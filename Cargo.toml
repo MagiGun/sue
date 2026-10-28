@@ -17,6 +17,7 @@ sue-io = { path = "crates/sue-io" }
 sue-pkg = { path = "crates/sue-pkg" }
 sue-ai = { path = "crates/sue-ai" }
 sue-wm = { path = "crates/sue-wm" }
+sue-model = { path = "crates/sue-model" }
 
 ed25519-dalek = "3"
 semver = "1"

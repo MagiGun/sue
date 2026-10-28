@@ -3021,6 +3021,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sue-model"
+version = "1.0.0"
+dependencies = [
+ "sue-core",
+]
+
+[[package]]
 name = "sue-pkg"
 version = "1.0.0"
 dependencies = [
