@@ -120,6 +120,11 @@ width = 960                    # [64..8192] Width of new paint layers (px)
 height = 600                   # [64..8192] Height of new paint layers (px)
 brush_size = 6                 # [1..128] Starting brush size (px)
 
+[sue_paint]
+width = 1600                   # [1..10000] Width of new illustrations (px)
+height = 1200                  # [1..10000] Height of new illustrations (px)
+dpi = 72                       # [1..2400] Resolution of new illustrations (dpi)
+
 [notes]
 font_size = 14                 # [8..48] Note text size (px)
 

@@ -1,0 +1,20 @@
+[package]
+name = "sue-paint"
+description = "Sue Paint: the painting and illustration studio."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui.workspace = true
+sue-core.workspace = true
+sue-io.workspace = true
+sue-model.workspace = true
+sue-platform.workspace = true
+sue-rice.workspace = true
+sue-wm.workspace = true
+
+[lints]
+workspace = true

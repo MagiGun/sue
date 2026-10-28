@@ -310,6 +310,29 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         camera.now,
     );
     shoot(&mut runtime, &mut camera, "10-code-hex")?;
+
+    // 11. Sue Paint with a sample illustration, 12. its Layer menu and
+    // 13. its New dialog.
+    let studio = AppletId::new(sue_paint::ID).map_err(|error| error.to_string())?;
+    runtime.request(
+        ShellRequest::OpenStudio(studio.clone()),
+        &mut camera.painter,
+        camera.now,
+    );
+    runtime.with_context(&mut camera.painter, camera.now, |cx| {
+        sue_paint::sample_picture(cx, 1600, 1200);
+    });
+    shoot(&mut runtime, &mut camera, "11-sue-paint")?;
+    for (target, name) in [
+        ("menu/Layer", "12-sue-paint-menu"),
+        ("dialog/new", "13-sue-paint-new"),
+    ] {
+        if let Some(applet) = runtime.applets.get_mut(&studio) {
+            applet.navigate("dialog/close");
+            applet.navigate(target);
+        }
+        shoot(&mut runtime, &mut camera, name)?;
+    }
     let _ = std::fs::remove_dir_all(&root);
     Ok(written)
 }

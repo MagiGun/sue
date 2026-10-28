@@ -338,6 +338,7 @@ impl MenuBar {
         let mut sub = None;
         let mut picked = None;
         egui::Area::new(Id::unique(("sue-menu-popup", level)))
+            .fade_in(false)
             .order(Order::Tooltip)
             .fixed_pos(origin)
             .show(ctx, |ui| {

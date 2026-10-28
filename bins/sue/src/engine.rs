@@ -593,6 +593,7 @@ impl Engine {
                         params(&["io.max_ingest_mib", "io.byte_map_width"]),
                     ),
                     group("Paint Layers", vec![section("paint")]),
+                    group("Sue Paint", vec![section("sue_paint")]),
                     group("Built-in Codecs", vec![table("codecs")]),
                 ],
             ),

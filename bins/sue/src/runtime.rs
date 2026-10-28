@@ -965,6 +965,174 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// One frame of `size` with `events`, at `now`.
+    fn frame_with(
+        runtime: &mut Runtime,
+        ctx: &egui::Context,
+        now: Instant,
+        events: Vec<egui::Event>,
+    ) {
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+            events,
+            ..egui::RawInput::default()
+        };
+        ctx.run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now))
+            .drop_without_applying_deltas();
+    }
+
+    fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    #[test]
+    fn sue_paint_makes_a_picture_draws_with_a_pen_and_undoes() {
+        let (mut runtime, root) = runtime("paint-studio");
+        let ctx = egui::Context::default();
+        let mut now = Instant::now();
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        assert_eq!(
+            runtime.shell.studio().map(AppletId::as_str),
+            Some(sue_paint::ID)
+        );
+        step(&mut runtime, Vec::new());
+        // Ctrl+N opens New, Enter makes the picture with the riced size.
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        step(&mut runtime, Vec::new());
+        let arena = &runtime.engine.world.arena;
+        let picture = arena
+            .iter()
+            .find(|(_, entity)| sue_model::picture::is_picture(entity))
+            .map(|(_, entity)| entity.id())
+            .expect("New made a picture");
+        assert_eq!(
+            sue_model::picture::size(arena.get_by_id(picture).unwrap()),
+            Some([1600, 1200])
+        );
+        let layer = sue_paint::doc::layers(arena, picture).last().unwrap().id;
+        let alpha = |runtime: &Runtime, x: u32, y: u32| {
+            let raster = sue_paint::doc::raster(&runtime.engine.world.arena, layer).unwrap();
+            raster.bytes().unwrap()[((y * raster.width() + x) * 4 + 3) as usize]
+        };
+        let depth = runtime.engine.history.depth();
+
+        // A pen stroke from the middle of the canvas to the right, with pen
+        // pressure. The picture is fitted, so the middle is pixel (800, 600).
+        let viewport_center = Pos2::new(737.0, 388.0);
+        let to = viewport_center + vec2(100.0, 0.0);
+        let touch = |phase, pos| egui::Event::Touch {
+            device_id: egui::TouchDeviceId(1),
+            id: egui::TouchId(1),
+            phase,
+            pos,
+            force: Some(0.6),
+        };
+        step(
+            &mut runtime,
+            vec![
+                touch(egui::TouchPhase::Start, viewport_center),
+                egui::Event::PointerMoved(viewport_center),
+                egui::Event::PointerButton {
+                    pos: viewport_center,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        step(
+            &mut runtime,
+            vec![
+                touch(egui::TouchPhase::Move, to),
+                egui::Event::PointerMoved(viewport_center + vec2(50.0, 0.0)),
+                egui::Event::PointerMoved(to),
+            ],
+        );
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerButton {
+                pos: to,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert_eq!(
+            runtime.engine.history.depth(),
+            depth + 1,
+            "one stroke, one undo step"
+        );
+        let across = |runtime: &Runtime| (590..610).map(|y| alpha(runtime, 900, y)).max();
+        assert!(across(&runtime) > Some(200), "the stroke crossed x = 900");
+        assert_eq!(alpha(&runtime, 900, 700), 0, "and stayed thin");
+        // Pressure 0.6 of an 8 px G-pen: about 5 px wide, not 8.
+        let wide = (580..620)
+            .filter(|y| alpha(&runtime, 900, *y) > 128)
+            .count();
+        assert!((3..=6).contains(&wide), "{wide} px wide");
+
+        // Ctrl+Shift+N adds a layer above; Ctrl+Z takes it away again, and
+        // a second Ctrl+Z the stroke.
+        step(
+            &mut runtime,
+            vec![key(
+                egui::Key::N,
+                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+            )],
+        );
+        assert_eq!(
+            sue_paint::doc::layers(&runtime.engine.world.arena, picture).len(),
+            3
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        assert_eq!(
+            sue_paint::doc::layers(&runtime.engine.world.arena, picture).len(),
+            2
+        );
+        assert_eq!(across(&runtime), Some(0), "undo took the stroke away");
+
+        // The picture lives in the project: it saves and comes back.
+        let path = root.join("paint.sue");
+        runtime.save_project_to(&path).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        runtime.open_project(&path, &bytes).unwrap();
+        assert!(runtime.engine.world.arena.get_by_id(picture).is_ok());
+        assert_eq!(
+            sue_paint::doc::layers(&runtime.engine.world.arena, picture).len(),
+            2
+        );
+        step(&mut runtime, Vec::new());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn spawned_entities_undo_and_redo_with_their_buffers() {
         let (mut runtime, root) = runtime("spawn");

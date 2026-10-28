@@ -92,7 +92,7 @@ type CheckFn = fn(&mut Subject) -> Result<String, String>;
 
 /// Runs every check against `subject`, in dependency order.
 pub fn run(subject: &mut Subject) -> Report {
-    let checks: [(&'static str, CheckFn); 8] = [
+    let checks: [(&'static str, CheckFn); 9] = [
         ("platform", check_platform),
         ("rice", check_rice),
         ("arena", check_arena),
@@ -101,6 +101,7 @@ pub fn run(subject: &mut Subject) -> Report {
         ("ai", check_ai),
         ("window manager", check_window_manager),
         ("backbone", check_backbone),
+        ("sue paint", check_paint_studio),
     ];
     Report {
         checks: checks
@@ -930,6 +931,131 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
     Ok(detail)
 }
 
+/// Sue Paint: a layered illustration painted with the real brushes, laid
+/// over its paper, undone and redone, saved in the project and exported.
+fn check_paint_studio(subject: &mut Subject) -> Result<String, String> {
+    use sue_paint::composite::{RenderOptions, flatten};
+    use sue_paint::doc;
+
+    let runtime = &mut subject.runtime;
+    let studio = sue_wm::AppletId::new(sue_paint::ID).map_err(text)?;
+    let now = Instant::now();
+    let mut textures = sue_platform::NoTextures;
+    runtime.request(ShellRequest::OpenStudio(studio.clone()), &mut textures, now);
+    ensure(
+        runtime.shell.studio() == Some(&studio),
+        "Sue Paint did not open",
+    )?;
+    let depth = runtime.engine.history.depth();
+    let picture = runtime
+        .with_context(&mut textures, now, |cx| {
+            sue_paint::sample_picture(cx, 320, 240)
+        })
+        .ok_or("the sample illustration was not made")?;
+    let steps = runtime.engine.history.depth() - depth;
+    let arena = &runtime.engine.world.arena;
+    let layers = doc::layers(arena, picture);
+    ensure(
+        layers.len() == 3,
+        "the illustration does not have paper, color and ink",
+    )?;
+    let flat = flatten(arena, picture, RenderOptions::default()).ok_or("nothing to flatten")?;
+    let pixels = flat.bytes().ok_or("the flattened picture is not 8-bit")?;
+    let inked = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|pixel| pixel[0] < 80 && pixel[1] < 80)
+        .count();
+    let colored = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|pixel| pixel[0].abs_diff(pixel[2]) > 60)
+        .count();
+    ensure(
+        inked > 200 && colored > 200,
+        "the strokes did not land on the picture",
+    )?;
+    ensure(
+        pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel[3] == 255),
+        "the paper does not show under the layers",
+    )?;
+
+    // Every stroke undoes, and comes back.
+    let before = flat.clone();
+    for _ in 0..steps {
+        runtime
+            .engine
+            .history
+            .undo(&mut runtime.engine.world)
+            .map_err(text)?;
+    }
+    ensure(
+        runtime.engine.world.arena.get_by_id(picture).is_err(),
+        "undo left the illustration behind",
+    )?;
+    for _ in 0..steps {
+        runtime
+            .engine
+            .history
+            .redo(&mut runtime.engine.world)
+            .map_err(text)?;
+    }
+    let again = flatten(
+        &runtime.engine.world.arena,
+        picture,
+        RenderOptions::default(),
+    )
+    .ok_or("redo did not bring the illustration back")?;
+    ensure(again == before, "redo did not restore every pixel")?;
+
+    // The illustration lives in the project.
+    let dir = runtime.engine.paths.cache_dir.join("self-check-paint");
+    std::fs::create_dir_all(&dir).map_err(text)?;
+    let path = dir.join("paint.sue");
+    runtime.save_project_to(&path)?;
+    let bytes = std::fs::read(&path).map_err(text)?;
+    runtime.open_project(&path, &bytes)?;
+    let _ = std::fs::remove_dir_all(&dir);
+    let reopened = flatten(
+        &runtime.engine.world.arena,
+        picture,
+        RenderOptions::default(),
+    )
+    .ok_or("the illustration did not come back from the project")?;
+    ensure(reopened == before, "the project changed the illustration")?;
+
+    // And exports through the format registry.
+    let png = sue_io::encode_png(&reopened)?;
+    let formats = sue_io::formats(sue_model::registry());
+    let back = formats
+        .import(&png, "sample.png", &sue_core::Properties::new())
+        .map_err(text)?;
+    let raster = back
+        .entities
+        .first()
+        .and_then(|entity| entity.component(ComponentKind::RasterTile2D))
+        .and_then(|data| data.as_raster())
+        .ok_or("the exported PNG has no pixels")?;
+    ensure(
+        (raster.width(), raster.height()) == (320, 240),
+        "the PNG has the wrong size",
+    )?;
+    runtime.request(ShellRequest::CloseStudio, &mut textures, now);
+    ensure(runtime.shell.studio().is_none(), "Sue Paint did not close")?;
+    Ok(format!(
+        "illustration of {} painted in {} undo steps, composited, undone, redone, saved in the project and exported as PNG ({} KiB)",
+        count(layers.len(), "layer", "layers"),
+        steps,
+        png.len().div_ceil(1024),
+    ))
+}
+
 /// The shared backbone: the project file, the format registry, operators,
 /// presets and background jobs, run against the live engine.
 fn check_backbone(subject: &mut Subject) -> Result<String, String> {
@@ -1096,7 +1222,7 @@ mod tests {
         let mut subject = Subject { host, runtime };
         let report = run(&mut subject);
         assert!(report.passed(), "{report}");
-        assert_eq!(report.checks.len(), 8);
+        assert_eq!(report.checks.len(), 9);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

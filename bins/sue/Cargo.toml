@@ -13,6 +13,7 @@ sue-ai.workspace = true
 sue-core.workspace = true
 sue-io.workspace = true
 sue-model.workspace = true
+sue-paint.workspace = true
 sue-pkg.workspace = true
 sue-platform.workspace = true
 sue-rice.workspace = true

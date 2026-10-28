@@ -1,0 +1,592 @@
+//! Tools and sub tools.
+//!
+//! The tool palette lists [`Tool`]s; each tool has [`SubTool`]s, ready-made
+//! settings such as a G-pen or a soft airbrush, picked in the Sub Tool
+//! palette and tuned in the Tool Property palette. Tools that are not built
+//! yet stay in the palette, grayed out.
+
+use crate::brush::{AntiAlias, Tip};
+
+/// A tool of the tool palette.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Tool {
+    /// Zooms the view in or out.
+    Zoom,
+    /// Scrolls or rotates the view.
+    Hand,
+    /// Moves the current layer.
+    MoveLayer,
+    /// Draws selections.
+    Select,
+    /// Selects areas of similar color.
+    AutoSelect,
+    /// Picks a color.
+    Eyedropper,
+    /// Crisp ink lines.
+    Pen,
+    /// Grainy pencil lines.
+    Pencil,
+    /// Paint brushes.
+    Brush,
+    /// Soft sprays.
+    Airbrush,
+    /// Pattern brushes.
+    Decoration,
+    /// Removes pixels.
+    Eraser,
+    /// Smudges and blurs.
+    Blend,
+    /// Fills areas.
+    Fill,
+    /// Fills with gradients.
+    Gradient,
+    /// Lines and shapes.
+    Figure,
+    /// Text.
+    Text,
+    /// Speech balloons.
+    Balloon,
+    /// Comic panel borders.
+    Frame,
+    /// Rulers and guides.
+    Ruler,
+    /// Tidies vector lines.
+    CorrectLine,
+    /// Selects and edits objects.
+    Operation,
+}
+
+impl Tool {
+    /// The palette, top to bottom.
+    pub const ALL: [Self; 22] = [
+        Self::Zoom,
+        Self::Hand,
+        Self::Operation,
+        Self::MoveLayer,
+        Self::Select,
+        Self::AutoSelect,
+        Self::Eyedropper,
+        Self::Pen,
+        Self::Pencil,
+        Self::Brush,
+        Self::Airbrush,
+        Self::Decoration,
+        Self::Eraser,
+        Self::Blend,
+        Self::Fill,
+        Self::Gradient,
+        Self::Figure,
+        Self::Frame,
+        Self::Ruler,
+        Self::Text,
+        Self::Balloon,
+        Self::CorrectLine,
+    ];
+
+    /// What people read.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Zoom => "Zoom",
+            Self::Hand => "Hand",
+            Self::MoveLayer => "Move Layer",
+            Self::Select => "Selection",
+            Self::AutoSelect => "Auto Select",
+            Self::Eyedropper => "Eyedropper",
+            Self::Pen => "Pen",
+            Self::Pencil => "Pencil",
+            Self::Brush => "Brush",
+            Self::Airbrush => "Airbrush",
+            Self::Decoration => "Decoration",
+            Self::Eraser => "Eraser",
+            Self::Blend => "Blend",
+            Self::Fill => "Fill",
+            Self::Gradient => "Gradient",
+            Self::Figure => "Figure",
+            Self::Text => "Text",
+            Self::Balloon => "Balloon",
+            Self::Frame => "Frame Border",
+            Self::Ruler => "Ruler",
+            Self::CorrectLine => "Correct Line",
+            Self::Operation => "Operation",
+        }
+    }
+
+    /// The key that picks it.
+    #[must_use]
+    pub const fn key(self) -> Option<char> {
+        match self {
+            Self::Hand => Some('H'),
+            Self::MoveLayer => Some('K'),
+            Self::Select => Some('M'),
+            Self::AutoSelect => Some('W'),
+            Self::Eyedropper => Some('I'),
+            Self::Pen | Self::Pencil => Some('P'),
+            Self::Brush | Self::Airbrush => Some('B'),
+            Self::Eraser => Some('E'),
+            Self::Fill | Self::Gradient => Some('G'),
+            Self::Figure => Some('U'),
+            Self::Text => Some('T'),
+            Self::Operation => Some('O'),
+            _ => None,
+        }
+    }
+
+    /// `true` if it works in this build.
+    #[must_use]
+    pub const fn available(self) -> bool {
+        !matches!(
+            self,
+            Self::Decoration
+                | Self::Blend
+                | Self::Text
+                | Self::Balloon
+                | Self::Frame
+                | Self::Ruler
+                | Self::CorrectLine
+                | Self::Operation
+        )
+    }
+
+    /// `true` for tools that paint with a [`Tip`].
+    #[must_use]
+    pub const fn paints(self) -> bool {
+        matches!(
+            self,
+            Self::Pen | Self::Pencil | Self::Brush | Self::Airbrush | Self::Eraser | Self::Figure
+        )
+    }
+
+    /// The sub tools a fresh studio starts with.
+    #[must_use]
+    pub fn sub_tools(self) -> Vec<SubTool> {
+        let tip = |size: f32, change: fn(&mut Tip)| {
+            let mut tip = Tip {
+                size,
+                ..Tip::default()
+            };
+            change(&mut tip);
+            tip
+        };
+        let plain = |name: &str, mode: u8| SubTool::new(self, name, mode, Tip::default());
+        match self {
+            Self::Zoom => vec![plain("Zoom In", 0), plain("Zoom Out", 1)],
+            Self::Hand => vec![plain("Hand", 0), plain("Rotate", 1)],
+            Self::MoveLayer => vec![plain("Move Layer", 0)],
+            Self::Select => vec![
+                plain("Rectangle", 0),
+                plain("Ellipse", 1),
+                plain("Lasso", 2),
+            ],
+            Self::AutoSelect => vec![
+                plain("Refer Only Editing Layer", 0).tolerance(0.1),
+                plain("Refer Other Layers", 1).tolerance(0.1),
+            ],
+            Self::Eyedropper => vec![
+                plain("Obtain Display Color", 0),
+                plain("Obtain Layer Color", 1),
+            ],
+            Self::Pen => vec![
+                SubTool::new(self, "G-Pen", 0, tip(8.0, |_| {})),
+                SubTool::new(
+                    self,
+                    "Mapping Pen",
+                    0,
+                    tip(4.0, |t| {
+                        t.min_size = 0.05;
+                    }),
+                ),
+                SubTool::new(
+                    self,
+                    "Turnip Pen",
+                    0,
+                    tip(14.0, |t| {
+                        t.min_size = 0.3;
+                        t.aa = AntiAlias::Medium;
+                    }),
+                ),
+                SubTool::new(
+                    self,
+                    "Marker",
+                    0,
+                    tip(10.0, |t| {
+                        t.pressure_size = false;
+                        t.aa = AntiAlias::Strong;
+                    }),
+                )
+                .stabilization(3),
+            ],
+            Self::Pencil => vec![
+                SubTool::new(
+                    self,
+                    "Pencil",
+                    0,
+                    tip(6.0, |t| {
+                        t.grain = 0.45;
+                        t.hardness = 0.85;
+                        t.min_size = 0.4;
+                        t.pressure_opacity = true;
+                    }),
+                ),
+                SubTool::new(
+                    self,
+                    "Mechanical Pencil",
+                    0,
+                    tip(3.0, |t| {
+                        t.grain = 0.3;
+                        t.pressure_size = false;
+                        t.pressure_opacity = true;
+                    }),
+                ),
+                SubTool::new(
+                    self,
+                    "Rough Pencil",
+                    0,
+                    tip(12.0, |t| {
+                        t.grain = 0.7;
+                        t.hardness = 0.6;
+                        t.pressure_opacity = true;
+                    }),
+                ),
+            ],
+            Self::Brush => vec![
+                SubTool::new(
+                    self,
+                    "Watercolor",
+                    0,
+                    tip(40.0, |t| {
+                        t.hardness = 0.3;
+                        t.build_up = true;
+                        t.flow = 0.15;
+                        t.opacity = 0.8;
+                        t.spacing = 0.08;
+                    }),
+                ),
+                SubTool::new(
+                    self,
+                    "Opaque Watercolor",
+                    0,
+                    tip(30.0, |t| {
+                        t.hardness = 0.7;
+                        t.build_up = true;
+                        t.flow = 0.4;
+                    }),
+                ),
+                SubTool::new(
+                    self,
+                    "Gouache",
+                    0,
+                    tip(30.0, |t| {
+                        t.min_size = 0.6;
+                        t.aa = AntiAlias::Medium;
+                    }),
+                ),
+                SubTool::new(
+                    self,
+                    "Ink Brush",
+                    0,
+                    tip(20.0, |t| {
+                        t.min_size = 0.02;
+                        t.aa = AntiAlias::Medium;
+                    }),
+                ),
+            ],
+            Self::Airbrush => vec![
+                SubTool::new(
+                    self,
+                    "Soft",
+                    0,
+                    tip(80.0, |t| {
+                        t.hardness = 0.0;
+                        t.build_up = true;
+                        t.flow = 0.06;
+                        t.pressure_size = false;
+                        t.pressure_opacity = true;
+                    }),
+                ),
+                SubTool::new(
+                    self,
+                    "Strong",
+                    0,
+                    tip(60.0, |t| {
+                        t.hardness = 0.3;
+                        t.build_up = true;
+                        t.flow = 0.2;
+                        t.pressure_size = false;
+                    }),
+                ),
+                SubTool::new(
+                    self,
+                    "Fine",
+                    0,
+                    tip(24.0, |t| {
+                        t.hardness = 0.2;
+                        t.build_up = true;
+                        t.flow = 0.15;
+                    }),
+                ),
+            ],
+            Self::Eraser => vec![
+                SubTool::new(
+                    self,
+                    "Hard",
+                    0,
+                    tip(20.0, |t| {
+                        t.eraser = true;
+                        t.pressure_size = false;
+                    }),
+                ),
+                SubTool::new(
+                    self,
+                    "Soft",
+                    0,
+                    tip(60.0, |t| {
+                        t.eraser = true;
+                        t.hardness = 0.2;
+                        t.build_up = true;
+                        t.flow = 0.3;
+                        t.pressure_size = false;
+                    }),
+                ),
+                SubTool::new(
+                    self,
+                    "Rough",
+                    0,
+                    tip(30.0, |t| {
+                        t.eraser = true;
+                        t.grain = 0.6;
+                    }),
+                ),
+            ],
+            Self::Fill => vec![
+                plain("Refer Only Editing Layer", 0).tolerance(0.1),
+                plain("Refer Other Layers", 1).tolerance(0.1),
+            ],
+            Self::Gradient => vec![
+                plain("Drawing Color to Transparent", 0),
+                plain("Main to Sub Color", 1),
+                plain("Radial", 2),
+            ],
+            Self::Figure => {
+                let line = tip(6.0, |t| {
+                    t.pressure_size = false;
+                });
+                vec![
+                    SubTool::new(self, "Straight Line", 0, line),
+                    SubTool::new(self, "Rectangle", 1, line),
+                    SubTool::new(self, "Ellipse", 2, line),
+                    SubTool::new(self, "Filled Rectangle", 3, line),
+                    SubTool::new(self, "Filled Ellipse", 4, line),
+                ]
+            }
+            Self::Decoration
+            | Self::Blend
+            | Self::Text
+            | Self::Balloon
+            | Self::Frame
+            | Self::Ruler
+            | Self::CorrectLine
+            | Self::Operation => vec![plain(self.label(), 0)],
+        }
+    }
+}
+
+/// A ready-made setting of a tool.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SubTool {
+    /// Its tool.
+    pub tool: Tool,
+    /// What people read, e.g. `G-Pen`.
+    pub name: String,
+    /// What it does within its tool (a shape, a direction, a reference).
+    pub mode: u8,
+    /// Its brush, for painting tools.
+    pub tip: Tip,
+    /// Pointer smoothing, 0 to 100.
+    pub stabilization: u32,
+    /// How different a color may be and still be filled or selected, 0 to 1.
+    pub tolerance: f32,
+}
+
+impl SubTool {
+    /// A sub tool.
+    #[must_use]
+    pub fn new(tool: Tool, name: &str, mode: u8, tip: Tip) -> Self {
+        Self {
+            tool,
+            name: name.to_owned(),
+            mode,
+            tip,
+            stabilization: 5,
+            tolerance: 0.0,
+        }
+    }
+
+    /// The same with another stabilization.
+    #[must_use]
+    pub fn stabilization(mut self, level: u32) -> Self {
+        self.stabilization = level;
+        self
+    }
+
+    /// The same with another tolerance.
+    #[must_use]
+    pub fn tolerance(mut self, tolerance: f32) -> Self {
+        self.tolerance = tolerance;
+        self
+    }
+}
+
+/// Every tool's sub tools and which one is picked.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Toolbox {
+    sets: Vec<(Tool, Vec<SubTool>, usize)>,
+    tool: Tool,
+}
+
+impl Default for Toolbox {
+    fn default() -> Self {
+        Self {
+            sets: Tool::ALL
+                .iter()
+                .map(|tool| (*tool, tool.sub_tools(), 0))
+                .collect(),
+            tool: Tool::Pen,
+        }
+    }
+}
+
+impl Toolbox {
+    /// The current tool.
+    #[must_use]
+    pub fn tool(&self) -> Tool {
+        self.tool
+    }
+
+    /// Picks a tool (if it is available).
+    pub fn pick(&mut self, tool: Tool) {
+        if tool.available() {
+            self.tool = tool;
+        }
+    }
+
+    fn set(&self, tool: Tool) -> &(Tool, Vec<SubTool>, usize) {
+        self.sets
+            .iter()
+            .find(|(t, _, _)| *t == tool)
+            .unwrap_or(&self.sets[0])
+    }
+
+    fn set_mut(&mut self, tool: Tool) -> &mut (Tool, Vec<SubTool>, usize) {
+        let index = self
+            .sets
+            .iter()
+            .position(|(t, _, _)| *t == tool)
+            .unwrap_or(0);
+        &mut self.sets[index]
+    }
+
+    /// The sub tools of `tool`.
+    #[must_use]
+    pub fn subs(&self, tool: Tool) -> &[SubTool] {
+        &self.set(tool).1
+    }
+
+    /// The index of the picked sub tool of `tool`.
+    #[must_use]
+    pub fn picked(&self, tool: Tool) -> usize {
+        self.set(tool).2
+    }
+
+    /// Picks sub tool `index` of `tool`.
+    pub fn pick_sub(&mut self, tool: Tool, index: usize) {
+        let set = self.set_mut(tool);
+        if index < set.1.len() {
+            set.2 = index;
+        }
+    }
+
+    /// The picked sub tool of the current tool.
+    #[must_use]
+    pub fn current(&self) -> &SubTool {
+        let (_, subs, index) = self.set(self.tool);
+        &subs[(*index).min(subs.len() - 1)]
+    }
+
+    /// The picked sub tool of the current tool, to change its settings.
+    pub fn current_mut(&mut self) -> &mut SubTool {
+        let tool = self.tool;
+        let (_, subs, index) = self.set_mut(tool);
+        let index = (*index).min(subs.len() - 1);
+        &mut subs[index]
+    }
+
+    /// The picked sub tool of `tool`.
+    #[must_use]
+    pub fn of(&self, tool: Tool) -> &SubTool {
+        let (_, subs, index) = self.set(tool);
+        &subs[(*index).min(subs.len() - 1)]
+    }
+
+    /// Picks the next tool sharing `key`, starting after the current one
+    /// (P switches between the pen and the pencil).
+    pub fn cycle(&mut self, key: char) {
+        let matching: Vec<Tool> = Tool::ALL
+            .iter()
+            .copied()
+            .filter(|tool| tool.key() == Some(key) && tool.available())
+            .collect();
+        let next = match matching.iter().position(|tool| *tool == self.tool) {
+            Some(at) => matching[(at + 1) % matching.len()],
+            None => match matching.first() {
+                Some(tool) => *tool,
+                None => return,
+            },
+        };
+        self.tool = next;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_tool_has_sub_tools_and_keys_cycle() {
+        let mut toolbox = Toolbox::default();
+        for tool in Tool::ALL {
+            assert!(!toolbox.subs(tool).is_empty(), "{tool:?}");
+            assert!(!tool.label().is_empty());
+        }
+        assert_eq!(toolbox.tool(), Tool::Pen);
+        toolbox.cycle('P');
+        assert_eq!(toolbox.tool(), Tool::Pencil);
+        toolbox.cycle('P');
+        assert_eq!(toolbox.tool(), Tool::Pen);
+        toolbox.cycle('E');
+        assert_eq!(toolbox.tool(), Tool::Eraser);
+        assert!(toolbox.current().tip.eraser);
+        toolbox.pick(Tool::Text);
+        assert_eq!(
+            toolbox.tool(),
+            Tool::Eraser,
+            "unavailable tools stay unpicked"
+        );
+    }
+
+    #[test]
+    fn sub_tools_keep_their_own_settings() {
+        let mut toolbox = Toolbox::default();
+        toolbox.pick(Tool::Brush);
+        toolbox.pick_sub(Tool::Brush, 2);
+        assert_eq!(toolbox.current().name, "Gouache");
+        toolbox.current_mut().tip.size = 99.0;
+        toolbox.pick_sub(Tool::Brush, 0);
+        assert_eq!(toolbox.current().tip.size, 40.0);
+        toolbox.pick_sub(Tool::Brush, 2);
+        assert_eq!(toolbox.current().tip.size, 99.0);
+        toolbox.pick_sub(Tool::Brush, 99);
+        assert_eq!(toolbox.picked(Tool::Brush), 2);
+        assert_eq!(toolbox.of(Tool::Pen).name, "G-Pen");
+    }
+}

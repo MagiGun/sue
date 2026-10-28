@@ -40,5 +40,7 @@ pub fn launchpad() -> Result<Launchpad, WmError> {
     launchpad.register(|| Box::new(History))?;
     // Windows.
     launchpad.register(|| Box::new(Settings::default()))?;
+    // Studios.
+    launchpad.register(|| Box::new(sue_paint::SuePaint::default()))?;
     Ok(launchpad)
 }

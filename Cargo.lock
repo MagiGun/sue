@@ -2989,6 +2989,7 @@ dependencies = [
  "sue-core",
  "sue-io",
  "sue-model",
+ "sue-paint",
  "sue-pkg",
  "sue-platform",
  "sue-rice",
@@ -3027,6 +3028,19 @@ name = "sue-model"
 version = "1.0.0"
 dependencies = [
  "sue-core",
+]
+
+[[package]]
+name = "sue-paint"
+version = "1.0.0"
+dependencies = [
+ "egui",
+ "sue-core",
+ "sue-io",
+ "sue-model",
+ "sue-platform",
+ "sue-rice",
+ "sue-wm",
 ]
 
 [[package]]
