@@ -19,7 +19,7 @@ mapped onto it in §8). What people should experience:
 | Part | Where |
 | --- | --- |
 | The kernel: arena, entity ids, components (built-in and registered), relations, values and properties, units, color, time, transactions and undo, the codec and the `.sue` container, registries, shared buffers, background jobs | `crates/sue-core` |
-| The shared data models features build on: text marks, tables, curves and animation, sequences and note events, node graphs, geometry and transforms, page layout, kept encoded files | `crates/sue-model` |
+| The shared data models features build on: text marks, tables, curves and animation, sequences and note events, node graphs, geometry and transforms, page layout, layered pictures and blend modes, kept encoded files | `crates/sue-model` |
 | Format handlers (import, export) and the `.sue` project format | `crates/sue-io`, `crates/sue-core/src/file.rs` |
 | Operating-system isolation | `crates/sue-platform` |
 | How changes reach the repository | Git, below |
@@ -43,7 +43,8 @@ code.
   `ComponentRegistry`, built on a shared model from `sue-model` whenever one
   fits: a spreadsheet is a `Table`, a shader or compositing network is a
   `NodeGraph`, a CAD part is `Geometry` with properties in real units
-  (`Quantity`).
+  (`Quantity`), a painting is a layered `picture` whose layers blend with the
+  shared `BlendMode`s.
 
 ## Rule 2: Every change is a transaction
 

@@ -34,6 +34,7 @@ style).
 
 ```text
 bins/sue      ──► every crate below                   + egui
+sue-paint     ──► sue-wm, sue-io, sue-model, sue-rice, sue-platform, sue-core   + egui
 sue-wm        ──► sue-rice, sue-platform, sue-core   + egui
 sue-ai        ──► sue-platform, sue-core
 sue-rice      ──► sue-platform, sue-core
@@ -373,7 +374,9 @@ valid however often an entity is removed and brought back: `SpawnEntity`
 (optionally with relations), `DespawnEntity` (restores relations), `SetProperty`,
 `SetMeta`, `Rename`, `Relate`, `Unrelate`, `SetExtension` (swap a whole extension
 component; fine-grained edits like `sue_model::SetCell` and `GraphEdit` store
-smaller deltas), `InsertBundle` (§1.10) and `Batch<T>`, which applies several
+smaller deltas), `RasterEdit` (the rectangles of a raster an in-place pixel edit
+changed, before and after: a brush stroke stores only the 64-pixel tiles it
+touched), `InsertBundle` (§1.10) and `Batch<T>`, which applies several
 transactions as one step and takes back the done ones if a later one fails.
 
 `UndoStack<T>` is generic. The shell keeps **one global history**,
@@ -496,6 +499,16 @@ extension components (`sue_model::register`):
 | `Geometry`, `Transform` | `sue.geometry`, `sue.transform` | Double-precision points, polygons, polylines and Bezier prims with attributes per domain; placement | 3D, CAD, BIM, vector art, rigging, game levels |
 | `PageLayout` | `sue.layout` | Pages (size, margins, bleed, masters) and frames showing other entities | publishing, books, slides, PDF pages, drawing sheets |
 | `Encoded` | `sue.encoded` | The original bytes of a file Sue cannot decode yet | every format before its decoder exists |
+
+Two shared shapes need no component of their own:
+
+| Model | Stored as | Holds | Shared by |
+| --- | --- | --- | --- |
+| Layered pictures (`sue_model::picture`) | a `sue.image` entity without a base, ordered `CHILD` layers, shared properties | Size (`image.width`, `image.height`) and resolution (`image.dpi`); raster layers (any child with a `RasterTile2D` base, usually class `sue.layer`) and paper layers (`sue.layer.paper`, one `layer.color`); `LayerStyle` reads visibility, opacity, blend, clipping, draft and offset from `style.*` and `layer.*` properties | painting, photo editing, compositing, textures, thumbnails |
+| `BlendMode` | its name in `style.blend` | 26 blend modes (normal; darken, multiply, burns; lighten, screen, dodges, add; overlay and the lights; difference, exclusion, divide; hue, saturation, color, luminosity) and W3C compositing with straight alpha; names from a newer Sue fall back to normal | every feature that stacks layers |
+
+A layer can be any raster entity, so a photo that sits on the canvas can also
+be a layer of a picture: the same entity, never a copy.
 
 A feature that needs something new adds its own `ComponentType` the same way,
 under its own prefix, and registers it.
@@ -874,6 +887,7 @@ pub trait SueApplet: Send {
     fn duration(&self, node: &SceneNode, world: &World) -> f64 { 4.0 }
     fn drawer_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {}
     fn window_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {}
+    fn studio_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {}  // a full-window studio
     fn tick(&mut self, cx: &mut AppletContext<'_>) -> Tick { Tick::default() }
     fn commands(&self) -> Vec<PaletteEntry> { Vec::new() }
     fn command(&mut self, name: &str, cx: &mut AppletContext<'_>) -> bool { false }
@@ -884,8 +898,15 @@ pub trait SueApplet: Send {
 
 The **role** decides where an applet lives: `Node` applets draw one kind of
 entity on the canvas and its selection pill, `LeftDrawer` and `RightDrawer`
-applets sit on a rail, and the `Window` applet (Settings) floats over the
-canvas. Nothing in the shell names an applet: the modes of the top pill come
+applets sit on a rail, the `Window` applet (Settings) floats over the canvas,
+and `Studio` applets (Sue Paint, §3.7) fill the whole window instead of the
+canvas. A studio opens from its mode in the top pill or the palette
+(`ShellRequest::OpenStudio`) and leaves with `CloseStudio`; the status bar, the
+palette, Settings and the global undo, save and open keys stay with it, and
+`Ctrl+O` asks the studio first. Studios draw their menus with `MenuBar`: menus
+are data (`Menu`, `MenuItem` with a command and a shortcut), and each frame the
+studio says per command whether it works and whether it is checked
+(`ItemState`), so items whose feature is not built yet are grayed out. Nothing in the shell names an applet: the modes of the top pill come
 from manifests' `mode`, the spawn buttons and the marking menu's New wedges from
 `spawn`, the timeline's lanes from `lane`, the rail icons from `icon` and
 `order`, and opened files go to the first node applet that `accepts` the
@@ -968,6 +989,67 @@ register its own:
 | Inspector | Right drawer | n/a | The selected node's place, size and properties, its entity's projections, memory and metadata |
 | History | Right drawer | n/a | The undo tree, branches indented; a click checks out any state |
 | Settings | Window | n/a | Preferences by category (§4.3) |
+| Illustration | Node | n/a (pictures come from Sue Paint) | A Sue Paint picture on the canvas: a preview that follows its layers; pill and double-click: Open in Sue Paint |
+| Sue Paint | Studio | Sue Paint | The painting studio (§3.7) |
+
+### 3.7 Sue Paint (`sue-paint`)
+
+Sue Paint is the painting and illustration studio, a clean-room studio laid
+out the way painting apps usually are. It fills the window with:
+
+| Part | What it holds |
+| --- | --- |
+| Menu bar | File, Edit, Story, Animation, Layer, Select, View, Filter, Window, Help; about 230 items, the unbuilt ones grayed out; Back to Canvas at the right |
+| Command bar | New, Open, Save; Undo, Redo; Clear, Clear Outside, Fill, Deselect, Transform; view flip, rotate and fit; snapping; shortcuts |
+| Tool strip | Zoom, Hand, Operation, Move Layer, Selection, Auto Select, Eyedropper, Pen, Pencil, Brush, Airbrush, Decoration, Eraser, Blend, Fill, Gradient, Figure, Frame Border, Ruler, Text, Balloon, Correct Line; main and sub color chips |
+| Sub Tool and Tool Property | The sub tools of the tool (G-Pen, Mapping Pen, Turnip Pen, Marker; Pencil, Mechanical, Rough; Watercolor, Opaque Watercolor, Gouache, Ink Brush; Soft, Strong, Fine airbrushes; Hard, Soft, Rough erasers; fill, gradient, figure, selection modes) and their settings, with a live stroke preview |
+| Size | Vertical brush size and opacity sliders |
+| Color Wheel, Color Slider | A hue ring around a saturation and value square; RGB and HSV sliders and hex |
+| Color Set, Color History | A default set of 56 swatches; the colors painted with, newest first |
+| Canvas | Tabs of open pictures; the view zooms (1% to 6400%), scrolls, turns and mirrors; a status strip with zoom, rotation, flip, size, resolution and the pointer's pixel |
+| Navigator | The whole picture with the visible area outlined (drag to scroll), zoom and rotation sliders, flips |
+| Layer, Layer Property, History | Blend mode (26), opacity, clip, draft, lock, lock transparent pixels; new, duplicate, merge down, move, delete; the stack with visibility, thumbnails, rename by double-click; the current layer's settings; the undo list |
+| Timeline | Present and grayed out until animation arrives |
+
+**Data.** A picture is the shared layered picture of §1.13, made by the New
+dialog (presets as backbone `Preset`s, paper sizes, px, cm, mm and inches,
+resolution, paper color) or by opening a PNG, JPEG or JPEG XL through the
+format registry. Every open tab is a picture in the arena: tabs appear for
+pictures made, opened, loaded with a project or brought back by redo, and
+closing a tab leaves the picture in the project. The studio keeps only views,
+screen images, the current layer and selections. Each new picture is also
+placed on the canvas as an Illustration card, the same entity.
+
+**Painting.** The brush engine stamps round dabs along the pointer's path
+(spacing as a fraction of the size, hardness, four anti-aliasing widths, paper
+grain, build-up and flow for airbrushes). Pen pressure, read from egui touch
+events with force, scales size and opacity; stabilization lags the brush behind
+the pointer and catches up on release. A stroke paints straight into the
+layer's pixels, but each touched 64-pixel tile keeps its pixels from before and
+a coverage mask, so every pixel is recomputed from the two: a 50% pen stays at
+50% where it crosses itself. On release the tiles become one `RasterEdit`.
+Pointer input is read as egui's raw event stream, so fast strokes keep every
+sample between frames.
+
+**Other edits.** Fill floods the current layer or all layers within a
+tolerance and grows one pixel under anti-aliased lines; gradients run linear or
+radial, drawing color to transparent or main to sub; figures draw lines,
+outlines and filled shapes; selections are coverage masks (rectangle, ellipse,
+lasso, auto select; new, add, subtract, intersect) that every edit stays inside,
+drawn as an outline. Edit and Filter commands (clear, fill, flips, recolor,
+brightness to opacity, reverse gradient, brightness and contrast, hue,
+saturation and luminosity, posterization, binarization, blurs, sharpen, mosaic,
+noise) rewrite a copy of the layer and record the smallest changed rectangle;
+dialogs preview in place and undo nothing until OK. Layer changes use the
+generic edits, named the way people say them ("Hide Layer", "Move Layer").
+
+**Compositing.** Layers composite bottom to top with `BlendMode::composite`,
+clipping to the nearest unclipped layer below, over a checkerboard where the
+picture is clear. The screen image recomposites only the painted rectangle
+while a stroke is drawn and everything when the arena changes behind it (undo,
+a property, a new layer), detected by the layers' revisions; large areas are
+split into bands of rows on every core. Exports (PNG, JPEG over white, JPEG XL)
+flatten the paper and leave draft layers out.
 
 ---
 
@@ -1262,7 +1344,9 @@ separators are measured against, and it exercises the full zero-copy path.
 | §1.10 Format registry, bundles, copy with fresh ids | **Implemented**; the canvas still opens dropped files through the ingest path (§2.2) and the `.sue` handler | `sue-core/src/format.rs`, `sue-io/src/formats.rs` |
 | §1.11 Operators and presets | **Implemented** in the kernel; the palette and applets do not route through operators yet | `sue-core/src/operator.rs` |
 | §1.12 Job pool and shared buffers | **Implemented**; no feature uses the pool yet | `sue-core/src/jobs.rs`, `shared.rs` |
+| §1.8 `RasterEdit` (pixel rectangles before and after) | **Implemented**; Sue Paint records every stroke, fill and filter with it | `sue-core/src/txn.rs` |
 | §1.13 Shared models (text marks, table, curves, sequence, notes, graph, geometry, layout, encoded) | **Implemented** as data with tests; no applet edits them yet | `sue-model` |
+| §1.13 Layered pictures and blend modes | **Implemented**; Sue Paint makes and edits them | `sue-model/src/picture.rs`, `blend.rs` |
 | §2.1 Three-tier sniffer | **Implemented** | `sue-io/src/sniff.rs` |
 | §2.2 JXL probe (boxes + `SizeHeader`) | **Implemented** | `sue-io/src/jxl.rs` |
 | §2.2 JXL pixel decode and JPEG reconstruction | **Implemented** with `jxl-oxide` (no CMYK yet; the DC preview and pass targets come from a full decode until a streaming decoder lands) | `sue-io/src/jxl.rs` |
@@ -1283,10 +1367,13 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.4 Multi-pass shader effects | Planned (the `ShaderPath` parameter type exists; no shipped parameter uses it yet) | n/a |
 | §3.5 Audio output (ring, atomic gain, real-time priority) and the shared transport | **Implemented** with `cpal`; the transport is tested headlessly with `NullAudio`, and a device test streams to the real output | `sue-platform/src/audio.rs`, `sue-wm/src/transport.rs` |
 | §3.5 DAW audio graph | Specified; planned with the DAW studio | n/a |
-| §3.6 Applets, Launchpad, infinite canvas, top and selection pills, marking menu, palette, drawers, status bar | **Implemented** (twelve built-in applets, see §3.6) | `sue-wm`, `bins/sue/src` |
+| §3.6 Applets, Launchpad, infinite canvas, top and selection pills, marking menu, palette, drawers, status bar | **Implemented** (fourteen built-in applets, see §3.6) | `sue-wm`, `bins/sue/src`, `sue-paint` |
 | §3.6 Text editing over the arena with one global undo (`ArenaText`, `Typing`) | **Implemented**; the self-check types, undoes with `Ctrl+Z` and redoes with `Ctrl+Y` through egui events | `sue-wm/src/text.rs`, `sue-core/src/txn.rs` |
 | §3.6 Timeline: lanes, projected blocks, playhead, playback of audio blocks | **Implemented** (blocks are moved, not trimmed; video lanes arrive with the video studio) | `sue-wm/src/timeline.rs`, `shell.rs` |
-| §3.6 Studios beyond the built-in entity kinds (DAW, video, 3D and CAD, IDE, game engine) | Planned; they arrive as packages that register node applets | n/a |
+| §3.6 Studio role, data-driven menu bars with grayed items | **Implemented** | `sue-wm/src/applet.rs`, `shell.rs`, `menubar.rs` |
+| §3.6 Studios beyond Sue Paint (DAW, video, 3D and CAD, IDE, game engine) | Planned; they arrive as studio applets, the way Sue Paint did | n/a |
+| §3.7 Sue Paint: layout, every menu, tools and sub tools, brush engine with pressure and stabilization, fills, gradients, figures, selections, layers, 26 blend modes, edits and filters, open and export, canvas cards | **Implemented**; an end-to-end test drives it with egui events (New, a pressure stroke, a layer, undo, save and reopen), the self-check paints, undoes, saves and exports, and three snapshots show it | `sue-paint`, `bins/sue/src/runtime.rs`, `selfcheck.rs`, `snapshot.rs` |
+| §3.7 Sue Paint: vector and text layers, layer folders and masks, correction layers, transform, canvas size and resolution changes, rulers, materials, pages, animation and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |
@@ -1367,7 +1454,7 @@ their files as `Encoded` bytes.
 
 | Area (for example) | Entities and data | Backbone pieces | Still to build |
 | --- | --- | --- | --- |
-| Raster painting and photo editing (Photoshop, Krita, Clip Studio) | a picture is a `sue.image` folder of layer entities (`CHILD`, ordered), each a `RasterTile2D` with blend and opacity properties | `CHILD` order, `style.*` properties, `Color` (managed), JPEG XL pipeline, tile undo | brushes as operators, masks, adjustment layers as `NodeGraph`s, PSD and KRA handlers |
+| Raster painting and photo editing (Photoshop, Krita, Clip Studio) | a picture is a `sue.image` entity with ordered layer entities (`CHILD`), each a `RasterTile2D` with blend and opacity properties (§1.13); **Sue Paint (§3.7) works on exactly this** | `sue_model::picture`, `BlendMode`, `RasterEdit`, `CHILD` order, `style.*` properties, `Color` (managed), JPEG XL pipeline | brushes as operators, masks, adjustment layers as `NodeGraph`s, vector and text layers, PSD and KRA handlers |
 | Vector design and UI design (Illustrator, Figma, CorelDraw) | `sue.vector` entities: `Geometry` with Bezier prims, fill and stroke properties, `Transform`; artboards as `PageLayout` pages | `Geometry`, `Transform`, `PropertySchema`, `REF` (components and instances) | boolean path ops, text on path, constraints and auto layout, SVG, AI and PDF handlers |
 | Photo and RAW development (Lightroom, Topaz) | photos as `sue.image` with `Encoded` RAW bytes; develop settings as properties; a catalogue `Table` | `Encoded` (lossless original), `Color` (ACES and wide gamut), `Preset`s for looks, `JobPool` | RAW decoders, a develop pipeline as `NodeGraph`, AI enhance through `sue-ai` |
 | Video editing (Premiere, Resolve, Final Cut) | `sue.sequence` with `Sequence` tracks; clips point at `sue.video` entities (`Encoded` today) | `Sequence`, `Clip` trims and splits, `Rate`, `Timecode`, `Time` | video decoding and encoding (behind a codec package), proxy media on the `JobPool`, export handlers |

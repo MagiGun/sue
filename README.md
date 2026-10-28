@@ -13,9 +13,9 @@
 
 **Sue, the Singular Unified Engine,** is one lightweight, endlessly expandable
 creative environment. Day to day it is a fast file explorer, media player, notes
-app and converter. One click turns it into a document processor, paint studio,
-audio editor or code and hex viewer, and later into a DAW, video editor, CAD/3D
-modeler, IDE or game engine.
+app and converter. One click turns it into a document processor, the **Sue
+Paint** illustration studio, audio editor or code and hex viewer, and later into
+a DAW, video editor, CAD/3D modeler, IDE or game engine.
 
 Sue does this without a pile of separate apps or an N×N grid of file converters.
 Every tool works on the same data in one shared, generation-indexed **Arena**.
@@ -24,7 +24,7 @@ Putting a document on the timeline, or a song next to a sketch, attaches a new
 
 ## Where things stand
 
-v1.0 "Faustian Enigma" contains the eight crates below and the `sue`
+v1.0 "Faustian Enigma" contains the nine crates below and the `sue`
 executable. It opens a native GPU window drawn with egui in a pure monochrome
 theme (black to white, nothing else), straight onto an **infinite canvas**:
 
@@ -32,9 +32,17 @@ theme (black to white, nothing else), straight onto an **infinite canvas**:
   pan with the middle button or Space and drag. Sue opens with three live
   entities on it: a Document you can type and select text in, a Paint layer you
   draw on, and an Audio waveform you can play.
-- **The top pill:** modes (Canvas, Document, Paint, Timeline, Code / Hex) that
-  glide the camera to frame an entity, buttons that create entities (+ Text,
-  + Paint, + Audio), and the command palette.
+- **The top pill:** modes (Canvas, Document, Paint, Sue Paint, Timeline, Code /
+  Hex) that glide the camera to frame an entity or open a studio, buttons that
+  create entities (+ Text, + Paint, + Audio), and the command palette.
+- **Sue Paint:** a full-window painting studio with the usual menu bar (File,
+  Edit, Story, Animation, Layer, Select, View, Filter, Window, Help; items not
+  built yet are grayed out), a command bar, tools and sub tools (pens, pencils,
+  brushes, airbrushes, erasers, fill, gradient, figures, selections,
+  eyedropper, hand, zoom, move layer) with pen pressure and stabilization, a
+  color wheel and sets, canvas tabs with a turnable view, a navigator, and
+  layers with 26 blend modes, clipping and locks. Pictures live in the project
+  and also sit on the canvas as cards.
 - **The selection pill:** select an entity and a floating toolbar springs up
   above it with only its tools: headings, bold and text size for documents;
   brush, line, rectangle, eraser, size, value and JPEG XL export for paint;
@@ -74,17 +82,19 @@ feature Sue may grow into onto the backbone.
 | Crate | Role | Key types |
 | --- | --- | --- |
 | [`sue-core`](crates/sue-core) | The backbone: arena, stable ids, entities, open components, relations, values, units, color, time, undo tree, `.sue` file, format and operator registries, presets, jobs | `Arena`, `Entity`, `EntityId`, `ComponentRegistry`, `RelationStore`, `Value`, `Quantity`, `Color`, `Time`, `UndoStack`, `SueFile`, `FormatRegistry`, `OperatorRegistry`, `JobPool` |
-| [`sue-model`](crates/sue-model) | Shared data models every feature can read | `TextMarks`, `Table`, `Animation`, `Sequence`, `Notes`, `NodeGraph`, `Geometry`, `Transform`, `PageLayout`, `Encoded` |
+| [`sue-model`](crates/sue-model) | Shared data models every feature can read | `TextMarks`, `Table`, `Animation`, `Sequence`, `Notes`, `NodeGraph`, `Geometry`, `Transform`, `PageLayout`, `picture`, `BlendMode`, `Encoded` |
 | [`sue-platform`](crates/sue-platform) | The only place OS-specific code may live: hosts, the egui window and frame pacing, GPU choice, painting, audio output, clipboard, dialogs | `PlatformHost`, `DesktopHost`, `run_desktop`, `FramePacing`, `EguiPainter`, `TextureUpload`, `AudioOutput` |
 | [`sue-rice`](crates/sue-rice) | `.suerice` parser, Settings descriptors, monochrome presets, migration, hardware profiles | `RiceSchema`, `RiceParameter`, `SetRiceValues`, `ThemePreset`, `migrate`, `HardwareProfile` |
 | [`sue-io`](crates/sue-io) | Magic-byte sniffer, JPEG XL, PNG, JPEG and audio codecs, every format handler, ingest, tile cache, byte map | `sniff_stream`, `formats`, `ingest_bytes`, `NativeJxlPipeline`, `decode_audio`, `encode_jpeg`, `TileCache` |
 | [`sue-pkg`](crates/sue-pkg) | Content-addressed packages, Ed25519 trust, resolver, atomic generations | `PackageManifest`, `ContentHash`, `TrustStore`, `PackageIndex`, `resolve`, `AtomicUpdater` |
 | [`sue-ai`](crates/sue-ai) | Offline, zero-copy AI substrate | `LocalModelRegistry`, `ComputeBackend`, `ZeroCopyTensorTask` |
-| [`sue-wm`](crates/sue-wm) | The shell: infinite canvas, spring camera, pills, marking menu, palette, timeline, drawers, theme | `SueApplet`, `Launchpad`, `Shell`, `Camera`, `Scene`, `SpringDamper`, `Typing`, `Transport` |
+| [`sue-wm`](crates/sue-wm) | The shell: infinite canvas, spring camera, pills, marking menu, palette, timeline, drawers, studios, menu bars, theme | `SueApplet`, `Launchpad`, `Shell`, `MenuBar`, `Camera`, `Scene`, `SpringDamper`, `Typing`, `Transport` |
+| [`sue-paint`](crates/sue-paint) | Sue Paint: the painting studio, its brush engine, compositing, selections, fills and filters | `SuePaint`, `PictureCard`, `Stroke`, `Compositor`, `Selection`, `Filter` |
 | [`bins/sue`](bins/sue) | The executable: runtime, built-in applets, self-check, snapshots | `Engine`, `Runtime` |
 
 ```text
 bins/sue      ──► every crate below                   + egui
+sue-paint     ──► sue-wm, sue-io, sue-model, sue-rice, sue-platform, sue-core   + egui
 sue-wm        ──► sue-rice, sue-platform, sue-core   + egui
 sue-ai        ──► sue-platform, sue-core
 sue-rice      ──► sue-platform, sue-core

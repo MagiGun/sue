@@ -85,9 +85,9 @@ only color you see.
 
 A floating bar at the top of the canvas:
 
-- **Modes** (Canvas, Document, Paint, Timeline, Code / Hex) glide the camera to
-  the thing you want to work on, about a quarter of a second each. Canvas shows
-  everything again.
+- **Modes** (Canvas, Document, Paint, Sue Paint, Timeline, Code / Hex) glide
+  the camera to the thing you want to work on, about a quarter of a second
+  each. Canvas shows everything again. Sue Paint opens the painting studio.
 - **+ Text, + Paint, + Audio** put a new document, paint layer or audio clip in
   view.
 - **Command (Tab)** opens the command palette.
@@ -166,6 +166,44 @@ floating window. A list of categories runs down the left (General, Appearance &
 Rice, Display & Graphics, Audio & DSP, Files & Codecs, Local AI, Packages &
 Updates, Keymaps), and the right side shows only that category. Type in "Filter
 settings..." to search all of them.
+
+---
+
+## Sue Paint: painting and illustration
+
+Click **Sue Paint** in the top pill (or find it with `Tab`) and the whole window
+becomes a painting studio. If you have used a painting app, it will feel
+familiar:
+
+- **Menus along the top:** File, Edit, Story, Animation, Layer, Select, View,
+  Filter, Window and Help. Everything Sue Paint can do is in them. Items shown
+  in gray are planned but not built yet (comic pages, animation, vector and text
+  layers, rulers and a few more), so you can see what is coming.
+- **Tools on the left:** pen, pencil, brush, airbrush, eraser, fill bucket,
+  gradient, shapes, selections, eyedropper, hand and zoom. Each tool has
+  ready-made **sub tools** (a G-pen, a mapping pen, a watercolor brush, a soft
+  airbrush) whose size, opacity, hardness, smoothing and pen pressure you can
+  tune. Your changes stick to that sub tool.
+- **Colors:** a color wheel, sliders, a color set and the colors you recently
+  painted with. `X` swaps your main and sub color; hold `Alt` and click to pick
+  a color from the picture.
+- **The canvas in the middle:** tabs for every open picture. The mouse wheel
+  zooms, Space and drag (or the middle button) scrolls, and the Hand tool's
+  Rotate turns the view. Tilting the view never changes your picture.
+- **On the right:** the navigator, then your **layers**: show or hide them,
+  change their opacity and blend mode, clip one to the layer below, lock it,
+  or lock its transparent pixels so you only paint over what is already there.
+  Double-click a name to rename it.
+
+`Ctrl+N` makes a new canvas: pick a preset or a paper size, a unit, a
+resolution and a paper color. `Ctrl+O` opens a PNG, JPEG or JPEG XL picture,
+and File, then Export Single Layer, saves your picture as one again. `Alt+I`
+lists every shortcut.
+
+Your pictures are part of your project: `Ctrl+S` saves them with everything
+else, and every stroke can be undone with `Ctrl+Z`. When you click **Back to
+Canvas**, the picture is waiting on the canvas as a card; double-click it (or
+use "Open in Sue Paint") to keep painting.
 
 ---
 
