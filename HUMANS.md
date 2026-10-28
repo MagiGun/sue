@@ -207,10 +207,19 @@ one to slide its drawer open; click it again to tuck it away.
   written over. Click Convert: big files convert in the background, the
   list says where each one went (click it to see it in Explorer), and the
   status bar names the folder.
-- **Notes** (left): jot something down. Notes save themselves.
-- **Inspector** (right): the details of the selected card: its place and size
-  on the canvas, which views it has (Document, Timeline and so on), and the
-  facts of its file, such as a JPEG XL picture's size and colors.
+- **Notes** (left): jot something down. Notes save themselves. Above the
+  note: Undo and Redo, **Save As** (to a text file, through the File
+  Manager), **Open** (put a text file into the note; Undo brings the old note
+  back), Copy All, Clear, and smaller or larger text; below it, how many
+  words and characters it has. Drag to select past the top or bottom of the
+  note and it scrolls along, so the selection keeps growing.
+- **Inspector** (right): the details of the selected card, and a place to
+  change them: type a new name; change its place and size on the canvas
+  (drag a number or type it); change its values, such as a document's text
+  size or a sound's gain; edit a document's or code's text right there; and
+  change, add or remove the facts of its file, such as a song's title or a
+  picture's notes. It also shows which views it has (Document, Timeline and
+  so on). Every change is one `Ctrl+Z` step.
 - **History** (right): every change you made, newest at the top, as a tree you
   can click to go back (or forward again) to any moment.
 

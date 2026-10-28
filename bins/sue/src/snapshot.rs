@@ -365,6 +365,23 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     }
     shoot(&mut runtime, &mut camera, "09-drawers-image")?;
 
+    // 9a. Notes, with its toolbar, next to the editable Inspector.
+    runtime.request(
+        ShellRequest::ShowDrawer(
+            AppletId::new(crate::notes::ID).map_err(|error| error.to_string())?,
+        ),
+        &mut camera.painter,
+        camera.now,
+    );
+    shoot(&mut runtime, &mut camera, "09a-notes-inspector")?;
+    runtime.request(
+        ShellRequest::ShowDrawer(
+            AppletId::new(crate::files::ID).map_err(|error| error.to_string())?,
+        ),
+        &mut camera.painter,
+        camera.now,
+    );
+
     // 9b. The large File Manager, as cards with picture thumbnails.
     let _ = runtime
         .engine

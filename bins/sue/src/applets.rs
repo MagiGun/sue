@@ -33,9 +33,9 @@ pub fn launchpad() -> Result<Launchpad, WmError> {
     launchpad.register(|| Box::new(Files::default()))?;
     launchpad.register(|| Box::new(Player::default()))?;
     launchpad.register(|| Box::new(Convert::default()))?;
-    launchpad.register(|| Box::new(Notes))?;
+    launchpad.register(|| Box::new(Notes::default()))?;
     // Right drawer.
-    launchpad.register(|| Box::new(Inspector))?;
+    launchpad.register(|| Box::new(Inspector::default()))?;
     launchpad.register(|| Box::new(History))?;
     // Windows.
     launchpad.register(|| Box::new(Settings::default()))?;

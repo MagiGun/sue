@@ -1562,6 +1562,43 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn notes_open_and_save_files_and_undo_brings_the_old_note_back() {
+        let (mut runtime, root) = runtime("notes-files");
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("in.txt");
+        std::fs::write(&file, "from a file").unwrap();
+        let note = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .find(|(_, entity)| entity.name() == NOTE_NAME)
+                .and_then(|(_, entity)| entity.string_buffer().map(|text| text.as_str().to_owned()))
+                .unwrap_or_default()
+        };
+        let before = note(&runtime);
+        let notes = AppletId::new(crate::notes::ID).unwrap();
+        let send = |purpose: &str, path: &Path| ShellRequest::SendFile {
+            to: notes.clone(),
+            purpose: purpose.to_owned(),
+            path: path.to_path_buf(),
+        };
+        runtime.request(send("open", &file), &mut NoTextures, Instant::now());
+        assert_eq!(note(&runtime), "from a file");
+        let out = root.join("out.txt");
+        runtime.request(send("save", &out), &mut NoTextures, Instant::now());
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), "from a file");
+        runtime
+            .engine
+            .history
+            .undo(&mut runtime.engine.world)
+            .unwrap();
+        assert_eq!(note(&runtime), before, "one undo brings the old note back");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn spawned_entities_undo_and_redo_with_their_buffers() {
         let (mut runtime, root) = runtime("spawn");
         let ctx = egui::Context::default();

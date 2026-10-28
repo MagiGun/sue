@@ -503,6 +503,20 @@ impl AppletContext<'_> {
         self.history.apply(self.world, txn)
     }
 
+    /// Undoes (or, with `redo`, redoes) the last change anywhere, as
+    /// `Ctrl+Z` does. Returns `false` when there was nothing to undo.
+    ///
+    /// # Errors
+    /// If the change could not be undone.
+    pub fn undo(&mut self, redo: bool) -> Result<bool, TxnError> {
+        self.typing.flush(self.history);
+        if redo {
+            self.history.redo(self.world)
+        } else {
+            self.history.undo(self.world)
+        }
+    }
+
     /// Records `txn`, whose effect already happened in place (a finished
     /// paint stroke), closing any open typing group first.
     pub fn record<X>(&mut self, txn: X) -> sue_core::NodeId
