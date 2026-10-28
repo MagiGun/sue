@@ -8,7 +8,11 @@
 //! spawn buttons), the floating selection pill above the selected entity,
 //! the radial marking menu, the command palette and the Settings window.
 //! A studio applet (Sue Paint) can take the whole window instead of the
-//! canvas; the status bar, the palette and Settings stay.
+//! canvas; the status bar, the palette and Settings stay. Going in, the
+//! camera glides into the studio's card and then the studio's panels slide
+//! in over it; going out, they slide away and the camera glides back out.
+//! The marking menu's New File wheel opens a wheel of kinds of files, and
+//! each kind a wheel of exact kinds, all read from the applets' templates.
 //!
 //! Motion: every moving part is a [`SpringDamper`] stepped with the
 //! real, clamped frame time. While any spring moves the shell calls
@@ -29,15 +33,34 @@ use sue_rice::HardwareProfile;
 
 use crate::config::GridStyle;
 use crate::palette::{Palette, PaletteOutcome};
-use crate::radial::{Radial, RadialOutcome};
+use crate::radial::{Radial, RadialOutcome, wedge_point};
 use crate::timeline::{Block, TimelineEvent, TimelineState, timeline_ui};
 use crate::transport::{Clip, pcm_of};
 use crate::{
     AppletContext, AppletId, AppletRole, Applets, ArenaEdit, Batch, Camera, Catalog,
-    FrameScheduler, LayoutRequest, NodeId, PaletteEntry, PlaceNode, RemoveNode, SceneNode,
-    SetNodeProp, SetNodeRect, ShellRequest, ShellView, SpawnNode, SpringDamper, SpringMode, Theme,
-    Transport, Typing, WmConfig, World, keys, solve_layout, widgets,
+    FrameScheduler, LayoutRequest, NewEntity, NodeId, PaletteEntry, PlaceNode, RemoveNode,
+    SceneNode, SetNodeProp, SetNodeRect, ShellRequest, ShellView, SpawnNode, SpringDamper,
+    SpringMode, Theme, Transport, Typing, WmConfig, World, keys, solve_layout, widgets,
 };
+
+/// Which wheel of the marking menu is showing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RadialPage {
+    /// The first wheel.
+    Root,
+    /// New File: the kinds of files.
+    Kinds,
+    /// The exact kinds of one kind of file.
+    Templates(String),
+}
+
+/// What a wedge of the marking menu does.
+#[derive(Clone, Debug, PartialEq)]
+enum RadialAction {
+    Request(ShellRequest),
+    Open(RadialPage),
+    Template(AppletId, String),
+}
 
 /// Height of a node's title bar, in canvas units.
 pub const NODE_TITLE: f32 = 26.0;
@@ -171,6 +194,14 @@ pub struct Shell {
     window: Option<AppletId>,
     window_appear: SpringDamper,
     studio: Option<AppletId>,
+    studio_shown: Option<AppletId>,
+    studio_reveal: SpringDamper,
+    studio_zooming: bool,
+    studio_leave: Option<(Option<NodeId>, bool)>,
+    studio_restore: Option<[bool; 3]>,
+    studio_area: Rect,
+    radial_page: RadialPage,
+    spawn_point: Option<Pos2>,
     interactive: bool,
     space_down: bool,
     space_panned: bool,
@@ -246,6 +277,14 @@ impl Shell {
             window: None,
             window_appear: spring(0.0),
             studio: None,
+            studio_shown: None,
+            studio_reveal: spring(0.0),
+            studio_zooming: false,
+            studio_leave: None,
+            studio_restore: None,
+            studio_area: Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 720.0)),
+            radial_page: RadialPage::Root,
+            spawn_point: None,
             interactive: false,
             space_down: false,
             space_panned: false,
@@ -339,10 +378,21 @@ impl Shell {
         self.right.shown.as_ref().filter(|_| self.right.open)
     }
 
-    /// The studio filling the window, if any.
+    /// The studio filling the window, if any (`None` as soon as it starts
+    /// leaving).
     #[must_use]
     pub fn studio(&self) -> Option<&AppletId> {
         self.studio.as_ref()
+    }
+
+    /// How far a studio has come in, 0 (the canvas) to 1 (all in place).
+    #[must_use]
+    pub fn studio_reveal(&self) -> f32 {
+        if self.studio_zooming {
+            0.0
+        } else {
+            self.studio_reveal.position().clamp(0.0, 1.0)
+        }
     }
 
     /// Marks the shell as running in the desktop window, where applets may
@@ -408,6 +458,7 @@ impl Shell {
             &mut self.pill.glide_y,
             &mut self.top_pill,
             &mut self.window_appear,
+            &mut self.studio_reveal,
         ] {
             spring.set_params(params);
             spring.set_mode(mode);
@@ -488,6 +539,7 @@ impl Shell {
             now,
             dt,
             studio: self.studio.clone(),
+            studio_reveal: self.studio_reveal(),
             interactive: self.interactive,
         }
     }
@@ -607,6 +659,7 @@ impl Shell {
 
     /// Opens the marking menu at a screen point.
     pub fn open_radial(&mut self, at: Pos2) {
+        self.radial_page = RadialPage::Root;
         let canvas_point = self.camera.to_canvas(self.canvas, at);
         self.radial = Some(Radial::open(
             at,
@@ -715,28 +768,152 @@ impl Shell {
         modes
     }
 
-    /// Fills the window with studio `id`.
-    pub fn open_studio(&mut self, id: AppletId) {
+    /// Fills the window with studio `id`: the camera glides into the card
+    /// the studio will work on (the selected one if the studio takes it,
+    /// else the one it worked on last), then the studio's panels come in.
+    pub fn open_studio(&mut self, id: AppletId, io: &mut ShellIo<'_>) {
         self.dismiss_overlays();
-        self.select_none_quietly();
         self.mode = id.as_str().to_owned();
-        self.studio = Some(id);
-        self.touch();
-    }
-
-    /// Leaves the studio for the canvas.
-    pub fn close_studio(&mut self, world: &World) {
-        if self.studio.take().is_some() {
-            self.mode = CANVAS_MODE.to_owned();
-            self.frame_all(world);
+        self.top_pill.set_target(0.0);
+        self.pill.appear.set_target(0.0);
+        let showing = self.studio_shown.as_ref() == Some(&id);
+        // The drawers and the timeline slide away with the rest of the
+        // canvas, and come back when the studio closes.
+        if self.studio_restore.is_none() {
+            self.studio_restore = Some([self.left.open, self.right.open, self.timeline_open]);
+        }
+        for drawer in [&mut self.left, &mut self.right] {
+            drawer.open = false;
+            drawer.reveal.set_target(0.0);
+        }
+        if self.timeline_open {
+            self.set_timeline(false);
+        }
+        self.studio = Some(id.clone());
+        self.studio_shown = Some(id.clone());
+        self.studio_leave = None;
+        let shot = if showing && self.studio_reveal.position() > 0.05 {
+            None
+        } else {
+            self.studio_card(&id, io)
+                .and_then(|node| self.studio_shot(node, io.world))
+        };
+        match shot {
+            Some((center, zoom)) => {
+                self.camera.glide_to(center, zoom);
+                self.studio_zooming = true;
+                self.studio_reveal.snap_to(0.0);
+            }
+            None => {
+                self.studio_zooming = false;
+                self.studio_reveal.set_target(1.0);
+            }
         }
         self.touch();
     }
 
-    fn select_none_quietly(&mut self) {
-        self.selected = None;
-        self.pill.node = None;
-        self.pill.appear.snap_to(0.0);
+    /// Leaves the studio for the canvas: its panels slide away from its
+    /// card, then the camera glides out to everything (`overview`) or stays
+    /// for whatever the caller frames next.
+    pub fn close_studio(&mut self, io: &mut ShellIo<'_>, overview: bool) {
+        let Some(id) = self.studio.take() else {
+            self.touch();
+            return;
+        };
+        self.mode = CANVAS_MODE.to_owned();
+        self.studio_zooming = false;
+        let card = io
+            .applets
+            .get(&id)
+            .and_then(|applet| applet.studio_focus())
+            .and_then(|focus| Self::card_of(focus, io.world));
+        // Under the studio the camera jumps to that card, so the panels
+        // slide away from the very picture on the canvas.
+        if let Some((center, zoom)) = card.and_then(|node| self.studio_shot(node, io.world))
+            && self.studio_reveal.position() > 0.5
+        {
+            self.camera.snap(center, zoom);
+        }
+        self.studio_leave = Some((card, overview));
+        self.studio_reveal.set_target(0.0);
+        self.touch();
+    }
+
+    /// The node showing the entity with `id`.
+    fn card_of(id: sue_core::EntityId, world: &World) -> Option<NodeId> {
+        world
+            .scene
+            .iter()
+            .find(|(_, node)| {
+                world
+                    .arena
+                    .get(node.entity)
+                    .is_ok_and(|entity| entity.id() == id)
+            })
+            .map(|(node, _)| node)
+    }
+
+    /// The card a studio opens on: the selected node if the studio takes
+    /// its entity, else the node of what the studio worked on last.
+    fn studio_card(&self, id: &AppletId, io: &ShellIo<'_>) -> Option<NodeId> {
+        let applet = io.applets.get(id)?;
+        let selected = self.selected.filter(|node| {
+            io.world
+                .scene
+                .get(*node)
+                .and_then(|node| io.world.arena.get(node.entity).ok())
+                .is_some_and(|entity| applet.accepts(entity))
+        });
+        selected.or_else(|| Self::card_of(applet.studio_focus()?, io.world))
+    }
+
+    /// Where the camera must be for a card's content to fill the studio's
+    /// area the way the studio shows its picture (24 points of margin).
+    fn studio_shot(&self, node: NodeId, world: &World) -> Option<(Pos2, f32)> {
+        let rect = world.scene.get(node)?.rect;
+        let content = Rect::from_min_max(pos2(rect.left(), rect.top() + NODE_TITLE), rect.max);
+        let area = self.studio_area;
+        let room = (area.size() - vec2(48.0, 48.0)).max(vec2(16.0, 16.0));
+        let zoom = (room.x / content.width().max(1.0)).min(room.y / content.height().max(1.0));
+        let center = content.center() - (area.center() - self.canvas.center()) / zoom;
+        Some((center, zoom))
+    }
+
+    /// Moves a studio's entry and exit along: the panels come in once the
+    /// camera has reached the card, and the canvas comes back once they are
+    /// gone.
+    fn advance_studio(&mut self, world: &World) {
+        if self.studio_zooming && self.camera.near_target() {
+            self.studio_zooming = false;
+            self.studio_reveal.set_target(1.0);
+        }
+        let gone = self.studio.is_none()
+            && self.studio_reveal.target() <= 0.0
+            && self.studio_reveal.position() <= 0.002;
+        if gone && self.studio_shown.take().is_some() {
+            self.studio_reveal.snap_to(0.0);
+            self.top_pill.set_target(1.0);
+            if let Some([left, right, timeline]) = self.studio_restore.take() {
+                for (drawer, open) in [(&mut self.left, left), (&mut self.right, right)] {
+                    drawer.open = open;
+                    drawer.reveal.set_target(if open { 1.0 } else { 0.0 });
+                }
+                if timeline {
+                    self.set_timeline(true);
+                }
+            }
+            let (card, overview) = self.studio_leave.take().unwrap_or((None, true));
+            if let Some(node) = card.filter(|node| world.scene.get(*node).is_some()) {
+                self.selected = Some(node);
+            }
+            if let Some(node) = self.selected {
+                self.pill.node = Some(node);
+                self.pill.appear.set_target(1.0);
+            }
+            if overview {
+                self.frame_all(world);
+            }
+        }
     }
 
     /// Switches mode: the canvas shows everything, the timeline opens, a
@@ -749,10 +926,12 @@ impl Shell {
                 .manifest(&id)
                 .is_some_and(|manifest| manifest.role == AppletRole::Studio)
         {
-            self.open_studio(id);
+            self.open_studio(id, io);
             return;
         }
-        self.studio = None;
+        if self.studio.is_some() {
+            self.close_studio(io, mode == CANVAS_MODE);
+        }
         match mode {
             CANVAS_MODE => {
                 self.mode = CANVAS_MODE.to_owned();
@@ -802,13 +981,46 @@ impl Shell {
         io: &mut ShellIo<'_>,
         now: Instant,
     ) -> Option<NodeId> {
-        let center = at.unwrap_or_else(|| self.camera.center());
         let view = self.view(now, 0.0);
         let theme = self.theme.clone();
         let entity = {
             let (applets, mut cx) = split(io, &theme, view);
             applets.get_mut(id)?.new_entity(&mut cx)?
         };
+        self.spawn_entity(id, entity, at, io)
+    }
+
+    /// Makes a new file from template `key` of applet `id`, placed at `at`
+    /// (canvas units) or in view. Returns the node, when the shell placed it.
+    pub fn create(
+        &mut self,
+        id: &AppletId,
+        key: &str,
+        at: Option<Pos2>,
+        io: &mut ShellIo<'_>,
+        now: Instant,
+    ) -> Option<NodeId> {
+        // An applet that places its own file places it here too.
+        self.spawn_point = at;
+        let view = self.view(now, 0.0);
+        let theme = self.theme.clone();
+        let entity = {
+            let (applets, mut cx) = split(io, &theme, view);
+            applets.get_mut(id)?.create(key, &mut cx)?
+        };
+        self.spawn_point = None;
+        self.spawn_entity(id, entity, at, io)
+    }
+
+    /// Spawns `entity` as a node of applet `id` and selects it.
+    fn spawn_entity(
+        &mut self,
+        id: &AppletId,
+        entity: NewEntity,
+        at: Option<Pos2>,
+        io: &mut ShellIo<'_>,
+    ) -> Option<NodeId> {
+        let center = at.unwrap_or_else(|| self.camera.center());
         let rect = io.world.scene.free_spot(center, entity.size, 48.0);
         let mut txn = SpawnNode::new(entity, id.clone(), rect);
         io.typing.flush(io.history);
@@ -841,7 +1053,11 @@ impl Shell {
             return None;
         };
         let size = io.applets.get(&applet)?.node_size(found);
-        let rect = io.world.scene.free_spot(self.camera.center(), size, 48.0);
+        let near = self
+            .spawn_point
+            .take()
+            .unwrap_or_else(|| self.camera.center());
+        let rect = io.world.scene.free_spot(near, size, 48.0);
         let node = io.world.scene.allocate();
         let txn = PlaceNode::with_id(SceneNode::new(entity, applet.clone(), rect), node);
         io.typing.flush(io.history);
@@ -911,6 +1127,11 @@ impl Shell {
                     self.frame_node(node, io.world, None);
                 }
             }
+            ShellRequest::Create { applet, key } => {
+                if let Some(node) = self.create(&applet, &key, None, io, now) {
+                    self.frame_node(node, io.world, None);
+                }
+            }
             ShellRequest::Palette => self.open_palette(),
             ShellRequest::ResetCamera => {
                 self.mode = CANVAS_MODE.to_owned();
@@ -918,13 +1139,17 @@ impl Shell {
             }
             ShellRequest::ShowDrawer(id) => self.show_drawer(&id, io.applets),
             ShellRequest::Place { entity, focus } => {
-                if focus {
-                    self.studio = None;
+                if focus && self.studio.is_some() {
+                    self.close_studio(io, false);
+                }
+                if focus && let Some(leave) = self.studio_leave.as_mut() {
+                    // Framing what was asked for wins over the overview.
+                    leave.1 = false;
                 }
                 self.place(entity, focus, io);
             }
-            ShellRequest::OpenStudio(id) => self.open_studio(id),
-            ShellRequest::CloseStudio => self.close_studio(io.world),
+            ShellRequest::OpenStudio(id) => self.open_studio(id, io),
+            ShellRequest::CloseStudio => self.close_studio(io, true),
             other => return Some(other),
         }
         self.touch();
@@ -1030,9 +1255,11 @@ impl Shell {
         }
 
         self.global_keys(&ctx, io, now);
+        self.spawn_point = None;
 
         // Springs.
         let mut moving = false;
+        moving |= self.studio_reveal.step(motion_dt);
         moving |= self.left.reveal.step(motion_dt);
         moving |= self.right.reveal.step(motion_dt);
         moving |= self.timeline_reveal.step(motion_dt);
@@ -1077,8 +1304,14 @@ impl Shell {
             metrics: self.config.metrics,
         });
         self.canvas = layout.canvas;
+        let screen = root.max_rect();
+        self.studio_area =
+            Rect::from_min_max(screen.min, pos2(screen.right(), layout.status.top()));
+        self.advance_studio(io.world);
+        let settled =
+            self.studio.is_some() && !self.studio_zooming && self.studio_reveal.position() >= 0.999;
 
-        if let Some(studio) = self.studio.clone() {
+        if settled && let Some(studio) = self.studio_shown.clone() {
             self.studio_frame(root, &studio, layout.status, io, &theme, now, dt);
             self.animating = moving;
             self.scheduler.set_animating(self.animating);
@@ -1140,10 +1373,30 @@ impl Shell {
         }
         self.status_ui(root, layout.status, io, &theme);
 
+        // A studio coming in or going out, over the canvas, not yet
+        // taking clicks.
+        if let Some(studio) = self.studio_shown.clone()
+            && !self.studio_zooming
+        {
+            self.studio_layer(root, &studio, true, io, &theme, now, dt);
+            let area = self.studio_area;
+            egui::Area::new(Id::unique("sue-studio-shield"))
+                .order(Order::Middle)
+                .fixed_pos(area.min)
+                .show(&ctx, |ui| {
+                    ui.allocate_rect(area, Sense::click_and_drag());
+                });
+        }
+
         // Floating surfaces.
-        self.top_pill_ui(&ctx, io, &theme, now);
-        self.selection_pill_ui(&ctx, io, &theme, now, dt);
-        self.radial_ui(&ctx, root.max_rect(), io, &theme, now);
+        let studio_over = self.studio_shown.is_some() && !self.studio_zooming;
+        if self.top_pill.position() > 0.01 && !studio_over {
+            self.top_pill_ui(&ctx, io, &theme, now);
+        }
+        if self.studio_shown.is_none() {
+            self.selection_pill_ui(&ctx, io, &theme, now, dt);
+            self.radial_ui(&ctx, root.max_rect(), io, &theme, now);
+        }
         self.palette_ui(&ctx, io, &theme, now);
         self.window_ui(&ctx, root.max_rect(), io, &theme, now, dt);
         if self.space_down {
@@ -1188,31 +1441,52 @@ impl Shell {
     ) {
         let ctx = root.ctx().clone();
         let screen = root.max_rect();
-        let area = Rect::from_min_max(screen.min, pos2(screen.right(), status.top()));
-        let view = self.view(now, dt);
-        {
-            let mut studio_ui = root.new_child(
-                UiBuilder::new()
-                    .max_rect(area)
-                    .id_salt(("sue-studio", studio.as_str()))
-                    .layout(Layout::top_down(Align::Min)),
-            );
-            studio_ui.set_clip_rect(area);
-            let (applets, mut cx) = split(io, theme, view);
-            match applets.get_mut(studio) {
-                Some(applet) => applet.studio_ui(&mut studio_ui, &mut cx),
-                None => {
-                    self.studio = None;
-                    self.mode = CANVAS_MODE.to_owned();
-                }
-            }
-        }
+        self.studio_layer(root, studio, false, io, theme, now, dt);
         let painter = root.painter().clone();
         painter.rect_filled(status, 0.0, theme.panel);
         painter.hline(status.x_range(), status.top(), theme.hairline());
         self.status_ui(root, status, io, theme);
         self.palette_ui(&ctx, io, theme, now);
         self.window_ui(&ctx, screen, io, theme, now, dt);
+    }
+
+    /// The studio itself, over the area above the status bar. While it
+    /// comes in or goes out (`lifted`) it paints on a layer above the
+    /// canvas's cards; its widgets keep the same ids either way.
+    #[allow(clippy::too_many_arguments, reason = "one layer of a studio")]
+    fn studio_layer(
+        &mut self,
+        root: &mut Ui,
+        studio: &AppletId,
+        lifted: bool,
+        io: &mut ShellIo<'_>,
+        theme: &Theme,
+        now: Instant,
+        dt: f32,
+    ) {
+        let area = self.studio_area;
+        let view = self.view(now, dt);
+        {
+            let mut builder = UiBuilder::new()
+                .max_rect(area)
+                .id_salt(("sue-studio", studio.as_str()))
+                .layout(Layout::top_down(Align::Min));
+            if lifted {
+                builder =
+                    builder.layer_id(LayerId::new(Order::Middle, Id::unique("sue-studio-lifted")));
+            }
+            let mut studio_ui = root.new_child(builder);
+            studio_ui.set_clip_rect(area);
+            let (applets, mut cx) = split(io, theme, view);
+            match applets.get_mut(studio) {
+                Some(applet) => applet.studio_ui(&mut studio_ui, &mut cx),
+                None => {
+                    self.studio = None;
+                    self.studio_shown = None;
+                    self.mode = CANVAS_MODE.to_owned();
+                }
+            }
+        }
     }
 
     fn global_keys(&mut self, ctx: &egui::Context, io: &mut ShellIo<'_>, now: Instant) {
@@ -2075,15 +2349,7 @@ impl Shell {
             self.canvas.top() + theme.padding * 1.5 - (1.0 - appear) * 16.0,
         );
         let modes = Self::mode_buttons(io.applets);
-        let spawns: Vec<(AppletId, String)> = io
-            .applets
-            .with_role(AppletRole::Node)
-            .filter_map(|manifest| {
-                Some((manifest.id.clone(), manifest.spawn.as_ref()?.button.clone()))
-            })
-            .collect();
         let mut picked_mode = None;
-        let mut picked_spawn = None;
         let mut palette = false;
         egui::Area::new(Id::unique("sue-top-pill"))
             .order(Order::Foreground)
@@ -2104,15 +2370,6 @@ impl Shell {
                             }
                         }
                         widgets::pill_divider(ui, theme);
-                        for (id, label) in &spawns {
-                            if widgets::pill_button(ui, label, false, theme)
-                                .on_hover_text("Create a new one in view")
-                                .clicked()
-                            {
-                                picked_spawn = Some(id.clone());
-                            }
-                        }
-                        widgets::pill_divider(ui, theme);
                         let hint = format!("Command ({})", self.config.keymap.command_palette);
                         if widgets::pill_button(ui, &hint, self.palette.is_some(), theme).clicked()
                         {
@@ -2127,11 +2384,6 @@ impl Shell {
             } else {
                 self.set_mode(&mode, io, now);
             }
-        }
-        if let Some(id) = picked_spawn
-            && let Some(node) = self.spawn(&id, None, io, now)
-        {
-            self.frame_node(node, io.world, None);
         }
         if palette {
             self.open_palette();
@@ -2183,20 +2435,125 @@ impl Shell {
 
     // ----- Marking menu, palette, window --------------------------------------------
 
-    fn radial_items(applets: &Applets) -> Vec<(String, ShellRequest)> {
-        let mut items: Vec<(String, ShellRequest)> = applets
-            .with_role(AppletRole::Node)
-            .filter_map(|manifest| {
-                Some((
-                    manifest.spawn.as_ref()?.label.clone(),
-                    ShellRequest::Spawn(manifest.id.clone()),
-                ))
+    /// Where the next wheel grows: around wedge `index` of `count`, kept on
+    /// screen.
+    fn next_wheel(radial: &Radial, index: usize, count: usize, radius: f32, screen: Rect) -> Pos2 {
+        let at = wedge_point(radial.center, index, count, radius * 1.4);
+        let margin = radius + 8.0;
+        pos2(
+            at.x.clamp(
+                screen.left() + margin,
+                (screen.right() - margin).max(screen.left() + margin),
+            ),
+            at.y.clamp(
+                screen.top() + margin,
+                (screen.bottom() - margin).max(screen.top() + margin),
+            ),
+        )
+    }
+
+    /// Opens the New File wheel of an open marking menu, and the wheel of
+    /// `kind` in it (scripted runs and snapshots).
+    pub fn radial_new_file(&mut self, kind: Option<&str>, applets: &Applets) {
+        let radius = self.config.radial_radius;
+        let screen = self.studio_area;
+        self.radial_page = RadialPage::Root;
+        let mut path = vec![(0, RadialPage::Kinds)];
+        if let Some(kind) = kind {
+            self.radial_page = RadialPage::Kinds;
+            let kinds = self.radial_items(applets);
+            if let Some(index) = kinds.iter().position(|(label, _)| label.starts_with(kind)) {
+                path.push((index, RadialPage::Templates(kind.to_owned())));
+            }
+            self.radial_page = RadialPage::Root;
+        }
+        for (index, page) in path {
+            let count = self.radial_items(applets).len();
+            if let Some(radial) = self.radial.as_mut() {
+                let center = Self::next_wheel(radial, index, count, radius, screen);
+                radial.descend(center);
+            }
+            self.radial_page = page;
+        }
+        self.touch();
+    }
+
+    /// Every applet's file templates, in applet order.
+    fn templates(applets: &Applets) -> Vec<(AppletId, crate::FileTemplate)> {
+        applets
+            .manifests()
+            .flat_map(|manifest| {
+                applets
+                    .get(&manifest.id)
+                    .map(|applet| applet.templates())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|template| (manifest.id.clone(), template))
             })
-            .collect();
-        items.push(("Toggle Timeline".to_owned(), ShellRequest::Timeline(true)));
-        items.push(("Command Palette".to_owned(), ShellRequest::Palette));
-        items.push(("Reset Camera".to_owned(), ShellRequest::ResetCamera));
-        items
+            .collect()
+    }
+
+    /// The wedges of the wheel showing now.
+    fn radial_items(&self, applets: &Applets) -> Vec<(String, RadialAction)> {
+        match &self.radial_page {
+            RadialPage::Root => {
+                let mut items = vec![
+                    (
+                        "New File \u{203a}".to_owned(),
+                        RadialAction::Open(RadialPage::Kinds),
+                    ),
+                    (
+                        "Open File".to_owned(),
+                        RadialAction::Request(ShellRequest::Command("file.open".to_owned())),
+                    ),
+                ];
+                for manifest in applets.with_role(AppletRole::Studio) {
+                    if let Some(mode) = &manifest.mode {
+                        items.push((
+                            mode.label.clone(),
+                            RadialAction::Request(ShellRequest::Mode(
+                                manifest.id.as_str().to_owned(),
+                            )),
+                        ));
+                    }
+                }
+                items.push((
+                    "Timeline".to_owned(),
+                    RadialAction::Request(ShellRequest::Timeline(true)),
+                ));
+                items.push((
+                    "Command Palette".to_owned(),
+                    RadialAction::Request(ShellRequest::Palette),
+                ));
+                items.push((
+                    "Reset Camera".to_owned(),
+                    RadialAction::Request(ShellRequest::ResetCamera),
+                ));
+                items
+            }
+            RadialPage::Kinds => {
+                let mut kinds: Vec<String> = Vec::new();
+                for (_, template) in Self::templates(applets) {
+                    if !kinds.contains(&template.category) {
+                        kinds.push(template.category);
+                    }
+                }
+                kinds
+                    .into_iter()
+                    .map(|kind| {
+                        (
+                            format!("{kind} \u{203a}"),
+                            RadialAction::Open(RadialPage::Templates(kind)),
+                        )
+                    })
+                    .collect()
+            }
+            RadialPage::Templates(kind) => Self::templates(applets)
+                .into_iter()
+                .filter(|(_, template)| &template.category == kind)
+                .map(|(id, template)| (template.label, RadialAction::Template(id, template.key)))
+                .collect(),
+        }
     }
 
     fn radial_ui(
@@ -2207,31 +2564,68 @@ impl Shell {
         theme: &Theme,
         now: Instant,
     ) {
-        let Some(radial) = self.radial.as_mut() else {
+        let items = self.radial_items(io.applets);
+        let radius = self.config.radial_radius;
+        let Some(mut radial) = self.radial.take() else {
             return;
         };
-        let items = Self::radial_items(io.applets);
         let labels: Vec<String> = items.iter().map(|(label, _)| label.clone()).collect();
         let canvas_point = radial.canvas_point;
-        let outcome = radial.ui(ctx, screen, &labels, self.config.radial_radius, theme);
+        let outcome = radial.ui(ctx, screen, &labels, radius, theme);
         self.touch();
-        if let RadialOutcome::Picked(index) = outcome
-            && let Some((_, request)) = items.into_iter().nth(index)
-        {
-            match request {
-                ShellRequest::Spawn(id) => {
-                    if let Some(node) = self.spawn(&id, Some(canvas_point), io, now) {
-                        self.select(Some(node), io.world);
+        match outcome {
+            RadialOutcome::Picked(index) => {
+                let Some((_, action)) = items.into_iter().nth(index) else {
+                    self.radial = Some(radial);
+                    return;
+                };
+                match action {
+                    RadialAction::Open(page) => {
+                        radial.descend(Self::next_wheel(
+                            &radial,
+                            index,
+                            labels.len(),
+                            radius,
+                            screen,
+                        ));
+                        self.radial_page = page;
+                    }
+                    RadialAction::Template(id, key) => {
+                        radial.close();
+                        self.radial_page = RadialPage::Root;
+                        if let Some(node) = self.create(&id, &key, Some(canvas_point), io, now) {
+                            self.select(Some(node), io.world);
+                        }
+                    }
+                    RadialAction::Request(request) => {
+                        radial.close();
+                        self.radial_page = RadialPage::Root;
+                        match request {
+                            ShellRequest::Timeline(_) => {
+                                let open = !self.timeline_open;
+                                self.set_timeline(open);
+                            }
+                            other => {
+                                if let Some(request) = self.handle(other, io, now) {
+                                    io.requests.push(request);
+                                }
+                            }
+                        }
                     }
                 }
-                ShellRequest::Timeline(_) => {
-                    let open = !self.timeline_open;
-                    self.set_timeline(open);
-                }
-                other => {
-                    self.handle(other, io, now);
-                }
             }
+            RadialOutcome::Back => {
+                radial.ascend();
+                self.radial_page = match &self.radial_page {
+                    RadialPage::Templates(_) => RadialPage::Kinds,
+                    _ => RadialPage::Root,
+                };
+            }
+            RadialOutcome::Dismissed => self.radial_page = RadialPage::Root,
+            RadialOutcome::Open => {}
+        }
+        if self.radial.is_none() {
+            self.radial = Some(radial);
         }
     }
 
@@ -2301,12 +2695,6 @@ impl Shell {
                     PaletteAction::Request(ShellRequest::Mode(manifest.id.as_str().to_owned())),
                 ));
             }
-            if let Some(spawn) = &manifest.spawn {
-                entries.push((
-                    entry(&spawn.label, String::new()),
-                    PaletteAction::Request(ShellRequest::Spawn(manifest.id.clone())),
-                ));
-            }
             if matches!(
                 manifest.role,
                 AppletRole::LeftDrawer | AppletRole::RightDrawer
@@ -2316,6 +2704,18 @@ impl Shell {
                     PaletteAction::Request(ShellRequest::ShowDrawer(manifest.id.clone())),
                 ));
             }
+        }
+        for (applet, template) in Self::templates(applets) {
+            entries.push((
+                entry(
+                    &format!("New {}: {}", template.category, template.label),
+                    String::new(),
+                ),
+                PaletteAction::Request(ShellRequest::Create {
+                    applet,
+                    key: template.key,
+                }),
+            ));
         }
         if self.selected.is_some() {
             entries.push((
@@ -2530,6 +2930,7 @@ impl Shell {
             &mut self.pill.glide_y,
             &mut self.top_pill,
             &mut self.window_appear,
+            &mut self.studio_reveal,
         ] {
             moving |= spring.step(dt);
         }

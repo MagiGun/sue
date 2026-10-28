@@ -16,8 +16,8 @@ use sue_io::{JxlPipeline, NativeJxlPipeline};
 use sue_platform::write_atomic;
 use sue_rice::{RiceDeclaration, RiceParameter};
 use sue_wm::{
-    AppletContext, AppletManifest, AppletRole, ArenaEdit, MediaClass, ModeSpec, NewEntity, NodeId,
-    SceneNode, SpawnSpec, SueApplet, World, project_to_timeline, widgets,
+    AppletContext, AppletManifest, AppletRole, ArenaEdit, MediaClass, NewEntity, NodeId, SceneNode,
+    SueApplet, World, project_to_timeline, widgets,
 };
 
 use crate::util::{file_name, free_path};
@@ -383,14 +383,8 @@ impl SueApplet for Paint {
         let mut manifest = AppletManifest::new(ID, "Paint", AppletRole::Node, "\u{1F58C}");
         manifest.summary = "Paint with a brush, lines, rectangles and an eraser.".to_owned();
         manifest.order = 20;
-        manifest.mode = Some(ModeSpec {
-            label: "Paint".to_owned(),
-            in_pill: true,
-        });
-        manifest.spawn = Some(SpawnSpec {
-            button: "+ Paint".to_owned(),
-            label: "New Paint Layer".to_owned(),
-        });
+        // Sue Paint replaced it: old layers still show and edit on the
+        // canvas, but nothing offers to make new ones.
         manifest.lane = Some("Paint/Visual Track".to_owned());
         manifest.opens = vec![MediaClass::Image];
         manifest

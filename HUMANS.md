@@ -58,8 +58,8 @@ only color you see.
 
 ```text
 ┌───┬──────────────────────────────────────────────────────────┬───┐
-│ F │      [ Canvas  Document  Paint  Timeline  Code / Hex ]    │ I │
-│ P │      [ + Text  + Paint  + Audio ]  [ Command (Tab) ]      │ H │
+│ F │  [ Canvas  Document  Sue Paint  Timeline  Command (Tab) ] │ I │
+│ P │                                                          │ H │
 │ C │                                                          │   │
 │ N │   ┌ Welcome ─────────┐         [ Brush  Line  Rect ... ] │   │
 │   │   │ # Welcome to Sue │         ┌ Sketch ──────────────┐  │   │
@@ -85,12 +85,12 @@ only color you see.
 
 A floating bar at the top of the canvas:
 
-- **Modes** (Canvas, Document, Paint, Sue Paint, Timeline, Code / Hex) glide
-  the camera to the thing you want to work on, about a quarter of a second
-  each. Canvas shows everything again. Sue Paint opens the painting studio.
-- **+ Text, + Paint, + Audio** put a new document, paint layer or audio clip in
-  view.
+- **Modes** (Canvas, Document, Sue Paint, Timeline) glide the camera to the
+  thing you want to work on, about a quarter of a second each. Canvas shows
+  everything again. Sue Paint opens the painting studio.
 - **Command (Tab)** opens the command palette.
+
+New files are made from the marking menu (right-click), described below.
 
 ### The selection pill
 
@@ -115,12 +115,22 @@ to that card's mode.
 ### The marking menu and the command palette
 
 **Right-click** anywhere on the canvas: a round menu grows around the pointer
-with New Document, New Paint Layer, New Audio Node, Toggle Timeline, Command
-Palette and Reset Camera. Click a slice, or hold the right button, drag toward a
-slice and let go.
+with New File, Open File, Sue Paint, Timeline, Command Palette and Reset
+Camera. Click a slice, or hold the right button, drag toward a slice and let
+go.
+
+**New File** opens a second wheel with the kinds of files Sue makes:
+Document, Picture, Audio and Code. Each of those opens a third wheel with the
+exact kind: a blank document, notes, a to-do list, a letter or a report; an
+illustration, a print page, a Full HD screen, a square post, a transparent
+sprite or a custom size; a chord, a tone or silence; a Rust, Python,
+JavaScript, HTML, CSS, JSON or shell file. The new file appears where you
+right-clicked. A new picture opens straight in Sue Paint. Click the middle of a
+wheel to go back to the one before.
 
 Press **Tab** (or `/`) for the **command palette**: start typing and it finds
-any action, mode or tool by a few letters, such as "np" for New Paint Layer.
+any action, mode or tool by a few letters, such as "new notes" for a new
+notes document.
 
 ### The timeline
 
@@ -212,6 +222,13 @@ Your pictures are part of your project: `Ctrl+S` saves them with everything
 else, and every stroke can be undone with `Ctrl+Z`. When you click **Back to
 Canvas**, the picture is waiting on the canvas as a card; double-click it (or
 use "Open in Sue Paint") to keep painting.
+
+Going in and out is smooth: opening Sue Paint, the canvas zooms into the
+picture's card while the drawers slide away, and then the menus and palettes
+slide in from the edges around it. Leaving, they slide back out, the picture
+settles into its card, and the canvas zooms out again. How fast this happens
+follows the Motion settings (Settings, Display & Graphics): a faster animation
+speed shortens it, and "Instant transitions" makes it immediate.
 
 ---
 

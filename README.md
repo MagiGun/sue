@@ -32,9 +32,8 @@ theme (black to white, nothing else), straight onto an **infinite canvas**:
   pan with the middle button or Space and drag. Sue opens with three live
   entities on it: a Document you can type and select text in, a Paint layer you
   draw on, and an Audio waveform you can play.
-- **The top pill:** modes (Canvas, Document, Paint, Sue Paint, Timeline, Code /
-  Hex) that glide the camera to frame an entity or open a studio, buttons that
-  create entities (+ Text, + Paint, + Audio), and the command palette.
+- **The top pill:** modes (Canvas, Document, Sue Paint, Timeline) that glide the
+  camera to frame an entity or open a studio, and the command palette.
 - **Sue Paint:** a full-window painting studio with the usual menu bar (File,
   Edit, Story, Animation, Layer, Select, View, Filter, Window, Help; items not
   built yet are grayed out), a command bar, tools and sub tools (pens, pencils,
@@ -42,15 +41,19 @@ theme (black to white, nothing else), straight onto an **infinite canvas**:
   eyedropper, hand, zoom, move layer) with pen pressure and stabilization, a
   color wheel and sets, canvas tabs with a turnable view, a navigator, and
   layers with 26 blend modes, clipping and locks. Pictures live in the project
-  and also sit on the canvas as cards.
+  and also sit on the canvas as cards. Going in, the canvas zooms into the
+  card and the panels slide in; going out, they slide away and the canvas
+  zooms back out.
 - **The selection pill:** select an entity and a floating toolbar springs up
   above it with only its tools: headings, bold and text size for documents;
   brush, line, rectangle, eraser, size, value and JPEG XL export for paint;
   play, gain, split and normalize for audio; 1:1 zoom, pixel grid, re-encode and
   hex for pictures.
 - **The marking menu:** right-click anywhere for a radial menu that grows on a
-  spring. **The command palette:** `Tab` or `/` for a fuzzy search over every
-  action.
+  spring. Its New File wedge opens a wheel of kinds of files (Document,
+  Picture, Audio, Code) and each kind a wheel of exact kinds, from the
+  applets' templates. **The command palette:** `Tab` or `/` for a fuzzy search
+  over every action and template.
 - **The timeline:** a bottom dock that springs open with Document, Paint/Visual
   and Audio tracks. Its blocks are the very entities on the canvas.
 - **Drawers:** Files, Player, Convert and Notes on the left; Inspector and

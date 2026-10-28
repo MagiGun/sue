@@ -138,6 +138,26 @@ impl Camera2 {
     /// Runs frames until the shell sleeps, then paints one more.
     fn shoot(&mut self, runtime: &mut Runtime, path: &Path) -> Result<(), String> {
         self.settle(runtime);
+        self.paint(runtime, path)
+    }
+
+    /// Runs `count` frames, then paints the next one: a moment in the
+    /// middle of an animation.
+    fn shoot_after(
+        &mut self,
+        runtime: &mut Runtime,
+        path: &Path,
+        count: usize,
+    ) -> Result<(), String> {
+        for _ in 0..count {
+            let output = self.frame(runtime);
+            self.painter.apply_textures(output.textures_delta);
+        }
+        self.paint(runtime, path)
+    }
+
+    /// Paints one frame into a PNG.
+    fn paint(&mut self, runtime: &mut Runtime, path: &Path) -> Result<(), String> {
         let output = self.frame(runtime);
         let pixels = self.painter.paint_offscreen(
             &self.ctx,
@@ -269,6 +289,10 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     let center = runtime.shell.canvas_rect().center();
     runtime.shell.open_radial(center);
     shoot(&mut runtime, &mut camera, "05-radial-menu")?;
+    runtime
+        .shell
+        .radial_new_file(Some("Picture"), &runtime.applets);
+    shoot(&mut runtime, &mut camera, "05b-new-file-wheels")?;
     runtime.shell.dismiss_overlays();
     runtime.shell.open_palette();
     runtime.shell.palette_query("new");
@@ -350,6 +374,19 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         );
     }
     shoot(&mut runtime, &mut camera, "14-illustration-card")?;
+
+    // 15 and 16. Open in Sue Paint from the card: the camera zooms into it,
+    // then the panels slide in.
+    runtime.request(
+        ShellRequest::OpenStudio(studio.clone()),
+        &mut camera.painter,
+        camera.now,
+    );
+    for (frames, name) in [(14, "15-entering-zoom"), (26, "16-entering-panels")] {
+        let path = dir.join(format!("{name}.png"));
+        camera.shoot_after(&mut runtime, &path, frames)?;
+        written.push(path);
+    }
     let _ = std::fs::remove_dir_all(&root);
     Ok(written)
 }

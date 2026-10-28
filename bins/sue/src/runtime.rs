@@ -1001,6 +1001,9 @@ pub(crate) mod tests {
             &mut NoTextures,
             now,
         );
+        // The studio's panels slide in first.
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        assert!(runtime.shell.studio_reveal() > 0.999);
         let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
             frame_with(runtime, &ctx, now, events);
             now += Duration::from_millis(8);
@@ -1156,6 +1159,86 @@ pub(crate) mod tests {
             2
         );
         step(&mut runtime, Vec::new());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn studios_zoom_in_slide_in_and_glide_back_out() {
+        let (mut runtime, root) = runtime("studio-motion");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let overview = runtime.shell.camera().zoom();
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        // New File, Picture, Square Post: a card appears and Sue Paint
+        // opens on it, first zooming into the card.
+        runtime.request(
+            ShellRequest::Create {
+                applet: paint.clone(),
+                key: "Square Post".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(runtime.shell.studio(), Some(&paint));
+        assert!(
+            runtime.shell.studio_reveal() < 0.01,
+            "the camera goes first"
+        );
+        let card = runtime
+            .engine
+            .world
+            .scene
+            .iter()
+            .any(|(_, node)| node.applet.as_str() == sue_paint::CARD_ID);
+        assert!(card, "the new picture sits on the canvas");
+        let opening = frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        assert!(
+            opening > 20,
+            "zooming and sliding in take a moment ({opening} frames)"
+        );
+        assert!(runtime.shell.studio_reveal() > 0.999);
+        assert!(
+            runtime.shell.camera().zoom() > overview * 1.5,
+            "zoomed into the card"
+        );
+
+        runtime.request(ShellRequest::CloseStudio, &mut NoTextures, start);
+        assert_eq!(runtime.shell.studio(), None, "leaving starts at once");
+        let closing = frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        assert!(
+            closing > 20,
+            "sliding out and zooming out take a moment ({closing})"
+        );
+        assert!(runtime.shell.studio_reveal() < 0.001);
+
+        // With instant transitions the same trip takes a frame or two.
+        runtime
+            .engine
+            .history
+            .apply(
+                &mut runtime.engine.world,
+                RiceEdit(sue_rice::SetRiceValue::new(
+                    "motion.instant_transitions",
+                    sue_rice::RiceValue::Bool(true),
+                )),
+            )
+            .unwrap();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        runtime.request(ShellRequest::OpenStudio(paint), &mut NoTextures, start);
+        for frame in 0..2 {
+            frame_with(
+                &mut runtime,
+                &ctx,
+                start + Duration::from_millis(8 * frame),
+                Vec::new(),
+            );
+        }
+        assert!(
+            runtime.shell.studio_reveal() > 0.999,
+            "instant transitions snap in a frame or two"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

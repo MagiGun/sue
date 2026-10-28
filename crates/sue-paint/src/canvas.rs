@@ -52,15 +52,22 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        let tabs = Rect::from_min_size(rect.min, vec2(rect.width(), 26.0));
+        // While the studio comes in or goes out, the tabs and the status
+        // strip slide off with the panels and the view takes their room.
+        let slide = self.hide * 26.0;
+        let tabs = Rect::from_min_size(rect.min - vec2(0.0, slide), vec2(rect.width(), 26.0));
         self.tabs(ui, tabs, cx, theme);
-        let status = Rect::from_min_max(pos2(rect.left(), rect.bottom() - 26.0), rect.max);
+        let status = Rect::from_min_max(
+            pos2(rect.left(), rect.bottom() - 26.0 + slide),
+            pos2(rect.right(), rect.bottom() + slide),
+        );
         let viewport = Rect::from_min_max(
             pos2(rect.left(), tabs.bottom()),
             pos2(rect.right(), status.top()),
         );
         self.viewport = viewport;
-        ui.painter().rect_filled(viewport, 0.0, theme.void);
+        ui.painter()
+            .rect_filled(viewport, 0.0, theme.void.gamma_multiply(self.cover));
         let size = self
             .picture()
             .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
@@ -70,10 +77,22 @@ impl SuePaint {
             self.status_strip(ui, status, None, cx, theme);
             return;
         };
-        if let Some(doc) = self.doc_mut()
-            && !doc.view.fitted
-        {
-            doc.view.fit(viewport, size);
+        let (hide, ready) = (self.hide, self.ready);
+        let exit_view = self.exit_view.filter(|_| self.leaving());
+        if let Some(doc) = self.doc_mut() {
+            if !ready && hide > 0.0 {
+                // Coming in, the picture shrinks from filling the window to
+                // its place; going out, it grows from the view it had back
+                // to filling the window, where its card waits.
+                let mut fitted = doc.view;
+                fitted.fit(viewport, size);
+                doc.view = match exit_view {
+                    Some(from) => from.blend(&fitted, hide),
+                    None => fitted,
+                };
+            } else if !doc.view.fitted {
+                doc.view.fit(viewport, size);
+            }
         }
         let response = ui.interact(
             viewport,
@@ -185,6 +204,7 @@ impl SuePaint {
     ) {
         let card = Rect::from_center_size(viewport.center(), vec2(320.0, 150.0));
         let mut inner = child(ui, card, "empty-canvas");
+        inner.multiply_opacity(self.cover);
         inner.vertical_centered(|ui| {
             ui.label(
                 RichText::new("No canvas is open")
@@ -219,7 +239,7 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
     ) {
         let ctx = ui.ctx().clone();
-        let blocked = self.dialog.is_some() || self.menubar.is_open();
+        let blocked = self.dialog.is_some() || self.menubar.is_open() || !self.ready;
         let (events, space, time, dt) = ctx.input(|input| {
             (
                 input.events.clone(),
@@ -1058,11 +1078,12 @@ impl SuePaint {
                     pos2(1.0, 1.0),
                     pos2(0.0, 1.0),
                 ];
+                let tint = Color32::WHITE.gamma_multiply(self.cover);
                 for (corner, uv) in corners.iter().zip(uvs) {
                     mesh.vertices.push(Vertex {
                         pos: *corner,
                         uv,
-                        color: Color32::WHITE,
+                        color: tint,
                     });
                 }
                 mesh.indices = vec![0, 1, 2, 0, 2, 3];
@@ -1078,7 +1099,7 @@ impl SuePaint {
         }
         painter.add(Shape::closed_line(
             corners.to_vec(),
-            Stroke::new(1.0, theme.border),
+            Stroke::new(1.0, theme.border.gamma_multiply(self.cover)),
         ));
     }
 
@@ -1092,6 +1113,9 @@ impl SuePaint {
         cx: &AppletContext<'_>,
         theme: &Theme,
     ) {
+        if !self.ready {
+            return;
+        }
         let painter = ui.painter().with_clip_rect(viewport);
         let Some(doc) = self.docs.get_mut(self.active) else {
             return;

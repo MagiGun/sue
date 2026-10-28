@@ -866,8 +866,18 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         &mut clock,
         vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
     );
+    let documents = |runtime: &Runtime| {
+        runtime
+            .engine
+            .world
+            .scene
+            .iter()
+            .filter(|(_, node)| node.applet.as_str() == crate::document::ID)
+            .count()
+    };
+    let before = documents(runtime);
     runtime.shell.open_palette();
-    runtime.shell.palette_query("paint layer");
+    runtime.shell.palette_query("new document notes");
     run_frames(runtime, &ctx, &mut clock, Vec::new());
     ensure(runtime.shell.palette_open(), "the palette did not open")?;
     run_frames(
@@ -876,14 +886,10 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         &mut clock,
         vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
     );
-    let paints = runtime
-        .engine
-        .world
-        .scene
-        .iter()
-        .filter(|(_, node)| node.applet.as_str() == crate::paint::ID)
-        .count();
-    ensure(paints == 2, "the palette's New Paint Layer did not run")?;
+    ensure(
+        documents(runtime) == before + 1,
+        "the palette's New Document: Notes did not run",
+    )?;
 
     // Then the shell sleeps, and egui asks for no frame either (its own hover
     // fades finish first, a second or so of headless time).

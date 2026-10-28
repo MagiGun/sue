@@ -117,6 +117,25 @@ impl Camera {
             .set_target(self.clamp_log(zoom.max(1e-3).ln()));
     }
 
+    /// Jumps to `zoom` around the canvas point `center`, without gliding.
+    pub fn snap(&mut self, center: Pos2, zoom: f32) {
+        self.anchor = None;
+        let log_zoom = self.clamp_log(zoom.max(1e-3).ln());
+        self.x.snap_to(center.x);
+        self.y.snap_to(center.y);
+        self.log_zoom.snap_to(log_zoom);
+    }
+
+    /// `true` once the camera is close to where it is gliding: within 3% of
+    /// its zoom and 3 screen points of its center.
+    #[must_use]
+    pub fn near_target(&self) -> bool {
+        let zoom = self.zoom();
+        (self.log_zoom.position() - self.log_zoom.target()).abs() < 0.03
+            && (self.x.position() - self.x.target()).abs() * zoom < 3.0
+            && (self.y.position() - self.y.target()).abs() * zoom < 3.0
+    }
+
     /// Zooms by `log_step` (natural log) around the screen point `pointer`,
     /// which keeps showing the same canvas point while the zoom glides.
     pub fn zoom_at(&mut self, viewport: Rect, pointer: Pos2, log_step: f32) {

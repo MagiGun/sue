@@ -1,6 +1,8 @@
 //! The right-click marking menu: wedges around the pointer whose radius
 //! grows from zero on a spring. Pick a wedge with a click, or press, drag
-//! toward it and release.
+//! toward it and release. A wedge can open another wheel (New File, then a
+//! kind of file, then the exact kind): the next wheel grows around the
+//! picked wedge, and a click in its middle goes back to the one before.
 
 use std::f32::consts::{FRAC_PI_2, TAU};
 
@@ -15,6 +17,8 @@ pub enum RadialOutcome {
     Open,
     /// The wedge at this index was picked.
     Picked(usize),
+    /// The middle of a nested wheel was clicked: back to the wheel before.
+    Back,
     /// Dismissed.
     Dismissed,
 }
@@ -29,6 +33,7 @@ pub struct Radial {
     grow: SpringDamper,
     closing: bool,
     hovered: Option<usize>,
+    parents: Vec<Pos2>,
 }
 
 /// The wedge under `offset` from the center, for `count` wedges starting
@@ -55,7 +60,40 @@ impl Radial {
             grow,
             closing: false,
             hovered: None,
+            parents: Vec::new(),
         }
+    }
+
+    /// Opens the next wheel around `center` (screen); the current one is
+    /// remembered for [`Self::ascend`].
+    pub fn descend(&mut self, center: Pos2) {
+        self.parents.push(self.center);
+        self.center = center;
+        self.regrow();
+    }
+
+    /// Goes back to the wheel before. Returns `false` at the first wheel.
+    pub fn ascend(&mut self) -> bool {
+        match self.parents.pop() {
+            Some(center) => {
+                self.center = center;
+                self.regrow();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// How many wheels deep the menu is (0 for the first).
+    #[must_use]
+    pub fn depth(&self) -> usize {
+        self.parents.len()
+    }
+
+    fn regrow(&mut self) {
+        self.grow.snap_to(0.0);
+        self.grow.set_target(1.0);
+        self.hovered = None;
     }
 
     /// Starts closing (the radius springs back to zero).
@@ -151,7 +189,26 @@ impl Radial {
                         );
                     }
                 }
-                painter.circle_filled(self.center, 3.0, theme.text.gamma_multiply(alpha));
+                if self.parents.is_empty() {
+                    painter.circle_filled(self.center, 3.0, theme.text.gamma_multiply(alpha));
+                } else {
+                    // The middle of a nested wheel goes back.
+                    let back = pointer.is_some_and(|at| at.distance(self.center) < inner);
+                    painter.circle_filled(
+                        self.center,
+                        inner * 0.8,
+                        if back { theme.hover } else { theme.pill }.gamma_multiply(alpha),
+                    );
+                    if grow > 0.35 {
+                        painter.text(
+                            self.center,
+                            Align2::CENTER_CENTER,
+                            "Back",
+                            theme.font(theme.small_size),
+                            if back { theme.text } else { theme.muted }.gamma_multiply(alpha),
+                        );
+                    }
+                }
                 if self.closing {
                     return;
                 }
@@ -161,9 +218,13 @@ impl Radial {
                         .button_released(egui::PointerButton::Secondary)
                 });
                 let moved_away = pointer.is_some_and(|at| at.distance(self.center) > inner);
+                let in_middle = pointer.is_some_and(|at| at.distance(self.center) < inner);
                 if response.clicked() || (released_right && moved_away) {
                     outcome = match self.hovered {
                         Some(index) => RadialOutcome::Picked(index),
+                        None if response.clicked() && in_middle && !self.parents.is_empty() => {
+                            RadialOutcome::Back
+                        }
                         None if response.clicked() => RadialOutcome::Dismissed,
                         None => RadialOutcome::Open,
                     };
@@ -172,7 +233,7 @@ impl Radial {
                     outcome = RadialOutcome::Dismissed;
                 }
             });
-        if !matches!(outcome, RadialOutcome::Open) {
+        if matches!(outcome, RadialOutcome::Dismissed) {
             self.close();
         }
         outcome
@@ -223,5 +284,26 @@ mod tests {
         radial.close();
         while radial.step(1.0 / 120.0) {}
         assert!(radial.is_gone());
+    }
+
+    #[test]
+    fn nested_wheels_grow_around_the_pick_and_go_back() {
+        let params = SpringParams {
+            stiffness: 260.0,
+            damping: 32.0,
+            mass: 1.0,
+        };
+        let mut radial = Radial::open(pos2(100.0, 100.0), Pos2::ZERO, params, SpringMode::Physics);
+        while radial.step(1.0 / 120.0) {}
+        radial.descend(pos2(160.0, 100.0));
+        assert_eq!(radial.depth(), 1);
+        assert_eq!(radial.center, pos2(160.0, 100.0));
+        assert!(radial.step(1.0 / 120.0), "the new wheel grows from nothing");
+        radial.descend(pos2(220.0, 140.0));
+        assert!(radial.ascend());
+        assert_eq!(radial.center, pos2(160.0, 100.0));
+        assert!(radial.ascend());
+        assert_eq!(radial.center, pos2(100.0, 100.0));
+        assert!(!radial.ascend(), "the first wheel has nothing before it");
     }
 }

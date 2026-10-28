@@ -5,8 +5,9 @@
 //! and full-window studios, whose menus are data drawn by [`MenuBar`]. The [`Shell`] draws Sue's window with egui: an infinite
 //! spatial canvas whose [`Camera`] zooms from 10% to 3200%, entity nodes
 //! drawn by their applets inside a camera-transformed layer, a floating top
-//! pill of modes and spawn buttons, a floating selection pill above the
-//! selected entity, a spring-animated radial marking menu, a fuzzy command
+//! pill of modes, a floating selection pill above the selected entity, a
+//! spring-animated radial marking menu with nested New File wheels, a fuzzy
+//! command
 //! [`Palette`], spring-driven drawers and a bottom timeline whose blocks are
 //! the same arena entities.
 //!
@@ -42,8 +43,8 @@ pub mod widgets;
 mod world;
 
 pub use applet::{
-    AppletContext, AppletError, AppletId, AppletManifest, AppletRole, MediaClass, ModeSpec,
-    PaletteEntry, ShellRequest, ShellView, SpawnSpec, SueApplet, Tick,
+    AppletContext, AppletError, AppletId, AppletManifest, AppletRole, FileTemplate, MediaClass,
+    ModeSpec, PaletteEntry, ShellRequest, ShellView, SueApplet, Tick,
 };
 pub use camera::Camera;
 pub use catalog::{

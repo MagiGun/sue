@@ -139,6 +139,23 @@ impl View {
         self.pan += center - moved;
     }
 
+    /// The view `t` (0 to 1) of the way from this one to `to`: zoom on a
+    /// log scale, scroll and rotation (the short way round) in a line.
+    #[must_use]
+    pub fn blend(&self, to: &Self, t: f32) -> Self {
+        let t = t.clamp(0.0, 1.0);
+        let turn = (to.rotation - self.rotation + 180.0).rem_euclid(360.0) - 180.0;
+        let zoom = (self.zoom.ln() + (to.zoom.ln() - self.zoom.ln()) * t).exp();
+        Self {
+            zoom,
+            pan: self.pan + (to.pan - self.pan) * t,
+            rotation: self.rotation + turn * t,
+            flip_h: if t < 0.5 { self.flip_h } else { to.flip_h },
+            flip_v: if t < 0.5 { self.flip_v } else { to.flip_v },
+            fitted: true,
+        }
+    }
+
     /// Scrolls so picture point `p` sits at the viewport's center.
     pub fn center_on(&mut self, viewport: Rect, size: [u32; 2], p: Pos2) {
         let at = self.to_screen(viewport, size, p);
@@ -206,5 +223,32 @@ mod tests {
         );
         view.zoom_at(viewport(), size, anchor, 1e6);
         assert_eq!(view.zoom, ZOOM_RANGE.1);
+    }
+
+    #[test]
+    fn views_blend_smoothly_from_one_to_another() {
+        let from = View {
+            zoom: 0.5,
+            pan: vec2(100.0, 0.0),
+            rotation: 170.0,
+            ..View::default()
+        };
+        let to = View {
+            zoom: 2.0,
+            rotation: -170.0,
+            ..View::default()
+        };
+        assert_eq!(from.blend(&to, 0.0).zoom, 0.5);
+        assert!(
+            (from.blend(&to, 0.5).zoom - 1.0).abs() < 1e-5,
+            "halfway on a log scale"
+        );
+        assert_eq!(from.blend(&to, 0.5).pan, vec2(50.0, 0.0));
+        let turned = from.blend(&to, 0.5).rotation;
+        assert!(
+            (turned - 180.0).abs() < 1e-3,
+            "the short way round: {turned}"
+        );
+        assert_eq!(from.blend(&to, 1.0).zoom, 2.0);
     }
 }

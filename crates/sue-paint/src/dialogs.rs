@@ -133,7 +133,7 @@ impl NewDialog {
         }
     }
 
-    fn apply_preset(&mut self, preset: &Preset) {
+    pub(crate) fn apply_preset(&mut self, preset: &Preset) {
         let int = |key| {
             preset
                 .values
@@ -408,7 +408,7 @@ impl SuePaint {
             }
             (Dialog::New(new), Outcome::Ok) => {
                 let spec = new.spec();
-                self.create(cx, &spec);
+                self.make_picture(cx, &spec);
             }
             (Dialog::New(_) | Dialog::Shortcuts, Outcome::Cancel | Outcome::Ok) => {}
         }

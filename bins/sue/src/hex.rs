@@ -74,6 +74,47 @@ pub struct Hex {
     dumps: HashMap<AssetHandle, String>,
 }
 
+/// The kinds of new code files: key, label, file name and starting text.
+const CODE: [(&str, &str, &str, &str); 7] = [
+    (
+        "rust",
+        "Rust",
+        "main.rs",
+        "// A scratch file. Every edit can be undone.\nfn main() {\n    println!(\"Sue\");\n}\n",
+    ),
+    (
+        "python",
+        "Python",
+        "main.py",
+        "def main():\n    print(\"Sue\")\n\n\nif __name__ == \"__main__\":\n    main()\n",
+    ),
+    (
+        "javascript",
+        "JavaScript",
+        "main.js",
+        "function main() {\n  console.log(\"Sue\");\n}\n\nmain();\n",
+    ),
+    (
+        "html",
+        "HTML",
+        "index.html",
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <title>Sue</title>\n</head>\n<body>\n  <h1>Sue</h1>\n</body>\n</html>\n",
+    ),
+    (
+        "css",
+        "CSS",
+        "style.css",
+        "body {\n  margin: 0;\n  font-family: sans-serif;\n}\n",
+    ),
+    ("json", "JSON", "data.json", "{\n  \"name\": \"Sue\"\n}\n"),
+    (
+        "shell",
+        "Shell Script",
+        "script.sh",
+        "#!/bin/sh\necho \"Sue\"\n",
+    ),
+];
+
 impl SueApplet for Hex {
     fn manifest(&self) -> AppletManifest {
         let mut manifest = AppletManifest::new(ID, "Code / Hex", AppletRole::Node, "\u{2328}");
@@ -82,7 +123,7 @@ impl SueApplet for Hex {
         manifest.opens = vec![MediaClass::Binary];
         manifest.mode = Some(ModeSpec {
             label: "Code / Hex".to_owned(),
-            in_pill: true,
+            in_pill: false,
         });
         manifest
     }
@@ -97,14 +138,21 @@ impl SueApplet for Hex {
         vec2(620.0, 460.0)
     }
 
-    fn new_entity(&mut self, _cx: &mut AppletContext<'_>) -> Option<NewEntity> {
+    fn new_entity(&mut self, cx: &mut AppletContext<'_>) -> Option<NewEntity> {
+        self.create("rust", cx)
+    }
+
+    fn templates(&self) -> Vec<sue_wm::FileTemplate> {
+        CODE.iter()
+            .map(|(key, label, _, _)| sue_wm::FileTemplate::new("Code", *label, *key))
+            .collect()
+    }
+
+    fn create(&mut self, key: &str, _cx: &mut AppletContext<'_>) -> Option<NewEntity> {
+        let (_, _, name, text) = CODE.iter().find(|(id, ..)| *id == key)?;
         Some(NewEntity {
-            name: "main.rs".to_owned(),
-            base: StringBuffer::from(
-                "// A scratch file. Every edit can be undone.\nfn main() {\n    println!(\"Sue\");\n}\n"
-                    .to_owned(),
-            )
-            .into(),
+            name: (*name).to_owned(),
+            base: StringBuffer::from((*text).to_owned()).into(),
             meta: vec![(KIND.to_owned(), KIND_CODE.to_owned())],
             size: vec2(620.0, 360.0),
             props: Vec::new(),

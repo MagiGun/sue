@@ -185,7 +185,7 @@ impl Applets {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::{AppletContext, ModeSpec, SpawnSpec};
+    use crate::{AppletContext, FileTemplate, ModeSpec};
 
     /// A node applet for tests.
     pub(crate) struct Probe(pub &'static str, pub AppletRole, pub i32);
@@ -199,13 +199,17 @@ pub(crate) mod tests {
                     label: self.0.to_owned(),
                     in_pill: true,
                 });
-                manifest.spawn = Some(SpawnSpec {
-                    button: format!("+ {}", self.0),
-                    label: format!("New {}", self.0),
-                });
                 manifest.lane = Some(format!("{} Track", self.0));
             }
             manifest
+        }
+
+        fn templates(&self) -> Vec<FileTemplate> {
+            if self.1 == AppletRole::Node {
+                vec![FileTemplate::new("Probe", self.0, "plain")]
+            } else {
+                Vec::new()
+            }
         }
 
         fn new_entity(&mut self, _cx: &mut AppletContext<'_>) -> Option<crate::NewEntity> {

@@ -877,11 +877,14 @@ Every tool, utility and studio implements `SueApplet`:
 
 ```rust
 pub trait SueApplet: Send {
-    fn manifest(&self) -> AppletManifest;   // id, name, role, icon, order, mode, spawn, lane
+    fn manifest(&self) -> AppletManifest;   // id, name, role, icon, order, mode, lane
     fn rice_declarations(&self) -> Vec<RiceDeclaration> { Vec::new() }
     fn accepts(&self, entity: &Entity) -> bool { false }            // for opened files
     fn node_size(&self, entity: &Entity) -> Vec2;
-    fn new_entity(&mut self, cx: &mut AppletContext<'_>) -> Option<NewEntity> { None }
+    fn new_entity(&mut self, cx: &mut AppletContext<'_>) -> Option<NewEntity> { None }  // a mode with no entity
+    fn templates(&self) -> Vec<FileTemplate> { Vec::new() }         // the New File wheels
+    fn create(&mut self, key: &str, cx: &mut AppletContext<'_>) -> Option<NewEntity> { None }
+    fn studio_focus(&self) -> Option<EntityId> { None }             // a studio's current entity
     fn node_ui(&mut self, ui: &mut Ui, node: NodeId, cx: &mut AppletContext<'_>) {}
     fn pill_ui(&mut self, ui: &mut Ui, node: NodeId, cx: &mut AppletContext<'_>) {}
     fn duration(&self, node: &SceneNode, world: &World) -> f64 { 4.0 }
@@ -906,18 +909,41 @@ palette, Settings and the global undo, save and open keys stay with it, and
 `Ctrl+O` asks the studio first. Studios draw their menus with `MenuBar`: menus
 are data (`Menu`, `MenuItem` with a command and a shortcut), and each frame the
 studio says per command whether it works and whether it is checked
-(`ItemState`), so items whose feature is not built yet are grayed out. Nothing in the shell names an applet: the modes of the top pill come
-from manifests' `mode`, the spawn buttons and the marking menu's New wedges from
-`spawn`, the timeline's lanes from `lane`, the rail icons from `icon` and
-`order`, and opened files go to the first node applet that `accepts` the
-ingested entity. `Launchpad` is the runtime registry of factories; `Applets` is
+(`ItemState`), so items whose feature is not built yet are grayed out.
+
+**Going in and out of a studio.** Opening a studio, the shell finds the card
+it will work on (the selected node, if the studio `accepts` its entity, else
+the node of its `studio_focus`), closes the drawers and the timeline, and
+glides the camera so the card's content fills the studio's area with the same
+24-point margin the studio fits its picture with. Once the camera is near
+(within 3% of its zoom and 3 points of its center), the studio's reveal spring
+runs from 0 to 1 and the studio, drawn on a layer above the canvas's cards,
+slides its palettes in from the window's edges (`ShellView::studio_reveal`);
+its picture fits the space the palettes leave, and its ground and picture turn
+opaque in the first third of the way, while they still line up with the card.
+A shield takes the clicks until the reveal is complete. Leaving, the camera
+jumps under the studio to the card of its current entity, the reveal runs
+back to 0 (the picture grows from its view to filling the window, where the
+card waits), and then the drawers and timeline come back and the camera
+glides out to everything. Every spring follows `motion.animation_speed` and
+`motion.instant_transitions`.
+
+Nothing in the shell names an applet: the modes of the top pill come from
+manifests' `mode`; the marking menu's New File wheels come from the applets'
+`templates` (a `FileTemplate` names a category such as Picture, the exact kind
+such as Square Post, and a key the applet's `create` gets back; a node applet
+returns the entity for the shell to place where the menu opened, a studio
+makes its own and places it); the timeline's lanes come from `lane`, the rail
+icons from `icon` and `order`, and opened files go to the first node applet
+that `accepts` the ingested entity. `Launchpad` is the runtime registry of factories; `Applets` is
 the set of live instances, sorted by `order`.
 
 Applets hold `AssetHandle`s and `NodeId`s, never media. They change the world
 only through the global `UndoStack<World>` (`cx.apply`, `cx.edit_rice`, or
 `cx.record` for an edit that already happened in place), and ask for things
 through `cx.request(ShellRequest::…)`: select, focus or frame a node, switch
-mode, spawn, open the timeline or Settings, open a file, run an engine command,
+mode, spawn or create from a template, place an entity, open or close a
+studio, open the timeline or Settings, open a file, run an engine command,
 show a message.
 
 **The scene.** `World` holds the arena, the live rice and the `Scene`: one
@@ -939,10 +965,10 @@ drawers, the timeline, the status bar, then the floating surfaces:
 
 | Surface | Behavior |
 | --- | --- |
-| Top pill | Centered over the canvas. Modes (Canvas, the node applets' modes, and Timeline between the visual and code modes), spawn buttons, and `Command (Tab)`. Fades and slides in at boot. |
+| Top pill | Centered over the canvas. Modes (Canvas, the modes applets show in the pill, and Timeline) and `Command (Tab)`. Fades and slides in at boot, and away while a studio is open. |
 | Selection pill | Above the selected node's top edge, clamped into view, drawn by its applet's `pill_ui`. Springs in and out; when the selection moves to another node it glides from the old place. |
-| Marking menu | Right-click: wedges whose radius grows on a spring (`layout.radial_radius`). Click a wedge, or press, drag and release. |
-| Command palette | `Tab` or `/` when no text field has focus: fuzzy search (in-order letters, bonuses for runs and word starts) over shell actions, every mode, spawn and drawer, and the applets' `commands`. |
+| Marking menu | Right-click: wedges whose radius grows on a spring (`layout.radial_radius`): New File, Open File, the studios, Timeline, Command Palette, Reset Camera. Click a wedge, or press, drag and release. New File opens a wheel of template categories around the wedge, each category a wheel of its templates; the middle of a nested wheel goes back. The new file lands where the menu opened. |
+| Command palette | `Tab` or `/` when no text field has focus: fuzzy search (in-order letters, bonuses for runs and word starts) over shell actions, every mode, template (`New Document: Notes`) and drawer, and the applets' `commands`. |
 | Settings window | Over a scrim; 190 px category sidebar, filter field, one page at a time (§4.3). |
 | Quit dialog | When `general.confirm_on_exit` is on. |
 
@@ -975,13 +1001,13 @@ shared `Transport` as the playhead crosses it.
 The built-in applets are registered by the binary, like any package would
 register its own:
 
-| Applet | Role | Mode, spawn, lane | What it does |
+| Applet | Role | Mode, templates, lane | What it does |
 | --- | --- | --- | --- |
-| Document | Node | Document; `+ Text`, New Document; Document Track | Markdown-like text (`#`, `##`, `**`, backticks styled, never hidden) in a `TextEdit`; pill: H1, H2, Bold, Monospace, text size, Project to Timeline |
-| Paint | Node | Paint; `+ Paint`, New Paint Layer; Paint/Visual Track | An RGBA raster in the arena; Brush, Line, Rect, Eraser, size, gray value; strokes keep 64 px undo tiles; Export .jxl (lossless) |
-| Audio | Node | Audio (palette only); `+ Audio`, New Audio Node; Audio Track | Waveform of a clip of a `PCMFloat1D`; Play or Pause, Gain, Split (zero-copy), Normalize, Open in Timeline |
+| Document | Node | Document; Document: Blank, Notes, To-Do List, Letter, Report; Document Track | Markdown-like text (`#`, `##`, `**`, backticks styled, never hidden) in a `TextEdit`; pill: H1, H2, Bold, Monospace, text size, Project to Timeline |
+| Paint | Node | none (Sue Paint replaced it; old layers still show and edit); Paint/Visual Track | An RGBA raster in the arena; Brush, Line, Rect, Eraser, size, gray value; strokes keep 64 px undo tiles; Export .jxl (lossless) |
+| Audio | Node | Audio (palette only); Audio: Chord, Tone (A 440), Silence (10 s); Audio Track | Waveform of a clip of a `PCMFloat1D`; Play or Pause, Gain, Split (zero-copy), Normalize, Open in Timeline |
 | Image | Node | Image (palette only); Paint/Visual Track | Decoded JPEG XL, PNG or JPEG; 1:1 Zoom, Pixel Grid, Re-encode .jxl (bit-exact for JPEG when a codec allows), Inspect Hex |
-| Code / Hex | Node | Code / Hex | Code in a monospace `TextEdit`, or a selectable hex dump of any file's bytes; Copy All |
+| Code / Hex | Node | Code / Hex (palette only); Code: Rust, Python, JavaScript, HTML, CSS, JSON, Shell Script | Code in a monospace `TextEdit`, or a selectable hex dump of any file's bytes; Copy All |
 | Files | Left drawer | n/a | Folders with quick jumps (Project, Desktop, Documents, Downloads, Pictures, Music); files open on the canvas |
 | Player | Left drawer | n/a | Every decoded track as a playlist; waveform scrubber, play, stop, volume |
 | Convert | Left drawer | n/a | Pictures to lossless JPEG XL, PNG or JPEG (`io.jpeg_quality`), songs to 16-bit WAV |
@@ -990,7 +1016,7 @@ register its own:
 | History | Right drawer | n/a | The undo tree, branches indented; a click checks out any state |
 | Settings | Window | n/a | Preferences by category (§4.3) |
 | Illustration | Node | n/a (pictures come from Sue Paint) | A Sue Paint picture on the canvas: a preview that follows its layers; pill and double-click: Open in Sue Paint |
-| Sue Paint | Studio | Sue Paint | The painting studio (§3.7) |
+| Sue Paint | Studio | Sue Paint; Picture: Illustration, Print A4, Full HD, Square Post, Sprite, Custom... | The painting studio (§3.7) |
 
 ### 3.7 Sue Paint (`sue-paint`)
 

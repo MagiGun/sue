@@ -3,9 +3,10 @@
 //! Nothing in the shell names an applet. Canvas entity kinds (documents,
 //! paint layers, audio, images, hex views), drawer utilities, the Settings
 //! window and full-window studios (Sue Paint) all register at runtime and
-//! describe themselves through an [`AppletManifest`]: the modes in the top
-//! pill, the spawn buttons, the wedges of the marking menu, the timeline
-//! lanes and the rail icons are all read from manifests.
+//! describe themselves through an [`AppletManifest`] and their
+//! [`FileTemplate`]s: the modes in the top pill, the New File wheels of the
+//! marking menu, the timeline lanes and the rail icons are all read from
+//! them.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -95,13 +96,31 @@ pub struct ModeSpec {
     pub in_pill: bool,
 }
 
-/// A way to create a new entity of the applet.
+/// A kind of new file an applet makes. The marking menu's New File wheel
+/// shows the categories; each category's wheel shows its exact kinds.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SpawnSpec {
-    /// Top pill button, e.g. `+ Text`.
-    pub button: String,
-    /// Marking menu wedge and palette entry, e.g. `New Document`.
+pub struct FileTemplate {
+    /// The kind of file, e.g. `Picture`.
+    pub category: String,
+    /// The exact kind, e.g. `Square Post`.
     pub label: String,
+    /// What the applet's [`SueApplet::create`] gets back.
+    pub key: String,
+}
+
+impl FileTemplate {
+    /// A template.
+    pub fn new(
+        category: impl Into<String>,
+        label: impl Into<String>,
+        key: impl Into<String>,
+    ) -> Self {
+        Self {
+            category: category.into(),
+            label: label.into(),
+            key: key.into(),
+        }
+    }
 }
 
 /// Static facts about an applet.
@@ -121,10 +140,8 @@ pub struct AppletManifest {
     pub order: i32,
     /// Asset kinds the applet shows.
     pub opens: Vec<MediaClass>,
-    /// Its mode, for node applets.
+    /// Its mode, for node applets and studios.
     pub mode: Option<ModeSpec>,
-    /// How to create new entities, for node applets.
-    pub spawn: Option<SpawnSpec>,
     /// Its timeline lane, e.g. `Audio Track`.
     pub lane: Option<String>,
 }
@@ -145,7 +162,6 @@ impl AppletManifest {
             order: 0,
             opens: Vec::new(),
             mode: None,
-            spawn: None,
             lane: None,
         }
     }
@@ -216,6 +232,13 @@ pub enum ShellRequest {
     Mode(String),
     /// Create a new entity of a node applet.
     Spawn(AppletId),
+    /// Make a new file from an applet's template.
+    Create {
+        /// The applet.
+        applet: AppletId,
+        /// The template's key.
+        key: String,
+    },
     /// Open the command palette.
     Palette,
     /// Frame everything.
@@ -284,8 +307,11 @@ pub struct ShellView {
     pub now: Instant,
     /// Seconds since the last frame (clamped).
     pub dt: f32,
-    /// The studio filling the window, if any.
+    /// The studio filling the window, if any (`None` while one leaves).
     pub studio: Option<AppletId>,
+    /// How far the studio has come in, 0 (the canvas) to 1 (all panels in
+    /// place). Between the two it is entering or leaving.
+    pub studio_reveal: f32,
     /// `true` in the desktop window, where native dialogs can open;
     /// `false` in headless runs.
     pub interactive: bool,
@@ -420,7 +446,9 @@ pub trait SueApplet: Send {
         Vec::new()
     }
 
-    /// `true` if this node applet shows `entity` (for opened files).
+    /// `true` if this node applet shows `entity` (for opened files), or this
+    /// studio works on it (the shell zooms into its card when the studio
+    /// opens).
     fn accepts(&self, entity: &Entity) -> bool {
         let _ = entity;
         false
@@ -432,9 +460,29 @@ pub trait SueApplet: Send {
         vec2(480.0, 320.0)
     }
 
-    /// A new entity for the spawn buttons.
+    /// A new entity, when a mode needs one and none exists.
     fn new_entity(&mut self, cx: &mut AppletContext<'_>) -> Option<NewEntity> {
         let _ = cx;
+        None
+    }
+
+    /// The kinds of new files it makes.
+    fn templates(&self) -> Vec<FileTemplate> {
+        Vec::new()
+    }
+
+    /// Makes a new file from template `key`. A node applet returns the
+    /// entity, which the shell places where the menu opened. An applet that
+    /// makes something larger (a picture with layers) makes it itself,
+    /// places it with [`ShellRequest::Place`] and returns `None`.
+    fn create(&mut self, key: &str, cx: &mut AppletContext<'_>) -> Option<NewEntity> {
+        let _ = (key, cx);
+        None
+    }
+
+    /// The entity a studio is working on, so the shell can zoom out of its
+    /// card when the studio closes.
+    fn studio_focus(&self) -> Option<sue_core::EntityId> {
         None
     }
 

@@ -10,7 +10,7 @@ use egui::{Rect, Sense, Stroke, Ui, pos2, vec2};
 use sue_core::{ComponentKind, Entity, PCMFloat1D};
 use sue_wm::{
     AppletContext, AppletManifest, AppletRole, Batch, Clip, MediaClass, ModeSpec, NewEntity,
-    NodeId, PlaceNode, SceneNode, SetNodeProp, ShellRequest, SpawnSpec, SueApplet, World, pcm_of,
+    NodeId, PlaceNode, SceneNode, SetNodeProp, ShellRequest, SueApplet, World, pcm_of,
     project_to_timeline, widgets,
 };
 
@@ -225,10 +225,6 @@ impl SueApplet for AudioNode {
             label: "Audio".to_owned(),
             in_pill: false,
         });
-        manifest.spawn = Some(SpawnSpec {
-            button: "+ Audio".to_owned(),
-            label: "New Audio Node".to_owned(),
-        });
         manifest.lane = Some("Audio Track".to_owned());
         manifest
     }
@@ -241,10 +237,46 @@ impl SueApplet for AudioNode {
         vec2(560.0, 200.0)
     }
 
-    fn new_entity(&mut self, _cx: &mut AppletContext<'_>) -> Option<NewEntity> {
+    fn new_entity(&mut self, cx: &mut AppletContext<'_>) -> Option<NewEntity> {
+        self.create("chord", cx)
+    }
+
+    fn templates(&self) -> Vec<sue_wm::FileTemplate> {
+        [
+            ("chord", "Chord"),
+            ("tone", "Tone (A 440)"),
+            ("silence", "Silence (10 s)"),
+        ]
+        .into_iter()
+        .map(|(key, label)| sue_wm::FileTemplate::new("Audio", label, key))
+        .collect()
+    }
+
+    fn create(&mut self, key: &str, _cx: &mut AppletContext<'_>) -> Option<NewEntity> {
+        let rate = 48_000_u32;
+        let (name, pcm) = match key {
+            "chord" => ("Chord", chord(rate, 3.0)),
+            "tone" => {
+                let frames = rate as usize * 2;
+                let samples = (0..frames)
+                    .flat_map(|frame| {
+                        let t = frame as f32 / rate as f32;
+                        let fade = (t * 20.0).min(1.0).min((2.0 - t) * 20.0).max(0.0);
+                        let value = (t * 440.0 * std::f32::consts::TAU).sin() * 0.3 * fade;
+                        [value, value]
+                    })
+                    .collect();
+                ("Tone", PCMFloat1D::new(rate, 2, samples).ok()?)
+            }
+            "silence" => (
+                "Silence",
+                PCMFloat1D::silence(rate, 2, rate as usize * 10).ok()?,
+            ),
+            _ => return None,
+        };
         Some(NewEntity {
-            name: "Chord".to_owned(),
-            base: chord(48_000, 3.0).into(),
+            name: name.to_owned(),
+            base: pcm.into(),
             meta: Vec::new(),
             size: vec2(560.0, 200.0),
             props: Vec::new(),

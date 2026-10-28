@@ -13,7 +13,7 @@ use sue_core::txn::TextOp;
 use sue_core::{ComponentKind, Entity, StringBuffer};
 use sue_wm::{
     AppletContext, AppletManifest, AppletRole, ArenaText, MediaClass, ModeSpec, NewEntity, NodeId,
-    SceneNode, SetNodeProp, SpawnSpec, SueApplet, Theme, World, project_to_timeline, widgets,
+    SceneNode, SetNodeProp, SueApplet, Theme, World, project_to_timeline, widgets,
 };
 
 /// The applet id.
@@ -211,6 +211,25 @@ impl Document {
     }
 }
 
+/// The kinds of new documents: key, label, name and starting text.
+const TEMPLATES: [(&str, &str, &str, &str); 5] = [
+    ("blank", "Blank", "Untitled", "# Untitled\n\n"),
+    ("notes", "Notes", "Notes", "# Notes\n\n- \n"),
+    ("todo", "To-Do List", "To Do", "# To do\n\n- [ ] \n- [ ] \n"),
+    (
+        "letter",
+        "Letter",
+        "Letter",
+        "Your Name\nYour Address\n\nDate\n\nDear ,\n\n\n\nKind regards,\n\nYour Name\n",
+    ),
+    (
+        "report",
+        "Report",
+        "Report",
+        "# Title\n\n## Summary\n\n\n## Background\n\n\n## Findings\n\n\n## Next steps\n\n",
+    ),
+];
+
 impl SueApplet for Document {
     fn manifest(&self) -> AppletManifest {
         let mut manifest = AppletManifest::new(ID, "Document", AppletRole::Node, "\u{1F4C4}");
@@ -221,10 +240,6 @@ impl SueApplet for Document {
         manifest.mode = Some(ModeSpec {
             label: "Document".to_owned(),
             in_pill: true,
-        });
-        manifest.spawn = Some(SpawnSpec {
-            button: "+ Text".to_owned(),
-            label: "New Document".to_owned(),
         });
         manifest.lane = Some("Document Track".to_owned());
         manifest
@@ -240,13 +255,24 @@ impl SueApplet for Document {
     }
 
     fn new_entity(&mut self, cx: &mut AppletContext<'_>) -> Option<NewEntity> {
-        let size = cx.theme.document_size;
+        self.create("blank", cx)
+    }
+
+    fn templates(&self) -> Vec<sue_wm::FileTemplate> {
+        TEMPLATES
+            .iter()
+            .map(|(key, label, _, _)| sue_wm::FileTemplate::new("Document", *label, *key))
+            .collect()
+    }
+
+    fn create(&mut self, key: &str, cx: &mut AppletContext<'_>) -> Option<NewEntity> {
+        let (_, _, name, text) = TEMPLATES.iter().find(|(id, ..)| *id == key)?;
         Some(NewEntity {
-            name: "Untitled".to_owned(),
-            base: StringBuffer::from("# Untitled\n\n".to_owned()).into(),
+            name: (*name).to_owned(),
+            base: StringBuffer::from((*text).to_owned()).into(),
             meta: Vec::new(),
             size: egui::vec2(560.0, 420.0),
-            props: vec![("font_size".to_owned(), f64::from(size))],
+            props: vec![("font_size".to_owned(), f64::from(cx.theme.document_size))],
         })
     }
 

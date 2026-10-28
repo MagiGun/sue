@@ -206,6 +206,17 @@ pub struct SuePaint {
     /// The time of the pointer sample being handled and the time between
     /// samples this frame, in seconds.
     pub(crate) clock: (f64, f32),
+    /// How far the panels are out of view while the studio comes in or
+    /// goes out (0 when all are in place).
+    pub(crate) hide: f32,
+    /// `true` once the studio is all in and takes input.
+    pub(crate) ready: bool,
+    /// How opaque the view's ground and picture are, 0 to 1.
+    pub(crate) cover: f32,
+    /// The view of the current picture as the studio started leaving.
+    pub(crate) exit_view: Option<View>,
+    /// `true` while the studio is the one the shell shows (not leaving).
+    pub(crate) present: bool,
 }
 
 impl Default for SuePaint {
@@ -245,6 +256,11 @@ impl Default for SuePaint {
             last_dir: None,
             shown: false,
             clock: (0.0, 1.0 / 60.0),
+            hide: 0.0,
+            ready: true,
+            cover: 1.0,
+            exit_view: None,
+            present: false,
         }
     }
 }
@@ -371,6 +387,11 @@ fn implemented(command: &str) -> bool {
 
 impl SuePaint {
     // ----- Reading the state ------------------------------------------------
+
+    /// `true` while the studio slides away.
+    pub(crate) fn leaving(&self) -> bool {
+        !self.present
+    }
 
     pub(crate) fn doc(&self) -> Option<&Doc> {
         self.docs.get(self.active)
@@ -902,7 +923,7 @@ impl SuePaint {
 
     /// Creates a picture from the New dialog, makes it current and puts
     /// it on the canvas.
-    pub(crate) fn create(&mut self, cx: &mut AppletContext<'_>, spec: &NewPicture) {
+    pub(crate) fn make_picture(&mut self, cx: &mut AppletContext<'_>, spec: &NewPicture) {
         match doc::create(spec) {
             Ok((edit, picture)) => {
                 if Self::apply(cx, edit) {
@@ -1659,7 +1680,21 @@ impl SuePaint {
     // ----- The frame ----------------------------------------------------------
 
     fn frame(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
-        if !self.shown {
+        let present = cx.view.studio.as_ref().map(AppletId::as_str) == Some(ID);
+        let reveal = cx.view.studio_reveal.clamp(0.0, 1.0);
+        self.hide = 1.0 - reveal;
+        // The view's ground and picture turn opaque within the first third
+        // of the way, where they still line up with the card underneath.
+        let cover = (reveal / 0.35).clamp(0.0, 1.0);
+        self.cover = cover * cover * (3.0 - 2.0 * cover);
+        self.ready = present && reveal >= 0.999;
+        self.present = present;
+        if self.ready {
+            self.exit_view = None;
+        } else if !present && self.exit_view.is_none() {
+            self.exit_view = self.doc().map(|doc| doc.view);
+        }
+        if !self.shown && present {
             // Opening: show the picture selected on the canvas, if any.
             self.shown = true;
             let selected = cx
@@ -1677,13 +1712,19 @@ impl SuePaint {
             doc.compositor.sync(&cx.world.arena);
         }
         let ctx = ui.ctx().clone();
-        self.keys(&ctx, cx);
+        if self.ready {
+            self.keys(&ctx, cx);
+        }
         let theme = cx.theme.clone();
         let full = ui.max_rect();
-        ui.painter().rect_filled(full, 0.0, theme.panel);
 
-        // The menu bar, with the way back to the canvas at its right.
-        let bar = Rect::from_min_size(full.min, vec2(full.width(), 26.0));
+        // The menu bar, with the way back to the canvas at its right. While
+        // the studio comes in or goes out, every palette slides in from or
+        // out to its edge of the window.
+        let top_height = 26.0 + if self.panels.command_bar { 34.0 } else { 0.0 };
+        let lift = self.hide * top_height;
+        let bar = Rect::from_min_size(full.min - vec2(0.0, lift), vec2(full.width(), 26.0));
+        ui.painter().rect_filled(bar, 0.0, theme.panel);
         let mut menubar = std::mem::take(&mut self.menubar);
         let picked = {
             let arena = &cx.world.arena;
@@ -1696,32 +1737,42 @@ impl SuePaint {
         ui.painter()
             .hline(bar.x_range(), bar.bottom(), theme.hairline());
 
-        let mut top = bar.bottom();
         if self.panels.command_bar {
+            let top = bar.bottom();
             let strip = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), top + 34.0));
             self.command_bar(ui, strip, cx, &theme);
-            top = strip.bottom();
         }
-        let body = Rect::from_min_max(pos2(full.left(), top), full.max);
+        let body = Rect::from_min_max(pos2(full.left(), full.top() + top_height - lift), full.max);
         self.body(ui, body, cx, &theme);
         if let Some(command) = picked {
             self.run(&command, cx);
         }
-        self.dialog_ui(&ctx, cx, &theme);
+        if self.ready {
+            self.dialog_ui(&ctx, cx, &theme);
+        }
     }
 
     /// Lays out the palettes around the canvas.
     fn body(&mut self, ui: &mut Ui, body: Rect, cx: &mut AppletContext<'_>, theme: &sue_wm::Theme) {
-        let mut left = body.left();
-        if self.panels.tool {
-            let strip = Rect::from_min_max(body.min, pos2(left + 40.0, body.bottom()));
-            self.tool_strip(ui, strip, cx, theme);
-            left = strip.right();
-        }
         let column = self.panels.sub_tool
             || self.panels.tool_property
             || self.panels.color
             || self.panels.color_set;
+        let left_width = if self.panels.tool { 40.0 } else { 0.0 }
+            + if column { 236.0 } else { 0.0 }
+            + if self.panels.brush_size { 58.0 } else { 0.0 };
+        let right_width = if self.panels.navigator || self.panels.layer {
+            300.0
+        } else {
+            0.0
+        };
+        let mut left = body.left() - self.hide * left_width;
+        if self.panels.tool {
+            let strip =
+                Rect::from_min_max(pos2(left, body.top()), pos2(left + 40.0, body.bottom()));
+            self.tool_strip(ui, strip, cx, theme);
+            left = strip.right();
+        }
         if column {
             let rect =
                 Rect::from_min_max(pos2(left, body.top()), pos2(left + 236.0, body.bottom()));
@@ -1733,19 +1784,20 @@ impl SuePaint {
             self.size_column(ui, rect, theme);
             left = rect.right();
         }
-        let mut right = body.right();
-        if self.panels.navigator || self.panels.layer {
+        let mut right = body.right() + self.hide * right_width;
+        if right_width > 0.0 {
             let rect =
                 Rect::from_min_max(pos2(right - 300.0, body.top()), pos2(right, body.bottom()));
             self.right_column(ui, rect, cx, theme);
             right = rect.left();
         }
         let mut center = Rect::from_min_max(pos2(left, body.top()), pos2(right, body.bottom()));
-        if self.panels.timeline && center.height() > 360.0 {
+        if self.panels.timeline && body.height() > 360.0 {
+            let top = center.bottom() - 160.0 * (1.0 - self.hide);
             let timeline =
-                Rect::from_min_max(pos2(center.left(), center.bottom() - 160.0), center.max);
+                Rect::from_min_max(pos2(center.left(), top), pos2(center.right(), top + 160.0));
             self.timeline_panel(ui, timeline, theme);
-            center.max.y = timeline.top();
+            center.max.y = top;
         }
         self.canvas_area(ui, center, cx, theme);
     }
@@ -1893,6 +1945,51 @@ impl SueApplet for SuePaint {
 
     fn studio_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
         self.frame(ui, cx);
+    }
+
+    fn accepts(&self, entity: &Entity) -> bool {
+        picture::is_picture(entity)
+    }
+
+    fn studio_focus(&self) -> Option<EntityId> {
+        self.picture()
+    }
+
+    fn templates(&self) -> Vec<sue_wm::FileTemplate> {
+        let mut templates: Vec<sue_wm::FileTemplate> = crate::dialogs::new_presets()
+            .for_target(crate::dialogs::NEW_PRESET_TARGET)
+            .map(|preset| {
+                // Short labels fit the wheel's wedges.
+                let label = match preset.name.as_str() {
+                    "Print (A4, 350 dpi)" => "Print A4",
+                    "Screen (Full HD)" => "Full HD",
+                    "Transparent Sprite" => "Sprite",
+                    name => name,
+                };
+                sue_wm::FileTemplate::new("Picture", label, &preset.name)
+            })
+            .collect();
+        templates.push(sue_wm::FileTemplate::new("Picture", "Custom...", "custom"));
+        templates
+    }
+
+    fn create(&mut self, key: &str, cx: &mut AppletContext<'_>) -> Option<sue_wm::NewEntity> {
+        if key == "custom" {
+            self.dialog = Some(Dialog::New(Self::new_dialog(cx)));
+        } else {
+            let library = crate::dialogs::new_presets();
+            let preset = library.get(crate::dialogs::NEW_PRESET_TARGET, key)?;
+            let mut dialog = NewDialog::new(&NewPicture::default());
+            dialog.apply_preset(preset);
+            let mut spec = dialog.spec();
+            spec.name = preset.name.clone();
+            self.make_picture(cx, &spec);
+        }
+        // Then into Sue Paint, zooming into the new card.
+        if let Ok(id) = AppletId::new(ID) {
+            cx.request(ShellRequest::OpenStudio(id));
+        }
+        None
     }
 
     fn tick(&mut self, cx: &mut AppletContext<'_>) -> sue_wm::Tick {
