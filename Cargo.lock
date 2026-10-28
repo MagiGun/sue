@@ -3148,7 +3148,9 @@ dependencies = [
  "sue-pkg",
  "sue-platform",
  "sue-rice",
+ "sue-type",
  "sue-wm",
+ "sue-writer",
 ]
 
 [[package]]
@@ -3175,6 +3177,7 @@ dependencies = [
  "sue-core",
  "sue-model",
  "symphonia",
+ "ttf-parser",
  "zune-core",
  "zune-jpeg",
  "zune-jpegxl",
@@ -3256,6 +3259,20 @@ dependencies = [
  "sue-platform",
  "sue-rice",
  "ttf-parser",
+]
+
+[[package]]
+name = "sue-writer"
+version = "1.0.0"
+dependencies = [
+ "egui",
+ "sue-core",
+ "sue-io",
+ "sue-model",
+ "sue-paint",
+ "sue-rice",
+ "sue-type",
+ "sue-wm",
 ]
 
 [[package]]

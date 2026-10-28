@@ -537,6 +537,16 @@ impl Engine {
                         ],
                     ),
                     group("Sue Paint Custom Colors", vec![section("sue_paint_colors")]),
+                    group(
+                        "Sue Writer",
+                        vec![
+                            SettingsItem::Note(
+                                "Sue Writer follows Sue's theme unless you choose a preset. The page itself stays white paper, as it prints, unless you turn on dark paper."
+                                    .to_owned(),
+                            ),
+                            section("sue_writer"),
+                        ],
+                    ),
                 ],
             ),
             SettingsPage::new(

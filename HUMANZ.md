@@ -34,11 +34,13 @@ style).
 
 ```text
 bins/sue      ──► every crate below                   + egui
+sue-writer    ──► sue-type, sue-paint, sue-wm, sue-io, sue-model, sue-rice, sue-core   + egui
 sue-paint     ──► sue-wm, sue-io, sue-model, sue-rice, sue-platform, sue-core   + egui
-sue-wm        ──► sue-rice, sue-platform, sue-core   + egui
+sue-type      ──► sue-wm, sue-io, sue-model, sue-core   + egui, ttf-parser
+sue-wm        ──► sue-rice, sue-platform, sue-core   + egui, ttf-parser
 sue-ai        ──► sue-platform, sue-core
 sue-rice      ──► sue-platform, sue-core
-sue-io        ──► sue-model, sue-core                 + jxl-oxide, zune-jpegxl, zune-png, zune-jpeg, jpeg-encoder, symphonia, image, flacenc
+sue-io        ──► sue-model, sue-core                 + jxl-oxide, zune-jpegxl, zune-png, zune-jpeg, jpeg-encoder, symphonia, image, flacenc, miniz_oxide, ttf-parser
 sue-model     ──► sue-core
 sue-pkg       ──► sha2, ed25519-dalek, semver         (no engine crates)
 sue-core      ──► nothing                              (leaf)
@@ -490,7 +492,7 @@ extension components (`sue_model::register`):
 
 | Model | Name | Holds | Shared by |
 | --- | --- | --- | --- |
-| `TextMarks` | `sue.text.marks` | Formatting ranges over the entity's text (bold, link, heading, list, font, size, color, inline math, comment), kept in place by `on_insert` and `on_delete` | word processing, notes, Markdown, novels, LaTeX, layout |
+| `TextMarks` | `sue.text.marks` | Formatting ranges over the entity's text (bold, link, heading, list, font, size, color, inline math, comment, footnote, embedded entity); paragraph marks ride on each paragraph's newline and follow edits through `insert_text` and `delete_text` (§3.8) | word processing, notes, Markdown, novels, LaTeX, layout |
 | `Table` | `sue.table` | Sparse cells (`Value` plus optional formula text), typed columns, A1 references, row insert and remove; `SetCell` edits | spreadsheets, databases, CSV, schedules, bills of materials, cue lists |
 | `Animation`, `Curve` | `sue.animation` | Keyframes (constant, linear, Bezier) per property key | motion graphics, animation, rigging, automation, grading keyframes |
 | `Sequence`, `Track`, `Clip` | `sue.sequence` | Tracks of clips pointing at any entity, with trims, speed and split | video editing, DAWs, slideshows, podcasts, subtitles |
@@ -500,11 +502,12 @@ extension components (`sue_model::register`):
 | `PageLayout` | `sue.layout` | Pages (size, margins, bleed, masters) and frames showing other entities | publishing, books, slides, PDF pages, drawing sheets |
 | `Encoded` | `sue.encoded` | The original bytes of a file Sue cannot decode yet | every format before its decoder exists |
 
-Two shared shapes need no component of their own:
+Three shared shapes need no component of their own:
 
 | Model | Stored as | Holds | Shared by |
 | --- | --- | --- | --- |
 | Layered pictures (`sue_model::picture`) | a `sue.image` entity without a base, ordered `CHILD` layers, shared properties | Size (`image.width`, `image.height`) and resolution (`image.dpi`); raster layers (any child with a `RasterTile2D` base, usually class `sue.layer`) and paper layers (`sue.layer.paper`, one `layer.color`); `LayerStyle` reads visibility, opacity, blend, clipping, draft and offset from `style.*` and `layer.*` properties | painting, photo editing, compositing, textures, thumbnails |
+| Manuscripts (`sue_model::manuscript`) | a `sue.manuscript` entity, ordered `CHILD` folders and documents | A binder with draft, research and trash folders (`manuscript.role`); synopsis, notes, status, label, include, word target and keywords as `doc.*` properties (§3.8) | novels, scripts, theses, manuals, e-books, outlines |
 | `BlendMode` | its name in `style.blend` | 26 blend modes (normal; darken, multiply, burns; lighten, screen, dodges, add; overlay and the lights; difference, exclusion, divide; hue, saturation, color, luminosity) and W3C compositing with straight alpha; names from a newer Sue fall back to normal | every feature that stacks layers |
 
 A layer can be any raster entity, so a photo that sits on the canvas can also
@@ -1173,6 +1176,117 @@ flatten the paper and leave draft layers out.
 
 ---
 
+### 3.8 Sue Writer (`sue-writer`) and typography (`sue-type`)
+
+Sue Writer is the writing and publishing studio: a word processor's pages
+and a long-form writing studio's binder in one. It owns little itself; it is
+assembled from features Sue owns, so the next studio that sets text (notes,
+slides, page layout, a font studio) uses the same ones.
+
+**Rich text (`sue-model::text`).** A document is a `StringBuffer` with
+`TextMarks`. Paragraphs end with a newline, and that newline carries the
+paragraph's own marks (`style`, `heading`, `list`, `level`, `align`, indents,
+spacing, `page_break`), as a word processor's paragraph mark does: a
+paragraph mark covers its whole paragraph, newline included, so an empty
+paragraph keeps its style, and a rich text ends with a newline.
+`TextMarks::insert_text` and `delete_text` keep them right through typing,
+pasting (pasted text brings its own marks, `source`) and joins (the joined
+paragraph keeps the first's marks, unless the deletion took that one from its
+very start). Character runs are read once for every view and format
+(`runs`, `CharFormat`, `marks_by_paragraph`). New kinds: `align`, `indent`,
+`indent_right`, `first_indent`, `line_spacing`, `space_before`, `space_after`,
+`page_break`, `level`, `highlight`, `script`, `small_caps`, `footnote` (the
+note's text, on the words it follows) and `embed` (an entity shown on an
+object replacement character).
+
+**Manuscripts (`sue-model::manuscript`).** A long work is an entity of class
+`sue.manuscript` whose ordered `sue.child` relations make a binder of folders
+and documents. Its top folders have a `manuscript.role`: `draft` (what is
+published), `research` (any entity: pictures, sounds, web pages) and
+`trash`. Documents carry `doc.synopsis`, `doc.notes`, `doc.status`,
+`doc.label`, `doc.include`, `doc.target_words` and `doc.keywords` as shared
+properties. `walk`, `publishable` and `total_words` read it.
+
+**Fonts (`sue-wm::fonts`).** A background scan of the folders the OS keeps
+fonts in (`sue_platform::system_font_dirs`) reads only each file's name, OS/2
+and post tables and groups the faces into families with their weights and
+italics. `fonts::resolve` installs a face into egui the first time it is
+drawn (answering with the bundled family until egui has it) and says when
+bold or italic must be faked. `fonts::face_bytes` hands exporters the file.
+Sue's bundled fonts are always there as `Sue Sans` and `Sue Mono`.
+
+**Styles (`sue-type::style`).** A `StyleSheet` holds named paragraph styles
+(font, size, weight, alignment, indents, spacing, line spacing, page break,
+keep with next, outline level, the style Enter goes on with, and the one Tab
+turns it into). Three ship: Standard (body text, a title, four headings,
+quotes, code, scene breaks, captions), Manuscript (double spaced, indented
+paragraphs, chapters on a new page) and Screenplay (scene headings, action,
+characters, parentheticals, dialogue and transitions at their standard
+indents). `paragraph_look` resolves a paragraph's style and its own marks;
+every view and exporter reads that.
+
+**Layout and the editor (`sue-type::layout`, `editor`).** Each paragraph is
+one egui galley, shaped with the fonts it asks for, with lists numbered
+across their run. In page view the galleys are broken across pages between
+their rows, headings kept with the line after them and no lone first line at
+a page's foot; in draft view they stack in one column. The `Editor` shows one
+document or several in a row and draws its own caret, selection, lists and
+pictures; it takes keys (words, rows, pages, `Home`, `End`), the mouse (one,
+two and three clicks, dragging past the edge scrolls), input methods and the
+clipboard, keeping formatting between Sue's own documents. Edits go through
+`sue-type::edit`: typing edits the `StringBuffer` in place and moves the
+marks, and `Typing::record_with` makes each burst one undo step for both;
+formatting is a `SetExtension` transaction. The editor registers as a text
+field, so the shell's keys (the command palette) leave typing alone.
+
+**Typesetting and PDF (`sue-type::typeset`, `sue-io::pdf`).** For print, the
+same styles and marks are set from the font files themselves (`ttf-parser`
+widths): lines broken at spaces, justified, paginated with the same rules,
+lists, pictures, links, footnotes gathered as notes at the end, page numbers
+and a running head. `sue-io::pdf` writes it: fonts embedded whole as
+CID-keyed fonts (a collection's face pulled out on its own), text that copies
+out as Unicode, pictures, links and bookmarks, every stream deflated.
+
+**Publishing formats (`sue-io::publish`).** A `Book` (sections of rich text
+with the paragraph styles they use, pictures as PNG, the page) is written as
+Word (Word's own style names, so its navigation and contents work; lists,
+footnotes, links, pictures, page numbers), OpenDocument, EPUB 3 (a file per
+section that starts a page, a navigation document and an NCX), HTML, RTF,
+Markdown and plain text; Word, HTML and Markdown read back into rich text.
+The registry offers Word (both ways), OpenDocument, EPUB and RTF for any
+text entity (`PublishFormat`). `zip` writes and reads the archives.
+
+**The studio.**
+
+| Part | What it holds |
+| --- | --- |
+| Menu bar | File, Edit, View, Insert, Format, Project, Help; Back to Canvas at the right |
+| Toolbar | paragraph style, font (every installed family, searchable), size, bold, italic, underline, strikethrough, raised and lowered, text color, highlight, alignment, lists, indents, line spacing; Focus, Find and the views (Page, Draft, Cards, Outline) at the right; it wraps onto a second row in a narrow window |
+| Binder | the project's folders and documents: click to open (a folder shows its documents one after another), double-click to rename, drag to move (above, below or into a folder), a right-click menu (new, rename, duplicate, include in compile, snapshot, merge, label, status, trash, Open in Sue Paint for pictures) |
+| Text | the editor on pages that fit the window (until you zoom) or one column |
+| Corkboard | index cards of a folder's items with their synopsis, label color, status and words; drag to reorder |
+| Outliner | a table of everything under a folder: title, synopsis, label, status, words, included |
+| Inspector | synopsis, label, status, include, word target with progress, keywords, statistics, notes, snapshots (take, restore) and the outline of the headings |
+| Status bar | words in the document (or the selection), the draft against its target, today's words against the daily goal, the page, zoom |
+
+Composition mode (`F11`) leaves only the text, set large on dark paper with
+typewriter scrolling. Find and replace work in what is shown or across the
+whole project. Compile (`Ctrl+Shift+E`) puts the draft together (folder
+titles as chapter headings, scene breaks or new pages between documents, a
+title page) and writes any of the formats above. Projects come from
+templates: blank document, novel, short story, screenplay, non-fiction book,
+essay or paper, poetry collection, letter and report.
+
+**Woven in.** A project is a card on the canvas; its documents are the
+shared rich text, its pictures the shared pictures. The Sue menu offers Sue
+Writer's own wheel while it is open, and Send To Sue Writer for any text
+(opened in place) and any picture (put into the text at the caret, drawn with
+Sue Paint's compositing). Opening a Word file anywhere in Sue
+(`SueApplet::opens_file`) brings it into Sue Writer. Writing sessions are
+counted and kept on the project by day (`sue_writer.history`).
+
+---
+
 ## 4. Introspective rice engine (`sue-rice`)
 
 ### 4.1 File format
@@ -1468,6 +1582,11 @@ separators are measured against, and it exercises the full zero-copy path.
 | §1.8 `RasterEdit` (pixel rectangles before and after) | **Implemented**; Sue Paint records every stroke, fill and filter with it | `sue-core/src/txn.rs` |
 | §1.13 Shared models (text marks, table, curves, sequence, notes, graph, geometry, layout, encoded) | **Implemented** as data with tests; no applet edits them yet | `sue-model` |
 | §1.13 Layered pictures and blend modes | **Implemented**; Sue Paint makes and edits them | `sue-model/src/picture.rs`, `blend.rs` |
+| §3.8 Rich text with paragraph marks, manuscripts | **Implemented**; Sue Writer edits them | `sue-model/src/text.rs`, `manuscript.rs` |
+| §3.8 Installed fonts | **Implemented** (a background scan; faces installed into egui on first use) | `sue-wm/src/fonts.rs`, `sue-platform/src/paths.rs` |
+| §3.8 Rich text editor, styles, page layout, typesetting | **Implemented** | `sue-type` |
+| §3.8 Publishing formats and PDF | **Implemented** (Word both ways; OpenDocument, EPUB, HTML, RTF, Markdown, text out; HTML and Markdown in; fonts embedded whole, not subset) | `sue-io/src/publish`, `pdf.rs`, `zip.rs` |
+| §3.8 Sue Writer | **Implemented** | `sue-writer` |
 | §2.1 Three-tier sniffer | **Implemented** | `sue-io/src/sniff.rs` |
 | §2.2 JXL probe (boxes + `SizeHeader`) | **Implemented** | `sue-io/src/jxl.rs` |
 | §2.2 JXL pixel decode and JPEG reconstruction | **Implemented** with `jxl-oxide` (no CMYK yet; the DC preview and pass targets come from a full decode until a streaming decoder lands) | `sue-io/src/jxl.rs` |
@@ -1551,10 +1670,10 @@ their files as `Encoded` bytes.
 
 | Area (for example) | Entities and data | Backbone pieces | Still to build |
 | --- | --- | --- | --- |
-| Word processing (Word, Pages) | `sue.document`: `StringBuffer` plus `TextMarks`; embedded pictures and tables as `CHILD` entities placed by marks | text edits, `TextMarks`, `PropertySchema` (styles), `PageLayout` for print | paragraph and character style sheets, pagination, footnotes, tracked changes (as transactions), DOCX and ODT handlers |
+| Word processing (Word, Pages) | `sue.document`: `StringBuffer` plus `TextMarks` (paragraph marks on the newline); pictures by `embed` marks | rich text edits and their undo, style sheets, pagination, footnotes, Word both ways, OpenDocument out (Sue Writer, §3.8) | tables, comments, tracked changes (as transactions), spelling, footnotes at the foot of each page, OpenDocument and RTF in |
 | Spreadsheets (Excel, Sheets) | `sue.sheet`: `Table`; several sheets as `CHILD` entities of a workbook folder | `Table`, `SetCell`, `Value`, `Quantity`, CSV and TSV handlers (done) | a formula engine with dependency tracking, charts (entities that `REF` a table), XLSX and ODS handlers |
 | Slideshows (PowerPoint, Keynote) | `sue.slides`: `PageLayout` with slide-sized pages; frames show text, pictures, video | `PageLayout`, `Animation` (builds), `Sequence` (timed shows) | transitions, presenter view, PPTX handler |
-| Novel writing and manuscripts (Scrivener) | a book is a `sue.folder` tree of chapter and scene documents (`CHILD`, ordered), notes and research as linked entities (`REF`) | relations, `OrderKey` reordering, `TextMarks`, properties (status, word target) | corkboard and outline views, compile to EPUB, PDF and DOCX |
+| Long-form writing and manuscripts | a `sue.manuscript`: a binder of folders and documents (`CHILD`, ordered), research as any entity under its research folder | `sue-model::manuscript`, the binder, corkboard, outliner, snapshots, targets and compile to every format (Sue Writer, §3.8) | keywords search, linked research (`REF`), revision marks, collections |
 | Book publishing and ebook libraries (Calibre) | books as `sue.publication`; library metadata in properties; a catalogue `Table` | `PageLayout`, `Bundle` export, properties | EPUB and MOBI handlers, library index |
 | PDF editing and signing | `sue.publication` holding `Encoded` PDF bytes today; later pages as `PageLayout` with frames | `Encoded` (done), `PageLayout`, a signature `ComponentType` | a PDF parser and writer, annotation and form models, signing through `sue-platform` key stores |
 | Notes and knowledge bases (Obsidian, Notion) | notes as documents, links as `REF` relations (backlinks are `sources`), databases as `Table` with typed columns | relations, `Table`, `TextMarks` (`link` marks), Markdown handler (done) | graph view, templates, queries over properties |

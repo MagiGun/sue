@@ -568,8 +568,7 @@ pub fn paragraph_look(sheet: &StyleSheet, marks: &[&Mark]) -> ParagraphLook {
     let own = |name: &str| -> Option<&Value> {
         marks
             .iter()
-            .filter(|mark| mark.kind == name)
-            .last()
+            .rfind(|mark| mark.kind == name)
             .map(|mark| &mark.value)
     };
     // A plain heading mark (from an import) picks the heading style.

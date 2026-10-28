@@ -220,27 +220,26 @@ fn inline(line: &str, text: &mut String, marks: &mut TextMarks) {
             rest = &rest[1 + next.len_utf8()..];
             continue;
         }
-        if ch == '`' {
-            if let Some(end) = rest[1..].find('`') {
-                let start = text.len();
-                text.push_str(&rest[1..1 + end]);
-                marks.set(start..text.len(), kind::CODE, Some(true.into()));
-                rest = &rest[end + 2..];
-                continue;
-            }
+        if ch == '`'
+            && let Some(end) = rest[1..].find('`')
+        {
+            let start = text.len();
+            text.push_str(&rest[1..1 + end]);
+            marks.set(start..text.len(), kind::CODE, Some(true.into()));
+            rest = &rest[end + 2..];
+            continue;
         }
-        if ch == '[' {
-            if let Some(close) = rest.find("](")
-                && let Some(end) = rest[close..].find(')')
-            {
-                let label = &rest[1..close];
-                let url = &rest[close + 2..close + end];
-                let start = text.len();
-                inline(label, text, marks);
-                marks.set(start..text.len(), kind::LINK, Some(url.into()));
-                rest = &rest[close + end + 1..];
-                continue;
-            }
+        if ch == '['
+            && let Some(close) = rest.find("](")
+            && let Some(end) = rest[close..].find(')')
+        {
+            let label = &rest[1..close];
+            let url = &rest[close + 2..close + end];
+            let start = text.len();
+            inline(label, text, marks);
+            marks.set(start..text.len(), kind::LINK, Some(url.into()));
+            rest = &rest[close + end + 1..];
+            continue;
         }
         let token = [
             ("**", kind::BOLD),

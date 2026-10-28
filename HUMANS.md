@@ -365,6 +365,57 @@ speed shortens it, and "Instant transitions" makes it immediate.
 
 ---
 
+## Sue Writer: writing and publishing
+
+**Sue Writer** is where you write, from a letter to a trilogy. Open it from
+the Hub, the top pill, the Sue button, or New File's Writing wheel, which
+starts a project from a template: a blank document, a novel, a short story, a
+screenplay, a non-fiction book, an essay or paper, a poetry collection, a
+letter or a report.
+
+It looks like a word processor: pages that fit the window, a toolbar with
+paragraph styles, every font installed on your computer, sizes, bold, italic,
+underline, strikethrough, raised and lowered text, colors, highlights,
+alignment, lists, indents and line spacing. The usual keys work: `Ctrl+B`,
+`Ctrl+I`, `Ctrl+U`, `Ctrl+E` to center, `Ctrl+J` to justify, `Ctrl+Alt+1` for
+a heading, `Ctrl+Enter` for a new page, `Ctrl+K` for a link, `Ctrl+F` to find
+and `Ctrl+H` to replace. Enter after a heading goes on in body text, Enter on
+an empty list item ends the list, and Tab moves a list item in. In a
+screenplay, Enter and Tab move between scene headings, action, characters,
+parentheticals and dialogue, each at its proper indent, typed in capitals
+where it should be. Quotes turn curly as you type (Settings, Studios).
+
+For long work it is also a writing studio:
+
+- **The binder** on the left holds your chapters and scenes, research and a
+  trash. Click a folder to read all its scenes one after another; drag to
+  reorder; right-click for the rest.
+- **The corkboard** shows each item as an index card with its synopsis,
+  label color and status; **the outliner** lists them in a table.
+- **The inspector** on the right keeps each scene's synopsis, notes, label,
+  status, word target and keywords, and **snapshots**: take one before a big
+  rewrite and put it back whenever you like.
+- **Targets**: a word target for the book and for each scene, and a daily
+  goal; the status bar counts as you go, and Writing Statistics shows the
+  words you wrote each day.
+- **Composition mode** (`F11`) leaves nothing but your words on a dark page,
+  the line you are on kept in the middle. `Esc` comes back.
+- **Find and replace** across one scene or the whole project.
+
+When you are done, **Compile** (`Ctrl+Shift+E`) puts the book together, with
+chapter titles from your folders, scene breaks and a title page, and saves it
+as a PDF (set in your fonts, with bookmarks and page numbers), a Word
+document, an OpenDocument file, an EPUB e-book, a web page, RTF, Markdown or
+plain text. `Ctrl+P` goes straight to PDF.
+
+Sue Writer works with the rest of Sue. A project sits on the canvas as a
+card. Pictures from Sue Paint go straight into your text with the Sue menu's
+Send To, and any text on the canvas opens in Sue Writer the same way. Open a
+Word file anywhere in Sue and it comes into Sue Writer, formatting and all.
+Everything you do can be undone, and it all saves inside your project.
+
+---
+
 ## Projects: one file for everything
 
 Press `Ctrl+S` to save your work as a **project**, a single `.sue` file. It

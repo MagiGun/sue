@@ -259,6 +259,9 @@ fn format(
         background = Color32::from_rgba_unmultiplied(0xf2, 0xc0, 0x3a, 0x55);
     } else if run.code {
         background = ink.shade;
+    } else if run.footnote.is_some() {
+        // A footnote's words, faintly: the note itself prints at the end.
+        background = Color32::from_rgba_unmultiplied(0x3a, 0x7b, 0xd5, 0x2c);
     }
     let stroke = Stroke::new((setting.scale * 0.75).max(1.0), text);
     TextFormat {
@@ -299,8 +302,9 @@ pub fn lay_document(
     let mut numbers = [0_usize; 9];
     let width_px = setting.width * setting.scale;
     let empty: Vec<&Mark> = Vec::new();
-    let ranges = if paragraphs.is_empty() {
-        vec![0..0]
+    // An empty text still has one (empty) paragraph to put the caret in.
+    let ranges: Vec<Range<usize>> = if paragraphs.is_empty() {
+        std::iter::once(0..0).collect()
     } else {
         paragraphs
     };
@@ -331,7 +335,7 @@ pub fn lay_document(
         let base_font = format(ctx, &look, &CharFormat::default(), setting, None).font_id;
         let natural = ctx.fonts_mut(|fonts| fonts.row_height(&base_font));
         let line = Some(natural * look.line_spacing);
-        let figure = (&text[body.clone()] == sue_model::OBJECT.to_string())
+        let figure = (text[body.clone()] == sue_model::OBJECT.to_string())
             .then(|| {
                 marks
                     .iter()

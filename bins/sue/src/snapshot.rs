@@ -555,11 +555,70 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         &mut camera.painter,
         camera.now,
     );
+    // Kept apart until the last shot, which borrows the list.
+    let mut entering = Vec::new();
     for (frames, name) in [(14, "15-entering-zoom"), (26, "16-entering-panels")] {
         let path = dir.join(format!("{name}.png"));
         camera.shoot_after(&mut runtime, &path, frames)?;
-        written.push(path);
+        entering.push(path);
     }
+    camera.settle(&mut runtime);
+    runtime.request(ShellRequest::CloseStudio, &mut camera.painter, camera.now);
+    camera.settle(&mut runtime);
+
+    // 17 to 23. Sue Writer on a sample novel: pages, the corkboard, the
+    // outliner, composition mode, the compile dialog and the Format menu,
+    // then its card on the canvas.
+    let writer = AppletId::new(sue_writer::ID).map_err(|error| error.to_string())?;
+    let novel = runtime
+        .with_context(&mut camera.painter, camera.now, sue_writer::sample_project)
+        .ok_or("the sample novel was not made")?;
+    if let Some(entity) = runtime.engine.world.arena.handle_of(novel) {
+        runtime.request(
+            ShellRequest::Place {
+                entity,
+                focus: false,
+            },
+            &mut camera.painter,
+            camera.now,
+        );
+    }
+    runtime.request(
+        ShellRequest::OpenIn {
+            entity: novel,
+            applet: writer.clone(),
+        },
+        &mut camera.painter,
+        camera.now,
+    );
+    // Let the fonts the novel uses load, then settle.
+    for _ in 0..3 {
+        camera.settle(&mut runtime);
+        std::thread::sleep(std::time::Duration::from_millis(400));
+    }
+    shoot(&mut runtime, &mut camera, "17-sue-writer")?;
+    for (target, name) in [
+        ("view/corkboard", "18-sue-writer-corkboard"),
+        ("view/outliner", "19-sue-writer-outliner"),
+        ("view/composition", "20-sue-writer-composition"),
+        ("dialog/compile", "21-sue-writer-compile"),
+        ("menu/Format", "22-sue-writer-format-menu"),
+    ] {
+        if let Some(applet) = runtime.applets.get_mut(&writer) {
+            applet.navigate("dialog/close");
+            applet.navigate("view/document");
+            applet.navigate(target);
+        }
+        shoot(&mut runtime, &mut camera, name)?;
+    }
+    if let Some(applet) = runtime.applets.get_mut(&writer) {
+        applet.navigate("dialog/close");
+        applet.navigate("view/document");
+    }
+    runtime.request(ShellRequest::CloseStudio, &mut camera.painter, camera.now);
+    camera.settle(&mut runtime);
+    shoot(&mut runtime, &mut camera, "23-manuscript-card")?;
+    written.extend(entering);
     let _ = std::fs::remove_dir_all(&root);
     Ok(written)
 }

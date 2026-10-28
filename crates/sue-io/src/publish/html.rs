@@ -71,10 +71,10 @@ pub(crate) fn para_html(
     figure: &dyn Fn(sue_core::EntityId) -> Option<String>,
 ) -> String {
     let mut inner = String::new();
-    if let Some(id) = para.embed {
-        if let Some(src) = figure(id) {
-            let _ = write!(inner, "<img src=\"{}\" alt=\"\"/>", escape(&src));
-        }
+    if let Some(id) = para.embed
+        && let Some(src) = figure(id)
+    {
+        let _ = write!(inner, "<img src=\"{}\" alt=\"\"/>", escape(&src));
     }
     for (text, look) in &para.runs {
         let mut piece = escape(text);

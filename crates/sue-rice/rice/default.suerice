@@ -143,6 +143,11 @@ selection_text = "#ffffff"     # Text inside a selection
 grid = "#474747"               # Grids and rulers
 shadow = "#141414"             # Shadow under floating surfaces
 
+[sue_writer]
+theme = "sue-theme"            # {sue-theme|gray|void|graphite|paper} Sue Writer's colors: Sue's own theme (follows it) or a preset
+smart_quotes = true            # Turn straight quotes into curly ones while typing
+dark_paper = false             # Show the page in the theme's dark colors instead of white paper
+
 [notes]
 font_size = 14                 # [8..48] Note text size (px)
 

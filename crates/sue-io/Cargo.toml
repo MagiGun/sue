@@ -16,6 +16,7 @@ jpeg-encoder.workspace = true
 miniz_oxide.workspace = true
 sue-model.workspace = true
 symphonia.workspace = true
+ttf-parser.workspace = true
 zune-core.workspace = true
 zune-jpeg.workspace = true
 zune-jpegxl.workspace = true

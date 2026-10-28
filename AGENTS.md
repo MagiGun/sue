@@ -19,7 +19,7 @@ mapped onto it in §8). What people should experience:
 | Part | Where |
 | --- | --- |
 | The kernel: arena, entity ids, components (built-in and registered), relations, values and properties, units, color, time, transactions and undo, the codec and the `.sue` container, registries, shared buffers, background jobs | `crates/sue-core` |
-| The shared data models features build on: text marks, tables, curves and animation, sequences and note events, node graphs, geometry and transforms, page layout, layered pictures and blend modes, kept encoded files | `crates/sue-model` |
+| The shared data models features build on: text marks, tables, curves and animation, sequences and note events, node graphs, geometry and transforms, page layout, layered pictures and blend modes, manuscripts, kept encoded files | `crates/sue-model` |
 | Format handlers (import, export) and the `.sue` project format | `crates/sue-io`, `crates/sue-core/src/file.rs` |
 | Operating-system isolation | `crates/sue-platform` |
 | How changes reach the repository | Git, below |
@@ -135,8 +135,10 @@ cargo run -p sue -- --self-check
   in Settings by themselves.
 - Register applets, operators and presets instead of keeping lists by hand.
 - Sue owns every feature; studios use them. A studio never builds its own
-  color picker, file dialog, converter, brush engine, font list, 3D view or
-  exporter when Sue has one (the shared widgets in `sue-wm`, the File
+  color picker, file dialog, converter, brush engine, font list, text
+  editor, 3D view or exporter when Sue has one (the shared widgets in
+  `sue-wm`, the installed fonts in `sue_wm::fonts`, the rich text editor and
+  typesetting in `sue-type`, the publishing formats in `sue-io`, the File
   Manager's `FilePick`, the Converter, the shared models). When a studio
   needs more than a feature offers, give that feature a new mode or
   parameter so every studio gains it, instead of copying it.

@@ -1071,6 +1071,135 @@ impl FormatHandler for KeptFormat {
 /// Every format this build reads or writes, with `registry` for `.sue`
 /// projects. Content sniffing picks the handler first, the extension second.
 #[must_use]
+/// Rich text documents through the publishing formats: Word reads and
+/// writes, OpenDocument, EPUB and RTF write. A document's text and its
+/// [`sue_model::TextMarks`] go out as one section with the default styles.
+#[derive(Clone, Copy, Debug)]
+pub struct PublishFormat {
+    info: FormatInfo,
+    write: fn(&crate::publish::Book) -> Vec<u8>,
+    read: Option<ReadRich>,
+}
+
+/// Reads a document file into its text and marks.
+type ReadRich = fn(&[u8]) -> Result<(String, sue_model::TextMarks), String>;
+
+impl PublishFormat {
+    /// Every publishing format the registry offers.
+    pub fn all() -> [Self; 4] {
+        use crate::publish as p;
+        let info = |id, name, extensions, mime| FormatInfo {
+            id,
+            name,
+            extensions,
+            mime,
+            category: "Document",
+        };
+        [
+            Self {
+                info: info(
+                    "docx",
+                    "Word document",
+                    &["docx"],
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ),
+                write: p::to_docx,
+                read: Some(p::from_docx),
+            },
+            Self {
+                info: info(
+                    "odt",
+                    "OpenDocument text",
+                    &["odt"],
+                    "application/vnd.oasis.opendocument.text",
+                ),
+                write: p::to_odt,
+                read: None,
+            },
+            Self {
+                info: info("epub", "EPUB e-book", &["epub"], "application/epub+zip"),
+                write: p::to_epub,
+                read: None,
+            },
+            Self {
+                info: info("rtf", "Rich Text Format", &["rtf"], "application/rtf"),
+                write: |book| p::to_rtf(book).into_bytes(),
+                read: None,
+            },
+        ]
+    }
+}
+
+impl FormatHandler for PublishFormat {
+    fn info(&self) -> FormatInfo {
+        self.info
+    }
+
+    fn can_import(&self) -> bool {
+        self.read.is_some()
+    }
+
+    fn import(
+        &self,
+        bytes: &[u8],
+        name: &str,
+        _options: &Properties,
+    ) -> Result<Bundle, FormatError> {
+        let read = self.read.ok_or_else(|| {
+            FormatError::new(format!("{} files cannot be opened yet", self.info.name))
+        })?;
+        let (text, marks) = read(bytes).map_err(FormatError::new)?;
+        let title = std::path::Path::new(name).file_stem().map_or_else(
+            || name.to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        );
+        Ok(Bundle::single(
+            Entity::new(title, StringBuffer::from(text))
+                .with_class(class::DOCUMENT)
+                .with_ext(marks)
+                .with_meta(meta::FORMAT, self.info.name)
+                .with_meta(meta::BYTES, bytes.len().to_string()),
+        ))
+    }
+
+    fn can_export(&self, entity: &Entity) -> bool {
+        entity.string_buffer().is_some()
+    }
+
+    fn export(
+        &self,
+        arena: &Arena,
+        ids: &[EntityId],
+        _options: &Properties,
+    ) -> Result<Vec<u8>, FormatError> {
+        let mut book: Option<crate::publish::Book> = None;
+        for id in ids {
+            let entity = arena.get_by_id(*id)?;
+            let Some(buffer) = entity.string_buffer() else {
+                continue;
+            };
+            let mut text = buffer.as_str().to_owned();
+            sue_model::ensure_final_newline(&mut text);
+            let marks = entity
+                .ext::<sue_model::TextMarks>()
+                .cloned()
+                .unwrap_or_default();
+            match &mut book {
+                None => book = Some(crate::publish::Book::single(entity.name(), &text, &marks)),
+                Some(book) => book.sections.push(crate::publish::Section {
+                    title: entity.name().to_owned(),
+                    depth: 0,
+                    text,
+                    marks,
+                    new_page: true,
+                }),
+            }
+        }
+        let book = book.ok_or_else(|| FormatError::new("there is no text to write"))?;
+        Ok((self.write)(&book))
+    }
+}
+
 pub fn formats(registry: ComponentRegistry) -> FormatRegistry {
     let mut formats = FormatRegistry::new();
     formats.register(SueFormat::new(registry));
@@ -1086,6 +1215,9 @@ pub fn formats(registry: ComponentRegistry) -> FormatRegistry {
     formats.register(DelimitedFormat::csv());
     formats.register(DelimitedFormat::tsv());
     formats.register(ObjFormat);
+    for format in PublishFormat::all() {
+        formats.register(format);
+    }
     for format in KeptFormat::all() {
         formats.register(format);
     }
@@ -1108,6 +1240,48 @@ mod tests {
         let id = insert.ids()[0];
         UndoStack::new().apply(&mut arena, insert).unwrap();
         (arena, id)
+    }
+
+    #[test]
+    fn rich_text_goes_through_word_and_the_other_publishing_formats() {
+        let formats = registry();
+        let text = "Heading\nSome bold words.\n";
+        let mut marks = sue_model::TextMarks::new();
+        marks.set_paragraphs(
+            text,
+            0..1,
+            sue_model::mark_kind::STYLE,
+            Some("heading1".into()),
+        );
+        marks.set(13..17, sue_model::mark_kind::BOLD, Some(true.into()));
+        let mut arena = Arena::new();
+        let handle = arena.insert(
+            Entity::new("Note", StringBuffer::from(text))
+                .with_class(class::DOCUMENT)
+                .with_ext(marks.clone()),
+        );
+        let id = arena.get(handle).unwrap().id();
+        for format in ["docx", "odt", "epub", "rtf"] {
+            let handler = formats.get(format).unwrap();
+            assert!(handler.can_export(arena.get(handle).unwrap()));
+            let bytes = handler.export(&arena, &[id], &Properties::new()).unwrap();
+            assert!(bytes.len() > 100, "{format}");
+        }
+        let docx = formats
+            .get("docx")
+            .unwrap()
+            .export(&arena, &[id], &Properties::new())
+            .unwrap();
+        let (back, back_id) = import_one(&formats, &docx, "Note.docx");
+        let entity = back.get_by_id(back_id).unwrap();
+        assert_eq!(entity.string_buffer().unwrap().as_str(), text);
+        assert_eq!(entity.name(), "Note");
+        assert!(
+            entity
+                .ext::<sue_model::TextMarks>()
+                .unwrap()
+                .covers(13..17, sue_model::mark_kind::BOLD)
+        );
     }
 
     #[test]

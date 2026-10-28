@@ -19,6 +19,8 @@ sue-ai = { path = "crates/sue-ai" }
 sue-wm = { path = "crates/sue-wm" }
 sue-model = { path = "crates/sue-model" }
 sue-paint = { path = "crates/sue-paint" }
+sue-type = { path = "crates/sue-type" }
+sue-writer = { path = "crates/sue-writer" }
 
 ed25519-dalek = "3"
 semver = "1"

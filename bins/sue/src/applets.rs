@@ -29,6 +29,7 @@ pub fn launchpad() -> Result<Launchpad, WmError> {
     launchpad.register(|| Box::new(Image::default()))?;
     launchpad.register(|| Box::new(Hex::default()))?;
     launchpad.register(|| Box::new(sue_paint::PictureCard::default()))?;
+    launchpad.register(|| Box::new(sue_writer::WriterCard))?;
     // Left drawer.
     launchpad.register(|| Box::new(Files::default()))?;
     launchpad.register(|| Box::new(Player::default()))?;
@@ -41,5 +42,6 @@ pub fn launchpad() -> Result<Launchpad, WmError> {
     launchpad.register(|| Box::new(Settings::default()))?;
     // Studios.
     launchpad.register(|| Box::new(sue_paint::SuePaint::default()))?;
+    launchpad.register(|| Box::new(sue_writer::SueWriter::default()))?;
     Ok(launchpad)
 }

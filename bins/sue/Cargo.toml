@@ -17,7 +17,9 @@ sue-paint.workspace = true
 sue-pkg.workspace = true
 sue-platform.workspace = true
 sue-rice.workspace = true
+sue-type.workspace = true
 sue-wm.workspace = true
+sue-writer.workspace = true
 
 [lints]
 workspace = true

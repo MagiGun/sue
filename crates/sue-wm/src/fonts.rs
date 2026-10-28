@@ -482,7 +482,7 @@ fn read_face(file: &mut File, path: &Path, index: u32, offset: u64) -> Option<Fo
     );
     let italic = os2
         .as_ref()
-        .map_or(false, |table| table.style() != ttf_parser::Style::Normal)
+        .is_some_and(|table| table.style() != ttf_parser::Style::Normal)
         || lower.contains("italic")
         || lower.contains("oblique");
     let monospace = post

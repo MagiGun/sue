@@ -786,6 +786,15 @@ pub trait SueApplet: Send {
         let _ = (purpose, entity, cx);
     }
 
+    /// `true` if this applet takes files like `path` itself when one is
+    /// opened anywhere in Sue (a word processor's documents go to it, not
+    /// onto the canvas). It gets them through [`SueApplet::picked`] with the
+    /// purpose `import`.
+    fn opens_file(&self, path: &Path) -> bool {
+        let _ = path;
+        false
+    }
+
     /// Chords a studio uses itself while it is open, which the shell then
     /// leaves to it (Sue Paint's `Tab` hides its palettes, as painting apps
     /// do, instead of opening the command palette).

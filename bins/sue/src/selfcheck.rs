@@ -92,7 +92,7 @@ type CheckFn = fn(&mut Subject) -> Result<String, String>;
 
 /// Runs every check against `subject`, in dependency order.
 pub fn run(subject: &mut Subject) -> Report {
-    let checks: [(&'static str, CheckFn); 9] = [
+    let checks: [(&'static str, CheckFn); 10] = [
         ("platform", check_platform),
         ("rice", check_rice),
         ("arena", check_arena),
@@ -102,6 +102,7 @@ pub fn run(subject: &mut Subject) -> Report {
         ("window manager", check_window_manager),
         ("backbone", check_backbone),
         ("sue paint", check_paint_studio),
+        ("sue writer", check_writer_studio),
     ];
     Report {
         checks: checks
@@ -938,6 +939,115 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
     Ok(detail)
 }
 
+/// Sue Writer: a novel made and written, saved in the project and opened
+/// again, compiled to every publishing format, and its Word file read back.
+fn check_writer_studio(subject: &mut Subject) -> Result<String, String> {
+    use sue_model::manuscript::{self, role};
+
+    let runtime = &mut subject.runtime;
+    let studio = sue_wm::AppletId::new(sue_writer::ID).map_err(text)?;
+    let now = Instant::now();
+    let mut textures = sue_platform::NoTextures;
+    runtime.request(ShellRequest::OpenStudio(studio.clone()), &mut textures, now);
+    ensure(
+        runtime.shell.studio() == Some(&studio),
+        "Sue Writer did not open",
+    )?;
+    let depth = runtime.engine.history.depth();
+    let novel = runtime
+        .with_context(&mut textures, now, sue_writer::sample_project)
+        .ok_or("the sample novel was not made")?;
+    let steps = runtime.engine.history.depth() - depth;
+    let arena = &runtime.engine.world.arena;
+    let draft = manuscript::folder(arena, novel, role::DRAFT).ok_or("the novel has no draft")?;
+    let words = manuscript::total_words(arena, draft);
+    ensure(words > 100, "the scenes were not written")?;
+
+    // Every step undoes, and comes back.
+    for _ in 0..steps {
+        runtime
+            .engine
+            .history
+            .undo(&mut runtime.engine.world)
+            .map_err(text)?;
+    }
+    ensure(
+        runtime.engine.world.arena.get_by_id(novel).is_err(),
+        "undo left the novel behind",
+    )?;
+    for _ in 0..steps {
+        runtime
+            .engine
+            .history
+            .redo(&mut runtime.engine.world)
+            .map_err(text)?;
+    }
+    ensure(
+        manuscript::total_words(&runtime.engine.world.arena, draft) == words,
+        "redo did not bring every word back",
+    )?;
+
+    // The novel lives in the project.
+    let dir = runtime.engine.paths.cache_dir.join("self-check-writer");
+    std::fs::create_dir_all(&dir).map_err(text)?;
+    let path = dir.join("writer.sue");
+    runtime.save_project_to(&path)?;
+    let bytes = std::fs::read(&path).map_err(text)?;
+    runtime.open_project(&path, &bytes)?;
+    let arena = &runtime.engine.world.arena;
+    ensure(
+        manuscript::total_words(arena, draft) == words,
+        "the project changed the novel",
+    )?;
+
+    // Every format compiles; the Word file reads back to the same words.
+    let fonts = sue_type::Fonts::installed(12.0);
+    let look = |sheet: sue_type::StyleSheet| sue_writer::Look {
+        sheet,
+        page: sue_type::PageSetup::default(),
+        title: "The Lighthouse Keeper".to_owned(),
+        author: "A. Writer".to_owned(),
+    };
+    let mut sizes = Vec::new();
+    for (format, _, _) in sue_writer::FORMATS {
+        let options = sue_writer::Options {
+            format: (*format).to_owned(),
+            from: draft,
+            titles: sue_writer::Titles::Folders,
+            separator: sue_writer::Separator::SceneBreak,
+            title_page: true,
+            chapter_pages: true,
+        };
+        let bytes = sue_writer::compile(
+            arena,
+            &options,
+            &look(sue_type::StyleSheet::manuscript(&fonts)),
+        )?;
+        if *format == "docx" {
+            let (text, _) = sue_io::publish::from_docx(&bytes)?;
+            ensure(
+                text.contains("Mara had kept the light"),
+                "the Word file lost the text",
+            )?;
+        }
+        if *format == "pdf" {
+            ensure(bytes.starts_with(b"%PDF-"), "the PDF is not a PDF")?;
+        }
+        sizes.push((*format, bytes.len()));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    runtime.request(ShellRequest::CloseStudio, &mut textures, now);
+    let pdf = sizes
+        .iter()
+        .find(|(format, _)| *format == "pdf")
+        .map_or(0, |(_, size)| *size);
+    Ok(format!(
+        "novel of {words} words written in {steps} undo steps, undone, redone, saved in the project, compiled to {} formats (PDF {} KiB with its fonts), Word read back",
+        sizes.len(),
+        pdf.div_ceil(1024)
+    ))
+}
+
 /// Sue Paint: a layered illustration painted with the real brushes, laid
 /// over its paper, undone and redone, saved in the project and exported.
 fn check_paint_studio(subject: &mut Subject) -> Result<String, String> {
@@ -1229,7 +1339,7 @@ mod tests {
         let mut subject = Subject { host, runtime };
         let report = run(&mut subject);
         assert!(report.passed(), "{report}");
-        assert_eq!(report.checks.len(), 9);
+        assert_eq!(report.checks.len(), 10);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

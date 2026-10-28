@@ -365,10 +365,10 @@ impl TextMarks {
         let range = paragraphs(text).into_iter().nth(index)?;
         self.marks
             .iter()
-            .filter(|mark| {
+            .rev()
+            .find(|mark| {
                 mark.kind == kind && mark.range.start < range.end && range.start < mark.range.end
             })
-            .last()
             .map(|mark| &mark.value)
     }
 

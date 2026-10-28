@@ -46,8 +46,9 @@ pub struct EditorView<'a> {
     pub ink: Ink,
     /// Around the pages.
     pub desk: Color32,
-    /// The picture to show for an embedded entity, with its size in points.
-    pub figures: &'a dyn Fn(EntityId) -> Option<(egui::TextureId, Vec2)>,
+    /// The picture to show for an embedded entity (once it is uploaded),
+    /// with its size in points.
+    pub figures: &'a dyn Fn(EntityId) -> Option<(Option<egui::TextureId>, Vec2)>,
     /// Keep the caret's line in the middle of the view.
     pub typewriter: bool,
     /// Turn straight quotes into curly ones while typing.
@@ -1050,10 +1051,10 @@ impl Editor {
                     }
                 }
                 _ => {
-                    if modifiers.command {
-                        if let Some(link) = self.link_at(caret) {
-                            output.link = Some(link);
-                        }
+                    if modifiers.command
+                        && let Some(link) = self.link_at(caret)
+                    {
+                        output.link = Some(link);
                     }
                     self.set_caret(caret, modifiers.shift);
                 }
@@ -1578,7 +1579,7 @@ impl Editor {
                     size,
                 );
                 match (view.figures)(entity) {
-                    Some((texture, _)) => {
+                    Some((Some(texture), _)) => {
                         painter.image(
                             texture,
                             rect,
@@ -1586,7 +1587,7 @@ impl Editor {
                             Color32::WHITE,
                         );
                     }
-                    None => {
+                    _ => {
                         painter.rect_stroke(
                             rect,
                             2.0,

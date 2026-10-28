@@ -746,7 +746,26 @@ impl Runtime {
 
     /// Reads a file, puts it in the arena and places it on the canvas in the
     /// applet that shows its content. A `.sue` project replaces the document.
+    /// A file an applet takes itself (a Word document, for Sue Writer) goes
+    /// to that applet instead.
     pub fn open_path(&mut self, path: &Path, textures: &mut dyn TextureUpload, now: Instant) {
+        let taker = self
+            .applets
+            .iter()
+            .find(|(_, applet)| applet.opens_file(path))
+            .map(|(manifest, _)| manifest.id.clone());
+        if let Some(to) = taker {
+            self.request(
+                ShellRequest::SendFile {
+                    to,
+                    purpose: "import".to_owned(),
+                    path: path.to_path_buf(),
+                },
+                textures,
+                now,
+            );
+            return;
+        }
         let name = file_name(path);
         let limit_mib = self
             .engine
@@ -1766,6 +1785,211 @@ pub(crate) mod tests {
             start,
         );
         assert_eq!(runtime.shell.studio(), Some(&paint));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn sue_writer_makes_a_novel_types_undoes_takes_a_picture_and_compiles() {
+        let (mut runtime, root) = runtime("sue-writer");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        runtime.request(ShellRequest::Hub(false), &mut NoTextures, start);
+        let writer = AppletId::new(sue_writer::ID).unwrap();
+        // A novel from the New File wheel: made, put on the canvas, opened.
+        runtime.request(
+            ShellRequest::Create {
+                applet: writer.clone(),
+                key: "novel".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        assert_eq!(runtime.shell.studio(), Some(&writer));
+        let arena = &runtime.engine.world.arena;
+        let novel = arena
+            .iter()
+            .find(|(_, entity)| sue_model::manuscript::is_manuscript(entity))
+            .map(|(_, entity)| entity.id())
+            .expect("a manuscript");
+        assert!(
+            runtime
+                .engine
+                .world
+                .scene
+                .iter()
+                .any(|(_, node)| node.applet.as_str() == sue_writer::CARD_ID),
+            "its card is on the canvas"
+        );
+        let draft = sue_model::manuscript::folder(arena, novel, sue_model::manuscript::role::DRAFT)
+            .unwrap();
+        let scene = sue_model::manuscript::walk(arena, draft)
+            .into_iter()
+            .map(|(id, _)| id)
+            .find(|id| {
+                arena
+                    .get_by_id(*id)
+                    .is_ok_and(sue_model::manuscript::is_document)
+            })
+            .unwrap();
+        let text = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .get_by_id(scene)
+                .unwrap()
+                .string_buffer()
+                .unwrap()
+                .as_str()
+                .to_owned()
+        };
+
+        // Typing goes into the first scene (the editor has the keyboard).
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![egui::Event::Text("It was a dark night.".to_owned())]
+            } else {
+                Vec::new()
+            }
+        });
+        assert_eq!(text(&runtime), "It was a dark night.\n");
+        // A pause ends the burst of typing.
+        runtime.typing.flush(&mut runtime.engine.history);
+        // Ctrl+B with nothing selected: what is typed next is bold.
+        let key = |key: egui::Key, modifiers: egui::Modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        frames(&mut runtime, &ctx, size, start, |frame| match frame {
+            1 => vec![key(egui::Key::B, egui::Modifiers::COMMAND)],
+            2 => vec![egui::Event::Text(" Bold.".to_owned())],
+            _ => Vec::new(),
+        });
+        assert_eq!(text(&runtime), "It was a dark night. Bold.\n");
+        let marks = runtime
+            .engine
+            .world
+            .arena
+            .get_by_id(scene)
+            .unwrap()
+            .ext::<sue_model::TextMarks>()
+            .cloned()
+            .unwrap();
+        assert!(
+            marks.covers(21..26, sue_model::mark_kind::BOLD),
+            "{marks:?}"
+        );
+        // Undo takes the burst back, its formatting too.
+        runtime.typing.flush(&mut runtime.engine.history);
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]
+            } else {
+                Vec::new()
+            }
+        });
+        assert_eq!(text(&runtime), "It was a dark night.\n");
+
+        // A Sue Paint picture sent to Sue Writer goes into the text.
+        let picture = runtime
+            .with_context(&mut NoTextures, start, |cx| {
+                sue_paint::sample_picture(cx, 64, 48)
+            })
+            .unwrap();
+        runtime.request(
+            ShellRequest::SendEntity {
+                to: writer.clone(),
+                purpose: "figure".to_owned(),
+                entity: picture,
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let marks = runtime
+            .engine
+            .world
+            .arena
+            .get_by_id(scene)
+            .unwrap()
+            .ext::<sue_model::TextMarks>()
+            .cloned()
+            .unwrap();
+        assert!(
+            marks
+                .marks()
+                .iter()
+                .any(|mark| mark.kind == sue_model::mark_kind::EMBED
+                    && mark.value == sue_core::Value::Entity(picture)),
+            "the picture is in the text"
+        );
+
+        // The Sue menu has Sue Writer's own wheel first.
+        runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
+        let first = runtime.shell.sue_menu_labels();
+        assert_eq!(first[0], "Sue Writer \u{203a}", "{first:?}");
+        runtime.shell.dismiss_overlays();
+
+        // Compile to Markdown and to PDF, as the File Manager answers.
+        for (format, ext) in [("md", "md"), ("pdf", "pdf"), ("docx", "docx")] {
+            let home = runtime.engine.catalog.folders["home"].clone();
+            std::fs::create_dir_all(&home).unwrap();
+            let path = home.join(format!("novel.{ext}"));
+            runtime.request(
+                ShellRequest::Picked {
+                    pick: FilePick::save(
+                        Some(writer.clone()),
+                        &format!("compile.{format}"),
+                        "Export",
+                        "novel",
+                    ),
+                    path: path.clone(),
+                },
+                &mut NoTextures,
+                start,
+            );
+            let bytes = std::fs::read(&path)
+                .unwrap_or_else(|_| panic!("{format} was written: {:?}", runtime.shell.message()));
+            if format == "md" {
+                let markdown = String::from_utf8(bytes).unwrap();
+                assert!(markdown.contains("Chapter 1"), "{markdown}");
+                assert!(markdown.contains("It was a dark night."));
+            } else if format == "pdf" {
+                assert!(bytes.starts_with(b"%PDF"));
+            }
+        }
+        // Opening a Word file anywhere in Sue brings it into Sue Writer.
+        let docs = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .filter(|(_, entity)| sue_model::manuscript::is_document(entity))
+                .count()
+        };
+        let before = docs(&runtime);
+        let word = runtime.engine.catalog.folders["home"].join("novel.docx");
+        runtime.open_path(&word, &mut NoTextures, start);
+        assert_eq!(
+            docs(&runtime),
+            before + 1,
+            "the Word file is a document now"
+        );
+        assert!(
+            runtime.engine.world.arena.iter().any(|(_, entity)| entity
+                .string_buffer()
+                .is_some_and(|text| text.as_str().contains("It was a dark night."))
+                && entity.name() == "novel"),
+            "with its text"
+        );
+        assert_eq!(runtime.shell.studio(), Some(&writer));
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -290,8 +290,7 @@ pub fn paragraphs(text: &str, marks: &TextMarks) -> Vec<Para> {
                 range.start..range.end - usize::from(text[range.clone()].ends_with('\n'));
             let value = |name: &str| {
                 own.iter()
-                    .filter(|mark| mark.kind == name)
-                    .last()
+                    .rfind(|mark| mark.kind == name)
                     .map(|mark| &mark.value)
             };
             let number = |name: &str| value(name).and_then(Value::as_f64).map(|v| v as f32);
@@ -305,7 +304,7 @@ pub fn paragraphs(text: &str, marks: &TextMarks) -> Vec<Para> {
                 })
                 .or_else(|| value(kind::QUOTE).map(|_| "quote".to_owned()))
                 .unwrap_or_else(|| "body".to_owned());
-            let embed = (&text[body.clone()] == sue_model::OBJECT.to_string())
+            let embed = (text[body.clone()] == sue_model::OBJECT.to_string())
                 .then(|| {
                     own.iter()
                         .find(|mark| mark.kind == kind::EMBED)
