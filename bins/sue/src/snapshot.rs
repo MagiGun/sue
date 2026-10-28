@@ -365,6 +365,35 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     }
     shoot(&mut runtime, &mut camera, "09-drawers-image")?;
 
+    // 9b. The large File Manager, as cards with picture thumbnails.
+    let _ = runtime
+        .engine
+        .world
+        .rice
+        .set("files.view", sue_rice::RiceValue::Text("cards".to_owned()));
+    runtime.request(
+        ShellRequest::OpenWindow(
+            AppletId::new(crate::files::ID).map_err(|error| error.to_string())?,
+        ),
+        &mut camera.painter,
+        camera.now,
+    );
+    camera.settle(&mut runtime);
+    for _ in 0..40 {
+        // The thumbnails come from a background thread.
+        runtime.timer(&mut camera.painter, camera.now);
+        let output = camera.frame(&mut runtime);
+        camera.painter.apply_textures(output.textures_delta);
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    shoot(&mut runtime, &mut camera, "09b-file-manager")?;
+    runtime.shell.close_window();
+    let _ = runtime
+        .engine
+        .world
+        .rice
+        .set("files.view", sue_rice::RiceValue::Text("list".to_owned()));
+
     // 10. Code / Hex on an unknown file, with the History drawer.
     runtime.open_path(&home.join("archive.zip"), &mut camera.painter, camera.now);
     runtime.request(

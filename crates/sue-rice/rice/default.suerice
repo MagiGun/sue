@@ -10,7 +10,7 @@
 # Text after the metadata becomes the description shown in Settings.
 
 [general]
-workspace_dir = ""             # @text Folder the Files drawer opens in (empty for your home folder)
+workspace_dir = ""             # @text Folder the File Manager opens in (empty for your home folder)
 autosave_seconds = 30          # [0..600] Save notes this often, in seconds (0 turns autosave off)
 confirm_on_exit = true         # Ask before closing the window
 
@@ -91,6 +91,10 @@ wheel_line_px = 48             # [8..200] Pixels scrolled per mouse-wheel notch 
 
 [files]
 show_hidden = false            # List files and folders whose names start with a dot
+view = "list"                  # {list|cards} How the File Manager shows a folder
+sort = "name"                  # {name|modified|size|kind} What the File Manager sorts by (folders come first)
+card_size = 112                # [64..256] Width of the File Manager's cards (px)
+saved = ""                     # @text Saved folders, separated by |
 
 [io]
 jxl_effort = 7                 # [1..9] JPEG XL effort for conversions (higher is smaller and slower)

@@ -1202,6 +1202,30 @@ impl Shell {
             ShellRequest::CloseStudio => self.close_studio(io, true),
             ShellRequest::Hub(open) => self.set_hub(open),
             ShellRequest::Saved { path, note } => self.notify_saved(&path, &note),
+            ShellRequest::CloseWindow => self.close_window(),
+            ShellRequest::OpenWindow(id) => self.open_window(id),
+            ShellRequest::PickFile(pick) => {
+                // The first applet that picks files shows it in its window.
+                let picker = io.applets.iter_mut().find_map(|(manifest, applet)| {
+                    applet.begin_pick(&pick).then(|| manifest.id.clone())
+                });
+                match picker {
+                    Some(id) => self.open_window(id),
+                    None => return Some(ShellRequest::PickFile(pick)),
+                }
+            }
+            ShellRequest::Picked { pick, path } => {
+                self.close_window();
+                let Some(requester) = pick.requester.clone() else {
+                    return Some(ShellRequest::Picked { pick, path });
+                };
+                let view = self.view(now, 0.0);
+                let theme = self.theme.clone();
+                let (applets, mut cx) = split(io, &theme, view);
+                if let Some(applet) = applets.get_mut(&requester) {
+                    applet.picked(&pick, &path, &mut cx);
+                }
+            }
             other => return Some(other),
         }
         self.touch();
@@ -3124,8 +3148,14 @@ impl Shell {
         let at = screen.center() - size / 2.0 + vec2(0.0, (1.0 - appear) * 18.0);
         let name = io
             .applets
-            .manifest(&id)
-            .map_or_else(String::new, |manifest| manifest.name.clone());
+            .get(&id)
+            .and_then(|applet| applet.window_title())
+            .or_else(|| {
+                io.applets
+                    .manifest(&id)
+                    .map(|manifest| manifest.name.clone())
+            })
+            .unwrap_or_default();
         let view = self.view(now, dt);
         let mut close = false;
         egui::Area::new(Id::unique("sue-window"))

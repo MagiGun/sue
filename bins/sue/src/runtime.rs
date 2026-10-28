@@ -20,7 +20,9 @@ use sue_platform::{
     AudioConfig, AudioOutput, AudioSink, FileFilter, FramePacing, TextureUpload, write_atomic,
 };
 use sue_rice::{RiceSchema, SetRiceValues};
-use sue_wm::{Applets, RiceEdit, Shell, ShellIo, ShellRequest, Theme, Transport, Typing, widgets};
+use sue_wm::{
+    Applets, FilePick, RiceEdit, Shell, ShellIo, ShellRequest, Theme, Transport, Typing, widgets,
+};
 
 use crate::document::{KIND, KIND_CODE};
 use crate::engine::{Engine, NOTE_NAME};
@@ -529,6 +531,10 @@ impl Runtime {
                     Some(ShellRequest::Fail(text)) => self.shell.notify(text, true),
                     Some(ShellRequest::OpenFile(path)) => self.open_path(&path, textures, now),
                     Some(ShellRequest::Command(command)) => self.run_command(&command),
+                    Some(ShellRequest::Picked { pick, path }) => {
+                        self.picked(&pick, &path, textures, now);
+                    }
+                    Some(ShellRequest::PickFile(pick)) => self.pick_with_system_dialog(pick),
                     Some(_) | None => {}
                 }
             }
@@ -598,15 +604,73 @@ impl Runtime {
         }
     }
 
+    /// Asks the File Manager for a file to open on the canvas.
     fn pick_and_open(&mut self) {
+        self.engine
+            .requests
+            .push(ShellRequest::PickFile(FilePick::open(
+                None,
+                "open",
+                "Open File",
+            )));
+    }
+
+    /// Carries out a file the File Manager picked for the shell or engine.
+    fn picked(
+        &mut self,
+        pick: &FilePick,
+        path: &Path,
+        textures: &mut dyn TextureUpload,
+        now: Instant,
+    ) {
+        match pick.purpose.as_str() {
+            "open" => self.open_path(path, textures, now),
+            "save-project" => {
+                if let Err(error) = self.save_project_to(path) {
+                    self.shell
+                        .notify(format!("Cannot save {}: {error}", file_name(path)), true);
+                }
+            }
+            "export-rice" => {
+                let text = self.engine.world.rice.to_suerice();
+                match write_atomic(path, text.as_bytes()) {
+                    Ok(()) => self.shell.notify_saved(path, "rice"),
+                    Err(error) => self.shell.notify(format!("Export failed: {error}"), true),
+                }
+            }
+            other => self
+                .shell
+                .notify(format!("Nothing asked for a file to {other}"), true),
+        }
+    }
+
+    /// No applet picks files: the system dialog answers instead.
+    fn pick_with_system_dialog(&mut self, pick: FilePick) {
         if !self.interactive {
             self.shell
                 .notify("Choosing files needs the desktop window", false);
             return;
         }
-        let start = self.engine.paths.home_dir.clone();
-        if let Some(path) = sue_platform::pick_open_file("Open File", Some(&start), &[]) {
-            self.engine.requests.push(ShellRequest::OpenFile(path));
+        let filters = if pick.extensions.is_empty() {
+            Vec::new()
+        } else {
+            vec![FileFilter {
+                name: "Files".to_owned(),
+                extensions: pick.extensions.clone(),
+            }]
+        };
+        let start = pick
+            .start
+            .clone()
+            .unwrap_or_else(|| self.engine.paths.home_dir.clone());
+        let path = match &pick.save_as {
+            Some(name) => sue_platform::pick_save_file(&pick.title, Some(&start), name, &filters),
+            None => sue_platform::pick_open_file(&pick.title, Some(&start), &filters),
+        };
+        if let Some(path) = path {
+            self.engine
+                .requests
+                .push(ShellRequest::Picked { pick, path });
         }
     }
 
@@ -621,26 +685,19 @@ impl Runtime {
     pub fn save_project(&mut self, choose: bool) {
         let path = match (&self.project, choose) {
             (Some(path), false) => path.clone(),
-            _ if !self.interactive => {
-                self.shell
-                    .notify("Choosing where to save needs the desktop window", false);
-                return;
-            }
             _ => {
-                let filters = [FileFilter {
-                    name: "Sue project".to_owned(),
-                    extensions: vec!["sue".to_owned()],
-                }];
-                let start = self.engine.paths.home_dir.clone();
-                match sue_platform::pick_save_file(
-                    "Save Project",
-                    Some(&start),
-                    "Untitled.sue",
-                    &filters,
-                ) {
-                    Some(path) => path,
-                    None => return,
-                }
+                // The File Manager asks where; `picked` saves.
+                let start = self
+                    .project
+                    .as_ref()
+                    .and_then(|path| path.parent().map(Path::to_path_buf))
+                    .unwrap_or_else(|| self.engine.paths.home_dir.clone());
+                self.engine.requests.push(ShellRequest::PickFile(
+                    FilePick::save(None, "save-project", "Save Project", "Untitled.sue")
+                        .extensions(&["sue"])
+                        .starting_in(Some(start)),
+                ));
+                return;
             }
         };
         if let Err(error) = self.save_project_to(&path) {
@@ -859,25 +916,13 @@ impl Runtime {
     }
 
     fn export_rice(&mut self) {
-        if !self.interactive {
-            self.shell
-                .notify("Exporting needs the desktop window", false);
-            return;
-        }
-        let filters = [FileFilter {
-            name: "Rice files".to_owned(),
-            extensions: vec!["suerice".to_owned()],
-        }];
+        // The File Manager asks where; `picked` writes it.
         let start = self.engine.paths.home_dir.clone();
-        if let Some(path) =
-            sue_platform::pick_save_file("Export Rice", Some(&start), "my.suerice", &filters)
-        {
-            let text = self.engine.world.rice.to_suerice();
-            match write_atomic(&path, text.as_bytes()) {
-                Ok(()) => self.shell.notify_saved(&path, "rice"),
-                Err(error) => self.shell.notify(format!("Export failed: {error}"), true),
-            }
-        }
+        self.engine.requests.push(ShellRequest::PickFile(
+            FilePick::save(None, "export-rice", "Export Rice", "my.suerice")
+                .extensions(&["suerice"])
+                .starting_in(Some(start)),
+        ));
     }
 
     /// Runs `work` with an applet context, as an applet would (snapshots,
@@ -1294,6 +1339,78 @@ pub(crate) mod tests {
         );
         assert!(runtime.shell.message().unwrap().0.starts_with("File: "));
         assert_eq!(runtime.shell.message_path(), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn studios_and_the_canvas_open_files_through_the_file_manager() {
+        let (mut runtime, root) = runtime("pick");
+        std::fs::create_dir_all(&root).unwrap();
+        let picture = root.join("photo.png");
+        let pixels = [255_u8, 0, 0, 255].repeat(16);
+        std::fs::write(&picture, sue_io::encode_png_rgba(4, 4, &pixels).unwrap()).unwrap();
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
+            Vec::new()
+        });
+        let pictures = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .filter(|(_, entity)| sue_model::picture::is_picture(entity))
+                .count()
+        };
+
+        // Sue Paint asks; the File Manager's window answers.
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let pick = FilePick::open(Some(paint), "open", "Open Picture").extensions(&["png"]);
+        runtime.request(ShellRequest::PickFile(pick.clone()), &mut NoTextures, start);
+        assert_eq!(
+            runtime.shell.window().map(AppletId::as_str),
+            Some(crate::files::ID)
+        );
+        let before = pictures(&runtime);
+        runtime.request(
+            ShellRequest::Picked {
+                pick,
+                path: picture.clone(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(pictures(&runtime), before + 1, "Sue Paint opened it");
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
+            Vec::new()
+        });
+        assert_eq!(runtime.shell.window(), None, "the window closed");
+
+        // Ctrl+O on the canvas goes the same way.
+        let nodes = runtime.engine.world.scene.len();
+        runtime.request(
+            ShellRequest::Command("file.open".to_owned()),
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(
+            runtime.shell.window().map(AppletId::as_str),
+            Some(crate::files::ID)
+        );
+        runtime.request(
+            ShellRequest::Picked {
+                pick: FilePick::open(None, "open", "Open File"),
+                path: picture,
+            },
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(
+            runtime.engine.world.scene.len(),
+            nodes + 1,
+            "it is on the canvas"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

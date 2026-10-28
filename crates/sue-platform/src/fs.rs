@@ -43,6 +43,20 @@ const LEGACY_JUNCTIONS: [&str; 10] = [
     "Templates",
 ];
 
+/// The tops of the file systems: the drive letters in use on Windows, `/`
+/// elsewhere.
+#[must_use]
+pub fn roots() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        (b'A'..=b'Z')
+            .map(|letter| PathBuf::from(format!("{}:\\", char::from(letter))))
+            .filter(|drive| drive.is_dir())
+            .collect()
+    } else {
+        vec![PathBuf::from("/")]
+    }
+}
+
 /// `true` for entries the OS hides from people: dot files everywhere, and
 /// the legacy junctions on Windows.
 #[must_use]

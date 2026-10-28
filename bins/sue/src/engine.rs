@@ -110,7 +110,7 @@ pub fn shell_declarations() -> Vec<RiceDeclaration> {
         declare(
             "general.workspace_dir",
             text(""),
-            "Folder the Files drawer opens in (empty for your home folder)",
+            "Folder the File Manager opens in (empty for your home folder)",
         ),
         declare(
             "general.autosave_seconds",
@@ -421,8 +421,8 @@ impl Engine {
                 vec![
                     group("Startup", vec![param("launchpad.boot_mode")]),
                     group(
-                        "Workspace",
-                        params(&["general.workspace_dir", "files.show_hidden"]),
+                        "File Manager",
+                        vec![param("general.workspace_dir"), section("files")],
                     ),
                     group(
                         "Saving",

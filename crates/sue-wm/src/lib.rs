@@ -44,8 +44,8 @@ pub mod widgets;
 mod world;
 
 pub use applet::{
-    AppletContext, AppletError, AppletId, AppletManifest, AppletRole, FileTemplate, MediaClass,
-    ModeSpec, PaletteEntry, ShellRequest, ShellView, SueApplet, Tick,
+    AppletContext, AppletError, AppletId, AppletManifest, AppletRole, FilePick, FileTemplate,
+    MediaClass, ModeSpec, PaletteEntry, ShellRequest, ShellView, SueApplet, Tick,
 };
 pub use camera::Camera;
 pub use catalog::{

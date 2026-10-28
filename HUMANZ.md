@@ -646,7 +646,7 @@ the `PlatformHost` trait and the portable services next to it:
 | Service | What it does |
 | --- | --- |
 | `AudioOutput` / `AudioSink` | A `cpal` output stream fed from a lock-free ring (§3.5); `NullAudio` is a device-free clock for tests |
-| `list_dir`, `hidden_by_os`, `write_atomic` | Sorted folder listings for the Files drawer, without dot files or, on Windows, the legacy junctions (`NetHood`, `PrintHood`, `Cookies`, `SendTo`, `Recent`, `Start Menu`, `Templates`, `Application Data`, `Local Settings`, `My Documents`); crash-safe writes (temporary file, sync, rename) |
+| `list_dir`, `hidden_by_os`, `roots`, `write_atomic` | Sorted folder listings for the File Manager, the drives (or `/`), without dot files or, on Windows, the legacy junctions (`NetHood`, `PrintHood`, `Cookies`, `SendTo`, `Recent`, `Start Menu`, `Templates`, `Application Data`, `Local Settings`, `My Documents`); crash-safe writes (temporary file, sync, rename) |
 | `copy_text` | The system clipboard (`arboard`) for buttons such as Copy All; text fields copy and paste through `egui-winit` |
 | `EguiPainter`, `TextureUpload` | Paints egui frames with `egui-wgpu` into the window or an offscreen texture; uploads image pixels the caller borrows from the arena straight into GPU textures (rule 5) |
 | `open_url`, `reveal_folder` | The system browser (only `http` and `https`, validated by `web_url`) and file manager |
@@ -960,6 +960,17 @@ mode, spawn or create from a template, place an entity, open or close a
 studio, open the timeline or Settings, open a file, run an engine command,
 show a message.
 
+**Asking for a file.** No studio opens the system's file dialog itself. It
+sends `ShellRequest::PickFile(FilePick)` (who asks, what for, a title, the
+extensions it takes, a file name when saving, a folder to start in); the
+shell hands it to the first applet whose `begin_pick` takes it (the File
+Manager) and shows that applet's window, titled by `window_title`. The
+chosen path comes back as `ShellRequest::Picked`, which the shell delivers
+to the asking applet's `picked`; a pick with no applet behind it (opening on
+the canvas, saving the project, exporting the rice) goes to the engine.
+The File Manager's System Dialog button, or a build without a picking
+applet, falls back to the native dialog.
+
 **The scene.** `World` holds the arena, the live rice and the `Scene`: one
 `SceneNode` per card on the canvas, holding an `AssetHandle`, the applet that
 draws it, its rect in canvas units, its stacking order and a few numeric
@@ -1022,7 +1033,7 @@ register its own:
 | Audio | Node | Audio (palette only); Audio: Tone (A 440), Silence (10 s); Audio Track | Waveform of a clip of a `PCMFloat1D`; Play or Pause, Gain, Split (zero-copy), Normalize, Open in Timeline |
 | Image | Node | Image (palette only); Paint/Visual Track | Decoded JPEG XL, PNG or JPEG; 1:1 Zoom, Pixel Grid, Re-encode .jxl (bit-exact for JPEG when a codec allows), Inspect Hex |
 | Code / Hex | Node | Code / Hex (palette only); Code: Rust, Python, JavaScript, HTML, CSS, JSON, Shell Script | Code in a monospace `TextEdit`, or a selectable hex dump of any file's bytes; Copy All |
-| Files | Left drawer | n/a | Folders with quick jumps (Project, Desktop, Documents, Downloads, Pictures, Music); files open on the canvas |
+| File Manager | Left drawer and window | n/a | Folder tabs with back and forward; a typed or copied path bar; list or card view (`files.view`), sort (`files.sort`), card size; picture thumbnails decoded and shrunk on a background thread; search of the folder or, on a background thread, everything under it (2,000 results, 200,000 entries at most); places (project, home and its usual folders, `sue_platform::roots`) and saved folders (`files.saved`, undoable rice edits); new folder, rename, copy path, show in Explorer; the large window answers every `FilePick` |
 | Player | Left drawer | n/a | Every decoded track as a playlist; waveform scrubber, play, stop, volume |
 | Convert | Left drawer | n/a | Pictures to lossless JPEG XL, PNG or JPEG (`io.jpeg_quality`), songs to 16-bit WAV |
 | Notes | Left drawer | n/a | One shared note in a `TextEdit`, autosaved every `general.autosave_seconds` and on exit |
@@ -1170,7 +1181,7 @@ packages can add their own:
 
 | Page | Holds |
 | --- | --- |
-| General | Where Sue opens (the Hub, the canvas or a studio), the Files folder, hidden files, autosave interval, quit confirmation, the note file and its text size |
+| General | Where Sue opens (the Hub, the canvas or a studio), the File Manager's folder, hidden files, view, sort, card size and saved folders, autosave interval, quit confirmation, the note file and its text size |
 | Appearance & Rice | Theme presets, every color, geometry (padding, hairlines, radii, pill and rail sizes, drawer and timeline sizes, the marking menu, shadows), the canvas (zoom limits, wheel step, grid), typography, the rice file with Reload, Export and Open Folder |
 | Display & Graphics | The performance preference (`profile.hardware`, labeled Performance Preference) and the active profile; the GPU preference (picked by adapter type: integrated, discrete, or the display's GPU), the GPU drawing, every GPU found and Restart Sue (the GPU is chosen at startup); the frame-rate cap, the settle grace, UI scale, list wheel speed, motion (instant snap, animation speed, drawer and camera spring constants, caret blink, message time) |
 | Audio & DSP | Output device, sample rate, buffer size, real-time priority, volume, and the live stream and real-time status |

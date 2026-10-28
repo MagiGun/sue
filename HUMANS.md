@@ -150,9 +150,20 @@ to play: audio blocks sound as the playhead passes them.
 The thin **rails** at the far left and far right hold one icon per tool. Click
 one to slide its drawer open; click it again to tuck it away.
 
-- **Files** (left): browse folders, with quick jumps to your project, Desktop,
-  Documents, Downloads, Pictures and Music. Click a file to put it on the
-  canvas. Hidden system clutter stays hidden.
+- **File Manager** (left): your folders, in tabs (`+` opens another tab on the
+  same folder, `×` closes one), each with its own Back and Forward. Show a
+  folder as a **list** (name, how long ago it changed, size) or as **cards**,
+  where pictures show a small preview. Sort by name, date, size or kind.
+  Search the folder as you type, or turn on **Subfolders** to search
+  everything under it. The path bar shows the folder you are in: copy it,
+  or type any folder and press Enter to go there. Click a file to select it
+  (its full path appears, with Copy Path, Rename, Show in Explorer and
+  Open); double-click to open it on the canvas. **Save Folder** keeps a
+  folder under Saved, next to your project, home folder, Desktop,
+  Documents, Downloads, Pictures, Music, Videos and drives. **New Folder**
+  makes one, and **Open in Explorer** shows the folder in your system's file
+  manager. "Open the large File Manager" shows it all in a big window.
+  Hidden system clutter stays hidden.
 - **Player** (left): play music (MP3, FLAC, WAV, Ogg, M4A) while you work in any
   mode, with a waveform you can click to jump, and a volume slider.
 - **Convert** (left): turn a picture into JPEG XL, PNG or JPEG, or a song into
@@ -236,7 +247,10 @@ familiar:
 
 `Ctrl+N` makes a new canvas: pick a preset or a paper size, a unit, a
 resolution and a paper color. `Ctrl+O` opens a PNG, JPEG or JPEG XL picture,
-and File, then Export Single Layer, saves your picture as one again. `Alt+I`
+and File, then Export Single Layer, saves your picture as one again. Both
+open the Sue File Manager, showing only the pictures it can read; type a file
+name to save, or click System Dialog to use your system's own window
+instead. `Alt+I`
 lists every shortcut.
 
 Your pictures are part of your project: `Ctrl+S` saves them with everything
@@ -259,8 +273,9 @@ Press `Ctrl+S` to save your work as a **project**, a single `.sue` file. It
 holds everything on the canvas: your documents, pictures, sounds and whatever
 else you made, how they are linked, and where each card sits. The first time,
 Sue asks where to save; after that `Ctrl+S` just saves. "Save Project As" in the
-command palette picks a new file. Open a project like any other file (the Files
-drawer, `Ctrl+O`, or drop it on the window) and the canvas comes back exactly as
+command palette picks a new file. Choosing where to save, and `Ctrl+O`, both
+open the Sue File Manager. Open a project like any other file (the File
+Manager, `Ctrl+O`, or drop it on the window) and the canvas comes back exactly as
 you left it. Your quick note is yours alone and never goes into projects.
 
 A few things make projects safe to keep for years:

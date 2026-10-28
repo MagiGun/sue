@@ -19,11 +19,11 @@ use sue_core::{
 use sue_io::{JxlPipeline, NativeJxlPipeline};
 use sue_model::class;
 use sue_model::picture::{self, LayerKind};
-use sue_platform::{FileFilter, write_atomic};
+use sue_platform::write_atomic;
 use sue_rice::{RiceDeclaration, RiceParameter};
 use sue_wm::{
-    AppletContext, AppletId, AppletManifest, AppletRole, ArenaEdit, ItemState, Menu, MenuBar,
-    ModeSpec, PaletteEntry, ShellRequest, SueApplet, World,
+    AppletContext, AppletId, AppletManifest, AppletRole, ArenaEdit, FilePick, ItemState, Menu,
+    MenuBar, ModeSpec, PaletteEntry, ShellRequest, SueApplet, World,
 };
 
 use crate::brush::{Stabilizer, Stroke};
@@ -202,6 +202,8 @@ pub struct SuePaint {
     pub(crate) thumbs: HashMap<EntityId, (u64, Vec<u8>, [u32; 2])>,
     pub(crate) preview: Option<(u64, Vec<u8>)>,
     pub(crate) last_dir: Option<PathBuf>,
+    /// An encoded export waiting for the File Manager to say where it goes.
+    pub(crate) pending_export: Option<Vec<u8>>,
     pub(crate) shown: bool,
     /// The time of the pointer sample being handled and the time between
     /// samples this frame, in seconds.
@@ -254,6 +256,7 @@ impl Default for SuePaint {
             thumbs: HashMap::new(),
             preview: None,
             last_dir: None,
+            pending_export: None,
             shown: false,
             clock: (0.0, 1.0 / 60.0),
             hide: 0.0,
@@ -793,24 +796,33 @@ impl SuePaint {
             }
         };
         let file = format!("{name}.{ext}");
-        let path = if cx.view.interactive {
-            let filters = [FileFilter {
-                name: ext.to_uppercase(),
-                extensions: vec![ext.to_owned()],
-            }];
+        if cx.view.interactive {
+            // The File Manager asks where; `picked` writes it.
             let start = self.last_dir.clone().unwrap_or_else(|| export_dir(cx));
-            match sue_platform::pick_save_file("Export", Some(&start), &file, &filters) {
-                Some(path) => path,
-                None => return,
-            }
+            self.pending_export = Some(bytes);
+            cx.request(ShellRequest::PickFile(
+                FilePick::save(
+                    Some(AppletId::new(ID).expect("a valid id")),
+                    "export",
+                    "Export",
+                    &file,
+                )
+                .extensions(&[ext])
+                .starting_in(Some(start)),
+            ));
         } else {
-            free_path(&export_dir(cx).join(&file))
-        };
+            let path = free_path(&export_dir(cx).join(&file));
+            self.write_export(cx, &path, &bytes);
+        }
+    }
+
+    /// Writes an encoded export to `path` and says where it went.
+    fn write_export(&mut self, cx: &mut AppletContext<'_>, path: &Path, bytes: &[u8]) {
         if let Some(dir) = path.parent() {
             self.last_dir = Some(dir.to_path_buf());
         }
-        match write_atomic(&path, &bytes) {
-            Ok(()) => cx.saved(&path, format!("{} KiB", bytes.len().div_ceil(1024))),
+        match write_atomic(path, bytes) {
+            Ok(()) => cx.saved(path, format!("{} KiB", bytes.len().div_ceil(1024))),
             Err(error) => cx.fail(format!("Cannot write {}: {error}", path.display())),
         }
     }
@@ -818,28 +830,30 @@ impl SuePaint {
     /// Asks for a picture file and opens it as a new canvas, or as a new
     /// layer of the current one.
     fn pick_image(&mut self, cx: &mut AppletContext<'_>, as_layer: bool) {
-        if !cx.view.interactive {
-            cx.notify("Choosing files needs the desktop window");
-            return;
-        }
-        let filters = [FileFilter {
-            name: "Pictures".to_owned(),
-            extensions: ["png", "jpg", "jpeg", "jxl"].map(String::from).to_vec(),
-        }];
         let start = self
             .last_dir
             .clone()
             .or_else(|| cx.catalog.folders.get("home").cloned());
-        let Some(path) = sue_platform::pick_open_file("Open Picture", start.as_deref(), &filters)
-        else {
-            return;
+        let (purpose, title) = if as_layer {
+            ("layer", "Import Picture as a Layer")
+        } else {
+            ("open", "Open Picture")
         };
+        cx.request(ShellRequest::PickFile(
+            FilePick::open(Some(AppletId::new(ID).expect("a valid id")), purpose, title)
+                .extensions(&["png", "jpg", "jpeg", "jxl"])
+                .starting_in(start),
+        ));
+    }
+
+    /// Opens the picture file at `path` as a new canvas, or as a new layer.
+    fn open_picked(&mut self, cx: &mut AppletContext<'_>, path: &Path, as_layer: bool) {
         if let Some(dir) = path.parent() {
             self.last_dir = Some(dir.to_path_buf());
         }
-        match std::fs::read(&path) {
+        match std::fs::read(path) {
             Ok(bytes) => {
-                if let Err(error) = self.open_bytes(cx, &path, &bytes, as_layer) {
+                if let Err(error) = self.open_bytes(cx, path, &bytes, as_layer) {
                     cx.fail(error);
                 }
             }
@@ -1948,6 +1962,19 @@ impl SueApplet for SuePaint {
 
     fn studio_focus(&self) -> Option<EntityId> {
         self.picture()
+    }
+
+    fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
+        match pick.purpose.as_str() {
+            "open" => self.open_picked(cx, path, false),
+            "layer" => self.open_picked(cx, path, true),
+            "export" => {
+                if let Some(bytes) = self.pending_export.take() {
+                    self.write_export(cx, path, &bytes);
+                }
+            }
+            _ => {}
+        }
     }
 
     fn templates(&self) -> Vec<sue_wm::FileTemplate> {

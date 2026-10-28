@@ -9,7 +9,7 @@
 //! them.
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use egui::{Ui, Vec2, vec2};
@@ -258,6 +258,19 @@ pub enum ShellRequest {
     CloseStudio,
     /// Show or hide the Hub, the list of studios.
     Hub(bool),
+    /// Ask for a file through the File Manager.
+    PickFile(FilePick),
+    /// The file a [`FilePick`] asked for.
+    Picked {
+        /// The request it answers.
+        pick: FilePick,
+        /// The chosen file (for a save, where to write it).
+        path: PathBuf,
+    },
+    /// Show an applet's window (its `window_ui`) floating over the screen.
+    OpenWindow(AppletId),
+    /// Close the floating window.
+    CloseWindow,
     /// A file was written: say where, and show it in its folder on a click.
     Saved {
         /// The file.
@@ -265,6 +278,71 @@ pub enum ShellRequest {
         /// What it is, e.g. `JPEG XL, lossless, 1.2 MiB`.
         note: String,
     },
+}
+
+/// A request for a file, answered by the applet that picks files (the File
+/// Manager) in a window: one to open, or where to save one.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FilePick {
+    /// Who gets the file: an applet, or `None` for the shell and engine
+    /// (opening on the canvas, saving the project).
+    pub requester: Option<AppletId>,
+    /// What the file is for, handed back with it, e.g. `open` or `layer`.
+    pub purpose: String,
+    /// The window's title, e.g. `Open Picture`.
+    pub title: String,
+    /// Extensions it takes, without the dot; empty takes any file.
+    pub extensions: Vec<String>,
+    /// `Some(name)` to choose where to save, starting with that file name.
+    pub save_as: Option<String>,
+    /// The folder to start in.
+    pub start: Option<PathBuf>,
+}
+
+impl FilePick {
+    /// A request for a file to open.
+    #[must_use]
+    pub fn open(requester: Option<AppletId>, purpose: &str, title: &str) -> Self {
+        Self {
+            requester,
+            purpose: purpose.to_owned(),
+            title: title.to_owned(),
+            ..Self::default()
+        }
+    }
+
+    /// A request for where to save `name`.
+    #[must_use]
+    pub fn save(requester: Option<AppletId>, purpose: &str, title: &str, name: &str) -> Self {
+        Self {
+            save_as: Some(name.to_owned()),
+            ..Self::open(requester, purpose, title)
+        }
+    }
+
+    /// The same request, taking only these extensions.
+    #[must_use]
+    pub fn extensions(mut self, extensions: &[&str]) -> Self {
+        self.extensions = extensions.iter().map(|&ext| ext.to_owned()).collect();
+        self
+    }
+
+    /// The same request, starting in `folder`.
+    #[must_use]
+    pub fn starting_in(mut self, folder: Option<PathBuf>) -> Self {
+        self.start = folder;
+        self
+    }
+
+    /// `true` when `path` has one of the extensions (or any are taken).
+    #[must_use]
+    pub fn takes(&self, path: &Path) -> bool {
+        self.extensions.is_empty()
+            || path
+                .extension()
+                .map(|ext| ext.to_string_lossy().to_ascii_lowercase())
+                .is_some_and(|ext| self.extensions.contains(&ext))
+    }
 }
 
 /// What an applet's tick asks for.
@@ -561,5 +639,22 @@ pub trait SueApplet: Send {
     /// `true` while the applet needs every key first (recording a shortcut).
     fn captures_keys(&self) -> bool {
         false
+    }
+
+    /// Takes on a [`FilePick`] in its window. Returns `false` if the applet
+    /// does not pick files.
+    fn begin_pick(&mut self, pick: &FilePick) -> bool {
+        let _ = pick;
+        false
+    }
+
+    /// Receives the file a [`FilePick`] this applet sent asked for.
+    fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
+        let _ = (pick, path, cx);
+    }
+
+    /// The floating window's title, when not the applet's name.
+    fn window_title(&self) -> Option<String> {
+        None
     }
 }
