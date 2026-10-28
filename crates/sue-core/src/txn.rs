@@ -3,16 +3,17 @@
 //! Each transaction stores only its delta: the inserted text, the removed
 //! range, the component it attached, the value a property had. The generic
 //! ones ([`SpawnEntity`], [`DespawnEntity`], [`SetProperty`], [`SetMeta`],
-//! [`Rename`], [`Relate`], [`Unrelate`], [`SetExtension`] and [`Batch`])
-//! name entities by [`EntityId`], so they stay valid however often an
-//! entity is removed and brought back.
+//! [`Rename`], [`Relate`], [`Unrelate`], [`SetExtension`], [`RasterEdit`]
+//! and [`Batch`]) name entities by [`EntityId`], so they stay valid however
+//! often an entity is removed and brought back.
 
 use std::fmt;
 use std::ops::Range;
 
 use crate::{
     Arena, AssetHandle, Component, ComponentData, ComponentKind, CoreError, Entity, EntityId,
-    Projection, Relation, ReversibleTransaction, StringBuffer, TxnError, Value,
+    PixelFormat, Projection, RasterTile2D, Relation, ReversibleTransaction, StringBuffer, TxnError,
+    Value,
 };
 
 fn text_mut(arena: &mut Arena, handle: AssetHandle) -> Result<&mut StringBuffer, CoreError> {
@@ -787,10 +788,257 @@ impl ReversibleTransaction<Arena> for SetExtension {
     }
 }
 
+/// One rectangle of an 8-bit raster, before and after an edit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RasterPatch {
+    /// Left edge, in pixels.
+    pub x: u32,
+    /// Top edge, in pixels.
+    pub y: u32,
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+    /// The rectangle's bytes before the edit, row by row.
+    pub before: Vec<u8>,
+    /// The rectangle's bytes after the edit, row by row.
+    pub after: Vec<u8>,
+}
+
+impl RasterPatch {
+    /// Copies a rectangle of `raster`, row by row. `None` if the raster is
+    /// not 8-bit or the rectangle does not fit inside it.
+    #[must_use]
+    pub fn read(raster: &RasterTile2D, x: u32, y: u32, width: u32, height: u32) -> Option<Vec<u8>> {
+        let (stride, pixel, row) = patch_layout(raster, x, y, width, height)?;
+        let bytes = raster.bytes()?;
+        let mut out = Vec::with_capacity(row * height as usize);
+        for line in 0..height as usize {
+            let at = (y as usize + line) * stride + x as usize * pixel;
+            out.extend_from_slice(&bytes[at..at + row]);
+        }
+        Some(out)
+    }
+
+    /// A patch of `before` and the rectangle as `raster` holds it now (after
+    /// an edit that already happened in place). `None` as for [`Self::read`]
+    /// or if `before` has the wrong length.
+    #[must_use]
+    pub fn capture(
+        raster: &RasterTile2D,
+        [x, y, width, height]: [u32; 4],
+        before: Vec<u8>,
+    ) -> Option<Self> {
+        let after = Self::read(raster, x, y, width, height)?;
+        (after.len() == before.len()).then_some(Self {
+            x,
+            y,
+            width,
+            height,
+            before,
+            after,
+        })
+    }
+
+    fn write(&self, raster: &mut RasterTile2D, after: bool) -> Result<(), TxnError> {
+        let (stride, pixel, row) = patch_layout(raster, self.x, self.y, self.width, self.height)
+            .ok_or_else(|| TxnError::new("the patch does not fit the raster"))?;
+        let source = if after { &self.after } else { &self.before };
+        if source.len() != row * self.height as usize {
+            return Err(TxnError::new("the patch has the wrong size"));
+        }
+        let bytes = raster
+            .bytes_mut()
+            .ok_or_else(|| TxnError::new("the raster is not 8-bit"))?;
+        for line in 0..self.height as usize {
+            let at = (self.y as usize + line) * stride + self.x as usize * pixel;
+            bytes[at..at + row].copy_from_slice(&source[line * row..(line + 1) * row]);
+        }
+        Ok(())
+    }
+}
+
+/// Row stride, bytes per pixel and bytes per patch row, if the rectangle
+/// fits an 8-bit raster.
+fn patch_layout(
+    raster: &RasterTile2D,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) -> Option<(usize, usize, usize)> {
+    let fits = width > 0
+        && height > 0
+        && x.checked_add(width)
+            .is_some_and(|right| right <= raster.width())
+        && y.checked_add(height)
+            .is_some_and(|bottom| bottom <= raster.height());
+    if !fits || raster.format() == PixelFormat::RgbaF32 {
+        return None;
+    }
+    let pixel = raster.format().bytes_per_pixel();
+    Some((
+        raster.width() as usize * pixel,
+        pixel,
+        width as usize * pixel,
+    ))
+}
+
+/// Pixels an edit changed in one entity's raster base: a brush stroke, a
+/// fill or a filter. Only the touched rectangles are stored, before and
+/// after; apply writes `after`, revert writes `before`. Usually recorded
+/// with [`crate::UndoStack::record`] once the edit happened in place.
+#[derive(Clone, Debug)]
+pub struct RasterEdit {
+    id: EntityId,
+    label: String,
+    patches: Vec<RasterPatch>,
+}
+
+impl RasterEdit {
+    /// An edit of the raster of `id`.
+    pub fn new(id: EntityId, label: impl Into<String>, patches: Vec<RasterPatch>) -> Self {
+        Self {
+            id,
+            label: label.into(),
+            patches,
+        }
+    }
+
+    /// The edited entity.
+    #[must_use]
+    pub fn id(&self) -> EntityId {
+        self.id
+    }
+
+    /// The changed rectangles.
+    #[must_use]
+    pub fn patches(&self) -> &[RasterPatch] {
+        &self.patches
+    }
+
+    /// `true` if nothing changed.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.patches.is_empty()
+    }
+
+    fn write(&self, arena: &mut Arena, after: bool) -> Result<(), TxnError> {
+        let entity = arena.get_by_id_mut(self.id)?;
+        let Some(ComponentData::RasterTile2D(raster)) =
+            entity.component_mut(ComponentKind::RasterTile2D)
+        else {
+            return Err(TxnError::new("the entity has no raster"));
+        };
+        // Check every patch first, so a bad one changes nothing.
+        for patch in &self.patches {
+            patch_layout(raster, patch.x, patch.y, patch.width, patch.height)
+                .ok_or_else(|| TxnError::new("the patch does not fit the raster"))?;
+        }
+        let order: Box<dyn Iterator<Item = &RasterPatch>> = if after {
+            Box::new(self.patches.iter())
+        } else {
+            Box::new(self.patches.iter().rev())
+        };
+        for patch in order {
+            patch.write(raster, after)?;
+        }
+        Ok(())
+    }
+}
+
+impl ReversibleTransaction<Arena> for RasterEdit {
+    fn label(&self) -> String {
+        self.label.clone()
+    }
+
+    fn apply(&mut self, arena: &mut Arena) -> Result<(), TxnError> {
+        self.write(arena, true)
+    }
+
+    fn revert(&mut self, arena: &mut Arena) -> Result<(), TxnError> {
+        self.write(arena, false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{CHILD, OpaqueComponent, TimeSpan, UndoStack};
+
+    #[test]
+    fn raster_edits_store_only_their_rectangles_and_undo_exactly() {
+        let mut arena = Arena::new();
+        let pixels = (0..8 * 6 * 4).map(|byte| byte as u8).collect::<Vec<_>>();
+        let raster = RasterTile2D::from_bytes(8, 6, PixelFormat::Rgba8, pixels.clone()).unwrap();
+        let layer = arena.spawn("layer", raster);
+        let id = arena.get(layer).unwrap().id();
+        let bytes = |arena: &Arena| {
+            arena
+                .get(layer)
+                .unwrap()
+                .component(ComponentKind::RasterTile2D)
+                .unwrap()
+                .as_raster()
+                .unwrap()
+                .bytes()
+                .unwrap()
+                .to_vec()
+        };
+        // Paint a 3 by 2 rectangle in place, keeping what was there.
+        let before = {
+            let tile = arena.get(layer).unwrap();
+            let raster = tile.component(ComponentKind::RasterTile2D).unwrap();
+            RasterPatch::read(raster.as_raster().unwrap(), 2, 1, 3, 2).unwrap()
+        };
+        let patch = {
+            let entity = arena.get_mut(layer).unwrap();
+            let Some(ComponentData::RasterTile2D(raster)) =
+                entity.component_mut(ComponentKind::RasterTile2D)
+            else {
+                panic!("no raster");
+            };
+            let bytes = raster.bytes_mut().unwrap();
+            for y in 1..3 {
+                for x in 2..5 {
+                    bytes[(y * 8 + x) * 4..(y * 8 + x) * 4 + 4].copy_from_slice(&[9, 9, 9, 9]);
+                }
+            }
+            RasterPatch::capture(raster, [2, 1, 3, 2], before).unwrap()
+        };
+        assert_eq!(patch.after.len(), 3 * 2 * 4);
+        let painted = bytes(&arena);
+        let mut history = UndoStack::new();
+        history.record(RasterEdit::new(id, "Stroke", vec![patch]));
+        history.undo(&mut arena).unwrap();
+        assert_eq!(bytes(&arena), pixels, "undo restores every byte");
+        history.redo(&mut arena).unwrap();
+        assert_eq!(bytes(&arena), painted, "redo paints it again");
+        assert_eq!(history.history(), vec!["Stroke"]);
+
+        // A patch outside the raster is refused and changes nothing.
+        let wild = RasterPatch {
+            x: 6,
+            y: 0,
+            width: 4,
+            height: 1,
+            before: vec![0; 16],
+            after: vec![1; 16],
+        };
+        let mut edit = RasterEdit::new(id, "Bad", vec![wild]);
+        assert!(edit.apply(&mut arena).is_err());
+        assert_eq!(bytes(&arena), painted);
+        assert!(
+            RasterPatch::read(
+                &RasterTile2D::new(2, 2, PixelFormat::RgbaF32).unwrap(),
+                0,
+                0,
+                1,
+                1
+            )
+            .is_none()
+        );
+    }
 
     fn text(arena: &Arena, handle: AssetHandle) -> &str {
         arena.get(handle).unwrap().string_buffer().unwrap().as_str()

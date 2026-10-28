@@ -13,20 +13,24 @@
 //! | [`NodeGraph`] / [`NodeRegistry`] | compositing, shaders, audio patches, procedural geometry, game logic |
 //! | [`Geometry`] / [`Transform`] | 3D, CAD, BIM, vector art, rigging, game levels |
 //! | [`PageLayout`] | desktop publishing, books, slides, PDF pages, drawing sheets |
+//! | [`picture`] / [`BlendMode`] | painting, photo editing, compositing, textures, thumbnails |
 //! | [`Encoded`] | any file Sue cannot decode yet, kept byte for byte |
 //!
 //! Features that need something new add their own component type the same
 //! way (see `HUMANZ.md` §8), and register it with [`register`].
 
+mod blend;
 mod curve;
 mod encoded;
 mod geometry;
 mod graph;
 mod layout;
+pub mod picture;
 mod sequence;
 mod table;
 mod text;
 
+pub use blend::BlendMode;
 pub use curve::{Animation, Curve, Interpolation, Key};
 pub use encoded::Encoded;
 pub use geometry::{AttributeData, Domain, Geometry, Prim, PrimKind, Transform};
@@ -50,8 +54,12 @@ pub mod class {
     pub const CODE: &str = "sue.code";
     /// A spreadsheet or database ([`crate::Table`]).
     pub const SHEET: &str = "sue.sheet";
-    /// A raster image.
+    /// A raster image, or a layered picture (see [`crate::picture`]).
     pub const IMAGE: &str = "sue.image";
+    /// A raster layer of a picture.
+    pub const LAYER: &str = "sue.layer";
+    /// A paper layer: one color under a picture's other layers.
+    pub const PAPER: &str = "sue.layer.paper";
     /// A vector drawing ([`crate::Geometry`] in 2D).
     pub const VECTOR: &str = "sue.vector";
     /// Audio.
@@ -101,6 +109,11 @@ pub fn registry() -> ComponentRegistry {
 /// so the Inspector can edit them on any entity.
 pub fn register_properties(schema: &mut PropertySchema) {
     let length = ValueType::Quantity(sue_core::Dimension::Length);
+    let layer_flag = |key: &str, label: &str| {
+        PropertyDef::new(key, label, false)
+            .typed(ValueType::Bool)
+            .group("Layer")
+    };
     let defs = [
         PropertyDef::new("doc.title", "Title", "").group("Document"),
         PropertyDef::new("doc.author", "Author", "").group("Document"),
@@ -110,16 +123,10 @@ pub fn register_properties(schema: &mut PropertySchema) {
             .group("Style"),
         PropertyDef::new("style.blend", "Blend mode", "normal")
             .typed(ValueType::Choice(
-                [
-                    "normal",
-                    "multiply",
-                    "screen",
-                    "overlay",
-                    "add",
-                    "difference",
-                ]
-                .map(String::from)
-                .to_vec(),
+                BlendMode::ALL
+                    .iter()
+                    .map(|mode| mode.name().to_owned())
+                    .collect(),
             ))
             .group("Style"),
         PropertyDef::new("style.fill", "Fill", sue_core::Color::srgb8(0, 0, 0)).group("Style"),
@@ -144,6 +151,30 @@ pub fn register_properties(schema: &mut PropertySchema) {
         PropertyDef::new("time.start", "Start", sue_core::Time::ZERO).group("Time"),
         PropertyDef::new("cad.material", "Material", "").group("Engineering"),
         PropertyDef::new("cad.layer", "Layer", "0").group("Engineering"),
+        PropertyDef::new(picture::WIDTH, "Width (px)", 1_i64)
+            .range(1.0, 65_535.0)
+            .group("Image"),
+        PropertyDef::new(picture::HEIGHT, "Height (px)", 1_i64)
+            .range(1.0, 65_535.0)
+            .group("Image"),
+        PropertyDef::new(picture::DPI, "Resolution (dpi)", 72.0)
+            .range(1.0, 10_000.0)
+            .group("Image"),
+        PropertyDef::new(picture::VISIBLE, "Visible", true)
+            .typed(ValueType::Bool)
+            .group("Layer"),
+        layer_flag(picture::LOCKED, "Locked"),
+        layer_flag(picture::ALPHA_LOCKED, "Lock transparent pixels"),
+        layer_flag(picture::CLIP, "Clip to layer below"),
+        layer_flag(picture::DRAFT, "Draft layer"),
+        PropertyDef::new(
+            picture::COLOR,
+            "Paper color",
+            sue_core::Color::srgb8(255, 255, 255),
+        )
+        .group("Layer"),
+        PropertyDef::new(picture::X, "X offset (px)", 0_i64).group("Layer"),
+        PropertyDef::new(picture::Y, "Y offset (px)", 0_i64).group("Layer"),
     ];
     for def in defs {
         schema.register(def);
@@ -240,6 +271,9 @@ mod tests {
                 .is_ok()
         );
         assert!(schema.validate("style.blend", &"screen".into()).is_ok());
+        assert!(schema.validate("style.blend", &"color-burn".into()).is_ok());
+        assert!(schema.validate("layer.visible", &false.into()).is_ok());
+        assert!(schema.validate("image.dpi", &0.0.into()).is_err());
         assert_eq!(schema.with_prefix("audio.").count(), 2);
     }
 }
