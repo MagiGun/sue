@@ -182,8 +182,31 @@ one to slide its drawer open; click it again to tuck it away.
   loudness between songs, loading the next song early, and cover pictures.
   "Open the Large Player" shows it in a big window with a sidebar, and the
   command palette has Play or Pause, Next Song and Previous Song.
-- **Convert** (left): turn a picture into JPEG XL, PNG or JPEG, or a song into
-  WAV. The new file is saved next to the original.
+- **Convert** (left): turn any file into another kind. Add files with **Add
+  Files** (one file or a whole folder, through the File Manager), with the
+  File Manager's **Convert** button, or **Add from the Canvas**. For each
+  kind of file in the list a drop-down says what it becomes:
+  - pictures: PNG, JPEG, JPEG XL, WebP, TIFF, BMP, GIF, TGA, QOI, ICO or PPM,
+    with a new size (scale, width, height, fit inside, exact) and how to
+    resample, turning, mirroring, brightness, contrast, saturation, grays
+    only, filling transparency with a color you pick on the wheel, and the
+    JPEG quality or JPEG XL effort;
+  - sounds: FLAC, WAV or AIFF, at a new sample rate, mono or stereo, 16 or
+    24-bit (or 32-bit float WAV), louder or quieter (or normalized), with
+    the start or end cut, faded in or out, sped up or slowed down, or
+    backwards;
+  - text: tidied (line endings, trailing spaces, tabs), Markdown as an HTML
+    page, and tables between CSV, TSV and JSON (JSON can also be
+    re-indented);
+  - anything at all: Base64 text, a hex dump, a byte map picture, or a
+    plain copy.
+
+  Choose where the results go (next to each file, or a folder you pick),
+  how they are named (`{name}-small`, say), and whether to keep both or
+  replace a file of the same name; the file being converted is never
+  written over. Click Convert: big files convert in the background, the
+  list says where each one went (click it to see it in Explorer), and the
+  status bar names the folder.
 - **Notes** (left): jot something down. Notes save themselves.
 - **Inspector** (right): the details of the selected card: its place and size
   on the canvas, which views it has (Document, Timeline and so on), and the

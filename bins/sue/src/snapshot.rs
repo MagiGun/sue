@@ -424,6 +424,27 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         camera.now,
     );
     shoot(&mut runtime, &mut camera, "09c-player")?;
+    runtime.shell.close_window();
+
+    // 9d. The large Converter with a picture, a song and a text file.
+    let convert = AppletId::new(crate::convert::ID).map_err(|error| error.to_string())?;
+    for name in ["photo.png", "chord.wav", "README.md"] {
+        runtime.request(
+            ShellRequest::SendFile {
+                to: convert.clone(),
+                purpose: "add".to_owned(),
+                path: home.join(name),
+            },
+            &mut camera.painter,
+            camera.now,
+        );
+    }
+    runtime.request(
+        ShellRequest::OpenWindow(convert),
+        &mut camera.painter,
+        camera.now,
+    );
+    shoot(&mut runtime, &mut camera, "09d-converter")?;
     runtime.request(
         ShellRequest::AppletCommand {
             applet: player,

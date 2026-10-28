@@ -1181,6 +1181,19 @@ impl Files {
                     path: path.clone(),
                 });
             }
+            if self.pick.is_none()
+                && widgets::pill_button(ui, "Convert", false, theme)
+                    .on_hover_text("Send it to the Converter")
+                    .clicked()
+            {
+                let convert = sue_wm::AppletId::new(crate::convert::ID).expect("a valid id");
+                cx.request(ShellRequest::SendFile {
+                    to: convert.clone(),
+                    purpose: "add".to_owned(),
+                    path: path.clone(),
+                });
+                cx.request(ShellRequest::ShowDrawer(convert));
+            }
             if self.pick.is_none() && widgets::pill_button(ui, "Open", false, theme).clicked() {
                 if path.is_dir() {
                     self.go(path.clone());

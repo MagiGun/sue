@@ -312,6 +312,159 @@ pub fn encode_wav(pcm: &PCMFloat1D) -> Vec<u8> {
     out
 }
 
+/// How many bits each sample of a written file has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SampleDepth {
+    /// 16-bit integers, as on a CD.
+    Int16,
+    /// 24-bit integers, as studios use.
+    Int24,
+    /// 32-bit floats, exactly as Sue holds them (WAV only).
+    Float32,
+}
+
+impl SampleDepth {
+    fn bits(self) -> u16 {
+        match self {
+            Self::Int16 => 16,
+            Self::Int24 => 24,
+            Self::Float32 => 32,
+        }
+    }
+
+    fn integer(self, sample: f32) -> i32 {
+        let sample = f64::from(sample.clamp(-1.0, 1.0));
+        match self {
+            Self::Int16 => (sample * 32_767.0).round() as i32,
+            Self::Int24 | Self::Float32 => (sample * 8_388_607.0).round() as i32,
+        }
+    }
+}
+
+/// A WAV file of `pcm` at `depth`.
+#[must_use]
+pub fn encode_wav_as(pcm: &PCMFloat1D, depth: SampleDepth) -> Vec<u8> {
+    if depth == SampleDepth::Int16 {
+        return encode_wav(pcm);
+    }
+    let channels = pcm.channels();
+    let bytes_per_sample = u32::from(depth.bits() / 8);
+    let data_len = u32::try_from(pcm.samples().len() as u64 * u64::from(bytes_per_sample))
+        .unwrap_or(u32::MAX - 36);
+    let format: u16 = if depth == SampleDepth::Float32 { 3 } else { 1 };
+    let mut out = Vec::with_capacity(44 + data_len as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_len).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16_u32.to_le_bytes());
+    out.extend_from_slice(&format.to_le_bytes());
+    out.extend_from_slice(&channels.to_le_bytes());
+    out.extend_from_slice(&pcm.sample_rate().to_le_bytes());
+    out.extend_from_slice(
+        &(pcm.sample_rate() * u32::from(channels) * bytes_per_sample).to_le_bytes(),
+    );
+    out.extend_from_slice(&(channels * depth.bits() / 8).to_le_bytes());
+    out.extend_from_slice(&depth.bits().to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_len.to_le_bytes());
+    for &sample in pcm.samples() {
+        match depth {
+            SampleDepth::Float32 => out.extend_from_slice(&sample.clamp(-1.0, 1.0).to_le_bytes()),
+            _ => out.extend_from_slice(&depth.integer(sample).to_le_bytes()[..3]),
+        }
+    }
+    out
+}
+
+/// An 80-bit extended float, as AIFF writes its sample rate.
+fn extended(value: f64) -> [u8; 10] {
+    let mut out = [0_u8; 10];
+    if value <= 0.0 {
+        return out;
+    }
+    let exponent = value.log2().floor() as i32;
+    let mantissa = (value / 2_f64.powi(exponent - 63)) as u64;
+    out[..2].copy_from_slice(&((exponent + 16_383) as u16).to_be_bytes());
+    out[2..].copy_from_slice(&mantissa.to_be_bytes());
+    out
+}
+
+/// An AIFF file of `pcm` with 16 or 24-bit samples (32-bit floats are
+/// written as 24-bit).
+#[must_use]
+pub fn encode_aiff(pcm: &PCMFloat1D, depth: SampleDepth) -> Vec<u8> {
+    let depth = if depth == SampleDepth::Float32 {
+        SampleDepth::Int24
+    } else {
+        depth
+    };
+    let bytes = usize::from(depth.bits() / 8);
+    let channels = pcm.channels();
+    let frames = u32::try_from(pcm.frames()).unwrap_or(u32::MAX);
+    let data = pcm.samples().len() * bytes;
+    let ssnd = 8 + data as u32;
+    let mut out = Vec::with_capacity(54 + data);
+    out.extend_from_slice(b"FORM");
+    out.extend_from_slice(&(4 + 26 + 8 + ssnd).to_be_bytes());
+    out.extend_from_slice(b"AIFFCOMM");
+    out.extend_from_slice(&18_u32.to_be_bytes());
+    out.extend_from_slice(&channels.to_be_bytes());
+    out.extend_from_slice(&frames.to_be_bytes());
+    out.extend_from_slice(&depth.bits().to_be_bytes());
+    out.extend_from_slice(&extended(f64::from(pcm.sample_rate())));
+    out.extend_from_slice(b"SSND");
+    out.extend_from_slice(&ssnd.to_be_bytes());
+    out.extend_from_slice(&[0; 8]);
+    for &sample in pcm.samples() {
+        let value = depth.integer(sample).to_be_bytes();
+        out.extend_from_slice(&value[4 - bytes..]);
+    }
+    out
+}
+
+/// A FLAC file of `pcm` with 16 or 24-bit samples (32-bit floats are
+/// written as 24-bit), compressed losslessly.
+///
+/// # Errors
+/// If the encoder refuses the stream (too many channels, say).
+pub fn encode_flac(pcm: &PCMFloat1D, depth: SampleDepth) -> Result<Vec<u8>, String> {
+    use flacenc::component::BitRepr;
+    use flacenc::error::Verify;
+    let depth = if depth == SampleDepth::Float32 {
+        SampleDepth::Int24
+    } else {
+        depth
+    };
+    let samples: Vec<i32> = pcm
+        .samples()
+        .iter()
+        .map(|&sample| depth.integer(sample))
+        .collect();
+    let config = flacenc::config::Encoder::default()
+        .into_verified()
+        .map_err(|(_, error)| format!("{error:?}"))?;
+    let source = flacenc::source::MemSource::from_samples(
+        &samples,
+        usize::from(pcm.channels()),
+        usize::from(depth.bits()),
+        pcm.sample_rate() as usize,
+    );
+    let stream = flacenc::encode_with_fixed_block_size(&config, source, config.block_size)
+        .map_err(|error| format!("{error:?}"))?;
+    let mut sink = flacenc::bitsink::ByteSink::new();
+    stream
+        .write(&mut sink)
+        .map_err(|error| format!("{error:?}"))?;
+    let mut bytes = sink.as_slice().to_vec();
+    // The stream's minimum block size leaves out the shorter last block
+    // (the FLAC format says so; decoders such as symphonia rely on it), so
+    // with fixed blocks it equals the maximum.
+    if bytes.len() >= 12 && bytes.starts_with(b"fLaC") {
+        bytes.copy_within(10..12, 8);
+    }
+    Ok(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -325,6 +478,43 @@ mod tests {
             })
             .collect();
         PCMFloat1D::new(rate, 2, samples).unwrap()
+    }
+
+    #[test]
+    fn every_depth_and_container_decodes_back_to_the_same_sound() {
+        let source = tone(44_100, 2_205);
+        let files = [
+            ("wav", encode_wav_as(&source, SampleDepth::Int24), 1e-5),
+            ("wav", encode_wav_as(&source, SampleDepth::Float32), 1e-7),
+            ("aiff", encode_aiff(&source, SampleDepth::Int16), 1e-4),
+            ("aiff", encode_aiff(&source, SampleDepth::Int24), 1e-5),
+            (
+                "flac",
+                encode_flac(&source, SampleDepth::Int16).unwrap(),
+                1e-4,
+            ),
+            (
+                "flac",
+                encode_flac(&source, SampleDepth::Int24).unwrap(),
+                1e-5,
+            ),
+        ];
+        for (extension, bytes, tolerance) in files {
+            let (decoded, _) = decode_audio(bytes, Some(extension))
+                .unwrap_or_else(|(error, _)| panic!("{extension}: {error}"));
+            assert_eq!(decoded.info.sample_rate, 44_100, "{extension}");
+            assert_eq!(decoded.info.channels, 2, "{extension}");
+            assert_eq!(decoded.pcm.frames(), 2_205, "{extension}");
+            let worst = decoded
+                .pcm
+                .samples()
+                .iter()
+                .zip(source.samples())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0_f32, f32::max);
+            assert!(worst <= tolerance, "{extension} drifted by {worst}");
+        }
+        assert_eq!(extended(44_100.0)[..2], [0x40, 0x0E]);
     }
 
     #[test]

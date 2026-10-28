@@ -38,7 +38,7 @@ sue-paint     ──► sue-wm, sue-io, sue-model, sue-rice, sue-platform, sue-c
 sue-wm        ──► sue-rice, sue-platform, sue-core   + egui
 sue-ai        ──► sue-platform, sue-core
 sue-rice      ──► sue-platform, sue-core
-sue-io        ──► sue-model, sue-core                 + jxl-oxide, zune-jpegxl, zune-png, zune-jpeg, jpeg-encoder, symphonia
+sue-io        ──► sue-model, sue-core                 + jxl-oxide, zune-jpegxl, zune-png, zune-jpeg, jpeg-encoder, symphonia, image, flacenc
 sue-model     ──► sue-core
 sue-pkg       ──► sha2, ed25519-dalek, semver         (no engine crates)
 sue-core      ──► nothing                              (leaf)
@@ -613,7 +613,10 @@ reads a file's tags and length without decoding it); text becomes a
 becomes a `Gray8` byte-map raster. Each entity carries metadata (`bytes`,
 `route`, `format`, size, decode time, colour and depth, codec and tags,
 entropy, and the source path). For the converter, `encode_png` writes
-compressed PNG and `encode_wav` writes 16-bit PCM WAV.
+compressed PNG; `encode_wav_as`, `encode_aiff` and `encode_flac` (with
+`flacenc`) write WAV (16, 24 or 32-bit float), AIFF and FLAC; and
+`decode_picture` and `encode_picture` read and write BMP, GIF, ICO, PNM, QOI,
+TGA, TIFF and WebP through the `image` crate (`PictureFormat`).
 
 ### 2.3 Tile cache
 
@@ -1038,7 +1041,7 @@ register its own:
 | Code / Hex | Node | Code / Hex (palette only); Code: Rust, Python, JavaScript, HTML, CSS, JSON, Shell Script | Code in a monospace `TextEdit`, or a selectable hex dump of any file's bytes; Copy All |
 | File Manager | Left drawer and window | n/a | Folder tabs with back and forward; a typed or copied path bar; list or card view (`files.view`), sort (`files.sort`), card size; picture thumbnails decoded and shrunk on a background thread; search of the folder or, on a background thread, everything under it (2,000 results, 200,000 entries at most); places (project, home and its usual folders, `sue_platform::roots`) and saved folders (`files.saved`, undoable rice edits); new folder, rename, copy path, show in Explorer; the large window answers every `FilePick` |
 | Player | Left drawer and window | n/a | A music library in the data folder (a versioned tab-separated text file: songs with tags and length from `sue_io::probe_audio`, playlists, hand-made albums, likes); albums from the tags, artists, search; a queue with shuffle, repeat off, all or one, and autoplay; songs decoded on a background thread into `Shared` buffers, the next one ahead of time, with loudness evening; shuffle, previous, play, next, repeat, seek, volume and mute; covers from a collection's picture or `cover.jpg` and the like beside the songs; `player.*` settings; palette commands |
-| Convert | Left drawer | n/a | Pictures to lossless JPEG XL, PNG or JPEG (`io.jpeg_quality`), songs to 16-bit WAV |
+| Convert | Left drawer and window | n/a | Any file in (picked through the File Manager, a folder at a time, sent by its Convert button, or from the canvas); a target per kind (pictures: PNG, JPEG, JPEG XL, WebP, TIFF, BMP, GIF, TGA, QOI, ICO, PPM; sounds: FLAC, WAV, AIFF; text: tidied, Markdown to HTML, CSV, TSV, JSON; anything: Base64, hex dump, byte map, copy); picture resizing with Lanczos, bicubic, bilinear or nearest in premultiplied alpha, turns, mirrors, brightness, contrast, saturation, grays, flattening; sound trimming, channels, Lanczos resampling, speed, reverse, gain or normalizing, fades, depth; text tidying; output folder, name pattern and keep or replace (never the source); files convert on a background thread |
 | Notes | Left drawer | n/a | One shared note in a `TextEdit`, autosaved every `general.autosave_seconds` and on exit |
 | Inspector | Right drawer | n/a | The selected node's place, size and properties, its entity's projections, memory and metadata |
 | History | Right drawer | n/a | The undo tree, branches indented; a click checks out any state |
@@ -1415,7 +1418,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §2.2 Lossless JXL encode | **Implemented** with `zune-jpegxl` (one `Gray8`, `Rgba8` or `RgbaF32` layer; multi-layer planned) | `sue-io/src/jxl.rs` |
 | §2.2 Lossless JPEG → JXL recompression | Planned; returns `CodecUnavailable` | `sue-io/src/jxl.rs` |
 | §2.2 PNG and JPEG decode, PNG encode | **Implemented** with `zune-png` and `zune-jpeg` | `sue-io/src/raster.rs` |
-| §2.2 Audio decode (MP3, FLAC, WAV, Ogg Vorbis, AAC) and WAV encode | **Implemented** with `symphonia`; WAV is written as 16-bit PCM | `sue-io/src/audio.rs` |
+| §2.2 Audio decode (MP3, FLAC, WAV, AIFF, Ogg Vorbis, AAC) and WAV, AIFF and FLAC encode | **Implemented** with `symphonia` and `flacenc`; WAV in 16, 24 or 32-bit float, AIFF and FLAC in 16 or 24-bit | `sue-io/src/audio.rs` |
 | §2.2 Ingest of opened and dropped files (sniff, then raster, audio, text or bytes entity) | **Implemented** (decoding runs on the UI thread; spawning the entity is not yet an undoable transaction) | `sue-io/src/ingest.rs`, `bins/sue/src/runtime.rs` |
 | §2.3 Tile cache, byte map | **Implemented** | `sue-io/src/tile_cache.rs`, `bytemap.rs` |
 | §3.1 `PlatformHost`, paths, `HeadlessHost` | **Implemented** | `sue-platform` |

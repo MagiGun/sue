@@ -1,208 +1,1115 @@
-//! Convert: turns an opened picture into JPEG XL, PNG or JPEG, or a song
-//! into WAV. Sources are the decoded assets already in the arena, so nothing
-//! is read twice; JPEG sources are recompressed bit for bit when a codec
-//! allows.
+//! Convert: turns any file into another kind. Pictures become PNG, JPEG,
+//! JPEG XL, WebP, TIFF, BMP, GIF, TGA, QOI, ICO or PPM, resized, turned,
+//! mirrored and adjusted on the way; sounds become FLAC, WAV or AIFF at any
+//! rate, depth and channel count, trimmed, faded, sped up or reversed; text
+//! is tidied, Markdown becomes HTML and tables move between CSV, TSV and
+//! JSON; and anything becomes Base64, a hex dump or a byte map picture.
+//!
+//! Files come from Add Files (the File Manager, a folder at a time if you
+//! like), the File Manager's Convert button, or what is on the canvas. They
+//! convert on a background thread, next to each file or into a chosen
+//! folder, and the list says where each one went.
 
+mod ops;
+
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{Receiver, channel};
+use std::time::Duration;
 
-use egui::{RichText, Sense, Ui, vec2};
+use egui::{Align, Align2, Layout, RichText, ScrollArea, Sense, Ui, vec2};
 use sue_core::{AssetHandle, ComponentKind};
-use sue_io::{JxlError, JxlPipeline, NativeJxlPipeline, encode_jpeg, encode_png, encode_wav, meta};
+use sue_io::{SampleDepth, meta};
 use sue_platform::write_atomic;
-use sue_wm::{AppletContext, AppletManifest, AppletRole, SueApplet, World, widgets};
+use sue_wm::{
+    AppletContext, AppletId, AppletManifest, AppletRole, FilePick, ShellRequest, SueApplet, Theme,
+    Tick, widgets,
+};
 
+use self::ops::{Endings, Filter, Kind, Options, Resize, Target};
 use crate::util::{file_name, free_path, human_bytes};
 
 /// The applet id.
 pub const ID: &str = "convert";
 
-/// What a source can become.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Target {
-    /// Lossless JPEG XL.
-    Jxl,
-    /// PNG.
-    Png,
-    /// Baseline JPEG at `io.jpeg_quality`.
-    Jpg,
-    /// 16-bit PCM WAV.
-    Wav,
+/// Most files one Add Files adds from a folder.
+const FOLDER_LIMIT: usize = 500;
+
+/// Where a file to convert comes from.
+#[derive(Clone, Debug, PartialEq)]
+enum Source {
+    /// A file on disk.
+    File(PathBuf),
+    /// A picture or sound on the canvas with no file behind it.
+    Entity(AssetHandle),
 }
 
-impl Target {
-    fn extension(self) -> &'static str {
-        match self {
-            Self::Jxl => "jxl",
-            Self::Png => "png",
-            Self::Jpg => "jpg",
-            Self::Wav => "wav",
+/// How a file's conversion went.
+#[derive(Clone, Debug, PartialEq)]
+enum Status {
+    Waiting,
+    Working,
+    Done(PathBuf, String),
+    Failed(String),
+}
+
+/// One file in the list.
+#[derive(Clone, Debug, PartialEq)]
+struct Input {
+    source: Source,
+    name: String,
+    kind: Kind,
+    size: u64,
+    status: Status,
+}
+
+/// Where converted files go and what they are called.
+#[derive(Clone, Debug, PartialEq)]
+struct Output {
+    /// `None` puts each next to its file.
+    folder: Option<PathBuf>,
+    /// The name, with `{name}` for the original's.
+    pattern: String,
+    /// Replace a file of the same name instead of keeping both.
+    replace: bool,
+}
+
+impl Output {
+    /// Where `input` converted to `target` goes.
+    fn path_for(&self, input: &Input, target: Target, fallback: &Path) -> PathBuf {
+        let (folder, stem, extension) = match &input.source {
+            Source::File(path) => (
+                self.folder
+                    .clone()
+                    .or_else(|| path.parent().map(Path::to_path_buf))
+                    .unwrap_or_else(|| fallback.to_path_buf()),
+                path.file_stem().map_or_else(
+                    || "converted".to_owned(),
+                    |stem| stem.to_string_lossy().into_owned(),
+                ),
+                path.extension()
+                    .map(|extension| extension.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            ),
+            Source::Entity(_) => (
+                self.folder
+                    .clone()
+                    .unwrap_or_else(|| fallback.to_path_buf()),
+                Path::new(&input.name).file_stem().map_or_else(
+                    || "converted".to_owned(),
+                    |stem| stem.to_string_lossy().into_owned(),
+                ),
+                String::new(),
+            ),
+        };
+        let pattern = if self.pattern.trim().is_empty() {
+            "{name}"
+        } else {
+            self.pattern.trim()
+        };
+        let name = pattern.replace("{name}", &stem);
+        let extension = if target == Target::Copy {
+            extension
+        } else {
+            target.extension().to_owned()
+        };
+        let file = if extension.is_empty() {
+            name
+        } else {
+            format!("{name}.{extension}")
+        };
+        let path = folder.join(file);
+        // Never write over the file being converted.
+        let is_source = matches!(&input.source, Source::File(source) if *source == path);
+        if self.replace && !is_source {
+            path
+        } else {
+            free_path(&path)
         }
     }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Jxl => ".jxl",
-            Self::Png => ".png",
-            Self::Jpg => ".jpg",
-            Self::Wav => ".wav",
-        }
-    }
 }
 
-/// What kind of source an entity is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Kind {
-    Image,
-    Audio,
-}
+/// A file's index in the list, and where it went and what it became.
+type Finished = (usize, Result<(PathBuf, String), String>);
 
-impl Kind {
-    fn targets(self) -> &'static [Target] {
-        match self {
-            Self::Image => &[Target::Jxl, Target::Png, Target::Jpg],
-            Self::Audio => &[Target::Wav],
-        }
-    }
-}
-
-fn kind_of(world: &World, handle: AssetHandle) -> Option<Kind> {
-    let entity = world.arena.get(handle).ok()?;
-    if entity.component(ComponentKind::PCMFloat1D).is_some() {
-        return Some(Kind::Audio);
-    }
-    // Decoded pictures and paint layers; byte maps carry their entropy.
-    (entity.component(ComponentKind::RasterTile2D).is_some()
-        && (entity.meta(meta::WIDTH).is_some() || entity.meta("revision").is_some())
-        && entity.meta(meta::ENTROPY).is_none())
-    .then_some(Kind::Image)
-}
-
-/// Convertible assets in the arena, newest first.
-fn candidates(world: &World) -> Vec<(AssetHandle, Kind)> {
-    let mut found: Vec<(AssetHandle, Kind)> = world
-        .arena
-        .iter()
-        .filter_map(|(handle, _)| Some((handle, kind_of(world, handle)?)))
-        .collect();
-    found.sort_by_key(|(handle, _)| std::cmp::Reverse(handle.index()));
-    found
-}
-
-/// Converts `source` to `target`, writing next to the source file (or into
-/// `out_dir`). Returns the written path and a summary.
-///
-/// # Errors
-/// A message for the status line.
-pub fn convert(
-    world: &World,
-    source: AssetHandle,
-    target: Target,
-    out_dir: &Path,
-) -> Result<(PathBuf, String), String> {
-    let entity = world.arena.get(source).map_err(|error| error.to_string())?;
-    let stem = Path::new(entity.name()).file_stem().map_or_else(
-        || "converted".to_owned(),
-        |stem| stem.to_string_lossy().into_owned(),
-    );
-    let effort = world
-        .rice
-        .get_i64("io.jxl_effort")
-        .and_then(|effort| u8::try_from(effort).ok())
-        .unwrap_or(7);
-    let mut note = None;
-    let bytes = match target {
-        Target::Wav => {
-            let pcm = entity
-                .component(ComponentKind::PCMFloat1D)
-                .and_then(|data| data.as_pcm())
-                .ok_or("only audio converts to WAV")?;
-            encode_wav(pcm)
-        }
-        Target::Png | Target::Jxl | Target::Jpg => {
-            let tile = entity
-                .component(ComponentKind::RasterTile2D)
-                .and_then(|data| data.as_raster())
-                .ok_or("only pictures convert to images")?;
-            let jpeg_source = entity.meta(meta::FORMAT) == Some("JPEG")
-                && world
-                    .rice
-                    .get_bool("io.jpeg_lossless_transcode")
-                    .unwrap_or(true);
-            let quality = world
-                .rice
-                .get_i64("io.jpeg_quality")
-                .and_then(|quality| u8::try_from(quality).ok())
-                .unwrap_or(90);
-            match target {
-                Target::Png => encode_png(tile)?,
-                Target::Jpg => encode_jpeg(tile, quality)?,
-                _ if jpeg_source => {
-                    let original = entity
-                        .meta(meta::SOURCE)
-                        .and_then(|path| std::fs::read(path).ok());
-                    match original.map(|jpeg| NativeJxlPipeline.transcode_jpeg_lossless(&jpeg)) {
-                        Some(Ok(jxl)) => jxl,
-                        Some(Err(JxlError::CodecUnavailable { .. })) | None => {
-                            note = Some(
-                                "bit-exact JPEG recompression needs a codec package, so the pixels were encoded losslessly",
-                            );
-                            NativeJxlPipeline
-                                .encode_layers(&[tile], effort)
-                                .map_err(|error| error.to_string())?
-                        }
-                        Some(Err(error)) => return Err(error.to_string()),
-                    }
-                }
-                _ => NativeJxlPipeline
-                    .encode_layers(&[tile], effort)
-                    .map_err(|error| error.to_string())?,
-            }
-        }
-    };
-    let path = free_path(&out_dir.join(format!("{stem}.{}", target.extension())));
-    write_atomic(&path, &bytes)
-        .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
-    let original = entity
-        .meta(meta::BYTES)
-        .and_then(|bytes| bytes.parse::<u64>().ok());
-    let mut summary = format!(
-        "Saved {} ({}{})",
-        file_name(&path),
-        human_bytes(bytes.len() as u64),
-        original.map_or_else(String::new, |original| format!(
-            ", {}% of the original",
-            (bytes.len() as u64 * 100)
-                .checked_div(original)
-                .unwrap_or(0)
-        ))
-    );
-    if let Some(note) = note {
-        summary.push_str(&format!(". Note: {note}"));
-    }
-    Ok((path, summary))
-}
-
-/// The converter in the left drawer.
-#[derive(Debug, Default)]
+/// The Converter.
+#[derive(Debug)]
 pub struct Convert {
-    source: Option<AssetHandle>,
-    target: Option<Target>,
-    status: Option<(String, bool)>,
+    inputs: Vec<Input>,
+    targets: HashMap<Kind, Target>,
+    options: Options,
+    output: Output,
+    reveal_after: bool,
+    resize_mode: usize,
+    resize_values: (f32, u32, u32),
+    sample_rate: usize,
+    channels: usize,
+    started: bool,
+    results: Option<Receiver<Finished>>,
+}
+
+impl Default for Convert {
+    fn default() -> Self {
+        Self {
+            inputs: Vec::new(),
+            targets: HashMap::new(),
+            options: Options::default(),
+            output: Output {
+                folder: None,
+                pattern: "{name}".to_owned(),
+                replace: false,
+            },
+            reveal_after: true,
+            resize_mode: 0,
+            resize_values: (50.0, 1920, 1080),
+            sample_rate: 0,
+            channels: 0,
+            started: false,
+            results: None,
+        }
+    }
+}
+
+const RESIZES: [&str; 6] = [
+    "Keep the size",
+    "Scale",
+    "Width",
+    "Height",
+    "Fit inside",
+    "Exact size",
+];
+const RATES: [(Option<u32>, &str); 9] = [
+    (None, "Keep the rate"),
+    (Some(8_000), "8,000 Hz"),
+    (Some(16_000), "16,000 Hz"),
+    (Some(22_050), "22,050 Hz"),
+    (Some(32_000), "32,000 Hz"),
+    (Some(44_100), "44,100 Hz (CD)"),
+    (Some(48_000), "48,000 Hz"),
+    (Some(88_200), "88,200 Hz"),
+    (Some(96_000), "96,000 Hz"),
+];
+const CHANNELS: [(Option<u16>, &str); 3] = [
+    (None, "Keep the channels"),
+    (Some(1), "Mono"),
+    (Some(2), "Stereo"),
+];
+
+fn combo<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    id: &str,
+    width: f32,
+    chosen: &mut T,
+    options: &[(T, String)],
+) -> bool {
+    let label = options
+        .iter()
+        .find(|(value, _)| value == chosen)
+        .map_or_else(String::new, |(_, label)| label.clone());
+    let mut changed = false;
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(label)
+        .width(width)
+        .show_ui(ui, |ui| {
+            for (value, label) in options {
+                if ui
+                    .add(egui::Button::selectable(value == chosen, label))
+                    .clicked()
+                {
+                    *chosen = *value;
+                    changed = true;
+                }
+            }
+        });
+    changed
+}
+
+fn row(ui: &mut Ui, label: &str, theme: &Theme, add: impl FnOnce(&mut Ui)) {
+    ui.horizontal(|ui| {
+        ui.add_sized(
+            vec2(110.0, 18.0),
+            egui::Label::new(RichText::new(label).color(theme.muted)),
+        );
+        add(ui);
+    });
 }
 
 impl Convert {
-    fn out_dir(cx: &AppletContext<'_>, source: AssetHandle) -> PathBuf {
-        let riced = cx.rice().get_str("io.convert_dir").unwrap_or("").trim();
-        if !riced.is_empty() {
-            return PathBuf::from(riced);
+    fn add_path(&mut self, path: &Path) {
+        if path.is_dir() {
+            let Ok(entries) = sue_platform::list_dir(path, false) else {
+                return;
+            };
+            for entry in entries
+                .into_iter()
+                .filter(|entry| !entry.is_dir)
+                .take(FOLDER_LIMIT)
+            {
+                self.add_path(&entry.path);
+            }
+            return;
         }
-        cx.arena()
-            .get(source)
+        if self
+            .inputs
+            .iter()
+            .any(|input| input.source == Source::File(path.to_path_buf()))
+        {
+            return;
+        }
+        let head: Vec<u8> = std::fs::File::open(path)
             .ok()
-            .and_then(|entity| entity.meta(meta::SOURCE))
-            .and_then(|path| Path::new(path).parent().map(Path::to_path_buf))
-            .or_else(|| cx.catalog.folders.get("home").cloned())
-            .unwrap_or_default()
+            .map(|file| {
+                use std::io::Read;
+                let mut head = Vec::new();
+                let _ = file.take(4096).read_to_end(&mut head);
+                head
+            })
+            .unwrap_or_default();
+        self.inputs.push(Input {
+            source: Source::File(path.to_path_buf()),
+            name: file_name(path),
+            kind: ops::kind_of(path, &head),
+            size: std::fs::metadata(path).map_or(0, |meta| meta.len()),
+            status: Status::Waiting,
+        });
+    }
+
+    /// Pictures and sounds on the canvas: their files where they have one,
+    /// else the entities themselves.
+    fn add_canvas(&mut self, cx: &AppletContext<'_>) {
+        let found: Vec<(AssetHandle, String, Option<String>, Kind)> = cx
+            .arena()
+            .iter()
+            .filter_map(|(handle, entity)| {
+                let kind = if entity.component(ComponentKind::PCMFloat1D).is_some() {
+                    Kind::Sound
+                } else if entity.component(ComponentKind::RasterTile2D).is_some()
+                    && entity.meta(meta::ENTROPY).is_none()
+                {
+                    Kind::Picture
+                } else {
+                    return None;
+                };
+                Some((
+                    handle,
+                    entity.name().to_owned(),
+                    entity.meta(meta::SOURCE).map(str::to_owned),
+                    kind,
+                ))
+            })
+            .collect();
+        for (handle, name, source, kind) in found {
+            match source.map(PathBuf::from).filter(|path| path.is_file()) {
+                Some(path) => self.add_path(&path),
+                None if !self
+                    .inputs
+                    .iter()
+                    .any(|input| input.source == Source::Entity(handle)) =>
+                {
+                    self.inputs.push(Input {
+                        source: Source::Entity(handle),
+                        name,
+                        kind,
+                        size: 0,
+                        status: Status::Waiting,
+                    });
+                }
+                None => {}
+            }
+        }
+    }
+
+    fn target(&self, kind: Kind) -> Target {
+        self.targets
+            .get(&kind)
+            .copied()
+            .unwrap_or_else(|| Target::for_kind(kind)[0])
+    }
+
+    fn kinds(&self) -> Vec<Kind> {
+        Kind::ALL
+            .into_iter()
+            .filter(|kind| self.inputs.iter().any(|input| input.kind == *kind))
+            .collect()
+    }
+
+    fn busy(&self) -> bool {
+        self.inputs
+            .iter()
+            .any(|input| input.status == Status::Working)
+    }
+
+    /// The options as the controls left them.
+    fn settled_options(&self) -> Options {
+        let mut options = self.options.clone();
+        let (percent, width, height) = self.resize_values;
+        options.picture.resize = match self.resize_mode {
+            1 => Resize::Scale(percent),
+            2 => Resize::Width(width),
+            3 => Resize::Height(height),
+            4 => Resize::Fit(width, height),
+            5 => Resize::Exact(width, height),
+            _ => Resize::Keep,
+        };
+        options.sound.sample_rate = RATES[self.sample_rate].0;
+        options.sound.channels = CHANNELS[self.channels].0;
+        options
+    }
+
+    /// Converts every waiting file: those on disk on a background thread,
+    /// the canvas's own at once.
+    fn run(&mut self, cx: &mut AppletContext<'_>) {
+        let options = self.settled_options();
+        let fallback = crate::util::export_dir(cx);
+        let mut jobs = Vec::new();
+        for index in 0..self.inputs.len() {
+            if matches!(self.inputs[index].status, Status::Working) {
+                continue;
+            }
+            let input = self.inputs[index].clone();
+            let target = self.target(input.kind);
+            let out = self.output.path_for(&input, target, &fallback);
+            match &input.source {
+                Source::File(path) => {
+                    self.inputs[index].status = Status::Working;
+                    jobs.push((index, path.clone(), input.kind, target, out));
+                }
+                Source::Entity(handle) => {
+                    self.inputs[index].status =
+                        match Self::convert_entity(cx, *handle, input.kind, target, &options, &out)
+                        {
+                            Ok(note) => Status::Done(out, note),
+                            Err(error) => Status::Failed(error),
+                        };
+                }
+            }
+        }
+        self.started = true;
+        if jobs.is_empty() {
+            self.finish(cx);
+            return;
+        }
+        let (sender, receiver) = channel();
+        self.results = Some(receiver);
+        let _ = std::thread::Builder::new()
+            .name("sue-convert".to_owned())
+            .spawn(move || {
+                for (index, path, kind, target, out) in jobs {
+                    let result = std::fs::read(&path)
+                        .map_err(|error| error.to_string())
+                        .and_then(|bytes| ops::convert(&path, bytes, kind, target, &options))
+                        .and_then(|(bytes, note)| {
+                            if let Some(folder) = out.parent() {
+                                std::fs::create_dir_all(folder)
+                                    .map_err(|error| error.to_string())?;
+                            }
+                            write_atomic(&out, &bytes).map_err(|error| error.to_string())?;
+                            Ok((out, format!("{note}, {}", human_bytes(bytes.len() as u64))))
+                        });
+                    if sender.send((index, result)).is_err() {
+                        return;
+                    }
+                }
+            });
+    }
+
+    /// Converts a picture or sound held only on the canvas.
+    fn convert_entity(
+        cx: &AppletContext<'_>,
+        handle: AssetHandle,
+        kind: Kind,
+        target: Target,
+        options: &Options,
+        out: &Path,
+    ) -> Result<String, String> {
+        let entity = cx.arena().get(handle).map_err(|error| error.to_string())?;
+        let (bytes, note) = match kind {
+            Kind::Picture => {
+                let tile = entity
+                    .component(ComponentKind::RasterTile2D)
+                    .and_then(|data| data.as_raster())
+                    .ok_or("the picture is gone")?;
+                let changed = ops::transform_picture(tile, &options.picture, target)?;
+                let note = format!("{} by {} pixels", changed.width(), changed.height());
+                (
+                    ops::write_picture(&changed, target, &options.picture)?,
+                    note,
+                )
+            }
+            Kind::Sound => {
+                let pcm = entity
+                    .component(ComponentKind::PCMFloat1D)
+                    .and_then(|data| data.as_pcm())
+                    .ok_or("the sound is gone")?;
+                let changed = ops::transform_sound(pcm, &options.sound)?;
+                let note = format!("{:.1} s", changed.duration_seconds());
+                (
+                    ops::write_sound(&changed, target, options.sound.depth)?,
+                    note,
+                )
+            }
+            Kind::Text | Kind::Data => return Err("only files on disk convert as text".to_owned()),
+        };
+        if let Some(folder) = out.parent() {
+            std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+        }
+        write_atomic(out, &bytes).map_err(|error| error.to_string())?;
+        Ok(format!("{note}, {}", human_bytes(bytes.len() as u64)))
+    }
+
+    /// Takes in finished conversions. Returns `true` if any came.
+    fn collect(&mut self, cx: &mut AppletContext<'_>) -> bool {
+        let Some(results) = self.results.as_ref() else {
+            return false;
+        };
+        let mut any = false;
+        while let Ok((index, result)) = results.try_recv() {
+            any = true;
+            if let Some(input) = self.inputs.get_mut(index) {
+                input.status = match result {
+                    Ok((path, note)) => Status::Done(path, note),
+                    Err(error) => Status::Failed(error),
+                };
+            }
+        }
+        if any && !self.busy() {
+            self.results = None;
+            self.finish(cx);
+        }
+        any
+    }
+
+    /// Says how a run went and, if asked, shows the result.
+    fn finish(&mut self, cx: &mut AppletContext<'_>) {
+        if !self.started {
+            return;
+        }
+        self.started = false;
+        let done: Vec<&PathBuf> = self
+            .inputs
+            .iter()
+            .filter_map(|input| match &input.status {
+                Status::Done(path, _) => Some(path),
+                _ => None,
+            })
+            .collect();
+        let failed = self
+            .inputs
+            .iter()
+            .filter(|input| matches!(input.status, Status::Failed(_)))
+            .count();
+        match done.as_slice() {
+            [] if failed > 0 => cx.fail(format!("Nothing converted: {failed} failed")),
+            [] => {}
+            [one] => cx.saved(one.to_path_buf(), "converted"),
+            many => {
+                let folder = many[0].parent().map(Path::to_path_buf).unwrap_or_default();
+                cx.saved(
+                    many[0].to_path_buf(),
+                    format!(
+                        "{} files converted, {failed} failed, into {}",
+                        many.len(),
+                        folder.display()
+                    ),
+                );
+            }
+        }
+        if self.reveal_after
+            && let Some(first) = done.first()
+        {
+            cx.request(ShellRequest::Command(format!(
+                "reveal-file:{}",
+                first.display()
+            )));
+        }
+    }
+
+    fn pick(cx: &mut AppletContext<'_>, purpose: &str, title: &str) {
+        cx.request(ShellRequest::PickFile(
+            FilePick::open(Some(AppletId::new(ID).expect("a valid id")), purpose, title)
+                .or_folder(),
+        ));
+    }
+
+    // ----- The parts of the Converter -----------------------------------------
+
+    fn files_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        let theme = cx.theme.clone();
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+            if widgets::pill_button(ui, "Add Files", false, &theme)
+                .on_hover_text("Choose a file, or a whole folder, in the File Manager")
+                .clicked()
+            {
+                Self::pick(cx, "add", "Add Files to Convert");
+            }
+            if widgets::pill_button(ui, "Add from the Canvas", false, &theme).clicked() {
+                self.add_canvas(cx);
+            }
+            if !self.inputs.is_empty()
+                && !self.busy()
+                && widgets::pill_button(ui, "Clear", false, &theme).clicked()
+            {
+                self.inputs.clear();
+            }
+        });
+        if self.inputs.is_empty() {
+            ui.add(
+                egui::Label::new(
+                    RichText::new("Add any file: a picture, a song, a text file, a table, or anything at all. In the File Manager, Convert sends the selected file here.")
+                        .color(theme.muted),
+                )
+                .wrap(),
+            );
+            return;
+        }
+        let mut remove = None;
+        let mut reveal = None;
+        for (index, input) in self.inputs.iter().enumerate() {
+            let height = theme.ui_size * 2.6;
+            let (rect, response) =
+                ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+            if response.hovered() {
+                ui.painter().rect_filled(rect, 4.0, theme.hover);
+            }
+            let painter = ui
+                .painter()
+                .with_clip_rect(rect.shrink2(vec2(26.0, 0.0)).translate(vec2(-20.0, 0.0)));
+            painter.text(
+                rect.left_center() + vec2(8.0, -theme.small_size * 0.6),
+                Align2::LEFT_CENTER,
+                &input.name,
+                theme.font(theme.ui_size),
+                theme.text,
+            );
+            let detail = match &input.status {
+                Status::Waiting => {
+                    let size = if input.size > 0 {
+                        format!(", {}", human_bytes(input.size))
+                    } else {
+                        String::new()
+                    };
+                    format!(
+                        "{}{size}, becomes {}",
+                        input.kind.plural().trim_end_matches('s'),
+                        self.target(input.kind).label()
+                    )
+                }
+                Status::Working => "Converting...".to_owned(),
+                Status::Done(path, note) => format!("Done: {} ({note})", file_name(path)),
+                Status::Failed(error) => format!("! {error}"),
+            };
+            painter.text(
+                rect.left_center() + vec2(8.0, theme.ui_size * 0.55),
+                Align2::LEFT_CENTER,
+                detail,
+                theme.font(theme.small_size),
+                theme.muted,
+            );
+            let close = egui::Rect::from_center_size(
+                rect.right_center() - vec2(12.0, 0.0),
+                vec2(20.0, 20.0),
+            );
+            let close_response = ui.interact(
+                close,
+                ui.scope_id().with(("convert-remove", index)),
+                Sense::click(),
+            );
+            ui.painter().text(
+                close.center(),
+                Align2::CENTER_CENTER,
+                "\u{00D7}",
+                theme.font(theme.ui_size * 1.2),
+                if close_response.hovered() {
+                    theme.text
+                } else {
+                    theme.muted
+                },
+            );
+            if close_response
+                .on_hover_text("Take it off the list")
+                .clicked()
+            {
+                remove = Some(index);
+            } else if let Status::Done(path, _) = &input.status
+                && response.on_hover_text("Show it in Explorer").clicked()
+            {
+                reveal = Some(path.clone());
+            }
+        }
+        if let Some(index) = remove.filter(|index| self.inputs[*index].status != Status::Working) {
+            self.inputs.remove(index);
+        }
+        if let Some(path) = reveal {
+            cx.request(ShellRequest::Command(format!(
+                "reveal-file:{}",
+                path.display()
+            )));
+        }
+    }
+
+    fn targets_ui(&mut self, ui: &mut Ui, theme: &Theme) {
+        for kind in self.kinds() {
+            let mut target = self.target(kind);
+            let options: Vec<(Target, String)> = Target::for_kind(kind)
+                .into_iter()
+                .map(|target| (target, target.label()))
+                .collect();
+            row(ui, &format!("{} become", kind.plural()), theme, |ui| {
+                if combo(
+                    ui,
+                    &format!("sue-convert-target-{kind:?}"),
+                    210.0,
+                    &mut target,
+                    &options,
+                ) {
+                    self.targets.insert(kind, target);
+                }
+            });
+        }
+    }
+
+    #[allow(clippy::too_many_lines, reason = "every picture option in one place")]
+    fn picture_ui(&mut self, ui: &mut Ui, theme: &Theme) {
+        let target = self.target(Kind::Picture);
+        if matches!(
+            target,
+            Target::Base64 | Target::Hex | Target::ByteMap | Target::Copy
+        ) {
+            return;
+        }
+        egui::CollapsingHeader::new(RichText::new("Picture options").color(theme.text))
+            .id_salt("sue-convert-picture")
+            .default_open(true)
+            .show(ui, |ui| {
+                let picture = &mut self.options.picture;
+                row(ui, "Size", theme, |ui| {
+                    let options: Vec<(usize, String)> = RESIZES
+                        .iter()
+                        .enumerate()
+                        .map(|(index, label)| (index, (*label).to_owned()))
+                        .collect();
+                    combo(
+                        ui,
+                        "sue-convert-resize",
+                        140.0,
+                        &mut self.resize_mode,
+                        &options,
+                    );
+                });
+                let (percent, width, height) = &mut self.resize_values;
+                match self.resize_mode {
+                    1 => row(ui, "Scale", theme, |ui| {
+                        ui.add(
+                            egui::Slider::new(percent, 1.0..=400.0)
+                                .suffix(" %")
+                                .max_decimals(0),
+                        );
+                    }),
+                    2 => row(ui, "Width", theme, |ui| {
+                        ui.add(egui::DragValue::new(width).range(1..=32_768).suffix(" px"));
+                    }),
+                    3 => row(ui, "Height", theme, |ui| {
+                        ui.add(egui::DragValue::new(height).range(1..=32_768).suffix(" px"));
+                    }),
+                    4 | 5 => row(ui, "Box", theme, |ui| {
+                        ui.add(egui::DragValue::new(width).range(1..=32_768).suffix(" px"));
+                        ui.label("by");
+                        ui.add(egui::DragValue::new(height).range(1..=32_768).suffix(" px"));
+                    }),
+                    _ => {}
+                }
+                if self.resize_mode != 0 {
+                    row(ui, "Resampling", theme, |ui| {
+                        let options: Vec<(Filter, String)> = Filter::ALL
+                            .iter()
+                            .map(|(filter, label)| (*filter, (*label).to_owned()))
+                            .collect();
+                        combo(
+                            ui,
+                            "sue-convert-filter",
+                            160.0,
+                            &mut picture.filter,
+                            &options,
+                        );
+                    });
+                }
+                row(ui, "Turn", theme, |ui| {
+                    let options = ["None", "90\u{00B0} right", "180\u{00B0}", "90\u{00B0} left"]
+                        .map(str::to_owned);
+                    if let Some(index) = widgets::segmented(
+                        ui,
+                        &options,
+                        Some(usize::from(picture.quarter_turns % 4)),
+                        theme,
+                    ) {
+                        picture.quarter_turns = index as u8;
+                    }
+                });
+                row(ui, "Mirror", theme, |ui| {
+                    ui.checkbox(&mut picture.flip_h, "Left to right");
+                    ui.checkbox(&mut picture.flip_v, "Top to bottom");
+                });
+                row(ui, "Brightness", theme, |ui| {
+                    ui.add(egui::Slider::new(&mut picture.brightness, -1.0..=1.0).max_decimals(2));
+                });
+                row(ui, "Contrast", theme, |ui| {
+                    ui.add(egui::Slider::new(&mut picture.contrast, -1.0..=1.0).max_decimals(2));
+                });
+                row(ui, "Saturation", theme, |ui| {
+                    ui.add(egui::Slider::new(&mut picture.saturation, -1.0..=1.0).max_decimals(2));
+                });
+                row(ui, "Colors", theme, |ui| {
+                    ui.checkbox(&mut picture.grayscale, "Grays only");
+                    ui.checkbox(&mut picture.flatten, "Fill transparency");
+                });
+                if picture.flatten || target.flattens() {
+                    row(ui, "Background", theme, |ui| {
+                        let [r, g, b] = picture.background;
+                        let mut rgba = [r, g, b, 255];
+                        if sue_wm::color_button(
+                            ui,
+                            "sue-convert-background",
+                            &mut rgba,
+                            false,
+                            theme,
+                        )
+                        .changed
+                        {
+                            picture.background = [rgba[0], rgba[1], rgba[2]];
+                        }
+                    });
+                }
+                if target == Target::Jpeg {
+                    row(ui, "Quality", theme, |ui| {
+                        ui.add(egui::Slider::new(&mut picture.jpeg_quality, 1..=100));
+                    });
+                }
+                if target == Target::Jxl {
+                    row(ui, "Effort", theme, |ui| {
+                        ui.add(egui::Slider::new(&mut picture.jxl_effort, 1..=9))
+                            .on_hover_text("Higher is smaller and slower");
+                    });
+                }
+                if let Target::Picture(format) = target
+                    && let Some(max) = format.max_side()
+                    && max <= 256
+                {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} pictures are at most {max} by {max}; bigger ones are fitted.",
+                            format.name()
+                        ))
+                        .size(theme.small_size)
+                        .color(theme.muted),
+                    );
+                }
+            });
+    }
+
+    fn sound_ui(&mut self, ui: &mut Ui, theme: &Theme) {
+        let target = self.target(Kind::Sound);
+        if !matches!(target, Target::Wav | Target::Flac | Target::Aiff) {
+            return;
+        }
+        egui::CollapsingHeader::new(RichText::new("Sound options").color(theme.text))
+            .id_salt("sue-convert-sound")
+            .default_open(true)
+            .show(ui, |ui| {
+                row(ui, "Sample rate", theme, |ui| {
+                    let options: Vec<(usize, String)> = RATES
+                        .iter()
+                        .enumerate()
+                        .map(|(index, (_, label))| (index, (*label).to_owned()))
+                        .collect();
+                    combo(
+                        ui,
+                        "sue-convert-rate",
+                        150.0,
+                        &mut self.sample_rate,
+                        &options,
+                    );
+                });
+                row(ui, "Channels", theme, |ui| {
+                    let options: Vec<(usize, String)> = CHANNELS
+                        .iter()
+                        .enumerate()
+                        .map(|(index, (_, label))| (index, (*label).to_owned()))
+                        .collect();
+                    combo(
+                        ui,
+                        "sue-convert-channels",
+                        150.0,
+                        &mut self.channels,
+                        &options,
+                    );
+                });
+                let sound = &mut self.options.sound;
+                row(ui, "Bits", theme, |ui| {
+                    let mut depths = vec![
+                        (SampleDepth::Int16, "16-bit (CD)".to_owned()),
+                        (SampleDepth::Int24, "24-bit (studio)".to_owned()),
+                    ];
+                    if target == Target::Wav {
+                        depths.push((SampleDepth::Float32, "32-bit float".to_owned()));
+                    } else if sound.depth == SampleDepth::Float32 {
+                        sound.depth = SampleDepth::Int24;
+                    }
+                    combo(ui, "sue-convert-depth", 150.0, &mut sound.depth, &depths);
+                });
+                row(ui, "Loudness", theme, |ui| {
+                    ui.checkbox(&mut sound.normalize, "Normalize to -1 dB");
+                });
+                if !sound.normalize {
+                    row(ui, "Gain", theme, |ui| {
+                        ui.add(
+                            egui::Slider::new(&mut sound.gain_db, -24.0..=24.0)
+                                .suffix(" dB")
+                                .max_decimals(1),
+                        );
+                    });
+                }
+                row(ui, "Cut the start", theme, |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut sound.trim_start, 0.0..=60.0)
+                            .suffix(" s")
+                            .max_decimals(2),
+                    );
+                });
+                row(ui, "Cut the end", theme, |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut sound.trim_end, 0.0..=60.0)
+                            .suffix(" s")
+                            .max_decimals(2),
+                    );
+                });
+                row(ui, "Fade in", theme, |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut sound.fade_in, 0.0..=10.0)
+                            .suffix(" s")
+                            .max_decimals(2),
+                    );
+                });
+                row(ui, "Fade out", theme, |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut sound.fade_out, 0.0..=10.0)
+                            .suffix(" s")
+                            .max_decimals(2),
+                    );
+                });
+                row(ui, "Speed", theme, |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut sound.speed, 0.25..=4.0)
+                            .suffix("x")
+                            .max_decimals(2),
+                    )
+                    .on_hover_text("Changes the pitch too");
+                });
+                row(ui, "Direction", theme, |ui| {
+                    ui.checkbox(&mut sound.reverse, "Backwards");
+                });
+            });
+    }
+
+    fn text_ui(&mut self, ui: &mut Ui, theme: &Theme) {
+        let kinds = self.kinds();
+        let text_target = kinds.contains(&Kind::Text).then(|| self.target(Kind::Text));
+        let data_targets: Vec<Target> = kinds.iter().map(|kind| self.target(*kind)).collect();
+        let text = &mut self.options.text;
+        if let Some(target) = text_target
+            && matches!(
+                target,
+                Target::Text | Target::Html | Target::Json | Target::Csv | Target::Tsv
+            )
+        {
+            egui::CollapsingHeader::new(RichText::new("Text options").color(theme.text))
+                .id_salt("sue-convert-text")
+                .default_open(true)
+                .show(ui, |ui| {
+                    row(ui, "Line endings", theme, |ui| {
+                        let options = vec![
+                            (Endings::Keep, "Keep".to_owned()),
+                            (Endings::Lf, "LF (Linux, macOS)".to_owned()),
+                            (Endings::CrLf, "CRLF (Windows)".to_owned()),
+                        ];
+                        combo(
+                            ui,
+                            "sue-convert-endings",
+                            160.0,
+                            &mut text.endings,
+                            &options,
+                        );
+                    });
+                    if target == Target::Text {
+                        row(ui, "Tidy", theme, |ui| {
+                            ui.checkbox(&mut text.trim_trailing, "Drop trailing spaces");
+                        });
+                        row(ui, "Tabs", theme, |ui| {
+                            ui.add(
+                                egui::Slider::new(&mut text.tab_spaces, 0..=8).suffix(" spaces"),
+                            )
+                            .on_hover_text("0 keeps the tabs");
+                        });
+                    }
+                    if target == Target::Json {
+                        row(ui, "Indent", theme, |ui| {
+                            ui.add(
+                                egui::Slider::new(&mut text.json_indent, 0..=8).suffix(" spaces"),
+                            )
+                            .on_hover_text("0 writes it on one line");
+                        });
+                        row(ui, "Tables", theme, |ui| {
+                            ui.checkbox(&mut text.header_row, "The first row names the columns");
+                        });
+                    }
+                    if target == Target::Html {
+                        row(ui, "Page title", theme, |ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut text.html_title)
+                                    .hint_text("The file's name")
+                                    .desired_width(180.0),
+                            );
+                        });
+                    }
+                });
+        }
+        if data_targets.contains(&Target::Hex) {
+            row(ui, "Hex bytes a line", theme, |ui| {
+                ui.add(egui::Slider::new(&mut text.hex_width, 4..=64));
+            });
+        }
+        if data_targets.contains(&Target::Base64) {
+            row(ui, "Base64", theme, |ui| {
+                ui.checkbox(&mut text.base64_wrap, "Wrap lines at 76");
+            });
+        }
+        if data_targets.contains(&Target::ByteMap) {
+            row(ui, "Byte map width", theme, |ui| {
+                ui.add(egui::Slider::new(&mut text.map_width, 16..=2048).suffix(" px"));
+            });
+        }
+    }
+
+    fn output_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        let theme = cx.theme.clone();
+        widgets::heading(ui, "Save to", &theme);
+        let mut next_to = self.output.folder.is_none();
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .radio_value(&mut next_to, true, "Next to each file")
+                .clicked()
+            {
+                self.output.folder = None;
+            }
+            if ui
+                .radio_value(&mut next_to, false, "This folder:")
+                .clicked()
+                && self.output.folder.is_none()
+            {
+                Self::pick(cx, "folder", "Choose Where Converted Files Go");
+            }
+        });
+        if let Some(folder) = self.output.folder.clone() {
+            ui.horizontal_wrapped(|ui| {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(folder.display().to_string())
+                            .size(theme.small_size)
+                            .color(theme.text),
+                    )
+                    .wrap(),
+                );
+                if widgets::pill_button(ui, "Change", false, &theme).clicked() {
+                    Self::pick(cx, "folder", "Choose Where Converted Files Go");
+                }
+                if widgets::pill_button(ui, "Open", false, &theme).clicked() {
+                    cx.request(ShellRequest::Command(format!(
+                        "reveal:{}",
+                        folder.display()
+                    )));
+                }
+            });
+        }
+        row(ui, "File name", &theme, |ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.output.pattern)
+                    .desired_width(140.0)
+                    .hint_text("{name}"),
+            )
+            .on_hover_text("{name} is the original's name, e.g. {name}-small");
+        });
+        row(ui, "If it exists", &theme, |ui| {
+            let options = vec![
+                (false, "Keep both".to_owned()),
+                (true, "Replace it".to_owned()),
+            ];
+            combo(
+                ui,
+                "sue-convert-replace",
+                120.0,
+                &mut self.output.replace,
+                &options,
+            );
+        });
+        ui.checkbox(
+            &mut self.reveal_after,
+            "Show the result in Explorer when done",
+        );
+    }
+
+    fn body(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        let theme = cx.theme.clone();
+        self.collect(cx);
+        self.files_ui(ui, cx);
+        if self.inputs.is_empty() {
+            return;
+        }
+        ui.add_space(theme.padding);
+        self.targets_ui(ui, &theme);
+        if self.kinds().contains(&Kind::Picture) {
+            self.picture_ui(ui, &theme);
+        }
+        if self.kinds().contains(&Kind::Sound) {
+            self.sound_ui(ui, &theme);
+        }
+        self.text_ui(ui, &theme);
+        ui.add_space(theme.padding);
+        self.output_ui(ui, cx);
+        ui.add_space(theme.padding);
+        let waiting = self
+            .inputs
+            .iter()
+            .filter(|input| !matches!(input.status, Status::Working))
+            .count();
+        ui.horizontal(|ui| {
+            let label = if waiting == 1 {
+                "Convert 1 file".to_owned()
+            } else {
+                format!("Convert {waiting} files")
+            };
+            if ui
+                .add_enabled(
+                    !self.busy() && waiting > 0,
+                    egui::Button::new(RichText::new(label).color(theme.text)),
+                )
+                .clicked()
+            {
+                self.run(cx);
+            }
+            if self.busy() {
+                let done = self
+                    .inputs
+                    .iter()
+                    .filter(|input| matches!(input.status, Status::Done(..) | Status::Failed(_)))
+                    .count();
+                ui.add(
+                    egui::ProgressBar::new(done as f32 / self.inputs.len().max(1) as f32)
+                        .desired_width(140.0)
+                        .show_percentage(),
+                );
+                ui.ctx().request_repaint_after(Duration::from_millis(100));
+            }
+        });
     }
 }
 
@@ -210,110 +1117,121 @@ impl SueApplet for Convert {
     fn manifest(&self) -> AppletManifest {
         let mut manifest = AppletManifest::new(ID, "Convert", AppletRole::LeftDrawer, "\u{1F504}");
         manifest.summary =
-            "Turn pictures into JPEG XL, PNG or JPEG, and songs into WAV.".to_owned();
+            "Turn any file into another kind: pictures, sounds, text, tables or bytes.".to_owned();
         manifest.order = 30;
         manifest
     }
 
     fn drawer_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        if self.inputs.is_empty() {
+            let picture = &mut self.options.picture;
+            picture.jpeg_quality = cx
+                .rice()
+                .get_i64("io.jpeg_quality")
+                .and_then(|quality| u8::try_from(quality).ok())
+                .unwrap_or(picture.jpeg_quality);
+            picture.jxl_effort = cx
+                .rice()
+                .get_i64("io.jxl_effort")
+                .and_then(|effort| u8::try_from(effort).ok())
+                .unwrap_or(picture.jxl_effort);
+            if self.output.folder.is_none() {
+                let riced = cx.rice().get_str("io.convert_dir").unwrap_or("").trim();
+                if !riced.is_empty() {
+                    self.output.folder = Some(PathBuf::from(riced));
+                }
+            }
+        }
+        self.body(ui, cx);
         let theme = cx.theme.clone();
-        let found = candidates(cx.world);
-        if self
-            .source
-            .is_none_or(|source| found.iter().all(|(handle, _)| *handle != source))
+        if ui
+            .add(
+                egui::Button::new(
+                    RichText::new("Open the large Converter")
+                        .size(theme.small_size)
+                        .color(theme.muted),
+                )
+                .frame(false),
+            )
+            .clicked()
         {
-            self.source = found.first().map(|(handle, _)| *handle);
+            cx.request(ShellRequest::OpenWindow(
+                AppletId::new(ID).expect("a valid id"),
+            ));
         }
-        widgets::heading(ui, "Source", &theme);
-        if found.is_empty() {
-            ui.label(
-                RichText::new("Open a picture or a song first; it shows up here.")
-                    .color(theme.muted),
-            );
-            return;
-        }
-        for (handle, kind) in &found {
-            let name = cx
-                .arena()
-                .get(*handle)
-                .map_or_else(|_| String::new(), |entity| entity.name().to_owned());
-            let chosen = self.source == Some(*handle);
-            let (rect, response) = ui.allocate_exact_size(
-                vec2(ui.available_width(), theme.ui_size * 1.9),
-                Sense::click(),
-            );
-            if chosen || response.hovered() {
-                ui.painter().rect_filled(
-                    rect,
-                    4.0,
-                    if chosen { theme.active } else { theme.hover },
-                );
+    }
+
+    fn window_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        let theme = cx.theme.clone();
+        let area = ui.max_rect().shrink(theme.padding * 1.5);
+        let mut inner = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(area)
+                .layout(Layout::top_down(Align::Min)),
+        );
+        ScrollArea::vertical()
+            .id_salt("sue-convert-window")
+            .auto_shrink([false, false])
+            .show(&mut inner, |ui| self.body(ui, cx));
+    }
+
+    fn window_title(&self) -> Option<String> {
+        Some("Convert".to_owned())
+    }
+
+    fn commands(&self) -> Vec<sue_wm::PaletteEntry> {
+        [
+            ("Convert: Add Files", "convert.add"),
+            ("Convert: Convert the List", "convert.run"),
+            ("Convert: Open the Large Converter", "convert.window"),
+        ]
+        .into_iter()
+        .map(|(label, command)| sue_wm::PaletteEntry {
+            label: label.to_owned(),
+            command: command.to_owned(),
+            hint: String::new(),
+        })
+        .collect()
+    }
+
+    fn command(&mut self, name: &str, cx: &mut AppletContext<'_>) -> bool {
+        match name {
+            "convert.add" => Self::pick(cx, "add", "Add Files to Convert"),
+            "convert.run" if !self.busy() => self.run(cx),
+            "convert.run" => cx.notify("Already converting"),
+            "convert.window" => {
+                cx.request(ShellRequest::OpenWindow(
+                    AppletId::new(ID).expect("a valid id"),
+                ));
             }
-            ui.painter().text(
-                rect.left_center() + vec2(8.0, 0.0),
-                egui::Align2::LEFT_CENTER,
-                &name,
-                theme.font(theme.ui_size),
-                theme.text,
-            );
-            ui.painter().text(
-                rect.right_center() - vec2(8.0, 0.0),
-                egui::Align2::RIGHT_CENTER,
-                match kind {
-                    Kind::Image => "Picture",
-                    Kind::Audio => "Audio",
-                },
-                theme.font(theme.small_size),
-                theme.muted,
-            );
-            if response.clicked() {
-                self.source = Some(*handle);
+            _ => return false,
+        }
+        true
+    }
+
+    fn tick(&mut self, cx: &mut AppletContext<'_>) -> Tick {
+        let arrived = self.collect(cx);
+        Tick {
+            repaint: arrived,
+            wake: self
+                .busy()
+                .then(|| std::time::Instant::now() + Duration::from_millis(100)),
+            ..Tick::default()
+        }
+    }
+
+    fn picked(&mut self, pick: &FilePick, path: &Path, _cx: &mut AppletContext<'_>) {
+        match pick.purpose.as_str() {
+            "add" => self.add_path(path),
+            "folder" => {
+                let folder = if path.is_dir() {
+                    path.to_path_buf()
+                } else {
+                    path.parent().map(Path::to_path_buf).unwrap_or_default()
+                };
+                self.output.folder = Some(folder);
             }
-        }
-        let Some(source) = self.source else {
-            return;
-        };
-        let Some(kind) = found
-            .iter()
-            .find(|(handle, _)| *handle == source)
-            .map(|(_, kind)| *kind)
-        else {
-            return;
-        };
-        let targets = kind.targets();
-        if self.target.is_none_or(|target| !targets.contains(&target)) {
-            self.target = targets.first().copied();
-        }
-        ui.add_space(theme.padding);
-        widgets::heading(ui, "Format", &theme);
-        let labels: Vec<String> = targets
-            .iter()
-            .map(|target| target.label().to_owned())
-            .collect();
-        let chosen = self
-            .target
-            .and_then(|target| targets.iter().position(|t| *t == target));
-        if let Some(index) = widgets::segmented(ui, &labels, chosen, &theme) {
-            self.target = targets.get(index).copied();
-        }
-        ui.add_space(theme.padding);
-        if widgets::pill_button(ui, "Convert", false, &theme).clicked()
-            && let Some(target) = self.target
-        {
-            let dir = Self::out_dir(cx, source);
-            self.status = Some(match convert(cx.world, source, target, &dir) {
-                Ok((_, summary)) => (summary, false),
-                Err(error) => (error, true),
-            });
-        }
-        if let Some((text, error)) = &self.status {
-            ui.add_space(theme.padding * 0.5);
-            let shown = if *error {
-                format!("! {text}")
-            } else {
-                text.clone()
-            };
-            ui.label(RichText::new(shown).color(theme.muted));
+            _ => {}
         }
     }
 }
@@ -321,61 +1239,40 @@ impl SueApplet for Convert {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sue_core::{PCMFloat1D, PixelFormat, RasterTile2D};
-    use sue_rice::{DEFAULT_RICE, RiceSchema};
 
     #[test]
-    fn pictures_and_songs_convert_to_real_files() {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_nanos());
-        let dir = std::env::temp_dir().join(format!("sue-convert-{}-{unique}", std::process::id()));
-        let mut world = World {
-            rice: RiceSchema::parse(DEFAULT_RICE).unwrap(),
-            ..World::default()
+    fn outputs_go_next_to_their_file_and_never_over_it() {
+        let dir = std::env::temp_dir().join(format!("sue-convert-out-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("photo.png");
+        std::fs::write(&source, b"x").unwrap();
+        let input = Input {
+            source: Source::File(source.clone()),
+            name: "photo.png".to_owned(),
+            kind: Kind::Picture,
+            size: 1,
+            status: Status::Waiting,
         };
-        let tile = RasterTile2D::from_bytes(4, 4, PixelFormat::Rgba8, vec![120; 64]).unwrap();
-        let picture = world.arena.spawn("card.png", tile.clone());
-        world
-            .arena
-            .get_mut(picture)
-            .unwrap()
-            .set_meta(meta::WIDTH, "4");
-        let song = world.arena.spawn(
-            "tone.mp3",
-            PCMFloat1D::new(8_000, 1, vec![0.25; 800]).unwrap(),
-        );
-        let map = world.arena.spawn("blob.bin", tile);
-        world
-            .arena
-            .get_mut(map)
-            .unwrap()
-            .set_meta(meta::ENTROPY, "7.9");
+        let mut output = Output {
+            folder: None,
+            pattern: "{name}".to_owned(),
+            replace: true,
+        };
         assert_eq!(
-            candidates(&world),
-            [(song, Kind::Audio), (picture, Kind::Image)],
-            "newest first, byte maps excluded"
+            output.path_for(&input, Target::Jxl, &dir),
+            dir.join("photo.jxl")
         );
-
-        let (jxl, summary) = convert(&world, picture, Target::Jxl, &dir).unwrap();
-        assert_eq!(file_name(&jxl), "card.jxl");
-        assert!(summary.starts_with("Saved card.jxl"));
-        let decoded = NativeJxlPipeline
-            .decode(
-                &std::fs::read(&jxl).unwrap(),
-                sue_io::ProgressiveTarget::Full,
-            )
-            .unwrap();
-        assert_eq!(decoded.tile.width(), 4);
-        let (png, _) = convert(&world, picture, Target::Png, &dir).unwrap();
-        assert!(std::fs::read(&png).unwrap().starts_with(b"\x89PNG"));
-        let (again, _) = convert(&world, picture, Target::Png, &dir).unwrap();
-        assert_eq!(file_name(&again), "card (2).png", "nothing is overwritten");
-        let (jpg, _) = convert(&world, picture, Target::Jpg, &dir).unwrap();
-        assert!(std::fs::read(&jpg).unwrap().starts_with(&[0xFF, 0xD8]));
-        let (wav, _) = convert(&world, song, Target::Wav, &dir).unwrap();
-        assert!(std::fs::read(&wav).unwrap().starts_with(b"RIFF"));
-        assert!(convert(&world, song, Target::Png, &dir).is_err());
-        std::fs::remove_dir_all(&dir).unwrap();
+        // The same name and format would be the source itself: keep both.
+        assert_eq!(
+            output.path_for(&input, Target::Png, &dir),
+            dir.join("photo (2).png")
+        );
+        output.pattern = "{name}-small".to_owned();
+        output.folder = Some(dir.join("out"));
+        assert_eq!(
+            output.path_for(&input, Target::Copy, &dir),
+            dir.join("out").join("photo-small.png")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -22,11 +22,15 @@ mod bytemap;
 mod formats;
 mod ingest;
 mod jxl;
+mod pictures;
 mod raster;
 mod sniff;
 mod tile_cache;
 
-pub use audio::{AudioInfo, DecodedAudio, decode_audio, encode_wav, probe_audio};
+pub use audio::{
+    AudioInfo, DecodedAudio, SampleDepth, decode_audio, encode_aiff, encode_flac, encode_wav,
+    encode_wav_as, probe_audio,
+};
 pub use bytemap::{byte_map_tile, shannon_entropy};
 pub use formats::{
     CompressedAudioFormat, DelimitedFormat, JpegFormat, JxlFormat, KeptFormat, ObjFormat,
@@ -37,6 +41,7 @@ pub use jxl::{
     DC_PREVIEW_SCALE, DecodedJxl, FourCc, JXL_CODESTREAM_SIGNATURE, JXL_CONTAINER_SIGNATURE,
     JxlError, JxlImageInfo, JxlPipeline, JxlProbe, NativeJxlPipeline, ProgressiveTarget, probe_jxl,
 };
+pub use pictures::{PictureFormat, decode_picture, encode_picture};
 pub use raster::{
     DecodedRaster, RasterInfo, decode_jpeg, decode_png, encode_jpeg, encode_png, encode_png_rgba,
 };

@@ -8,6 +8,8 @@ publish.workspace = true
 repository.workspace = true
 
 [dependencies]
+flacenc.workspace = true
+image.workspace = true
 jxl-oxide.workspace = true
 sue-core.workspace = true
 jpeg-encoder.workspace = true
