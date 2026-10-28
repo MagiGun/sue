@@ -827,6 +827,41 @@ impl SuePaint {
         }
     }
 
+    /// Sue Paint's own colors, used when `sue_paint.theme` is Custom; they
+    /// start as the Gray theme.
+    fn custom_colors() -> Vec<RiceDeclaration> {
+        let color = |key: &str, hex: &str, description: &str| {
+            RiceDeclaration::new(
+                format!("sue_paint_colors.{key}"),
+                RiceParameter::ColorHex {
+                    value: hex
+                        .parse()
+                        .unwrap_or_else(|error| panic!("built-in color {hex}: {error}")),
+                },
+                description,
+            )
+        };
+        vec![
+            color("void", "#2b2b2b", "Around the picture"),
+            color("panel", "#3a3a3a", "Palettes and menus"),
+            color("pill", "#444444", "Fields, chips and cards"),
+            color("hover", "#505050", "Hovered controls"),
+            color("active", "#5e5e5e", "Pressed and chosen controls"),
+            color("border", "#2a2a2a", "Hairline borders"),
+            color(
+                "border_active",
+                "#d8d8d8",
+                "Borders of chosen and focused controls",
+            ),
+            color("text", "#e6e6e6", "Primary text and active icons"),
+            color("muted", "#a4a4a4", "Secondary text"),
+            color("selection", "#6a6a6a", "Text selection highlight"),
+            color("selection_text", "#ffffff", "Text inside a selection"),
+            color("grid", "#474747", "Grids and rulers"),
+            color("shadow", "#141414", "Shadow under floating surfaces"),
+        ]
+    }
+
     /// Asks for a picture file and opens it as a new canvas, or as a new
     /// layer of the current one.
     fn pick_image(&mut self, cx: &mut AppletContext<'_>, as_layer: bool) {
@@ -1933,7 +1968,7 @@ impl SueApplet for SuePaint {
             min: Some(min),
             max: Some(max),
         };
-        vec![
+        let mut declarations = vec![
             RiceDeclaration::new(
                 "sue_paint.width",
                 int(1600, 1, 10_000),
@@ -1949,7 +1984,26 @@ impl SueApplet for SuePaint {
                 int(72, 1, 2400),
                 "Resolution of new illustrations (dpi)",
             ),
-        ]
+            RiceDeclaration::new(
+                "sue_paint.theme",
+                RiceParameter::EnumChoice {
+                    value: "gray".to_owned(),
+                    options: [
+                        "gray",
+                        sue_wm::STUDIO_THEME_SUE,
+                        "void",
+                        "graphite",
+                        "paper",
+                        sue_wm::STUDIO_THEME_CUSTOM,
+                    ]
+                    .map(String::from)
+                    .to_vec(),
+                },
+                "Sue Paint's colors: Gray, Sue's own theme (follows it), a preset, or Custom (below)",
+            ),
+        ];
+        declarations.extend(Self::custom_colors());
+        declarations
     }
 
     fn studio_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {

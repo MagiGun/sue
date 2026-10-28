@@ -205,6 +205,7 @@ pub struct Shell {
     studio_leave: Option<(Option<NodeId>, bool)>,
     studio_restore: Option<bool>,
     studio_area: Rect,
+    presets: Vec<sue_rice::ThemePreset>,
     radial_page: RadialPage,
     spawn_point: Option<Pos2>,
     interactive: bool,
@@ -291,6 +292,7 @@ impl Shell {
             studio_leave: None,
             studio_restore: None,
             studio_area: Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 720.0)),
+            presets: sue_rice::builtin_presets(),
             radial_page: RadialPage::Root,
             spawn_point: None,
             interactive: false,
@@ -1568,6 +1570,17 @@ impl Shell {
     ) {
         let area = self.studio_area;
         let view = self.view(now, dt);
+        // A studio may wear its own theme: its colors are egui's while it
+        // draws (its menus and popups too), and Sue's again afterwards.
+        let section = studio.as_str().replace('-', "_");
+        let theme = theme.for_studio(&io.world.rice, &section, &self.presets);
+        let own = theme != self.theme;
+        let ctx = root.ctx().clone();
+        if own {
+            let visuals = theme.visuals(self.config.caret_blink);
+            ctx.all_styles_mut(|style| style.visuals = visuals.clone());
+        }
+        let theme = &theme;
         {
             let mut builder = UiBuilder::new()
                 .max_rect(area)
@@ -1579,6 +1592,9 @@ impl Shell {
             }
             let mut studio_ui = root.new_child(builder);
             studio_ui.set_clip_rect(area);
+            if own {
+                studio_ui.style_mut().visuals = theme.visuals(self.config.caret_blink);
+            }
             let (applets, mut cx) = split(io, theme, view);
             match applets.get_mut(studio) {
                 Some(applet) => applet.studio_ui(&mut studio_ui, &mut cx),
@@ -1588,6 +1604,10 @@ impl Shell {
                     self.mode = CANVAS_MODE.to_owned();
                 }
             }
+        }
+        if own {
+            let visuals = self.theme.visuals(self.config.caret_blink);
+            ctx.all_styles_mut(|style| style.visuals = visuals.clone());
         }
     }
 

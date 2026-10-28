@@ -519,8 +519,24 @@ impl Engine {
                         "Opening Files",
                         params(&["io.max_ingest_mib", "io.byte_map_width"]),
                     ),
-                    group("Sue Paint", vec![section("sue_paint")]),
                     group("Built-in Codecs", vec![table("codecs")]),
+                ],
+            ),
+            SettingsPage::new(
+                "studios",
+                "Studios",
+                vec![
+                    group(
+                        "Sue Paint",
+                        vec![
+                            SettingsItem::Note(
+                                "Each studio can wear its own theme. Sue Paint starts in Gray, like other painting apps; choose Sue theme to have it follow Sue's colors everywhere, or Custom to color it with the wheels below."
+                                    .to_owned(),
+                            ),
+                            section("sue_paint"),
+                        ],
+                    ),
+                    group("Sue Paint Custom Colors", vec![section("sue_paint_colors")]),
                 ],
             ),
             SettingsPage::new(
@@ -943,6 +959,7 @@ pub(crate) mod tests {
                 "Display & Graphics",
                 "Audio & DSP",
                 "Files & Codecs",
+                "Studios",
                 "Packages & Updates",
                 "Keymaps",
                 "MCP"

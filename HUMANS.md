@@ -413,8 +413,15 @@ controls for it in **Settings**:
   **drop-downs**,
 - shortcuts become **key caps**: click one and press the new keys.
 
-**Appearance & Rice** also offers ready-made themes (Void, Graphite and Paper)
-that change every color at once, and one `Ctrl+Z` brings yours back. They are
+**Appearance & Rice** also offers ready-made themes (Void, Graphite, Paper and
+Gray) that change every color at once, and one `Ctrl+Z` brings yours back.
+
+Each studio can wear its own theme (Settings, Studios). Sue Paint starts in
+**Gray**, the mid grays painting apps use so your colors read true. Set it to
+**Sue theme** and it follows Sue's own colors, so changing them changes every
+studio that uses the Sue theme at once; pick another preset; or choose
+**Custom** and color Sue Paint with its own color wheels. The side panels
+always keep Sue's theme. They are
 all black, white and gray: Sue's look stays out of the way of your work. A
 color you pick yourself stays; only the tinted colors that very old releases
 shipped with are reset to the monochrome default (Sue keeps a copy of your old

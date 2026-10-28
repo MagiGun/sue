@@ -7,7 +7,7 @@ use std::time::Duration;
 use egui::epaint::Shadow;
 use egui::style::{Selection, TextCursorStyle, WidgetVisuals, Widgets};
 use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle, Visuals};
-use sue_rice::{Rgba, RiceSchema};
+use sue_rice::{Rgba, RiceSchema, ThemePreset};
 
 /// Colors, geometry and type for the whole shell.
 #[derive(Clone, Debug, PartialEq)]
@@ -70,7 +70,96 @@ fn color(rgba: Rgba) -> Color32 {
     Color32::from_rgba_unmultiplied(rgba.r, rgba.g, rgba.b, rgba.a)
 }
 
+/// The color keys of a theme, as `colors.<key>` names them.
+pub const COLOR_KEYS: [&str; 13] = [
+    "void",
+    "panel",
+    "pill",
+    "hover",
+    "active",
+    "border",
+    "border_active",
+    "text",
+    "muted",
+    "selection",
+    "selection_text",
+    "grid",
+    "shadow",
+];
+
+/// What a studio's `<section>.theme` may say besides a preset's id.
+pub const STUDIO_THEME_SUE: &str = "sue-theme";
+
+/// A studio's own colors, in `<section>_colors`.
+pub const STUDIO_THEME_CUSTOM: &str = "custom";
+
 impl Theme {
+    /// The color named by `key` (one of [`COLOR_KEYS`]).
+    fn color_mut(&mut self, key: &str) -> Option<&mut Color32> {
+        Some(match key {
+            "void" => &mut self.void,
+            "panel" => &mut self.panel,
+            "pill" => &mut self.pill,
+            "hover" => &mut self.hover,
+            "active" => &mut self.active,
+            "border" => &mut self.border,
+            "border_active" => &mut self.border_active,
+            "text" => &mut self.text,
+            "muted" => &mut self.muted,
+            "selection" => &mut self.selection,
+            "selection_text" => &mut self.selection_text,
+            "grid" => &mut self.grid,
+            "shadow" => &mut self.shadow,
+            _ => return None,
+        })
+    }
+
+    /// This theme with a preset's colors (its `colors.*` values).
+    #[must_use]
+    pub fn with_preset(&self, preset: &ThemePreset) -> Self {
+        let mut theme = self.clone();
+        for (path, value) in &preset.values {
+            if let (Some(key), sue_rice::RiceValue::Color(rgba)) =
+                (path.strip_prefix("colors."), value)
+                && let Some(slot) = theme.color_mut(key)
+            {
+                *slot = color(rgba.to_owned());
+            }
+        }
+        theme
+    }
+
+    /// This theme with the colors kept in `section` of `rice` (keys as in
+    /// [`COLOR_KEYS`]); colors the section lacks stay.
+    #[must_use]
+    pub fn with_colors_from(&self, rice: &RiceSchema, section: &str) -> Self {
+        let mut theme = self.clone();
+        for key in COLOR_KEYS {
+            if let Some(rgba) = rice.get_color(&format!("{section}.{key}"))
+                && let Some(slot) = theme.color_mut(key)
+            {
+                *slot = color(rgba);
+            }
+        }
+        theme
+    }
+
+    /// The theme a studio wears: `<section>.theme` names a preset, the Sue
+    /// theme (this one, so it follows every change to Sue's colors), or its
+    /// own colors in `<section>_colors`. A studio with no such setting
+    /// wears this theme.
+    #[must_use]
+    pub fn for_studio(&self, rice: &RiceSchema, section: &str, presets: &[ThemePreset]) -> Self {
+        match rice.get_str(&format!("{section}.theme")) {
+            None | Some(STUDIO_THEME_SUE) => self.clone(),
+            Some(STUDIO_THEME_CUSTOM) => self.with_colors_from(rice, &format!("{section}_colors")),
+            Some(id) => presets
+                .iter()
+                .find(|preset| preset.id == id)
+                .map_or_else(|| self.clone(), |preset| self.with_preset(preset)),
+        }
+    }
+
     /// Reads the theme from `rice`, falling back to the shipped defaults for
     /// anything missing.
     #[must_use]
@@ -266,6 +355,54 @@ fn fonts(ui_font: &str) -> egui::FontDefinitions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn studios_wear_a_preset_sues_theme_or_their_own_colors() {
+        let mut rice = RiceSchema::parse(sue_rice::DEFAULT_RICE).unwrap();
+        crate::register_rice(&mut rice).unwrap();
+        let presets = sue_rice::builtin_presets();
+        let sue = Theme::from_rice(&rice);
+        // Sue Paint ships in Gray.
+        let paint = sue.for_studio(&rice, "sue_paint", &presets);
+        assert_eq!(paint.panel, Color32::from_gray(0x3a));
+        assert_eq!(paint.padding, sue.padding, "only the colors change");
+        // A studio with no theme setting wears Sue's.
+        assert_eq!(sue.for_studio(&rice, "no_such_studio", &presets), sue);
+        // Sue theme follows Sue's colors, even after they change.
+        rice.set(
+            "sue_paint.theme",
+            sue_rice::RiceValue::Text(STUDIO_THEME_SUE.to_owned()),
+        )
+        .unwrap();
+        rice.set(
+            "colors.panel",
+            sue_rice::RiceValue::Color("#202020".parse().unwrap()),
+        )
+        .unwrap();
+        let synced = Theme::from_rice(&rice);
+        assert_eq!(
+            synced.for_studio(&rice, "sue_paint", &presets).panel,
+            Color32::from_gray(0x20)
+        );
+        // Custom reads the studio's own section.
+        rice.set(
+            "sue_paint.theme",
+            sue_rice::RiceValue::Text(STUDIO_THEME_CUSTOM.to_owned()),
+        )
+        .unwrap();
+        rice.set(
+            "sue_paint_colors.panel",
+            sue_rice::RiceValue::Color("#123456".parse().unwrap()),
+        )
+        .unwrap();
+        let custom = synced.for_studio(&rice, "sue_paint", &presets);
+        assert_eq!(custom.panel, Color32::from_rgb(0x12, 0x34, 0x56));
+        assert_eq!(
+            custom.text,
+            Color32::from_gray(0xe6),
+            "the rest of the custom colors"
+        );
+    }
 
     #[test]
     fn the_default_theme_is_pure_monochrome() {

@@ -919,6 +919,14 @@ palette (`ShellRequest::OpenStudio`) and leaves with `CloseStudio`; the rails,
 the drawers, the status bar, the palette, Settings and the global undo, save
 and open keys stay with it, and `Ctrl+O` asks the studio first.
 
+**Studio themes.** A studio whose rice section (its id with `-` as `_`)
+has a `theme` wears `Theme::for_studio`: a preset's colors, the Sue theme
+(`sue-theme`, the global colors, so it follows every change to them), or its
+own colors in `<section>_colors` (`custom`). Only the colors change. The
+shell sets egui's visuals to the studio's theme while the studio draws, so
+its menus and popups wear it too, and back to Sue's for the side panels,
+the status bar and Settings.
+
 **The Hub** (`ShellRequest::Hub`, `Shell::set_hub`) is a card for the canvas
 and one for each `Studio` manifest (name, icon, summary), over a scrim, on a
 spring. `launchpad.boot_mode` is `hub` by default (the Hub over the canvas);
@@ -1188,10 +1196,11 @@ packages can add their own:
 | Page | Holds |
 | --- | --- |
 | General | Where Sue opens (the Hub, the canvas or a studio), the File Manager's folder, hidden files, view, sort, card size and saved folders, autosave interval, quit confirmation, the note file and its text size |
-| Appearance & Rice | Theme presets, every color, geometry (padding, hairlines, radii, pill and rail sizes, drawer and timeline sizes, the marking menu, shadows), the canvas (zoom limits, wheel step, grid), typography, the rice file with Reload, Export and Open Folder |
+| Appearance & Rice | Theme presets (Void, Graphite, Paper, Gray), every color, geometry (padding, hairlines, radii, pill and rail sizes, drawer and timeline sizes, the marking menu, shadows), the canvas (zoom limits, wheel step, grid), typography, the rice file with Reload, Export and Open Folder |
 | Display & Graphics | The performance preference (`profile.hardware`, labeled Performance Preference) and the active profile; the GPU preference (picked by adapter type: integrated, discrete, or the display's GPU), the GPU drawing, every GPU found and Restart Sue (the GPU is chosen at startup); the frame-rate cap, the settle grace, UI scale, list wheel speed, motion (instant snap, animation speed, drawer and camera spring constants, caret blink, message time) |
 | Audio & DSP | Output device, sample rate, buffer size, real-time priority, volume, and the live stream and real-time status |
-| Files & Codecs | JPEG XL effort, bit-exact JPEG recompression, the conversion folder and JPEG quality, the open-file size limit, byte-map width, Sue Paint's new picture size, the built-in codecs |
+| Files & Codecs | JPEG XL effort, bit-exact JPEG recompression, the conversion folder and JPEG quality, the open-file size limit, byte-map width, the built-in codecs |
+| Studios | Each studio's own settings and theme: for Sue Paint the new picture size and resolution, `sue_paint.theme` (Gray by default, the Sue theme, a preset, or Custom) and the Custom colors (`sue_paint_colors`) |
 | Packages & Updates | The signature policy, the installed applets, installed packages, the active generation and rollback state |
 | Keymaps | Every shortcut as an action and a key cap |
 | MCP | "Not yet available." (a `SettingsItem::Note`) |

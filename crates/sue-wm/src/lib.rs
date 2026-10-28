@@ -68,7 +68,7 @@ pub use shell::{
 };
 pub use spring::{SpringDamper, SpringMode, SpringParams};
 pub use text::{ArenaText, TYPING_PAUSE, Typing};
-pub use theme::Theme;
+pub use theme::{COLOR_KEYS, STUDIO_THEME_CUSTOM, STUDIO_THEME_SUE, Theme};
 pub use timeline::{Block, TimelineEvent, TimelineState, timecode};
 pub use transport::{Clip, ClipSource, Transport, pcm_of};
 pub use world::{

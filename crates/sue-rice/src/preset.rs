@@ -68,6 +68,7 @@ pub fn builtin_presets() -> Vec<ThemePreset> {
             "Paper",
             include_str!("../rice/presets/paper.suerice"),
         ),
+        ("gray", "Gray", include_str!("../rice/presets/gray.suerice")),
     ]
     .into_iter()
     .map(|(id, name, source)| {
@@ -90,6 +91,13 @@ mod tests {
         assert!(presets[0].is_active(&rice));
         assert!(!presets[1].is_active(&rice));
         assert!(presets.iter().all(|preset| preset.values.len() == 13));
+        assert_eq!(
+            presets
+                .iter()
+                .map(|preset| preset.id.as_str())
+                .collect::<Vec<_>>(),
+            ["void", "graphite", "paper", "gray"]
+        );
         // Every preset is achromatic.
         for preset in &presets {
             for (path, value) in &preset.values {
