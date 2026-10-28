@@ -12,6 +12,7 @@ egui.workspace = true
 sue-core.workspace = true
 sue-platform.workspace = true
 sue-rice.workspace = true
+ttf-parser.workspace = true
 
 [lints]
 workspace = true

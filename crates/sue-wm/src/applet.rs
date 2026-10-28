@@ -596,6 +596,21 @@ impl AppletContext<'_> {
         self.typing.record(self.history, handle, ops, now);
     }
 
+    /// Records rich text typed into `handle` (entity `id`) whose formatting
+    /// component moved with it: `before` is that component as it was before
+    /// `ops`, so one undo step puts back both.
+    pub fn record_rich_typing(
+        &mut self,
+        handle: AssetHandle,
+        id: sue_core::EntityId,
+        ops: Vec<sue_core::txn::TextOp>,
+        before: Box<dyn sue_core::Component>,
+    ) {
+        let now = self.view.now;
+        self.typing
+            .record_with(self.history, handle, id, ops, before, now);
+    }
+
     /// A message for the status bar.
     pub fn notify(&mut self, text: impl Into<String>) {
         self.requests.push(ShellRequest::Notify(text.into()));

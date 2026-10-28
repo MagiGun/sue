@@ -55,6 +55,6 @@ pub use os::{
     web_url,
 };
 pub use paint::{EguiPainter, NoTextures, TextureUpload};
-pub use paths::PlatformPaths;
+pub use paths::{PlatformPaths, font_dirs, system_font_dirs};
 /// The `wgpu` version Sue renders with, re-exported so renderers match it.
 pub use wgpu;

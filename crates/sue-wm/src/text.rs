@@ -3,6 +3,9 @@
 //! records every insert and delete. [`Typing`] groups those deltas into one
 //! undo step per burst of typing and records it in the global `UndoStack`,
 //! so `Ctrl+Z` and `Ctrl+Y` work the same in every text field (backbone rule 2).
+//! Rich text, whose formatting moves with every edit, hands [`Typing`] the
+//! formatting as it was when the burst began ([`Typing::record_with`]), so
+//! the same undo step puts both back.
 
 use std::any::TypeId;
 use std::ops::Range;
@@ -10,8 +13,8 @@ use std::time::{Duration, Instant};
 
 use egui::TextBuffer;
 use egui::text::CharIndex;
-use sue_core::txn::{TextEdits, TextOp};
-use sue_core::{AssetHandle, StringBuffer, UndoStack};
+use sue_core::txn::{Batch, SetExtension, TextEdits, TextOp};
+use sue_core::{AssetHandle, Component, EntityId, StringBuffer, UndoStack};
 
 use crate::{ArenaEdit, World};
 
@@ -84,6 +87,9 @@ impl TextBuffer for ArenaText<'_> {
 #[derive(Debug, Default)]
 pub struct Typing {
     pending: Option<(TextEdits, Instant)>,
+    /// The extension component that changed with the text, as it was when
+    /// the open group began.
+    before: Option<(EntityId, Box<dyn Component>)>,
 }
 
 impl Typing {
@@ -114,12 +120,51 @@ impl Typing {
         *last = now;
     }
 
+    /// Records `ops` typed into `handle` (entity `id`) whose extension
+    /// component changed with them, as rich text marks do: `before` is that
+    /// component as it was before these ops. Only the first `before` of a
+    /// group is kept, so the undo step restores the component as it was
+    /// when the burst began.
+    pub fn record_with(
+        &mut self,
+        history: &mut UndoStack<World>,
+        handle: AssetHandle,
+        id: EntityId,
+        ops: Vec<TextOp>,
+        before: Box<dyn Component>,
+        now: Instant,
+    ) {
+        if ops.is_empty() {
+            return;
+        }
+        self.record(history, handle, ops, now);
+        let same = self.before.as_ref().is_some_and(|(known, component)| {
+            *known == id && component.type_name() == before.type_name()
+        });
+        if !same {
+            self.before = Some((id, before));
+        }
+    }
+
     /// Closes the open group into one undo step.
     pub fn flush(&mut self, history: &mut UndoStack<World>) {
+        let before = self.before.take();
         if let Some((group, _)) = self.pending.take()
             && !group.is_empty()
         {
-            history.record(ArenaEdit(group));
+            match before {
+                Some((id, component)) => {
+                    let label = sue_core::ReversibleTransaction::label(&group);
+                    // Text first, then the component; undone the other way.
+                    let batch = Batch::new(label)
+                        .then(group)
+                        .then(SetExtension::set_boxed(id, component));
+                    history.record(ArenaEdit(batch));
+                }
+                None => {
+                    history.record(ArenaEdit(group));
+                }
+            }
         }
     }
 
@@ -209,5 +254,61 @@ mod tests {
         assert_eq!(text(&world, handle), "héllo");
         history.redo(&mut world).unwrap();
         assert_eq!(text(&world, handle), "Héllo!");
+    }
+
+    #[test]
+    fn rich_typing_undoes_the_text_and_its_formatting_together() {
+        let mut world = World::default();
+        let handle = world
+            .arena
+            .spawn("doc", StringBuffer::from("ab".to_owned()));
+        let id = world.arena.get(handle).unwrap().id();
+        let marks = |bytes: &[u8]| sue_core::OpaqueComponent {
+            type_name: "test.marks".to_owned(),
+            version: 1,
+            bytes: bytes.to_vec(),
+        };
+        world
+            .arena
+            .get_mut(handle)
+            .unwrap()
+            .set_ext(Box::new(marks(b"before")));
+        let mut history = UndoStack::new();
+        let mut typing = Typing::default();
+        let start = Instant::now();
+        for (step, ch) in ["c", "d"].into_iter().enumerate() {
+            let before = world
+                .arena
+                .get(handle)
+                .unwrap()
+                .ext_named("test.marks")
+                .unwrap()
+                .clone_box();
+            let mut ops = Vec::new();
+            let entity = world.arena.get_mut(handle).unwrap();
+            ArenaText::new(entity.string_buffer_mut().unwrap(), &mut ops)
+                .insert_text(ch, CharIndex(2 + step));
+            entity.set_ext(Box::new(marks(format!("after {step}").as_bytes())));
+            typing.record_with(&mut history, handle, id, ops, before, start);
+        }
+        typing.flush(&mut history);
+        assert_eq!(history.len(), 1, "one burst, one step");
+        let read = |world: &World| {
+            let entity = world.arena.get(handle).unwrap();
+            let bytes = entity
+                .ext_named("test.marks")
+                .and_then(|component| {
+                    component
+                        .as_any()
+                        .downcast_ref::<sue_core::OpaqueComponent>()
+                })
+                .map(|component| component.bytes.clone())
+                .unwrap();
+            (text(world, handle), String::from_utf8(bytes).unwrap())
+        };
+        history.undo(&mut world).unwrap();
+        assert_eq!(read(&world), ("ab".to_owned(), "before".to_owned()));
+        history.redo(&mut world).unwrap();
+        assert_eq!(read(&world), ("abcd".to_owned(), "after 1".to_owned()));
     }
 }

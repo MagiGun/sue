@@ -144,6 +144,77 @@ impl PlatformPaths {
     pub fn notes_dir(&self) -> PathBuf {
         self.data_dir.join("notes")
     }
+
+    /// Fonts Sue keeps itself (installed from a studio), searched with the
+    /// system's.
+    #[must_use]
+    pub fn fonts_dir(&self) -> PathBuf {
+        self.data_dir.join("fonts")
+    }
+}
+
+/// The folders this OS installs fonts in, system-wide and for the user,
+/// that exist on this device.
+#[must_use]
+pub fn system_font_dirs() -> Vec<PathBuf> {
+    font_dirs(OsFamily::current(), |name| std::env::var(name).ok())
+        .into_iter()
+        .filter(|dir| dir.is_dir())
+        .collect()
+}
+
+/// The folders `os` installs fonts in, from its environment (`env` looks
+/// variables up, so this stays a pure, testable function).
+pub fn font_dirs<F>(os: OsFamily, env: F) -> Vec<PathBuf>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let var = |name: &str| {
+        env(name)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    };
+    match os {
+        OsFamily::Windows => {
+            let windows = var("WINDIR")
+                .or_else(|| var("SystemRoot"))
+                .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+            let mut dirs = vec![windows.join("Fonts")];
+            if let Some(local) = var("LOCALAPPDATA") {
+                dirs.push(local.join("Microsoft").join("Windows").join("Fonts"));
+            }
+            dirs
+        }
+        OsFamily::MacOs | OsFamily::Ios => {
+            let mut dirs = vec![
+                PathBuf::from("/System/Library/Fonts"),
+                PathBuf::from("/Library/Fonts"),
+            ];
+            if let Some(home) = var("HOME") {
+                dirs.push(home.join("Library").join("Fonts"));
+            }
+            dirs
+        }
+        OsFamily::Android => vec![PathBuf::from("/system/fonts")],
+        OsFamily::Linux | OsFamily::Other => {
+            let mut dirs = vec![
+                PathBuf::from("/usr/share/fonts"),
+                PathBuf::from("/usr/local/share/fonts"),
+            ];
+            match var("XDG_DATA_HOME").filter(|path| path.has_root()) {
+                Some(data) => dirs.push(data.join("fonts")),
+                None => {
+                    if let Some(home) = var("HOME") {
+                        dirs.push(home.join(".local").join("share").join("fonts"));
+                    }
+                }
+            }
+            if let Some(home) = var("HOME") {
+                dirs.push(home.join(".fonts"));
+            }
+            dirs
+        }
+    }
 }
 
 #[cfg(test)]
@@ -157,6 +228,23 @@ mod tests {
             .map(|&(key, value)| (key.to_owned(), value.to_owned()))
             .collect();
         move |name| map.get(name).cloned()
+    }
+
+    #[test]
+    fn fonts_are_found_where_each_os_keeps_them() {
+        let windows = font_dirs(
+            OsFamily::Windows,
+            env_of(&[
+                ("WINDIR", r"C:\Windows"),
+                ("LOCALAPPDATA", r"C:\Users\a\AppData\Local"),
+            ]),
+        );
+        assert_eq!(windows[0], Path::new(r"C:\Windows").join("Fonts"));
+        assert!(windows[1].ends_with(Path::new("Microsoft").join("Windows").join("Fonts")));
+        let linux = font_dirs(OsFamily::Linux, env_of(&[("HOME", "/home/a")]));
+        assert!(linux.contains(&Path::new("/home/a/.local/share/fonts").to_path_buf()));
+        let mac = font_dirs(OsFamily::MacOs, env_of(&[("HOME", "/Users/a")]));
+        assert_eq!(mac.len(), 3);
     }
 
     #[test]

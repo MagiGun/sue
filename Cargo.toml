@@ -49,6 +49,11 @@ egui-wgpu = { version = "0.37", default-features = false }
 egui-winit = { version = "0.37", default-features = false, features = ["clipboard", "links", "wayland", "x11"] }
 jpeg-encoder = "0.7"
 
+# Typography and publishing: reading installed fonts, and the deflate
+# inside DOCX, EPUB, ODT and PDF files.
+miniz_oxide = "0.8"
+ttf-parser = "0.25"
+
 # The converter: more picture formats in and out, and FLAC out.
 flacenc = { version = "0.5", default-features = false }
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "ico", "png", "pnm", "qoi", "tga", "tiff", "webp"] }

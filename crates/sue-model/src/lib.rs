@@ -7,6 +7,7 @@
 //! | Model | Shared by |
 //! | --- | --- |
 //! | [`TextMarks`] | word processing, notes, markdown, novels, LaTeX, layout |
+//! | [`manuscript`] | novels, scripts, theses, manuals, e-books, outlines |
 //! | [`Table`] | spreadsheets, databases, CSV, schedules, bills of materials |
 //! | [`Animation`] / [`Curve`] | motion graphics, 2D and 3D animation, automation, grading |
 //! | [`Sequence`] / [`Notes`] | video editing, DAWs, slideshows, subtitles, singing synthesis |
@@ -25,6 +26,7 @@ mod encoded;
 mod geometry;
 mod graph;
 mod layout;
+pub mod manuscript;
 pub mod picture;
 mod sequence;
 mod table;
@@ -38,7 +40,11 @@ pub use graph::{GraphEdit, GraphOp, Link, Node, NodeGraph, NodeKey, NodeRegistry
 pub use layout::{Frame, PAGE_SIZES, Page, PageLayout, Rect, page_size, points};
 pub use sequence::{Clip, Note, Notes, Sequence, Track};
 pub use table::{Cell, Column, SetCell, Table, column_name, parse_a1};
-pub use text::{Mark, TextMarks, kind as mark_kind};
+pub use text::{
+    CharFormat, Mark, OBJECT, PARAGRAPH_KINDS, TextMarks, char_format, ensure_final_newline,
+    is_paragraph_kind, kind as mark_kind, marks_by_paragraph, paragraph_at, paragraphs, points_of,
+    rgb_of, runs, word_count,
+};
 
 use sue_core::{ComponentRegistry, PropertyDef, PropertySchema, Quantity, ValueType};
 
@@ -78,6 +84,9 @@ pub mod class {
     pub const PUBLICATION: &str = "sue.publication";
     /// A slideshow ([`crate::PageLayout`] with slide-sized pages).
     pub const SLIDES: &str = "sue.slides";
+    /// A long piece of writing: a binder of folders and documents (see
+    /// [`crate::manuscript`]).
+    pub const MANUSCRIPT: &str = "sue.manuscript";
     /// A link to a file Sue does not hold in memory.
     pub const LINKED_FILE: &str = "sue.linked-file";
 }
@@ -118,6 +127,17 @@ pub fn register_properties(schema: &mut PropertySchema) {
         PropertyDef::new("doc.title", "Title", "").group("Document"),
         PropertyDef::new("doc.author", "Author", "").group("Document"),
         PropertyDef::new("doc.language", "Language", "en").group("Document"),
+        PropertyDef::new(manuscript::SYNOPSIS, "Synopsis", "").group("Document"),
+        PropertyDef::new(manuscript::NOTES, "Notes", "").group("Document"),
+        PropertyDef::new(manuscript::STATUS, "Status", "").group("Document"),
+        PropertyDef::new(manuscript::LABEL, "Label", "").group("Document"),
+        PropertyDef::new(manuscript::KEYWORDS, "Keywords", "").group("Document"),
+        PropertyDef::new(manuscript::INCLUDE, "Include when publishing", true)
+            .typed(ValueType::Bool)
+            .group("Document"),
+        PropertyDef::new(manuscript::TARGET, "Word target", 0_i64)
+            .range(0.0, 10_000_000.0)
+            .group("Document"),
         PropertyDef::new("style.opacity", "Opacity", 1.0)
             .range(0.0, 1.0)
             .group("Style"),

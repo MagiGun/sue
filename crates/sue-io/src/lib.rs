@@ -23,9 +23,11 @@ mod formats;
 mod ingest;
 mod jxl;
 mod pictures;
+pub mod publish;
 mod raster;
 mod sniff;
 mod tile_cache;
+pub mod zip;
 
 pub use audio::{
     AudioInfo, DecodedAudio, SampleDepth, decode_audio, encode_aiff, encode_flac, encode_wav,

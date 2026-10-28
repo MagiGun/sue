@@ -26,6 +26,7 @@ mod catalog;
 mod color_pick;
 mod config;
 mod error;
+pub mod fonts;
 pub mod keys;
 mod launchpad;
 mod layout;

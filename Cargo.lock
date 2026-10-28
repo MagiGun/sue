@@ -3171,6 +3171,7 @@ dependencies = [
  "image",
  "jpeg-encoder",
  "jxl-oxide",
+ "miniz_oxide 0.8.9",
  "sue-core",
  "sue-model",
  "symphonia",
@@ -3235,6 +3236,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sue-type"
+version = "1.0.0"
+dependencies = [
+ "egui",
+ "sue-core",
+ "sue-io",
+ "sue-model",
+ "sue-wm",
+ "ttf-parser",
+]
+
+[[package]]
 name = "sue-wm"
 version = "1.0.0"
 dependencies = [
@@ -3242,6 +3255,7 @@ dependencies = [
  "sue-core",
  "sue-platform",
  "sue-rice",
+ "ttf-parser",
 ]
 
 [[package]]

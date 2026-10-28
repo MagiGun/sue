@@ -335,21 +335,11 @@ impl Theme {
             spacing.slider_width = 160.0;
         });
         if previous.is_none_or(|old| old.ui_font != self.ui_font) {
-            ctx.set_fonts(fonts(&self.ui_font));
+            // The bundled fonts, with the interface font first, and every
+            // font a studio has installed so far.
+            ctx.set_fonts(crate::fonts::definitions(&self.ui_font));
         }
     }
-}
-
-/// The bundled fonts, with `ui_font` first for proportional text.
-fn fonts(ui_font: &str) -> egui::FontDefinitions {
-    let mut fonts = egui::FontDefinitions::default();
-    if ui_font == "Hack"
-        && let Some(proportional) = fonts.families.get_mut(&FontFamily::Proportional)
-    {
-        proportional.retain(|name| name != "Hack");
-        proportional.insert(0, "Hack".to_owned());
-    }
-    fonts
 }
 
 #[cfg(test)]
