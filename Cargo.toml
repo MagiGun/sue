@@ -1,0 +1,35 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "bins/*"]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+repository = "https://github.com/uvxszi/Sue"
+
+[workspace.dependencies]
+sue-core = { path = "crates/sue-core" }
+sue-platform = { path = "crates/sue-platform" }
+sue-rice = { path = "crates/sue-rice" }
+sue-io = { path = "crates/sue-io" }
+sue-pkg = { path = "crates/sue-pkg" }
+sue-ai = { path = "crates/sue-ai" }
+sue-wm = { path = "crates/sue-wm" }
+
+ed25519-dalek = "3"
+semver = "1"
+sha2 = "0.11"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+
+[profile.release]
+lto = "thin"

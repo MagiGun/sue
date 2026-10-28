@@ -1,0 +1,16 @@
+[package]
+name = "sue-wm"
+description = "Sue's adaptive window manager: SueApplet, the Launchpad, desktop tiling and mobile drawers, spring physics and the dirty-frame scheduler."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+sue-core.workspace = true
+sue-platform.workspace = true
+sue-rice.workspace = true
+
+[lints]
+workspace = true

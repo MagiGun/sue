@@ -1,0 +1,15 @@
+[package]
+name = "sue-ai"
+description = "Sue's offline AI substrate: local model registry, compute backends and zero-copy tensor tasks over the arena."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+sue-core.workspace = true
+sue-platform.workspace = true
+
+[lints]
+workspace = true

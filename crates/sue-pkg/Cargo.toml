@@ -1,0 +1,16 @@
+[package]
+name = "sue-pkg"
+description = "Sue's atomic updater and package manager: content-addressed payloads, Ed25519 trust, dependency resolution and rollback-safe generations."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+ed25519-dalek.workspace = true
+semver.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true
