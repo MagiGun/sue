@@ -11,10 +11,15 @@
 //! encoded tiles under a byte budget, and [`byte_map_tile`] turns raw bytes
 //! into a zero-copy `Gray8` raster.
 //!
+//! [`formats`] puts all of it behind the kernel's one `FormatRegistry`:
+//! each format imports to entities of a well-known class and exports back,
+//! and formats Sue cannot decode yet are kept byte for byte.
+//!
 //! Specification: `HUMANZ.md` §2.
 
 mod audio;
 mod bytemap;
+mod formats;
 mod ingest;
 mod jxl;
 mod raster;
@@ -23,6 +28,10 @@ mod tile_cache;
 
 pub use audio::{AudioInfo, DecodedAudio, decode_audio, encode_wav};
 pub use bytemap::{byte_map_tile, shannon_entropy};
+pub use formats::{
+    CompressedAudioFormat, DelimitedFormat, JpegFormat, JxlFormat, KeptFormat, ObjFormat,
+    PngFormat, SueFormat, TextFormat, WavFormat, formats,
+};
 pub use ingest::{IngestOptions, IngestView, Ingested, ingest_bytes, meta, route_label};
 pub use jxl::{
     DC_PREVIEW_SCALE, DecodedJxl, FourCc, JXL_CODESTREAM_SIGNATURE, JXL_CONTAINER_SIGNATURE,

@@ -11,6 +11,7 @@ repository.workspace = true
 jxl-oxide.workspace = true
 sue-core.workspace = true
 jpeg-encoder.workspace = true
+sue-model.workspace = true
 symphonia.workspace = true
 zune-core.workspace = true
 zune-jpeg.workspace = true

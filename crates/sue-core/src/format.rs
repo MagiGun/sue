@@ -142,6 +142,20 @@ impl Bundle {
         map
     }
 
+    /// Gives fresh ids only if some id is already used in `arena` (the same
+    /// file imported twice, a paste into its own document). Returns `true`
+    /// if it did.
+    pub fn renew_ids_if_taken(&mut self, arena: &Arena) -> bool {
+        let taken = self
+            .entities
+            .iter()
+            .any(|entity| arena.handle_of(entity.id()).is_some());
+        if taken {
+            self.renew_ids();
+        }
+        taken
+    }
+
     /// Writes the bundle (the clipboard format).
     pub fn encode(&self, out: &mut Writer) {
         out.len(self.entities.len());
@@ -621,13 +635,15 @@ mod tests {
         assert_eq!(arena.relations().children(new_book), vec![new_one, new_two]);
 
         // Pasting the same bundle twice without new ids is refused whole.
-        let again = Bundle::copy_from(&arena, &[book], true).unwrap();
+        let mut again = Bundle::copy_from(&arena, &[book], true).unwrap();
         assert!(
             history
-                .apply(&mut arena, InsertBundle::new("Dup", again))
+                .apply(&mut arena, InsertBundle::new("Dup", again.clone()))
                 .is_err()
         );
         assert_eq!(arena.len(), 6);
+        assert!(again.renew_ids_if_taken(&arena));
+        assert!(!again.renew_ids_if_taken(&arena));
 
         // Import under a parent and through the clipboard encoding.
         let folder = arena.insert(Entity::empty("Shelf", "sue.folder"));

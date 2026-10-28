@@ -3013,6 +3013,7 @@ dependencies = [
  "jpeg-encoder",
  "jxl-oxide",
  "sue-core",
+ "sue-model",
  "symphonia",
  "zune-core",
  "zune-jpeg",

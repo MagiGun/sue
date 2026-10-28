@@ -13,11 +13,13 @@
 //! | [`NodeGraph`] / [`NodeRegistry`] | compositing, shaders, audio patches, procedural geometry, game logic |
 //! | [`Geometry`] / [`Transform`] | 3D, CAD, BIM, vector art, rigging, game levels |
 //! | [`PageLayout`] | desktop publishing, books, slides, PDF pages, drawing sheets |
+//! | [`Encoded`] | any file Sue cannot decode yet, kept byte for byte |
 //!
 //! Features that need something new add their own component type the same
 //! way (see `HUMANZ.md` §8), and register it with [`register`].
 
 mod curve;
+mod encoded;
 mod geometry;
 mod graph;
 mod layout;
@@ -26,6 +28,7 @@ mod table;
 mod text;
 
 pub use curve::{Animation, Curve, Interpolation, Key};
+pub use encoded::Encoded;
 pub use geometry::{AttributeData, Domain, Geometry, Prim, PrimKind, Transform};
 pub use graph::{GraphEdit, GraphOp, Link, Node, NodeGraph, NodeKey, NodeRegistry, NodeType, Port};
 pub use layout::{Frame, PAGE_SIZES, Page, PageLayout, Rect, page_size, points};
@@ -82,7 +85,8 @@ pub fn register(registry: &mut ComponentRegistry) {
         .register::<NodeGraph>()
         .register::<Geometry>()
         .register::<Transform>()
-        .register::<PageLayout>();
+        .register::<PageLayout>()
+        .register::<Encoded>();
 }
 
 /// A registry with every model component type.
