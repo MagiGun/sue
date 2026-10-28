@@ -947,6 +947,49 @@ impl SuePaint {
         NewDialog::new(&spec)
     }
 
+    /// Records what an unfinished gesture or slider already changed in
+    /// place, so nothing escapes the history when the studio closes.
+    fn settle(&mut self, cx: &mut AppletContext<'_>) {
+        match self.gesture.take() {
+            Some(Gesture::Stroke { stroke, label, .. }) => {
+                if let Some(raster) = doc::raster(&cx.world.arena, stroke.layer()) {
+                    let edit = stroke.finish(raster, &label);
+                    if !edit.is_empty() {
+                        cx.record(ArenaEdit(edit));
+                    }
+                }
+            }
+            Some(Gesture::Move { layer, old, .. }) => {
+                let mut steps = Batch::new("Move Layer");
+                for (key, before) in [(picture::X, old[0].clone()), (picture::Y, old[1].clone())] {
+                    steps = steps.then(match before {
+                        Some(value) => SetProperty::new(layer, key, value),
+                        None => SetProperty::remove(layer, key),
+                    });
+                }
+                cx.record(ArenaEdit(steps));
+            }
+            _ => {}
+        }
+        if let Some(live) = self.live.take() {
+            let label = cx
+                .world
+                .arena
+                .get_by_id(live.id)
+                .ok()
+                .and_then(|entity| entity.property(&live.key).cloned())
+                .map_or_else(
+                    || format!("Set {}", live.key),
+                    |value| doc::label(&live.key, &value),
+                );
+            let step = match live.old {
+                Some(old) => SetProperty::new(live.id, live.key, old),
+                None => SetProperty::remove(live.id, live.key),
+            };
+            cx.record(ArenaEdit(Batch::new(label).then(step)));
+        }
+    }
+
     /// Moves the current layer to `index` (0 is the bottom).
     fn move_layer_to(&mut self, cx: &mut AppletContext<'_>, index: usize) {
         let (Some(picture), Some(layer)) = (self.picture(), self.layer()) else {
@@ -1847,9 +1890,15 @@ impl SueApplet for SuePaint {
     fn tick(&mut self, cx: &mut AppletContext<'_>) -> sue_wm::Tick {
         if cx.view.studio.as_ref().map(AppletId::as_str) != Some(ID) {
             self.shown = false;
-            self.gesture = None;
+            self.settle(cx);
         }
         sue_wm::Tick::default()
+    }
+
+    fn captures_keys(&self) -> bool {
+        // A dialog or a stroke in progress owns the keys, so the global
+        // undo cannot pull pixels from under a preview or a pen.
+        self.dialog.is_some() || self.gesture.is_some()
     }
 
     fn commands(&self) -> Vec<PaletteEntry> {
