@@ -1687,6 +1687,7 @@ impl SuePaint {
         key: &str,
         value: Value,
     ) {
+        let label = doc::label(key, &value);
         if response.changed() {
             let Ok(entity) = cx.world.arena.get_by_id_mut(id) else {
                 return;
@@ -1712,7 +1713,7 @@ impl SuePaint {
                 Some(old) => sue_core::txn::SetProperty::new(id, key, old),
                 None => sue_core::txn::SetProperty::remove(id, key),
             };
-            cx.record(sue_wm::ArenaEdit(step));
+            cx.record(sue_wm::ArenaEdit(doc::Edit::new(label).then(step)));
         }
     }
 

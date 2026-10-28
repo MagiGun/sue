@@ -263,7 +263,7 @@ pub fn delete(layer: EntityId) -> DespawnEntity {
 
 /// Moves `layer` to position `index` of the stack (0 is the bottom).
 #[must_use]
-pub fn reorder(arena: &Arena, picture: EntityId, layer: EntityId, index: usize) -> Option<Relate> {
+pub fn reorder(arena: &Arena, picture: EntityId, layer: EntityId, index: usize) -> Option<Edit> {
     let stack: Vec<LayerInfo> = layers(arena, picture);
     let from = stack.iter().position(|info| info.id == layer)?;
     let others: Vec<&LayerInfo> = stack.iter().filter(|info| info.id != layer).collect();
@@ -280,14 +280,35 @@ pub fn reorder(arena: &Arena, picture: EntityId, layer: EntityId, index: usize) 
         (Some(low), Some(high)) if low >= high => return None,
         _ => OrderKey::between(low, high),
     };
-    Some(Relate::new(
+    Some(Edit::new("Move Layer").then(Relate::new(
         Relation::new(picture, CHILD, layer).ordered(order),
-    ))
+    )))
 }
 
-/// Sets one property of a layer or picture.
-pub fn set(id: EntityId, key: &str, value: impl Into<Value>) -> SetProperty {
-    SetProperty::new(id, key, value)
+/// Sets one property of a layer or picture, as an undo step named for what
+/// it changes.
+pub fn set(id: EntityId, key: &str, value: impl Into<Value>) -> Edit {
+    let value = value.into();
+    Edit::new(label(key, &value)).then(SetProperty::new(id, key, value))
+}
+
+/// What people read in the history for setting `key` to `value`.
+#[must_use]
+pub fn label(key: &str, value: &Value) -> String {
+    let on = value.as_bool().unwrap_or(true);
+    let pick = |yes: &str, no: &str| if on { yes } else { no }.to_owned();
+    match key {
+        picture::VISIBLE => pick("Show Layer", "Hide Layer"),
+        picture::LOCKED => pick("Lock Layer", "Unlock Layer"),
+        picture::ALPHA_LOCKED => pick("Lock Transparent Pixels", "Unlock Transparent Pixels"),
+        picture::CLIP => pick("Clip to Layer Below", "Release Clipping"),
+        picture::DRAFT => pick("Set as Draft Layer", "Unset Draft Layer"),
+        picture::OPACITY => "Layer Opacity".to_owned(),
+        picture::BLEND => "Blend Mode".to_owned(),
+        picture::COLOR => "Paper Color".to_owned(),
+        picture::X | picture::Y => "Move Layer".to_owned(),
+        other => format!("Set {other}"),
+    }
 }
 
 /// Merges `layer` into the raster layer below it, with its blend mode and
@@ -596,6 +617,8 @@ mod tests {
             reorder(&arena, picture, second, 3).is_none(),
             "already there"
         );
+        assert_eq!(label(picture::VISIBLE, &false.into()), "Hide Layer");
+        assert_eq!(set(second, picture::OPACITY, 0.5).label(), "Layer Opacity");
         let mut gone = delete(between);
         gone.apply(&mut arena).unwrap();
         assert_eq!(names(&arena).len(), 4);

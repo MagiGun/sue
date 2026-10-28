@@ -918,7 +918,9 @@ impl Shell {
             }
             ShellRequest::ShowDrawer(id) => self.show_drawer(&id, io.applets),
             ShellRequest::Place { entity, focus } => {
-                self.studio = None;
+                if focus {
+                    self.studio = None;
+                }
                 self.place(entity, focus, io);
             }
             ShellRequest::OpenStudio(id) => self.open_studio(id),

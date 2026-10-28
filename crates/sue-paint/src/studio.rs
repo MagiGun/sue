@@ -198,6 +198,7 @@ pub struct SuePaint {
     pub(crate) thumbs: HashMap<EntityId, (u64, Vec<u8>, [u32; 2])>,
     pub(crate) preview: Option<(u64, Vec<u8>)>,
     pub(crate) last_dir: Option<PathBuf>,
+    pub(crate) shown: bool,
 }
 
 impl Default for SuePaint {
@@ -235,6 +236,7 @@ impl Default for SuePaint {
             thumbs: HashMap::new(),
             preview: None,
             last_dir: None,
+            shown: false,
         }
     }
 }
@@ -881,25 +883,45 @@ impl SuePaint {
                                 .ordered(sue_core::OrderKey::default()),
                         ),
                     );
-                Self::apply(cx, edit);
-                self.closed.remove(&picture_id);
+                if Self::apply(cx, edit) {
+                    self.activate(&cx.world.arena, picture_id);
+                    Self::place(cx, picture_id);
+                }
             }
         }
         Ok(())
     }
 
-    /// Creates a picture from the New dialog and makes it current.
+    /// Creates a picture from the New dialog, makes it current and puts
+    /// it on the canvas.
     pub(crate) fn create(&mut self, cx: &mut AppletContext<'_>, spec: &NewPicture) {
         match doc::create(spec) {
             Ok((edit, picture)) => {
                 if Self::apply(cx, edit) {
-                    self.sync_docs(&cx.world.arena);
-                    if let Some(index) = self.docs.iter().position(|doc| doc.picture == picture) {
-                        self.active = index;
-                    }
+                    self.activate(&cx.world.arena, picture);
+                    Self::place(cx, picture);
                 }
             }
             Err(error) => cx.fail(error),
+        }
+    }
+
+    /// Makes `picture` the current tab, opening one if it has none.
+    pub(crate) fn activate(&mut self, arena: &Arena, picture: EntityId) {
+        self.closed.remove(&picture);
+        self.sync_docs(arena);
+        if let Some(index) = self.docs.iter().position(|doc| doc.picture == picture) {
+            self.active = index;
+        }
+    }
+
+    /// Puts a picture on the canvas as a card (one undo step of its own).
+    fn place(cx: &mut AppletContext<'_>, picture: EntityId) {
+        if let Some(entity) = cx.world.arena.handle_of(picture) {
+            cx.request(ShellRequest::Place {
+                entity,
+                focus: false,
+            });
         }
     }
 
@@ -1586,6 +1608,19 @@ impl SuePaint {
     // ----- The frame ----------------------------------------------------------
 
     fn frame(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        if !self.shown {
+            // Opening: show the picture selected on the canvas, if any.
+            self.shown = true;
+            let selected = cx
+                .view
+                .selected
+                .and_then(|node| cx.entity(node))
+                .filter(|entity| picture::is_picture(entity))
+                .map(Entity::id);
+            if let Some(picture) = selected {
+                self.activate(&cx.world.arena, picture);
+            }
+        }
         self.sync_docs(&cx.world.arena);
         if let Some(doc) = self.docs.get_mut(self.active) {
             doc.compositor.sync(&cx.world.arena);
@@ -1807,6 +1842,14 @@ impl SueApplet for SuePaint {
 
     fn studio_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
         self.frame(ui, cx);
+    }
+
+    fn tick(&mut self, cx: &mut AppletContext<'_>) -> sue_wm::Tick {
+        if cx.view.studio.as_ref().map(AppletId::as_str) != Some(ID) {
+            self.shown = false;
+            self.gesture = None;
+        }
+        sue_wm::Tick::default()
     }
 
     fn commands(&self) -> Vec<PaletteEntry> {

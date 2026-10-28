@@ -5,6 +5,7 @@
 //! A [`Compositor`] keeps the screen image of one picture: it recomposites
 //! everything when the layers changed behind its back (undo, a property, a
 //! new layer) and only the painted rectangle while a stroke is drawn.
+//! Large areas are split into bands of rows composited on every core.
 
 use sue_core::{Arena, ComponentKind, EntityId, PixelFormat, RasterTile2D};
 use sue_model::picture::{self, LayerKind, LayerStyle};
@@ -135,6 +136,45 @@ fn pixel(layers: &[Layer<'_>], x: u32, y: u32) -> [f32; 4] {
     color
 }
 
+/// Runs `work(y, row)` for each `stride`-byte row of `buffer` (row `y0`
+/// first), spread over the cores when the area is large.
+fn rows(
+    buffer: &mut [u8],
+    stride: usize,
+    y0: u32,
+    pixels: usize,
+    work: impl Fn(u32, &mut [u8]) + Sync,
+) {
+    if stride == 0 {
+        return;
+    }
+    let count = buffer.len() / stride;
+    let threads = if pixels < 1 << 16 {
+        1
+    } else {
+        std::thread::available_parallelism()
+            .map_or(1, std::num::NonZero::get)
+            .clamp(1, 32)
+    };
+    if threads <= 1 || count < 2 {
+        for (index, row) in buffer.chunks_mut(stride).enumerate() {
+            work(y0 + index as u32, row);
+        }
+        return;
+    }
+    let per = count.div_ceil(threads);
+    std::thread::scope(|scope| {
+        for (band, chunk) in buffer.chunks_mut(per * stride).enumerate() {
+            let work = &work;
+            scope.spawn(move || {
+                for (index, row) in chunk.chunks_mut(stride).enumerate() {
+                    work(y0 + (band * per + index) as u32, row);
+                }
+            });
+        }
+    });
+}
+
 /// Composites the rectangle `[x0, y0, x1, y1]` of `picture` as straight
 /// RGBA8, row by row.
 #[must_use]
@@ -145,13 +185,16 @@ pub fn render(
     options: RenderOptions,
 ) -> Vec<u8> {
     let layers = gather(arena, picture, options);
-    let mut out = Vec::with_capacity((x1.saturating_sub(x0) * y1.saturating_sub(y0)) as usize * 4);
-    for y in y0..y1 {
-        for x in x0..x1 {
-            let color = pixel(&layers, x, y);
-            out.extend(color.map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8));
+    let (width, height) = (
+        x1.saturating_sub(x0) as usize,
+        y1.saturating_sub(y0) as usize,
+    );
+    let mut out = vec![0_u8; width * height * 4];
+    rows(&mut out, width * 4, y0, width * height, |y, row| {
+        for (x, slot) in (x0..x1).zip(row.as_chunks_mut::<4>().0) {
+            *slot = pixel(&layers, x, y).map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8);
         }
-    }
+    });
     out
 }
 
@@ -161,6 +204,60 @@ pub fn flatten(arena: &Arena, picture: EntityId, options: RenderOptions) -> Opti
     let [width, height] = picture::size(arena.get_by_id(picture).ok()?)?;
     let pixels = render(arena, picture, [0, 0, width, height], options);
     RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels).ok()
+}
+
+/// The picture's and its layers' revisions, in stacking order: when this
+/// changes, the picture looks different.
+#[must_use]
+pub fn signature(arena: &Arena, picture: EntityId) -> Vec<(EntityId, u64)> {
+    let revision = |id| {
+        arena
+            .get_by_id(id)
+            .map_or(u64::MAX, sue_core::Entity::revision)
+    };
+    let mut seen = vec![(picture, revision(picture))];
+    seen.extend(
+        picture::layers(arena, picture)
+            .into_iter()
+            .map(|id| (id, revision(id))),
+    );
+    seen
+}
+
+/// The whole picture at most `max` pixels a side (sampled, not filtered),
+/// over the checkerboard: opaque RGBA8 pixels and their size.
+#[must_use]
+pub fn preview(arena: &Arena, picture: EntityId, max: [u32; 2]) -> Option<(Vec<u8>, [u32; 2])> {
+    let size = picture::size(arena.get_by_id(picture).ok()?)?;
+    let scale = (max[0] as f32 / size[0] as f32)
+        .min(max[1] as f32 / size[1] as f32)
+        .min(1.0);
+    let out = [
+        ((size[0] as f32 * scale).round() as u32).max(1),
+        ((size[1] as f32 * scale).round() as u32).max(1),
+    ];
+    let layers = gather(arena, picture, RenderOptions::default());
+    let mut pixels = vec![0_u8; out[0] as usize * out[1] as usize * 4];
+    rows(
+        &mut pixels,
+        out[0] as usize * 4,
+        0,
+        (out[0] * out[1]) as usize,
+        |ty, row| {
+            for (tx, slot) in (0..out[0]).zip(row.as_chunks_mut::<4>().0) {
+                let x = (((tx as f32 + 0.5) / scale) as u32).min(size[0] - 1);
+                let y = (((ty as f32 + 0.5) / scale) as u32).min(size[1] - 1);
+                let color = pixel(&layers, x, y);
+                let under = checker(tx, ty);
+                for (channel, value) in slot.iter_mut().zip(color) {
+                    let shown = value * color[3] + under * (1.0 - color[3]);
+                    *channel = (shown.clamp(0.0, 1.0) * 255.0).round() as u8;
+                }
+                slot[3] = 255;
+            }
+        },
+    );
+    Some((pixels, out))
 }
 
 /// The gray of the transparency checkerboard at a pixel.
@@ -219,21 +316,7 @@ impl Compositor {
     }
 
     fn signature(&self, arena: &Arena) -> Vec<(EntityId, u64)> {
-        let mut seen = vec![(
-            self.picture,
-            arena
-                .get_by_id(self.picture)
-                .map_or(u64::MAX, sue_core::Entity::revision),
-        )];
-        seen.extend(picture::layers(arena, self.picture).into_iter().map(|id| {
-            (
-                id,
-                arena
-                    .get_by_id(id)
-                    .map_or(u64::MAX, sue_core::Entity::revision),
-            )
-        }));
-        seen
+        signature(arena, self.picture)
     }
 
     /// Recomposites everything if the layers changed since the last look.
@@ -272,20 +355,22 @@ impl Compositor {
 
     fn paint(&mut self, arena: &Arena, [x0, y0, x1, y1]: [u32; 4]) {
         let layers = gather(arena, self.picture, RenderOptions::default());
-        let width = self.size[0] as usize;
-        for y in y0..y1 {
-            for x in x0..x1 {
+        let stride = self.size[0] as usize * 4;
+        let band = &mut self.display[y0 as usize * stride..y1 as usize * stride];
+        let area = (x1.saturating_sub(x0) * y1.saturating_sub(y0)) as usize;
+        rows(band, stride, y0, area, |y, row| {
+            let span = &mut row[x0 as usize * 4..x1 as usize * 4];
+            for (x, slot) in (x0..x1).zip(span.as_chunks_mut::<4>().0) {
                 let color = pixel(&layers, x, y);
                 let under = checker(x, y);
                 let alpha = color[3];
-                let at = (y as usize * width + x as usize) * 4;
-                for (slot, value) in self.display[at..at + 3].iter_mut().zip(color) {
+                for (channel, value) in slot.iter_mut().zip(color) {
                     let shown = value * alpha + under * (1.0 - alpha);
-                    *slot = (shown.clamp(0.0, 1.0) * 255.0).round() as u8;
+                    *channel = (shown.clamp(0.0, 1.0) * 255.0).round() as u8;
                 }
-                self.display[at + 3] = 255;
+                slot[3] = 255;
             }
-        }
+        });
         self.version += 1;
     }
 }
@@ -458,5 +543,11 @@ mod tests {
         let (thumb, thumb_size) = thumbnail(&arena, layer, [16, 16]).unwrap();
         assert_eq!(thumb_size, [16, 8]);
         assert_eq!(thumb.len(), 16 * 8 * 4);
+        let (small, small_size) = preview(&arena, picture, [4, 4]).unwrap();
+        assert_eq!(small_size, [4, 2]);
+        assert_eq!(&small[..4], &[255, 255, 255, 255], "the paper, opaque");
+        let before = signature(&arena, picture);
+        paint(&mut arena, layer, 0, 0, [1, 1, 1, 255]);
+        assert_ne!(signature(&arena, picture), before);
     }
 }

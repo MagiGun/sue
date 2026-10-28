@@ -1031,6 +1031,19 @@ pub(crate) mod tests {
             Some([1600, 1200])
         );
         let layer = sue_paint::doc::layers(arena, picture).last().unwrap().id;
+        let card = runtime
+            .engine
+            .world
+            .scene
+            .iter()
+            .find(|(_, node)| node.applet.as_str() == sue_paint::CARD_ID)
+            .map(|(_, node)| node.entity);
+        assert_eq!(
+            card.and_then(|handle| arena.get(handle).ok())
+                .map(sue_core::Entity::id),
+            Some(picture),
+            "the new picture also sits on the canvas"
+        );
         let alpha = |runtime: &Runtime, x: u32, y: u32| {
             let raster = sue_paint::doc::raster(&runtime.engine.world.arena, layer).unwrap();
             raster.bytes().unwrap()[((y * raster.width() + x) * 4 + 3) as usize]

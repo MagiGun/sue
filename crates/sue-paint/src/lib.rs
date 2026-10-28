@@ -26,6 +26,7 @@
 
 pub mod brush;
 mod canvas;
+mod card;
 pub mod color;
 pub mod composite;
 mod dialogs;
@@ -40,6 +41,7 @@ mod studio;
 pub mod tools;
 pub mod view;
 
+pub use card::{CARD_ID, PictureCard};
 pub use menus::menus;
 pub use studio::{ID, SuePaint};
 

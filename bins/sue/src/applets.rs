@@ -30,6 +30,7 @@ pub fn launchpad() -> Result<Launchpad, WmError> {
     launchpad.register(|| Box::new(AudioNode))?;
     launchpad.register(|| Box::new(Image::default()))?;
     launchpad.register(|| Box::new(Hex::default()))?;
+    launchpad.register(|| Box::new(sue_paint::PictureCard::default()))?;
     // Left drawer.
     launchpad.register(|| Box::new(Files::default()))?;
     launchpad.register(|| Box::new(Player::default()))?;

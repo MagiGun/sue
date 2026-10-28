@@ -319,8 +319,8 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         &mut camera.painter,
         camera.now,
     );
-    runtime.with_context(&mut camera.painter, camera.now, |cx| {
-        sue_paint::sample_picture(cx, 1600, 1200);
+    let sample = runtime.with_context(&mut camera.painter, camera.now, |cx| {
+        sue_paint::sample_picture(cx, 1600, 1200)
     });
     shoot(&mut runtime, &mut camera, "11-sue-paint")?;
     for (target, name) in [
@@ -333,6 +333,23 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         }
         shoot(&mut runtime, &mut camera, name)?;
     }
+    if let Some(applet) = runtime.applets.get_mut(&studio) {
+        applet.navigate("dialog/close");
+    }
+
+    // 14. Back on the canvas, the same picture as a card.
+    runtime.request(ShellRequest::CloseStudio, &mut camera.painter, camera.now);
+    if let Some(entity) = sample.and_then(|id| runtime.engine.world.arena.handle_of(id)) {
+        runtime.request(
+            ShellRequest::Place {
+                entity,
+                focus: true,
+            },
+            &mut camera.painter,
+            camera.now,
+        );
+    }
+    shoot(&mut runtime, &mut camera, "14-illustration-card")?;
     let _ = std::fs::remove_dir_all(&root);
     Ok(written)
 }

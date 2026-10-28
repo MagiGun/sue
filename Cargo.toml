@@ -65,3 +65,11 @@ lto = "thin"
 # Sue's own crates stay at the default debug level for fast rebuilds.
 [profile.dev.package."*"]
 opt-level = 3
+
+# Sue Paint's pixel loops and the blend math they call run for every pixel
+# on every change; unoptimized, painting and layer edits would stutter.
+[profile.dev.package.sue-paint]
+opt-level = 3
+
+[profile.dev.package.sue-model]
+opt-level = 3
