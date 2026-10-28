@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use egui::{Align, Color32, Layout, RichText, ScrollArea, Sense, Stroke, Ui, vec2};
+use egui::{Align, Layout, RichText, ScrollArea, Sense, Stroke, Ui, vec2};
 use sue_rice::{Keybind, RiceEntry, RiceParameter, RiceSchema, RiceValue, SetRiceValue};
 use sue_wm::{
     AppletContext, AppletManifest, AppletRole, Catalog, RiceEdit, SettingsGroup, SettingsItem,
@@ -85,31 +85,6 @@ fn matches(entry: &RiceEntry, needle: &str) -> bool {
         || entry
             .description()
             .is_some_and(|text| text.to_lowercase().contains(needle))
-}
-
-/// The value typed into a field, typed like the parameter it edits.
-///
-/// # Errors
-/// A message when the text does not fit the parameter.
-pub fn typed_value(rice: &RiceSchema, path: &str, text: &str) -> Result<RiceValue, String> {
-    match rice.parameter(path) {
-        Some(RiceParameter::IntRange { .. }) => text
-            .trim()
-            .parse()
-            .map(RiceValue::Int)
-            .map_err(|_| format!("{text} is not a whole number")),
-        Some(RiceParameter::FloatRange { .. }) => text
-            .trim()
-            .parse()
-            .map(RiceValue::Float)
-            .map_err(|_| format!("{text} is not a number")),
-        Some(RiceParameter::ColorHex { .. }) => text
-            .trim()
-            .parse()
-            .map(RiceValue::Color)
-            .map_err(|_| format!("{text} is not a color like #808080")),
-        _ => Ok(RiceValue::Text(text.to_owned())),
-    }
 }
 
 /// A monochrome on and off switch.
@@ -246,37 +221,23 @@ impl Settings {
                 )
             }
             RiceParameter::ColorHex { value } => {
-                let text = self
-                    .texts
-                    .entry(path.clone())
-                    .or_insert_with(|| value.to_string());
-                let response = ui.add(
-                    egui::TextEdit::singleline(text)
-                        .font(theme.mono(theme.ui_size))
-                        .desired_width(84.0),
-                );
-                let (swatch, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
-                ui.painter().rect_filled(
-                    swatch,
-                    4.0,
-                    Color32::from_rgba_unmultiplied(value.r, value.g, value.b, value.a),
-                );
-                ui.painter()
-                    .rect_stroke(swatch, 4.0, theme.hairline(), egui::StrokeKind::Inside);
-                if response.lost_focus() {
-                    let typed = self.texts.remove(&path).unwrap_or_default();
-                    return Some(match typed_value(cx.rice(), &path, &typed) {
-                        Ok(value) => Edit::Set(path, value),
-                        Err(error) => {
-                            self.error = Some(error);
-                            return None;
-                        }
-                    });
+                // Picked by eye on the color wheel; dragging previews and
+                // letting go makes one undo step.
+                let mut rgba = [value.r, value.g, value.b, value.a];
+                let pick = sue_wm::color_button(ui, ("sue-color", &path), &mut rgba, true, theme);
+                if pick.released {
+                    return Some(Edit::Release(path));
                 }
-                if !response.has_focus() {
-                    self.texts.insert(path, value.to_string());
+                if !pick.changed {
+                    return None;
                 }
-                None
+                let [r, g, b, a] = rgba;
+                let picked = RiceValue::Color(sue_rice::Rgba { r, g, b, a });
+                Some(if pick.dragging {
+                    Edit::Preview(path, picked)
+                } else {
+                    Edit::Set(path, picked)
+                })
             }
             RiceParameter::EnumChoice { value, options } => {
                 let labels: Vec<String> =
@@ -671,18 +632,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn typed_values_follow_the_parameter_type() {
-        let mut rice = RiceSchema::new();
-        sue_wm::register_rice(&mut rice).unwrap();
-        assert_eq!(
-            typed_value(&rice, "display.frame_rate_cap", "120"),
-            Ok(RiceValue::Int(120))
-        );
-        assert!(typed_value(&rice, "display.frame_rate_cap", "fast").is_err());
-        assert!(matches!(
-            typed_value(&rice, "colors.text", "#c0c0c0"),
-            Ok(RiceValue::Color(_))
-        ));
+    fn choices_read_like_words() {
         assert_eq!(choice_label("high-refresh"), "High refresh");
     }
 }

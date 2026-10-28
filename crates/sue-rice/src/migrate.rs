@@ -53,21 +53,19 @@ fn chromatic(value: &RiceValue) -> bool {
     matches!(value, RiceValue::Color(rgba) if !(rgba.r == rgba.g && rgba.g == rgba.b))
 }
 
-/// Migrates `text` to [`RICE_FORMAT`], and resets any color that is not a
-/// gray. Returns `None` when the file is current and monochrome.
+/// Migrates `text` to [`RICE_FORMAT`]. Colors from before format 3 that are
+/// not gray are reset (the old tinted defaults); a color picked since is
+/// the user's own and stays. Returns `None` when the file is current.
 ///
 /// # Errors
 /// If `text` does not parse; the caller then falls back to the default.
 pub fn migrate(text: &str) -> Result<Option<Migration>, RiceError> {
     let from = format_of(text);
     let user = RiceSchema::parse(text)?;
-    let tinted = user
-        .entries()
-        .iter()
-        .any(|entry| chromatic(&entry.parameter().value()));
-    if from >= RICE_FORMAT && !tinted {
+    if from >= RICE_FORMAT {
         return Ok(None);
     }
+    let tinted_era = from < 3;
     let old_defaults = HISTORY
         .iter()
         .find(|(format, _)| *format == from)
@@ -77,7 +75,7 @@ pub fn migrate(text: &str) -> Result<Option<Migration>, RiceError> {
     let (mut kept, mut dropped, mut purged) = (Vec::new(), Vec::new(), Vec::new());
     for entry in user.entries() {
         let value = entry.parameter().value();
-        if chromatic(&value) {
+        if tinted_era && chromatic(&value) {
             purged.push(entry.path().to_owned());
             continue;
         }
@@ -152,20 +150,13 @@ mod tests {
         assert_eq!(migration.from, 2);
         assert_eq!(migration.text, DEFAULT_RICE.replace("\r\n", "\n"));
         assert!(!migration.text.contains("#3b82f6"));
-        // A current file with a tinted color is cleaned too, keeping the rest.
-        let tinted = DEFAULT_RICE
-            .replace("\ntext = \"#ffffff\"", "\ntext = \"#3b82f6\"")
-            .replace("ui_size = 13 ", "ui_size = 15 ");
-        let migration = migrate(&tinted).unwrap().unwrap();
-        assert_eq!(migration.purged, ["colors.text"]);
-        assert_eq!(migration.kept, ["typography.ui_size"]);
-        let schema = RiceSchema::parse(&migration.text).unwrap();
-        assert_eq!(
-            schema
-                .get_color("colors.text")
-                .map(|rgba| (rgba.r, rgba.g, rgba.b)),
-            Some((255, 255, 255))
-        );
+        // A blue picked on the color wheel since then is the user's own.
+        let tinted = DEFAULT_RICE.replace("\ntext = \"#ffffff\"", "\ntext = \"#3b82f6\"");
+        assert_eq!(migrate(&tinted).unwrap(), None);
+        let v3 = V3.replace("\ntext = \"#ffffff\"", "\ntext = \"#3b82f6\"");
+        let migration = migrate(&v3).unwrap().unwrap();
+        assert!(migration.purged.is_empty());
+        assert_eq!(migration.kept, ["colors.text"]);
     }
 
     #[test]

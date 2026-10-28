@@ -23,6 +23,7 @@
 mod applet;
 mod camera;
 mod catalog;
+mod color_pick;
 mod config;
 mod error;
 pub mod keys;
@@ -51,6 +52,7 @@ pub use catalog::{
     Catalog, Choice, CommandButton, InfoTable, Property, PropertyGroup, SettingsGroup,
     SettingsItem, SettingsPage,
 };
+pub use color_pick::{ColorPick, alpha_bar, color_button, color_wheel, hsv_of, rgb_of, swatch};
 pub use config::{CanvasConfig, GridStyle, Keymap, WmConfig, register_rice, rice_declarations};
 pub use error::WmError;
 pub use launchpad::{AppletFactory, Applets, Launchpad};

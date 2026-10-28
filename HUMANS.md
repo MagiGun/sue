@@ -53,8 +53,8 @@ imported or converted between them.
 
 Sue's window is one big **infinite canvas**: a dark board with a faint dot grid
 that goes on forever in every direction. Everything you work on sits on it as a
-card. Sue is black, white and grays only, so your own pictures and words are the
-only color you see.
+card. Out of the box Sue is black, white and grays only, so your own pictures
+and words are the only color you see (you can color it yourself in Settings).
 
 ```text
 ┌───┬──────────────────────────────────────────────────────────┬───┐
@@ -168,6 +168,11 @@ The rails and drawers stay with you inside every studio too, so your files,
 notes and history are always one click away.
 
 You can also drop any file anywhere on the window to put it on the canvas.
+
+Whenever Sue saves or exports a file (a project, a picture from Sue Paint, a
+re-encoded JPEG XL, an exported rice), the status bar says the file's name and
+the folder it went to. Click that message to see the file, selected, in your
+system's file manager.
 
 ### Text, everywhere
 
@@ -337,16 +342,20 @@ controls for it in **Settings**:
 
 - on/off options become **switches**,
 - numbers with a range become **sliders** with their value beside them,
-- colors become **swatches** with their hex code,
+- colors become **swatches**: click one and a color wheel opens next to it.
+  Turn the ring for the hue, pick in the square for how strong and how light,
+  slide the bar for how see-through, or click one of the grays below. You
+  never type a color code. Letting go of a drag is one `Ctrl+Z` step,
 - short lists of choices become **side-by-side buttons**, longer ones
   **drop-downs**,
 - shortcuts become **key caps**: click one and press the new keys.
 
 **Appearance & Rice** also offers ready-made themes (Void, Graphite and Paper)
 that change every color at once, and one `Ctrl+Z` brings yours back. They are
-all black, white and gray: Sue's look stays out of the way of your work. If an
-older `.suerice` file has a tinted color in it, Sue resets that color to the
-monochrome default the next time it starts and keeps a copy of your old file.
+all black, white and gray: Sue's look stays out of the way of your work. A
+color you pick yourself stays; only the tinted colors that very old releases
+shipped with are reset to the monochrome default (Sue keeps a copy of your old
+file).
 
 A line like this in your `.suerice` file:
 

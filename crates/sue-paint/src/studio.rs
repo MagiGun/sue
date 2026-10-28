@@ -810,12 +810,7 @@ impl SuePaint {
             self.last_dir = Some(dir.to_path_buf());
         }
         match write_atomic(&path, &bytes) {
-            Ok(()) => cx.notify(format!(
-                "Exported {} ({} KiB)",
-                path.file_name()
-                    .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
-                bytes.len().div_ceil(1024)
-            )),
+            Ok(()) => cx.saved(&path, format!("{} KiB", bytes.len().div_ceil(1024))),
             Err(error) => cx.fail(format!("Cannot write {}: {error}", path.display())),
         }
     }

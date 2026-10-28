@@ -78,6 +78,40 @@ pub fn reveal_folder(dir: &Path) -> io::Result<()> {
     open::that_detached(dir)
 }
 
+/// Shows a file in the system file manager, selected in its folder where
+/// the system allows it (Explorer and Finder do), else just its folder.
+///
+/// # Errors
+/// If the file is gone, or the OS fails to open the file manager.
+pub fn reveal_file(path: &Path) -> io::Result<()> {
+    if !path.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{} is gone", path.display()),
+        ));
+    }
+    if path.is_dir() {
+        return open::that_detached(path);
+    }
+    if cfg!(target_os = "windows") {
+        let mut select = std::ffi::OsString::from("/select,");
+        select.push(path.as_os_str());
+        std::process::Command::new("explorer.exe")
+            .arg(select)
+            .spawn()
+            .map(|_| ())
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+    } else {
+        let folder = path.parent().unwrap_or(path);
+        open::that_detached(folder)
+    }
+}
+
 /// A file-type filter for the native dialogs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileFilter {

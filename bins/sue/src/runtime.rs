@@ -561,10 +561,15 @@ impl Runtime {
                     self.open_audio();
                 }
             }
-            other => match other.strip_prefix("reveal:") {
-                Some(path) => self.reveal(Path::new(path)),
-                None => self.shell.notify(format!("Unknown command {other}"), true),
-            },
+            other => {
+                if let Some(path) = other.strip_prefix("reveal:") {
+                    self.reveal(Path::new(path));
+                } else if let Some(path) = other.strip_prefix("reveal-file:") {
+                    self.reveal_file(Path::new(path));
+                } else {
+                    self.shell.notify(format!("Unknown command {other}"), true);
+                }
+            }
         }
     }
 
@@ -577,6 +582,19 @@ impl Runtime {
         if let Err(error) = sue_platform::reveal_folder(dir) {
             self.shell
                 .notify(format!("Cannot open the folder: {error}"), true);
+        }
+    }
+
+    /// Shows a file selected in the system file manager.
+    fn reveal_file(&mut self, path: &Path) {
+        if !self.interactive {
+            self.shell
+                .notify(format!("File: {}", path.display()), false);
+            return;
+        }
+        if let Err(error) = sue_platform::reveal_file(path) {
+            self.shell
+                .notify(format!("Cannot show the file: {error}"), true);
         }
     }
 
@@ -640,8 +658,7 @@ impl Runtime {
         self.engine.world.write_into(&mut self.project_file);
         write_atomic(path, &self.project_file.to_bytes()).map_err(|error| error.to_string())?;
         self.project = Some(path.to_path_buf());
-        self.shell
-            .notify(format!("Saved {}", file_name(path)), false);
+        self.shell.notify_saved(path, "project");
         Ok(())
     }
 
@@ -857,9 +874,7 @@ impl Runtime {
         {
             let text = self.engine.world.rice.to_suerice();
             match write_atomic(&path, text.as_bytes()) {
-                Ok(()) => self
-                    .shell
-                    .notify(format!("Exported the rice to {}", path.display()), false),
+                Ok(()) => self.shell.notify_saved(&path, "rice"),
                 Err(error) => self.shell.notify(format!("Export failed: {error}"), true),
             }
         }
@@ -1249,6 +1264,36 @@ pub(crate) mod tests {
             runtime.shell.studio_reveal() > 0.999,
             "instant transitions snap in a frame or two"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn saved_files_say_where_they_went_and_show_on_a_click() {
+        let (mut runtime, root) = runtime("saved");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("out.jxl");
+        std::fs::write(&path, b"jxl").unwrap();
+        let start = Instant::now();
+        runtime.request(
+            ShellRequest::Saved {
+                path: path.clone(),
+                note: "JPEG XL".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        let (text, error) = runtime.shell.message().unwrap();
+        assert!(!error);
+        assert!(text.contains("out.jxl") && text.contains(&root.display().to_string()));
+        assert_eq!(runtime.shell.message_path(), Some(path.as_path()));
+        // Headless, showing the file names it instead of opening Explorer.
+        runtime.request(
+            ShellRequest::Command(format!("reveal-file:{}", path.display())),
+            &mut NoTextures,
+            start,
+        );
+        assert!(runtime.shell.message().unwrap().0.starts_with("File: "));
+        assert_eq!(runtime.shell.message_path(), None);
         let _ = std::fs::remove_dir_all(&root);
     }
 

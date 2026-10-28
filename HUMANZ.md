@@ -839,10 +839,15 @@ native textures by key and version: a layer's version is its `revision`
 metadata, bumped by every stroke and by undo and redo. Textures no frame used
 are freed.
 
-**Telemetry.** The status bar shows the mode and the selected entity (or the
-latest message) on the left; the arena entity count, the undo depth, the
-hardware profile, the zoom and the frame state (`Idle` while asleep, `N FPS`
-measured over the last second while animating) on the right.
+**Telemetry.** The status bar shows the Hub button, the mode, the selected
+entity and the latest message on the left; the arena entity count, the undo
+depth, the hardware profile, the zoom and the frame state (`Idle` while
+asleep, `N FPS` measured over the last second while animating) on the right.
+A file written anywhere (`cx.saved(path, note)`, `ShellRequest::Saved`) is
+reported with its name, a note and its folder for at least ten seconds; a
+click on that message runs `reveal-file:<path>`, which shows the file
+selected in Explorer or Finder (`sue_platform::reveal_file`), or its folder
+elsewhere.
 
 ### 3.5 Real-time audio thread isolation
 
@@ -1181,14 +1186,14 @@ parameter stays reachable (tested).
 | --- | --- |
 | `Bool` | A black and white switch |
 | `IntRange` / `FloatRange` | Slider with a 4 px track, a filled part and a round thumb, its value on the right |
-| `ColorHex` | Swatch plus hex field |
+| `ColorHex` | A swatch that opens the shared color wheel (`sue_wm::color_button`: a hue ring around a saturation and value square, an opacity bar, HSV numbers and a row of grays) in a layer over every window; dragging previews, release commits |
 | `EnumChoice` | A segmented control for up to five short options, else a compact drop-down |
 | A text parameter with live choices (output device, boot mode) | A drop-down |
 | `Keybind` | A key cap; click it and press the new chord (`Esc` cancels; global shortcuts are held back while recording) |
 | `ShaderPath` / `Text` | Text field |
 
-Text fields commit when they lose focus. A slider drag previews
-live: it sets the schema directly, so the whole UI follows the value as you
+Text fields commit when they lose focus. A slider or color wheel drag
+previews live: it sets the schema directly, so the whole UI follows the value as you
 drag. On release the preview is reverted and one `RiceEdit(SetRiceValue)` is
 recorded, so a whole drag is one undo step. After any change (an edit, a
 preview, an undo or a redo) the runtime re-reads `WmConfig`, the

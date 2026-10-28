@@ -15,7 +15,7 @@ use sue_wm::{
     SceneNode, ShellRequest, SpawnNode, SueApplet, World, widgets,
 };
 
-use crate::util::{file_name, free_path, human_bytes};
+use crate::util::{free_path, human_bytes};
 
 /// The applet id.
 pub const ID: &str = "image";
@@ -94,11 +94,10 @@ impl Image {
         );
         let path = free_path(&dir.join(format!("{stem}.jxl")));
         match write_atomic(&path, &bytes) {
-            Ok(()) => cx.notify(format!(
-                "Saved {} ({}, {how})",
-                file_name(&path),
-                human_bytes(bytes.len() as u64)
-            )),
+            Ok(()) => cx.saved(
+                &path,
+                format!("JPEG XL, {how}, {}", human_bytes(bytes.len() as u64)),
+            ),
             Err(error) => cx.fail(format!("Cannot write {}: {error}", path.display())),
         }
     }

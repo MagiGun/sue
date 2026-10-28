@@ -51,7 +51,8 @@ pub use input::{
     ScreenEdge, StylusSample, SwipeDirection, TouchGesture, WindowEvent,
 };
 pub use os::{
-    FileFilter, copy_text, open_url, pick_open_file, pick_save_file, reveal_folder, web_url,
+    FileFilter, copy_text, open_url, pick_open_file, pick_save_file, reveal_file, reveal_folder,
+    web_url,
 };
 pub use paint::{EguiPainter, NoTextures, TextureUpload};
 pub use paths::PlatformPaths;

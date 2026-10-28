@@ -258,6 +258,13 @@ pub enum ShellRequest {
     CloseStudio,
     /// Show or hide the Hub, the list of studios.
     Hub(bool),
+    /// A file was written: say where, and show it in its folder on a click.
+    Saved {
+        /// The file.
+        path: PathBuf,
+        /// What it is, e.g. `JPEG XL, lossless, 1.2 MiB`.
+        note: String,
+    },
 }
 
 /// What an applet's tick asks for.
@@ -425,6 +432,15 @@ impl AppletContext<'_> {
     /// An error for the status bar.
     pub fn fail(&mut self, text: impl Into<String>) {
         self.requests.push(ShellRequest::Fail(text.into()));
+    }
+
+    /// Tells where a file was written (`note` says what it is), and offers
+    /// to show it in its folder.
+    pub fn saved(&mut self, path: impl Into<PathBuf>, note: impl Into<String>) {
+        self.requests.push(ShellRequest::Saved {
+            path: path.into(),
+            note: note.into(),
+        });
     }
 
     /// Asks the shell or engine for something.

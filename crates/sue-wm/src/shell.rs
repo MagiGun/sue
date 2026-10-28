@@ -213,6 +213,7 @@ pub struct Shell {
     middle_pan: bool,
     node_drag: Option<NodeDrag>,
     message: Option<(String, bool, Instant)>,
+    message_path: Option<PathBuf>,
     last_frame: Option<Instant>,
     last_change: Option<Instant>,
     animating: bool,
@@ -298,6 +299,7 @@ impl Shell {
             middle_pan: false,
             node_drag: None,
             message: None,
+            message_path: None,
             last_frame: None,
             last_change: None,
             animating: true,
@@ -491,7 +493,37 @@ impl Shell {
             error,
             Instant::now() + self.config.message_duration,
         ));
+        self.message_path = None;
         self.touch();
+    }
+
+    /// Says where a file was written, for long enough to read the folder;
+    /// a click on the message shows the file in its folder.
+    pub fn notify_saved(&mut self, path: &std::path::Path, note: &str) {
+        let name = path
+            .file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+        let folder = path
+            .parent()
+            .map_or_else(String::new, |folder| folder.display().to_string());
+        let note = if note.is_empty() {
+            String::new()
+        } else {
+            format!(" ({note})")
+        };
+        self.message = Some((
+            format!("Saved {name}{note} in {folder}. Click to show it"),
+            false,
+            Instant::now() + self.config.message_duration.max(Duration::from_secs(10)),
+        ));
+        self.message_path = Some(path.to_path_buf());
+        self.touch();
+    }
+
+    /// The file the status message is about, if it is about one.
+    #[must_use]
+    pub fn message_path(&self) -> Option<&std::path::Path> {
+        self.message_path.as_deref()
     }
 
     /// The status message, if any.
@@ -529,6 +561,7 @@ impl Shell {
             .is_some_and(|(_, _, until)| *until <= now)
         {
             self.message = None;
+            self.message_path = None;
             return true;
         }
         false
@@ -1168,6 +1201,7 @@ impl Shell {
             ShellRequest::OpenStudio(id) => self.open_studio(id, io),
             ShellRequest::CloseStudio => self.close_studio(io, true),
             ShellRequest::Hub(open) => self.set_hub(open),
+            ShellRequest::Saved { path, note } => self.notify_saved(&path, &note),
             other => return Some(other),
         }
         self.touch();
@@ -2268,20 +2302,51 @@ impl Shell {
             left.push_str("    ");
             left.push_str(&name);
         }
-        if let Some((text, error)) = self.message() {
-            left.push_str("    ");
-            if error {
-                left.push_str("! ");
-            }
-            left.push_str(text);
-        }
-        painter.text(
+        let placed = painter.text(
             rect.left_center() + vec2(theme.padding, 0.0),
             Align2::LEFT_CENTER,
             left,
             font.clone(),
             theme.muted,
         );
+        if let Some((text, error)) = self.message() {
+            let text = if error {
+                format!("! {text}")
+            } else {
+                text.to_owned()
+            };
+            let at = pos2(placed.right() + theme.padding * 3.0, rect.center().y);
+            let galley = painter.layout_no_wrap(text, font.clone(), theme.muted);
+            let area =
+                Rect::from_min_size(pos2(at.x, rect.top()), vec2(galley.size().x, rect.height()));
+            let mut color = if error { theme.text } else { theme.muted };
+            if let Some(path) = self.message_path.clone() {
+                // A saved file's message shows the file when clicked.
+                let response = root
+                    .interact(area, Id::unique("sue-status-message"), Sense::click())
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text(path.display().to_string());
+                if response.hovered() {
+                    color = theme.text;
+                    painter.hline(
+                        area.x_range(),
+                        rect.center().y + galley.size().y / 2.0,
+                        Stroke::new(1.0, theme.muted),
+                    );
+                }
+                if response.clicked() {
+                    io.requests.push(ShellRequest::Command(format!(
+                        "reveal-file:{}",
+                        path.display()
+                    )));
+                }
+            }
+            painter.galley(
+                pos2(at.x, rect.center().y - galley.size().y / 2.0),
+                galley,
+                color,
+            );
+        }
         let items = [
             format!("{} entities", io.world.arena.len()),
             format!("Undo {}", io.history.depth()),

@@ -1675,16 +1675,28 @@ impl SuePaint {
                     .get_by_id(info.id)
                     .map(picture::paper_color)
                     .unwrap_or_else(|_| sue_core::Color::srgb8(255, 255, 255));
-                let mut rgb = color::bytes(paper.rgb);
+                let [r, g, b] = color::bytes(paper.rgb);
+                let mut rgba = [r, g, b, 255];
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Color").color(theme.muted));
-                    if egui::color_picker::color_edit_button_srgb(ui, &mut rgb).changed() {
-                        let [r, g, b] = rgb;
-                        Self::apply(
-                            cx,
-                            doc::set(info.id, picture::COLOR, sue_core::Color::srgb8(r, g, b)),
-                        );
-                    }
+                    let pick = sue_wm::color_button(
+                        ui,
+                        ("sue-paint-paper", info.id),
+                        &mut rgba,
+                        false,
+                        theme,
+                    );
+                    let [r, g, b, _] = rgba;
+                    self.live_value(
+                        cx,
+                        (
+                            pick.changed,
+                            pick.released || (pick.changed && !pick.dragging),
+                        ),
+                        info.id,
+                        picture::COLOR,
+                        Value::from(sue_core::Color::srgb8(r, g, b)),
+                    );
                 });
             }
             LayerKind::Raster => {
@@ -1743,8 +1755,24 @@ impl SuePaint {
         key: &str,
         value: Value,
     ) {
+        let finished = response.drag_stopped()
+            || response.lost_focus()
+            || (response.changed() && !response.dragged() && !response.has_focus());
+        self.live_value(cx, (response.changed(), finished), id, key, value);
+    }
+
+    /// Sets property `key` of `id` live while it `changed`, and records
+    /// one undo step from where it began once `finished`.
+    fn live_value(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        (changed, finished): (bool, bool),
+        id: sue_core::EntityId,
+        key: &str,
+        value: Value,
+    ) {
         let label = doc::label(key, &value);
-        if response.changed() {
+        if changed {
             let Ok(entity) = cx.world.arena.get_by_id_mut(id) else {
                 return;
             };
@@ -1761,9 +1789,6 @@ impl SuePaint {
             }
             entity.properties_mut().set(key, value);
         }
-        let finished = response.drag_stopped()
-            || response.lost_focus()
-            || (response.changed() && !response.dragged() && !response.has_focus());
         if finished && let Some(live) = self.live.take_if(|live| live.id == id && live.key == key) {
             let step = match live.old {
                 Some(old) => sue_core::txn::SetProperty::new(id, key, old),

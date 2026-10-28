@@ -620,7 +620,11 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
     ui.horizontal(|ui| {
         ui.checkbox(&mut new.paper, "Paper color");
         ui.add_enabled_ui(new.paper, |ui| {
-            egui::color_picker::color_edit_button_srgb(ui, &mut new.paper_color);
+            let [r, g, b] = new.paper_color;
+            let mut rgba = [r, g, b, 255];
+            if sue_wm::color_button(ui, "sue-paint-new-paper", &mut rgba, false, theme).changed {
+                new.paper_color = [rgba[0], rgba[1], rgba[2]];
+            }
         });
     });
     ui.add_enabled_ui(false, |ui| {

@@ -102,6 +102,8 @@ struct Camera2 {
     size: [u32; 2],
     start: Instant,
     now: Instant,
+    /// Input for the coming frames, one list per frame.
+    input: Vec<Vec<egui::Event>>,
 }
 
 impl Camera2 {
@@ -113,6 +115,11 @@ impl Camera2 {
             )),
             time: Some(self.now.duration_since(self.start).as_secs_f64()),
             max_texture_side: Some(self.painter.max_texture_side()),
+            events: if self.input.is_empty() {
+                Vec::new()
+            } else {
+                self.input.remove(0)
+            },
             ..egui::RawInput::default()
         };
         let now = self.now;
@@ -123,13 +130,26 @@ impl Camera2 {
         output
     }
 
+    /// Clicks at `at` over the next frames.
+    fn click(&mut self, at: Pos2) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        self.input.push(vec![egui::Event::PointerMoved(at)]);
+        self.input.push(vec![button(true)]);
+        self.input.push(vec![button(false)]);
+    }
+
     /// Runs frames until the shell sleeps.
     fn settle(&mut self, runtime: &mut Runtime) {
         for count in 0.. {
             let output = self.frame(runtime);
             self.painter.apply_textures(output.textures_delta);
             let asleep = !matches!(runtime.pacing(self.now), FramePacing::Animate { .. });
-            if (asleep && count > 3) || count > 600 {
+            if (asleep && count > 3 && self.input.is_empty()) || count > 600 {
                 break;
             }
         }
@@ -219,6 +239,7 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         size: [width, height],
         start,
         now: start,
+        input: Vec::new(),
     };
     let mut written = Vec::new();
     let mut shoot =
@@ -322,6 +343,13 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
             camera.now,
         );
         shoot(&mut runtime, &mut camera, name)?;
+        if page == "appearance" {
+            // 7b. The color wheel behind the Void swatch.
+            camera.click(Pos2::new(1176.0, 318.0));
+            shoot(&mut runtime, &mut camera, "07b-color-wheel")?;
+            camera.click(Pos2::new(700.0, 860.0));
+            camera.settle(&mut runtime);
+        }
     }
     runtime.shell.close_window();
     runtime.shell.dismiss_overlays();
