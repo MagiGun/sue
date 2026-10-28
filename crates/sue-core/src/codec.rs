@@ -344,6 +344,34 @@ impl<'a> Reader<'a> {
     }
 }
 
+const CRC_TABLE: [u32; 256] = {
+    let mut table = [0_u32; 256];
+    let mut index = 0;
+    while index < 256 {
+        let mut crc = index as u32;
+        let mut bit = 0;
+        while bit < 8 {
+            crc = if crc & 1 == 1 {
+                0xEDB8_8320 ^ (crc >> 1)
+            } else {
+                crc >> 1
+            };
+            bit += 1;
+        }
+        table[index] = crc;
+        index += 1;
+    }
+    table
+};
+
+/// The CRC-32 (IEEE) checksum of `bytes`, as in PNG and zip.
+#[must_use]
+pub fn crc32(bytes: &[u8]) -> u32 {
+    !bytes.iter().fold(!0_u32, |crc, byte| {
+        CRC_TABLE[((crc ^ u32::from(*byte)) & 0xFF) as usize] ^ (crc >> 8)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,6 +406,12 @@ mod tests {
         assert_eq!(input.f64s().unwrap(), [3.0]);
         assert_eq!(input.nested().unwrap().str().unwrap(), "inside");
         assert!(input.is_empty());
+    }
+
+    #[test]
+    fn crc32_matches_the_standard() {
+        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+        assert_eq!(crc32(b""), 0);
     }
 
     #[test]

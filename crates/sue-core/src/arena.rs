@@ -146,6 +146,11 @@ impl Entity {
         self.id
     }
 
+    /// Gives a detached entity a new id (copies, see `Bundle::renew_ids`).
+    pub(crate) fn set_id(&mut self, id: EntityId) {
+        self.id = id;
+    }
+
     /// Human-readable name, e.g. a file name.
     #[must_use]
     pub fn name(&self) -> &str {

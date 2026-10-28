@@ -57,71 +57,9 @@ impl<X: ReversibleTransaction<RiceSchema>> ReversibleTransaction<World> for Rice
     }
 }
 
-/// Several transactions as one undo step, applied in order and reverted in
-/// reverse; a failure part way takes back what already went in.
-pub struct Batch {
-    label: String,
-    steps: Vec<Box<dyn ReversibleTransaction<World>>>,
-}
-
-impl std::fmt::Debug for Batch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Batch")
-            .field("label", &self.label)
-            .field("steps", &self.steps.len())
-            .finish()
-    }
-}
-
-impl Batch {
-    /// An empty batch.
-    #[must_use]
-    pub fn new(label: impl Into<String>) -> Self {
-        Self {
-            label: label.into(),
-            steps: Vec::new(),
-        }
-    }
-
-    /// Adds a step.
-    #[must_use]
-    pub fn then<X: ReversibleTransaction<World> + 'static>(mut self, step: X) -> Self {
-        self.steps.push(Box::new(step));
-        self
-    }
-}
-
-impl ReversibleTransaction<World> for Batch {
-    fn label(&self) -> String {
-        self.label.clone()
-    }
-
-    fn apply(&mut self, world: &mut World) -> Result<(), TxnError> {
-        for done in 0..self.steps.len() {
-            if let Err(error) = self.steps[done].apply(world) {
-                for step in self.steps[..done].iter_mut().rev() {
-                    let _ = step.revert(world);
-                }
-                return Err(error);
-            }
-        }
-        Ok(())
-    }
-
-    fn revert(&mut self, world: &mut World) -> Result<(), TxnError> {
-        let count = self.steps.len();
-        for undone in 0..count {
-            let index = count - 1 - undone;
-            if let Err(error) = self.steps[index].revert(world) {
-                for step in &mut self.steps[index + 1..] {
-                    let _ = step.apply(world);
-                }
-                return Err(error);
-            }
-        }
-        Ok(())
-    }
-}
+/// Several world transactions as one undo step (the kernel's generic
+/// [`sue_core::txn::Batch`]).
+pub type Batch = sue_core::txn::Batch<World>;
 
 /// What a new entity starts with.
 #[derive(Debug)]
