@@ -119,10 +119,18 @@ impl SuePaint {
                 .arena
                 .get_by_id(doc.picture)
                 .map_or_else(|_| "Picture".to_owned(), |entity| entity.name().to_owned());
+            let (_, _, version) = doc.compositor.display();
+            let modified = self
+                .clean
+                .get(&doc.picture)
+                .is_some_and(|clean| *clean != version);
             let galley = ui.painter().layout_no_wrap(name, font.clone(), theme.text);
             let tab = Rect::from_min_size(
                 pos2(x, strip.top() + 2.0),
-                vec2(galley.size().x + 38.0, 24.0),
+                vec2(
+                    galley.size().x + 38.0 + if modified { 12.0 } else { 0.0 },
+                    24.0,
+                ),
             );
             x = tab.right() + 2.0;
             let chosen = index == self.active;
@@ -142,11 +150,20 @@ impl SuePaint {
                     theme.pill
                 },
             );
+            let text_width = galley.size().x;
             ui.painter().galley(
                 pos2(tab.left() + 10.0, tab.center().y - galley.size().y / 2.0),
                 galley,
                 if chosen { theme.text } else { theme.muted },
             );
+            if modified {
+                // Changed since it was opened or saved.
+                ui.painter().circle_filled(
+                    pos2(tab.left() + 16.0 + text_width, tab.center().y),
+                    3.0,
+                    if chosen { theme.text } else { theme.muted },
+                );
+            }
             let cross =
                 Rect::from_center_size(pos2(tab.right() - 13.0, tab.center().y), vec2(16.0, 16.0));
             let cross_response = ui.interact(
@@ -1457,11 +1474,32 @@ impl SuePaint {
                 doc.view.rotate_by(viewport, size, 15.0);
             }
             if ui
+                .small_button("0\u{b0}")
+                .on_hover_text("Reset rotation")
+                .clicked()
+            {
+                doc.view.set_rotation(viewport, size, 0.0);
+            }
+            if ui
                 .selectable_label(doc.view.flip_h, "Flip")
-                .on_hover_text("Flip the view")
+                .on_hover_text("Flip the view left to right")
                 .clicked()
             {
                 doc.view.flip(viewport, size, true);
+            }
+            if ui
+                .small_button("Fit")
+                .on_hover_text("Fit to screen (Ctrl+0)")
+                .clicked()
+            {
+                doc.view.fit(viewport, size);
+            }
+            if ui
+                .small_button("100%")
+                .on_hover_text("Actual pixels (Ctrl+Alt+0)")
+                .clicked()
+            {
+                doc.view.set_zoom_at(viewport, size, viewport.center(), 1.0);
             }
             ui.separator();
             let small = |text: String| {

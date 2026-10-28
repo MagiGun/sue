@@ -184,6 +184,17 @@ pub struct SuePaint {
     pub(crate) menus_hidden: bool,
     /// Where the palettes are docked, floating or collapsed.
     pub(crate) dock: crate::dock::Dock,
+    /// The Sub View's reference pictures.
+    pub(crate) sub_view: crate::subview::SubView,
+    /// The color sets.
+    pub(crate) color_sets: crate::colorsets::ColorSets,
+    /// The color set's settings menu is open.
+    pub(crate) set_menu: bool,
+    /// Navigator or Sub View.
+    pub(crate) nav_tab: u8,
+    /// Each picture's version when last saved or opened, for the tabs'
+    /// modified dot.
+    pub(crate) clean: HashMap<EntityId, u64>,
     pub(crate) hue: f32,
     pub(crate) recent: History,
     pub(crate) docs: Vec<Doc>,
@@ -269,6 +280,11 @@ impl Default for SuePaint {
             transparent: false,
             menus_hidden: false,
             dock: crate::dock::Dock::default(),
+            sub_view: crate::subview::SubView::default(),
+            color_sets: crate::colorsets::ColorSets::default(),
+            set_menu: false,
+            nav_tab: 0,
+            clean: HashMap::new(),
             pending_export: None,
             shown: false,
             clock: (0.0, 1.0 / 60.0),
@@ -877,6 +893,24 @@ impl SuePaint {
         ]
     }
 
+    /// Remembers every open picture as saved, for the tabs' modified dot.
+    pub(crate) fn mark_clean(&mut self) {
+        for doc in &self.docs {
+            let (_, _, version) = doc.compositor.display();
+            self.clean.insert(doc.picture, version);
+        }
+    }
+
+    /// Writes the color sets to Sue Paint's data folder.
+    pub(crate) fn save_color_sets(&self, cx: &mut AppletContext<'_>) {
+        if let Err(error) = self
+            .color_sets
+            .save(crate::colorsets::folder(cx).as_deref())
+        {
+            cx.fail(format!("Cannot save the color sets: {error}"));
+        }
+    }
+
     /// Asks for a picture file and opens it as a new canvas, or as a new
     /// layer of the current one.
     fn pick_image(&mut self, cx: &mut AppletContext<'_>, as_layer: bool) {
@@ -1256,7 +1290,10 @@ impl SuePaint {
                     self.active = self.active.min(self.docs.len().saturating_sub(1));
                 }
             }
-            "file.save" => cx.request(ShellRequest::Command("file.save".to_owned())),
+            "file.save" => {
+                cx.request(ShellRequest::Command("file.save".to_owned()));
+                self.mark_clean();
+            }
             "file.save_as" => cx.request(ShellRequest::Command("file.save_as".to_owned())),
             "file.export.png" => self.export(cx, "png"),
             "file.export.jpg" => self.export(cx, "jpg"),
@@ -2103,6 +2140,38 @@ impl SueApplet for SuePaint {
             "export" => {
                 if let Some(bytes) = self.pending_export.take() {
                     self.write_export(cx, path, &bytes);
+                }
+            }
+            "subview" => self.add_reference(path, cx),
+            "colorset-import" => match std::fs::read_to_string(path) {
+                Ok(text) => {
+                    let colors = crate::colorsets::import(&text);
+                    if colors.is_empty() {
+                        cx.fail("No colors in that file");
+                    } else {
+                        let name = path.file_stem().map_or_else(
+                            || "Imported".to_owned(),
+                            |stem| stem.to_string_lossy().into_owned(),
+                        );
+                        self.color_sets.add_set(&name, colors);
+                        self.save_color_sets(cx);
+                    }
+                }
+                Err(error) => cx.fail(format!("Cannot read it: {error}")),
+            },
+            "colorset-export" => {
+                let (name, colors) = self
+                    .color_sets
+                    .sets
+                    .get(self.color_sets.current)
+                    .cloned()
+                    .unwrap_or_default();
+                match write_atomic(
+                    path,
+                    crate::colorsets::export_gpl(&name, &colors).as_bytes(),
+                ) {
+                    Ok(()) => cx.saved(path, "GIMP palette"),
+                    Err(error) => cx.fail(format!("Cannot write it: {error}")),
                 }
             }
             _ => {}

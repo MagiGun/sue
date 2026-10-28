@@ -282,16 +282,47 @@ familiar:
   thins the end into a point ("Taper"), and lets a quick flick run out into a
   fine tail. Watercolor and gouache brushes pick up the color underneath and
   drag it along ("Color mixing"). All of it is in Tool Property.
-- **Colors:** a color wheel, sliders, a color set and the colors you recently
-  painted with. `X` swaps your main and sub color; hold `Alt` and click to pick
-  a color from the picture.
+- **Colors:** a color wheel, sliders, color sets and the colors you recently
+  painted with. `X` swaps your main and sub color, `C` switches to the
+  transparent color (brushes then erase); hold `Alt` and click, or
+  right-click, to pick a color from the picture. The **Color Set** palette
+  has several sets (Default, Grays, Skin Tones, Pastels and your own) in a
+  drop-down; the wrench makes, copies and deletes sets and changes the
+  swatch size; the arrows import a set (a GIMP palette or a list of color
+  codes) and export one; and the buttons under the swatches add the drawing
+  color, replace the swatch you picked with it, or delete that swatch. Your
+  sets are kept for next time.
 - **The canvas in the middle:** tabs for every open picture. The mouse wheel
   zooms, Space and drag (or the middle button) scrolls, and the Hand tool's
   Rotate turns the view. Tilting the view never changes your picture.
 - **On the right:** the navigator, then your **layers**: show or hide them,
   change their opacity and blend mode, clip one to the layer below, lock it,
   or lock its transparent pixels so you only paint over what is already there.
-  Double-click a name to rename it.
+  Double-click a name to rename it. The navigator's **Sub View** tab holds
+  reference pictures: import them, step through them or pick one from the
+  list, zoom and turn the view of one, and click it to pick its colors.
+- **Arrange the palettes your way:** drag the edge of a column to make it
+  wider, or the line between two palettes to share the height differently.
+  Each palette's menu (the three lines at its top right) docks it on the
+  other side, floats it in its own window you can move and resize, folds it
+  into an icon in a strip at the far right (click the icon to see it), or
+  closes it. In a narrow window, the widest palettes fold into the strip by
+  themselves and come back when there is room. Drag the top of the timeline
+  to make it taller. Window, then Reset Palette Layout, puts everything
+  back. `Tab` hides or shows every palette and `Shift+Tab` the menus.
+- **Shortcuts:** Sue Paint uses Clip Studio Paint's default keys: the tool
+  letters (`P`, `B`, `E`, `G`, `M`, `W`, `I`, `K`, `H`, `R`, `/` and the
+  rest), `,` and `.` for the previous and next sub tool, `[` and `]` for the
+  brush size, Shift and drag for a straight line, Ctrl, Alt and drag to size
+  the brush, Shift and Space to turn the view, Ctrl and Space or Alt and Space
+  to click-zoom, Ctrl, Shift and click to pick the layer under the pointer,
+  and the usual menu keys (`Ctrl+T`, `Ctrl+U`, `Ctrl+G`, `Ctrl+E`,
+  `Shift+Del` to fill and so on). Keys for things Sue Paint cannot do yet say
+  so. `F1` or `Alt+I` lists them all. In Sue Paint the command palette is the
+  Command button in the status bar, since `Tab` belongs to the palettes.
+- **Tabs** show a dot when a picture changed since it was opened or saved.
+  The timeline and Animation Cels already carry their buttons, waiting for
+  animation.
 
 `Ctrl+N` makes a new canvas: pick a preset or a paper size, a unit, a
 resolution and a paper color. `Ctrl+O` opens a PNG, JPEG or JPEG XL picture,

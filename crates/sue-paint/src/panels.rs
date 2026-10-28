@@ -246,6 +246,8 @@ impl SuePaint {
                 (Icon::Ruler, "view.snap_ruler", "Snap to Ruler"),
                 (Icon::Frame, "view.snap_grid", "Snap to Grid"),
                 (Icon::Reference, "help.shortcuts", "Keyboard Shortcuts"),
+                (Icon::Help, "help.about", "About Sue Paint"),
+                (Icon::Search, "app.palette", "Search every command"),
             ],
         ];
         let mut x = strip.left() + 8.0;
@@ -276,8 +278,44 @@ impl SuePaint {
                 }
             }
         }
-        if let Some(command) = clicked {
-            self.run(command, cx);
+        // Save's menu: the project, or the picture as a file.
+        let save = Rect::from_min_size(
+            pos2(strip.left() + 8.0 + 2.0 * 30.0 + 26.0, strip.top() + 9.0),
+            vec2(10.0, 16.0),
+        );
+        let response = ui.interact(save, Id::unique("sue-paint-save-menu"), Sense::click());
+        let painter = ui.painter();
+        painter.add(Shape::convex_polygon(
+            vec![
+                pos2(save.left() + 1.0, save.center().y - 2.0),
+                pos2(save.right() - 1.0, save.center().y - 2.0),
+                pos2(save.center().x, save.center().y + 3.0),
+            ],
+            if response.hovered() {
+                theme.text
+            } else {
+                theme.muted
+            },
+            Stroke::NONE,
+        ));
+        let response = response.on_hover_text("Save or export");
+        egui::Popup::menu(&response).show(|ui| {
+            for (label, command) in [
+                ("Save Project (Ctrl+S)", "file.save"),
+                ("Save Project As (Ctrl+Shift+S)", "file.save_as"),
+                ("Export as PNG", "file.export.png"),
+                ("Export as JPEG", "file.export.jpg"),
+                ("Export as JPEG XL", "file.export.jxl"),
+            ] {
+                if ui.button(label).clicked() {
+                    clicked = Some(command);
+                }
+            }
+        });
+        match clicked {
+            Some("app.palette") => cx.request(ShellRequest::Palette),
+            Some(command) => self.run(command, cx),
+            None => {}
         }
     }
 
@@ -1057,7 +1095,14 @@ impl SuePaint {
         });
     }
 
-    pub(crate) fn color_set_panel(&mut self, ui: &mut Ui, rect: Rect, theme: &Theme) {
+    #[allow(clippy::too_many_lines, reason = "the color set and its controls")]
+    pub(crate) fn color_set_panel(
+        &mut self,
+        ui: &mut Ui,
+        rect: Rect,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
         let tabs = [("Color Set", true), ("Color History", true)];
         let (body, clicked) = header(ui, rect, &tabs, self.set_tab, theme);
         if let Some(tab) = clicked {
@@ -1065,18 +1110,102 @@ impl SuePaint {
         }
         let body = body.shrink(6.0);
         let mut top = body.top();
-        if self.set_tab == 0 {
-            ui.painter().text(
-                pos2(body.left() + 2.0, top + 8.0),
-                Align2::LEFT_CENTER,
-                "Default color set",
-                theme.font(theme.small_size + 0.5),
-                theme.muted,
+        let mut bottom = body.bottom();
+        let editing = self.set_tab == 0;
+        if editing {
+            self.color_sets
+                .load(crate::colorsets::folder(cx).as_deref());
+            // The set, its settings, import and export.
+            let row = Rect::from_min_size(body.min, vec2(body.width(), 22.0));
+            let mut inner = child(
+                ui,
+                Rect::from_min_max(row.min, pos2(row.right() - 78.0, row.bottom())),
+                "color-set-pick",
             );
-            top += 20.0;
+            let names: Vec<String> = self
+                .color_sets
+                .sets
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect();
+            let current = self.color_sets.current.min(names.len().saturating_sub(1));
+            egui::ComboBox::from_id_salt("sue-paint-color-set")
+                .selected_text(names.get(current).cloned().unwrap_or_default())
+                .width((row.width() - 90.0).max(60.0))
+                .show_ui(&mut inner, |ui| {
+                    for (index, name) in names.iter().enumerate() {
+                        if ui
+                            .add(egui::Button::selectable(index == current, name))
+                            .clicked()
+                        {
+                            self.color_sets.current = index;
+                            self.color_sets.selected = None;
+                        }
+                    }
+                });
+            let icons_at = |index: f32| {
+                Rect::from_min_size(
+                    pos2(row.right() - 76.0 + index * 26.0, row.top()),
+                    vec2(22.0, 22.0),
+                )
+            };
+            if icon_button(
+                ui,
+                icons_at(0.0),
+                Icon::Wrench,
+                true,
+                self.set_menu,
+                "Color set settings",
+                theme,
+            ) {
+                self.set_menu = !self.set_menu;
+            }
+            let me = || sue_wm::AppletId::new(crate::studio::ID).expect("a valid id");
+            if icon_button(
+                ui,
+                icons_at(1.0),
+                Icon::Import,
+                true,
+                false,
+                "Import a color set (GIMP .gpl or hex list)",
+                theme,
+            ) {
+                cx.request(ShellRequest::PickFile(
+                    sue_wm::FilePick::open(Some(me()), "colorset-import", "Import a Color Set")
+                        .extensions(&["gpl", "txt", "hex"]),
+                ));
+            }
+            if icon_button(
+                ui,
+                icons_at(2.0),
+                Icon::Export,
+                true,
+                false,
+                "Export this color set (GIMP .gpl)",
+                theme,
+            ) {
+                let name = names
+                    .get(current)
+                    .cloned()
+                    .unwrap_or_else(|| "Colors".to_owned());
+                cx.request(ShellRequest::PickFile(
+                    sue_wm::FilePick::save(
+                        Some(me()),
+                        "colorset-export",
+                        "Export the Color Set",
+                        &format!("{name}.gpl"),
+                    )
+                    .extensions(&["gpl"]),
+                ));
+            }
+            if self.set_menu {
+                self.color_set_menu(ui, icons_at(0.0), cx, theme);
+            }
+            top += 28.0;
+            bottom -= 26.0;
         }
-        let swatches: Vec<[u8; 3]> = if self.set_tab == 0 {
-            color::DEFAULT_SET.to_vec()
+        let swatches: Vec<[u8; 3]> = if editing {
+            self.color_sets.colors().to_vec()
         } else {
             self.recent.colors().to_vec()
         };
@@ -1084,13 +1213,21 @@ impl SuePaint {
             ui.painter().text(
                 pos2(body.left() + 2.0, top + 10.0),
                 Align2::LEFT_CENTER,
-                "Colors you paint with show here",
+                if editing {
+                    "Empty: add the drawing color with +"
+                } else {
+                    "Colors you paint with show here"
+                },
                 theme.font(theme.small_size + 0.5),
                 theme.muted,
             );
-            return;
         }
-        let columns = 8;
+        let tile = if self.color_sets.tile > 0.0 {
+            self.color_sets.tile
+        } else {
+            (body.width() / 8.0).floor()
+        };
+        let columns = ((body.width() / tile).floor() as usize).max(1);
         let cell = (body.width() / columns as f32).floor();
         for (index, rgb) in swatches.iter().enumerate() {
             let (column, row) = (index % columns, index / columns);
@@ -1098,7 +1235,7 @@ impl SuePaint {
                 pos2(body.left() + column as f32 * cell, top + row as f32 * cell),
                 vec2(cell - 1.0, cell - 1.0),
             );
-            if rect.bottom() > body.bottom() {
+            if rect.bottom() > bottom {
                 break;
             }
             let [r, g, b] = *rgb;
@@ -1109,17 +1246,179 @@ impl SuePaint {
                 Id::unique(("sue-paint-swatch", self.set_tab, index)),
                 Sense::click(),
             );
-            if response.hovered() {
+            let chosen = editing && self.color_sets.selected == Some(index);
+            if response.hovered() || chosen {
                 ui.painter().rect_stroke(
                     rect,
                     0.0,
-                    Stroke::new(1.5, theme.border_active),
+                    Stroke::new(if chosen { 2.0 } else { 1.5 }, theme.border_active),
                     StrokeKind::Inside,
                 );
             }
             if response.on_hover_text(color::hex(*rgb)).clicked() {
                 self.set_drawing_color(*rgb);
+                self.transparent = false;
+                if editing {
+                    self.color_sets.selected = Some(index);
+                }
             }
+        }
+        if !editing {
+            return;
+        }
+        // The drawing colors, and adding, replacing and deleting swatches.
+        let row = Rect::from_min_max(pos2(body.left(), bottom + 2.0), body.max);
+        let main = Rect::from_min_size(row.min + vec2(0.0, 3.0), vec2(14.0, 14.0));
+        let sub = Rect::from_min_size(row.min + vec2(18.0, 3.0), vec2(14.0, 14.0));
+        for (rect, rgb, chosen) in [
+            (main, self.main, !self.sub_active),
+            (sub, self.sub, self.sub_active),
+        ] {
+            let [r, g, b] = rgb;
+            ui.painter()
+                .rect_filled(rect, 1.0, Color32::from_rgb(r, g, b));
+            ui.painter().rect_stroke(
+                rect,
+                1.0,
+                Stroke::new(
+                    1.0,
+                    if chosen {
+                        theme.border_active
+                    } else {
+                        theme.border
+                    },
+                ),
+                StrokeKind::Outside,
+            );
+        }
+        let at = |index: f32| {
+            Rect::from_min_size(
+                pos2(row.right() - 74.0 + index * 25.0, row.top()),
+                vec2(22.0, 22.0),
+            )
+        };
+        let has = self
+            .color_sets
+            .selected
+            .filter(|index| *index < swatches.len());
+        let drawing = self.drawing_color();
+        let mut changed = false;
+        if icon_button(
+            ui,
+            at(0.0),
+            Icon::Add,
+            true,
+            false,
+            "Add the drawing color",
+            theme,
+        ) && let Some(colors) = self.color_sets.colors_mut()
+        {
+            colors.push(drawing);
+            self.color_sets.selected = Some(colors.len() - 1);
+            changed = true;
+        }
+        if icon_button(
+            ui,
+            at(1.0),
+            Icon::Replace,
+            has.is_some(),
+            false,
+            "Replace the picked swatch with the drawing color",
+            theme,
+        ) && let (Some(index), Some(colors)) = (has, self.color_sets.colors_mut())
+        {
+            colors[index] = drawing;
+            changed = true;
+        }
+        if icon_button(
+            ui,
+            at(2.0),
+            Icon::Delete,
+            has.is_some(),
+            false,
+            "Delete the picked swatch",
+            theme,
+        ) && let (Some(index), Some(colors)) = (has, self.color_sets.colors_mut())
+        {
+            colors.remove(index);
+            self.color_sets.selected = None;
+            changed = true;
+        }
+        if changed {
+            self.save_color_sets(cx);
+        }
+    }
+
+    /// The color set's settings: sets and swatch sizes.
+    fn color_set_menu(
+        &mut self,
+        ui: &mut Ui,
+        button: Rect,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        let mut chosen = None;
+        let shown = egui::Area::new(Id::unique("sue-paint-color-set-menu"))
+            .order(egui::Order::Tooltip)
+            .fade_in(false)
+            .fixed_pos(pos2(button.right() - 190.0, button.bottom() + 2.0))
+            .show(ui.ctx(), |ui| {
+                sue_wm::widgets::window_frame(theme)
+                    .inner_margin(egui::Margin::same(6))
+                    .show(ui, |ui| {
+                        ui.set_min_width(178.0);
+                        for (label, key) in [
+                            ("New Color Set", "new"),
+                            ("Duplicate This Set", "duplicate"),
+                            ("Delete This Set", "delete"),
+                            ("Small Swatches", "small"),
+                            ("Medium Swatches", "medium"),
+                            ("Large Swatches", "large"),
+                            ("Restore the Built-in Sets", "restore"),
+                        ] {
+                            if ui.add(egui::Button::new(label).frame(false)).clicked() {
+                                chosen = Some(key);
+                            }
+                        }
+                    });
+            });
+        let inside = shown.response.rect;
+        let outside = ui.input(|input| {
+            input.pointer.any_pressed()
+                && input
+                    .pointer
+                    .interact_pos()
+                    .is_some_and(|point| !inside.contains(point) && !button.contains(point))
+        });
+        let sets = &mut self.color_sets;
+        match chosen {
+            Some("new") => sets.add_set("My Colors", Vec::new()),
+            Some("duplicate") => {
+                let (name, colors) = sets.sets.get(sets.current).cloned().unwrap_or_default();
+                sets.add_set(&name, colors);
+            }
+            Some("delete") if sets.sets.len() > 1 => {
+                sets.sets.remove(sets.current);
+                sets.current = sets.current.min(sets.sets.len() - 1);
+                sets.selected = None;
+            }
+            Some("small") => sets.tile = 14.0,
+            Some("medium") => sets.tile = 0.0,
+            Some("large") => sets.tile = 40.0,
+            Some("restore") => {
+                for builtin in crate::colorsets::builtin() {
+                    if !sets.sets.iter().any(|(name, _)| *name == builtin.0) {
+                        sets.sets.push(builtin);
+                    }
+                }
+            }
+            _ => {}
+        }
+        if chosen.is_some() {
+            self.save_color_sets(cx);
+        }
+        if chosen.is_some() || outside {
+            self.set_menu = false;
         }
     }
 
@@ -1179,14 +1478,21 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        let (body, _) = header(
+        let (body, clicked) = header(
             ui,
             rect,
-            &[("Navigator", true), ("Sub View", false)],
-            0,
+            &[("Navigator", true), ("Sub View", true)],
+            self.nav_tab,
             theme,
         );
+        if let Some(tab) = clicked {
+            self.nav_tab = tab;
+        }
         let body = body.shrink(6.0);
+        if self.nav_tab == 1 {
+            self.sub_view(ui, body, cx, theme);
+            return;
+        }
         let viewport = self.viewport;
         let controls = 58.0;
         let thumb_area = Rect::from_min_max(body.min, pos2(body.right(), body.bottom() - controls));
@@ -1229,10 +1535,13 @@ impl SuePaint {
             let p = doc.view.to_picture(viewport, size, corner);
             thumb.min + p.to_vec2() * scale
         });
-        ui.painter().add(Shape::closed_line(
-            corners.to_vec(),
-            Stroke::new(1.5, theme.border_active),
-        ));
+        // Clipped: zoomed out, the view is larger than the picture.
+        ui.painter()
+            .with_clip_rect(thumb_area)
+            .add(Shape::closed_line(
+                corners.to_vec(),
+                Stroke::new(1.5, theme.border_active),
+            ));
         let response = ui.interact(
             thumb_area,
             Id::unique("sue-paint-navigator"),
@@ -1290,6 +1599,12 @@ impl SuePaint {
             {
                 doc.view.set_rotation(viewport, size, rotation);
             }
+            if icon_in(ui, Icon::RotateLeft, false, "Rotate left", theme) {
+                doc.view.rotate_by(viewport, size, -15.0);
+            }
+            if icon_in(ui, Icon::RotateRight, false, "Rotate right", theme) {
+                doc.view.rotate_by(viewport, size, 15.0);
+            }
             if icon_in(ui, Icon::Reset, false, "Reset rotation", theme) {
                 doc.view.set_rotation(viewport, size, 0.0);
             }
@@ -1314,7 +1629,7 @@ impl SuePaint {
             ("Layer", true),
             ("Layer Property", true),
             ("History", true),
-            ("Animation Cels", false),
+            ("Animation Cels", true),
         ];
         let (body, clicked) = header(ui, rect, &tabs, self.layer_tab, theme);
         if let Some(tab) = clicked {
@@ -1332,6 +1647,10 @@ impl SuePaint {
         };
         let stack = doc::layers(&cx.world.arena, picture_id);
         let current = self.layer_info(&cx.world.arena);
+        if self.layer_tab == 3 {
+            self.cels_tab(ui, body, theme);
+            return;
+        }
         match self.layer_tab {
             1 => {
                 let mut inner = child(ui, body.shrink(8.0), "layer-property");
@@ -1851,28 +2170,94 @@ impl SuePaint {
 
     // ----- Timeline -----------------------------------------------------------------------
 
+    /// The Animation Cels tab: its tools, which wait for animation.
+    fn cels_tab(&mut self, ui: &mut Ui, body: Rect, theme: &Theme) {
+        let row = Rect::from_min_size(body.min + vec2(6.0, 6.0), vec2(body.width() - 12.0, 22.0));
+        let buttons: [(Icon, &str); 6] = [
+            (Icon::Cel, "New animation cel"),
+            (Icon::Edit, "Specify cels"),
+            (Icon::Delete, "Delete cel"),
+            (Icon::Onion, "Onion skin"),
+            (Icon::Layers, "Light table"),
+            (Icon::Loop, "Cel order"),
+        ];
+        for (index, (icon, tip)) in buttons.iter().enumerate() {
+            let at = Rect::from_min_size(
+                pos2(row.left() + index as f32 * 26.0, row.top()),
+                vec2(22.0, 22.0),
+            );
+            icon_button(ui, at, *icon, false, false, tip, theme);
+        }
+        ui.painter().text(
+            pos2(body.left() + 8.0, row.bottom() + 16.0),
+            Align2::LEFT_CENTER,
+            "Animation cels arrive with animation",
+            theme.font(theme.small_size + 0.5),
+            theme.muted,
+        );
+    }
+
     pub(crate) fn timeline_panel(&mut self, ui: &mut Ui, rect: Rect, theme: &Theme) {
         ui.painter().rect_filled(rect, 0.0, theme.panel);
         ui.painter()
             .hline(rect.x_range(), rect.top(), theme.hairline());
         let (body, _) = header(ui, rect, &[("Timeline", true)], 0, theme);
         let bar = Rect::from_min_size(body.min, vec2(body.width(), 28.0));
-        let icons_row = [
-            Icon::First,
-            Icon::Prev,
-            Icon::Play,
-            Icon::Stop,
-            Icon::Next,
-            Icon::Last,
-            Icon::Loop,
+        // The timeline to edit, then its tools and playback, as in Clip
+        // Studio Paint; they wait for animation to arrive.
+        let mut picker = child(
+            ui,
+            Rect::from_min_size(bar.min + vec2(6.0, 3.0), vec2(118.0, 22.0)),
+            "timeline-pick",
+        );
+        picker.add_enabled_ui(false, |ui| {
+            egui::ComboBox::from_id_salt("sue-paint-timeline-pick")
+                .selected_text("Timeline 1")
+                .width(110.0)
+                .show_ui(ui, |_| {});
+        });
+        let icons_row: [(Icon, &str); 16] = [
+            (Icon::New, "New timeline"),
+            (Icon::NewFolder, "New animation folder"),
+            (Icon::Cel, "New animation cel"),
+            (Icon::Edit, "Specify cels"),
+            (Icon::Delete, "Delete cel"),
+            (Icon::Add, "Add keyframe"),
+            (Icon::Minus, "Delete keyframe"),
+            (Icon::Onion, "Onion skin"),
+            (Icon::Layers, "Light table"),
+            (Icon::First, "First frame"),
+            (Icon::Prev, "Previous frame"),
+            (Icon::Play, "Play"),
+            (Icon::Stop, "Stop"),
+            (Icon::Next, "Next frame"),
+            (Icon::Last, "Last frame"),
+            (Icon::Loop, "Loop"),
         ];
-        for (index, icon) in icons_row.iter().enumerate() {
-            let at = Rect::from_min_size(
-                pos2(bar.left() + 8.0 + index as f32 * 26.0, bar.top() + 3.0),
-                vec2(22.0, 22.0),
-            );
-            icon_button(ui, at, *icon, false, false, "Playback", theme);
+        let mut x = bar.left() + 130.0;
+        for (index, (icon, tip)) in icons_row.iter().enumerate() {
+            if index == 9 || index == 5 {
+                ui.painter().vline(
+                    x + 1.0,
+                    bar.shrink2(vec2(0.0, 6.0)).y_range(),
+                    theme.hairline(),
+                );
+                x += 6.0;
+            }
+            let at = Rect::from_min_size(pos2(x, bar.top() + 3.0), vec2(22.0, 22.0));
+            if at.right() > bar.right() - 70.0 {
+                break;
+            }
+            icon_button(ui, at, *icon, false, false, tip, theme);
+            x += 25.0;
         }
+        ui.painter().text(
+            pos2(bar.right() - 8.0, bar.center().y),
+            Align2::RIGHT_CENTER,
+            "24 fps",
+            theme.font(theme.small_size),
+            theme.muted.gamma_multiply(0.7),
+        );
         ui.painter()
             .hline(body.x_range(), bar.bottom(), theme.hairline());
         let tracks = Rect::from_min_max(pos2(body.left(), bar.bottom()), body.max);

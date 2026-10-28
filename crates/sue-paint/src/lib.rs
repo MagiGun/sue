@@ -28,6 +28,7 @@ pub mod brush;
 mod canvas;
 mod card;
 pub mod color;
+mod colorsets;
 pub mod composite;
 mod dialogs;
 pub mod doc;
@@ -39,6 +40,7 @@ mod menus;
 mod panels;
 pub mod select;
 mod studio;
+mod subview;
 pub mod tools;
 pub mod view;
 

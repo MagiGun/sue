@@ -495,7 +495,7 @@ impl SuePaint {
             Palette::SubTool => self.tool_panel(ui, rect, cx, theme),
             Palette::BrushSize => self.size_column(ui, rect, theme),
             Palette::Color => self.color_panel(ui, rect, theme),
-            Palette::ColorSet => self.color_set_panel(ui, rect, theme),
+            Palette::ColorSet => self.color_set_panel(ui, rect, cx, theme),
             Palette::Navigator => self.navigator(ui, rect, cx, theme),
             Palette::Layer => self.layer_panel(ui, rect, cx, theme),
         }

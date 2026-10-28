@@ -597,6 +597,7 @@ impl Engine {
             ("rice", self.paths.rice_dir()),
             ("notes", self.paths.notes_dir()),
             ("player", self.paths.data_dir.join("player")),
+            ("paint", self.paths.data_dir.join("paint")),
         ] {
             catalog.folders.insert(name.to_owned(), folder);
         }

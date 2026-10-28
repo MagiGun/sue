@@ -500,6 +500,19 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         sue_paint::sample_picture(cx, 1600, 1200)
     });
     shoot(&mut runtime, &mut camera, "11-sue-paint")?;
+    // 11b. The same, wide: the side drawers closed, every palette docked.
+    let open: Vec<AppletId> = [runtime.shell.left_drawer(), runtime.shell.right_drawer()]
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect();
+    for id in &open {
+        runtime.shell.toggle_drawer_applet(id, &runtime.applets);
+    }
+    shoot(&mut runtime, &mut camera, "11b-sue-paint-wide")?;
+    for id in &open {
+        runtime.shell.toggle_drawer_applet(id, &runtime.applets);
+    }
     for (target, name) in [
         ("menu/Layer", "12-sue-paint-menu"),
         ("dialog/new", "13-sue-paint-new"),

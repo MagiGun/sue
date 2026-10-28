@@ -1064,17 +1064,38 @@ out the way painting apps usually are. It fills the window with:
 
 | Part | What it holds |
 | --- | --- |
-| Menu bar | File, Edit, Story, Animation, Layer, Select, View, Filter, Window, Help; about 230 items, the unbuilt ones grayed out; Back to Canvas at the right |
-| Command bar | New, Open, Save; Undo, Redo; Clear, Clear Outside, Fill, Deselect, Transform; view flip, rotate and fit; snapping; shortcuts |
+| Menu bar | File, Edit, Story, Animation, Layer, Select, View, Filter, Window, Help; about 230 items, the unbuilt ones grayed out; Back to Canvas at the right (its icon alone in a narrow window); hidden with `Shift+Tab` |
+| Command bar | New, Open, Save (with a menu for Save As and the exports); Undo, Redo; Clear, Clear Outside, Fill, Deselect, Transform; view flip, rotate and fit; snapping; shortcuts, about, and search (the command palette) |
 | Tool strip | Zoom, Hand, Operation, Move Layer, Selection, Auto Select, Eyedropper, Pen, Pencil, Brush, Airbrush, Decoration, Eraser, Blend, Fill, Gradient, Figure, Frame Border, Ruler, Text, Balloon, Correct Line; main and sub color chips |
 | Sub Tool and Tool Property | The sub tools of the tool (G-Pen, Mapping Pen, Turnip Pen, Marker; Pencil, Mechanical, Rough; Watercolor, Opaque Watercolor, Gouache, Ink Brush; Soft, Strong, Fine airbrushes; Hard, Soft, Rough erasers; fill, gradient, figure, selection modes) and their settings, with a live stroke preview |
 | Size | Vertical brush size and opacity sliders |
 | Color Wheel, Color Slider | A hue ring around a saturation and value square; RGB and HSV sliders and hex |
-| Color Set, Color History | A default set of 56 swatches; the colors painted with, newest first |
+| Color Set, Color History | Color sets (Default, Grays, Skin Tones, Pastels, and the user's) in a drop-down, kept in the data folder (`color_sets.txt`), with a settings menu (new, duplicate, delete, swatch size, restore), GIMP palette and hex import, GIMP palette export, and add, replace and delete; the colors painted with, newest first |
 | Canvas | Tabs of open pictures; the view zooms (1% to 6400%), scrolls, turns and mirrors; a status strip with zoom, rotation, flip, size, resolution and the pointer's pixel |
-| Navigator | The whole picture with the visible area outlined (drag to scroll), zoom and rotation sliders, flips |
+| Navigator, Sub View | The whole picture with the visible area outlined (drag to scroll), zoom and rotation sliders, turns, flips; reference pictures (import through the File Manager, previous, next, list, eyedropper, zoom, turn, fit, delete) |
 | Layer, Layer Property, History | Blend mode (26), opacity, clip, draft, lock, lock transparent pixels; new, duplicate, merge down, move, delete; the stack with visibility, thumbnails, rename by double-click; the current layer's settings; the undo list |
-| Timeline | Present and grayed out until animation arrives |
+| Timeline, Animation Cels | The timeline picker, new timeline, animation folder and cel, specify and delete cels, keyframes, onion skin, light table and playback, grayed out until animation arrives; the timeline's top edge resizes it |
+
+**Palettes and docking** (`dock.rs`). The palettes (Tool, Sub Tool, Brush
+Size, Color Wheel, Color Set, Navigator, Layer) sit in columns at the left
+and right, each column's height shared by weight. A column's inner edge
+drags its width (170 to 560 points; the tool strip and brush size keep
+theirs), the line between two palettes their shares. A palette's menu docks
+it on either side, floats it in an `egui::Window`, collapses it to an icon
+in the strip at the far right (shown beside the strip on a click), or
+closes it. When the columns, the strip and 300 points of canvas do not fit,
+the widest columns (never the tools) fold into the strip for that frame.
+Tabs show a dot when a picture's composite changed since it was opened or
+saved.
+
+**Shortcuts.** Clip Studio Paint's defaults: the File, Edit, Layer,
+Selection, View, Window and Help chords; the tool letters; comma and period
+for sub tools; `C` for the transparent color; and on the canvas Shift+Space
+(turn), Ctrl+Space and Alt+Space (click-zoom), Ctrl+Shift+click (pick a
+layer), Ctrl+Alt+drag (brush size), Shift+drag (straight line), right-click
+(eyedropper) and Shift+wheel (turn). Chords for features not built yet are
+bound and report that. The studio reserves `Tab`, `Shift+Tab`, `/` and
+`Ctrl+0` from the shell (`SueApplet::reserved_keys`).
 
 **Data.** A picture is the shared layered picture of §1.13, made by the New
 dialog (presets as backbone `Preset`s, paper sizes, px, cm, mm and inches,
