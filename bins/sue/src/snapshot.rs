@@ -208,6 +208,8 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     let options = BootOptions {
         audio_devices: Vec::new(),
         gpu_label: Some(gpu.adapter_label()),
+        gpu_kind: Some(gpu.adapter_kind().to_owned()),
+        gpus: gpu.available().to_vec(),
     };
     let mut runtime = Runtime::new(Engine::boot_with(&host, options)?)?;
     let start = Instant::now();
@@ -228,16 +230,27 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         };
     let home = paths.home_dir;
 
-    // 1. The canvas as Sue opens: three live entities and the top pill.
+    // 0. The Hub Sue opens with, then 1. the canvas behind it, with the
+    // Welcome document, a tone and the top pill.
+    shoot(&mut runtime, &mut camera, "00-hub")?;
+    runtime.request(ShellRequest::Hub(false), &mut camera.painter, camera.now);
+    runtime.request(
+        ShellRequest::Create {
+            applet: sue_wm::AppletId::new(crate::audio_node::ID)
+                .map_err(|error| error.to_string())?,
+            key: "tone".to_owned(),
+        },
+        &mut camera.painter,
+        camera.now,
+    );
+    runtime.request(ShellRequest::ResetCamera, &mut camera.painter, camera.now);
+    runtime.request(ShellRequest::Select(None), &mut camera.painter, camera.now);
     shoot(&mut runtime, &mut camera, "01-canvas")?;
 
-    // 2. A paint stroke, then the selection pill above the paint layer.
-    let paint = node_of(&runtime, crate::paint::ID).ok_or("no paint layer")?;
-    runtime.with_context(&mut camera.painter, camera.now, |cx| {
-        crate::paint::scribble(cx, paint);
-    });
+    // 2. The selection pill above the document.
+    let document = node_of(&runtime, crate::document::ID).ok_or("no document")?;
     runtime.request(
-        ShellRequest::Select(Some(paint)),
+        ShellRequest::Select(Some(document)),
         &mut camera.painter,
         camera.now,
     );
@@ -255,7 +268,7 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     shoot(&mut runtime, &mut camera, "03-document-mode")?;
 
     // 4. Everything projected onto the open timeline, audio selected.
-    for applet in [crate::document::ID, crate::paint::ID, crate::audio_node::ID] {
+    for applet in [crate::document::ID, crate::audio_node::ID] {
         if let Some(node) = node_of(&runtime, applet) {
             let seconds = if applet == crate::audio_node::ID {
                 3.0

@@ -368,6 +368,9 @@ pub struct RiceDeclaration {
     pub default: RiceParameter,
     /// Tooltip.
     pub description: String,
+    /// What Settings calls it, when the key's own words are not the best
+    /// name (the key stays stable for old files).
+    pub label: Option<String>,
 }
 
 impl RiceDeclaration {
@@ -381,7 +384,15 @@ impl RiceDeclaration {
             path: path.into(),
             default,
             description: description.into(),
+            label: None,
         }
+    }
+
+    /// The same declaration, shown in Settings as `label`.
+    #[must_use]
+    pub fn labeled(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
     }
 }
 

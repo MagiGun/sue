@@ -85,6 +85,8 @@ pub enum SettingsItem {
     Actions(Vec<CommandButton>),
     /// A fact from [`Catalog::facts`], as `label: value`.
     Fact(String),
+    /// A line of plain text.
+    Note(String),
 }
 
 /// A titled group of rows.

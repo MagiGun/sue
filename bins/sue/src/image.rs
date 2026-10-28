@@ -87,7 +87,7 @@ impl Image {
         let dir = source
             .as_deref()
             .and_then(|path| Path::new(path).parent().map(Path::to_path_buf))
-            .unwrap_or_else(|| crate::paint::export_dir(cx));
+            .unwrap_or_else(|| crate::util::export_dir(cx));
         let stem = Path::new(&name).file_stem().map_or_else(
             || "image".to_owned(),
             |stem| stem.to_string_lossy().into_owned(),

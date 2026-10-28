@@ -47,19 +47,20 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
         declare(
             "launchpad.boot_mode",
             RiceParameter::Text {
-                value: "canvas".to_owned(),
+                value: "hub".to_owned(),
             },
-            "Mode Sue opens in: \"canvas\", or the id of an applet with a mode",
+            "Where Sue opens: \"hub\" (the studios), \"canvas\", or a studio's id",
         ),
         declare(
             "profile.hardware",
             choice("auto", &profiles),
             "Frame pacing and effect budget",
-        ),
+        )
+        .labeled("Performance Preference"),
         declare(
             "display.frame_rate_cap",
             int(0, 0, 360),
-            "Highest frame rate while animating (0 follows the hardware profile)",
+            "Highest frame rate while animating (0 follows the performance preference)",
         ),
         declare(
             "display.ui_scale",
@@ -594,7 +595,7 @@ mod tests {
         assert_eq!(config.metrics.rail_width, 36.0);
         assert_eq!(config.canvas.zoom_min, 0.1);
         assert_eq!(config.canvas.zoom_max, 32.0);
-        assert_eq!(config.boot_mode, "canvas");
+        assert_eq!(config.boot_mode, "hub");
         assert_eq!(config.keymap.command_palette.to_string(), "Tab");
     }
 

@@ -75,6 +75,9 @@ pub const CANVAS_MODE: &str = "canvas";
 /// The mode that opens the timeline.
 pub const TIMELINE_MODE: &str = "timeline";
 
+/// The boot mode that opens the Hub over the canvas.
+pub const HUB_MODE: &str = "hub";
+
 /// A hardware profile as people read it, e.g. `Legacy Low Spec`.
 #[must_use]
 pub fn profile_label(profile: HardwareProfile) -> String {
@@ -193,12 +196,14 @@ pub struct Shell {
     palette: Option<Palette>,
     window: Option<AppletId>,
     window_appear: SpringDamper,
+    hub: bool,
+    hub_appear: SpringDamper,
     studio: Option<AppletId>,
     studio_shown: Option<AppletId>,
     studio_reveal: SpringDamper,
     studio_zooming: bool,
     studio_leave: Option<(Option<NodeId>, bool)>,
-    studio_restore: Option<[bool; 3]>,
+    studio_restore: Option<bool>,
     studio_area: Rect,
     radial_page: RadialPage,
     spawn_point: Option<Pos2>,
@@ -276,6 +281,8 @@ impl Shell {
             palette: None,
             window: None,
             window_appear: spring(0.0),
+            hub: false,
+            hub_appear: spring(0.0),
             studio: None,
             studio_shown: None,
             studio_reveal: spring(0.0),
@@ -458,6 +465,7 @@ impl Shell {
             &mut self.pill.glide_y,
             &mut self.top_pill,
             &mut self.window_appear,
+            &mut self.hub_appear,
             &mut self.studio_reveal,
         ] {
             spring.set_params(params);
@@ -628,6 +636,22 @@ impl Shell {
         self.touch();
     }
 
+    /// Whether the Hub is open.
+    #[must_use]
+    pub fn hub_open(&self) -> bool {
+        self.hub
+    }
+
+    /// Opens or closes the Hub, the list of studios to work in.
+    pub fn set_hub(&mut self, open: bool) {
+        if open {
+            self.dismiss_overlays();
+        }
+        self.hub = open;
+        self.hub_appear.set_target(if open { 1.0 } else { 0.0 });
+        self.touch();
+    }
+
     /// Opens the window applet `id` (Settings).
     pub fn open_window(&mut self, id: AppletId) {
         self.dismiss_overlays();
@@ -773,18 +797,17 @@ impl Shell {
     /// else the one it worked on last), then the studio's panels come in.
     pub fn open_studio(&mut self, id: AppletId, io: &mut ShellIo<'_>) {
         self.dismiss_overlays();
+        if self.hub {
+            self.set_hub(false);
+        }
         self.mode = id.as_str().to_owned();
         self.top_pill.set_target(0.0);
         self.pill.appear.set_target(0.0);
         let showing = self.studio_shown.as_ref() == Some(&id);
-        // The drawers and the timeline slide away with the rest of the
-        // canvas, and come back when the studio closes.
+        // The side panels stay with every studio; the timeline slides away
+        // and comes back when the studio closes.
         if self.studio_restore.is_none() {
-            self.studio_restore = Some([self.left.open, self.right.open, self.timeline_open]);
-        }
-        for drawer in [&mut self.left, &mut self.right] {
-            drawer.open = false;
-            drawer.reveal.set_target(0.0);
+            self.studio_restore = Some(self.timeline_open);
         }
         if self.timeline_open {
             self.set_timeline(false);
@@ -893,14 +916,8 @@ impl Shell {
         if gone && self.studio_shown.take().is_some() {
             self.studio_reveal.snap_to(0.0);
             self.top_pill.set_target(1.0);
-            if let Some([left, right, timeline]) = self.studio_restore.take() {
-                for (drawer, open) in [(&mut self.left, left), (&mut self.right, right)] {
-                    drawer.open = open;
-                    drawer.reveal.set_target(if open { 1.0 } else { 0.0 });
-                }
-                if timeline {
-                    self.set_timeline(true);
-                }
+            if self.studio_restore.take() == Some(true) {
+                self.set_timeline(true);
             }
             let (card, overview) = self.studio_leave.take().unwrap_or((None, true));
             if let Some(node) = card.filter(|node| world.scene.get(*node).is_some()) {
@@ -1150,6 +1167,7 @@ impl Shell {
             }
             ShellRequest::OpenStudio(id) => self.open_studio(id, io),
             ShellRequest::CloseStudio => self.close_studio(io, true),
+            ShellRequest::Hub(open) => self.set_hub(open),
             other => return Some(other),
         }
         self.touch();
@@ -1163,7 +1181,7 @@ impl Shell {
         }
         self.booted = true;
         let mode = self.config.boot_mode.clone();
-        if mode.is_empty() || mode == CANVAS_MODE {
+        if mode.is_empty() || mode == CANVAS_MODE || mode == HUB_MODE {
             let bounds = io.world.scene.bounds();
             if let Some(bounds) = bounds {
                 self.camera.frame(
@@ -1171,6 +1189,10 @@ impl Shell {
                     bounds,
                     self.config.canvas.frame_margin + self.config.pill_height,
                 );
+            }
+            // Unless something already opened a studio.
+            if mode == HUB_MODE && self.studio.is_none() {
+                self.set_hub(true);
             }
         } else {
             self.set_mode(&mode, io, now);
@@ -1254,6 +1276,13 @@ impl Shell {
             io.requests.push(ShellRequest::OpenFile(path));
         }
 
+        if self.hub
+            && self.window.is_none()
+            && self.palette.is_none()
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.set_hub(false);
+        }
         self.global_keys(&ctx, io, now);
         self.spawn_point = None;
 
@@ -1269,6 +1298,7 @@ impl Shell {
         moving |= self.pill.glide_y.step(motion_dt);
         moving |= self.top_pill.step(motion_dt);
         moving |= self.window_appear.step(motion_dt);
+        moving |= self.hub_appear.step(motion_dt);
         if let Some(radial) = self.radial.as_mut() {
             moving |= radial.step(motion_dt);
         }
@@ -1304,15 +1334,19 @@ impl Shell {
             metrics: self.config.metrics,
         });
         self.canvas = layout.canvas;
-        let screen = root.max_rect();
-        self.studio_area =
-            Rect::from_min_max(screen.min, pos2(screen.right(), layout.status.top()));
+        // A studio works between the side panels, which stay with it.
+        self.studio_area = layout.canvas;
         self.advance_studio(io.world);
         let settled =
             self.studio.is_some() && !self.studio_zooming && self.studio_reveal.position() >= 0.999;
 
         if settled && let Some(studio) = self.studio_shown.clone() {
-            self.studio_frame(root, &studio, layout.status, io, &theme, now, dt);
+            self.studio_layer(root, &studio, false, io, &theme, now, dt);
+            self.chrome_ui(root, &layout, io, &theme, now, dt);
+            let screen = root.max_rect();
+            self.hub_ui(&ctx, screen, io, &theme, now);
+            self.palette_ui(&ctx, io, &theme, now);
+            self.window_ui(&ctx, screen, io, &theme, now, dt);
             self.animating = moving;
             self.scheduler.set_animating(self.animating);
             if self.animating {
@@ -1325,8 +1359,75 @@ impl Shell {
         }
 
         self.canvas_ui(root, io, &theme, now, dt);
+        self.chrome_ui(root, &layout, io, &theme, now, dt);
 
-        // Structural panels around the canvas.
+        // A studio coming in or going out, over the canvas, not yet
+        // taking clicks.
+        if let Some(studio) = self.studio_shown.clone()
+            && !self.studio_zooming
+        {
+            self.studio_layer(root, &studio, true, io, &theme, now, dt);
+            let area = self.studio_area;
+            egui::Area::new(Id::unique("sue-studio-shield"))
+                .order(Order::Middle)
+                .fixed_pos(area.min)
+                .show(&ctx, |ui| {
+                    ui.allocate_rect(area, Sense::click_and_drag());
+                });
+        }
+
+        // Floating surfaces.
+        let studio_over = self.studio_shown.is_some() && !self.studio_zooming;
+        if self.top_pill.position() > 0.01 && !studio_over {
+            self.top_pill_ui(&ctx, &theme);
+        }
+        if self.studio_shown.is_none() {
+            self.selection_pill_ui(&ctx, io, &theme, now, dt);
+            self.radial_ui(&ctx, root.max_rect(), io, &theme, now);
+        }
+        self.hub_ui(&ctx, root.max_rect(), io, &theme, now);
+        self.palette_ui(&ctx, io, &theme, now);
+        self.window_ui(&ctx, root.max_rect(), io, &theme, now, dt);
+        if self.space_down && self.studio_shown.is_none() {
+            // While Space is held, the canvas pans instead of editing.
+            egui::Area::new(Id::unique("sue-space-pan"))
+                .order(Order::Foreground)
+                .fixed_pos(self.canvas.min)
+                .show(&ctx, |ui| {
+                    let response = ui.allocate_rect(self.canvas, Sense::drag());
+                    if response.dragged() {
+                        self.camera.pan_by(response.drag_delta());
+                        self.space_panned = true;
+                        self.touch();
+                    }
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                });
+        }
+
+        // Applet ticks that need every frame (a stroke in progress).
+        self.animating = moving || self.node_drag.is_some() || self.timeline.playing;
+        self.scheduler.set_animating(self.animating);
+        if self.animating {
+            ctx.request_repaint();
+        }
+        if io.typing.flush_if_paused(io.history, now) {
+            self.touch();
+        }
+    }
+
+    /// The structural panels around the canvas: the rails, the drawers, the
+    /// timeline dock and the status bar. Every studio keeps them too.
+    #[allow(clippy::too_many_arguments, reason = "the panels around the canvas")]
+    fn chrome_ui(
+        &mut self,
+        root: &mut Ui,
+        layout: &crate::LayoutSolution,
+        io: &mut ShellIo<'_>,
+        theme: &Theme,
+        now: Instant,
+        dt: f32,
+    ) {
+        let theme = theme.clone();
         let painter = root.painter().clone();
         for rect in [layout.left_rail, layout.right_rail, layout.status] {
             painter.rect_filled(rect, 0.0, theme.panel);
@@ -1372,85 +1473,9 @@ impl Shell {
             self.timeline_dock(root, layout.timeline, layout.timeline_full, io, &theme, now);
         }
         self.status_ui(root, layout.status, io, &theme);
-
-        // A studio coming in or going out, over the canvas, not yet
-        // taking clicks.
-        if let Some(studio) = self.studio_shown.clone()
-            && !self.studio_zooming
-        {
-            self.studio_layer(root, &studio, true, io, &theme, now, dt);
-            let area = self.studio_area;
-            egui::Area::new(Id::unique("sue-studio-shield"))
-                .order(Order::Middle)
-                .fixed_pos(area.min)
-                .show(&ctx, |ui| {
-                    ui.allocate_rect(area, Sense::click_and_drag());
-                });
-        }
-
-        // Floating surfaces.
-        let studio_over = self.studio_shown.is_some() && !self.studio_zooming;
-        if self.top_pill.position() > 0.01 && !studio_over {
-            self.top_pill_ui(&ctx, io, &theme, now);
-        }
-        if self.studio_shown.is_none() {
-            self.selection_pill_ui(&ctx, io, &theme, now, dt);
-            self.radial_ui(&ctx, root.max_rect(), io, &theme, now);
-        }
-        self.palette_ui(&ctx, io, &theme, now);
-        self.window_ui(&ctx, root.max_rect(), io, &theme, now, dt);
-        if self.space_down {
-            // While Space is held, the canvas pans instead of editing.
-            egui::Area::new(Id::unique("sue-space-pan"))
-                .order(Order::Foreground)
-                .fixed_pos(self.canvas.min)
-                .show(&ctx, |ui| {
-                    let response = ui.allocate_rect(self.canvas, Sense::drag());
-                    if response.dragged() {
-                        self.camera.pan_by(response.drag_delta());
-                        self.space_panned = true;
-                        self.touch();
-                    }
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-                });
-        }
-
-        // Applet ticks that need every frame (a stroke in progress).
-        self.animating = moving || self.node_drag.is_some() || self.timeline.playing;
-        self.scheduler.set_animating(self.animating);
-        if self.animating {
-            ctx.request_repaint();
-        }
-        if io.typing.flush_if_paused(io.history, now) {
-            self.touch();
-        }
     }
 
-    /// One frame of a studio: the studio over the whole window, then the
-    /// status bar, the palette and the Settings window.
-    #[allow(clippy::too_many_arguments, reason = "one frame of a studio")]
-    fn studio_frame(
-        &mut self,
-        root: &mut Ui,
-        studio: &AppletId,
-        status: Rect,
-        io: &mut ShellIo<'_>,
-        theme: &Theme,
-        now: Instant,
-        dt: f32,
-    ) {
-        let ctx = root.ctx().clone();
-        let screen = root.max_rect();
-        self.studio_layer(root, studio, false, io, theme, now, dt);
-        let painter = root.painter().clone();
-        painter.rect_filled(status, 0.0, theme.panel);
-        painter.hline(status.x_range(), status.top(), theme.hairline());
-        self.status_ui(root, status, io, theme);
-        self.palette_ui(&ctx, io, theme, now);
-        self.window_ui(&ctx, screen, io, theme, now, dt);
-    }
-
-    /// The studio itself, over the area above the status bar. While it
+    /// The studio itself, between the side panels. While it
     /// comes in or goes out (`lifted`) it paints on a layer above the
     /// canvas's cards; its widgets keep the same ids either way.
     #[allow(clippy::too_many_arguments, reason = "one layer of a studio")]
@@ -2199,6 +2224,36 @@ impl Shell {
     fn status_ui(&mut self, root: &mut Ui, rect: Rect, io: &mut ShellIo<'_>, theme: &Theme) {
         let painter = root.painter().with_clip_rect(rect);
         let font = theme.font(theme.small_size);
+        // Hub, at the far left, so every studio can reach it.
+        let hub_text = painter.layout_no_wrap("Hub".to_owned(), font.clone(), theme.text);
+        let hub = Rect::from_min_size(
+            rect.min,
+            vec2(hub_text.size().x + theme.padding * 2.0, rect.height()),
+        );
+        let response = root
+            .interact(hub, Id::unique("sue-status-hub"), Sense::click())
+            .on_hover_text("Every studio you can work in");
+        if response.hovered() || self.hub {
+            painter.rect_filled(hub, 0.0, theme.hover);
+        }
+        painter.galley(
+            pos2(
+                hub.left() + theme.padding,
+                rect.center().y - hub_text.size().y / 2.0,
+            ),
+            hub_text,
+            theme.text,
+        );
+        painter.vline(
+            hub.right(),
+            rect.shrink2(vec2(0.0, 5.0)).y_range(),
+            theme.hairline(),
+        );
+        if response.clicked() {
+            let open = !self.hub;
+            self.set_hub(open);
+        }
+        let rect = Rect::from_min_max(pos2(hub.right(), rect.top()), rect.max);
         let mode_label = Self::mode_buttons(io.applets)
             .into_iter()
             .find(|mode| mode.id == self.mode)
@@ -2336,20 +2391,13 @@ impl Shell {
 
     // ----- Floating pills -----------------------------------------------------------
 
-    fn top_pill_ui(
-        &mut self,
-        ctx: &egui::Context,
-        io: &mut ShellIo<'_>,
-        theme: &Theme,
-        now: Instant,
-    ) {
+    fn top_pill_ui(&mut self, ctx: &egui::Context, theme: &Theme) {
         let appear = self.top_pill.position().clamp(0.0, 1.0);
         let at = pos2(
             self.canvas.center().x,
             self.canvas.top() + theme.padding * 1.5 - (1.0 - appear) * 16.0,
         );
-        let modes = Self::mode_buttons(io.applets);
-        let mut picked_mode = None;
+        let mut hub = false;
         let mut palette = false;
         egui::Area::new(Id::unique("sue-top-pill"))
             .order(Order::Foreground)
@@ -2360,14 +2408,11 @@ impl Shell {
                 widgets::pill_frame(theme).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 2.0;
-                        for mode in &modes {
-                            let chosen = self.mode == mode.id
-                                || (mode.id == TIMELINE_MODE
-                                    && self.timeline_open
-                                    && self.mode == TIMELINE_MODE);
-                            if widgets::pill_button(ui, &mode.label, chosen, theme).clicked() {
-                                picked_mode = Some(mode.id.clone());
-                            }
+                        if widgets::pill_button(ui, "Hub", self.hub, theme)
+                            .on_hover_text("Every studio you can work in")
+                            .clicked()
+                        {
+                            hub = true;
                         }
                         widgets::pill_divider(ui, theme);
                         let hint = format!("Command ({})", self.config.keymap.command_palette);
@@ -2378,16 +2423,203 @@ impl Shell {
                     });
                 });
             });
-        if let Some(mode) = picked_mode {
-            if mode == TIMELINE_MODE && self.mode == TIMELINE_MODE {
-                self.set_timeline(!self.timeline_open);
-            } else {
-                self.set_mode(&mode, io, now);
-            }
+        if hub {
+            let open = !self.hub;
+            self.set_hub(open);
         }
         if palette {
             self.open_palette();
         }
+    }
+
+    /// The places the Hub offers: the canvas, then every studio, as
+    /// (mode, name, icon, summary).
+    fn hub_places(applets: &Applets) -> Vec<(String, String, String, String)> {
+        let mut places = vec![(
+            CANVAS_MODE.to_owned(),
+            "Canvas".to_owned(),
+            "\u{221E}".to_owned(),
+            "Every file of the project, side by side on one endless surface".to_owned(),
+        )];
+        let mut studios: Vec<_> = applets
+            .manifests()
+            .filter(|manifest| manifest.role == AppletRole::Studio)
+            .collect();
+        studios.sort_by_key(|manifest| manifest.order);
+        places.extend(studios.into_iter().map(|manifest| {
+            (
+                manifest.id.as_str().to_owned(),
+                manifest.name.clone(),
+                manifest.icon.clone(),
+                manifest.summary.clone(),
+            )
+        }));
+        places
+    }
+
+    /// The Hub: a card for the canvas and for each studio, over a scrim.
+    fn hub_ui(
+        &mut self,
+        ctx: &egui::Context,
+        screen: Rect,
+        io: &mut ShellIo<'_>,
+        theme: &Theme,
+        now: Instant,
+    ) {
+        let appear = self.hub_appear.position().clamp(0.0, 1.0);
+        if appear <= 0.01 && !self.hub {
+            return;
+        }
+        let scrim = egui::Area::new(Id::unique("sue-hub-scrim"))
+            .order(Order::Middle)
+            .fixed_pos(screen.min)
+            .show(ctx, |ui| {
+                let response = ui.allocate_rect(screen, Sense::click());
+                ui.painter()
+                    .rect_filled(screen, 0.0, theme.shadow.gamma_multiply(0.55 * appear));
+                response.clicked()
+            })
+            .inner;
+        if scrim && self.hub {
+            self.set_hub(false);
+        }
+        let places = Self::hub_places(io.applets);
+        let card = vec2(220.0, 168.0);
+        let gap = theme.padding * 2.0;
+        let fit = ((screen.width() - 96.0 + gap) / (card.x + gap))
+            .floor()
+            .max(1.0) as usize;
+        let columns = fit.clamp(1, places.len().max(1));
+        let current = if self.studio.is_some() {
+            self.mode.clone()
+        } else {
+            CANVAS_MODE.to_owned()
+        };
+        let width = columns as f32 * card.x + (columns as f32 - 1.0) * gap + theme.padding * 4.0;
+        let at = pos2(
+            screen.center().x - width / 2.0,
+            screen.top() + (screen.height() * 0.22).min(180.0) + (1.0 - appear) * 22.0,
+        );
+        let mut picked = None;
+        egui::Area::new(Id::unique("sue-hub"))
+            .order(Order::Foreground)
+            .fixed_pos(at)
+            .interactable(appear > 0.3)
+            .show(ctx, |ui| {
+                ui.set_opacity(appear);
+                widgets::window_frame(theme)
+                    .inner_margin(egui::Margin::same((theme.padding * 2.0) as i8))
+                    .show(ui, |ui| {
+                        ui.set_width(width - theme.padding * 4.0);
+                        ui.label(
+                            RichText::new("Hub")
+                                .size(theme.heading_size)
+                                .color(theme.text),
+                        );
+                        ui.label(
+                            RichText::new("Choose where to work. Esc goes back.")
+                                .size(theme.small_size)
+                                .color(theme.muted),
+                        );
+                        ui.add_space(theme.padding * 1.5);
+                        for row in places.chunks(columns) {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = gap;
+                                for (id, name, icon, summary) in row {
+                                    if Self::hub_card(
+                                        ui,
+                                        card,
+                                        (name, icon, summary),
+                                        *id == current,
+                                        theme,
+                                    ) {
+                                        picked = Some(id.clone());
+                                    }
+                                }
+                            });
+                            ui.add_space(gap / 2.0);
+                        }
+                    });
+            });
+        if let Some(id) = picked {
+            self.set_hub(false);
+            if id == CANVAS_MODE {
+                if self.studio.is_some() {
+                    self.close_studio(io, true);
+                } else {
+                    self.set_mode(CANVAS_MODE, io, now);
+                }
+            } else {
+                self.set_mode(&id, io, now);
+            }
+        }
+    }
+
+    /// One card of the Hub. Returns whether it was clicked.
+    fn hub_card(
+        ui: &mut Ui,
+        size: Vec2,
+        (name, icon, summary): (&str, &str, &str),
+        current: bool,
+        theme: &Theme,
+    ) -> bool {
+        let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+        let hovered = response.hovered();
+        let fill = if hovered {
+            theme.hover
+        } else if current {
+            theme.active
+        } else {
+            theme.pill
+        };
+        let painter = ui.painter();
+        painter.rect(
+            rect,
+            theme.control_radius * 2.0,
+            fill,
+            egui::Stroke::new(
+                theme.border_width.max(1.0),
+                if current || hovered {
+                    theme.border_active
+                } else {
+                    theme.border
+                },
+            ),
+            egui::StrokeKind::Inside,
+        );
+        painter.text(
+            rect.left_top() + vec2(18.0, 16.0),
+            Align2::LEFT_TOP,
+            icon,
+            theme.font(theme.heading_size * 1.8),
+            theme.text,
+        );
+        painter.text(
+            rect.left_top() + vec2(18.0, 76.0),
+            Align2::LEFT_TOP,
+            name,
+            theme.font(theme.ui_size * 1.2),
+            theme.text,
+        );
+        let galley = painter.layout(
+            summary.to_owned(),
+            theme.font(theme.small_size),
+            theme.muted,
+            rect.width() - 36.0,
+        );
+        painter.galley(rect.left_top() + vec2(18.0, 102.0), galley, theme.muted);
+        if current {
+            painter.text(
+                rect.right_top() + vec2(-14.0, 16.0),
+                Align2::RIGHT_TOP,
+                "Open now",
+                theme.font(theme.small_size),
+                theme.muted,
+            );
+        }
+        response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
     }
 
     fn selection_pill_ui(
@@ -2518,8 +2750,8 @@ impl Shell {
                     }
                 }
                 items.push((
-                    "Timeline".to_owned(),
-                    RadialAction::Request(ShellRequest::Timeline(true)),
+                    "Hub".to_owned(),
+                    RadialAction::Request(ShellRequest::Hub(true)),
                 ));
                 items.push((
                     "Command Palette".to_owned(),
@@ -2930,6 +3162,7 @@ impl Shell {
             &mut self.pill.glide_y,
             &mut self.top_pill,
             &mut self.window_appear,
+            &mut self.hub_appear,
             &mut self.studio_reveal,
         ] {
             moving |= spring.step(dt);

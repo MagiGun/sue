@@ -7,9 +7,9 @@ musicians, filmmakers, makers and coders. It has no technical jargon. When a ter
 needs explaining, it is explained the first time it appears.
 
 > **Where things stand:** This guide describes the experience Sue is built for.
-> Sue v1.0 "Faustian Enigma" already opens its own window onto the infinite
-> canvas described below, with a document, a paint layer and a piece of audio
-> on it. You can write, draw, listen, split and level audio, view pictures and
+> Sue v1.0 "Faustian Enigma" already opens its own window with the Hub, where
+> you pick a studio, over the infinite canvas described below. You can write,
+> paint in Sue Paint, listen, split and level audio, view pictures and
 > raw bytes, line things up on the timeline, browse files, play music, convert
 > files and keep notes. Everything you change can be undone. Your quick note is
 > saved as you go, and `Ctrl+S` saves everything on the canvas as one project
@@ -58,20 +58,29 @@ only color you see.
 
 ```text
 ┌───┬──────────────────────────────────────────────────────────┬───┐
-│ F │  [ Canvas  Document  Sue Paint  Timeline  Command (Tab) ] │ I │
+│ F │               [ Hub  Command (Tab) ]                     │ I │
 │ P │                                                          │ H │
-│ C │                                                          │   │
-│ N │   ┌ Welcome ─────────┐         [ Brush  Line  Rect ... ] │   │
-│   │   │ # Welcome to Sue │         ┌ Sketch ──────────────┐  │   │
-│   │   │ text you can type│         │   (you can draw here)│  │   │
-│   │   └──────────────────┘         └──────────────────────┘  │   │
-│   │                                ┌ Chord ───────────────┐  │   │
-│   │                                │ ▁▃▅▇▅▃▁ waveform      │  │   │
-│ ⚙ │                                └──────────────────────┘  │   │
+│ C │       ┌ Welcome ──────────────────────────────┐          │   │
+│ N │       │ # Welcome to Sue                      │          │   │
+│   │       │ text you can type                     │          │   │
+│   │       │                                       │          │   │
+│   │       └───────────────────────────────────────┘          │   │
+│ ⚙ │                                                          │   │
 ├───┴──────────────────────────────────────────────────────────┴───┤
-│ Canvas  Sketch                 4 entities  Undo 1  Balanced  Idle │
+│ Hub │ Canvas  Welcome              1 entity  Undo 0  Balanced  Idle │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+### The Hub
+
+Sue opens with the **Hub** in front of the canvas: one card for each place
+you can work. **Canvas** is the endless surface with every file of your
+project; **Sue Paint** is the painting studio, and more studios join it as
+they are built. Click one to go there, or press `Esc` to stay on the canvas.
+The **Hub** button at the top of the canvas and at the far left of the status
+bar (also inside every studio) brings it back. If you would rather open
+straight into the canvas or a studio, pick it under Settings, General,
+Startup.
 
 ### Moving around
 
@@ -83,14 +92,13 @@ only color you see.
 
 ### The top pill
 
-A floating bar at the top of the canvas:
+A floating bar at the top of the canvas with just two buttons:
 
-- **Modes** (Canvas, Document, Sue Paint, Timeline) glide the camera to the
-  thing you want to work on, about a quarter of a second each. Canvas shows
-  everything again. Sue Paint opens the painting studio.
+- **Hub** shows every studio you can choose.
 - **Command (Tab)** opens the command palette.
 
-New files are made from the marking menu (right-click), described below.
+To work on a card, just click it. New files are made from the marking menu
+(right-click), described below.
 
 ### The selection pill
 
@@ -100,8 +108,6 @@ tools that card needs:
 - **Documents:** H1, H2, Bold, Monospace, a smaller or larger text size, and
   Project to Timeline. Headings and bold stay as marks in the text (`#`, `**`),
   so the text is always plain and portable.
-- **Paint layers:** Brush, Line, Rect, Eraser, a size slider, the gray value
-  (click to step from white to black), Export .jxl and Project to Timeline.
 - **Audio:** Play or Pause, Gain down and up, Split (at the playhead, or in the
   middle), Normalize and Open in Timeline. None of these change the recording
   itself: the two halves of a split share the very same sound.
@@ -115,15 +121,14 @@ to that card's mode.
 ### The marking menu and the command palette
 
 **Right-click** anywhere on the canvas: a round menu grows around the pointer
-with New File, Open File, Sue Paint, Timeline, Command Palette and Reset
-Camera. Click a slice, or hold the right button, drag toward a slice and let
+with New File, Open File, Sue Paint, Hub, Command Palette and Reset Camera. Click a slice, or hold the right button, drag toward a slice and let
 go.
 
 **New File** opens a second wheel with the kinds of files Sue makes:
 Document, Picture, Audio and Code. Each of those opens a third wheel with the
 exact kind: a blank document, notes, a to-do list, a letter or a report; an
 illustration, a print page, a Full HD screen, a square post, a transparent
-sprite or a custom size; a chord, a tone or silence; a Rust, Python,
+sprite or a custom size; a tone or silence; a Rust, Python,
 JavaScript, HTML, CSS, JSON or shell file. The new file appears where you
 right-clicked. A new picture opens straight in Sue Paint. Click the middle of a
 wheel to go back to the one before.
@@ -134,8 +139,8 @@ notes document.
 
 ### The timeline
 
-Project to Timeline (or the Timeline mode) slides the **timeline** up from the
-bottom. It has a Document Track, a Paint/Visual Track and an Audio Track. Each
+Project to Timeline (or Toggle Timeline in the command palette) slides the
+**timeline** up from the bottom. It has a Document Track, a Paint/Visual Track and an Audio Track. Each
 block on it *is* the card on the canvas, not a copy. Drag blocks to move them,
 click the ruler to move the playhead, and press **Space** (or the Play button)
 to play: audio blocks sound as the playhead passes them.
@@ -156,8 +161,11 @@ one to slide its drawer open; click it again to tuck it away.
 - **Inspector** (right): the details of the selected card: its place and size
   on the canvas, which views it has (Document, Timeline and so on), and the
   facts of its file, such as a JPEG XL picture's size and colors.
-- **History** (right): every change you made, as a tree you can click to go back
-  (or forward again) to any moment.
+- **History** (right): every change you made, newest at the top, as a tree you
+  can click to go back (or forward again) to any moment.
+
+The rails and drawers stay with you inside every studio too, so your files,
+notes and history are always one click away.
 
 You can also drop any file anywhere on the window to put it on the canvas.
 
@@ -166,23 +174,31 @@ You can also drop any file anywhere on the window to put it on the canvas.
 Every place you type (documents, code, notes, search boxes) works the same: drag
 to select, double-click a word, `Ctrl+A` to select all, `Ctrl+C`, `Ctrl+X` and
 `Ctrl+V` to copy, cut and paste, and `Ctrl+Z` and `Ctrl+Y` to undo and redo.
-Undo is one history for everything: typing, moving a card, a paint stroke or a
+Undo is one history for everything: typing, moving a card, a brush stroke or a
 Settings slider all go back in the order you did them.
 
 ### Settings
 
 The gear at the bottom of the left rail (or `Ctrl+,`) opens **Settings** as a
 floating window. A list of categories runs down the left (General, Appearance &
-Rice, Display & Graphics, Audio & DSP, Files & Codecs, Local AI, Packages &
-Updates, Keymaps), and the right side shows only that category. Type in "Filter
+Rice, Display & Graphics, Audio & DSP, Files & Codecs, Packages & Updates,
+Keymaps, MCP), and the right side shows only that category. Type in "Filter
 settings..." to search all of them.
+
+Under Display & Graphics, **Performance Preference** sets how smooth and how
+frugal Sue is (Auto picks for your machine). **GPU preference** chooses which
+graphics card draws the window: Auto uses the one your screen is plugged into,
+Integrated the power-saving one and Discrete the fast one. Sue shows which card
+it is drawing on and every card it found; the choice takes effect when Sue
+starts, so press **Restart Sue** after changing it. **MCP** (connecting Sue to
+AI tools) is not yet available.
 
 ---
 
 ## Sue Paint: painting and illustration
 
-Click **Sue Paint** in the top pill (or find it with `Tab`) and the whole window
-becomes a painting studio. If you have used a painting app, it will feel
+Click **Sue Paint** in the Hub (or find it with `Tab`) and the space between the
+side rails becomes a painting studio. If you have used a painting app, it will feel
 familiar:
 
 - **Menus along the top:** File, Edit, Story, Animation, Layer, Select, View,
@@ -224,8 +240,8 @@ Canvas**, the picture is waiting on the canvas as a card; double-click it (or
 use "Open in Sue Paint") to keep painting.
 
 Going in and out is smooth: opening Sue Paint, the canvas zooms into the
-picture's card while the drawers slide away, and then the menus and palettes
-slide in from the edges around it. Leaving, they slide back out, the picture
+picture's card, and then the menus and palettes slide in from the edges around
+it. Leaving, they slide back out, the picture
 settles into its card, and the canvas zooms out again. How fast this happens
 follows the Motion settings (Settings, Display & Graphics): a faster animation
 speed shortens it, and "Instant transitions" makes it immediate.

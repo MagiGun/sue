@@ -47,6 +47,17 @@ pub fn free_path(path: &Path) -> PathBuf {
         .unwrap_or_else(|| path.to_path_buf())
 }
 
+/// Where exports without a file of their own go: `io.convert_dir`, or the
+/// home folder.
+pub fn export_dir(cx: &sue_wm::AppletContext<'_>) -> PathBuf {
+    let riced = cx.rice().get_str("io.convert_dir").unwrap_or("").trim();
+    if riced.is_empty() {
+        cx.catalog.folders.get("home").cloned().unwrap_or_default()
+    } else {
+        PathBuf::from(riced)
+    }
+}
+
 /// The last component of `path`, for display.
 pub fn file_name(path: &Path) -> String {
     path.file_name().map_or_else(

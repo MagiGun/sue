@@ -72,7 +72,7 @@ fn kind_of(world: &World, handle: AssetHandle) -> Option<Kind> {
     }
     // Decoded pictures and paint layers; byte maps carry their entropy.
     (entity.component(ComponentKind::RasterTile2D).is_some()
-        && (entity.meta(meta::WIDTH).is_some() || entity.meta(crate::paint::REVISION).is_some())
+        && (entity.meta(meta::WIDTH).is_some() || entity.meta("revision").is_some())
         && entity.meta(meta::ENTROPY).is_none())
     .then_some(Kind::Image)
 }

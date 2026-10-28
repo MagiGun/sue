@@ -14,7 +14,6 @@ use crate::history::History;
 use crate::image::Image;
 use crate::inspector::Inspector;
 use crate::notes::Notes;
-use crate::paint::Paint;
 use crate::player::Player;
 use crate::settings::Settings;
 
@@ -26,7 +25,6 @@ pub fn launchpad() -> Result<Launchpad, WmError> {
     let mut launchpad = Launchpad::new();
     // Entities on the canvas.
     launchpad.register(|| Box::new(Document))?;
-    launchpad.register(|| Box::new(Paint::default()))?;
     launchpad.register(|| Box::new(AudioNode))?;
     launchpad.register(|| Box::new(Image::default()))?;
     launchpad.register(|| Box::new(Hex::default()))?;

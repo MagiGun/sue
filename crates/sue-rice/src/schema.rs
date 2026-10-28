@@ -37,6 +37,7 @@ pub struct RiceEntry {
     key: String,
     parameter: RiceParameter,
     description: Option<String>,
+    label: Option<String>,
     origin: Origin,
 }
 
@@ -74,7 +75,9 @@ impl RiceEntry {
     /// Human label derived from the key: `border_width` → "Border width".
     #[must_use]
     pub fn label(&self) -> String {
-        humanize(self.key.rsplit('.').next().unwrap_or(&self.key))
+        self.label
+            .clone()
+            .unwrap_or_else(|| humanize(self.key.rsplit('.').next().unwrap_or(&self.key)))
     }
 
     /// 1-based source line, if the entry came from a file.
@@ -262,6 +265,7 @@ impl RiceSchema {
                         key: parsed.key,
                         parameter,
                         description: parsed.metadata.description,
+                        label: None,
                         origin: Origin::File {
                             line: index,
                             value_span: parsed.value_span,
@@ -442,6 +446,7 @@ impl RiceSchema {
                 if entry.description.is_none() {
                     entry.description = Some(declaration.description.clone());
                 }
+                entry.label.clone_from(&declaration.label);
                 if metadata_changed {
                     if let Origin::File { state, .. } = &mut entry.origin {
                         *state = LineState::Rewrite;
@@ -469,6 +474,7 @@ impl RiceSchema {
             );
             entry.parameter = declaration.default.clone();
             entry.description = Some(declaration.description.clone());
+            entry.label.clone_from(&declaration.label);
             if let Origin::File { state, .. } = &mut entry.origin {
                 *state = LineState::Rewrite;
             }
@@ -488,6 +494,7 @@ impl RiceSchema {
             key: key.to_owned(),
             parameter: declaration.default.clone(),
             description: Some(declaration.description.clone()),
+            label: declaration.label.clone(),
             origin: Origin::Registered,
         };
         self.note_section(section);

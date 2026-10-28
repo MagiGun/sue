@@ -1,7 +1,7 @@
 //! History: the global undo tree in the right drawer. Every change (typing,
 //! a moved entity, a paint stroke, a Settings slider) is a node; branches
-//! appear where you undid and then did something else. Click any node to
-//! go back or forward to it.
+//! appear where you undid and then did something else. The newest change
+//! is at the top. Click any node to go back or forward to it.
 
 use egui::{RichText, Sense, Ui, vec2};
 use sue_core::{NodeId, UndoStack};
@@ -14,7 +14,8 @@ pub const ID: &str = "history";
 #[derive(Debug, Default)]
 pub struct History;
 
-/// Depth-first rows with their indent: a branch indents one step.
+/// Depth-first rows with their indent, oldest first: a branch indents one
+/// step.
 pub fn rows(history: &UndoStack<World>) -> Vec<(NodeId, usize)> {
     let mut indents: Vec<(NodeId, usize)> = Vec::new();
     for node in history.walk() {
@@ -47,7 +48,8 @@ impl SueApplet for History {
         cx.typing.flush(cx.history);
         let cursor = cx.history.cursor();
         let mut checkout = None;
-        for (node, indent) in rows(cx.history) {
+        // Newest at the top, the opened project at the bottom.
+        for (node, indent) in rows(cx.history).into_iter().rev() {
             let label = cx.history.label(node).unwrap_or("").to_owned();
             let applied = cx.history.is_applied(node);
             let here = node == cursor;

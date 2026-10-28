@@ -13,7 +13,6 @@ mod history;
 mod image;
 mod inspector;
 mod notes;
-mod paint;
 mod player;
 mod runtime;
 mod selfcheck;

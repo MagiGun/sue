@@ -834,8 +834,8 @@ further).
 `egui-wgpu`. The canvas is an egui layer with a camera transform
 (`set_transform_layer`), so entity nodes are ordinary egui widgets, text fields
 included, at any zoom; hit testing and pointer positions follow the transform.
-Images (pictures, paint layers) are uploaded from the arena's own bytes into
-native textures by key and version: a paint layer's version is its `revision`
+Images (pictures, Sue Paint's layers) are uploaded from the arena's own bytes into
+native textures by key and version: a layer's version is its `revision`
 metadata, bumped by every stroke and by undo and redo. Textures no frame used
 are freed.
 
@@ -902,19 +902,27 @@ pub trait SueApplet: Send {
 The **role** decides where an applet lives: `Node` applets draw one kind of
 entity on the canvas and its selection pill, `LeftDrawer` and `RightDrawer`
 applets sit on a rail, the `Window` applet (Settings) floats over the canvas,
-and `Studio` applets (Sue Paint, §3.7) fill the whole window instead of the
-canvas. A studio opens from its mode in the top pill or the palette
-(`ShellRequest::OpenStudio`) and leaves with `CloseStudio`; the status bar, the
-palette, Settings and the global undo, save and open keys stay with it, and
-`Ctrl+O` asks the studio first. Studios draw their menus with `MenuBar`: menus
+and `Studio` applets (Sue Paint, §3.7) take the canvas's place between the
+rails and drawers. A studio opens from the Hub, the marking menu or the
+palette (`ShellRequest::OpenStudio`) and leaves with `CloseStudio`; the rails,
+the drawers, the status bar, the palette, Settings and the global undo, save
+and open keys stay with it, and `Ctrl+O` asks the studio first.
+
+**The Hub** (`ShellRequest::Hub`, `Shell::set_hub`) is a card for the canvas
+and one for each `Studio` manifest (name, icon, summary), over a scrim, on a
+spring. `launchpad.boot_mode` is `hub` by default (the Hub over the canvas);
+`canvas` boots without it, and a studio's id opens that studio. The top pill
+and the status bar's left end both open it; `Esc` or a click on the scrim
+closes it, and opening a studio closes it too. Studios draw their menus with `MenuBar`: menus
 are data (`Menu`, `MenuItem` with a command and a shortcut), and each frame the
 studio says per command whether it works and whether it is checked
 (`ItemState`), so items whose feature is not built yet are grayed out.
 
 **Going in and out of a studio.** Opening a studio, the shell finds the card
 it will work on (the selected node, if the studio `accepts` its entity, else
-the node of its `studio_focus`), closes the drawers and the timeline, and
-glides the camera so the card's content fills the studio's area with the same
+the node of its `studio_focus`), closes the timeline (the side panels stay),
+and glides the camera so the card's content fills the studio's area (the
+canvas area between the rails and drawers) with the same
 24-point margin the studio fits its picture with. Once the camera is near
 (within 3% of its zoom and 3 points of its center), the studio's reveal spring
 runs from 0 to 1 and the studio, drawn on a layer above the canvas's cards,
@@ -924,11 +932,12 @@ opaque in the first third of the way, while they still line up with the card.
 A shield takes the clicks until the reveal is complete. Leaving, the camera
 jumps under the studio to the card of its current entity, the reveal runs
 back to 0 (the picture grows from its view to filling the window, where the
-card waits), and then the drawers and timeline come back and the camera
-glides out to everything. Every spring follows `motion.animation_speed` and
+card waits), and then the timeline comes back and the camera glides out to
+everything. Every spring follows `motion.animation_speed` and
 `motion.instant_transitions`.
 
-Nothing in the shell names an applet: the modes of the top pill come from
+Nothing in the shell names an applet: the Hub's cards come from `Studio`
+manifests; the modes (the palette's and the status bar's) come from
 manifests' `mode`; the marking menu's New File wheels come from the applets'
 `templates` (a `FileTemplate` names a category such as Picture, the exact kind
 such as Square Post, and a key the applet's `create` gets back; a node applet
@@ -965,9 +974,10 @@ drawers, the timeline, the status bar, then the floating surfaces:
 
 | Surface | Behavior |
 | --- | --- |
-| Top pill | Centered over the canvas. Modes (Canvas, the modes applets show in the pill, and Timeline) and `Command (Tab)`. Fades and slides in at boot, and away while a studio is open. |
+| Top pill | Centered over the canvas: `Hub` and `Command (Tab)`. Fades and slides in at boot, and away while a studio is open. |
+| Hub | A card per place to work (the canvas and every studio) over a scrim, on a spring; open at boot unless `launchpad.boot_mode` says otherwise. |
 | Selection pill | Above the selected node's top edge, clamped into view, drawn by its applet's `pill_ui`. Springs in and out; when the selection moves to another node it glides from the old place. |
-| Marking menu | Right-click: wedges whose radius grows on a spring (`layout.radial_radius`): New File, Open File, the studios, Timeline, Command Palette, Reset Camera. Click a wedge, or press, drag and release. New File opens a wheel of template categories around the wedge, each category a wheel of its templates; the middle of a nested wheel goes back. The new file lands where the menu opened. |
+| Marking menu | Right-click: wedges whose radius grows on a spring (`layout.radial_radius`): New File, Open File, the studios, Hub, Command Palette, Reset Camera. Click a wedge, or press, drag and release. New File opens a wheel of template categories around the wedge, each category a wheel of its templates; the middle of a nested wheel goes back. The new file lands where the menu opened. |
 | Command palette | `Tab` or `/` when no text field has focus: fuzzy search (in-order letters, bonuses for runs and word starts) over shell actions, every mode, template (`New Document: Notes`) and drawer, and the applets' `commands`. |
 | Settings window | Over a scrim; 190 px category sidebar, filter field, one page at a time (§4.3). |
 | Quit dialog | When `general.confirm_on_exit` is on. |
@@ -1004,8 +1014,7 @@ register its own:
 | Applet | Role | Mode, templates, lane | What it does |
 | --- | --- | --- | --- |
 | Document | Node | Document; Document: Blank, Notes, To-Do List, Letter, Report; Document Track | Markdown-like text (`#`, `##`, `**`, backticks styled, never hidden) in a `TextEdit`; pill: H1, H2, Bold, Monospace, text size, Project to Timeline |
-| Paint | Node | none (Sue Paint replaced it; old layers still show and edit); Paint/Visual Track | An RGBA raster in the arena; Brush, Line, Rect, Eraser, size, gray value; strokes keep 64 px undo tiles; Export .jxl (lossless) |
-| Audio | Node | Audio (palette only); Audio: Chord, Tone (A 440), Silence (10 s); Audio Track | Waveform of a clip of a `PCMFloat1D`; Play or Pause, Gain, Split (zero-copy), Normalize, Open in Timeline |
+| Audio | Node | Audio (palette only); Audio: Tone (A 440), Silence (10 s); Audio Track | Waveform of a clip of a `PCMFloat1D`; Play or Pause, Gain, Split (zero-copy), Normalize, Open in Timeline |
 | Image | Node | Image (palette only); Paint/Visual Track | Decoded JPEG XL, PNG or JPEG; 1:1 Zoom, Pixel Grid, Re-encode .jxl (bit-exact for JPEG when a codec allows), Inspect Hex |
 | Code / Hex | Node | Code / Hex (palette only); Code: Rust, Python, JavaScript, HTML, CSS, JSON, Shell Script | Code in a monospace `TextEdit`, or a selectable hex dump of any file's bytes; Copy All |
 | Files | Left drawer | n/a | Folders with quick jumps (Project, Desktop, Documents, Downloads, Pictures, Music); files open on the canvas |
@@ -1156,14 +1165,14 @@ packages can add their own:
 
 | Page | Holds |
 | --- | --- |
-| General | The boot mode (Canvas or any node applet's mode), the Files folder, hidden files, autosave interval, quit confirmation, the note file and its text size |
+| General | Where Sue opens (the Hub, the canvas or a studio), the Files folder, hidden files, autosave interval, quit confirmation, the note file and its text size |
 | Appearance & Rice | Theme presets, every color, geometry (padding, hairlines, radii, pill and rail sizes, drawer and timeline sizes, the marking menu, shadows), the canvas (zoom limits, wheel step, grid), typography, the rice file with Reload, Export and Open Folder |
-| Display & Graphics | The hardware profile, the active profile and GPU, the GPU preference, the frame-rate cap, the settle grace, UI scale, list wheel speed, motion (instant snap, animation speed, drawer and camera spring constants, caret blink, message time) |
+| Display & Graphics | The performance preference (`profile.hardware`, labeled Performance Preference) and the active profile; the GPU preference (picked by adapter type: integrated, discrete, or the display's GPU), the GPU drawing, every GPU found and Restart Sue (the GPU is chosen at startup); the frame-rate cap, the settle grace, UI scale, list wheel speed, motion (instant snap, animation speed, drawer and camera spring constants, caret blink, message time) |
 | Audio & DSP | Output device, sample rate, buffer size, real-time priority, volume, and the live stream and real-time status |
-| Files & Codecs | JPEG XL effort, bit-exact JPEG recompression, the conversion folder and JPEG quality, the open-file size limit, byte-map width, new paint layers' size and brush, the built-in codecs |
-| Local AI | The compute backend (backends this machine lacks are greyed out), the VRAM budget, which model and backend a task would use now, the model folder and the model files found in it |
+| Files & Codecs | JPEG XL effort, bit-exact JPEG recompression, the conversion folder and JPEG quality, the open-file size limit, byte-map width, Sue Paint's new picture size, the built-in codecs |
 | Packages & Updates | The signature policy, the installed applets, installed packages, the active generation and rollback state |
 | Keymaps | Every shortcut as an action and a key cap |
+| MCP | "Not yet available." (a `SettingsItem::Note`) |
 
 Any rice section no page claims is listed on a final "Other" page, so every
 parameter stays reachable (tested).
@@ -1416,7 +1425,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §5 Hashes, Ed25519, resolver, generations, atomic pointer | **Implemented** | `sue-pkg` |
 | §5 Package download, binary deltas, WASM plugin loading | Planned (the signature policy is riced and shown; nothing installs packages yet) | n/a |
 | §6 Formats, backends, registry, zero-copy tasks | **Implemented** (reference kernel on `CpuSimd`) | `sue-ai` |
-| §6 GGUF/ONNX inference runtimes | Planned (the Local AI page lists model files and the backend a task would use) | n/a |
+| §6 GGUF/ONNX inference runtimes | Planned (`sue-ai` selects backends and models; its Settings page returns with the runtimes) | n/a |
 | House style: no em dashes, en dashes or middle dots | **Checked** by a test that scans every text file | `bins/sue/src/style.rs` |
 | §8 Features beyond today's applets | Ideas mapped onto the backbone; none is promised | n/a |
 

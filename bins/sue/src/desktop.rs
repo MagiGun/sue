@@ -30,6 +30,8 @@ impl DesktopApp for DesktopShell {
         let options = BootOptions {
             audio_devices: audio_output_devices(),
             gpu_label: Some(host.gpu().adapter_label()),
+            gpu_kind: Some(host.gpu().adapter_kind().to_owned()),
+            gpus: host.gpu().available().to_vec(),
         };
         let engine = Engine::boot_with(&*host, options)?;
         let runtime = Runtime::new(engine)?.interactive(true);
@@ -68,6 +70,14 @@ impl DesktopApp for DesktopShell {
     fn exit(&mut self, _host: &mut DesktopHost) {
         if let Some(runtime) = self.runtime.as_mut() {
             runtime.shutdown();
+            if runtime.wants_restart()
+                && let Ok(exe) = std::env::current_exe()
+            {
+                // A fresh Sue picks up what only applies at startup (the GPU).
+                let _ = std::process::Command::new(exe)
+                    .args(std::env::args_os().skip(1))
+                    .spawn();
+            }
         }
     }
 }

@@ -24,6 +24,51 @@ impl GpuPreference {
             _ => Self::Auto,
         }
     }
+
+    /// The kind of adapter this preference asks for, if any.
+    #[must_use]
+    pub fn device_type(self) -> Option<wgpu::DeviceType> {
+        match self {
+            Self::Auto => None,
+            Self::Integrated => Some(wgpu::DeviceType::IntegratedGpu),
+            Self::Discrete => Some(wgpu::DeviceType::DiscreteGpu),
+        }
+    }
+}
+
+/// `integrated`, `discrete`, `virtual`, `software` or `other`, as the
+/// settings name kinds of adapter.
+#[must_use]
+pub fn device_kind(device_type: wgpu::DeviceType) -> &'static str {
+    match device_type {
+        wgpu::DeviceType::IntegratedGpu => "integrated",
+        wgpu::DeviceType::DiscreteGpu => "discrete",
+        wgpu::DeviceType::VirtualGpu => "virtual",
+        wgpu::DeviceType::Cpu => "software",
+        wgpu::DeviceType::Other => "other",
+    }
+}
+
+/// `NVIDIA GeForce RTX 5070 (discrete GPU, Dx12)`.
+fn describe(info: &wgpu::AdapterInfo) -> String {
+    format!(
+        "{} ({} GPU, {:?})",
+        info.name,
+        device_kind(info.device_type),
+        info.backend
+    )
+}
+
+/// How much a backend is preferred for the same GPU (lower first): the
+/// system's native API, then Vulkan, then the rest.
+fn backend_rank(backend: wgpu::Backend) -> u8 {
+    match backend {
+        wgpu::Backend::Dx12 if cfg!(windows) => 0,
+        wgpu::Backend::Metal => 0,
+        wgpu::Backend::Vulkan => 1,
+        wgpu::Backend::Gl => 3,
+        _ => 2,
+    }
 }
 
 /// The GPU objects every renderer needs.
@@ -36,6 +81,8 @@ pub struct GpuContext {
     pub device: wgpu::Device,
     /// The submission queue.
     pub queue: wgpu::Queue,
+    /// Every GPU this machine offers, as `describe` labels them.
+    available: Vec<String>,
 }
 
 impl std::fmt::Debug for GpuContext {
@@ -72,9 +119,33 @@ impl GpuContext {
         surface: Option<&wgpu::Surface<'_>>,
         preference: GpuPreference,
     ) -> Result<Self, PlatformError> {
-        let mut adapter = match preference {
-            GpuPreference::Auto => display_adapter(&instance, surface).await,
-            GpuPreference::Integrated | GpuPreference::Discrete => None,
+        let adapters = instance.enumerate_adapters(wgpu::Backends::all()).await;
+        let mut available: Vec<String> = Vec::new();
+        for adapter in &adapters {
+            let info = adapter.get_info();
+            // Real chips only: not software rasterizers, and not the same
+            // chip again under an OpenGL driver's longer name.
+            if matches!(
+                info.device_type,
+                wgpu::DeviceType::Cpu | wgpu::DeviceType::Other
+            ) {
+                continue;
+            }
+            let label = format!("{} ({} GPU)", info.name, device_kind(info.device_type));
+            if !available.contains(&label) {
+                available.push(label);
+            }
+        }
+        let mut adapter = match preference.device_type() {
+            None => display_adapter(adapters, surface),
+            // Exactly the kind of GPU asked for, through its best backend.
+            Some(wanted) => adapters
+                .into_iter()
+                .filter(|adapter| {
+                    adapter.get_info().device_type == wanted
+                        && surface.is_none_or(|target| adapter.is_surface_supported(target))
+                })
+                .min_by_key(|adapter| backend_rank(adapter.get_info().backend)),
         };
         let power_preference = match preference {
             GpuPreference::Discrete => wgpu::PowerPreference::HighPerformance,
@@ -111,14 +182,27 @@ impl GpuContext {
             adapter,
             device,
             queue,
+            available,
         })
     }
 
-    /// `name (backend)` of the adapter, for diagnostics.
+    /// `name (kind GPU, backend)` of the adapter, for diagnostics.
     #[must_use]
     pub fn adapter_label(&self) -> String {
-        let info = self.adapter.get_info();
-        format!("{} ({:?})", info.name, info.backend)
+        describe(&self.adapter.get_info())
+    }
+
+    /// The kind of GPU drawing: `integrated`, `discrete` and so on.
+    #[must_use]
+    pub fn adapter_kind(&self) -> &'static str {
+        device_kind(self.adapter.get_info().device_type)
+    }
+
+    /// Every GPU this machine offers, e.g. `AMD Radeon(TM) Graphics
+    /// (integrated GPU)`.
+    #[must_use]
+    pub fn available(&self) -> &[String] {
+        &self.available
     }
 
     /// `base` with the graphics API, vendor and tier filled in from the adapter.
@@ -135,14 +219,13 @@ impl GpuContext {
 /// across adapters, and that copy keeps a time-critical driver thread busy
 /// even while the window sleeps (measured: a full core, with the integrated
 /// GPU drawing for a monitor on the discrete one).
-async fn display_adapter(
-    instance: &wgpu::Instance,
+fn display_adapter(
+    adapters: Vec<wgpu::Adapter>,
     surface: Option<&wgpu::Surface<'_>>,
 ) -> Option<wgpu::Adapter> {
     if !cfg!(windows) {
         return None;
     }
-    let adapters = instance.enumerate_adapters(wgpu::Backends::all()).await;
     let display = adapters
         .iter()
         .find(|adapter| adapter.get_info().backend == wgpu::Backend::Dx12)?
@@ -310,6 +393,33 @@ mod tests {
         );
         assert_eq!(GpuPreference::from_setting("auto"), GpuPreference::Auto);
         assert_eq!(GpuPreference::from_setting("bogus"), GpuPreference::Auto);
+        assert_eq!(
+            GpuPreference::Integrated.device_type(),
+            Some(wgpu::DeviceType::IntegratedGpu)
+        );
+        assert_eq!(GpuPreference::Auto.device_type(), None);
+        assert_eq!(device_kind(wgpu::DeviceType::DiscreteGpu), "discrete");
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU; run with --ignored --nocapture"]
+    fn each_preference_draws_on_that_kind_of_gpu() {
+        for preference in [GpuPreference::Integrated, GpuPreference::Discrete] {
+            let instance = wgpu::Instance::new(
+                wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
+            );
+            let gpu =
+                pollster::block_on(GpuContext::with_instance(instance, None, preference)).unwrap();
+            println!("{preference:?} draws on {}", gpu.adapter_label());
+            let wanted = preference.device_type().unwrap();
+            let offered = gpu
+                .available()
+                .iter()
+                .any(|label| label.contains(&format!("({} GPU)", device_kind(wanted))));
+            if offered {
+                assert_eq!(gpu.adapter.get_info().device_type, wanted);
+            }
+        }
     }
 
     #[test]

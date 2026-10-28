@@ -28,28 +28,15 @@ pub fn clip_of(node: &SceneNode, pcm: &PCMFloat1D) -> (usize, usize, f32) {
     (start as usize, end as usize, node.prop("gain", 1.0) as f32)
 }
 
-/// A soft three-note chord, so a new audio node has something to hear.
+/// A mono A 440 tone of `seconds`, faded in and out so it never clicks.
 #[must_use]
-pub fn chord(sample_rate: u32, seconds: f32) -> PCMFloat1D {
+pub fn tone(sample_rate: u32, seconds: f32) -> PCMFloat1D {
     let frames = (sample_rate as f32 * seconds) as usize;
-    let notes = [220.0_f32, 277.18, 329.63];
     let samples = (0..frames)
         .map(|frame| {
             let t = frame as f32 / sample_rate as f32;
-            let envelope = (t * 8.0).min(1.0) * (1.0 - t / seconds).max(0.0).powf(1.5);
-            notes
-                .iter()
-                .enumerate()
-                .map(|(index, freq)| {
-                    let onset = index as f32 * 0.35;
-                    if t < onset {
-                        0.0
-                    } else {
-                        (TAU * freq * t).sin() * 0.22
-                    }
-                })
-                .sum::<f32>()
-                * envelope
+            let fade = (t * 20.0).min(1.0).min((seconds - t) * 20.0).max(0.0);
+            (TAU * 440.0 * t).sin() * 0.3 * fade
         })
         .collect();
     PCMFloat1D::new(sample_rate, 1, samples).expect("a mono buffer is valid")
@@ -238,36 +225,20 @@ impl SueApplet for AudioNode {
     }
 
     fn new_entity(&mut self, cx: &mut AppletContext<'_>) -> Option<NewEntity> {
-        self.create("chord", cx)
+        self.create("tone", cx)
     }
 
     fn templates(&self) -> Vec<sue_wm::FileTemplate> {
-        [
-            ("chord", "Chord"),
-            ("tone", "Tone (A 440)"),
-            ("silence", "Silence (10 s)"),
-        ]
-        .into_iter()
-        .map(|(key, label)| sue_wm::FileTemplate::new("Audio", label, key))
-        .collect()
+        [("tone", "Tone (A 440)"), ("silence", "Silence (10 s)")]
+            .into_iter()
+            .map(|(key, label)| sue_wm::FileTemplate::new("Audio", label, key))
+            .collect()
     }
 
     fn create(&mut self, key: &str, _cx: &mut AppletContext<'_>) -> Option<NewEntity> {
         let rate = 48_000_u32;
         let (name, pcm) = match key {
-            "chord" => ("Chord", chord(rate, 3.0)),
-            "tone" => {
-                let frames = rate as usize * 2;
-                let samples = (0..frames)
-                    .flat_map(|frame| {
-                        let t = frame as f32 / rate as f32;
-                        let fade = (t * 20.0).min(1.0).min((2.0 - t) * 20.0).max(0.0);
-                        let value = (t * 440.0 * std::f32::consts::TAU).sin() * 0.3 * fade;
-                        [value, value]
-                    })
-                    .collect();
-                ("Tone", PCMFloat1D::new(rate, 2, samples).ok()?)
-            }
+            "tone" => ("Tone", tone(rate, 2.0)),
             "silence" => (
                 "Silence",
                 PCMFloat1D::silence(rate, 2, rate as usize * 10).ok()?,
@@ -437,7 +408,7 @@ mod tests {
     #[test]
     fn splitting_shares_the_samples_and_undoes_in_one_step() {
         let mut world = World::default();
-        let handle = world.arena.spawn("chord", chord(8_000, 1.0));
+        let handle = world.arena.spawn("tone", tone(8_000, 1.0));
         let node = SceneNode::new(
             handle,
             AppletId::new(ID).unwrap(),
@@ -468,7 +439,7 @@ mod tests {
 
     #[test]
     fn peaks_follow_the_waveform() {
-        let pcm = chord(8_000, 1.0);
+        let pcm = tone(8_000, 1.0);
         let columns = peaks(&pcm, 0, pcm.frames(), 50);
         assert_eq!(columns.len(), 50);
         assert!(columns.iter().any(|(low, high)| *high > 0.1 && *low < -0.1));

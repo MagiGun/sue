@@ -256,6 +256,8 @@ pub enum ShellRequest {
     OpenStudio(AppletId),
     /// Leave the studio for the canvas.
     CloseStudio,
+    /// Show or hide the Hub, the list of studios.
+    Hub(bool),
 }
 
 /// What an applet's tick asks for.

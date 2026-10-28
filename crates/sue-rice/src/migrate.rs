@@ -9,8 +9,8 @@
 use crate::{DEFAULT_RICE, RiceError, RiceSchema, RiceValue};
 
 /// The format of [`DEFAULT_RICE`], declared in its header as
-/// `# sue-rice format 3`.
-pub const RICE_FORMAT: u32 = 3;
+/// `# sue-rice format 4`.
+pub const RICE_FORMAT: u32 = 4;
 
 const MARKER: &str = "# sue-rice format ";
 
@@ -18,6 +18,7 @@ const MARKER: &str = "# sue-rice format ";
 const HISTORY: &[(u32, &str)] = &[
     (1, include_str!("../rice/history/v1.suerice")),
     (2, include_str!("../rice/history/v2.suerice")),
+    (3, include_str!("../rice/history/v3.suerice")),
 ];
 
 /// The format a `.suerice` text declares in its header; files written before
@@ -110,12 +111,14 @@ mod tests {
 
     const V1: &str = include_str!("../rice/history/v1.suerice");
     const V2: &str = include_str!("../rice/history/v2.suerice");
+    const V3: &str = include_str!("../rice/history/v3.suerice");
 
     #[test]
     fn the_shipped_default_is_current() {
         assert_eq!(format_of(DEFAULT_RICE), RICE_FORMAT);
         assert_eq!(format_of(V1), 1);
         assert_eq!(format_of(V2), 2);
+        assert_eq!(format_of(V3), 3);
         assert_eq!(migrate(DEFAULT_RICE).unwrap(), None);
     }
 
@@ -163,6 +166,23 @@ mod tests {
                 .map(|rgba| (rgba.r, rgba.g, rgba.b)),
             Some((255, 255, 255))
         );
+    }
+
+    #[test]
+    fn the_canvas_era_opens_into_the_hub_and_keeps_its_choices() {
+        // Booting into the canvas was the old default, so it takes the new
+        // one; the retired Local AI and sketch pad keys go away.
+        let migration = migrate(V3).unwrap().unwrap();
+        assert_eq!(migration.from, 3);
+        assert_eq!(migration.text, DEFAULT_RICE.replace("\r\n", "\n"));
+        let schema = RiceSchema::parse(&migration.text).unwrap();
+        assert_eq!(schema.get_str("launchpad.boot_mode"), Some("hub"));
+        assert!(schema.get("ai.backend").is_none());
+        assert!(schema.get("paint.brush_size").is_none());
+        // A studio chosen on purpose stays.
+        let chosen = V3.replace("boot_mode = \"canvas\"", "boot_mode = \"sue-paint\"");
+        let migration = migrate(&chosen).unwrap().unwrap();
+        assert_eq!(migration.kept, ["launchpad.boot_mode"]);
     }
 
     #[test]

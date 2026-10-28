@@ -1,14 +1,12 @@
 //! Boot: wires a platform host, the live rice (migrated when it is old or
 //! tinted), the undoable world with its canvas, the catalog Settings reads,
-//! and the three entities Sue opens with: a Document, a Paint layer and an
-//! Audio waveform, already on the infinite canvas.
+//! and the Welcome document Sue opens with, already on the infinite canvas.
 
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use egui::{Rect, pos2, vec2};
-use sue_ai::{AiTask, ComputeBackend, LocalModelRegistry, MidSideStemSplit, ModelFormat};
 use sue_core::{StringBuffer, UndoStack};
 use sue_io::meta;
 use sue_platform::{
@@ -24,8 +22,7 @@ use sue_wm::{
     SettingsGroup, SettingsItem, SettingsPage, ShellRequest, WmConfig, World,
 };
 
-use crate::util::human_bytes;
-use crate::{applets, audio_node, document, paint};
+use crate::{applets, document};
 
 /// The live rice file in the platform rice directory. It starts as a byte-for-
 /// byte copy of the built-in `default.suerice` and is written back
@@ -190,65 +187,11 @@ pub fn shell_declarations() -> Vec<RiceDeclaration> {
             "Player volume",
         ),
         declare(
-            "ai.backend",
-            choice("auto", &["auto", "cpu-simd", "vulkan", "cuda", "metal"]),
-            "Where AI kernels run",
-        ),
-        declare(
-            "ai.model_dir",
-            text(""),
-            "Folder with offline models (empty for Sue's data folder)",
-        ),
-        declare(
-            "ai.vram_budget_mib",
-            int(2048, 256, 65_536),
-            "Most GPU memory AI models may use (MiB)",
-        ),
-        declare(
             "packages.require_signatures",
             toggle(true),
             "Only accept packages with a valid Ed25519 signature",
         ),
     ]
-}
-
-/// The backend `ai.backend` names.
-fn backend_from_rice(name: &str) -> Option<ComputeBackend> {
-    Some(match name {
-        "cpu-simd" => ComputeBackend::CpuSimd,
-        "vulkan" => ComputeBackend::VulkanWgpu,
-        "cuda" => ComputeBackend::Cuda,
-        "metal" => ComputeBackend::Metal,
-        _ => return None,
-    })
-}
-
-/// One model file found in the model folder.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ModelFile {
-    /// File name.
-    pub name: String,
-    /// Format from the extension.
-    pub format: String,
-    /// Size in bytes.
-    pub size: u64,
-}
-
-/// Lists model files (GGUF, ONNX, safetensors) in `dir`.
-fn scan_models(dir: &Path) -> Vec<ModelFile> {
-    sue_platform::list_dir(dir, false)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|entry| !entry.is_dir)
-        .filter_map(|entry| {
-            let format = ModelFormat::from_extension(&entry.name)?;
-            Some(ModelFile {
-                format: format!("{format:?}"),
-                name: entry.name,
-                size: entry.size,
-            })
-        })
-        .collect()
 }
 
 /// What the engine was given beyond the platform host.
@@ -258,6 +201,10 @@ pub struct BootOptions {
     pub audio_devices: Vec<String>,
     /// The GPU adapter, for the Display page.
     pub gpu_label: Option<String>,
+    /// The kind of GPU drawing (`integrated`, `discrete`).
+    pub gpu_kind: Option<String>,
+    /// Every GPU the machine offers.
+    pub gpus: Vec<String>,
 }
 
 /// Every subsystem, booted and connected.
@@ -367,7 +314,7 @@ impl Engine {
             entity.set_class(NOTE_CLASS);
         }
 
-        // The three live entities Sue opens with.
+        // The document Sue opens with.
         let document_size = world.rice.get_i64("typography.document_size").unwrap_or(15);
         let text = world
             .arena
@@ -378,26 +325,6 @@ impl Engine {
             document::ID,
             Rect::from_min_size(pos2(-620.0, -260.0), vec2(560.0, 440.0)),
             &[("font_size", document_size as f64)],
-        );
-        let layer = paint::blank_layer(960, 600).map_err(|error| format!("paint: {error}"))?;
-        let canvas = world.arena.spawn("Sketch", layer);
-        if let Ok(entity) = world.arena.get_mut(canvas) {
-            entity.set_meta(paint::REVISION, "0");
-        }
-        place(
-            &mut world,
-            canvas,
-            paint::ID,
-            Rect::from_min_size(pos2(20.0, -260.0), vec2(560.0, 350.0 + sue_wm::NODE_TITLE)),
-            &[],
-        );
-        let tone = world.arena.spawn("Chord", audio_node::chord(48_000, 3.0));
-        place(
-            &mut world,
-            tone,
-            audio_node::ID,
-            Rect::from_min_size(pos2(20.0, 150.0), vec2(560.0, 200.0)),
-            &[],
         );
 
         let mut engine = Self {
@@ -429,14 +356,6 @@ impl Engine {
     /// Where the note is saved.
     pub fn note_path(&self) -> PathBuf {
         self.paths.notes_dir().join(NOTE_FILE)
-    }
-
-    /// The folder model files are read from.
-    pub fn model_dir(&self) -> PathBuf {
-        match self.world.rice.get_str("ai.model_dir") {
-            Some(dir) if !dir.trim().is_empty() => PathBuf::from(dir.trim()),
-            _ => self.paths.models_dir(),
-        }
     }
 
     /// Re-reads the window-manager config and hardware profile from the rice,
@@ -543,12 +462,19 @@ impl Engine {
                 "Display & Graphics",
                 vec![
                     group(
-                        "Hardware",
+                        "Performance",
+                        vec![param("profile.hardware"), fact("display.profile")],
+                    ),
+                    group(
+                        "Graphics Card",
                         vec![
-                            param("profile.hardware"),
-                            fact("display.profile"),
                             param("display.gpu_preference"),
                             fact("display.gpu"),
+                            fact("display.gpus"),
+                            SettingsItem::Actions(vec![CommandButton::new(
+                                "Restart Sue",
+                                "app.restart",
+                            )]),
                         ],
                     ),
                     group(
@@ -592,34 +518,8 @@ impl Engine {
                         "Opening Files",
                         params(&["io.max_ingest_mib", "io.byte_map_width"]),
                     ),
-                    group("Paint Layers", vec![section("paint")]),
                     group("Sue Paint", vec![section("sue_paint")]),
                     group("Built-in Codecs", vec![table("codecs")]),
-                ],
-            ),
-            SettingsPage::new(
-                "ai",
-                "Local AI",
-                vec![
-                    group(
-                        "Compute",
-                        vec![
-                            param("ai.backend"),
-                            param("ai.vram_budget_mib"),
-                            fact("ai.selection"),
-                        ],
-                    ),
-                    group(
-                        "Models",
-                        vec![
-                            param("ai.model_dir"),
-                            table("models"),
-                            SettingsItem::Actions(vec![
-                                CommandButton::new("Rescan", "ai.rescan"),
-                                CommandButton::new("Open Folder", "ai.reveal"),
-                            ]),
-                        ],
-                    ),
                 ],
             ),
             SettingsPage::new(
@@ -646,10 +546,18 @@ impl Engine {
                 "Keymaps",
                 vec![group("Shortcuts", vec![section("keys")])],
             ),
+            SettingsPage::new(
+                "mcp",
+                "MCP",
+                vec![group(
+                    "Model Context Protocol",
+                    vec![SettingsItem::Note("Not yet available.".to_owned())],
+                )],
+            ),
         ];
 
         // Live choices.
-        let mut boot = vec![Choice::new("canvas", "Canvas")];
+        let mut boot = vec![Choice::new("hub", "Hub"), Choice::new("canvas", "Canvas")];
         boot.extend(self.launchpad.manifests().filter_map(|manifest| {
             let mode = manifest.mode.as_ref()?;
             Some(Choice::new(manifest.id.as_str(), mode.label.clone()))
@@ -667,24 +575,8 @@ impl Engine {
         catalog
             .choices
             .insert("audio.output_device".to_owned(), devices);
-        let available = ComputeBackend::detect_available(self.os, &self.capabilities);
-        let mut backends = vec![Choice::new("auto", "Auto")];
-        backends.extend(
-            [
-                ("cpu-simd", "CPU SIMD", ComputeBackend::CpuSimd),
-                ("vulkan", "Vulkan", ComputeBackend::VulkanWgpu),
-                ("cuda", "CUDA", ComputeBackend::Cuda),
-                ("metal", "Metal", ComputeBackend::Metal),
-            ]
-            .into_iter()
-            .map(|(value, label, backend)| {
-                Choice::new(value, label).enabled(available.contains(&backend))
-            }),
-        );
-        catalog.choices.insert("ai.backend".to_owned(), backends);
         for (name, folder) in [
             ("home", self.paths.home_dir.clone()),
-            ("models", self.model_dir()),
             ("rice", self.paths.rice_dir()),
             ("notes", self.paths.notes_dir()),
         ] {
@@ -707,21 +599,6 @@ impl Engine {
                     })
                     .collect(),
                 empty: String::new(),
-            },
-        );
-        let model_dir = self.model_dir();
-        catalog.tables.insert(
-            "models".to_owned(),
-            InfoTable {
-                columns: vec!["Model".into(), "Format".into(), "Size".into()],
-                rows: scan_models(&model_dir)
-                    .into_iter()
-                    .map(|model| vec![model.name, model.format, human_bytes(model.size)])
-                    .collect(),
-                empty: format!(
-                    "No model files in {}. Put .gguf, .onnx or .safetensors files there and rescan.",
-                    model_dir.display()
-                ),
             },
         );
         catalog.tables.insert(
@@ -785,15 +662,38 @@ impl Engine {
                 self.capabilities.display_refresh_hz,
             ),
         );
+        let running = self.options.gpu_label.clone().unwrap_or_else(|| {
+            format!(
+                "{:?} through {:?}",
+                self.capabilities.gpu_vendor, self.capabilities.graphics_api
+            )
+        });
+        let wanted = rice.get_str("display.gpu_preference").unwrap_or("auto");
+        let offered = |kind: &str| {
+            self.options
+                .gpus
+                .iter()
+                .any(|gpu| gpu.ends_with(&format!("({kind} GPU)")))
+        };
+        let drawing = match (wanted, self.options.gpu_kind.as_deref()) {
+            ("auto", _) | (_, None) => running,
+            (wanted, Some(kind)) if wanted == kind => running,
+            (wanted, Some(_)) if !offered(wanted) => {
+                format!("{running}. This machine has no {wanted} GPU")
+            }
+            (wanted, Some(_)) => {
+                format!("{running}. Restart Sue to draw on the {wanted} GPU")
+            }
+        };
+        facts("display.gpu", "Drawing on", drawing);
         facts(
-            "display.gpu",
-            "Graphics",
-            self.options.gpu_label.clone().unwrap_or_else(|| {
-                format!(
-                    "{:?} through {:?}",
-                    self.capabilities.gpu_vendor, self.capabilities.graphics_api
-                )
-            }),
+            "display.gpus",
+            "GPUs here",
+            if self.options.gpus.is_empty() {
+                "Not probed in this run".to_owned()
+            } else {
+                self.options.gpus.join(", ")
+            },
         );
         let (stream, realtime) = match (&self.audio, &self.audio_error) {
             (Some(sink), _) => {
@@ -827,25 +727,6 @@ impl Engine {
         };
         facts("audio.stream", "Stream", stream);
         facts("audio.realtime", "Real-time priority", realtime);
-        let preferred = rice.get_str("ai.backend").and_then(backend_from_rice);
-        let usable: Vec<ComputeBackend> = match preferred {
-            Some(backend) if available.contains(&backend) => vec![backend],
-            _ => available.clone(),
-        };
-        let budget = rice
-            .get_i64("ai.vram_budget_mib")
-            .and_then(|mib| u64::try_from(mib).ok())
-            .unwrap_or(2048)
-            .saturating_mul(1024 * 1024);
-        let mut registry = LocalModelRegistry::new();
-        let _ = registry.register(MidSideStemSplit::descriptor());
-        let selection = registry
-            .select(AiTask::StemSeparation, &usable, budget)
-            .map_or_else(
-                || "No installed model fits the chosen backend and budget".to_owned(),
-                |selected| format!("{} on {}", selected.model.id, selected.backend.name()),
-            );
-        facts("ai.selection", "Stem separation runs", selection);
         facts(
             "packages.policy",
             "Policy",
@@ -993,7 +874,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn boot_places_a_document_a_paint_layer_and_audio_on_the_canvas() {
+    fn boot_places_the_welcome_document_on_the_canvas() {
         let (host, root) = temp_host("boot");
         let engine = Engine::boot(&host).unwrap();
         let applets: Vec<&str> = engine
@@ -1002,7 +883,7 @@ pub(crate) mod tests {
             .iter()
             .map(|(_, node)| node.applet.as_str())
             .collect();
-        assert_eq!(applets, [document::ID, paint::ID, audio_node::ID]);
+        assert_eq!(applets, [document::ID]);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1060,9 +941,9 @@ pub(crate) mod tests {
                 "Display & Graphics",
                 "Audio & DSP",
                 "Files & Codecs",
-                "Local AI",
                 "Packages & Updates",
-                "Keymaps"
+                "Keymaps",
+                "MCP"
             ]
         );
         let claimed = |path: &str| {
@@ -1084,12 +965,20 @@ pub(crate) mod tests {
                 entry.path()
             );
         }
-        assert!(
-            engine.catalog.choices["ai.backend"]
-                .iter()
-                .any(|choice| choice.value == "cpu-simd" && choice.enabled)
+        assert_eq!(
+            engine.world.rice.get_str("launchpad.boot_mode"),
+            Some("hub"),
+            "Sue opens into the Hub"
         );
-        assert!(engine.catalog.facts["ai.selection"].1.contains("mid-side"));
+        assert!(
+            engine
+                .world
+                .rice
+                .entries()
+                .iter()
+                .any(|entry| entry.path() == "profile.hardware"
+                    && entry.label() == "Performance Preference")
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

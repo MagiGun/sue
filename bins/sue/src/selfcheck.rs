@@ -699,8 +699,8 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         .map(|(_, node)| node.applet.as_str().to_owned())
         .collect();
     ensure(
-        kinds == ["document", "paint", "audio"],
-        "Sue did not boot into a document, a paint layer and an audio waveform",
+        kinds == ["document"],
+        "Sue did not boot into the Welcome document",
     )?;
     let roles = |role: AppletRole| runtime.applets.with_role(role).count();
     let (nodes, left, right, windows) = (
@@ -711,9 +711,16 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
     );
     run_frames(runtime, &ctx, &mut clock, Vec::new());
     ensure(
-        runtime.shell.mode() == "canvas",
-        "boot did not open the canvas",
+        runtime.shell.mode() == "canvas" && runtime.shell.hub_open(),
+        "boot did not open the Hub over the canvas",
     )?;
+    run_frames(
+        runtime,
+        &ctx,
+        &mut clock,
+        vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+    );
+    ensure(!runtime.shell.hub_open(), "Esc did not close the Hub")?;
 
     // A drawer glides on its spring, and snaps on legacy hardware.
     runtime.request(
@@ -806,22 +813,16 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         "Ctrl+Y did not redo the typing",
     )?;
 
-    // A paint stroke is one undo step that stores only its tiles.
-    let paint = node_of(runtime, crate::paint::ID).ok_or("no paint layer")?;
-    let tiles = runtime.with_context(&mut tex, clock, |cx| crate::paint::scribble(cx, paint));
-    ensure(tiles > 0, "the stroke touched no tiles")?;
-    runtime
-        .engine
-        .history
-        .undo(&mut runtime.engine.world)
-        .map_err(text)?;
-    runtime
-        .engine
-        .history
-        .redo(&mut runtime.engine.world)
-        .map_err(text)?;
-
-    // Projection onto the timeline, which springs open.
+    // A new tone from the audio templates, projected onto the timeline,
+    // which springs open.
+    runtime.request(
+        ShellRequest::Create {
+            applet: sue_wm::AppletId::new(crate::audio_node::ID).map_err(text)?,
+            key: "tone".to_owned(),
+        },
+        &mut tex,
+        clock,
+    );
     let audio = node_of(runtime, crate::audio_node::ID).ok_or("no audio")?;
     runtime.with_context(&mut tex, clock, |cx| {
         sue_wm::project_to_timeline(cx, audio, 3.0)
@@ -927,7 +928,7 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         "the idle shell keeps drawing",
     )?;
     let mut detail = format!(
-        "booted into canvas with document, paint, audio; {nodes} node kinds, {left}+{right} drawer applets, {windows} window; drawer glided {glide} frames ({}) vs {snap} (legacy snap); camera framed the document in {framed} frames; typed, Ctrl+Z, Ctrl+Y through the UndoStack; stroke touched {tiles} tiles, undone and redone; timeline projected and sprang open; marking menu and palette; then 0 FPS",
+        "booted into the Hub over the Welcome document, Esc closed it; {nodes} node kinds, {left}+{right} drawer applets, {windows} window; drawer glided {glide} frames ({}) vs {snap} (legacy snap); camera framed the document in {framed} frames; typed, Ctrl+Z, Ctrl+Y through the UndoStack; a new tone projected onto the timeline, which sprang open; marking menu and palette; then 0 FPS",
         sue_wm::profile_label(profile)
     );
     match render_shell(runtime, clock)? {

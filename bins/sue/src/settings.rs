@@ -460,6 +460,10 @@ impl Settings {
                     ui.add_space(6.0);
                 }
             }
+            SettingsItem::Note(text) if needle.is_empty() => {
+                ui.add(egui::Label::new(RichText::new(text).color(theme.muted)).wrap());
+                ui.add_space(6.0);
+            }
             SettingsItem::Table(id) if needle.is_empty() => {
                 if let Some(table) = cx.catalog.tables.get(id).cloned() {
                     if table.rows.is_empty() {

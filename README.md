@@ -19,7 +19,7 @@ a DAW, video editor, CAD/3D modeler, IDE or game engine.
 
 Sue does this without a pile of separate apps or an N×N grid of file converters.
 Every tool works on the same data in one shared, generation-indexed **Arena**.
-Putting a document on the timeline, or a song next to a sketch, attaches a new
+Putting a document on the timeline, or a song next to a painting, attaches a new
 *projection* to the data that is already there. Nothing is copied or converted.
 
 ## Where things stand
@@ -28,12 +28,12 @@ v1.0 "Faustian Enigma" contains the nine crates below and the `sue`
 executable. It opens a native GPU window drawn with egui in a pure monochrome
 theme (black to white, nothing else), straight onto an **infinite canvas**:
 
+- **The Hub:** Sue opens with a card for each place to work (the Canvas and
+  every studio); `Esc` stays on the canvas.
 - **The canvas:** a live dot grid you zoom from 10% to 3200% with the wheel and
-  pan with the middle button or Space and drag. Sue opens with three live
-  entities on it: a Document you can type and select text in, a Paint layer you
-  draw on, and an Audio waveform you can play.
-- **The top pill:** modes (Canvas, Document, Sue Paint, Timeline) that glide the
-  camera to frame an entity or open a studio, and the command palette.
+  pan with the middle button or Space and drag, with the Welcome document on
+  it to type and select text in.
+- **The top pill:** Hub and the command palette, nothing else.
 - **Sue Paint:** a full-window painting studio with the usual menu bar (File,
   Edit, Story, Animation, Layer, Select, View, Filter, Window, Help; items not
   built yet are grayed out), a command bar, tools and sub tools (pens, pencils,

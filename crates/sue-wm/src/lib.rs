@@ -61,7 +61,8 @@ pub use radial::{Radial, RadialOutcome, wedge_at, wedge_point};
 pub use scene::{NodeId, SCENE_CHUNK, Scene, SceneNode};
 pub use scheduler::{Damage, FrameScheduler, FrameTicket, RenderDemand};
 pub use shell::{
-    CANVAS_MODE, NODE_TITLE, Shell, ShellIo, TIMELINE_MODE, profile_label, project_to_timeline,
+    CANVAS_MODE, HUB_MODE, NODE_TITLE, Shell, ShellIo, TIMELINE_MODE, profile_label,
+    project_to_timeline,
 };
 pub use spring::{SpringDamper, SpringMode, SpringParams};
 pub use text::{ArenaText, TYPING_PAUSE, Typing};

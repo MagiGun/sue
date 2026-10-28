@@ -82,10 +82,8 @@ fn text_hash(text: &str) -> u64 {
 /// Values whose change means the Settings catalog must be rebuilt.
 fn catalog_fingerprint(rice: &RiceSchema) -> String {
     [
-        "ai.model_dir",
-        "ai.backend",
-        "ai.vram_budget_mib",
         "packages.require_signatures",
+        "display.gpu_preference",
         "profile.hardware",
         "display.frame_rate_cap",
     ]
@@ -138,6 +136,7 @@ pub struct Runtime {
     asked_for_audio: bool,
     confirm_quit: bool,
     quit: bool,
+    restart: bool,
     interactive: bool,
     booted: bool,
     note_saved: Option<u64>,
@@ -188,6 +187,7 @@ impl Runtime {
             asked_for_audio: false,
             confirm_quit: false,
             quit: false,
+            restart: false,
             interactive: false,
             booted: false,
             note_saved: note,
@@ -214,6 +214,12 @@ impl Runtime {
     #[must_use]
     pub fn wants_exit(&self) -> bool {
         self.quit
+    }
+
+    /// `true` when Sue should start again after closing (Restart Sue).
+    #[must_use]
+    pub fn wants_restart(&self) -> bool {
+        self.restart
     }
 
     /// Builds one frame of the whole window into the root `ui`.
@@ -545,21 +551,10 @@ impl Runtime {
                 let dir = self.engine.paths.rice_dir();
                 self.reveal(&dir);
             }
-            "ai.rescan" => {
-                self.engine.rebuild_catalog();
-                let found = self
-                    .engine
-                    .catalog
-                    .tables
-                    .get("models")
-                    .map_or(0, |table| table.rows.len());
-                self.shell
-                    .notify(format!("Found {found} model files"), false);
-            }
-            "ai.reveal" => {
-                let dir = self.engine.model_dir();
-                let _ = std::fs::create_dir_all(&dir);
-                self.reveal(&dir);
+            "app.restart" => {
+                self.shutdown();
+                self.restart = true;
+                self.quit = true;
             }
             "audio.start" => {
                 if self.engine.audio.is_none() {
@@ -1055,7 +1050,9 @@ pub(crate) mod tests {
 
         // A pen stroke from the middle of the canvas to the right, with pen
         // pressure. The picture is fitted, so the middle is pixel (800, 600).
-        let viewport_center = Pos2::new(737.0, 388.0);
+        // The studio sits between the side rails, and its palettes leave the
+        // canvas 17 points right of and 50 points above the area's middle.
+        let viewport_center = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
         let to = viewport_center + vec2(100.0, 0.0);
         let touch = |phase, pos| egui::Event::Touch {
             device_id: egui::TouchDeviceId(1),
@@ -1117,7 +1114,7 @@ pub(crate) mod tests {
                 .map(|y| u32::from(alpha(&runtime, x, y)))
                 .sum::<u32>()
         };
-        let end = (900..1040).rev().find(|x| ink(*x) > 0).unwrap();
+        let end = (900..1300).rev().find(|x| ink(*x) > 0).unwrap();
         assert!(end > 990, "the stroke reached x = {end}");
         assert!(ink(end - 4) < ink(900), "it thins toward its end");
 
@@ -1199,9 +1196,22 @@ pub(crate) mod tests {
             "zooming and sliding in take a moment ({opening} frames)"
         );
         assert!(runtime.shell.studio_reveal() > 0.999);
+        // The card's picture fills the studio's area, 24 points from its
+        // edges, as Sue Paint then shows it.
+        let content = runtime
+            .engine
+            .world
+            .scene
+            .iter()
+            .find(|(_, node)| node.applet.as_str() == sue_paint::CARD_ID)
+            .map(|(_, node)| node.rect.size() - vec2(0.0, sue_wm::NODE_TITLE))
+            .unwrap();
+        let area = runtime.shell.canvas_rect().size() - vec2(48.0, 48.0);
+        let filled = (area.x / content.x).min(area.y / content.y);
+        let zoom = runtime.shell.camera().zoom();
         assert!(
-            runtime.shell.camera().zoom() > overview * 1.5,
-            "zoomed into the card"
+            (zoom / filled - 1.0).abs() < 0.05 && (zoom / overview - 1.0).abs() > 0.05,
+            "zoomed into the card: {zoom} for {filled}, from {overview}"
         );
 
         runtime.request(ShellRequest::CloseStudio, &mut NoTextures, start);
@@ -1252,7 +1262,7 @@ pub(crate) mod tests {
         });
         let before = runtime.engine.world.scene.len();
         runtime.request(
-            ShellRequest::Spawn(AppletId::new("paint").unwrap()),
+            ShellRequest::Spawn(AppletId::new(crate::document::ID).unwrap()),
             &mut NoTextures,
             start,
         );
