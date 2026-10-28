@@ -1082,14 +1082,18 @@ pub(crate) mod tests {
                 egui::Event::PointerMoved(to),
             ],
         );
+        // A pen's touch ends before its button does.
         step(
             &mut runtime,
-            vec![egui::Event::PointerButton {
-                pos: to,
-                button: egui::PointerButton::Primary,
-                pressed: false,
-                modifiers: egui::Modifiers::NONE,
-            }],
+            vec![
+                touch(egui::TouchPhase::End, to),
+                egui::Event::PointerButton {
+                    pos: to,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
         );
         assert_eq!(
             runtime.engine.history.depth(),
@@ -1104,6 +1108,15 @@ pub(crate) mod tests {
             .filter(|y| alpha(&runtime, 900, *y) > 128)
             .count();
         assert!((3..=6).contains(&wide), "{wide} px wide");
+        // The G-pen tapers into its end instead of leaving a blob.
+        let ink = |x: u32| {
+            (580..620)
+                .map(|y| u32::from(alpha(&runtime, x, y)))
+                .sum::<u32>()
+        };
+        let end = (900..1040).rev().find(|x| ink(*x) > 0).unwrap();
+        assert!(end > 990, "the stroke reached x = {end}");
+        assert!(ink(end - 4) < ink(900), "it thins toward its end");
 
         // Ctrl+Shift+N adds a layer above; Ctrl+Z takes it away again, and
         // a second Ctrl+Z the stroke.

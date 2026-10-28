@@ -187,15 +187,31 @@ impl Tool {
                 plain("Obtain Layer Color", 1),
             ],
             Self::Pen => vec![
-                SubTool::new(self, "G-Pen", 0, tip(8.0, |_| {})),
+                SubTool::new(
+                    self,
+                    "G-Pen",
+                    0,
+                    tip(8.0, |t| {
+                        t.taper_start = 14.0;
+                        t.taper_end = 26.0;
+                    }),
+                )
+                .stabilization(6)
+                .correction(2)
+                .flick(),
                 SubTool::new(
                     self,
                     "Mapping Pen",
                     0,
                     tip(4.0, |t| {
                         t.min_size = 0.05;
+                        t.taper_start = 10.0;
+                        t.taper_end = 20.0;
                     }),
-                ),
+                )
+                .stabilization(8)
+                .correction(3)
+                .flick(),
                 SubTool::new(
                     self,
                     "Turnip Pen",
@@ -203,8 +219,13 @@ impl Tool {
                     tip(14.0, |t| {
                         t.min_size = 0.3;
                         t.aa = AntiAlias::Medium;
+                        t.taper_start = 10.0;
+                        t.taper_end = 18.0;
                     }),
-                ),
+                )
+                .stabilization(4)
+                .correction(1)
+                .flick(),
                 SubTool::new(
                     self,
                     "Marker",
@@ -214,7 +235,8 @@ impl Tool {
                         t.aa = AntiAlias::Strong;
                     }),
                 )
-                .stabilization(3),
+                .stabilization(3)
+                .correction(1),
             ],
             Self::Pencil => vec![
                 SubTool::new(
@@ -226,8 +248,10 @@ impl Tool {
                         t.hardness = 0.85;
                         t.min_size = 0.4;
                         t.pressure_opacity = true;
+                        t.taper_end = 6.0;
                     }),
-                ),
+                )
+                .stabilization(3),
                 SubTool::new(
                     self,
                     "Mechanical Pencil",
@@ -237,7 +261,8 @@ impl Tool {
                         t.pressure_size = false;
                         t.pressure_opacity = true;
                     }),
-                ),
+                )
+                .stabilization(3),
                 SubTool::new(
                     self,
                     "Rough Pencil",
@@ -246,8 +271,10 @@ impl Tool {
                         t.grain = 0.7;
                         t.hardness = 0.6;
                         t.pressure_opacity = true;
+                        t.taper_end = 10.0;
                     }),
-                ),
+                )
+                .stabilization(2),
             ],
             Self::Brush => vec![
                 SubTool::new(
@@ -259,9 +286,10 @@ impl Tool {
                         t.build_up = true;
                         t.flow = 0.15;
                         t.opacity = 0.8;
-                        t.spacing = 0.08;
+                        t.mix = 0.35;
                     }),
-                ),
+                )
+                .stabilization(4),
                 SubTool::new(
                     self,
                     "Opaque Watercolor",
@@ -270,8 +298,10 @@ impl Tool {
                         t.hardness = 0.7;
                         t.build_up = true;
                         t.flow = 0.4;
+                        t.mix = 0.5;
                     }),
-                ),
+                )
+                .stabilization(4),
                 SubTool::new(
                     self,
                     "Gouache",
@@ -279,8 +309,11 @@ impl Tool {
                     tip(30.0, |t| {
                         t.min_size = 0.6;
                         t.aa = AntiAlias::Medium;
+                        t.flow = 0.9;
+                        t.mix = 0.2;
                     }),
-                ),
+                )
+                .stabilization(4),
                 SubTool::new(
                     self,
                     "Ink Brush",
@@ -288,8 +321,13 @@ impl Tool {
                     tip(20.0, |t| {
                         t.min_size = 0.02;
                         t.aa = AntiAlias::Medium;
+                        t.taper_start = 20.0;
+                        t.taper_end = 40.0;
                     }),
-                ),
+                )
+                .stabilization(6)
+                .correction(2)
+                .flick(),
             ],
             Self::Airbrush => vec![
                 SubTool::new(
@@ -335,7 +373,8 @@ impl Tool {
                         t.eraser = true;
                         t.pressure_size = false;
                     }),
-                ),
+                )
+                .stabilization(2),
                 SubTool::new(
                     self,
                     "Soft",
@@ -347,7 +386,8 @@ impl Tool {
                         t.flow = 0.3;
                         t.pressure_size = false;
                     }),
-                ),
+                )
+                .stabilization(2),
                 SubTool::new(
                     self,
                     "Rough",
@@ -356,7 +396,8 @@ impl Tool {
                         t.eraser = true;
                         t.grain = 0.6;
                     }),
-                ),
+                )
+                .stabilization(2),
             ],
             Self::Fill => vec![
                 plain("Refer Only Editing Layer", 0).tolerance(0.1),
@@ -404,6 +445,12 @@ pub struct SubTool {
     pub tip: Tip,
     /// Pointer smoothing, 0 to 100.
     pub stabilization: u32,
+    /// Stabilization loosens as the pen speeds up.
+    pub adjust_by_speed: bool,
+    /// Post correction when the pen lifts, 0 (none) to 10.
+    pub correction: u32,
+    /// A quick stroke carries on into a fine point when the pen lifts.
+    pub flick: bool,
     /// How different a color may be and still be filled or selected, 0 to 1.
     pub tolerance: f32,
 }
@@ -418,8 +465,25 @@ impl SubTool {
             mode,
             tip,
             stabilization: 5,
+            adjust_by_speed: true,
+            correction: 0,
+            flick: false,
             tolerance: 0.0,
         }
+    }
+
+    /// The same with another post correction.
+    #[must_use]
+    pub fn correction(mut self, level: u32) -> Self {
+        self.correction = level.min(10);
+        self
+    }
+
+    /// The same, carrying quick strokes on into a point.
+    #[must_use]
+    pub fn flick(mut self) -> Self {
+        self.flick = true;
+        self
     }
 
     /// The same with another stabilization.

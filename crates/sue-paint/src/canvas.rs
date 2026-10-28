@@ -15,7 +15,7 @@ use sue_core::txn::{Batch, SetProperty};
 use sue_model::picture::{self, LayerKind};
 use sue_wm::{AppletContext, ArenaEdit, Theme};
 
-use crate::brush::{Stabilizer, Stroke as BrushStroke};
+use crate::brush::{Finish, Stabilizer, Stroke as BrushStroke};
 use crate::color;
 use crate::composite::{self, RenderOptions};
 use crate::doc;
@@ -220,8 +220,25 @@ impl SuePaint {
     ) {
         let ctx = ui.ctx().clone();
         let blocked = self.dialog.is_some() || self.menubar.is_open();
-        let (events, space) = ctx.input(|input| (input.events.clone(), input.key_down(Key::Space)));
+        let (events, space, time, dt) = ctx.input(|input| {
+            (
+                input.events.clone(),
+                input.key_down(Key::Space),
+                input.time,
+                input.unstable_dt,
+            )
+        });
         let space = space && !ctx.text_edit_focused();
+        // Spread this frame's pointer samples evenly over the frame's time,
+        // so the stabilizer and flicks see the pen's real speed.
+        let moves = events
+            .iter()
+            .filter(|event| matches!(event, Event::PointerMoved(_)))
+            .count()
+            .max(1);
+        let frame = dt.clamp(0.001, 0.1);
+        let step = frame / moves as f32;
+        self.clock = (time - f64::from(frame), step);
         self.pointer = response.hover_pos();
         for event in events {
             match event {
@@ -254,7 +271,10 @@ impl SuePaint {
                         _ => {}
                     }
                 }
-                Event::PointerMoved(pos) => self.drag(pos, viewport, size, cx),
+                Event::PointerMoved(pos) => {
+                    self.clock.0 += f64::from(self.clock.1);
+                    self.drag(pos, viewport, size, cx);
+                }
                 Event::PointerButton {
                     pos,
                     pressed: false,
@@ -389,8 +409,8 @@ impl SuePaint {
                     .filter(|_| offset != [0, 0])
                     .map(|selection| selection.shifted(offset));
                 let local = [p.x - offset[0] as f32, p.y - offset[1] as f32];
-                let mut stabilizer = Stabilizer::new(sub.stabilization);
-                let start = stabilizer.sample(local);
+                let mut stabilizer = Stabilizer::new(sub.stabilization, sub.adjust_by_speed);
+                let start = stabilizer.sample(local, doc.view.zoom, self.clock.1);
                 let pressure = self.pressure.unwrap_or(1.0);
                 let selection = shifted.as_ref().or(doc.selection.as_ref());
                 if let Some(raster) = doc::raster_mut(&mut cx.world.arena, info.id) {
@@ -403,6 +423,9 @@ impl SuePaint {
                     raw: local,
                     label: sub.name.clone(),
                     shifted,
+                    trail: vec![(self.clock.0, local)],
+                    correction: sub.correction,
+                    flick: sub.flick,
                 });
             }
             Tool::Figure | Tool::Gradient => {
@@ -472,6 +495,7 @@ impl SuePaint {
             return;
         }
         let pressure = self.pressure.unwrap_or(1.0);
+        let (time, step) = self.clock;
         let (Some(gesture), Some(doc)) = (self.gesture.as_mut(), self.docs.get_mut(self.active))
         else {
             return;
@@ -484,11 +508,16 @@ impl SuePaint {
                 offset,
                 raw,
                 shifted,
+                trail,
                 ..
             } => {
                 let local = [p.x - offset[0] as f32, p.y - offset[1] as f32];
                 *raw = local;
-                let smooth = stabilizer.sample(local);
+                trail.push((time, local));
+                if trail.len() > 64 {
+                    trail.drain(..trail.len() - 64);
+                }
+                let smooth = stabilizer.sample(local, doc.view.zoom, step);
                 let selection = shifted.as_ref().or(doc.selection.as_ref());
                 if let Some(raster) = doc::raster_mut(&mut cx.world.arena, stroke.layer()) {
                     stroke.to(raster, smooth, pressure, selection);
@@ -545,16 +574,39 @@ impl SuePaint {
                 raw,
                 label,
                 shifted,
+                trail,
+                correction,
+                flick,
             } => {
                 let Some(doc) = self.docs.get_mut(self.active) else {
                     return;
                 };
                 let layer = stroke.layer();
                 let selection = shifted.as_ref().or(doc.selection.as_ref());
+                // The pen's velocity over its last few hundredths of a
+                // second, for a flick.
+                let velocity = trail.last().and_then(|&(end, at)| {
+                    let &(start, from) = trail.iter().find(|(time, _)| end - time <= 0.05)?;
+                    let seconds = (end - start) as f32;
+                    (seconds > 0.004)
+                        .then(|| [(at[0] - from[0]) / seconds, (at[1] - from[1]) / seconds])
+                });
+                let fast = velocity.filter(|v| v[0].hypot(v[1]) * doc.view.zoom > 700.0);
+                let finish = Finish {
+                    correction,
+                    flick: fast.filter(|_| flick),
+                };
+                // A pen's touch ends before its button does, so the last
+                // points keep the stroke's own last pressure, not a full one.
+                let last = stroke
+                    .samples()
+                    .last()
+                    .map_or(pressure, |sample| sample.pressure);
                 if let Some(raster) = doc::raster_mut(&mut cx.world.arena, layer) {
                     for point in stabilizer.catch_up(raw) {
-                        stroke.to(raster, point, pressure, selection);
+                        stroke.to(raster, point, last, selection);
                     }
+                    stroke.end(raster, finish, selection);
                 }
                 if let Some([x0, y0, x1, y1]) = stroke.take_dirty() {
                     let shift = |value: u32, by: i64| (i64::from(value) + by).max(0) as u32;
@@ -904,7 +956,13 @@ impl SuePaint {
                     selection.shifted(offset)
                 }
             });
-        let mut stroke = BrushStroke::new(info.id, sub.tip, rgb, info.alpha_locked);
+        let plain = crate::brush::Tip {
+            taper_start: 0.0,
+            taper_end: 0.0,
+            mix: 0.0,
+            ..sub.tip
+        };
+        let mut stroke = BrushStroke::new(info.id, plain, rgb, info.alpha_locked);
         if let Some(raster) = doc::raster_mut(&mut cx.world.arena, info.id) {
             for point in points {
                 stroke.to(

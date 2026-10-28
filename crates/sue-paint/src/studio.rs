@@ -80,7 +80,8 @@ impl Doc {
 #[derive(Debug)]
 pub(crate) enum Gesture {
     /// A brush stroke (`shifted` is the selection moved into the layer's
-    /// pixels when the layer is offset).
+    /// pixels when the layer is offset; `trail` the recent raw samples with
+    /// their times, for the pen's speed as it lifts).
     Stroke {
         stroke: Stroke,
         stabilizer: Stabilizer,
@@ -88,6 +89,9 @@ pub(crate) enum Gesture {
         raw: [f32; 2],
         label: String,
         shifted: Option<Selection>,
+        trail: Vec<(f64, [f32; 2])>,
+        correction: u32,
+        flick: bool,
     },
     /// Scrolling the view.
     Pan { last: Pos2 },
@@ -199,6 +203,9 @@ pub struct SuePaint {
     pub(crate) preview: Option<(u64, Vec<u8>)>,
     pub(crate) last_dir: Option<PathBuf>,
     pub(crate) shown: bool,
+    /// The time of the pointer sample being handled and the time between
+    /// samples this frame, in seconds.
+    pub(crate) clock: (f64, f32),
 }
 
 impl Default for SuePaint {
@@ -237,6 +244,7 @@ impl Default for SuePaint {
             preview: None,
             last_dir: None,
             shown: false,
+            clock: (0.0, 1.0 / 60.0),
         }
     }
 }

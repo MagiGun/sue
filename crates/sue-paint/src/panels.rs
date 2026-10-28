@@ -567,6 +567,7 @@ impl SuePaint {
             let pressure = (t * std::f32::consts::PI).sin().max(0.05);
             stroke.to(&mut raster, [x, y], pressure, None);
         }
+        stroke.end(&mut raster, crate::brush::Finish::default(), None);
         let bytes = raster.bytes()?;
         let mut shown = Vec::with_capacity(bytes.len());
         for pixel in bytes.as_chunks::<4>().0 {
@@ -655,10 +656,51 @@ impl SuePaint {
                 ) {
                     sub.stabilization = stabilization.round() as u32;
                 }
+                ui.checkbox(&mut sub.adjust_by_speed, small("Adjust by speed"))
+                    .on_hover_text(
+                        "Less smoothing as the pen moves faster, so quick lines stay snappy",
+                    );
+                let mut correction = sub.correction as f32;
+                if slider_row(
+                    ui,
+                    "Correction",
+                    &mut correction,
+                    0.0..=10.0,
+                    "",
+                    false,
+                    theme,
+                ) {
+                    sub.correction = correction.round() as u32;
+                }
+                ui.checkbox(&mut sub.flick, small("Flick into a point"))
+                    .on_hover_text(
+                        "A quick stroke carries on along the pen's momentum into a fine point",
+                    );
+                ui.label(small("Starting and ending"));
                 let tip = &mut sub.tip;
-                let mut spacing = tip.spacing * 100.0;
-                if slider_row(ui, "Spacing", &mut spacing, 1.0..=200.0, " %", true, theme) {
-                    tip.spacing = spacing / 100.0;
+                slider_row(
+                    ui,
+                    "Taper start",
+                    &mut tip.taper_start,
+                    0.0..=200.0,
+                    " px",
+                    false,
+                    theme,
+                );
+                slider_row(
+                    ui,
+                    "Taper end",
+                    &mut tip.taper_end,
+                    0.0..=200.0,
+                    " px",
+                    false,
+                    theme,
+                );
+                if tip.dabbed() {
+                    let mut spacing = tip.spacing * 100.0;
+                    if slider_row(ui, "Spacing", &mut spacing, 1.0..=200.0, " %", true, theme) {
+                        tip.spacing = spacing / 100.0;
+                    }
                 }
                 ui.checkbox(&mut tip.pressure_size, small("Size by pen pressure"));
                 if tip.pressure_size {
@@ -673,6 +715,20 @@ impl SuePaint {
                     let mut flow = tip.flow * 100.0;
                     if slider_row(ui, "Flow", &mut flow, 1.0..=100.0, " %", false, theme) {
                         tip.flow = flow / 100.0;
+                    }
+                }
+                if !tip.eraser {
+                    let mut mix = tip.mix * 100.0;
+                    if slider_row(
+                        ui,
+                        "Color mixing",
+                        &mut mix,
+                        0.0..=100.0,
+                        " %",
+                        false,
+                        theme,
+                    ) {
+                        tip.mix = mix / 100.0;
                     }
                 }
                 let mut grain = tip.grain * 100.0;

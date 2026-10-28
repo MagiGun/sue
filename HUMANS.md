@@ -184,6 +184,14 @@ familiar:
   ready-made **sub tools** (a G-pen, a mapping pen, a watercolor brush, a soft
   airbrush) whose size, opacity, hardness, smoothing and pen pressure you can
   tune. Your changes stick to that sub tool.
+- **Clean lines without lag:** pens smooth out the shake of your hand, and
+  smooth less the faster you move, so quick strokes never trail behind
+  ("Adjust by speed"). When you lift the pen, Sue tidies the line: it removes
+  the little hook at the end, turns a few fast mouse points into a smooth
+  curve, evens out wobbles while keeping sharp corners sharp ("Correction"),
+  thins the end into a point ("Taper"), and lets a quick flick run out into a
+  fine tail. Watercolor and gouache brushes pick up the color underneath and
+  drag it along ("Color mixing"). All of it is in Tool Property.
 - **Colors:** a color wheel, sliders, a color set and the colors you recently
   painted with. `X` swaps your main and sub color; hold `Alt` and click to pick
   a color from the picture.

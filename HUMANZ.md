@@ -1020,16 +1020,24 @@ closing a tab leaves the picture in the project. The studio keeps only views,
 screen images, the current layer and selections. Each new picture is also
 placed on the canvas as an Illustration card, the same entity.
 
-**Painting.** The brush engine stamps round dabs along the pointer's path
-(spacing as a fraction of the size, hardness, four anti-aliasing widths, paper
-grain, build-up and flow for airbrushes). Pen pressure, read from egui touch
-events with force, scales size and opacity; stabilization lags the brush behind
-the pointer and catches up on release. A stroke paints straight into the
-layer's pixels, but each touched 64-pixel tile keeps its pixels from before and
-a coverage mask, so every pixel is recomputed from the two: a 50% pen stays at
-50% where it crosses itself. On release the tiles become one `RasterEdit`.
-Pointer input is read as egui's raw event stream, so fast strokes keep every
-sample between frames.
+**Painting.** The brush engine (`sue_paint::brush`) is built so lines come out
+clean without the brush feeling slow. A stroke passes through these stages:
+
+| Stage | What it does |
+| --- | --- |
+| Input | egui's raw event stream, in order, so a fast stroke keeps every sample between frames; each frame's samples are spread over its time, so speeds are real. Pen pressure comes from egui touch events with force and scales size (down to the tip's minimum size) and opacity. |
+| Stabilization | A time-based filter (lag of about 4 ms per level, the same at any sample rate) that the brush follows. *Adjust by speed* loosens it as the pen speeds up (from 150 to 1500 points per second the lag drops to a tenth), so slow lines lose their tremor while quick hatching stays snappy. On lift the brush catches up with the pen. |
+| Painting live | Pen-like tips paint a continuous tapered capsule between consecutive samples: each pixel's coverage comes from its exact distance to the segment (four anti-aliasing widths, hardness falloff), so there are no gaps, ridges or beads at any speed, and lines thinner than a pixel stay unbroken as lighter ink. Airbrushes and mixing brushes stamp dabs at a tight spacing instead, because their dabs add up. The start taper grows the line from a point. |
+| Finishing on lift | The hooks a pen leaves when it touches down and lifts are trimmed; the samples become a centripetal Catmull-Rom spline (no loops or overshoot), so even a fast mouse that reported a few points ends as a curve; *post correction* (0 to 10) resamples the path evenly, finds deliberate corners (a turn of more than about 65 degrees over arms a brush wide, on a lightly smoothed copy) and smooths everything between them with a gaussian along the path that grows with the level and the brush; a quick *flick* (over 700 points per second) carries the line on along the pen's momentum. The stroke is then painted again from the finished path with its end tapered, the flick thinning to a point. |
+| Color mixing | Mixing brushes pick up the color under them and are reloaded with their own paint, both per distance travelled, so a stroke settles at the mix amount of the canvas color whatever the spacing. |
+
+A stroke never stacks on itself: each touched 64-pixel tile keeps its pixels
+from before and a coverage mask, and every pixel is recomputed from the two, so
+a 50% pen stays at 50% where it crosses itself, and painting the finished path
+again starts from untouched pixels. On release the tiles become one
+`RasterEdit`. Each pen and brush sub tool ships with its own stabilization,
+correction, tapers, flick and mixing, all editable in Tool Property; an ignored
+test (`stroke_sheet`) paints a sheet of simulated strokes for tuning by eye.
 
 **Other edits.** Fill floods the current layer or all layers within a
 tolerance and grows one pixel under anti-aliased lines; gradients run linear or
