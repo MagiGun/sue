@@ -73,7 +73,7 @@ impl fmt::Display for ModelFormat {
 /// The fixed part of a GGUF header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GgufHeader {
-    /// Format version (1–3).
+    /// Format version (1 to 3).
     pub version: u32,
     /// Number of tensors.
     pub tensor_count: u64,

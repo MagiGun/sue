@@ -136,8 +136,42 @@ impl RiceEntry {
 }
 
 /// Turns an identifier into a label: `left_dock-width` → "Left dock width".
+/// Turns a key into a label: `ui_scale` reads `UI scale`, `settle_grace_ms`
+/// reads `Settle grace (ms)`. Known acronyms are capitalized and a trailing
+/// unit goes in parentheses.
 pub(crate) fn humanize(id: &str) -> String {
-    let spaced = id.replace(['_', '-', '.'], " ");
+    const ACRONYMS: [(&str, &str); 8] = [
+        ("ui", "UI"),
+        ("ai", "AI"),
+        ("gpu", "GPU"),
+        ("vram", "VRAM"),
+        ("jxl", "JPEG XL"),
+        ("jpeg", "JPEG"),
+        ("url", "URL"),
+        ("os", "OS"),
+    ];
+    const UNITS: [(&str, &str); 4] = [("ms", "ms"), ("px", "px"), ("mib", "MiB"), ("hz", "Hz")];
+    let mut words: Vec<String> = id
+        .split(['_', '-', '.'])
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            ACRONYMS
+                .iter()
+                .find(|(key, _)| word.eq_ignore_ascii_case(key))
+                .map_or_else(|| word.to_owned(), |(_, acronym)| (*acronym).to_owned())
+        })
+        .collect();
+    if words.len() > 1
+        && let Some((_, unit)) = UNITS.iter().find(|(key, _)| {
+            words
+                .last()
+                .is_some_and(|last| last.eq_ignore_ascii_case(key))
+        })
+    {
+        words.pop();
+        words.push(format!("({unit})"));
+    }
+    let spaced = words.join(" ");
     let mut chars = spaced.chars();
     match chars.next() {
         Some(first) => first.to_uppercase().chain(chars).collect(),
@@ -575,6 +609,68 @@ impl ReversibleTransaction<RiceSchema> for SetRiceValue {
     }
 }
 
+/// Sets several rice values as one undoable step, such as a theme preset or
+/// a reload from disk. All values change, or none do.
+#[derive(Clone, Debug)]
+pub struct SetRiceValues {
+    label: String,
+    edits: Vec<SetRiceValue>,
+}
+
+impl SetRiceValues {
+    /// Sets every `(path, value)` pair, labelled `label` in history views.
+    pub fn new(
+        label: impl Into<String>,
+        values: impl IntoIterator<Item = (String, RiceValue)>,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            edits: values
+                .into_iter()
+                .map(|(path, value)| SetRiceValue::new(path, value))
+                .collect(),
+        }
+    }
+
+    /// Number of values set.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.edits.len()
+    }
+
+    /// `true` if nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.edits.is_empty()
+    }
+}
+
+impl ReversibleTransaction<RiceSchema> for SetRiceValues {
+    fn label(&self) -> String {
+        self.label.clone()
+    }
+
+    fn apply(&mut self, schema: &mut RiceSchema) -> Result<(), TxnError> {
+        for applied in 0..self.edits.len() {
+            if let Err(error) = self.edits[applied].apply(schema) {
+                // Atomic: undo the values already set, newest first.
+                for edit in self.edits[..applied].iter_mut().rev() {
+                    edit.revert(schema)?;
+                }
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    fn revert(&mut self, schema: &mut RiceSchema) -> Result<(), TxnError> {
+        for edit in self.edits.iter_mut().rev() {
+            edit.revert(schema)?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -600,18 +696,54 @@ accent = \"#c9a227\" # Focus ring
             schema.diagnostics()
         );
         assert!(schema.len() >= 20);
-        assert_eq!(schema.sections()[0], "profile");
-        assert_eq!(schema.get_i64("layout.gap"), Some(8));
+        assert_eq!(schema.sections()[0], "general");
+        assert_eq!(schema.get_i64("layout.gap"), Some(0));
         assert_eq!(schema.get_f64("motion.spring_stiffness"), Some(170.0));
         assert_eq!(schema.get_str("profile.hardware"), Some("auto"));
         assert_eq!(
             schema.get_keybind("keys.redo").unwrap().to_string(),
             "Ctrl+Shift+Z"
         );
+        assert_eq!(
+            schema
+                .get_keybind("keys.open_settings")
+                .unwrap()
+                .to_string(),
+            "Ctrl+,"
+        );
         assert!(matches!(
-            schema.parameter("shaders.background"),
-            Some(RiceParameter::ShaderPath { .. })
+            schema.parameter("audio.sample_rate"),
+            Some(RiceParameter::EnumChoice { options, .. }) if options.len() == 3
         ));
+    }
+
+    #[test]
+    fn batches_set_atomically_and_undo_in_one_step() {
+        let mut schema = RiceSchema::parse(SAMPLE).unwrap();
+        let mut history = UndoStack::new();
+        let batch = SetRiceValues::new(
+            "Two values",
+            [
+                ("layout.gap".to_owned(), RiceValue::Int(4)),
+                ("layout.corner_radius".to_owned(), RiceValue::Float(2.0)),
+            ],
+        );
+        assert_eq!(batch.len(), 2);
+        history.apply(&mut schema, batch).unwrap();
+        assert_eq!(schema.get_i64("layout.gap"), Some(4));
+        history.undo(&mut schema).unwrap();
+        assert_eq!(schema.get_i64("layout.gap"), Some(8));
+        assert_eq!(schema.get_f64("layout.corner_radius"), Some(6.0));
+
+        let broken = SetRiceValues::new(
+            "Half valid",
+            [
+                ("layout.gap".to_owned(), RiceValue::Int(5)),
+                ("layout.gap".to_owned(), RiceValue::Int(999)),
+            ],
+        );
+        assert!(history.apply(&mut schema, broken).is_err());
+        assert_eq!(schema.get_i64("layout.gap"), Some(8), "nothing changed");
     }
 
     #[test]
@@ -782,5 +914,10 @@ accent = \"#c9a227\" # Focus ring
             "Left dock width"
         );
         assert_eq!(humanize(""), "");
+        assert_eq!(humanize("ui_scale"), "UI scale");
+        assert_eq!(humanize("settle_grace_ms"), "Settle grace (ms)");
+        assert_eq!(humanize("max_ingest_mib"), "Max ingest (MiB)");
+        assert_eq!(humanize("jxl_effort"), "JPEG XL effort");
+        assert_eq!(humanize("ms"), "Ms", "a lone unit stays a word");
     }
 }

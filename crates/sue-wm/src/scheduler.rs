@@ -17,6 +17,12 @@ pub enum RenderDemand {
 }
 
 impl RenderDemand {
+    /// `true` for [`RenderDemand::ActiveFrame`].
+    #[must_use]
+    pub fn is_active(self) -> bool {
+        !self.is_sleep()
+    }
+
     /// Merges two demands: any active frame wins, at the higher rate.
     #[must_use]
     pub fn combine(self, other: Self) -> Self {
@@ -62,6 +68,7 @@ pub struct FrameTicket {
 pub struct FrameScheduler {
     profile: HardwareProfile,
     display_hz: u32,
+    frame_cap: u32,
     damage: Option<Damage>,
     animating: bool,
     frames: u64,
@@ -75,6 +82,7 @@ impl FrameScheduler {
         Self {
             profile,
             display_hz,
+            frame_cap: 0,
             damage: None,
             animating: false,
             frames: 0,
@@ -85,6 +93,29 @@ impl FrameScheduler {
     /// Changes the hardware profile.
     pub fn set_profile(&mut self, profile: HardwareProfile) {
         self.profile = profile;
+    }
+
+    /// Caps the animation frame rate below the profile's (`0` removes the cap).
+    pub fn set_frame_cap(&mut self, cap: u32) {
+        self.frame_cap = cap;
+    }
+
+    /// The frame rate animations run at: the profile's target, lowered by
+    /// the user's cap.
+    #[must_use]
+    pub fn target_hz(&self) -> u32 {
+        let target = self.profile.target_fps(self.display_hz);
+        if self.frame_cap > 0 {
+            target.min(self.frame_cap)
+        } else {
+            target
+        }
+    }
+
+    /// `true` if something asked for a redraw that has not been drawn yet.
+    #[must_use]
+    pub fn has_damage(&self) -> bool {
+        self.damage.is_some()
     }
 
     /// Marks `rect` as needing a redraw. Regions merge by union.
@@ -113,7 +144,7 @@ impl FrameScheduler {
             RenderDemand::Sleep
         } else {
             RenderDemand::ActiveFrame {
-                target_hz: self.profile.target_fps(self.display_hz),
+                target_hz: self.target_hz(),
             }
         }
     }
@@ -201,6 +232,20 @@ mod tests {
         );
         scheduler.set_animating(false);
         assert!(scheduler.demand().is_sleep());
+    }
+
+    #[test]
+    fn a_user_cap_lowers_the_frame_rate() {
+        let mut scheduler = FrameScheduler::new(HardwareProfile::HighRefresh, 240);
+        assert_eq!(scheduler.target_hz(), 240);
+        scheduler.set_frame_cap(60);
+        assert_eq!(scheduler.target_hz(), 60);
+        scheduler.set_frame_cap(500);
+        assert_eq!(scheduler.target_hz(), 240, "a cap never raises the rate");
+        scheduler.invalidate_all();
+        assert!(scheduler.has_damage());
+        scheduler.begin_frame();
+        assert!(!scheduler.has_damage());
     }
 
     #[test]

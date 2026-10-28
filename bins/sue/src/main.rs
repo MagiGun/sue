@@ -2,18 +2,25 @@
 //! headless self-check, or renders offscreen snapshots.
 
 mod applets;
+mod browser;
+mod convert;
 mod desktop;
-mod drop_zone;
 mod engine;
+mod files;
 mod hex_inspector;
+mod history;
 mod image_viewer;
-mod png;
+mod inspector;
+#[cfg(test)]
+mod laws;
+mod player;
 mod quick_notes;
 mod runtime;
 mod selfcheck;
 mod settings;
 mod snapshot;
 mod text_studio;
+mod util;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -31,7 +38,7 @@ Usage: sue [--self-check | --snapshot <dir> | --version | --help]
   --help            Print this help";
 
 fn banner() {
-    println!("Sue v{SUE_VERSION} \"{SUE_CODENAME}\" · Singular Unified Engine");
+    println!("Sue v{SUE_VERSION} \"{SUE_CODENAME}\", the Singular Unified Engine");
     println!("\"{SUE_MOTTO}\"");
     println!();
 }
@@ -41,8 +48,9 @@ fn self_check() -> ExitCode {
     let subject = HeadlessHost::detect()
         .map_err(|error| format!("platform: {error}"))
         .and_then(|host| {
+            let engine = engine::Engine::boot(&host)?;
             Ok(selfcheck::Subject {
-                engine: engine::Engine::boot(&host)?,
+                runtime: runtime::Runtime::new(engine)?,
                 host,
             })
         });
@@ -63,7 +71,7 @@ fn self_check() -> ExitCode {
 }
 
 fn snapshots(dir: PathBuf) -> ExitCode {
-    match snapshot::write_snapshots(&dir, 1280, 800) {
+    match snapshot::write_snapshots(&dir, 1440, 900) {
         Ok(paths) => {
             for path in paths {
                 println!("{}", path.display());

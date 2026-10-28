@@ -15,6 +15,8 @@ pub enum FontId {
     Monospace,
     /// Noto Emoji (monochrome), the fallback for symbols.
     Emoji,
+    /// The egui icon font, the last fallback for UI symbols.
+    Icons,
 }
 
 /// A glyph placed on a line.
@@ -37,6 +39,7 @@ pub struct Fonts {
     proportional: Font,
     monospace: Font,
     emoji: Font,
+    icons: Font,
     proportional_face: FontId,
 }
 
@@ -60,6 +63,7 @@ impl Fonts {
             proportional: load(epaint_default_fonts::UBUNTU_LIGHT)?,
             monospace: load(epaint_default_fonts::HACK_REGULAR)?,
             emoji: load(epaint_default_fonts::NOTO_EMOJI_REGULAR)?,
+            icons: load(epaint_default_fonts::EMOJI_ICON)?,
             proportional_face: FontId::Proportional,
         })
     }
@@ -88,7 +92,24 @@ impl Fonts {
             FontId::Proportional => &self.proportional,
             FontId::Monospace => &self.monospace,
             FontId::Emoji => &self.emoji,
+            FontId::Icons => &self.icons,
         }
+    }
+
+    /// `true` if every non-space character of `text` has a glyph in a
+    /// bundled font, so it will not render as a blank box.
+    #[must_use]
+    pub fn covers(&self, text: &str) -> bool {
+        text.chars().filter(|ch| !ch.is_whitespace()).all(|ch| {
+            [
+                &self.proportional,
+                &self.monospace,
+                &self.emoji,
+                &self.icons,
+            ]
+            .iter()
+            .any(|font| font.lookup_glyph_index(ch) != 0)
+        })
     }
 
     /// Distance from the line top to the baseline.
@@ -119,10 +140,17 @@ impl Fonts {
             let mut font_id = primary;
             let mut glyph = self.font(primary).lookup_glyph_index(ch);
             if glyph == 0 && !ch.is_whitespace() {
-                let fallback = self.emoji.lookup_glyph_index(ch);
-                if fallback != 0 {
-                    font_id = FontId::Emoji;
-                    glyph = fallback;
+                for (fallback_id, fallback) in [
+                    (FontId::Monospace, &self.monospace),
+                    (FontId::Emoji, &self.emoji),
+                    (FontId::Icons, &self.icons),
+                ] {
+                    let index = fallback.lookup_glyph_index(ch);
+                    if index != 0 && fallback_id != primary {
+                        font_id = fallback_id;
+                        glyph = index;
+                        break;
+                    }
                 }
             }
             let font = self.font(font_id);
@@ -287,6 +315,37 @@ mod tests {
         assert_eq!(glyphs[1].font, FontId::Emoji);
         assert_ne!(glyphs[1].glyph, 0);
         assert_eq!(glyphs[1].byte_index, 1);
+    }
+
+    #[test]
+    fn every_shell_symbol_has_a_glyph() {
+        let fonts = fonts();
+        // Rail and title icons, the gear, chevrons, transport and close marks.
+        for symbol in [
+            "\u{1F4C1}",
+            "\u{1F3B5}",
+            "\u{1F504}",
+            "\u{1F4DD}",
+            "\u{1F50D}",
+            "\u{1F310}",
+            "\u{1F558}",
+            "\u{2699}",
+            "\u{25BE}",
+            "\u{00D7}",
+            "\u{25B6}",
+            "\u{23F8}",
+            "\u{23EE}",
+            "\u{23ED}",
+            "\u{1F4C4}",
+            "\u{1F5BC}",
+            "\u{1F522}",
+            "\u{2190}",
+            "\u{2191}",
+            "\u{1F50A}",
+        ] {
+            assert!(fonts.covers(symbol), "no glyph for {symbol:?}");
+        }
+        assert!(!fonts.covers("\u{4E00}\u{10FFFD}"));
     }
 
     #[test]

@@ -546,7 +546,7 @@ impl MeshBuffer3D {
 // ─── TimeSpan ───────────────────────────────────────────────────────────────
 
 /// Ticks per second of the global clock. A flick divides evenly by every common
-/// frame rate (24–120 fps) and audio sample rate (8–192 kHz).
+/// frame rate (24 to 120 fps) and audio sample rate (8 to 192 kHz).
 pub const FLICKS_PER_SECOND: i64 = 705_600_000;
 
 /// A half-open interval `[start, start + duration)` in flicks.

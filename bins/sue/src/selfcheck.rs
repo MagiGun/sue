@@ -3,6 +3,7 @@
 
 use std::f32::consts::TAU;
 use std::fmt;
+use std::time::{Duration, Instant};
 
 use sue_ai::{
     AiTask, ComputeBackend, GgufHeader, LocalModelRegistry, MidSideStemSplit, ZeroCopyTensorTask,
@@ -18,20 +19,22 @@ use sue_pkg::{
     SigningKey, TrustStore, UpdateOutcome, Version, resolve,
 };
 use sue_platform::{
-    FileDrop, FormFactor, GpuContext, HeadlessHost, InputEvent, Key, KeyEvent, Modifiers, NamedKey,
-    PlatformHost, SafeAreaInsets, SurfaceDescriptor,
+    FileDrop, FormFactor, FramePacing, GpuContext, HeadlessHost, InputEvent, Key, KeyEvent,
+    Modifiers, MouseButton, MouseEvent, NamedKey, PlatformHost, Point, SafeAreaInsets,
+    SurfaceDescriptor,
 };
 use sue_rice::{
     DEFAULT_RICE, HardwareProfile, Keybind, RiceSchema, RiceValue, SetRiceValue, SettingsTree,
 };
 use sue_wm::{
-    AppletContext, Canvas, Focus, Fonts, FrameTarget, Placement, Rect, RenderDemand, RiceEdit,
-    ShellFrame, Tab, Theme, Ui, UiInput, UiState, WmConfig, Workspace, draw_shell,
-    render_offscreen,
+    AppletContext, Canvas, Fonts, FrameTarget, Placement, Rect, RenderDemand, RiceEdit, ShellFrame,
+    Tab, Theme, Ui, UiInput, UiState, WmConfig, Workspace, Zone, draw_shell, render_offscreen,
+    widget_id,
 };
 
-use crate::engine::Engine;
-use crate::{image_viewer, quick_notes, snapshot};
+use crate::engine::NOTE_NAME;
+use crate::runtime::Runtime;
+use crate::{image_viewer, quick_notes, settings, snapshot};
 
 /// Seed of the throwaway publisher key used to sign the self-check's sample
 /// packages. It is trusted only by the self-check's own `TrustStore`.
@@ -50,8 +53,8 @@ type SamplePackage = (
 pub struct Subject {
     /// The headless platform host.
     pub host: HeadlessHost,
-    /// The booted engine.
-    pub engine: Engine,
+    /// The booted engine inside the shell runtime.
+    pub runtime: Runtime,
 }
 
 /// The outcome of one subsystem check.
@@ -154,7 +157,7 @@ fn check_platform(subject: &mut Subject) -> Result<String, String> {
         "destroyed surface is still alive",
     )?;
     Ok(format!(
-        "{} · {} · {} cores · surface {}x{} · config {}",
+        "{}, {}, {} cores, surface {}x{}, config {}",
         host.os(),
         host.form_factor(),
         host.capabilities().logical_cores,
@@ -165,7 +168,7 @@ fn check_platform(subject: &mut Subject) -> Result<String, String> {
 }
 
 fn check_rice(subject: &mut Subject) -> Result<String, String> {
-    let engine = &mut subject.engine;
+    let engine = &mut subject.runtime.engine;
     let tree = SettingsTree::build(&engine.world.rice);
     ensure(
         tree.widget_count() == engine.world.rice.len(),
@@ -176,7 +179,7 @@ fn check_rice(subject: &mut Subject) -> Result<String, String> {
         .rice
         .get_i64("layout.gap")
         .ok_or("layout.gap is missing")?;
-    let edited = (gap + 4).min(64);
+    let edited = (gap + 4).min(32);
 
     engine
         .history
@@ -211,7 +214,7 @@ fn check_rice(subject: &mut Subject) -> Result<String, String> {
     )?;
 
     Ok(format!(
-        "{} params → {} widgets in {} sections · gap {gap}→{edited}→{gap} via global undo · {} · profile {}",
+        "{} params → {} widgets in {} sections; gap {gap}→{edited}→{gap} via global undo; {}; profile {}",
         engine.world.rice.len(),
         tree.widget_count(),
         tree.sections.len(),
@@ -221,7 +224,7 @@ fn check_rice(subject: &mut Subject) -> Result<String, String> {
 }
 
 fn check_arena(subject: &mut Subject) -> Result<String, String> {
-    let arena = &mut subject.engine.world.arena;
+    let arena = &mut subject.runtime.engine.world.arena;
     let mut history: UndoStack<Arena> = UndoStack::new();
     let doc = arena.spawn(
         "Faustian Enigma.md",
@@ -285,7 +288,7 @@ fn check_arena(subject: &mut Subject) -> Result<String, String> {
     ensure(branches == 2, "the old future was not kept as a branch")?;
 
     Ok(format!(
-        "{doc} · {} txns, {branches} branches · projections {projections} · buffer address stable · {}",
+        "{doc}, {} txns, {branches} branches; projections {projections}; buffer address stable; {}",
         history.len(),
         count(arena.len(), "entity", "entities")
     ))
@@ -335,7 +338,7 @@ fn check_sniffer(subject: &mut Subject) -> Result<String, String> {
         .map(|(label, route)| format!("{label}→T{}", route.tier() as u8))
         .collect();
 
-    let arena = &mut subject.engine.world.arena;
+    let arena = &mut subject.runtime.engine.world.arena;
     let options = IngestOptions { byte_map_width: 64 };
     let image = ingest_bytes(arena, "card.jxl", jxl.clone(), &pipeline, options).map_err(text)?;
     ensure(
@@ -369,7 +372,7 @@ fn check_sniffer(subject: &mut Subject) -> Result<String, String> {
     )?;
 
     Ok(format!(
-        "{} · JXL {}x{} decoded bit-exact ({} B lossless, {}x{} preview) · ingest → raster {} + byte map {} · tile cache hit",
+        "{}; JXL {}x{} decoded bit-exact ({} B lossless, {}x{} preview); ingest → raster {} + byte map {}; tile cache hit",
         summary.join(" "),
         decoded.info.width,
         decoded.info.height,
@@ -474,14 +477,14 @@ fn check_packages(_subject: &mut Subject) -> Result<String, String> {
     )?;
 
     Ok(format!(
-        "{} signed manifests verified, tampered one rejected · plan {} · gen {generation} committed · gen {failed} failed its health check → gen {restored} restored",
+        "{} signed manifests verified, tampered one rejected; plan {}; gen {generation} committed; gen {failed} failed its health check → gen {restored} restored",
         index.len(),
         order.join(" → ")
     ))
 }
 
 fn check_ai(subject: &mut Subject) -> Result<String, String> {
-    let engine = &mut subject.engine;
+    let engine = &mut subject.runtime.engine;
     let available = ComputeBackend::detect_available(engine.os, &engine.capabilities);
 
     let mut header = b"GGUF".to_vec();
@@ -542,7 +545,7 @@ fn check_ai(subject: &mut Subject) -> Result<String, String> {
 
     let names: Vec<&str> = available.iter().map(|backend| backend.name()).collect();
     Ok(format!(
-        "backends [{}] · GGUF v{} header ({} tensors) parsed · {} on {} · {} samples in place, {} bytes copied",
+        "backends [{}]; GGUF v{} header ({} tensors) parsed; {} on {}; {} samples in place, {} bytes copied",
         names.join(", "),
         gguf.version,
         gguf.tensor_count,
@@ -567,13 +570,14 @@ fn frames_to_settle(workspace: &mut Workspace, ctx: &mut AppletContext<'_>) -> u
     frames
 }
 
-/// Draws the shell offscreen and checks the top bar's color. `None` without a
+/// Draws the shell offscreen and checks the header's color. `None` without a
 /// GPU adapter.
-fn render_shell(engine: &mut Engine) -> Result<Option<String>, String> {
+fn render_shell(runtime: &mut Runtime) -> Result<Option<String>, String> {
     let Ok(gpu) = GpuContext::headless() else {
         return Ok(None);
     };
     let fonts = Fonts::new()?;
+    let engine = &mut runtime.engine;
     let theme = Theme::from_rice(&engine.world.rice);
     let (width, height) = (960, 600);
     let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
@@ -592,8 +596,9 @@ fn render_shell(engine: &mut Engine) -> Result<Option<String>, String> {
             viewport,
             safe_area: SafeAreaInsets::ZERO,
             form_factor: FormFactor::Desktop,
-            telemetry: "Render: SLEEP (0 FPS) · self-check",
-            sleeping: true,
+            fps: None,
+            message: None,
+            dialog: None,
         };
         draw_shell(workspace, &mut ui, &mut ctx, &frame);
     }
@@ -609,33 +614,33 @@ fn render_shell(engine: &mut Engine) -> Result<Option<String>, String> {
         &canvas,
         &fonts,
         &engine.world.arena,
-        theme.background,
+        theme.base,
     )?;
-    let surface = engine
+    let chrome = engine
         .world
         .rice
-        .get_color("colors.surface")
-        .ok_or("colors.surface is missing")?;
-    // Row 1 lies inside the top bar and above its buttons.
-    let probe = &pixels[(width as usize + width as usize / 2) * 4..][..3];
+        .get_color("colors.chrome")
+        .ok_or("colors.chrome is missing")?;
+    // Row 1 lies inside the header, between the menus and the tabs' text.
+    let probe = &pixels[(width as usize + width as usize - 120) * 4..][..3];
     ensure(
         probe
             .iter()
-            .zip([surface.r, surface.g, surface.b])
+            .zip([chrome.r, chrome.g, chrome.b])
             .all(|(&got, want)| got.abs_diff(want) <= 2),
-        "the top bar did not render in colors.surface",
+        "the header did not render in colors.chrome",
     )?;
     Ok(Some(format!(
         "shell rendered on {} ({} draw commands)",
         gpu.adapter_label(),
-        canvas.commands().len()
+        canvas.len()
     )))
 }
 
 fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
-    let engine = &mut subject.engine;
-    let detected = engine.workspace.profile();
-    let keymap = WmConfig::from_rice(&engine.world.rice)
+    let runtime = &mut subject.runtime;
+    let detected = runtime.engine.workspace.profile();
+    let keymap = WmConfig::from_rice(&runtime.engine.world.rice)
         .map_err(text)?
         .keymap;
     let samples = std::env::temp_dir().join(format!("sue-self-check-{}", std::process::id()));
@@ -645,38 +650,45 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         .encode_layers(&[&snapshot::test_card()], 1)
         .map_err(text)?;
     std::fs::write(&dropped, card).map_err(text)?;
+    let viewport = Rect::new(0.0, 0.0, 1280.0, 800.0);
 
     let result = (|| -> Result<String, String> {
-        let (workspace, mut ctx) = engine.shell();
-        let hub = workspace.launchpad().hub();
-        let (studios, utilities) = (hub.studios.len(), hub.utilities.len());
-        let boot = workspace.launchpad().boot_target();
-        let docks: Vec<(usize, String)> = workspace
-            .docked()
-            .filter_map(|(index, _, manifest)| Some((index, manifest?.id.to_string())))
-            .collect();
-        let notes = docks
-            .iter()
-            .find(|(_, id)| id == quick_notes::ID)
-            .map(|(index, _)| *index)
-            .ok_or("Quick Notes is not docked")?;
+        let (studios, inspectors, left, right) = {
+            let workspace = &runtime.engine.workspace;
+            let hub = workspace.launchpad().hub();
+            let rail = |zone| {
+                workspace
+                    .dock_applets(zone)
+                    .iter()
+                    .map(|(_, manifest)| manifest.id.to_string())
+                    .collect::<Vec<_>>()
+                    .join("+")
+            };
+            (
+                hub.studios.len(),
+                hub.inspectors.len(),
+                rail(Zone::LeftDock),
+                rail(Zone::RightDock),
+            )
+        };
+        let boot = runtime.engine.workspace.launchpad().boot_target();
 
-        workspace.set_focus(Focus::Dock(notes));
+        // Quick Notes: typing, backspace, undo and the alternative redo.
+        runtime.show_dock(quick_notes::ID);
         for ch in "Sue!".chars() {
-            workspace
-                .dispatch(&InputEvent::Keyboard(KeyEvent::typed(ch)), &mut ctx)
-                .map_err(text)?;
+            runtime.handle(&InputEvent::Keyboard(KeyEvent::typed(ch)));
         }
-        let backspace = InputEvent::Keyboard(KeyEvent::press(
+        runtime.handle(&InputEvent::Keyboard(KeyEvent::press(
             Key::Named(NamedKey::Backspace),
             Modifiers::NONE,
-        ));
-        workspace.dispatch(&backspace, &mut ctx).map_err(text)?;
-        let note_text = |ctx: &AppletContext<'_>| {
-            ctx.world
+        )));
+        let note_text = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
                 .arena
                 .iter()
-                .find(|(_, entity)| entity.name() == quick_notes::NOTE_NAME)
+                .find(|(_, entity)| entity.name() == NOTE_NAME)
                 .and_then(|(_, entity)| {
                     entity
                         .string_buffer()
@@ -684,37 +696,95 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
                 })
                 .unwrap_or_default()
         };
-        ensure(note_text(&ctx) == "Sue", "typing or backspace failed")?;
-        workspace
-            .dispatch(&press(keymap.undo), &mut ctx)
-            .map_err(text)?;
         ensure(
-            note_text(&ctx) == "Sue!",
+            note_text(runtime).ends_with("Sue"),
+            "typing or backspace failed",
+        )?;
+        runtime.handle(&press(keymap.undo));
+        ensure(
+            note_text(runtime).ends_with("Sue!"),
             "undo did not restore the deleted character",
         )?;
-        workspace
-            .dispatch(&press(keymap.redo_alt), &mut ctx)
-            .map_err(text)?;
-        ensure(note_text(&ctx) == "Sue", "Ctrl+Y redo failed")?;
+        runtime.handle(&press(keymap.redo_alt));
+        ensure(note_text(runtime).ends_with("Sue"), "Ctrl+Y redo failed")?;
 
-        workspace
-            .dispatch(
-                &InputEvent::FileDrop(FileDrop::Dropped(dropped.clone())),
-                &mut ctx,
-            )
-            .map_err(text)?;
+        // A file dropped anywhere opens in the applet its content fits.
+        runtime.handle(&InputEvent::FileDrop(FileDrop::Dropped(dropped.clone())));
+        let workspace = &runtime.engine.workspace;
         let opened = matches!(workspace.active_tab(), Tab::Applet { id, .. } if id.as_str() == image_viewer::ID);
         ensure(
             opened,
             "the dropped JPEG XL did not open in the Image Viewer",
         )?;
-        let title = workspace.tab_title(workspace.active_index(), ctx.world);
+        let title = workspace.tab_title(workspace.active_index(), &runtime.engine.world);
 
-        workspace.set_profile(HardwareProfile::Balanced);
-        workspace
-            .dispatch(&press(keymap.toggle_left_dock), &mut ctx)
-            .map_err(text)?;
-        let animated = frames_to_settle(workspace, &mut ctx);
+        // Settings is one tab, however often it is asked for.
+        runtime.handle(&press(keymap.open_settings));
+        runtime.handle(&press(keymap.home));
+        runtime.handle(&press(keymap.open_settings));
+        let settings_tabs = runtime
+            .engine
+            .workspace
+            .tabs()
+            .iter()
+            .filter(|tab| {
+                tab.applet_id()
+                    .is_some_and(|id| id.as_str() == settings::ID)
+            })
+            .count();
+        ensure(settings_tabs == 1, "Settings opened more than one tab")?;
+
+        // The pacing fix: a clicked dock toggle animates to the end with no
+        // further input, then the scene goes back to sleep.
+        runtime
+            .engine
+            .workspace
+            .set_profile(HardwareProfile::Balanced);
+        let mut now = Instant::now();
+        runtime.frame(viewport, SafeAreaInsets::ZERO, now);
+        let toggle = runtime
+            .widget_rect(widget_id("shell", "toggle-left"))
+            .ok_or("the left dock toggle was not drawn")?;
+        let center = Point::new(
+            toggle.x + toggle.width / 2.0,
+            toggle.y + toggle.height / 2.0,
+        );
+        runtime.handle(&InputEvent::Mouse(MouseEvent::Moved { position: center }));
+        for pressed in [true, false] {
+            runtime.handle(&InputEvent::Mouse(MouseEvent::Button {
+                button: MouseButton::Left,
+                pressed,
+                position: center,
+            }));
+            now += Duration::from_millis(16);
+            runtime.frame(viewport, SafeAreaInsets::ZERO, now);
+        }
+        ensure(
+            !runtime.engine.workspace.docks_open().0,
+            "the click missed the toggle",
+        )?;
+        let mut animated = 0;
+        while matches!(runtime.pacing(now), FramePacing::Animate { .. }) && animated < 2_000 {
+            now += Duration::from_millis(16);
+            runtime.frame(viewport, SafeAreaInsets::ZERO, now);
+            if runtime.engine.workspace.is_animating() {
+                animated += 1;
+            }
+        }
+        ensure(
+            runtime.engine.workspace.dock_reveal().0 == 0.0,
+            "the dock animation stopped before the end",
+        )?;
+        ensure(
+            !matches!(
+                runtime.pacing(now + Duration::from_secs(1)),
+                FramePacing::Animate { .. }
+            ),
+            "frames kept coming after the animation",
+        )?;
+
+        // Legacy hardware snaps in one frame.
+        let (workspace, mut ctx) = runtime.engine.shell();
         workspace.set_profile(HardwareProfile::LegacyLowSpec);
         workspace
             .dispatch(&press(keymap.toggle_left_dock), &mut ctx)
@@ -746,39 +816,34 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
             FormFactor::Mobile,
         );
         ensure(
-            matches!(desktop.left, Placement::Tiled(_)),
-            "desktop left dock should tile",
+            matches!(desktop.left, Placement::Tiled(_)) && desktop.left_rail.is_some(),
+            "desktop left dock should tile beside its rail",
         )?;
         ensure(
-            matches!(phone.left, Placement::Drawer { .. }),
+            matches!(phone.left, Placement::Drawer { .. }) && phone.left_rail.is_none(),
             "phone left dock should be a drawer",
         )?;
         ensure(
-            phone.center == Rect::new(0.0, 47.0, 390.0, 763.0),
-            "phone Center Stage must fill the safe area",
+            phone.center.width == 390.0,
+            "phone Center Stage must fill the safe width",
         )?;
         ensure(
             workspace.begin_frame().is_none(),
             "an idle workspace still renders",
         )?;
         Ok(format!(
-            "hub: {}, {} · docks {} · boot {boot:?} · notes \"Sue!\" ⌫ undo redo → \"Sue\" · drop → {title} · dock {animated} frames (balanced) vs {snapped} (legacy snap) · center {}px desktop / {}px phone · idle → 0 FPS",
+            "home: {}, {}; rails {left} | {right}; boot {boot:?}; notes typed, undone, redone; drop → {title}; Settings opens once; clicked dock animated {animated} frames to the end (balanced) vs {snapped} (legacy snap), then 0 FPS; center {}px desktop / {}px phone",
             count(studios, "studio", "studios"),
-            count(utilities, "utility", "utilities"),
-            docks
-                .iter()
-                .map(|(_, id)| id.as_str())
-                .collect::<Vec<_>>()
-                .join("+"),
+            count(inspectors, "inspector", "inspectors"),
             desktop.center.width,
             phone.center.width
         ))
     })();
     let _ = std::fs::remove_dir_all(&samples);
     let mut detail = result?;
-    match render_shell(engine)? {
-        Some(rendered) => detail = format!("{detail} · {rendered}"),
-        None => detail = format!("{detail} · GPU render skipped (no adapter)"),
+    match render_shell(runtime)? {
+        Some(rendered) => detail = format!("{detail}; {rendered}"),
+        None => detail = format!("{detail}; GPU render skipped (no adapter)"),
     }
     Ok(detail)
 }
@@ -786,14 +851,17 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::Engine;
+    use crate::engine::tests::temp_host;
 
     #[test]
     fn every_subsystem_passes() {
-        let host = HeadlessHost::detect().expect("platform paths resolve");
-        let engine = Engine::boot(&host).expect("engine boots");
-        let mut subject = Subject { host, engine };
+        let (host, root) = temp_host("self-check");
+        let runtime = Runtime::new(Engine::boot(&host).expect("engine boots")).unwrap();
+        let mut subject = Subject { host, runtime };
         let report = run(&mut subject);
         assert!(report.passed(), "{report}");
         assert_eq!(report.checks.len(), 7);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

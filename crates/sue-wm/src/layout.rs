@@ -1,4 +1,5 @@
-//! The adaptive layout solver: desktop tiles, tablet overlays, phone drawers.
+//! The adaptive layout solver: a flush desktop workstation (header, activity
+//! rails, docks, Center Stage, status bar), tablet overlays and phone drawers.
 
 use sue_platform::{FormFactor, SafeAreaInsets, ScreenEdge};
 
@@ -91,16 +92,22 @@ impl Rect {
             && other.right() <= self.right() + EPSILON
             && other.bottom() <= self.bottom() + EPSILON
     }
+
+    /// `true` if `(x, y)` lies inside.
+    #[must_use]
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        x >= self.x && y >= self.y && x < self.right() && y < self.bottom()
+    }
 }
 
-/// The four regions of Sue's screen.
+/// The regions of Sue's screen that applets live in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Zone {
-    /// Daily utilities.
+    /// Daily utilities, picked on the left activity rail.
     LeftDock,
-    /// The morphing workspace.
+    /// The morphing workspace: tabs.
     CenterStage,
-    /// Reference and control.
+    /// Context panels, picked on the right activity rail.
     RightDock,
     /// Timeline for time-based media.
     BottomTimeline,
@@ -151,8 +158,10 @@ pub enum Placement {
     Drawer {
         /// Edge it slides from.
         edge: ScreenEdge,
-        /// Its current rectangle (partly off-screen while sliding).
+        /// Its current rectangle (partly outside `bounds` while sliding).
         rect: Rect,
+        /// The region it slides within; draw it clipped to this.
+        bounds: Rect,
         /// How far it is revealed, `0.0..=1.0`.
         reveal: f32,
     },
@@ -181,8 +190,14 @@ impl Placement {
 /// Riceable layout sizes, in logical pixels or fractions.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LayoutMetrics {
-    /// Gap between tiles and around the content.
+    /// Space between panels (0 for a flush workstation).
     pub gap: f32,
+    /// Header bar height.
+    pub header_height: f32,
+    /// Status bar height.
+    pub status_bar_height: f32,
+    /// Activity rail width.
+    pub rail_width: f32,
     /// Left dock width.
     pub left_dock_width: f32,
     /// Right dock width.
@@ -221,6 +236,14 @@ pub struct LayoutRequest {
 pub struct LayoutSolution {
     /// Geometry family used.
     pub topology: Topology,
+    /// Header bar (menus, tabs, dock toggles).
+    pub header: Rect,
+    /// Status bar, when the topology has one.
+    pub status: Option<Rect>,
+    /// Left activity rail, when the topology has one.
+    pub left_rail: Option<Rect>,
+    /// Right activity rail, when the topology has one.
+    pub right_rail: Option<Rect>,
     /// Left dock.
     pub left: Placement,
     /// Center Stage (always visible).
@@ -244,6 +267,24 @@ impl LayoutSolution {
     }
 }
 
+/// A drawer sliding in from the left or right edge of `bounds`.
+fn drawer(edge: ScreenEdge, width: f32, reveal: f32, bounds: Rect, max_fraction: f32) -> Placement {
+    if reveal <= 0.0 {
+        return Placement::Hidden;
+    }
+    let width = width.min(bounds.width * max_fraction);
+    let x = match edge {
+        ScreenEdge::Right => bounds.right() - width * reveal,
+        _ => bounds.x - width * (1.0 - reveal),
+    };
+    Placement::Drawer {
+        edge,
+        rect: Rect::new(x, bounds.y, width, bounds.height),
+        bounds,
+        reveal,
+    }
+}
+
 /// Solves the layout for `request`. A pure function of its input.
 #[must_use]
 pub fn solve_layout(request: &LayoutRequest) -> LayoutSolution {
@@ -252,107 +293,174 @@ pub fn solve_layout(request: &LayoutRequest) -> LayoutSolution {
     let metrics = &request.metrics;
     let left_reveal = request.left_reveal.clamp(0.0, 1.0);
     let right_reveal = request.right_reveal.clamp(0.0, 1.0);
-    let drawer = |edge: ScreenEdge, width: f32, reveal: f32| {
-        if reveal <= 0.0 {
-            return Placement::Hidden;
-        }
-        let width = width.min(safe.width * metrics.drawer_max_fraction);
-        let x = match edge {
-            ScreenEdge::Right => safe.right() - width * reveal,
-            _ => safe.x - width * (1.0 - reveal),
-        };
-        Placement::Drawer {
-            edge,
-            rect: Rect::new(x, safe.y, width, safe.height),
-            reveal,
-        }
-    };
+    let header = Rect::new(
+        safe.x,
+        safe.y,
+        safe.width,
+        metrics.header_height.min(safe.height),
+    );
+    let below_header = Rect::new(
+        safe.x,
+        header.bottom(),
+        safe.width,
+        (safe.height - header.height).max(0.0),
+    );
 
-    match topology {
-        Topology::MobilePocket => {
-            let bottom = if request.timeline_active {
-                let height = metrics
-                    .timeline_height
-                    .min(safe.height * metrics.sheet_max_fraction);
-                Placement::BottomSheet {
-                    rect: Rect::new(safe.x, safe.bottom() - height, safe.width, height),
-                    detent: SheetDetent::Peek,
-                }
-            } else {
-                Placement::Hidden
-            };
-            LayoutSolution {
-                topology,
-                left: drawer(ScreenEdge::Left, metrics.left_dock_width, left_reveal),
-                center: safe,
-                right: drawer(ScreenEdge::Right, metrics.right_dock_width, right_reveal),
-                bottom,
+    if topology == Topology::MobilePocket {
+        let bottom = if request.timeline_active {
+            let height = metrics
+                .timeline_height
+                .min(below_header.height * metrics.sheet_max_fraction);
+            Placement::BottomSheet {
+                rect: Rect::new(
+                    below_header.x,
+                    below_header.bottom() - height,
+                    below_header.width,
+                    height,
+                ),
+                detent: SheetDetent::Peek,
             }
+        } else {
+            Placement::Hidden
+        };
+        let fraction = metrics.drawer_max_fraction;
+        return LayoutSolution {
+            topology,
+            header,
+            status: None,
+            left_rail: None,
+            right_rail: None,
+            left: drawer(
+                ScreenEdge::Left,
+                metrics.left_dock_width,
+                left_reveal,
+                below_header,
+                fraction,
+            ),
+            center: below_header,
+            right: drawer(
+                ScreenEdge::Right,
+                metrics.right_dock_width,
+                right_reveal,
+                below_header,
+                fraction,
+            ),
+            bottom,
+        };
+    }
+
+    // Desktop and tablet: rails at both edges, a status bar at the bottom.
+    let status_height = metrics.status_bar_height.min(below_header.height);
+    let status = Rect::new(
+        safe.x,
+        safe.bottom() - status_height,
+        safe.width,
+        status_height,
+    );
+    let body = Rect::new(
+        safe.x,
+        below_header.y,
+        safe.width,
+        (status.y - below_header.y).max(0.0),
+    );
+    let rail = metrics.rail_width.min(body.width / 2.0);
+    let left_rail = Rect::new(body.x, body.y, rail, body.height);
+    let right_rail = Rect::new(body.right() - rail, body.y, rail, body.height);
+    let region = Rect::new(
+        left_rail.right(),
+        body.y,
+        (body.width - rail * 2.0).max(0.0),
+        body.height,
+    );
+    let gap = metrics.gap;
+    let content = region.shrink(gap);
+    let fraction = 1.0;
+
+    let (left, right, column) = if topology == Topology::TabletStylus {
+        (
+            drawer(
+                ScreenEdge::Left,
+                metrics.left_dock_width,
+                left_reveal,
+                region,
+                fraction,
+            ),
+            drawer(
+                ScreenEdge::Right,
+                metrics.right_dock_width,
+                right_reveal,
+                region,
+                fraction,
+            ),
+            content,
+        )
+    } else {
+        let left_width = metrics.left_dock_width * left_reveal;
+        let right_width = metrics.right_dock_width * right_reveal;
+        let mut left_tiled = left_reveal > 0.0;
+        let mut right_tiled = right_reveal > 0.0;
+        let center_width = |left: bool, right: bool| {
+            let taken = |tiled: bool, width: f32| if tiled { width + gap } else { 0.0 };
+            content.width - taken(left, left_width) - taken(right, right_width)
+        };
+        // Too narrow: float the right dock first, then the left.
+        if right_tiled && center_width(left_tiled, right_tiled) < metrics.min_center_width {
+            right_tiled = false;
         }
-        Topology::TabletStylus => {
-            let content = safe.shrink(metrics.gap);
-            let (center, bottom) = split_timeline(content, metrics, request.timeline_active);
-            LayoutSolution {
-                topology,
-                left: drawer(ScreenEdge::Left, metrics.left_dock_width, left_reveal),
-                center,
-                right: drawer(ScreenEdge::Right, metrics.right_dock_width, right_reveal),
-                bottom,
-            }
+        if left_tiled && center_width(left_tiled, right_tiled) < metrics.min_center_width {
+            left_tiled = false;
         }
-        Topology::DesktopTiling => {
-            let content = safe.shrink(metrics.gap);
-            let gap = metrics.gap;
-            let left_width = metrics.left_dock_width * left_reveal;
-            let right_width = metrics.right_dock_width * right_reveal;
-            let mut left_tiled = left_reveal > 0.0;
-            let mut right_tiled = right_reveal > 0.0;
-            let center_width = |left: bool, right: bool| {
-                let taken = |tiled: bool, width: f32| if tiled { width + gap } else { 0.0 };
-                content.width - taken(left, left_width) - taken(right, right_width)
-            };
-            // Too narrow: float the right dock first, then the left.
-            if right_tiled && center_width(left_tiled, right_tiled) < metrics.min_center_width {
-                right_tiled = false;
-            }
-            if left_tiled && center_width(left_tiled, right_tiled) < metrics.min_center_width {
-                left_tiled = false;
-            }
-            let left = if left_tiled {
-                Placement::Tiled(Rect::new(content.x, content.y, left_width, content.height))
-            } else {
-                drawer(ScreenEdge::Left, metrics.left_dock_width, left_reveal)
-            };
-            let right = if right_tiled {
-                Placement::Tiled(Rect::new(
-                    content.right() - right_width,
-                    content.y,
-                    right_width,
-                    content.height,
-                ))
-            } else {
-                drawer(ScreenEdge::Right, metrics.right_dock_width, right_reveal)
-            };
-            let column_x = if left_tiled {
-                content.x + left_width + gap
-            } else {
-                content.x
-            };
-            let column = Rect::new(
-                column_x,
+        let left = if left_tiled {
+            Placement::Tiled(Rect::new(content.x, content.y, left_width, content.height))
+        } else {
+            drawer(
+                ScreenEdge::Left,
+                metrics.left_dock_width,
+                left_reveal,
+                region,
+                fraction,
+            )
+        };
+        let right = if right_tiled {
+            Placement::Tiled(Rect::new(
+                content.right() - right_width,
                 content.y,
-                center_width(left_tiled, right_tiled).max(0.0),
+                right_width,
                 content.height,
-            );
-            let (center, bottom) = split_timeline(column, metrics, request.timeline_active);
-            LayoutSolution {
-                topology,
-                left,
-                center,
-                right,
-                bottom,
-            }
-        }
+            ))
+        } else {
+            drawer(
+                ScreenEdge::Right,
+                metrics.right_dock_width,
+                right_reveal,
+                region,
+                fraction,
+            )
+        };
+        let column_x = if left_tiled {
+            content.x + left_width + gap
+        } else {
+            content.x
+        };
+        let column = Rect::new(
+            column_x,
+            content.y,
+            center_width(left_tiled, right_tiled).max(0.0),
+            content.height,
+        );
+        (left, right, column)
+    };
+    let (center, bottom) = split_timeline(column, metrics, request.timeline_active);
+    LayoutSolution {
+        topology,
+        header,
+        status: Some(status),
+        left_rail: Some(left_rail),
+        right_rail: Some(right_rail),
+        left,
+        center,
+        right,
+        bottom,
     }
 }
 
@@ -388,9 +496,12 @@ mod tests {
     use super::*;
 
     const METRICS: LayoutMetrics = LayoutMetrics {
-        gap: 8.0,
-        left_dock_width: 280.0,
-        right_dock_width: 340.0,
+        gap: 0.0,
+        header_height: 30.0,
+        status_bar_height: 22.0,
+        rail_width: 38.0,
+        left_dock_width: 260.0,
+        right_dock_width: 280.0,
         timeline_height: 220.0,
         min_center_width: 480.0,
         drawer_max_fraction: 0.85,
@@ -414,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn desktop_tiles_fill_the_content_width_without_overlap() {
+    fn desktops_are_flush_workstations() {
         let solution = solve_layout(&LayoutRequest {
             timeline_active: true,
             ..request(1920.0, 1080.0, FormFactor::Desktop)
@@ -425,21 +536,50 @@ mod tests {
         else {
             panic!("expected tiled docks and timeline: {solution:?}");
         };
-        let content_width = 1920.0 - 2.0 * METRICS.gap;
-        assert!(close(
-            left.width + METRICS.gap + solution.center.width + METRICS.gap + right.width,
-            content_width
-        ));
-        let tiles = [left, solution.center, right, timeline];
+        let (rail_l, rail_r, status) = (
+            solution.left_rail.unwrap(),
+            solution.right_rail.unwrap(),
+            solution.status.unwrap(),
+        );
+        assert_eq!(solution.header, Rect::new(0.0, 0.0, 1920.0, 30.0));
+        assert_eq!(status, Rect::new(0.0, 1058.0, 1920.0, 22.0));
+        // Edge to edge: rail, dock, center, dock, rail with no gaps.
+        assert!(close(rail_l.right(), left.x));
+        assert!(close(left.right(), solution.center.x));
+        assert!(close(solution.center.right(), right.x));
+        assert!(close(right.right(), rail_r.x));
+        assert!(close(rail_r.right(), 1920.0));
+        assert!(close(left.y, 30.0) && close(left.bottom(), status.y));
+        let tiles = [
+            rail_l,
+            left,
+            solution.center,
+            right,
+            rail_r,
+            timeline,
+            status,
+        ];
         for (i, a) in tiles.iter().enumerate() {
             for b in &tiles[i + 1..] {
                 assert!(!a.overlaps(b), "{a:?} overlaps {b:?}");
             }
         }
         assert!(close(timeline.height, METRICS.timeline_height));
-        assert!(
-            close(timeline.x, solution.center.x) && close(timeline.width, solution.center.width)
-        );
+    }
+
+    #[test]
+    fn gaps_separate_panels_when_riced() {
+        let solution = solve_layout(&LayoutRequest {
+            metrics: LayoutMetrics {
+                gap: 6.0,
+                ..METRICS
+            },
+            ..request(1920.0, 1080.0, FormFactor::Desktop)
+        });
+        let Placement::Tiled(left) = solution.left else {
+            panic!("tiled")
+        };
+        assert!(close(solution.center.x - left.right(), 6.0));
     }
 
     #[test]
@@ -455,15 +595,12 @@ mod tests {
         ));
         assert!(solution.center.width >= METRICS.min_center_width);
 
-        let tiny = solve_layout(&request(600.0, 800.0, FormFactor::Desktop));
-        assert!(matches!(
-            tiny.left,
-            Placement::Drawer {
-                edge: ScreenEdge::Left,
-                ..
-            }
-        ));
-        assert!(close(tiny.center.width, 600.0 - 2.0 * METRICS.gap));
+        let tiny = solve_layout(&request(640.0, 800.0, FormFactor::Desktop));
+        let Placement::Drawer { rect, bounds, .. } = tiny.left else {
+            panic!("left drawer")
+        };
+        assert!(close(rect.x, 38.0) && close(bounds.x, 38.0));
+        assert!(close(tiny.center.width, 640.0 - 2.0 * 38.0));
     }
 
     #[test]
@@ -477,13 +614,13 @@ mod tests {
             (closed.left, closed.right, closed.bottom),
             (Placement::Hidden, Placement::Hidden, Placement::Hidden)
         );
-        assert!(close(closed.center.width, 1920.0 - 2.0 * METRICS.gap));
+        assert!(close(closed.center.width, 1920.0 - 2.0 * 38.0));
 
         let sliding = solve_layout(&LayoutRequest {
             left_reveal: 0.5,
             ..request(1920.0, 1080.0, FormFactor::Desktop)
         });
-        assert!(matches!(sliding.left, Placement::Tiled(rect) if close(rect.width, 140.0)));
+        assert!(matches!(sliding.left, Placement::Tiled(rect) if close(rect.width, 130.0)));
     }
 
     #[test]
@@ -499,17 +636,19 @@ mod tests {
             timeline_active: true,
             ..request(390.0, 844.0, FormFactor::Mobile)
         });
-        let safe = Rect::new(0.0, 47.0, 390.0, 844.0 - 47.0 - 34.0);
         assert_eq!(solution.topology, Topology::MobilePocket);
-        assert_eq!(solution.center, safe);
+        assert_eq!(solution.header, Rect::new(0.0, 47.0, 390.0, 30.0));
+        assert_eq!((solution.status, solution.left_rail), (None, None));
+        let body = Rect::new(0.0, 77.0, 390.0, 844.0 - 77.0 - 34.0);
+        assert_eq!(solution.center, body);
         let Placement::Drawer { rect: left, .. } = solution.left else {
             panic!("left drawer")
         };
-        assert!(close(left.width, 280.0) && safe.contains_rect(&left));
+        assert!(close(left.width, 260.0) && body.contains_rect(&left));
         let Placement::Drawer { rect: right, .. } = solution.right else {
             panic!("right drawer")
         };
-        assert!(close(right.width, 390.0 * 0.85) && safe.contains_rect(&right));
+        assert!(close(right.width, 280.0) && body.contains_rect(&right));
         let Placement::BottomSheet {
             rect: sheet,
             detent,
@@ -518,7 +657,7 @@ mod tests {
             panic!("sheet")
         };
         assert_eq!(detent, SheetDetent::Peek);
-        assert!(close(sheet.height, 220.0) && close(sheet.bottom(), safe.bottom()));
+        assert!(close(sheet.height, 220.0) && close(sheet.bottom(), body.bottom()));
     }
 
     #[test]
@@ -531,7 +670,7 @@ mod tests {
         let Placement::Drawer { rect, reveal, .. } = solution.left else {
             panic!("left drawer")
         };
-        assert!(close(rect.x, -280.0 * 0.75) && close(reveal, 0.25));
+        assert!(close(rect.x, -260.0 * 0.75) && close(reveal, 0.25));
         assert_eq!(solution.right, Placement::Hidden);
         assert_eq!(
             solution.placement(Zone::CenterStage),
@@ -544,7 +683,8 @@ mod tests {
         let solution = solve_layout(&request(1194.0, 834.0, FormFactor::Tablet));
         assert_eq!(solution.topology, Topology::TabletStylus);
         assert!(matches!(solution.left, Placement::Drawer { .. }));
-        assert!(close(solution.center.width, 1194.0 - 2.0 * METRICS.gap));
+        assert!(close(solution.center.width, 1194.0 - 2.0 * 38.0));
+        assert!(solution.left_rail.is_some() && solution.status.is_some());
     }
 
     #[test]
@@ -554,5 +694,6 @@ mod tests {
         assert!(!a.overlaps(&b));
         assert_eq!(a.union(&b), Rect::new(0.0, 0.0, 15.0, 10.0));
         assert_eq!(Rect::new(0.0, 0.0, 4.0, 4.0).shrink(3.0).width, 0.0);
+        assert!(a.contains(9.9, 0.0) && !a.contains(10.0, 0.0));
     }
 }

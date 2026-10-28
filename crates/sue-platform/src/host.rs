@@ -25,6 +25,8 @@ pub enum PlatformError {
     Window(String),
     /// The application failed to start.
     App(String),
+    /// No usable audio device or stream.
+    Audio(String),
 }
 
 impl fmt::Display for PlatformError {
@@ -38,6 +40,7 @@ impl fmt::Display for PlatformError {
             Self::Gpu(reason) => write!(f, "GPU: {reason}"),
             Self::Window(reason) => write!(f, "window: {reason}"),
             Self::App(reason) => write!(f, "application: {reason}"),
+            Self::Audio(reason) => write!(f, "audio: {reason}"),
         }
     }
 }
@@ -197,7 +200,7 @@ impl HeadlessHost {
         } else {
             FormFactor::Desktop
         };
-        let paths = PlatformPaths::resolve(os, |name| std::env::var(name).ok(), None)?;
+        let paths = PlatformPaths::detect()?;
         Ok(Self::new(
             os,
             form_factor,
@@ -313,6 +316,7 @@ mod tests {
             config_dir: PathBuf::from("cfg"),
             data_dir: PathBuf::from("data"),
             cache_dir: PathBuf::from("cache"),
+            home_dir: PathBuf::from("home"),
         };
         HeadlessHost::new(
             OsFamily::Android,

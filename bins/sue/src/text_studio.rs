@@ -1,13 +1,19 @@
 //! Text Studio: a code and prose editor over an arena `StringBuffer`. Every
-//! keystroke is an undoable transaction.
+//! keystroke is an undoable transaction; `save` writes the file back.
+
+use std::path::Path;
 
 use sue_core::txn::{DeleteText, InsertText};
 use sue_core::{AssetHandle, StringBuffer};
-use sue_platform::{CursorShape, InputEvent, Key, NamedKey, Point};
+use sue_io::meta;
+use sue_platform::{CursorShape, InputEvent, Key, NamedKey, Point, write_atomic};
 use sue_wm::{
     AppletCategory, AppletContext, AppletError, AppletId, AppletManifest, BoxStyle, FontFace,
-    InputResponse, MediaClass, Rect, SueApplet, Ui, World, Zone, widget_id,
+    InputResponse, MediaClass, PropertyGroup, Rect, ShellRequest, SueApplet, Ui, World, Zone,
+    widget_id,
 };
+
+use crate::util::file_name;
 
 /// The applet id.
 pub const ID: &str = "text-studio";
@@ -78,6 +84,22 @@ impl TextStudio {
             _ => return None,
         })
     }
+
+    fn write_to(&self, path: &Path, ctx: &mut AppletContext<'_>) -> Result<(), AppletError> {
+        let doc = self
+            .doc
+            .ok_or_else(|| AppletError::new("no document is open"))?;
+        let text = self.text(ctx.world).to_owned();
+        write_atomic(path, text.as_bytes()).map_err(|error| {
+            AppletError::new(format!("cannot save {}: {error}", path.display()))
+        })?;
+        ctx.world
+            .arena
+            .get_mut(doc)?
+            .set_meta(meta::SOURCE, path.display().to_string());
+        ctx.request(ShellRequest::Notify(format!("Saved {}", file_name(path))));
+        Ok(())
+    }
 }
 
 impl SueApplet for TextStudio {
@@ -88,9 +110,11 @@ impl SueApplet for TextStudio {
             category: AppletCategory::Studio,
             home_zone: Zone::CenterStage,
             uses_timeline: false,
-            summary: "Edit text and code with full undo: the seed of the IDE.".to_owned(),
+            summary: "Write and edit text and code with line numbers, full undo and save. Opens any UTF-8 file."
+                .to_owned(),
             opens: vec![MediaClass::Text],
-            accepts_drops: false,
+            icon: "\u{1F4C4}".to_owned(),
+            singleton: false,
         }
     }
 
@@ -112,9 +136,83 @@ impl SueApplet for TextStudio {
         Ok(())
     }
 
+    fn command(&mut self, name: &str, ctx: &mut AppletContext<'_>) -> Result<bool, AppletError> {
+        if let Some(path) = name.strip_prefix("save_as:") {
+            self.write_to(Path::new(path), ctx)?;
+            return Ok(true);
+        }
+        if name != "save" {
+            return Ok(false);
+        }
+        let source = self
+            .doc
+            .and_then(|doc| ctx.arena().get(doc).ok())
+            .and_then(|entity| entity.meta(meta::SOURCE))
+            .map(str::to_owned);
+        match source {
+            Some(path) => self.write_to(Path::new(&path), ctx)?,
+            // No file yet: the engine asks where to save it.
+            None => ctx.request(ShellRequest::Command("file.save_as".to_owned())),
+        }
+        Ok(true)
+    }
+
     fn title(&self, world: &World) -> Option<String> {
-        let entity = world.arena.get(self.doc?).ok()?;
-        Some(format!("Text Studio — {}", entity.name()))
+        Some(world.arena.get(self.doc?).ok()?.name().to_owned())
+    }
+
+    fn inspect(&self, world: &World) -> Vec<PropertyGroup> {
+        let Some(entity) = self.doc.and_then(|doc| world.arena.get(doc).ok()) else {
+            return Vec::new();
+        };
+        let text = self.text(world);
+        let starts = line_starts(text);
+        let (line, column) = locate(&starts, floor_boundary(text, self.caret));
+        let column = text[starts[line]..starts[line] + column].chars().count();
+        let endings = if text.contains("\r\n") {
+            "CRLF (Windows)"
+        } else if text.contains('\n') {
+            "LF (Unix)"
+        } else {
+            "None yet"
+        };
+        vec![
+            PropertyGroup::new(
+                "Document",
+                [
+                    ("Name", entity.name().to_owned()),
+                    (
+                        "File",
+                        entity
+                            .meta(meta::SOURCE)
+                            .unwrap_or("Not saved yet")
+                            .to_owned(),
+                    ),
+                    (
+                        "Format",
+                        entity.meta(meta::FORMAT).unwrap_or("Text").to_owned(),
+                    ),
+                    ("Encoding", "UTF-8".to_owned()),
+                    ("Line endings", endings.to_owned()),
+                ],
+            ),
+            PropertyGroup::new(
+                "Counts",
+                [
+                    ("Characters", text.chars().count().to_string()),
+                    ("Words", text.split_whitespace().count().to_string()),
+                    ("Lines", starts.len().to_string()),
+                    ("Bytes", text.len().to_string()),
+                ],
+            ),
+            PropertyGroup::new(
+                "Caret",
+                [
+                    ("Line", (line + 1).to_string()),
+                    ("Column", (column + 1).to_string()),
+                ],
+            ),
+        ]
     }
 
     fn handle_input(
@@ -150,6 +248,10 @@ impl SueApplet for TextStudio {
                 ctx.edit_arena(InsertText::new(doc, caret, "\n"))?;
                 self.caret = caret + 1;
             }
+            Key::Named(NamedKey::Tab) => {
+                ctx.edit_arena(InsertText::new(doc, caret, "    "))?;
+                self.caret = caret + 4;
+            }
             _ => match &key.text {
                 Some(typed) if !typed.is_empty() && !typed.chars().any(char::is_control) => {
                     let length = typed.len();
@@ -164,64 +266,70 @@ impl SueApplet for TextStudio {
 
     fn draw(&mut self, ui: &mut Ui<'_>, area: Rect, ctx: &mut AppletContext<'_>) {
         let theme = ui.theme;
+        let pad = theme.padding;
         let text = self.text(ctx.world);
         self.caret = floor_boundary(text, self.caret);
         let size = theme.mono_size;
         let line = ui.fonts.line_height(FontFace::Mono, size);
         let starts = line_starts(text);
         let digits = starts.len().to_string().len().max(3);
-        let gutter =
-            ui.fonts.measure(FontFace::Mono, size, &"0".repeat(digits)) + theme.padding() * 2.0;
+        let gutter = ui.fonts.measure(FontFace::Mono, size, &"0".repeat(digits)) + pad * 2.0;
+        let page = Rect::new(
+            area.x,
+            area.y + pad / 2.0,
+            area.width,
+            area.height - pad / 2.0,
+        );
         let content_height = starts.len() as f32 * line;
-        self.scroll = (self.scroll - ui.wheel_in(area))
-            .clamp(0.0, (content_height - area.height + line).max(0.0));
+        self.scroll = (self.scroll - ui.wheel_in(page))
+            .clamp(0.0, (content_height - page.height + line).max(0.0));
 
-        let response = ui.interact(widget_id("text-studio", "page"), area);
+        let response = ui.interact(widget_id("text-studio", "page"), page);
         if response.hovered {
             ui.set_cursor(CursorShape::Text);
         }
         if response.pressed
             && let Some(pointer) = ui.input.pointer
         {
-            let row = (((pointer.y - area.y + self.scroll) / line).floor().max(0.0) as usize)
+            let row = (((pointer.y - page.y + self.scroll) / line).floor().max(0.0) as usize)
                 .min(starts.len() - 1);
             let end = starts.get(row + 1).map_or(text.len(), |next| next - 1);
             let line_text = &text[starts[row]..end];
             let column =
                 ui.fonts
-                    .hit_index(FontFace::Mono, size, line_text, pointer.x - area.x - gutter);
+                    .hit_index(FontFace::Mono, size, line_text, pointer.x - page.x - gutter);
             self.caret = starts[row] + column;
         }
 
-        ui.canvas.draw_box(
-            Rect::new(area.x, area.y, gutter - theme.padding(), area.height),
-            BoxStyle::filled(theme.background.fade(0.6), theme.radius / 2.0),
+        ui.fill(
+            Rect::new(area.x, area.y, gutter - pad / 2.0, area.height),
+            theme.panel,
         );
+        ui.vline(area.x + gutter - pad / 2.0, area.y, area.height);
         let (caret_line, caret_column) = locate(&starts, self.caret);
         let first = (self.scroll / line).floor() as usize;
-        let visible = (area.height / line).ceil() as usize + 1;
+        let visible = (page.height / line).ceil() as usize + 1;
         for row in first..(first + visible).min(starts.len()) {
-            let y = area.y + row as f32 * line - self.scroll;
+            let y = page.y + row as f32 * line - self.scroll;
             let end = starts.get(row + 1).map_or(text.len(), |next| next - 1);
             let line_text = &text[starts[row]..end];
             if row == caret_line && ctx.focused {
                 ui.canvas.draw_box(
-                    Rect::new(
-                        area.x + gutter - theme.padding() / 2.0,
-                        y,
-                        area.width - gutter,
-                        line,
-                    ),
-                    BoxStyle::filled(theme.raised.fade(0.6), 0.0),
+                    Rect::new(area.x + gutter - pad / 2.0, y, area.width - gutter, line),
+                    BoxStyle::filled(theme.surface, 0.0),
                 );
             }
             let number = format!("{:>digits$}", row + 1);
             ui.text(
-                Point::new(area.x + theme.padding() / 2.0, y),
+                Point::new(area.x + pad / 2.0, y),
                 &number,
                 FontFace::Mono,
                 size,
-                theme.muted,
+                if row == caret_line {
+                    theme.text
+                } else {
+                    theme.muted
+                },
             );
             ui.canvas.push_clip(Rect::new(
                 area.x + gutter,
@@ -241,10 +349,7 @@ impl SueApplet for TextStudio {
                     + gutter
                     + ui.fonts
                         .caret_x(FontFace::Mono, size, line_text, caret_column);
-                ui.canvas.draw_box(
-                    Rect::new(x, y, 1.5, line),
-                    BoxStyle::filled(theme.accent, 0.0),
-                );
+                ui.caret(Rect::new(x, y, 1.5, line));
             }
             ui.canvas.pop_clip();
         }
@@ -289,5 +394,31 @@ mod tests {
         );
         assert_eq!(TextStudio::navigate(text, 0, named(NamedKey::End)), Some(6));
         assert_eq!(TextStudio::navigate(text, 0, Key::Character('x')), None);
+    }
+
+    #[test]
+    fn the_inspector_counts_words_lines_and_the_caret() {
+        let mut world = World::default();
+        let doc = world
+            .arena
+            .spawn("notes.md", StringBuffer::from("one two\nthree"));
+        let studio = TextStudio {
+            doc: Some(doc),
+            caret: 10,
+            scroll: 0.0,
+        };
+        let groups = studio.inspect(&world);
+        let value = |group: usize, name: &str| {
+            groups[group]
+                .properties
+                .iter()
+                .find(|property| property.name == name)
+                .map(|property| property.value.clone())
+        };
+        assert_eq!(value(1, "Words").as_deref(), Some("3"));
+        assert_eq!(value(1, "Lines").as_deref(), Some("2"));
+        assert_eq!(value(2, "Line").as_deref(), Some("2"));
+        assert_eq!(value(2, "Column").as_deref(), Some("3"));
+        assert_eq!(value(0, "File").as_deref(), Some("Not saved yet"));
     }
 }

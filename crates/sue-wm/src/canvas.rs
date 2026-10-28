@@ -146,12 +146,24 @@ pub enum DrawCommand {
     },
 }
 
-/// A frame's draw list with a clip stack.
+/// The two drawing layers. Everything on the overlay (menus, drop-downs,
+/// tooltips, dialogs) is drawn after, and hit-tested before, the base layer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Layer {
+    /// Panels, docks and applets.
+    #[default]
+    Base,
+    /// Pop-ups above everything else.
+    Overlay,
+}
+
+/// A frame's draw list: two layers, each with its own clip stack.
 #[derive(Clone, Debug)]
 pub struct Canvas {
     viewport: Rect,
-    clips: Vec<Rect>,
-    commands: Vec<DrawCommand>,
+    layer: Layer,
+    clips: [Vec<Rect>; 2],
+    commands: [Vec<DrawCommand>; 2],
 }
 
 impl Canvas {
@@ -160,8 +172,16 @@ impl Canvas {
     pub fn new(viewport: Rect) -> Self {
         Self {
             viewport,
-            clips: Vec::new(),
-            commands: Vec::new(),
+            layer: Layer::Base,
+            clips: [Vec::new(), Vec::new()],
+            commands: [Vec::new(), Vec::new()],
+        }
+    }
+
+    fn slot(&self) -> usize {
+        match self.layer {
+            Layer::Base => 0,
+            Layer::Overlay => 1,
         }
     }
 
@@ -171,28 +191,49 @@ impl Canvas {
         self.viewport
     }
 
+    /// The layer drawing goes to.
+    #[must_use]
+    pub fn layer(&self) -> Layer {
+        self.layer
+    }
+
+    /// Switches the layer drawing goes to. Each layer keeps its own clips.
+    pub fn set_layer(&mut self, layer: Layer) {
+        self.layer = layer;
+    }
+
     /// The active clip rectangle.
     #[must_use]
     pub fn clip(&self) -> Rect {
-        self.clips.last().copied().unwrap_or(self.viewport)
+        self.clips[self.slot()]
+            .last()
+            .copied()
+            .unwrap_or(self.viewport)
     }
 
     /// Restricts drawing to `rect` (intersected with the current clip).
     pub fn push_clip(&mut self, rect: Rect) {
         let clip = intersect(self.clip(), rect);
-        self.clips.push(clip);
+        let slot = self.slot();
+        self.clips[slot].push(clip);
     }
 
     /// Restores the previous clip.
     pub fn pop_clip(&mut self) {
-        self.clips.pop();
+        let slot = self.slot();
+        self.clips[slot].pop();
+    }
+
+    fn push(&mut self, command: DrawCommand) {
+        let slot = self.slot();
+        self.commands[slot].push(command);
     }
 
     /// Draws a box.
     pub fn draw_box(&mut self, rect: Rect, style: BoxStyle) {
         let clip = self.clip();
         if rect.overlaps(&clip) && (style.fill.a > 0.0 || style.border.a > 0.0) {
-            self.commands.push(DrawCommand::Box { rect, style, clip });
+            self.push(DrawCommand::Box { rect, style, clip });
         }
     }
 
@@ -207,7 +248,7 @@ impl Canvas {
     ) {
         let clip = self.clip();
         if !text.is_empty() && color.a > 0.0 && clip.width > 0.0 && clip.height > 0.0 {
-            self.commands.push(DrawCommand::Text {
+            self.push(DrawCommand::Text {
                 position,
                 text: text.to_owned(),
                 face,
@@ -222,7 +263,7 @@ impl Canvas {
     pub fn draw_image(&mut self, rect: Rect, image: AssetHandle, smooth: bool) {
         let clip = self.clip();
         if rect.overlaps(&clip) {
-            self.commands.push(DrawCommand::Image {
+            self.push(DrawCommand::Image {
                 rect,
                 image,
                 smooth,
@@ -231,10 +272,21 @@ impl Canvas {
         }
     }
 
-    /// Every command, in painter's order.
+    /// Every command in painter's order: the base layer, then the overlay.
+    pub fn commands(&self) -> impl Iterator<Item = &DrawCommand> + '_ {
+        self.commands[0].iter().chain(&self.commands[1])
+    }
+
+    /// Number of commands on both layers.
     #[must_use]
-    pub fn commands(&self) -> &[DrawCommand] {
-        &self.commands
+    pub fn len(&self) -> usize {
+        self.commands[0].len() + self.commands[1].len()
+    }
+
+    /// `true` if nothing was drawn.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -271,10 +323,7 @@ mod tests {
             Rect::new(0.0, 0.0, 5.0, 5.0),
             BoxStyle::filled(Color::from_rgba(Rgba::new(1, 2, 3, 255)), 0.0),
         );
-        assert!(
-            canvas.commands().is_empty(),
-            "boxes outside the clip are culled"
-        );
+        assert!(canvas.is_empty(), "boxes outside the clip are culled");
         canvas.draw_text(
             Point::new(45.0, 45.0),
             "Sue",
@@ -286,7 +335,31 @@ mod tests {
         canvas.pop_clip();
         assert_eq!(canvas.clip(), canvas.viewport());
         assert!(
-            matches!(&canvas.commands()[0], DrawCommand::Text { clip, .. } if clip.width == 20.0)
+            matches!(canvas.commands().next(), Some(DrawCommand::Text { clip, .. }) if clip.width == 20.0)
         );
+    }
+
+    #[test]
+    fn the_overlay_draws_last_with_its_own_clips() {
+        let mut canvas = Canvas::new(Rect::new(0.0, 0.0, 100.0, 100.0));
+        let color = Color::from_rgba(Rgba::new(1, 2, 3, 255));
+        canvas.push_clip(Rect::new(0.0, 0.0, 10.0, 10.0));
+        canvas.set_layer(Layer::Overlay);
+        assert_eq!(canvas.clip(), canvas.viewport(), "the overlay is unclipped");
+        canvas.draw_box(
+            Rect::new(50.0, 50.0, 5.0, 5.0),
+            BoxStyle::filled(color, 0.0),
+        );
+        canvas.set_layer(Layer::Base);
+        canvas.draw_box(Rect::new(1.0, 1.0, 5.0, 5.0), BoxStyle::filled(color, 0.0));
+        let order: Vec<f32> = canvas
+            .commands()
+            .map(|command| match command {
+                DrawCommand::Box { rect, .. } => rect.x,
+                _ => -1.0,
+            })
+            .collect();
+        assert_eq!(order, [1.0, 50.0]);
+        assert_eq!(canvas.len(), 2);
     }
 }

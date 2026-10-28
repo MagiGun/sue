@@ -1,6 +1,11 @@
 //! The native desktop host: one `winit` window with a `wgpu` surface, an
 //! event-driven loop that sleeps at 0 FPS, and translation of OS input into
 //! [`InputEvent`]s.
+//!
+//! Pacing is decided in one place: every time the loop is about to wait it
+//! asks the application for its [`FramePacing`]. While anything animates the
+//! loop requests the next redraw itself (paced by vsync, or by a timer for a
+//! lower frame-rate cap), so animations run to the end without any input.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -13,7 +18,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key as OsKey, ModifiersState, NamedKey as OsNamedKey};
 use winit::window::{CursorIcon, Window, WindowId};
 
-use crate::gpu::{GpuContext, WindowSurface};
+use crate::gpu::{GpuContext, GpuPreference, WindowSurface};
 use crate::{
     FileDrop, FormFactor, HardwareCapabilities, InputEvent, Key, KeyEvent, Modifiers, MouseButton,
     MouseEvent, NamedKey, OsFamily, PlatformError, PlatformHost, PlatformPaths, Point,
@@ -25,6 +30,10 @@ use crate::{
 pub enum FramePacing {
     /// Nothing changes: block until the next input event (0 FPS).
     Sleep,
+    /// Nothing moves, but something changes at this instant (a caret blink,
+    /// audio to feed, a message to clear): block until then, then call
+    /// [`DesktopApp::timer`].
+    WakeAt(Instant),
     /// Keep rendering, at most `target_hz` frames per second.
     Animate {
         /// Frame-rate cap.
@@ -60,6 +69,8 @@ pub struct DesktopOptions {
     pub height: f32,
     /// Pixels scrolled per wheel notch (from rice).
     pub wheel_line_px: f32,
+    /// Which GPU draws the window (from rice).
+    pub gpu: GpuPreference,
 }
 
 /// An application driven by the desktop host.
@@ -73,9 +84,25 @@ pub trait DesktopApp {
     /// Handles one input event. Returns `true` if the scene must be redrawn.
     fn input(&mut self, host: &mut DesktopHost, event: InputEvent) -> bool;
 
-    /// Draws one frame (see [`DesktopHost::acquire_frame`]) and says how to pace
-    /// the next ones.
-    fn frame(&mut self, host: &mut DesktopHost) -> FramePacing;
+    /// A [`FramePacing::WakeAt`] deadline passed. Returns `true` if the scene
+    /// must be redrawn.
+    fn timer(&mut self, host: &mut DesktopHost) -> bool;
+
+    /// Draws one frame (see [`DesktopHost::acquire_frame`]).
+    fn frame(&mut self, host: &mut DesktopHost);
+
+    /// How to pace what comes next. Asked every time the event loop is about
+    /// to wait, so it is the single source of truth for frame scheduling.
+    fn pacing(&mut self, now: Instant) -> FramePacing;
+
+    /// The user asked to close the window. Returns `true` to close now, or
+    /// `false` to keep the window open (for example to ask first).
+    fn close_requested(&mut self, host: &mut DesktopHost) -> bool;
+
+    /// The loop is about to end: save what must survive.
+    fn exit(&mut self, host: &mut DesktopHost) {
+        let _ = host;
+    }
 }
 
 /// The native desktop [`PlatformHost`]: a single main window with a GPU surface.
@@ -119,12 +146,16 @@ impl DesktopHost {
         let surface = instance
             .create_surface(Arc::clone(&window))
             .map_err(|error| PlatformError::Gpu(error.to_string()))?;
-        let gpu = pollster::block_on(GpuContext::with_instance(instance, Some(&surface)))?;
+        let gpu = pollster::block_on(GpuContext::with_instance(
+            instance,
+            Some(&surface),
+            options.gpu,
+        ))?;
         let size = window.inner_size();
         let surface = WindowSurface::new(surface, &gpu, size.width, size.height)?;
 
         let os = OsFamily::current();
-        let paths = PlatformPaths::resolve(os, |name| std::env::var(name).ok(), None)?;
+        let paths = PlatformPaths::detect()?;
         let refresh_hz = window
             .current_monitor()
             .and_then(|monitor| monitor.refresh_rate_millihertz())
@@ -389,7 +420,8 @@ pub fn run_desktop<A: DesktopApp>(app: A, options: DesktopOptions) -> Result<(),
         options,
         host: None,
         error: None,
-        next_frame: None,
+        last_frame: None,
+        exiting: false,
     };
     event_loop
         .run_app(&mut runner)
@@ -402,44 +434,100 @@ struct Runner<A> {
     options: DesktopOptions,
     host: Option<DesktopHost>,
     error: Option<PlatformError>,
-    next_frame: Option<Instant>,
+    last_frame: Option<Instant>,
+    exiting: bool,
 }
 
-impl<A: DesktopApp> Runner<A> {
-    fn schedule(&mut self, event_loop: &ActiveEventLoop, pacing: FramePacing) {
-        let Some(host) = self.host.as_ref() else {
-            return;
-        };
-        match pacing {
-            FramePacing::Sleep => {
-                self.next_frame = None;
-                event_loop.set_control_flow(ControlFlow::Wait);
-            }
-            FramePacing::Animate { target_hz }
-                if target_hz >= host.capabilities.display_refresh_hz =>
-            {
-                // Presenting with vsync paces these frames.
-                self.next_frame = None;
-                event_loop.set_control_flow(ControlFlow::Wait);
-                host.window.request_redraw();
-            }
-            FramePacing::Animate { target_hz } => {
-                let next =
-                    Instant::now() + Duration::from_secs_f64(1.0 / f64::from(target_hz.max(1)));
-                self.next_frame = Some(next);
-                event_loop.set_control_flow(ControlFlow::WaitUntil(next));
+/// What the loop does next for one pacing decision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Step {
+    /// Block until input.
+    Wait,
+    /// Block until input or this instant.
+    WaitUntil(Instant),
+    /// Request a redraw now, then block until it arrives.
+    Redraw,
+    /// Run the application's timer now.
+    Timer,
+}
+
+/// Turns a pacing decision into a loop step. Uncapped animation is paced by
+/// vsync (presenting blocks), so it redraws at once; a lower cap waits for
+/// the next frame slot after `last_frame`.
+fn plan_step(
+    pacing: FramePacing,
+    now: Instant,
+    last_frame: Option<Instant>,
+    display_hz: u32,
+) -> Step {
+    match pacing {
+        FramePacing::Sleep => Step::Wait,
+        FramePacing::WakeAt(at) if at <= now => Step::Timer,
+        FramePacing::WakeAt(at) => Step::WaitUntil(at),
+        FramePacing::Animate { target_hz } => {
+            let interval = Duration::from_secs_f64(1.0 / f64::from(target_hz.max(1)));
+            match last_frame.map(|last| last + interval) {
+                Some(next) if target_hz < display_hz && next > now => Step::WaitUntil(next),
+                _ => Step::Redraw,
             }
         }
     }
 }
 
+impl<A: DesktopApp> Runner<A> {
+    fn finish(&mut self, event_loop: &ActiveEventLoop) {
+        if !self.exiting {
+            self.exiting = true;
+            if let Some(host) = self.host.as_mut() {
+                self.app.exit(host);
+            }
+        }
+        event_loop.exit();
+    }
+}
+
 impl<A: DesktopApp> ApplicationHandler for Runner<A> {
-    fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
-        if let StartCause::ResumeTimeReached { .. } = cause
-            && let Some(host) = self.host.as_ref()
-        {
-            self.next_frame = None;
-            host.window.request_redraw();
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: StartCause) {}
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.exiting {
+            return;
+        }
+        let Some(host) = self.host.as_mut() else {
+            return;
+        };
+        let display_hz = host.capabilities.display_refresh_hz;
+        let mut step = plan_step(
+            self.app.pacing(Instant::now()),
+            Instant::now(),
+            self.last_frame,
+            display_hz,
+        );
+        if step == Step::Timer {
+            if self.app.timer(host) {
+                host.window.request_redraw();
+            }
+            step = match plan_step(
+                self.app.pacing(Instant::now()),
+                Instant::now(),
+                self.last_frame,
+                display_hz,
+            ) {
+                // A deadline that is still due would spin the loop: retry soon.
+                Step::Timer => Step::WaitUntil(Instant::now() + Duration::from_millis(1)),
+                other => other,
+            };
+        }
+        match step {
+            Step::Wait | Step::Timer => event_loop.set_control_flow(ControlFlow::Wait),
+            Step::WaitUntil(at) => event_loop.set_control_flow(ControlFlow::WaitUntil(at)),
+            Step::Redraw => {
+                host.window.request_redraw();
+                event_loop.set_control_flow(ControlFlow::Wait);
+            }
+        }
+        if host.exit_requested {
+            self.finish(event_loop);
         }
     }
 
@@ -471,20 +559,26 @@ impl<A: DesktopApp> ApplicationHandler for Runner<A> {
         _window_id: WindowId,
         event: OsWindowEvent,
     ) {
+        if self.exiting {
+            return;
+        }
         let Some(host) = self.host.as_mut() else {
             return;
         };
         let translated = match &event {
             OsWindowEvent::CloseRequested => {
-                event_loop.exit();
+                if self.app.close_requested(host) {
+                    self.finish(event_loop);
+                } else {
+                    host.window.request_redraw();
+                }
                 return;
             }
             OsWindowEvent::RedrawRequested => {
-                let pacing = self.app.frame(host);
-                let exit = host.exit_requested;
-                self.schedule(event_loop, pacing);
-                if exit {
-                    event_loop.exit();
+                self.last_frame = Some(Instant::now());
+                self.app.frame(host);
+                if host.exit_requested {
+                    self.finish(event_loop);
                 }
                 return;
             }
@@ -498,7 +592,7 @@ impl<A: DesktopApp> ApplicationHandler for Runner<A> {
             }
         }
         if host.exit_requested {
-            event_loop.exit();
+            self.finish(event_loop);
         }
     }
 }
@@ -579,6 +673,32 @@ mod tests {
             Some(Key::Named(NamedKey::F(11)))
         );
         assert_eq!(map_key(&OsKey::Named(OsNamedKey::CapsLock)), None);
+    }
+
+    #[test]
+    fn pacing_turns_into_loop_steps() {
+        let now = Instant::now();
+        assert_eq!(plan_step(FramePacing::Sleep, now, None, 60), Step::Wait);
+        let later = now + Duration::from_millis(500);
+        assert_eq!(
+            plan_step(FramePacing::WakeAt(later), now, None, 60),
+            Step::WaitUntil(later)
+        );
+        assert_eq!(
+            plan_step(FramePacing::WakeAt(now), now, None, 60),
+            Step::Timer
+        );
+        // Uncapped animation asks for the next frame at once: vsync paces it.
+        let uncapped = FramePacing::Animate { target_hz: 144 };
+        assert_eq!(plan_step(uncapped, now, Some(now), 144), Step::Redraw);
+        // A 30 Hz cap on a 144 Hz display waits for the next frame slot.
+        let capped = FramePacing::Animate { target_hz: 30 };
+        assert!(matches!(
+            plan_step(capped, now, Some(now), 144),
+            Step::WaitUntil(at) if at > now
+        ));
+        let slot = now + Duration::from_millis(40);
+        assert_eq!(plan_step(capped, slot, Some(now), 144), Step::Redraw);
     }
 
     #[test]

@@ -134,7 +134,7 @@ pub enum NamedKey {
     PageUp,
     /// Page Down.
     PageDown,
-    /// Function key `F1`–`F24`.
+    /// Function key `F1` to `F24`.
     F(u8),
 }
 

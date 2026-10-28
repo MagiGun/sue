@@ -324,6 +324,51 @@ impl<T> UndoStack<T> {
         self.nodes.get(node.0).map(|n| n.label.as_str())
     }
 
+    /// The parent of `node` (`None` for the root or an unknown node).
+    #[must_use]
+    pub fn parent(&self, node: NodeId) -> Option<NodeId> {
+        self.nodes.get(node.0).and_then(|n| n.parent)
+    }
+
+    /// Distance from the root to `node`.
+    #[must_use]
+    pub fn depth_of(&self, node: NodeId) -> Option<usize> {
+        self.nodes.get(node.0).map(|n| n.depth)
+    }
+
+    /// The child [`redo`](Self::redo) would follow from `node`.
+    #[must_use]
+    pub fn preferred_child(&self, node: NodeId) -> Option<NodeId> {
+        self.nodes.get(node.0).and_then(|n| n.preferred)
+    }
+
+    /// `true` if `node` lies on the path from the root to the cursor, so its
+    /// change is part of the current state.
+    #[must_use]
+    pub fn is_applied(&self, node: NodeId) -> bool {
+        let Some(depth) = self.depth_of(node) else {
+            return false;
+        };
+        let mut cursor = self.cursor;
+        while self.nodes[cursor.0].depth > depth {
+            cursor = self.parent_of(cursor);
+        }
+        cursor == node
+    }
+
+    /// Every node in depth-first order: each node is followed by its subtree,
+    /// children in creation order. The root comes first.
+    #[must_use]
+    pub fn walk(&self) -> Vec<NodeId> {
+        let mut order = Vec::with_capacity(self.nodes.len());
+        let mut stack = vec![NodeId::ROOT];
+        while let Some(node) = stack.pop() {
+            order.push(node);
+            stack.extend(self.nodes[node.0].children.iter().rev());
+        }
+        order
+    }
+
     /// Labels from the first transaction to the cursor.
     #[must_use]
     pub fn history(&self) -> Vec<&str> {
@@ -405,6 +450,23 @@ mod tests {
         assert_eq!(value, 0);
         stack.checkout(&mut value, new_future).unwrap();
         assert_eq!(value, 101);
+    }
+
+    #[test]
+    fn trees_walk_depth_first_and_know_what_is_applied() {
+        let mut value = 0;
+        let mut stack = UndoStack::new();
+        let first = stack.apply(&mut value, Add(1)).unwrap();
+        let old = stack.apply(&mut value, Add(10)).unwrap();
+        stack.undo(&mut value).unwrap();
+        let new = stack.apply(&mut value, Add(100)).unwrap();
+        assert_eq!(stack.walk(), vec![NodeId::ROOT, first, old, new]);
+        assert_eq!(stack.parent(new), Some(first));
+        assert_eq!(stack.depth_of(old), Some(2));
+        assert_eq!(stack.preferred_child(first), Some(new));
+        assert!(stack.is_applied(first) && stack.is_applied(new));
+        assert!(!stack.is_applied(old));
+        assert!(stack.is_applied(NodeId::ROOT));
     }
 
     #[test]

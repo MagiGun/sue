@@ -7,14 +7,17 @@ musicians, filmmakers, makers and coders. It has no technical jargon. When a ter
 needs explaining, it is explained the first time it appears.
 
 > **Where things stand:** This guide describes the experience Sue is built for.
-> Sue v1.0 "Faustian Enigma" already opens its own window, with the Hub and
-> pinning, Quick Notes, a Drop Zone, and Settings for every option, which you
-> can undo and which are saved as you go. Drop a JPEG XL picture, a text file
-> or any other file on the window, and Sue opens it in the right viewer. The
-> big studios, the file explorer, the media player, the web browser and the
-> timeline are added in the releases that follow. For now, Sue reads your
-> `.suerice` file only when it starts, so close Sue before you edit the file by
-> hand.
+> Sue v1.0 "Faustian Enigma" already opens its own window with the layout
+> below: Home with pinning; Files, Player, Convert and Notes on the left;
+> Inspector, Browser and History on the right; a Text Studio, an Image Viewer
+> and a Hex Inspector in the middle; and Settings with eight categories and a
+> search box. Everything you change can be undone and is saved as you go. Drop
+> a picture, a song, a text file or any other file on the window, and Sue opens
+> it in the right place. The big studios, the timeline, and a web browser built
+> into the window are added in the releases that follow; for now, web pages
+> open in your usual browser. Sue reads your `.suerice` file when it starts (or
+> when you press Reload in Settings), so close Sue or reload after you edit the
+> file by hand.
 
 ---
 
@@ -50,41 +53,57 @@ Nothing is exported, imported or converted between them.
 
 ## How the screen works
 
-Sue's window has four areas. Each one appears only when you need it.
+Sue's window looks like a studio workstation: panels sit edge to edge, with
+thin lines between them and no wasted space.
 
 ```text
-┌────────────┬──────────────────────────────┬──────────────┐
-│            │                              │              │
-│  LEFT      │        CENTER STAGE          │   RIGHT      │
-│  DOCK      │   (changes to fit your task) │   DOCK       │
-│            │                              │              │
-│  Files     │                              │  Browser     │
-│  Player    │                              │  Inspector   │
-│  Notes     ├──────────────────────────────┤  Settings    │
-│  Converter │  TIMELINE (only for audio,   │              │
-│            │  video and animation)        │              │
-└────────────┴──────────────────────────────┴──────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│ File Edit Workspace Tools Settings │ Home │ Notes.md x │ +     (gear) │
+├────┬────────────┬──────────────────────────────┬────────────┬────┤
+│ R  │ LEFT DOCK  │        CENTER STAGE          │ RIGHT DOCK │ R  │
+│ A  │ Files      │   (changes to fit your task) │ Inspector  │ A  │
+│ I  │ Player     │                              │ Browser    │ I  │
+│ L  │ Convert    ├──────────────────────────────┤ History    │ L  │
+│    │ Notes      │  TIMELINE (only for audio,   │            │    │
+│    │            │  video and animation)        │            │    │
+├────┴────────────┴──────────────────────────────┴────────────┴────┤
+│ Notes.md                       3 entities   Undo 4   Balanced   Idle │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
-### The Launchpad and Pin-to-Boot
+- The **header** along the top holds the menus, your **tabs** and the gear that
+  opens Settings. The small panel icons at its corners show or hide the docks.
+- The thin **rails** at the far left and far right hold one icon per tool.
+  Click an icon to show that tool in its dock; click it again to tuck the dock
+  away.
+- The **status bar** at the bottom says what you are working on, and shows
+  "Idle" whenever nothing is moving on screen.
 
-Every **new tab** opens to the **Hub**, a home screen that shows all your
-installed **Studios** (the big creative tools) and **Utilities** (the small
-everyday tools). Click one to open it.
+### Home and Pin-to-Boot
+
+The first tab is always **Home**. It shows all your installed **Studios** (the
+big creative tools) and **Inspectors** (viewers for one kind of file) as cards
+with a short description. Click one to open it in a new tab. A new tab (`+`)
+starts on Home too.
 
 Maybe you only ever use Sue as a CAD tool, or only as an MP3 player. Then
-**pin** that mode. From then on Sue opens straight into it when it starts and
-skips the Hub. Unpin it whenever you like.
+**pin** that mode with the "Pin as boot" switch on its card. From then on Sue
+opens straight into it when it starts. Unpin it whenever you like.
 
 ### Left Dock: your daily utilities
 
 The left side holds the tools you reach for all day:
 
-- **File Explorer**: browse, search and preview your files, including instant
-  previews of large images.
-- **Media Player**: play music and video while you work in any other mode.
-- **Quick Notes**: jot something down without leaving what you're doing.
-- **Drag-and-Drop Converter**: drop a file onto it and pick the format you want.
+- **Files**: browse your folders and open any file with one click. Sue looks
+  at what is inside the file and opens it in the right place.
+- **Player**: play music (MP3, FLAC, WAV, Ogg, M4A) while you work in any other
+  mode, with a playlist, a position bar and a volume slider.
+- **Convert**: turn a picture into JPEG XL or PNG, or a song into WAV. The new
+  file is saved next to the original.
+- **Notes**: jot something down without leaving what you're doing. Notes save
+  themselves.
+
+You can also drop a file anywhere on the window to open it.
 
 ### Center Stage: the workspace that changes shape
 
@@ -98,11 +117,21 @@ that moves through time: audio, video or animation. Then it slides up on its own
 
 The right side keeps your references and controls nearby:
 
-- **Web Browser**: look things up without leaving Sue. Drag pictures, sounds or
-  code straight from a website into your project.
-- **Inspector**: shows the details of whatever you've selected (size, color,
-  length, settings) and lets you change them.
-- **Settings**: every option Sue has, in one place.
+- **Inspector**: shows the details of whatever is open in the middle: the
+  words and lines of a text, the size and colors of a picture, the numbers
+  under the cursor of the Hex Inspector.
+- **Browser**: look things up. Type an address or pick a bookmark; for now
+  pages open in your usual web browser.
+- **History**: every change you made, as a list you can click to go back (or
+  forward again) to any moment.
+
+### Settings
+
+The gear in the header (or `Ctrl+,`) opens **Settings** as its own tab. A list
+of categories runs down the left (General, Appearance & Rice, Display &
+Graphics, Audio & DSP, Files & Codecs, Local AI, Packages & Updates, Keymaps),
+and the page on the right shows only that category. Start typing anywhere to
+search all of them.
 
 ---
 
@@ -156,11 +185,15 @@ All of it lives in a plain text file ending in **`.suerice`**. You can edit it i
 any text editor, but you never have to. Sue reads the file and builds the
 controls for it in **Settings**:
 
-- on/off options become **toggles**,
+- on/off options become **switches**,
 - numbers with a range become **sliders**,
-- colors become **color pickers**,
-- lists of choices become **drop-downs**,
-- shortcuts become **"press a key" recorders**.
+- colors become **color swatches** with their hex code,
+- short lists of choices become **side-by-side buttons**, longer ones
+  **drop-downs**,
+- shortcuts become **key caps**: click one and press the new keys.
+
+**Appearance & Rice** also offers ready-made themes (Graphite, Midnight and
+Daylight) that change every color at once, and one `Ctrl+Z` brings yours back.
 
 A line like this in your `.suerice` file:
 
@@ -169,9 +202,10 @@ gap = 8   # [0..64] Space between panels
 ```
 
 shows up in Settings as a slider from 0 to 64 labelled "Gap", with the
-tooltip "Space between panels". Move the slider and the file updates. Edit the
-file and the slider moves. You can share your `.suerice` file with friends or
-download other people's looks from the package manager.
+description "Space between panels" under it. Move the slider and the file
+updates. Edit the file and the slider moves the next time Sue reads it. You can
+share your `.suerice` file with friends or download other people's looks from
+the package manager.
 
 ---
 
@@ -184,6 +218,10 @@ Sue is built to be **light when it can be and powerful when it should be**:
 - On older or low-power machines, Sue skips animations and jumps straight to
   the end result, so it stays quick.
 - On phones in battery-saver mode, Sue lowers its frame rate to save power.
+- On computers with two graphics chips, Sue draws with the one your screen is
+  plugged into, so an idle window really stays idle. You can pick the other
+  chip under **Display & Graphics** in Settings; the change applies the next
+  time Sue starts.
 - On high-end machines, Sue uses all of it: smooth 240 Hz+ motion, spring
   animations, and multi-layer visual effects.
 

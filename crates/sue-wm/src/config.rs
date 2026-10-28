@@ -1,5 +1,7 @@
 //! The window manager's riceables (LAW 3) and the typed config read from them.
 
+use std::time::Duration;
+
 use sue_rice::{Keybind, RiceDeclaration, RiceError, RiceParameter, RiceSchema};
 
 use crate::{LayoutMetrics, SpringParams, WmError};
@@ -32,6 +34,7 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
         value: value.to_owned(),
         options: options.iter().map(|&option| option.to_owned()).collect(),
     };
+    let toggle = |value| RiceParameter::Bool { value };
     let profiles = [
         "auto",
         "high-refresh",
@@ -42,50 +45,116 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
     let declare = RiceDeclaration::new;
     vec![
         declare(
-            "profile.hardware",
-            choice("auto", &profiles),
-            "Frame pacing and shader budget",
-        ),
-        declare(
             "launchpad.boot_into",
             RiceParameter::Text {
                 value: "hub".to_owned(),
             },
-            "Applet id to open at launch, or \"hub\" for the Launchpad",
+            "What Sue opens at launch: \"hub\" for Home, or an applet id",
         ),
         declare(
             "launchpad.card_width",
-            int(240, 160, 480),
-            "Width of Launchpad cards (px)",
+            int(300, 280, 560),
+            "Narrowest a Home card may get (px)",
         ),
         declare(
-            "layout.gap",
-            int(8, 0, 64),
-            "Space between tiled panes (px)",
+            "profile.hardware",
+            choice("auto", &profiles),
+            "Frame pacing and effect budget",
+        ),
+        declare(
+            "display.frame_rate_cap",
+            int(0, 0, 360),
+            "Highest frame rate while animating (0 follows the hardware profile)",
+        ),
+        declare(
+            "display.ui_scale",
+            float(1.0, 0.75, 2.0),
+            "Interface scale on top of the system scale",
+        ),
+        declare(
+            "display.gpu_preference",
+            choice("auto", &["auto", "integrated", "discrete"]),
+            "GPU that draws the window; auto uses the display's GPU (applies after a restart)",
+        ),
+        declare(
+            "motion.instant_transitions",
+            toggle(false),
+            "Snap panels in 0 ms instead of animating them",
+        ),
+        declare(
+            "motion.animation_speed",
+            float(1.0, 0.25, 4.0),
+            "Speed of panel animations",
+        ),
+        declare(
+            "motion.spring_stiffness",
+            float(170.0, 10.0, 1000.0),
+            "Spring constant k",
+        ),
+        declare(
+            "motion.spring_damping",
+            float(26.0, 0.0, 120.0),
+            "Damping coefficient c",
+        ),
+        declare(
+            "motion.settle_grace_ms",
+            int(300, 0, 2000),
+            "Keep drawing this long after the last change (ms)",
+        ),
+        declare(
+            "motion.caret_blink_ms",
+            int(530, 0, 2000),
+            "Caret blink interval (0 keeps the caret solid)",
+        ),
+        declare(
+            "motion.message_seconds",
+            int(4, 1, 30),
+            "How long messages stay in the status bar (s)",
+        ),
+        declare("layout.gap", int(0, 0, 32), "Space between panels (px)"),
+        declare(
+            "layout.padding",
+            int(8, 2, 24),
+            "Space inside panels and controls (px)",
         ),
         declare(
             "layout.border_width",
-            int(1, 0, 16),
-            "Pane border thickness (px)",
+            int(1, 0, 4),
+            "Hairline divider thickness (px)",
         ),
         declare(
-            "layout.corner_radius",
-            float(8.0, 0.0, 24.0),
-            "Pane corner rounding (px)",
+            "layout.panel_radius",
+            float(0.0, 0.0, 16.0),
+            "Corner rounding of structural panels (px)",
         ),
         declare(
-            "layout.top_bar_height",
-            int(40, 28, 96),
-            "Height of the top bar (px)",
+            "layout.control_radius",
+            float(3.0, 0.0, 12.0),
+            "Corner rounding of buttons, fields and cards (px)",
+        ),
+        declare(
+            "layout.header_height",
+            int(30, 24, 64),
+            "Height of the header bar (px)",
+        ),
+        declare(
+            "layout.status_bar_height",
+            int(22, 16, 48),
+            "Height of the status bar (px)",
+        ),
+        declare(
+            "layout.rail_width",
+            int(38, 28, 72),
+            "Width of the activity rails (px)",
         ),
         declare(
             "layout.left_dock_width",
-            int(300, 160, 640),
+            int(260, 160, 640),
             "Left dock width (px)",
         ),
         declare(
             "layout.right_dock_width",
-            int(340, 160, 720),
+            int(280, 160, 720),
             "Right dock width (px)",
         ),
         declare(
@@ -109,63 +178,88 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
             "Tallest the phone timeline sheet may peek, as a share of the screen",
         ),
         declare(
-            "motion.instant_transitions",
-            RiceParameter::Bool { value: false },
-            "Snap panels in 0 ms instead of animating them",
+            "layout.tab_accent",
+            int(2, 0, 6),
+            "Accent line above the active tab (px)",
         ),
         declare(
-            "motion.spring_stiffness",
-            float(170.0, 10.0, 1000.0),
-            "Spring constant k",
+            "layout.slider_track",
+            int(4, 2, 12),
+            "Slider track thickness (px)",
         ),
         declare(
-            "motion.spring_damping",
-            float(26.0, 0.0, 120.0),
-            "Damping coefficient c",
+            "layout.settings_sidebar_width",
+            int(190, 140, 360),
+            "Width of the category list in Settings (px)",
+        ),
+        declare("colors.base", color("#121212"), "Window and canvas base"),
+        declare(
+            "colors.panel",
+            color("#181818"),
+            "Dock and panel background",
         ),
         declare(
-            "colors.background",
-            color("#14111a"),
-            "Workspace background",
+            "colors.chrome",
+            color("#141414"),
+            "Activity rails, header and status bar",
         ),
-        declare("colors.surface", color("#1f1a26"), "Pane surface"),
         declare(
-            "colors.raised",
-            color("#2a2333"),
-            "Cards, fields and buttons",
+            "colors.surface",
+            color("#222222"),
+            "Cards, controls and inputs",
         ),
-        declare("colors.hover", color("#382e44"), "Hovered controls"),
+        declare("colors.hover", color("#2a2a2a"), "Hovered controls"),
+        declare(
+            "colors.border",
+            color("#2b2b2b"),
+            "Hairline borders and dividers",
+        ),
+        declare("colors.text", color("#e4e4e4"), "Primary text"),
+        declare("colors.muted", color("#888888"), "Secondary text"),
         declare(
             "colors.accent",
-            color("#c9a227"),
-            "Focus ring and highlights",
+            color("#3b82f6"),
+            "Focus, selection and the active tab",
         ),
         declare(
             "colors.on_accent",
-            color("#14111a"),
+            color("#ffffff"),
             "Text on accent surfaces",
         ),
         declare(
             "colors.alert",
-            color("#a4243b"),
+            color("#e5484d"),
             "Errors and destructive actions",
         ),
-        declare("colors.text", color("#e6dfd3"), "Primary text"),
         declare(
-            "colors.muted",
-            color("#8f8599"),
-            "Secondary text and outlines",
+            "colors.success",
+            color("#3fb950"),
+            "Healthy and finished states",
         ),
         declare(
             "typography.ui_font",
             choice("Ubuntu Light", &["Ubuntu Light", "Hack"]),
-            "UI font (bundled)",
+            "Interface font (bundled)",
         ),
-        declare("typography.ui_size", int(14, 8, 32), "UI font size (px)"),
+        declare(
+            "typography.ui_size",
+            int(13, 8, 32),
+            "Interface text size (px)",
+        ),
+        declare(
+            "typography.small_size",
+            int(11, 8, 24),
+            "Caption and status bar text size (px)",
+        ),
+        declare(
+            "typography.heading_size",
+            int(20, 12, 48),
+            "Page title size (px)",
+        ),
         declare(
             "typography.mono_size",
-            int(13, 8, 32),
-            "Code and hex font size (px)",
+            int(12, 8, 32),
+            "Code and hex text size (px)",
         ),
         declare(
             "input.wheel_line_px",
@@ -174,19 +268,27 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
         ),
         declare(
             "keys.toggle_left_dock",
-            chord("Super+B"),
+            chord("Ctrl+B"),
             "Show or hide the left dock",
         ),
         declare(
             "keys.toggle_right_dock",
-            chord("Super+N"),
+            chord("Ctrl+Alt+B"),
             "Show or hide the right dock",
         ),
+        declare("keys.new_tab", chord("Ctrl+T"), "Open a new tab"),
+        declare("keys.close_tab", chord("Ctrl+W"), "Close the active tab"),
+        declare("keys.next_tab", chord("Ctrl+Tab"), "Switch to the next tab"),
         declare(
-            "keys.new_tab",
-            chord("Ctrl+T"),
-            "Open a new tab on the Launchpad",
+            "keys.previous_tab",
+            chord("Ctrl+Shift+Tab"),
+            "Switch to the previous tab",
         ),
+        declare("keys.home", chord("Ctrl+Shift+H"), "Go to the Home tab"),
+        declare("keys.open_settings", chord("Ctrl+,"), "Open Settings"),
+        declare("keys.open_file", chord("Ctrl+O"), "Open a file"),
+        declare("keys.save", chord("Ctrl+S"), "Save the active document"),
+        declare("keys.quit", chord("Ctrl+Q"), "Quit Sue"),
         declare("keys.undo", chord("Ctrl+Z"), "Undo the last change"),
         declare("keys.redo", chord("Ctrl+Shift+Z"), "Redo"),
         declare("keys.redo_alt", chord("Ctrl+Y"), "Redo (alternative)"),
@@ -209,8 +311,24 @@ pub struct Keymap {
     pub toggle_left_dock: Keybind,
     /// Show or hide the right dock.
     pub toggle_right_dock: Keybind,
-    /// Open a new tab on the Hub.
+    /// Open a new tab.
     pub new_tab: Keybind,
+    /// Close the active tab.
+    pub close_tab: Keybind,
+    /// Next tab.
+    pub next_tab: Keybind,
+    /// Previous tab.
+    pub previous_tab: Keybind,
+    /// The Home tab.
+    pub home: Keybind,
+    /// Open Settings.
+    pub open_settings: Keybind,
+    /// Open a file.
+    pub open_file: Keybind,
+    /// Save the active document.
+    pub save: Keybind,
+    /// Quit.
+    pub quit: Keybind,
     /// Undo.
     pub undo: Keybind,
     /// Redo.
@@ -228,6 +346,18 @@ pub struct WmConfig {
     pub spring: SpringParams,
     /// `true` turns every spring into an instant snap.
     pub instant_transitions: bool,
+    /// Multiplies the time springs see each frame.
+    pub animation_speed: f32,
+    /// How long frames keep coming after the last change.
+    pub settle_grace: Duration,
+    /// Caret blink half-period; `None` keeps carets solid.
+    pub caret_blink: Option<Duration>,
+    /// How long status messages stay.
+    pub message_duration: Duration,
+    /// Highest animation frame rate; `0` follows the hardware profile.
+    pub frame_rate_cap: u32,
+    /// Interface scale on top of the system scale.
+    pub ui_scale: f32,
     /// Global shortcuts.
     pub keymap: Keymap,
     /// `profile.hardware`: `"auto"` or a profile name.
@@ -250,6 +380,12 @@ impl WmConfig {
                 .map(|value| value as f32)
                 .ok_or(WmError::MissingRice(path))
         };
+        let millis = |path: &'static str| {
+            schema
+                .get_i64(path)
+                .map(|value| Duration::from_millis(u64::try_from(value).unwrap_or(0)))
+                .ok_or(WmError::MissingRice(path))
+        };
         let keybind =
             |path: &'static str| schema.get_keybind(path).ok_or(WmError::MissingRice(path));
         let text = |path: &'static str| {
@@ -258,9 +394,13 @@ impl WmConfig {
                 .map(str::to_owned)
                 .ok_or(WmError::MissingRice(path))
         };
+        let blink = millis("motion.caret_blink_ms")?;
         Ok(Self {
             metrics: LayoutMetrics {
                 gap: number("layout.gap")?,
+                header_height: number("layout.header_height")?,
+                status_bar_height: number("layout.status_bar_height")?,
+                rail_width: number("layout.rail_width")?,
                 left_dock_width: number("layout.left_dock_width")?,
                 right_dock_width: number("layout.right_dock_width")?,
                 timeline_height: number("layout.timeline_height")?,
@@ -276,10 +416,34 @@ impl WmConfig {
             instant_transitions: schema
                 .get_bool("motion.instant_transitions")
                 .ok_or(WmError::MissingRice("motion.instant_transitions"))?,
+            animation_speed: number("motion.animation_speed")?,
+            settle_grace: millis("motion.settle_grace_ms")?,
+            caret_blink: (!blink.is_zero()).then_some(blink),
+            message_duration: Duration::from_secs(
+                u64::try_from(
+                    schema
+                        .get_i64("motion.message_seconds")
+                        .ok_or(WmError::MissingRice("motion.message_seconds"))?,
+                )
+                .unwrap_or(1),
+            ),
+            frame_rate_cap: schema
+                .get_i64("display.frame_rate_cap")
+                .and_then(|cap| u32::try_from(cap).ok())
+                .ok_or(WmError::MissingRice("display.frame_rate_cap"))?,
+            ui_scale: number("display.ui_scale")?,
             keymap: Keymap {
                 toggle_left_dock: keybind("keys.toggle_left_dock")?,
                 toggle_right_dock: keybind("keys.toggle_right_dock")?,
                 new_tab: keybind("keys.new_tab")?,
+                close_tab: keybind("keys.close_tab")?,
+                next_tab: keybind("keys.next_tab")?,
+                previous_tab: keybind("keys.previous_tab")?,
+                home: keybind("keys.home")?,
+                open_settings: keybind("keys.open_settings")?,
+                open_file: keybind("keys.open_file")?,
+                save: keybind("keys.save")?,
+                quit: keybind("keys.quit")?,
                 undo: keybind("keys.undo")?,
                 redo: keybind("keys.redo")?,
                 redo_alt: keybind("keys.redo_alt")?,
@@ -308,6 +472,14 @@ mod tests {
                 declaration.path
             );
             assert_eq!(
+                schema
+                    .entry(&declaration.path)
+                    .and_then(|entry| entry.description()),
+                Some(declaration.description.as_str()),
+                "{} has a different description",
+                declaration.path
+            );
+            assert_eq!(
                 schema.register(&declaration),
                 Ok(RegisterOutcome::KeptUserValue)
             );
@@ -321,10 +493,13 @@ mod tests {
         let mut schema = RiceSchema::new();
         register_rice(&mut schema).unwrap();
         let config = WmConfig::from_rice(&schema).unwrap();
-        assert_eq!(config.metrics.gap, 8.0);
+        assert_eq!(config.metrics.gap, 0.0);
+        assert_eq!(config.metrics.rail_width, 38.0);
         assert_eq!(config.spring.stiffness, 170.0);
         assert_eq!(config.keymap.redo.to_string(), "Ctrl+Shift+Z");
-        assert_eq!(config.keymap.redo_alt.to_string(), "Ctrl+Y");
+        assert_eq!(config.keymap.open_settings.to_string(), "Ctrl+,");
+        assert_eq!(config.settle_grace, Duration::from_millis(300));
+        assert_eq!(config.caret_blink, Some(Duration::from_millis(530)));
         assert_eq!(config.boot_into, "hub");
         assert!(!config.instant_transitions);
         assert!(matches!(

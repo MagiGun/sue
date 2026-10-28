@@ -1,4 +1,4 @@
-# HUMANZ — Sue Systems Specification
+# HUMANZ: Sue Systems Specification
 
 > "A jack of all trades is a master of none, but oftentimes better than a master of one."
 
@@ -9,7 +9,8 @@ are in [`AGENTS.md`](AGENTS.md).
 
 The words **MUST**, **MUST NOT**, **SHOULD** and **MAY** are used as in RFC 2119.
 Type names in `code` refer to real items in the workspace. §7 maps every part of
-this specification to its implementation status.
+this specification to its implementation status. Like every file in the
+repository, this one contains no em dashes, en dashes or middle dots (LAW 8).
 
 ---
 
@@ -33,18 +34,19 @@ bins/sue      ──► every crate below
 sue-wm        ──► sue-rice, sue-platform, sue-core   + wgpu, fontdue, epaint_default_fonts
 sue-ai        ──► sue-platform, sue-core
 sue-rice      ──► sue-platform, sue-core
-sue-io        ──► sue-core                            + jxl-oxide, zune-jpegxl
+sue-io        ──► sue-core                            + jxl-oxide, zune-jpegxl, zune-png, zune-jpeg, symphonia
 sue-pkg       ──► sha2, ed25519-dalek, semver         (no engine crates)
 sue-core      ──► nothing                              (leaf)
-sue-platform  ──► winit, wgpu, pollster                (no engine crates)
+sue-platform  ──► winit, wgpu, pollster, cpal, audio_thread_priority, rfd, open   (no engine crates)
 ```
 
 The graph is acyclic by construction. `sue-core` and `sue-platform` are leaves
 among the engine crates, so the data kernel never depends on an operating
 system, and the OS layer never depends on the data model. `winit` (windows and
-OS input) is used only by `sue-platform`. `wgpu` is a portable graphics API: the
-platform host owns the device and window surface, and `sue-wm` records draw
-calls with it. `unsafe` code is forbidden workspace-wide
+OS input), `cpal` (audio devices), `rfd` (native dialogs) and `open` (the
+system browser and file manager) are used only by `sue-platform`. `wgpu` is a
+portable graphics API: the platform host owns the device and window surface,
+and `sue-wm` records draw calls with it. `unsafe` code is forbidden workspace-wide
 (`[workspace.lints] rust.unsafe_code = "forbid"`). The `wgpu` window surface is
 created through its safe API, so `sue-platform` keeps the lint too. Native FFI
 added to `sue-platform` later MUST relax it for that crate only.
@@ -115,13 +117,13 @@ of each kind. Each kind is a dense, typed buffer:
 
 | `ComponentKind` | Payload | Layout | Zero-copy `f32` tensor view |
 | --- | --- | --- | --- |
-| `StringBuffer` | UTF-8 text | `String` | — |
+| `StringBuffer` | UTF-8 text | `String` | n/a |
 | `PCMFloat1D` | Interleaved audio | `sample_rate: u32`, `channels: u16`, `Vec<f32>` | samples |
 | `VectorSpline2D` | Cubic Bézier chain | `Vec<[f32; 2]>` with `3n + 1` knots, `closed` | knots, flattened |
 | `RasterTile2D` | Pixel tile | `width`, `height`, `PixelFormat::{Gray8, Rgba8, RgbaF32}` | `RgbaF32` pixels |
 | `MeshBuffer3D` | Indexed triangles | `Vec<[f32; 3]>` positions, `Vec<u32>` indices | positions, flattened |
-| `TimeSpan` | Interval on the global clock | `start`, `duration` in flicks (§1.6) | — |
-| `ASTNode` | Syntax / scene-graph node | `kind`, byte span, `Vec<AssetHandle>` children | — |
+| `TimeSpan` | Interval on the global clock | `start`, `duration` in flicks (§1.6) | n/a |
+| `ASTNode` | Syntax / scene-graph node | `kind`, byte span, `Vec<AssetHandle>` children | n/a |
 
 Constructors validate their invariants (for example, sample count divisible by
 channel count, or triangle indices in bounds), so a component that exists is
@@ -303,10 +305,15 @@ else:           xsize = ysize * {1/1, 12/10, 4/3, 3/2, 16/9, 5/4, 2/1}[ratio - 1
 - **Lossless JPEG recompression** (`transcode_jpeg_lossless`) still returns
   `JxlError::CodecUnavailable`: no pure-Rust JPEG→JXL transcoder exists yet.
 
-`sue_io::ingest_bytes` uses the pipeline for drag and drop: a JPEG XL decodes into
-an `Rgba8` raster entity; text becomes a `StringBuffer`; anything else, including
-media Sue has no decoder for yet, becomes a `Gray8` byte-map raster. Each entity
-carries metadata (`bytes`, `route`, `format`, size, decode time and entropy).
+`sue_io::ingest_bytes` turns any opened or dropped file into one entity, routed
+by content: JPEG XL decodes through the pipeline, PNG and JPEG through
+`zune-png` / `zune-jpeg`, all into `Rgba8` rasters; MP3, FLAC, WAV, Ogg Vorbis
+and AAC / M4A decode through `symphonia` into `PCMFloat1D`; text becomes a
+`StringBuffer`; anything else, including media Sue has no decoder for yet,
+becomes a `Gray8` byte-map raster. Each entity carries metadata (`bytes`,
+`route`, `format`, size, decode time, colour and depth, codec and tags,
+entropy, and the source path). For the converter, `encode_png` writes
+compressed PNG and `encode_wav` writes 16-bit PCM WAV.
 
 ### 2.3 Tile cache
 
@@ -326,16 +333,23 @@ diagnostics overlay. The cache stores opaque bytes, and by LAW 6 those bytes are
 ### 3.1 Platform isolation
 
 `sue-platform` is the **only** crate allowed to touch OS-specific APIs
-(`windows-sys`, `libc`, `jni`, `objc`, …). Everything above it talks to the
-`PlatformHost` trait:
+(`windows-sys`, `libc`, `jni`, `objc`, and so on). Everything above it talks to
+the `PlatformHost` trait and the portable services next to it:
 
 | `PlatformHost` method | Abstracts |
 | --- | --- |
 | `os`, `form_factor` | `OsFamily::{Windows, Linux, MacOs, Android, Ios, Other}`, `FormFactor` |
 | `capabilities` | `HardwareCapabilities`: logical cores, refresh rate, graphics API, GPU tier and vendor, memory, power source, touch, stylus |
-| `paths` | `PlatformPaths`: config, data and cache roots, plus derived `rice_dir`, `packages_dir`, `models_dir` |
+| `paths` | `PlatformPaths`: config, data, cache and home folders, plus derived `rice_dir`, `packages_dir`, `models_dir`, `notes_dir` |
 | `create_surface`, `resize_surface`, `destroy_surface`, `surface` | Window / swap-chain surfaces with logical size, scale factor and safe-area insets |
 | `poll_events` | Drains `InputEvent`s |
+
+| Service | What it does |
+| --- | --- |
+| `AudioOutput` / `AudioSink` | A `cpal` output stream fed from a lock-free ring (§3.5); `NullAudio` is a device-free clock for tests |
+| `list_dir`, `write_atomic` | Sorted folder listings for the Files panel; crash-safe writes (temporary file, sync, rename) |
+| `open_url`, `reveal_folder` | The system browser (only `http` and `https`, validated by `web_url`) and file manager |
+| `pick_open_file`, `pick_save_file` | Native open and save dialogs (`rfd`) |
 
 Path resolution is a pure function of the OS and an injected environment lookup,
 so it can be tested without touching the real environment:
@@ -355,59 +369,89 @@ Two hosts implement the trait:
 
 - `HeadlessHost` has virtual surfaces and an injectable input queue. CI, the
   self-check, offscreen snapshots and remote scripting use it.
-- `DesktopHost` opens one native window (`winit` 0.30) with a `wgpu` 30 surface,
-  sRGB where available and presented with vsync. It fills `HardwareCapabilities`
-  from the adapter (API, vendor, tier; a GL-only driver counts as legacy) and the
-  monitor's refresh rate. It translates OS events into `InputEvent`s: mouse,
-  wheel (`input.wheel_line_px` per notch), keyboard with text, window resize and
-  focus, and file drag and drop (`FileDrop::{Hovered, Cancelled, Dropped}`).
-  `create_surface` reports `Unsupported`, because this host drives a single
-  main window.
+- `DesktopHost` opens one native window titled `Sue` (`winit` 0.30) with a
+  `wgpu` 30 surface, sRGB where available and presented with vsync. It fills
+  `HardwareCapabilities` from the adapter and the monitor's refresh rate, and
+  translates OS events into `InputEvent`s: mouse, wheel (`input.wheel_line_px`
+  per notch), keyboard with text, resize and focus, and file drag and drop.
 
-`run_desktop(app, options)` drives a `DesktopApp` from the `winit` event loop.
-Input events reach the app, which answers whether to redraw. Each frame returns
-a `FramePacing`: `Sleep` puts the loop into `ControlFlow::Wait` (no frames, no
-CPU), and `Animate { target_hz }` either chains redraws behind vsync or
-schedules the next one with `ControlFlow::WaitUntil` when the profile caps the
-rate below the display's. Measured on the reference machine (AMD Radeon,
-Vulkan), an idle window drew one frame and used no CPU time over ten seconds.
+**GPU choice.** The window draws on the GPU picked by `display.gpu_preference`
+(`GpuPreference`). `auto`, the default, uses the GPU that drives the display: on
+Windows the adapter DXGI lists first (which also follows the per-app choice in
+the Windows graphics settings), matched by vendor and device id through the
+first backend `wgpu` itself would choose; elsewhere the integrated GPU, which
+drives the screen on most laptops. `integrated` and `discrete` map to `wgpu`'s
+`LowPower` and `HighPerformance`. The rule decides the idle cost: when one GPU
+draws and the monitor hangs off another, Windows copies every presented frame
+between adapters, and that path kept a time-critical driver thread spinning at
+a full core while Sue slept at 0 FPS (measured with an AMD integrated GPU
+drawing for a monitor on an NVIDIA card; on the display GPU the same idle
+window used 0.3% of one core). The value is read from the rice file before the
+window opens, so a change applies after a restart. Offscreen rendering
+(snapshots, tests) uses the integrated GPU, since nothing is presented.
+
+**Frame pacing (the event loop).** `run_desktop(app, options)` drives a
+`DesktopApp`. Pacing is decided in one place: every time the loop is about to
+wait (`about_to_wait`), it asks the application for a `FramePacing`:
+
+| `FramePacing` | Loop step |
+| --- | --- |
+| `Sleep` | `ControlFlow::Wait`: no frames and no CPU until input arrives |
+| `WakeAt(t)` | `ControlFlow::WaitUntil(t)`, then `DesktopApp::timer` runs timed work without drawing unless it asks to |
+| `Animate { target_hz }` | Request the next redraw now when vsync paces it; with a lower cap, wait for the next frame slot after the last frame |
+
+The loop never requests a redraw from inside the redraw handler (some platforms
+drop such requests); it does so from `about_to_wait`, so an animation started by
+a click keeps its frames coming with no further input. Closing the window asks
+the application first (`close_requested`), which can show a confirmation, and
+`exit` lets it save before the loop ends.
 
 ### 3.2 Form-factor topologies
 
 | `FormFactor` | `Topology` | Input model | Geometry |
 | --- | --- | --- | --- |
-| `Desktop` | `DesktopTiling` | Mouse + keyboard, keybinds from rice | Docks tile beside Center Stage; timeline tiles beneath it |
-| `Tablet` | `TabletStylus` | Stylus pressure curves ($p' = p^{\gamma}$), radial marking menus | Docks become overlay drawers so the canvas is as large as possible; timeline stays tiled |
-| `Mobile` | `MobilePocket` | Touch gestures, edge swipes | Single-pane stack inside the safe area; docks are edge drawers; timeline is a thumb-zone bottom sheet |
+| `Desktop` | `DesktopTiling` | Mouse + keyboard, keybinds from rice | A flush workstation: header, rails, tiled docks, Center Stage, status bar |
+| `Tablet` | `TabletStylus` | Stylus pressure curves ($p' = p^{\gamma}$), radial marking menus | Same chrome, but docks overlay Center Stage as drawers so the canvas stays large |
+| `Mobile` | `MobilePocket` | Touch gestures, edge swipes | Header over a single pane; no rails or status bar; docks are edge drawers that switch their applets in a strip; the timeline is a thumb-zone bottom sheet |
 
 Classification follows Android's resource-qualifier convention: on a mobile OS, a
-smallest screen side of **≥ 600 dp** is a tablet (`FormFactor::classify`).
+smallest screen side of **at least 600 dp** is a tablet (`FormFactor::classify`).
 Desktop operating systems are `Desktop`.
 
 ### 3.3 Layout solver
 
-`solve_layout(&LayoutRequest) -> LayoutSolution` is a pure function. It maps the
-four zones (`LeftDock`, `CenterStage`, `RightDock`, `BottomTimeline`) to
-`Placement::{Hidden, Tiled(Rect), Drawer { edge, rect, reveal }, BottomSheet { rect, detent }}`.
+`solve_layout(&LayoutRequest) -> LayoutSolution` is a pure function. Its
+solution names every region: `header`, the optional `status` bar and
+`left_rail` / `right_rail`, and the four applet zones (`LeftDock`,
+`CenterStage`, `RightDock`, `BottomTimeline`) as
+`Placement::{Hidden, Tiled(Rect), Drawer { edge, rect, bounds, reveal }, BottomSheet { rect, detent }}`.
+
+```text
+┌──────────────────────────── header (30 px) ─────────────────────────────┐
+├──────┬────────────┬──────────────────────────────┬────────────┬──────┤
+│ rail │ left dock  │        Center Stage          │ right dock │ rail │
+│ 38px │  260 px    │  (timeline below when used)  │   280 px   │ 38px │
+├──────┴────────────┴──────────────────────────────┴────────────┴──────┤
+└──────────────────────────── status bar (22 px) ─────────────────────────┘
+```
 
 - **Inputs:** viewport, safe-area insets, form factor, dock reveal fractions
   (driven by springs, §3.4), whether a time-based asset is active, and
-  `LayoutMetrics` (gap, dock widths, timeline height, minimum center width).
-  The metrics are read from rice.
-- **Desktop:** the content rect is the viewport inset by the safe area and outer
-  gap. Docks take `width × reveal` from each side. Center Stage fills the rest,
-  and the timeline takes the bottom of the center column only when
-  `timeline_active`. If Center Stage would fall below `min_center_width`, the
-  right dock (then the left dock) degrades to an overlay drawer instead of
-  crushing the workspace.
-- **Mobile:** Center Stage is exactly the safe-area rect. A drawer's width is
-  `min(dock_width, drawer_max_fraction × safe_width)`, and it slides in from its
-  edge by its reveal fraction. The timeline becomes a `BottomSheet` at the `Peek`
-  detent, capped at `sheet_max_fraction` of the safe height (the thumb zone).
-  Both fractions are riceable (`layout.drawer_max_fraction`, default 0.85;
-  `layout.sheet_max_fraction`, default 0.4).
-- **Invariants (tested):** tiled rects never overlap, tiled widths plus gaps sum
-  to the content width, and nothing is placed outside the safe area.
+  `LayoutMetrics` (gap, header, status bar and rail sizes, dock widths, timeline
+  height, minimum center width, drawer and sheet fractions), all read from rice.
+- **Desktop:** the header spans the top and the status bar the bottom. The rails
+  sit at both edges; between them, docks take `width x reveal`, Center Stage
+  fills the rest, and the timeline takes the bottom of the center column only
+  when `timeline_active`. With the default `layout.gap = 0` every region is
+  flush, separated by 1 px hairlines in `colors.border`. If Center Stage would
+  fall below `min_center_width`, the right dock (then the left) becomes a
+  drawer that slides over Center Stage within the region between the rails.
+- **Mobile:** Center Stage fills the safe area under the header. A drawer's
+  width is `min(dock_width, drawer_max_fraction x safe_width)`; the timeline is
+  a `BottomSheet` at the `Peek` detent, capped at `sheet_max_fraction`.
+- **Invariants (tested):** tiled regions never overlap, the desktop regions are
+  edge to edge (rail, dock, center, dock, rail), and nothing is placed outside
+  the safe area.
 
 ### 3.4 Hybrid render scheduler
 
@@ -418,10 +462,9 @@ pub enum RenderDemand { Sleep, ActiveFrame { target_hz: u32 } }
 ```
 
 `FrameScheduler` collects damage rectangles (merged by union) and an "animating"
-flag. With no damage and no running animation it reports `Sleep`. The host then
-blocks in its event wait: 0 FPS and roughly 0% CPU/GPU. Otherwise
-`begin_frame` hands out the merged damage rect and a frame-rate target from the
-active `HardwareProfile`:
+flag. With no damage and no running animation it reports `Sleep`. The frame-rate
+target comes from the active `HardwareProfile`, lowered by
+`display.frame_rate_cap` when the user sets one:
 
 | `HardwareProfile` | Frame cap | Shader passes | Spring physics | Blur | Graphics path |
 | --- | --- | --- | --- | --- | --- |
@@ -430,122 +473,181 @@ active `HardwareProfile`:
 | `LegacyLowSpec` | 30 | 0 | **no: instant 0 ms snap** | no | OpenGL / GLES |
 | `MobileBatterySaver` | 30 | 1 | yes | no | GLES / Vulkan / Metal |
 
-`HardwareProfile::recommend` picks a profile from `HardwareCapabilities`: low-power
-mode → `MobileBatterySaver`; software/legacy GPU or ≤ 2 cores → `LegacyLowSpec`;
-≥ 120 Hz with a high-end GPU → `HighRefresh`; otherwise `Balanced`. The user can
-override it with `profile.hardware` in rice.
+`HardwareProfile::recommend` picks a profile from `HardwareCapabilities`:
+low-power mode becomes `MobileBatterySaver`; a software or legacy GPU, or at most
+2 cores, becomes `LegacyLowSpec`; 120 Hz or more with a high-end GPU becomes
+`HighRefresh`; otherwise `Balanced`. The user can override it with
+`profile.hardware`.
+
+**Pacing in the runtime.** The shell runtime answers the host's pacing question
+from four facts, in order:
+
+1. A spring is moving, damage is waiting, or an applet animates: `Animate`.
+   Damage includes changes made *while* drawing a frame (a click handled by an
+   immediate-mode button), so a click on a dock toggle schedules the frames
+   that play its animation.
+2. Within `motion.settle_grace_ms` (300 ms) of the last change: `Animate`, so
+   anything that changed visually finishes drawing.
+3. Timed work is pending: `WakeAt(earliest)` for the next caret blink
+   (`motion.caret_blink_ms`, only while a caret is on screen), a status message
+   to clear, the player's next audio top-up, or a pending note autosave.
+4. Otherwise `Sleep`: 0 FPS and no CPU.
+
+Each frame measures real elapsed time,
+`dt = now - last_frame` clamped to $[0.0001, 0.05]$ s, so a stall never makes an
+animation jump; the first frame after sleeping advances by one nominal frame.
+Springs see `dt x motion.animation_speed`. A runtime test clicks the left dock
+toggle with simulated input and then calls only `pacing` and `frame`: the
+animation runs to the end over many frames and the scene then sleeps.
 
 **Spring physics.** Panel motion uses a damped harmonic oscillator,
 $F = -kx - cv$, so $m\ddot{x} = -k(x - x_\text{target}) - c\dot{x}$. The
 damping ratio is $\zeta = c / (2\sqrt{km})$. The shipped defaults ($k = 170$,
 $c = 26$, $m = 1$) give $\zeta \approx 1.0$: critically damped, fast and with no
 overshoot. `SpringDamper` integrates with semi-implicit (symplectic) Euler in
-sub-steps of at most 1/240 s. That is stable for every riceable stiffness
-($\omega\,\Delta t \ll 2$), and frame time is clamped to 0.25 s so a long stall
-does not cause a burst. A spring is **settled** when $|x - x_\text{target}|$ and
-$|v|$ are both below $10^{-3}$. It then snaps exactly to the target and
-reports `Sleep`. Under `LegacyLowSpec`, or when the user enables
+sub-steps of at most 1/240 s. A spring is **settled** when
+$|x - x_\text{target}|$ and $|v|$ are both below $10^{-3}$. It then snaps
+exactly to the target. Under `LegacyLowSpec`, or when the user enables
 `motion.instant_transitions`, `SpringMode::InstantSnap` skips integration
 entirely: transitions take 0 ms.
 
 **GPU renderer.** The shell draws into a `Canvas`: a renderer-agnostic list of
 rounded boxes, text runs and arena images (by `AssetHandle`, never pixels), each
-with its clip rectangle. `UiRenderer` draws a canvas with **one instanced `wgpu`
-pipeline**. Every quad carries its rectangle, colors, corner radius, border,
-kind and clip. The fragment shader antialiases rounded boxes with a signed
-distance function, samples glyph coverage from an R8 atlas, and samples arena
-images as sRGB (or byte maps as gray). It clips per instance and blends
-premultiplied alpha. Consecutive quads that share a texture form one draw
-call. Text uses `fontdue` with the bundled Ubuntu Light, Hack and Noto Emoji
-(monochrome) fonts. Glyphs are rasterized at physical size, packed into the
-atlas on shelves, and snapped to whole pixels. Images larger than the device's
-texture limit are box-filtered down on upload. Offscreen tests read the
-rendered pixels back and check them exactly.
+with its clip rectangle, on two layers. The overlay layer (menus, drop-downs,
+tooltips, dialogs) draws after the base layer and wins hit tests. `UiRenderer`
+draws a canvas with **one instanced `wgpu` pipeline**. The fragment shader
+antialiases rounded boxes with a signed distance function, samples glyph
+coverage from an R8 atlas, and samples arena images as sRGB (or byte maps as
+gray). It clips per instance and blends premultiplied alpha. Text uses `fontdue`
+with the bundled Ubuntu Light, Hack, Noto Emoji and egui icon fonts; a test
+checks that every symbol the shell draws has a glyph. GPU textures of entities
+that leave the arena are released.
 
-**Telemetry.** The top bar shows `Render: SLEEP (0 FPS)` whenever the frame just
-drawn is the last one before the loop sleeps, and `Render: ACTIVE (N FPS)`
-(measured over the last second of animation) while springs or applets keep
-frames coming, followed by the active `HardwareProfile`.
+**Telemetry.** The status bar shows the active tab, the arena entity count, the
+undo depth, the hardware profile and the frame state: `Idle` while the scene
+sleeps, `N FPS` (measured over the last second) while it animates.
 
 ### 3.5 Real-time audio thread isolation
 
-The DAW audio graph runs on a dedicated real-time thread that **MUST NOT**
-allocate, lock, log or make syscalls inside the render callback. It talks to the
-rest of the engine only through wait-free single-producer/single-consumer ring
-buffers:
+The device callback runs on the audio backend's real-time thread and
+**MUST NOT** allocate, lock, log or make syscalls. `AudioOutput` meets that
+with a single-producer, single-consumer ring of `f32` samples stored as atomic
+bit patterns (safe Rust, no `unsafe`): the UI thread pushes, the callback pops,
+and a flush index lets the producer drop queued audio after a seek without a
+lock. Volume is an atomic gain applied in the callback, so it takes effect at
+once. A paused stream is stopped at the device and costs no CPU.
 
 ```text
-UI / arena ──(SPSC: parameter & transport commands)──► audio thread
-audio thread ──(SPSC: meters, playhead position)──► UI
+UI / arena ──(SPSC ring: interleaved f32 samples)──► audio callback
+audio callback ──(atomics: frames played, underruns)──► UI
 ```
 
-All buffers the graph needs are preallocated when the graph is compiled. Graph
-changes are prepared off-thread and swapped in at a buffer boundary. GPU frame
-timing therefore never causes an audio dropout, and an audio overload never
-stalls the UI.
+`AudioConfig` comes from rice: `audio.output_device`, `audio.sample_rate`
+(44.1, 48 or 96 kHz, falling back to the device's rate), `audio.buffer_frames`
+(used when the device accepts a fixed size) and `audio.realtime_priority`, which
+registers the callback thread with the OS real-time scheduler
+(`audio_thread_priority`: MMCSS on Windows) on its first call and reports
+whether the OS granted it. The stream opens when the Player first plays and
+reopens when its settings change. The Player keeps decoded tracks in the arena
+and tops the ring up every 40 ms from the next slice, resampled linearly to the
+device rate; the ring is the device boundary, like a texture upload. A DAW graph
+will run on the same ring discipline.
 
-### 3.6 Applets, the Launchpad and pin-to-boot
+### 3.6 Applets, the Launchpad, docks and Settings
 
 Every tool, utility and studio implements `SueApplet` (LAW 1):
 
 ```rust
 pub trait SueApplet: Send {
-    fn manifest(&self) -> AppletManifest;   // id, name, category, home zone, opens, accepts_drops
+    fn manifest(&self) -> AppletManifest;   // id, name, category, zone, opens, icon, singleton
     fn rice_declarations(&self) -> Vec<RiceDeclaration> { Vec::new() }
     fn mount(&mut self, ctx: &mut AppletContext<'_>) -> Result<(), AppletError>;
     fn open(&mut self, asset: AssetHandle, ctx: &mut AppletContext<'_>) -> Result<(), AppletError>;
+    fn navigate(&mut self, target: &str) -> bool { false }        // e.g. a Settings page
+    fn command(&mut self, name: &str, ctx: &mut AppletContext<'_>) -> Result<bool, AppletError>;
     fn handle_input(&mut self, event: &InputEvent, ctx: &mut AppletContext<'_>)
         -> Result<InputResponse, AppletError>;
+    fn captures_keys(&self) -> bool { false }                      // e.g. recording a shortcut
     fn draw(&mut self, ui: &mut Ui<'_>, area: Rect, ctx: &mut AppletContext<'_>) {}
     fn title(&self, world: &World) -> Option<String> { None }
+    fn inspect(&self, world: &World) -> Vec<PropertyGroup> { Vec::new() }
     fn update(&mut self, dt: f32, ctx: &mut AppletContext<'_>) -> RenderDemand { RenderDemand::Sleep }
+    fn tick(&mut self, now: Instant, ctx: &mut AppletContext<'_>) -> Tick { Tick::default() }
     fn unmount(&mut self, ctx: &mut AppletContext<'_>) {}
 }
 ```
 
 Applets hold `AssetHandle`s, not data. They change the world only through
 `ctx.edit_arena(txn)` / `ctx.edit_rice(txn)` on the global `UndoStack<World>`,
-and they ask the shell for things through `ctx.request(ShellRequest::…)`, which
-the workspace carries out after the call. The `Launchpad` is a runtime registry
-of applet factories and knows nothing about specific applets. `hub()` groups the
-installed applets into Studios and Utilities, `pin_boot` stores the
-`pinned_boot_applet`, and `boot_target()` resolves it at startup. A pinned applet
-that has been uninstalled falls back to the Hub instead of failing.
+and they ask for things through `ctx.request(ShellRequest::…)`: opening an
+asset or an applet (carried out by the workspace), or opening a file or URL,
+running an engine command and showing a message (carried out by the engine).
+`AppletContext` also lends them the engine's `Catalog` (Settings pages, live
+choices, system tables, theme presets, well-known folders), the audio sink when
+one is open, and the Inspector's properties of the active tab.
 
-`Workspace` owns the Center Stage tabs (each one the Hub or a mounted applet),
-the docked applets, keyboard focus, the dock springs, the global keymap and the
-`FrameScheduler`. At boot, every applet whose `home_zone` is `LeftDock` or
-`RightDock` is mounted into that dock. Assets open by **media class**: an
-applet's manifest lists the classes it opens (`Image`, `Text`, `Binary`), and
-`open_asset` picks the first Center Stage applet that declares the class. No
-table maps formats to applets. Dropped files go to applets that set
-`accepts_drops`; keyboard input goes to the focused applet after the global
-shortcuts.
+The `Launchpad` is a runtime registry of applet factories and knows nothing
+about specific applets. A manifest's **category** decides where the shell lists
+it: `Studio` and `Inspector` applets fill the two sections of Home,
+`Utility` applets sit on the rail of their dock, and the `System` applet
+(Settings) opens from the gear, the Settings menu and `keys.open_settings`.
+`pin_boot` stores the boot applet and `boot_target()` resolves it at startup; a
+pinned applet that has since been uninstalled falls back to Home.
+
+`Workspace` owns the tabs, the docks, keyboard focus, the dock springs, the
+global keymap and the `FrameScheduler`:
+
+- **Tabs.** The first tab is **Home** and cannot close. `+` (or `keys.new_tab`)
+  opens a new tab showing Home, which the next applet opened fills in place.
+  Applets marked `singleton` (Settings) are activated instead of opened twice.
+- **Docks.** Every `LeftDock` and `RightDock` applet is mounted at boot and keeps
+  its state. Each dock shows one of them, picked on its rail; clicking the shown
+  one again closes the dock.
+- **Routing.** Assets open by media class (`Image`, `Text`, `Audio`, `Binary`):
+  the first applet whose manifest opens the class gets it. A dock applet (the
+  Player) is brought into view in its dock; a Center Stage applet gets a tab.
+  No table maps formats to applets.
+- **Keys.** Global shortcuts from `[keys]` run first (docks, tabs, Home,
+  Settings, open, save, quit, undo, redo), unless the focused applet captures
+  keys; everything else goes to the focused applet. A file dropped anywhere goes
+  to the engine, which reads it (capped at `io.max_ingest_mib`), ingests it and
+  routes it.
 
 The **desktop shell** (`draw_shell`) is the only chrome:
 
-- **Top bar:** dock toggles, the title, a mode chip (the active tab's title),
-  tabs with close buttons, the new-tab button, and the telemetry badge.
-- **Docks:** each docked applet is drawn under its name, clipped to the dock
-  while the spring slides it. On narrow windows and phones the docks become
-  overlay drawers.
-- **Center Stage:** the active applet, or the **Launchpad**: Studio and Utility
-  cards in a grid sized by `launchpad.card_width`, each with a 📌 pin. Clicking a
-  pin is an undoable rice edit of `launchpad.boot_into`, so pinning persists and
-  `Ctrl+Z` unpins.
-- **Drop overlay:** shown while a file hovers over the window.
+- **Header:** the left dock toggle (aligned with the rail), the menus (File,
+  Edit, Workspace, Tools, Settings) on the overlay layer with their shortcuts,
+  the flush tab bar (the active tab has `colors.surface` and a
+  `layout.tab_accent` line in `colors.accent`), the gear, and the right dock
+  toggle.
+- **Rails:** one icon per dock applet, with a tooltip; the shown one is lit and
+  marked by an accent bar on the outer edge.
+- **Docks:** the shown applet under its name, with a hairline on the inner edge.
+- **Center Stage:** the active applet, or **Home**: Studios and Inspectors in a
+  grid of cards at least `launchpad.card_width` wide. Descriptions wrap and are
+  never cut. Each card has a "Pin as boot" switch, an undoable rice edit of
+  `launchpad.boot_into`.
+- **Status bar:** the active tab or the latest message on the left; entities,
+  undo depth, profile and frame state on the right.
+- **Overlays:** the quit confirmation (`general.confirm_on_exit`) and the drop
+  overlay while a file hovers over the window.
 
 The built-in applets are registered by the binary, like any package would
 register its own:
 
-| Applet | Zone | Opens | What it does |
-| --- | --- | --- | --- |
-| Quick Notes | Left dock | — | One shared note; every keystroke is an `InsertText`/`DeleteText` transaction |
-| Drop Zone | Left dock | drops | Reads dropped files (`io.max_ingest_mib` cap), runs `ingest_bytes`, opens the result, and lists recent ingests |
-| Settings | Right dock | — | The live rice GUI (§4.3) |
-| Text Studio | Center | `Text` | Caret editor with line numbers, arrows / Home / End navigation and undoable edits |
-| Image Viewer | Center | `Image` | Decoded raster with drag-to-pan, zoom around the pointer and a metadata card |
-| Hex Inspector | Center | `Binary` | Hex rows plus a spatial byte map of the whole file, kept in sync |
+| Applet | Category | Zone | Opens | What it does |
+| --- | --- | --- | --- | --- |
+| Files | Utility | Left dock | n/a | Lists `general.workspace_dir` (or the home folder), folders first; folders open in place, files open in the applet that fits them |
+| Player | Utility | Left dock | `Audio` | Plays decoded tracks through the audio sink: title and tags, play and pause, previous and next, a scrubber, the riced volume, a playlist |
+| Convert | Utility | Left dock | n/a | Converts an opened picture to lossless JPEG XL or PNG, or a song to 16-bit WAV, next to the source or into `io.convert_dir` |
+| Notes | Utility | Left dock | n/a | One shared note; every keystroke is a transaction; autosaved every `general.autosave_seconds` and on exit |
+| Inspector | Utility | Right dock | n/a | The active tab's `inspect()` properties: counts and caret for text; size, depth, channels and zoom for pictures; integers and floats at the hex cursor |
+| Browser | Utility | Right dock | n/a | An address bar and `browser.bookmarks`; pages open in the system browser (there is no embedded web engine yet) |
+| History | Utility | Right dock | n/a | The undo tree, branches indented; a click checks out any state |
+| Text Studio | Studio | Center | `Text` | Caret editor with line numbers, undoable edits, Save (`keys.save`) and Save As |
+| Image Viewer | Inspector | Center | `Image` | Decoded JPEG XL, PNG or JPEG with drag-to-pan, zoom around the pointer and Fit |
+| Hex Inspector | Inspector | Center | `Binary` | Hex rows beside a spatial byte map of the whole file, with a byte cursor |
+| Settings | System | Center | n/a | Preferences by category (§4.3) |
 
 ---
 
@@ -574,7 +676,7 @@ tag      := "@color" | "@keybind" | "@shader" | "@text"
 
 | Literal | Metadata | `RiceParameter` | `Control` |
 | --- | --- | --- | --- |
-| `true`/`false` | — | `Bool` | `Toggle` |
+| `true`/`false` | n/a | `Bool` | `Toggle` |
 | integer | `[a..b]` (integer bounds) | `IntRange` | `Slider` (step 1), or `NumberField` if a bound is missing |
 | integer or float | float bounds, or a float literal | `FloatRange` | `Slider` (step = span / 100), or `NumberField` |
 | string | `{a\|b\|…}` | `EnumChoice` | `Dropdown` |
@@ -591,30 +693,53 @@ never stops Sue from booting.
 
 ### 4.3 Two-way binding
 
-- **File → GUI:** `RiceSchema::parse` builds the schema, and
+- **File to GUI:** `RiceSchema::parse` builds the schema, and
   `SettingsTree::build(&schema)` turns it into sections and widgets. Labels come
-  from keys (`border_width` → "Border width"), and tooltips come from the
-  descriptions. Each widget's `binding` is its dotted path.
-- **GUI → file:** a widget edit becomes `SetRiceValue { path, value }`, a
+  from keys with known acronyms and units spelled out (`border_width` reads
+  "Border width", `ui_scale` reads "UI scale", `settle_grace_ms` reads "Settle
+  grace (ms)"), and descriptions come from the trailing comments. Each widget's
+  `binding` is its dotted path.
+- **GUI to file:** a widget edit becomes `SetRiceValue { path, value }`, a
   `ReversibleTransaction<RiceSchema>`, so Settings changes are undoable.
-  `RiceSchema::set` type-checks and range-checks the value (an int is accepted
-  for a float), then bumps `revision()`. `SettingsTree::is_stale` compares
-  revisions.
+  `SetRiceValues` sets several values as one step (a theme preset, a reload from
+  disk), all or none. `RiceSchema::set` type-checks and range-checks the value
+  (an int is accepted for a float), then bumps `revision()`.
 - **Format-preserving write-back:** `to_suerice()` reproduces every unchanged line
   byte for byte, comments and spacing included. For a changed key it splices
   only the new value into the original value span. Defaults registered at runtime
   are inserted at the end of their section, or in a new section.
 
-**In the live shell.** The Settings applet renders every parameter of the live
-rice with the `Ui` toolkit:
+**Settings.** Preferences open as a single Center Stage tab (the gear, the
+Settings menu, or `keys.open_settings`, `Ctrl+,`). A category sidebar
+(`layout.settings_sidebar_width`, 190 px) lists the pages; the main pane shows
+only the chosen page, under a live filter field. Typing anywhere starts a
+search; while a filter is active, matching parameters from every page are
+listed by page, and the sidebar shows how many match on each.
+
+The pages are data the engine registers in its `Catalog`, like applets, so
+packages can add their own:
+
+| Page | Holds |
+| --- | --- |
+| General | The boot target (Home or any Center Stage applet), the Files folder, hidden files, autosave interval, quit confirmation, the note file, Quick Notes, browser bookmarks |
+| Appearance & Rice | Theme presets, every color, panel geometry, typography, the rice file with Reload, Export and Open Folder |
+| Display & Graphics | The hardware profile, the active profile and GPU, the frame-rate cap, the settle grace, UI scale, wheel speed, motion (instant snap, animation speed, spring constants, caret blink, message time) |
+| Audio & DSP | Output device, sample rate, buffer size, real-time priority, volume, and the live stream and real-time status |
+| Files & Codecs | JPEG XL effort, bit-exact JPEG recompression, the conversion folder, the open-file size limit, byte-map width, the built-in codecs |
+| Local AI | The compute backend (backends this machine lacks are greyed out), the VRAM budget, which model and backend a task would use now, the model folder and the model files found in it |
+| Packages & Updates | The signature policy, the installed applets, installed packages, the active generation and rollback state |
+| Keymaps | Every shortcut as an action and a key cap |
+
+Any rice section no page claims is listed on a final "Other" page, so every
+parameter stays reachable (LAW 3, tested).
 
 | Parameter | Control |
 | --- | --- |
 | `Bool` | Toggle |
-| `IntRange` / `FloatRange` | Draggable slider with its value (a number field when unbounded) |
+| `IntRange` / `FloatRange` | Slider with a slim track, an accent fill and a compact thumb, and its value on the right (click it to type); a text field when unbounded |
 | `ColorHex` | Swatch plus hex field |
-| `EnumChoice` | List of choices (for example the hardware profile selector) |
-| `Keybind` | "Press a chord…" recorder |
+| `EnumChoice`, or a text parameter with live choices | A segmented control beside the label when it fits, on its own line under the description when it does not, a compact drop-down beyond six options |
+| `Keybind` | A key cap; click it and press the new chord (`Esc` cancels; global shortcuts are held back while recording) |
 | `ShaderPath` / `Text` | Text field |
 
 Text fields commit on `Enter` and cancel on `Escape`. A slider drag previews
@@ -622,24 +747,42 @@ live: it sets the schema directly, so the whole UI follows the value as you
 drag. On release the preview is reverted and one `RiceEdit(SetRiceValue)` is
 recorded, so a whole drag is one undo step. After any change (an edit, a
 preview, an undo or a redo) the runtime re-reads `WmConfig`, the
-`HardwareProfile`, the `Theme` and the UI font. Once no drag is in progress, it
-writes the rice back with `write_atomic` (write a temporary file, sync it to
-disk, rename it over the old one) to `<config>/rice/default.suerice`. On first
-launch that file is seeded with a byte-for-byte copy of the shipped default. A
-test edits a value, persists it, checks that exactly one line changed, undoes
-the edit, and checks that the file is identical to the original again.
+`HardwareProfile`, the `Theme`, the UI font, the audio stream settings and,
+when they changed, the catalog. Once no drag is in progress, it writes the rice
+back with `write_atomic` to `<config>/rice/default.suerice`. A test edits a
+value, persists it, checks that exactly one line changed, undoes the edit, and
+checks that the file is identical to the original again.
 
-The file is read once, at boot, and is not watched yet. An edit made in a text
-editor while Sue runs is overwritten by the next change made in Settings.
+**Theme presets.** Graphite (the default), Midnight and Daylight ship as
+`.suerice` files with a `[colors]` section. Applying one is a single
+`SetRiceValues` step; the switcher marks the preset whose colors are all in
+effect, or none for custom colors.
 
-### 4.4 Registration (LAW 3)
+The file is read at boot (and by Reload from Disk), and is not watched yet. An
+edit made in a text editor while Sue runs is overwritten by the next change made
+in Settings; Reload from Disk applies the file's differences as one undoable
+step first.
+
+### 4.4 Registration (LAW 3) and migration
 
 Subsystems and applets declare their riceables as `RiceDeclaration { path,
 default, description }`. `RiceSchema::register` inserts a missing key, or keeps the
 user's value when its type is compatible (re-clamping it to the declared range).
 An incompatible user value is replaced and reported. `sue_wm::register_rice`
-declares every window-manager constant, and a test checks that the shipped
-`default.suerice` matches those declarations exactly.
+declares the window manager's constants and `shell_declarations` the shell's.
+Tests check that the shipped `default.suerice` matches the declarations key for
+key, description included, and that it holds no undeclared key.
+
+**Format and migration.** The shipped file declares its format in its header
+(`# sue-rice format 2`). Each released default is frozen in `rice/history/`. At
+boot, `migrate` brings an older file up to date: a value still equal to the old
+default takes the new default (so the old purple and gold palette and the 8 px
+gaps of format 1 become the graphite palette and flush panels), a value the user
+changed is carried over when its key still exists and the value passes the new
+checks, and the rest is reported. The old file is kept as
+`default.suerice.v1.bak`. A file that does not parse is moved to
+`default.suerice.broken` and the defaults are used, so a typo never stops Sue
+from starting.
 
 ---
 
@@ -714,11 +857,11 @@ against that generation's binary, signed like any other payload.
 
 | `ModelFormat` | Identified by | Header facts parsed |
 | --- | --- | --- |
-| `Gguf` | magic `GGUF` | version (1–3), tensor count, metadata key/value count (32-bit counts in v1, 64-bit after) |
+| `Gguf` | magic `GGUF` | version (1 to 3), tensor count, metadata key/value count (32-bit counts in v1, 64-bit after) |
 | `Safetensors` | 8-byte LE header length (≤ 100 MB) followed by `{` | header length |
-| `Onnx` | `.onnx` extension (protobuf has no magic) | — |
-| `Magic` | `.magic` extension: Sue's native serialized compute graph | — |
-| `Builtin` | compiled into the engine | — |
+| `Onnx` | `.onnx` extension (protobuf has no magic) | n/a |
+| `Magic` | `.magic` extension: Sue's native serialized compute graph | n/a |
+| `Builtin` | compiled into the engine | n/a |
 
 ### 6.2 Compute backends
 
@@ -787,20 +930,30 @@ separators are measured against, and it exercises the full zero-copy path.
 | §2.2 JXL pixel decode and JPEG reconstruction | **Implemented** with `jxl-oxide` (no CMYK yet; the DC preview and pass targets come from a full decode until a streaming decoder lands) | `sue-io/src/jxl.rs` |
 | §2.2 Lossless JXL encode | **Implemented** with `zune-jpegxl` (one `Gray8`, `Rgba8` or `RgbaF32` layer; multi-layer planned) | `sue-io/src/jxl.rs` |
 | §2.2 Lossless JPEG → JXL recompression | Planned; returns `CodecUnavailable` | `sue-io/src/jxl.rs` |
-| §2.2 Drag-and-drop ingest (sniff → raster, text or bytes entity) | **Implemented** (spawning the entity is not yet an undoable transaction) | `sue-io/src/ingest.rs`, `bins/sue/src/drop_zone.rs` |
+| §2.2 PNG and JPEG decode, PNG encode | **Implemented** with `zune-png` and `zune-jpeg` | `sue-io/src/raster.rs` |
+| §2.2 Audio decode (MP3, FLAC, WAV, Ogg Vorbis, AAC) and WAV encode | **Implemented** with `symphonia`; WAV is written as 16-bit PCM | `sue-io/src/audio.rs` |
+| §2.2 Ingest of opened and dropped files (sniff, then raster, audio, text or bytes entity) | **Implemented** (decoding runs on the UI thread; spawning the entity is not yet an undoable transaction) | `sue-io/src/ingest.rs`, `bins/sue/src/runtime.rs` |
 | §2.3 Tile cache, byte map | **Implemented** | `sue-io/src/tile_cache.rs`, `bytemap.rs` |
 | §3.1 `PlatformHost`, paths, `HeadlessHost` | **Implemented** | `sue-platform` |
-| §3.1 Native desktop host (`winit` window, `wgpu` surface, input, file drops, 0 FPS idle) | **Implemented** (one window; tested on Windows) | `sue-platform/src/desktop.rs`, `gpu.rs` |
-| §3.1 Native mobile hosts (Android, iOS) | Planned (the mobile topologies already run on `HeadlessHost`) | — |
-| §3.2–3.4 Topologies, layout, springs, scheduler | **Implemented** | `sue-wm` |
-| §3.4 GPU renderer (rounded boxes, borders, clipping, images, text) | **Implemented** with one instanced `wgpu` pipeline and a `fontdue` glyph atlas | `sue-wm/src/gpu.rs`, `ui.wgsl`, `text.rs` |
-| §3.4 Multi-pass shader effects (`shaders.*` in the rice) | Planned; the paths are parsed and editable but not rendered | — |
-| §3.5 Real-time audio thread | Specified; planned with the DAW | — |
-| §3.6 Applets, Launchpad, pin-to-boot, workspace, shell | **Implemented** (six built-in applets, see §3.6) | `sue-wm`, `bins/sue/src` |
-| §3.6 Timeline applet | Planned; the layout reserves the zone, but no built-in applet uses it yet | — |
+| §3.1 Native desktop host (`winit` window, `wgpu` surface, input, file drops) | **Implemented** (one window; tested on Windows) | `sue-platform/src/desktop.rs`, `gpu.rs` |
+| §3.1 GPU choice (`display.gpu_preference`: auto, integrated, discrete) | **Implemented**; `auto` draws on the display GPU, which a device test checks on Windows | `sue-platform/src/gpu.rs`, `bins/sue/src/desktop.rs` |
+| §3.1 Frame pacing: redraws requested from `about_to_wait`, timed wakes, close confirmation | **Implemented**; a test animates a clicked dock toggle to the end with no further input | `sue-platform/src/desktop.rs`, `bins/sue/src/runtime.rs` |
+| §3.1 Native dialogs, system browser, file manager | **Implemented** with `rfd` and `open` (web addresses limited to `http` and `https`) | `sue-platform/src/os.rs` |
+| §3.1 Native mobile hosts (Android, iOS) | Planned (the mobile topologies already run on `HeadlessHost`) | n/a |
+| §3.2 to 3.4 Topologies, workstation layout, springs, scheduler | **Implemented** | `sue-wm` |
+| §3.4 GPU renderer (rounded boxes, borders, clipping, images, text, overlay layer) | **Implemented** with one instanced `wgpu` pipeline and a `fontdue` glyph atlas | `sue-wm/src/gpu.rs`, `ui.wgsl`, `text.rs`, `canvas.rs` |
+| §3.4 Multi-pass shader effects | Planned (the `ShaderPath` parameter type exists; no shipped parameter uses it yet) | n/a |
+| §3.5 Audio output (ring, atomic gain, real-time priority) | **Implemented** with `cpal`; the player is tested headlessly with `NullAudio`, and a device test streams to the real output | `sue-platform/src/audio.rs`, `bins/sue/src/player.rs` |
+| §3.5 DAW audio graph | Specified; planned with the DAW studio | n/a |
+| §3.6 Applets, Launchpad, rails, docks, tabs, menus, Home, status bar | **Implemented** (eleven built-in applets, see §3.6) | `sue-wm`, `bins/sue/src` |
+| §3.6 Studios beyond Text Studio (document, vector and paint, DAW, video, 3D and CAD, IDE, game engine) | Planned; Home lists only installed applets and says the rest arrive as packages | n/a |
+| §3.6 Timeline applet | Planned; the layout reserves the zone, but no built-in applet uses it yet | n/a |
+| §3.6 Embedded web view | Planned; the Browser opens pages in the system browser | n/a |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |
-| §4.3 Live Settings GUI, undoable edits, atomic persistence | **Implemented** (the file is read at boot; watching it for outside edits is planned) | `bins/sue/src/settings.rs`, `runtime.rs` |
+| §4.3 Settings tab: categories, search, segmented and slider controls, presets, undoable edits, atomic persistence | **Implemented** (the file is read at boot and by Reload from Disk; watching it for outside edits is planned) | `bins/sue/src/settings.rs`, `runtime.rs`, `engine.rs` |
+| §4.4 Rice format marker and migration from format 1 | **Implemented**, with a backup of the old file | `sue-rice/src/migrate.rs`, `bins/sue/src/engine.rs` |
 | §5 Hashes, Ed25519, resolver, generations, atomic pointer | **Implemented** | `sue-pkg` |
-| §5 Package download, binary deltas, WASM plugin loading | Planned | — |
+| §5 Package download, binary deltas, WASM plugin loading | Planned (the signature policy is riced and shown; nothing installs packages yet) | n/a |
 | §6 Formats, backends, registry, zero-copy tasks | **Implemented** (reference kernel on `CpuSimd`) | `sue-ai` |
-| §6 GGUF/ONNX inference runtimes | Planned | — |
+| §6 GGUF/ONNX inference runtimes | Planned (the Local AI page lists model files and the backend a task would use) | n/a |
+| LAW 8: no em dashes, en dashes or middle dots | **Enforced** by a test that scans every text file | `bins/sue/src/laws.rs` |

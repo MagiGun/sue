@@ -411,7 +411,7 @@ impl UiRenderer {
         arena: &Arena,
     ) -> Option<(Vec<f32>, Vec<Batch>, Vec<PendingGlyph>)> {
         let scale = frame.scale;
-        let mut data: Vec<f32> = Vec::with_capacity(canvas.commands().len() * FLOATS_PER_INSTANCE);
+        let mut data: Vec<f32> = Vec::with_capacity(canvas.len() * FLOATS_PER_INSTANCE);
         let mut batches: Vec<Batch> = Vec::new();
         let mut pending = Vec::new();
         let push = |data: &mut Vec<f32>,

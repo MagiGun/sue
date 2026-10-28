@@ -24,13 +24,15 @@ pub enum BootTarget {
     Applet(AppletId),
 }
 
-/// The Hub's listing, sorted by name.
+/// What Home lists: Center Stage applets grouped by category, each group
+/// sorted by name. Dock utilities live on their rails and Settings behind
+/// the gear, so they are not listed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HubView<'a> {
     /// Full creative environments.
     pub studios: Vec<&'a AppletManifest>,
-    /// Everyday tools.
-    pub utilities: Vec<&'a AppletManifest>,
+    /// Viewers for one kind of asset.
+    pub inspectors: Vec<&'a AppletManifest>,
 }
 
 /// The registry of installed applets. It knows applets only through their
@@ -104,20 +106,22 @@ impl Launchpad {
             .map(|registration| &registration.manifest)
     }
 
-    /// The Hub listing: studios and utilities, each sorted by name.
+    /// The Home listing: studios and inspectors, each sorted by name.
     #[must_use]
     pub fn hub(&self) -> HubView<'_> {
         let sorted = |category: AppletCategory| {
             let mut listed: Vec<&AppletManifest> = self
                 .manifests()
-                .filter(|manifest| manifest.category == category)
+                .filter(|manifest| {
+                    manifest.category == category && manifest.home_zone == crate::Zone::CenterStage
+                })
                 .collect();
             listed.sort_by(|a, b| a.name.cmp(&b.name));
             listed
         };
         HubView {
             studios: sorted(AppletCategory::Studio),
-            utilities: sorted(AppletCategory::Utility),
+            inspectors: sorted(AppletCategory::Inspector),
         }
     }
 
@@ -209,11 +213,16 @@ pub(crate) mod tests {
                 id: AppletId::new(self.id).unwrap(),
                 name: self.name.to_owned(),
                 category: self.category,
-                home_zone: Zone::CenterStage,
+                home_zone: if self.category == AppletCategory::Utility {
+                    Zone::LeftDock
+                } else {
+                    Zone::CenterStage
+                },
                 uses_timeline: self.uses_timeline,
                 summary: String::new(),
                 opens: Vec::new(),
-                accepts_drops: false,
+                icon: "F".to_owned(),
+                singleton: self.category == AppletCategory::System,
             }
         }
 
@@ -273,6 +282,9 @@ pub(crate) mod tests {
             ))
             .unwrap();
         launchpad
+            .register(fixture("hex", "Hex", AppletCategory::Inspector, false))
+            .unwrap();
+        launchpad
             .register(fixture("cad", "CAD Studio", AppletCategory::Studio, false))
             .unwrap();
         launchpad
@@ -285,9 +297,9 @@ pub(crate) mod tests {
         let names =
             |list: &[&AppletManifest]| list.iter().map(|m| m.name.clone()).collect::<Vec<_>>();
         assert_eq!(names(&hub.studios), ["CAD Studio", "Video Editor"]);
-        assert_eq!(names(&hub.utilities), ["Media Player"]);
-        assert_eq!(launchpad.len(), 3);
-        assert_eq!(launchpad.rice_declarations().len(), 3);
+        assert_eq!(names(&hub.inspectors), ["Hex"]);
+        assert_eq!(launchpad.len(), 4);
+        assert_eq!(launchpad.rice_declarations().len(), 4);
     }
 
     #[test]

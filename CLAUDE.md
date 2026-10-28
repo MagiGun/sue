@@ -86,6 +86,18 @@ Architecture reference: [`HUMANZ.md`](HUMANZ.md). User-facing intent:
   `Co-Authored-By:` trailer or any other AI attribution line. Add one only when
   the human explicitly asks for it.
 
+## LAW 8: No em dashes, en dashes or middle dots
+
+- **Never** write an em dash (U+2014), an en dash (U+2013) or a middle dot
+  (U+00B7) anywhere in the repository: UI strings, window titles, tab and card
+  text, log output, code comments, rice files and docs.
+- Use a comma, a colon, a semicolon, parentheses, `to` for ranges (`1 to 3`)
+  or a plain hyphen instead. Separate status items with space or hairline
+  dividers, not dots.
+- The window title is exactly `Sue`.
+- A test (`bins/sue/src/laws.rs`) scans every text file in the repository and
+  fails on any of the three characters.
+
 ---
 
 ## Definition of done

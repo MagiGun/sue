@@ -8,7 +8,11 @@ publish.workspace = true
 repository.workspace = true
 
 [dependencies]
+audio_thread_priority.workspace = true
+cpal.workspace = true
+open.workspace = true
 pollster.workspace = true
+rfd.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 

@@ -222,20 +222,17 @@ mod tests {
         let schema = RiceSchema::parse(DEFAULT_RICE).unwrap();
         let tree = SettingsTree::build(&schema);
         assert_eq!(tree.widget_count(), schema.len());
-        assert_eq!(tree.sections[0].title, "Profile");
+        assert_eq!(tree.sections[0].title, "General");
 
         let gap = tree.widget("layout.gap").unwrap();
         assert_eq!(gap.label, "Gap");
-        assert_eq!(
-            gap.tooltip.as_deref(),
-            Some("Space between tiled panes (px)")
-        );
+        assert_eq!(gap.tooltip.as_deref(), Some("Space between panels (px)"));
         assert_eq!(
             gap.control,
             Control::Slider {
-                value: 8.0,
+                value: 0.0,
                 min: 0.0,
-                max: 64.0,
+                max: 32.0,
                 step: 1.0,
                 integer: true
             }
@@ -259,12 +256,17 @@ mod tests {
             }
         );
         assert!(matches!(
-            tree.widget("shaders.background").unwrap().control,
-            Control::ShaderPicker { .. }
-        ));
-        assert!(matches!(
             tree.widget("launchpad.boot_into").unwrap().control,
             Control::TextField { .. }
+        ));
+        let shaders =
+            RiceSchema::parse("[shaders]\nbackground = \"\" # @shader Background pass\n").unwrap();
+        assert!(matches!(
+            SettingsTree::build(&shaders)
+                .widget("shaders.background")
+                .unwrap()
+                .control,
+            Control::ShaderPicker { .. }
         ));
     }
 

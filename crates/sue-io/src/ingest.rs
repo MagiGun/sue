@@ -2,18 +2,18 @@
 
 use std::time::Instant;
 
-use sue_core::{Arena, AssetHandle, CoreError, StringBuffer};
+use sue_core::{Arena, AssetHandle, CoreError, RasterTile2D, StringBuffer};
 
 use crate::{
     IngestRoute, JxlImageInfo, JxlPipeline, NativeFormat, ProgressiveTarget, byte_map_tile,
-    shannon_entropy, sniff_stream,
+    decode_audio, decode_jpeg, decode_png, shannon_entropy, sniff_stream,
 };
 
 /// Metadata keys set on ingested entities.
 pub mod meta {
     /// Original size in bytes.
     pub const BYTES: &str = "bytes";
-    /// Human-readable route, e.g. `Tier 1 · JPEG XL`.
+    /// Human-readable route, e.g. `Tier 1: JPEG XL`.
     pub const ROUTE: &str = "route";
     /// Detected format name.
     pub const FORMAT: &str = "format";
@@ -31,6 +31,20 @@ pub mod meta {
     pub const ENTROPY: &str = "entropy";
     /// Why the bytes were shown raw.
     pub const NOTE: &str = "note";
+    /// Audio codec, e.g. `MP3`.
+    pub const CODEC: &str = "codec";
+    /// Audio sample rate in Hz.
+    pub const SAMPLE_RATE: &str = "sample_rate";
+    /// Audio channel count.
+    pub const CHANNELS: &str = "channels";
+    /// Track title tag.
+    pub const TITLE: &str = "title";
+    /// Artist tag.
+    pub const ARTIST: &str = "artist";
+    /// Album tag.
+    pub const ALBUM: &str = "album";
+    /// The file the entity was read from (set by whoever read it).
+    pub const SOURCE: &str = "source";
 }
 
 /// Which kind of view suits the ingested entity.
@@ -40,6 +54,8 @@ pub enum IngestView {
     Raster,
     /// UTF-8 text (`StringBuffer`).
     Text,
+    /// Decoded audio (`PCMFloat1D`).
+    Audio,
     /// Raw bytes as a `Gray8` byte map (`RasterTile2D`), for the hex view.
     Bytes,
 }
@@ -60,7 +76,7 @@ pub struct Ingested {
     pub route: IngestRoute,
     /// The view that suits the entity.
     pub view: IngestView,
-    /// Facts about a decoded image.
+    /// Facts about a decoded JPEG XL image.
     pub image: Option<JxlImageInfo>,
     /// Why the bytes ended up in a different view than their route suggests.
     pub note: Option<String>,
@@ -68,10 +84,67 @@ pub struct Ingested {
     pub micros: u64,
 }
 
+fn elapsed(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX)
+}
+
+/// The file extension the audio prober is hinted with.
+fn audio_extension(format: NativeFormat) -> Option<&'static str> {
+    Some(match format {
+        NativeFormat::Mp3 => "mp3",
+        NativeFormat::Flac => "flac",
+        NativeFormat::Wav => "wav",
+        NativeFormat::Ogg => "ogg",
+        NativeFormat::M4a => "m4a",
+        _ => return None,
+    })
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "a decoded image carries its own facts"
+)]
+fn spawn_raster(
+    arena: &mut Arena,
+    name: &str,
+    tile: RasterTile2D,
+    route: IngestRoute,
+    format: &str,
+    facts: [(&str, String); 2],
+    length: usize,
+    micros: u64,
+) -> Result<Ingested, CoreError> {
+    let (width, height) = (tile.width(), tile.height());
+    let handle = arena.spawn(name, tile);
+    let entity = arena.get_mut(handle)?;
+    for (key, value) in [
+        (meta::BYTES, length.to_string()),
+        (meta::ROUTE, route_label(&route)),
+        (meta::FORMAT, format.to_owned()),
+        (meta::MICROS, micros.to_string()),
+        (meta::WIDTH, width.to_string()),
+        (meta::HEIGHT, height.to_string()),
+    ]
+    .into_iter()
+    .chain(facts)
+    {
+        entity.set_meta(key, value);
+    }
+    Ok(Ingested {
+        handle,
+        route,
+        view: IngestView::Raster,
+        image: None,
+        note: None,
+        micros,
+    })
+}
+
 /// Sniffs `bytes`, decodes them when Sue has a native decoder, and spawns one
-/// entity named `name`: an `Rgba8` raster for JPEG XL, a `StringBuffer` for
-/// UTF-8 text, and a `Gray8` byte map for everything else. The byte vector is
-/// moved into the arena, not copied.
+/// entity named `name`: an `Rgba8` raster for JPEG XL, PNG and JPEG, a
+/// `PCMFloat1D` for audio, a `StringBuffer` for UTF-8 text, and a `Gray8`
+/// byte map for everything else. The byte vector is moved into the arena,
+/// not copied.
 ///
 /// # Errors
 /// Only if the byte map cannot be built (more than `u32::MAX` rows).
@@ -86,39 +159,106 @@ pub fn ingest_bytes(
     let route = sniff_stream(&bytes);
     let length = bytes.len();
     let label = route_label(&route);
-    let elapsed =
-        |started: Instant| u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
 
     let (bytes, note) = match route {
         IngestRoute::Native(NativeFormat::JpegXl { .. }) => {
             match pipeline.decode(&bytes, ProgressiveTarget::Full) {
                 Ok(decoded) => {
+                    let info = decoded.info;
+                    let mut ingested = spawn_raster(
+                        arena,
+                        name,
+                        decoded.tile,
+                        route,
+                        "JPEG XL",
+                        [
+                            (meta::COLOR, info.color_model.to_owned()),
+                            (meta::BITS, info.bits_per_sample.to_string()),
+                        ],
+                        length,
+                        elapsed(started),
+                    )?;
+                    ingested.image = Some(info);
+                    return Ok(ingested);
+                }
+                Err(error) => (bytes, Some(format!("{error}; showing the raw bytes"))),
+            }
+        }
+        IngestRoute::Native(format @ (NativeFormat::Png | NativeFormat::Jpeg)) => {
+            let decoded = if format == NativeFormat::Png {
+                decode_png(&bytes)
+            } else {
+                decode_jpeg(&bytes)
+            };
+            match decoded {
+                Ok(decoded) => {
+                    return spawn_raster(
+                        arena,
+                        name,
+                        decoded.tile,
+                        route,
+                        format.name(),
+                        [
+                            (meta::COLOR, decoded.info.color_model.to_owned()),
+                            (meta::BITS, decoded.info.bits_per_sample.to_string()),
+                        ],
+                        length,
+                        elapsed(started),
+                    );
+                }
+                Err(error) => (
+                    bytes,
+                    Some(format!(
+                        "the {} decoder failed ({error}); showing the raw bytes",
+                        format.name()
+                    )),
+                ),
+            }
+        }
+        IngestRoute::Native(format) if audio_extension(format).is_some() => {
+            match decode_audio(bytes, audio_extension(format)) {
+                Ok((decoded, _)) => {
                     let micros = elapsed(started);
                     let info = decoded.info;
-                    let handle = arena.spawn(name, decoded.tile);
+                    let handle = arena.spawn(name, decoded.pcm);
                     let entity = arena.get_mut(handle)?;
+                    let tags = [
+                        (meta::TITLE, info.title),
+                        (meta::ARTIST, info.artist),
+                        (meta::ALBUM, info.album),
+                    ];
                     for (key, value) in [
                         (meta::BYTES, length.to_string()),
                         (meta::ROUTE, label),
-                        (meta::FORMAT, "JPEG XL".to_owned()),
+                        (meta::FORMAT, format.name().to_owned()),
                         (meta::MICROS, micros.to_string()),
-                        (meta::WIDTH, info.width.to_string()),
-                        (meta::HEIGHT, info.height.to_string()),
-                        (meta::COLOR, info.color_model.to_owned()),
-                        (meta::BITS, info.bits_per_sample.to_string()),
-                    ] {
+                        (meta::CODEC, info.codec),
+                        (meta::SAMPLE_RATE, info.sample_rate.to_string()),
+                        (meta::CHANNELS, info.channels.to_string()),
+                    ]
+                    .into_iter()
+                    .chain(
+                        tags.into_iter()
+                            .filter_map(|(key, value)| Some((key, value?))),
+                    ) {
                         entity.set_meta(key, value);
                     }
                     return Ok(Ingested {
                         handle,
                         route,
-                        view: IngestView::Raster,
-                        image: Some(info),
+                        view: IngestView::Audio,
+                        image: None,
                         note: None,
                         micros,
                     });
                 }
-                Err(error) => (bytes, Some(format!("{error}; showing the raw bytes"))),
+                Err((error, bytes)) => (
+                    bytes,
+                    Some(format!(
+                        "the {} decoder failed ({error}); showing the raw bytes",
+                        format.name()
+                    )),
+                ),
             }
         }
         IngestRoute::Native(format) => (
@@ -176,15 +316,15 @@ pub fn ingest_bytes(
     })
 }
 
-/// `Tier 1 · JPEG XL`, `Tier 2 · TOML`, `Tier 3 · byte map (zip)`.
+/// `Tier 1: JPEG XL`, `Tier 2: TOML`, `Tier 3: byte map (ZIP)`.
 #[must_use]
 pub fn route_label(route: &IngestRoute) -> String {
     match route {
-        IngestRoute::Native(format) => format!("Tier 1 · {}", format.name()),
-        IngestRoute::Structured(format) => format!("Tier 2 · {}", format.name()),
+        IngestRoute::Native(format) => format!("Tier 1: {}", format.name()),
+        IngestRoute::Structured(format) => format!("Tier 2: {}", format.name()),
         IngestRoute::ByteMap(hint) => match hint.signature {
-            Some(signature) => format!("Tier 3 · byte map ({})", signature.name()),
-            None => "Tier 3 · byte map".to_owned(),
+            Some(signature) => format!("Tier 3: byte map ({})", signature.name()),
+            None => "Tier 3: byte map".to_owned(),
         },
     }
 }
@@ -192,8 +332,8 @@ pub fn route_label(route: &IngestRoute) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::NativeJxlPipeline;
-    use sue_core::{ComponentKind, PixelFormat, RasterTile2D};
+    use crate::{NativeJxlPipeline, encode_png, encode_wav};
+    use sue_core::{ComponentKind, PCMFloat1D, PixelFormat, RasterTile2D};
 
     const OPTIONS: IngestOptions = IngestOptions { byte_map_width: 64 };
 
@@ -209,7 +349,45 @@ mod tests {
         assert_eq!(entity.base_kind(), ComponentKind::RasterTile2D);
         assert_eq!(entity.meta(meta::WIDTH), Some("4"));
         assert_eq!(entity.meta(meta::FORMAT), Some("JPEG XL"));
-        assert_eq!(entity.meta(meta::ROUTE), Some("Tier 1 · JPEG XL"));
+        assert_eq!(entity.meta(meta::ROUTE), Some("Tier 1: JPEG XL"));
+    }
+
+    #[test]
+    fn png_files_become_decoded_rasters() {
+        let tile = RasterTile2D::from_bytes(3, 2, PixelFormat::Rgba8, vec![90; 24]).unwrap();
+        let png = encode_png(&tile).unwrap();
+        let mut arena = Arena::new();
+        let ingested = ingest_bytes(&mut arena, "a.png", png, &NativeJxlPipeline, OPTIONS).unwrap();
+        assert_eq!(ingested.view, IngestView::Raster);
+        let entity = arena.get(ingested.handle).unwrap();
+        assert_eq!(entity.meta(meta::FORMAT), Some("PNG"));
+        assert_eq!(entity.meta(meta::HEIGHT), Some("2"));
+        assert_eq!(
+            entity
+                .component(ComponentKind::RasterTile2D)
+                .and_then(|data| data.as_raster())
+                .map(|raster| raster.bytes().unwrap().to_vec()),
+            Some(vec![90; 24])
+        );
+    }
+
+    #[test]
+    fn audio_files_become_pcm() {
+        let pcm = PCMFloat1D::new(8_000, 1, vec![0.25; 800]).unwrap();
+        let mut arena = Arena::new();
+        let ingested = ingest_bytes(
+            &mut arena,
+            "tone.wav",
+            encode_wav(&pcm),
+            &NativeJxlPipeline,
+            OPTIONS,
+        )
+        .unwrap();
+        assert_eq!(ingested.view, IngestView::Audio);
+        let entity = arena.get(ingested.handle).unwrap();
+        assert_eq!(entity.base_kind(), ComponentKind::PCMFloat1D);
+        assert_eq!(entity.meta(meta::SAMPLE_RATE), Some("8000"));
+        assert_eq!(entity.meta(meta::CODEC), Some("PCM"));
     }
 
     #[test]
@@ -235,12 +413,16 @@ mod tests {
         assert_eq!(ingested.view, IngestView::Bytes);
         let entity = arena.get(ingested.handle).unwrap();
         assert_eq!(entity.meta(meta::BYTES), Some("10"));
-        assert_eq!(entity.meta(meta::ROUTE), Some("Tier 3 · byte map (ZIP)"));
+        assert_eq!(entity.meta(meta::ROUTE), Some("Tier 3: byte map (ZIP)"));
 
         let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
         let ingested = ingest_bytes(&mut arena, "a.png", png, &NativeJxlPipeline, OPTIONS).unwrap();
         assert_eq!(ingested.view, IngestView::Bytes);
-        assert!(ingested.note.unwrap().contains("no PNG decoder"));
+        assert!(ingested.note.unwrap().contains("PNG decoder failed"));
+
+        let gif = b"GIF89a\x01\0\x01\0\0\0\0".to_vec();
+        let ingested = ingest_bytes(&mut arena, "a.gif", gif, &NativeJxlPipeline, OPTIONS).unwrap();
+        assert!(ingested.note.unwrap().contains("no GIF decoder"));
 
         let broken = vec![0xFF, 0x0A, 0x41, 0x00];
         let ingested =

@@ -1,13 +1,28 @@
-//! The desktop shell: top bar, docks, Center Stage, Launchpad and the drop
-//! overlay, composed from the workspace layout and drawn with [`Ui`].
+//! The workstation shell: a flush header (menus, tabs, dock toggles), the
+//! activity rails, the docks, Center Stage with Home, and the status bar,
+//! with menus, tooltips, dialogs and the drop overlay on top.
 
 use sue_platform::{CursorShape, FormFactor, Point, SafeAreaInsets};
-use sue_rice::{RiceValue, SetRiceValue};
+use sue_rice::{HardwareProfile, RiceValue, SetRiceValue};
 
+use crate::canvas::Layer;
 use crate::{
-    AppletCategory, AppletContext, AppletId, AppletManifest, BoxStyle, Color, Focus, FontFace,
-    Placement, Rect, Ui, WmError, Workspace, Zone, widget_id,
+    AppletContext, AppletId, AppletManifest, BoxStyle, Focus, FontFace, MenuEntry, Placement, Rect,
+    ShellRequest, Tab, Ui, WmError, Workspace, Zone, widget_id,
 };
+
+/// A question the shell asks over everything else.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Dialog {
+    /// Title line.
+    pub title: String,
+    /// Explanation.
+    pub body: String,
+    /// The confirming button.
+    pub confirm: String,
+    /// The cancelling button.
+    pub cancel: String,
+}
 
 /// Per-frame facts the shell shows.
 #[derive(Clone, Debug, PartialEq)]
@@ -18,10 +33,12 @@ pub struct ShellFrame<'a> {
     pub safe_area: SafeAreaInsets,
     /// Device form factor.
     pub form_factor: FormFactor,
-    /// Telemetry badge text, e.g. `Render: SLEEP (0 FPS) · balanced`.
-    pub telemetry: &'a str,
-    /// `true` when the next frame will not be drawn (0 FPS).
-    pub sleeping: bool,
+    /// The animation frame rate, or `None` while the scene sleeps at 0 FPS.
+    pub fps: Option<u32>,
+    /// A status message, and whether it reports an error.
+    pub message: Option<(&'a str, bool)>,
+    /// A modal question, if one is open.
+    pub dialog: Option<&'a Dialog>,
 }
 
 /// What the user asked the shell to do this frame.
@@ -29,26 +46,51 @@ pub struct ShellFrame<'a> {
 pub enum ShellAction {
     /// Show or hide a dock.
     ToggleDock(Zone),
-    /// Open a new Hub tab.
+    /// A rail click on dock applet `index`.
+    SelectDock(usize),
+    /// Open a new tab.
     NewTab,
     /// Switch tabs.
     ActivateTab(usize),
     /// Close a tab.
     CloseTab(usize),
-    /// Open an applet in the active tab.
+    /// Open an applet.
     OpenApplet(AppletId),
     /// Pin or unpin an applet as the boot target (an undoable rice edit).
     TogglePin(AppletId),
     /// Move keyboard focus.
     Focus(Focus),
+    /// Open Settings, optionally at a page.
+    OpenSettings(Option<String>),
+    /// Undo the last change.
+    Undo,
+    /// Redo.
+    Redo,
+    /// Hand a request to the engine.
+    Post(ShellRequest),
+    /// The open dialog was answered.
+    DialogAnswer(bool),
 }
 
-fn contains(rect: Rect, point: Point) -> bool {
-    point.x >= rect.x && point.y >= rect.y && point.x < rect.right() && point.y < rect.bottom()
-}
+/// The icon drawn for the Settings gear.
+const GEAR: &str = "\u{2699}";
+/// The tab close mark.
+const CLOSE: &str = "\u{00D7}";
 
-fn inset(rect: Rect, amount: f32) -> Rect {
-    rect.shrink(amount)
+/// `high-refresh` becomes `High Refresh`.
+#[must_use]
+pub fn profile_label(profile: HardwareProfile) -> String {
+    profile
+        .rice_name()
+        .split('-')
+        .map(|word| {
+            let mut chars = word.chars();
+            chars.next().map_or_else(String::new, |first| {
+                first.to_uppercase().chain(chars).collect()
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Draws the whole shell and returns the actions the user triggered. Applets
@@ -62,27 +104,18 @@ pub fn draw_shell(
     let mut actions = Vec::new();
     let theme = ui.theme;
     let viewport = frame.viewport;
-    ui.canvas
-        .draw_box(viewport, BoxStyle::filled(theme.background, 0.0));
-    let top = Rect::new(viewport.x, viewport.y, viewport.width, theme.top_bar_height);
-    let content = Rect::new(
-        viewport.x,
-        top.bottom(),
-        viewport.width,
-        (viewport.height - theme.top_bar_height).max(0.0),
-    );
-    let layout = workspace.layout(content, frame.safe_area, frame.form_factor);
+    ui.fill(viewport, theme.base);
+    let layout = workspace.layout(viewport, frame.safe_area, frame.form_factor);
     let pressed_at = ui.input.pointer.filter(|_| ui.input.pressed);
+    ctx.inspection = workspace.inspect_active(ctx.world);
 
     // Center Stage.
-    ui.panel(layout.center);
-    let stage = inset(layout.center, theme.padding());
-    ui.canvas.push_clip(stage);
-    if !workspace.draw_active(ui, stage, ctx) {
-        draw_launchpad(workspace, ui, ctx, stage, &mut actions);
+    ui.canvas.push_clip(layout.center);
+    if !workspace.draw_active(ui, layout.center, ctx) {
+        draw_home(workspace, ui, ctx, layout.center, &mut actions);
     }
     ui.canvas.pop_clip();
-    if pressed_at.is_some_and(|point| contains(layout.center, point)) {
+    if pressed_at.is_some_and(|point| layout.center.contains(point.x, point.y)) {
         actions.push(ShellAction::Focus(Focus::Center));
     }
 
@@ -90,69 +123,96 @@ pub fn draw_shell(
         layout.bottom
     {
         ui.panel(timeline);
-        let label = Rect::new(
-            timeline.x + theme.padding(),
-            timeline.y,
-            timeline.width,
-            ui.row_height(),
+        ui.hline(timeline.x, timeline.y, timeline.width);
+        let pad = theme.padding;
+        ui.label_sized(
+            Rect::new(
+                timeline.x + pad,
+                timeline.y,
+                timeline.width,
+                ui.row_height(),
+            ),
+            "TIMELINE",
+            theme.small_size,
+            theme.muted,
         );
-        ui.label(label, "Timeline", theme.muted);
     }
 
+    let rails = layout.left_rail.is_some();
     for (zone, placement) in [
         (Zone::LeftDock, layout.left),
         (Zone::RightDock, layout.right),
     ] {
-        let Some(rect) = placement.rect() else {
-            continue;
-        };
-        if let Placement::Drawer { reveal, .. } = placement {
-            // Overlay drawers dim what they cover.
-            ui.canvas.draw_box(
-                layout.center,
-                BoxStyle::filled(theme.background.fade(0.5 * reveal), 0.0),
-            );
+        match placement {
+            Placement::Tiled(rect) => {
+                draw_dock(
+                    workspace,
+                    ui,
+                    ctx,
+                    zone,
+                    rect,
+                    rails,
+                    pressed_at,
+                    &mut actions,
+                );
+            }
+            Placement::Drawer {
+                rect,
+                bounds,
+                reveal,
+                ..
+            } => {
+                ui.canvas.push_clip(bounds);
+                ui.fill(bounds, theme.base.fade(0.5 * reveal));
+                draw_dock(
+                    workspace,
+                    ui,
+                    ctx,
+                    zone,
+                    rect,
+                    rails,
+                    pressed_at,
+                    &mut actions,
+                );
+                ui.canvas.pop_clip();
+            }
+            Placement::Hidden | Placement::BottomSheet { .. } => {}
         }
-        draw_dock(workspace, ui, ctx, zone, rect, pressed_at, &mut actions);
     }
 
-    draw_top_bar(workspace, ui, ctx, top, frame, &mut actions);
+    for (zone, rail) in [
+        (Zone::LeftDock, layout.left_rail),
+        (Zone::RightDock, layout.right_rail),
+    ] {
+        if let Some(rail) = rail {
+            draw_rail(workspace, ui, zone, rail, &mut actions);
+        }
+    }
 
+    draw_header(
+        workspace,
+        ui,
+        ctx,
+        layout.header,
+        frame,
+        &layout,
+        &mut actions,
+    );
+    if let Some(status) = layout.status {
+        draw_status(workspace, ui, ctx, status, frame);
+    }
+
+    if let Some(dialog) = frame.dialog {
+        draw_dialog(ui, viewport, dialog, &mut actions);
+    }
     if ui.input.file_hover {
-        ui.canvas
-            .draw_box(viewport, BoxStyle::filled(theme.background.fade(0.75), 0.0));
-        let width = (viewport.width * 0.6).min(theme.card_width * 2.5);
-        let height = ui.row_height() * 3.0;
-        let target = Rect::new(
-            viewport.x + (viewport.width - width) / 2.0,
-            viewport.y + (viewport.height - height) / 2.0,
-            width,
-            height,
-        );
-        ui.canvas.draw_box(
-            target,
-            BoxStyle {
-                fill: theme.surface,
-                border: theme.accent,
-                border_width: theme.border_width.max(1.0) * 2.0,
-                radius: theme.radius,
-            },
-        );
-        let line = ui.row_height();
-        ui.label_centered(
-            Rect::new(target.x, target.y, target.width, line * 1.5),
-            "Drop to ingest",
-            theme.accent,
-        );
-        ui.label_centered(
-            Rect::new(target.x, target.y + line * 1.4, target.width, line),
-            "JPEG XL opens in the viewer · text in Text Studio · anything else in the Hex Inspector",
-            theme.muted,
-        );
+        draw_drop_overlay(ui, viewport);
     }
+    ui.draw_tooltip();
     actions
 }
 
+/// The dock title row, then the dock's active applet.
 #[allow(
     clippy::too_many_arguments,
     reason = "one dock needs the shell, the zone and the frame's input"
@@ -163,260 +223,539 @@ fn draw_dock(
     ctx: &mut AppletContext<'_>,
     zone: Zone,
     rect: Rect,
+    rails: bool,
     pressed_at: Option<Point>,
     actions: &mut Vec<ShellAction>,
 ) {
     let theme = ui.theme;
+    let pad = theme.padding;
     ui.canvas.push_clip(rect);
     ui.panel(rect);
-    let docked: Vec<(usize, String)> = workspace
-        .docked()
-        .filter(|(_, dock_zone, _)| *dock_zone == zone)
-        .map(|(index, _, manifest)| (index, manifest.map_or_else(String::new, |m| m.name.clone())))
-        .collect();
-    let count = docked.len().max(1) as f32;
-    let header = ui.row_height();
-    let slot_height = (rect.height - theme.padding()) / count;
-    for (slot, (index, name)) in docked.into_iter().enumerate() {
-        let slot_rect = Rect::new(
-            rect.x + theme.padding(),
-            rect.y + theme.padding() + slot_height * slot as f32,
-            rect.width - theme.padding() * 2.0,
-            slot_height - theme.padding(),
-        );
-        let focused = workspace.focus() == Focus::Dock(index);
-        let title_color = if focused { theme.accent } else { theme.muted };
-        ui.label(
-            Rect::new(slot_rect.x, slot_rect.y, slot_rect.width, header),
-            &name.to_uppercase(),
-            title_color,
-        );
-        let body = Rect::new(
-            slot_rect.x,
-            slot_rect.y + header,
-            slot_rect.width,
-            (slot_rect.height - header).max(0.0),
-        );
-        ui.canvas.push_clip(body);
-        workspace.draw_dock(index, ui, body, ctx);
+    match zone {
+        Zone::LeftDock => ui.vline(rect.right() - theme.hairline(), rect.y, rect.height),
+        _ => ui.vline(rect.x, rect.y, rect.height),
+    }
+    let Some(index) = workspace.active_dock(zone) else {
         ui.canvas.pop_clip();
-        if pressed_at.is_some_and(|point| contains(slot_rect, point)) {
-            actions.push(ShellAction::Focus(Focus::Dock(index)));
+        return;
+    };
+    let row = ui.row_height();
+    let mut top = rect.y;
+    let applets = workspace.dock_applets(zone);
+    if rails {
+        let name = applets
+            .iter()
+            .find(|(candidate, _)| *candidate == index)
+            .map_or_else(String::new, |(_, manifest)| manifest.name.to_uppercase());
+        let color = if workspace.focus() == Focus::Dock(index) {
+            theme.text
+        } else {
+            theme.muted
+        };
+        ui.label_sized(
+            Rect::new(rect.x + pad, top, rect.width - pad * 2.0, row),
+            &name,
+            theme.small_size,
+            color,
+        );
+    } else {
+        // Phones have no rails: the drawer switches its applets itself.
+        let mut x = rect.x + pad / 2.0;
+        for (candidate, manifest) in &applets {
+            let button = Rect::new(x, top, row, row);
+            let id = widget_id("shell/drawer", manifest.id.as_str());
+            if ui.icon_button(
+                id,
+                button,
+                &manifest.icon,
+                *candidate == index,
+                &manifest.name,
+            ) {
+                actions.push(ShellAction::SelectDock(*candidate));
+            }
+            x += row;
         }
+    }
+    top += row;
+    let body = Rect::new(
+        rect.x + pad,
+        top,
+        (rect.width - pad * 2.0).max(0.0),
+        (rect.bottom() - top - pad / 2.0).max(0.0),
+    );
+    ui.canvas.push_clip(body);
+    workspace.draw_dock(index, ui, body, ctx);
+    ui.canvas.pop_clip();
+    if pressed_at.is_some_and(|point| rect.contains(point.x, point.y)) {
+        actions.push(ShellAction::Focus(Focus::Dock(index)));
     }
     ui.canvas.pop_clip();
 }
 
-fn draw_top_bar(
+/// An activity rail: one icon per dock applet. The active one is lit and
+/// marked with an accent bar on the outer edge.
+fn draw_rail(
     workspace: &Workspace,
     ui: &mut Ui<'_>,
-    ctx: &AppletContext<'_>,
-    top: Rect,
-    frame: &ShellFrame<'_>,
+    zone: Zone,
+    rail: Rect,
     actions: &mut Vec<ShellAction>,
 ) {
     let theme = ui.theme;
-    ui.canvas
-        .draw_box(top, BoxStyle::filled(theme.surface, 0.0));
-    ui.canvas.draw_box(
-        Rect::new(
-            top.x,
-            top.bottom() - theme.border_width,
-            top.width,
-            theme.border_width,
-        ),
-        BoxStyle::filled(theme.raised, 0.0),
-    );
-    let pad = theme.padding();
-    let button = (top.height - pad).max(1.0);
-    let y = top.y + (top.height - button) / 2.0;
+    ui.fill(rail, theme.chrome);
+    match zone {
+        Zone::LeftDock => ui.vline(rail.right() - theme.hairline(), rail.y, rail.height),
+        _ => ui.vline(rail.x, rail.y, rail.height),
+    }
     let (left_open, right_open) = workspace.docks_open();
+    let open = if zone == Zone::LeftDock {
+        left_open
+    } else {
+        right_open
+    };
+    let active = workspace.active_dock(zone);
+    let size = rail.width;
+    for (slot, (index, manifest)) in workspace.dock_applets(zone).into_iter().enumerate() {
+        let button = Rect::new(rail.x, rail.y + slot as f32 * size, size, size);
+        let lit = open && active == Some(index);
+        if lit {
+            let bar = theme.tab_accent.max(theme.hairline());
+            let x = if zone == Zone::LeftDock {
+                button.x
+            } else {
+                button.right() - bar
+            };
+            ui.fill(Rect::new(x, button.y, bar, button.height), theme.accent);
+        }
+        let id = widget_id("shell/rail", manifest.id.as_str());
+        if ui.icon_button(id, button, &manifest.icon, lit, &manifest.name) {
+            actions.push(ShellAction::SelectDock(index));
+        }
+    }
+}
 
-    let left_toggle = Rect::new(top.x + pad / 2.0, y, button, button);
+/// A dock toggle drawn as a window with its left or right pane filled.
+fn dock_icon(ui: &mut Ui<'_>, id: u64, rect: Rect, left: bool, open: bool, tooltip: &str) -> bool {
+    let response = ui.interact(id, rect);
+    let theme = ui.theme;
+    if response.hovered {
+        ui.canvas.draw_box(
+            rect.shrink(3.0),
+            BoxStyle::filled(theme.hover, theme.radius),
+        );
+        ui.set_cursor(CursorShape::Pointer);
+    }
+    let side = (rect.height * 0.5).round();
+    let icon = Rect::new(
+        (rect.x + (rect.width - side * 1.2) / 2.0).round(),
+        (rect.y + (rect.height - side) / 2.0).round(),
+        (side * 1.2).round(),
+        side,
+    );
+    let color = if open || response.hovered {
+        theme.text
+    } else {
+        theme.muted
+    };
+    let line = theme.hairline().max(1.0);
+    ui.canvas.draw_box(
+        icon,
+        BoxStyle {
+            fill: crate::Color::TRANSPARENT,
+            border: color,
+            border_width: line,
+            radius: theme.radius.min(2.0),
+        },
+    );
+    let pane = (icon.width * 0.38).round();
+    let pane_x = if left { icon.x } else { icon.right() - pane };
+    let fill = if open { color } else { color.fade(0.35) };
+    ui.canvas.draw_box(
+        Rect::new(pane_x, icon.y, pane, icon.height),
+        BoxStyle::filled(fill, theme.radius.min(2.0)),
+    );
+    ui.tooltip(response, rect, tooltip);
+    response.clicked
+}
+
+/// One header menu: its title and its entries, each with what it does.
+type Menu = (&'static str, Vec<(MenuEntry, Option<ShellAction>)>);
+
+/// The menus of the header, with what each entry does.
+fn menus(workspace: &Workspace, ctx: &AppletContext<'_>) -> Vec<Menu> {
+    let keys = workspace.config().keymap;
+    let key = |chord: sue_rice::Keybind| Some(chord.to_string());
+    let item = |label: &str, chord: Option<String>, action: ShellAction| {
+        (MenuEntry::item(label, chord), Some(action))
+    };
+    let separator = || (MenuEntry::Separator, None);
+    let has_applet = workspace.active_tab().applet_id().is_some();
+    let post = |command: &str| ShellAction::Post(ShellRequest::Command(command.to_owned()));
+
+    let file = vec![
+        item("Open File...", key(keys.open_file), post("file.open")),
+        {
+            let (entry, action) = item("Save", key(keys.save), post("file.save"));
+            (entry.enabled(has_applet), action)
+        },
+        separator(),
+        {
+            let (entry, action) = item(
+                "Close Tab",
+                key(keys.close_tab),
+                ShellAction::CloseTab(workspace.active_index()),
+            );
+            (entry.enabled(workspace.active_index() > 0), action)
+        },
+        separator(),
+        item("Quit", key(keys.quit), post("app.quit")),
+    ];
+    let edit = vec![
+        {
+            let (entry, action) = item("Undo", key(keys.undo), ShellAction::Undo);
+            (entry.enabled(ctx.history.can_undo()), action)
+        },
+        {
+            let (entry, action) = item("Redo", key(keys.redo), ShellAction::Redo);
+            (entry.enabled(ctx.history.can_redo()), action)
+        },
+    ];
+    let (left_open, right_open) = workspace.docks_open();
+    let dock_label =
+        |name: &str, open: bool| format!("{} {name} Dock", if open { "Hide" } else { "Show" });
+    let workspace_menu = vec![
+        item("New Tab", key(keys.new_tab), ShellAction::NewTab),
+        item("Home", key(keys.home), ShellAction::ActivateTab(0)),
+        separator(),
+        item(
+            &dock_label("Left", left_open),
+            key(keys.toggle_left_dock),
+            ShellAction::ToggleDock(Zone::LeftDock),
+        ),
+        item(
+            &dock_label("Right", right_open),
+            key(keys.toggle_right_dock),
+            ShellAction::ToggleDock(Zone::RightDock),
+        ),
+    ];
+    let hub = workspace.launchpad().hub();
+    let mut tools: Vec<(MenuEntry, Option<ShellAction>)> = hub
+        .studios
+        .iter()
+        .chain(&hub.inspectors)
+        .map(|manifest| {
+            item(
+                &manifest.name,
+                None,
+                ShellAction::OpenApplet(manifest.id.clone()),
+            )
+        })
+        .collect();
+    let docked: Vec<(MenuEntry, Option<ShellAction>)> = [Zone::LeftDock, Zone::RightDock]
+        .into_iter()
+        .flat_map(|zone| workspace.dock_applets(zone))
+        .map(|(index, manifest)| item(&manifest.name, None, ShellAction::SelectDock(index)))
+        .collect();
+    if !tools.is_empty() && !docked.is_empty() {
+        tools.push(separator());
+    }
+    tools.extend(docked);
+    let mut settings = vec![
+        item(
+            "Open Settings",
+            key(keys.open_settings),
+            ShellAction::OpenSettings(None),
+        ),
+        separator(),
+    ];
+    settings.extend(ctx.catalog.pages.iter().map(|page| {
+        item(
+            &page.title,
+            None,
+            ShellAction::OpenSettings(Some(page.id.clone())),
+        )
+    }));
+    settings.extend([
+        separator(),
+        item("Reload default.suerice", None, post("rice.reload")),
+        item("Export Rice...", None, post("rice.export")),
+        item("Open Config Folder", None, post("rice.reveal")),
+    ]);
+    vec![
+        ("File", file),
+        ("Edit", edit),
+        ("Workspace", workspace_menu),
+        ("Tools", tools),
+        ("Settings", settings),
+    ]
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the header needs the layout and the frame facts"
+)]
+fn draw_header(
+    workspace: &Workspace,
+    ui: &mut Ui<'_>,
+    ctx: &AppletContext<'_>,
+    header: Rect,
+    frame: &ShellFrame<'_>,
+    layout: &crate::LayoutSolution,
+    actions: &mut Vec<ShellAction>,
+) {
+    let theme = ui.theme;
+    let pad = theme.padding;
+    ui.fill(header, theme.chrome);
+    ui.hline(header.x, header.bottom() - theme.hairline(), header.width);
+    let (left_open, right_open) = workspace.docks_open();
+    let toggle_width = layout.left_rail.map_or(header.height, |rail| rail.width);
+
+    let left_toggle = Rect::new(header.x, header.y, toggle_width, header.height);
     if dock_icon(
         ui,
         widget_id("shell", "toggle-left"),
         left_toggle,
         true,
         left_open,
+        "Left dock",
     ) {
         actions.push(ShellAction::ToggleDock(Zone::LeftDock));
     }
-    let mut x = left_toggle.right() + pad;
-    let title = "Sue v1.0 — Faustian Enigma";
-    let title_width = ui.fonts.measure(FontFace::Ui, theme.ui_size, title);
-    ui.label(
-        Rect::new(x, top.y, title_width + 1.0, top.height),
-        title,
-        theme.text,
+    let right_toggle = Rect::new(
+        header.right() - toggle_width,
+        header.y,
+        toggle_width,
+        header.height,
     );
-    x += title_width + pad * 2.0;
-
-    let mode = workspace.tab_title(workspace.active_index(), ctx.world);
-    let mode_text = format!("Mode · {mode}");
-    let mode_width = ui.fonts.measure(FontFace::Ui, theme.ui_size, &mode_text) + pad * 2.0;
-    let mode_rect = Rect::new(x, y, mode_width, button);
-    ui.canvas.draw_box(
-        mode_rect,
-        BoxStyle::filled(theme.accent.fade(0.18), button / 2.0),
-    );
-    ui.label_centered(mode_rect, &mode_text, theme.accent);
-    x = mode_rect.right() + pad;
-
-    let right_toggle = Rect::new(top.right() - pad / 2.0 - button, y, button, button);
     if dock_icon(
         ui,
         widget_id("shell", "toggle-right"),
         right_toggle,
         false,
         right_open,
+        "Right dock",
     ) {
         actions.push(ShellAction::ToggleDock(Zone::RightDock));
     }
-    let badge_width = ui
-        .fonts
-        .measure(FontFace::Mono, theme.mono_size, frame.telemetry)
-        + pad * 3.0;
-    let badge = Rect::new(right_toggle.x - pad - badge_width, y, badge_width, button);
-    ui.canvas.draw_box(
-        badge,
-        BoxStyle {
-            fill: theme.background,
-            border: if frame.sleeping {
-                theme.raised
-            } else {
-                theme.accent
-            },
-            border_width: theme.border_width.max(1.0),
-            radius: button / 2.0,
-        },
+    let gear = Rect::new(
+        right_toggle.x - header.height,
+        header.y,
+        header.height,
+        header.height,
     );
-    let dot = button / 4.0;
-    let dot_color = if frame.sleeping {
-        theme.muted
-    } else {
-        theme.accent
-    };
-    ui.canvas.draw_box(
-        Rect::new(
-            badge.x + pad * 0.75,
-            badge.y + (button - dot) / 2.0,
-            dot,
-            dot,
-        ),
-        BoxStyle::filled(dot_color, dot / 2.0),
-    );
-    let mono_height = ui.fonts.line_height(FontFace::Mono, theme.mono_size);
-    ui.text(
-        Point::new(
-            badge.x + pad * 0.75 + dot + pad / 2.0,
-            badge.y + (button - mono_height) / 2.0,
-        ),
-        frame.telemetry,
-        FontFace::Mono,
-        theme.mono_size,
-        if frame.sleeping {
-            theme.muted
-        } else {
-            theme.text
-        },
-    );
+    if ui.icon_button(widget_id("shell", "gear"), gear, GEAR, false, "Settings") {
+        actions.push(ShellAction::OpenSettings(None));
+    }
 
-    // Tabs fill the space between the mode chip and the badge.
-    let tabs_end = badge.x - pad;
-    let tab_count = workspace.tabs().len();
-    let plus_width = button;
-    let available = (tabs_end - x - plus_width - pad).max(0.0);
-    let tab_width = (available / tab_count.max(1) as f32).min(theme.card_width * 0.75);
-    if tab_width > button * 2.0 {
-        for index in 0..tab_count {
-            let tab = Rect::new(
-                x + index as f32 * (tab_width + pad / 2.0),
-                y,
-                tab_width,
-                button,
-            );
-            let active = index == workspace.active_index();
-            let response = ui.interact(widget_id("shell/tab", &index.to_string()), tab);
-            let fill = if active {
-                theme.raised
-            } else if response.hovered {
-                theme.hover
-            } else {
-                Color::TRANSPARENT
-            };
-            ui.canvas
-                .draw_box(tab, BoxStyle::filled(fill, theme.radius / 2.0));
-            let close = Rect::new(tab.right() - button, tab.y, button, button);
-            let label = Rect::new(
-                tab.x + pad,
-                tab.y,
-                (tab.width - pad - button).max(0.0),
-                tab.height,
-            );
-            let text_color = if active { theme.text } else { theme.muted };
-            ui.label(label, &workspace.tab_title(index, ctx.world), text_color);
-            if response.hovered {
-                ui.set_cursor(CursorShape::Pointer);
+    let mut x = left_toggle.right();
+    if frame.form_factor != FormFactor::Mobile {
+        for (name, entries) in menus(workspace, ctx) {
+            let width = ui.fonts.measure(FontFace::Ui, theme.ui_size, name) + pad * 2.0;
+            let button = Rect::new(x, header.y + 3.0, width, header.height - 6.0);
+            let button_id = widget_id("shell/menu-button", name);
+            let menu_id = widget_id("shell/menu", name);
+            let open = ui.popup_open(menu_id);
+            if ui.flat_button(button_id, button, name, open).clicked {
+                if open {
+                    ui.close_popup();
+                } else {
+                    ui.open_popup(menu_id, button_id);
+                }
             }
-            if response.clicked {
-                actions.push(ShellAction::ActivateTab(index));
+            if ui.popup_open(menu_id) {
+                let shown: Vec<MenuEntry> =
+                    entries.iter().map(|(entry, _)| entry.clone()).collect();
+                if let Some(picked) =
+                    ui.menu(menu_id, Point::new(button.x, header.bottom()), &shown)
+                    && let Some(Some(action)) =
+                        entries.get(picked).map(|(_, action)| action.clone())
+                {
+                    actions.push(action);
+                }
             }
+            x = button.right();
+        }
+        x += pad;
+        ui.vline(x, header.y + 6.0, header.height - 12.0);
+    }
+
+    // Tabs fill the rest of the header, flush, then "+".
+    let tabs_start = x;
+    let plus_width = header.height;
+    let available = (gear.x - tabs_start - plus_width).max(0.0);
+    let count = workspace.tabs().len();
+    let titles: Vec<String> = (0..count)
+        .map(|index| {
+            let title = workspace.tab_title(index, ctx.world);
+            let icon = workspace
+                .tabs()
+                .get(index)
+                .and_then(Tab::applet_id)
+                .and_then(|id| workspace.launchpad().manifest(id))
+                .map(|manifest| manifest.icon.clone());
+            icon.map_or(title.clone(), |icon| format!("{icon}  {title}"))
+        })
+        .collect();
+    let close_width = header.height * 0.8;
+    let natural: Vec<f32> = titles
+        .iter()
+        .enumerate()
+        .map(|(index, title)| {
+            ui.fonts.measure(FontFace::Ui, theme.ui_size, title)
+                + pad * 2.0
+                + if index == 0 { 0.0 } else { close_width }
+        })
+        .collect();
+    let total: f32 = natural.iter().sum();
+    let squeeze = if total > available && total > 0.0 {
+        available / total
+    } else {
+        1.0
+    };
+    let mut tab_x = tabs_start;
+    for (index, title) in titles.iter().enumerate() {
+        let width = natural[index] * squeeze;
+        let tab = Rect::new(tab_x, header.y, width, header.height - theme.hairline());
+        tab_x = tab.right();
+        let active = index == workspace.active_index();
+        let response = ui.interact(widget_id("shell/tab", &index.to_string()), tab);
+        if active {
+            ui.fill(tab, theme.surface);
+            ui.fill(
+                Rect::new(tab.x, tab.y, tab.width, theme.tab_accent),
+                theme.accent,
+            );
+        } else if response.hovered {
+            ui.fill(tab, theme.hover);
+        }
+        ui.vline(tab.right() - theme.hairline(), tab.y, tab.height);
+        let closable = index > 0;
+        let label = Rect::new(
+            tab.x + pad,
+            tab.y,
+            (tab.width - pad * 2.0 - if closable { close_width } else { 0.0 }).max(0.0),
+            tab.height,
+        );
+        ui.canvas.push_clip(label);
+        ui.text(
+            Point::new(label.x, tab.y + (tab.height - ui.line_height()) / 2.0),
+            title,
+            FontFace::Ui,
+            theme.ui_size,
+            if active { theme.text } else { theme.muted },
+        );
+        ui.canvas.pop_clip();
+        if response.hovered {
+            ui.set_cursor(CursorShape::Pointer);
+        }
+        if response.clicked {
+            actions.push(ShellAction::ActivateTab(index));
+        }
+        if closable {
+            let close = Rect::new(
+                tab.right() - close_width - pad / 2.0,
+                tab.y + (tab.height - close_width) / 2.0,
+                close_width,
+                close_width,
+            );
             let close_response =
                 ui.interact(widget_id("shell/tab-close", &index.to_string()), close);
-            let close_color = if close_response.hovered {
-                theme.alert
-            } else {
-                theme.muted
-            };
-            ui.label_centered(close, "×", close_color);
+            if close_response.hovered {
+                ui.canvas
+                    .draw_box(close, BoxStyle::filled(theme.hover, theme.radius));
+                ui.set_cursor(CursorShape::Pointer);
+            }
+            if active || response.hovered || close_response.hovered {
+                ui.label_centered(close, CLOSE, theme.muted);
+            }
+            ui.tooltip(close_response, close, "Close tab");
             if close_response.clicked {
                 actions.push(ShellAction::CloseTab(index));
             }
         }
-        let plus = Rect::new(
-            x + tab_count as f32 * (tab_width + pad / 2.0),
-            y,
-            plus_width,
-            button,
+    }
+    let plus = Rect::new(
+        tab_x,
+        header.y,
+        plus_width,
+        header.height - theme.hairline(),
+    );
+    let response = ui.flat_button(widget_id("shell", "new-tab"), plus, "+", false);
+    ui.tooltip(response, plus, "New tab");
+    if response.clicked {
+        actions.push(ShellAction::NewTab);
+    }
+}
+
+fn draw_status(
+    workspace: &Workspace,
+    ui: &mut Ui<'_>,
+    ctx: &AppletContext<'_>,
+    status: Rect,
+    frame: &ShellFrame<'_>,
+) {
+    let theme = ui.theme;
+    let pad = theme.padding;
+    let size = theme.small_size;
+    ui.fill(status, theme.chrome);
+    ui.hline(status.x, status.y, status.width);
+    let (left_text, left_color) = match frame.message {
+        Some((message, true)) => (message.to_owned(), theme.alert),
+        Some((message, false)) => (message.to_owned(), theme.text),
+        None => (
+            workspace.tab_title(workspace.active_index(), ctx.world),
+            theme.muted,
+        ),
+    };
+    let entities = ctx.world.arena.len();
+    let items = [
+        format!(
+            "{entities} {}",
+            if entities == 1 { "entity" } else { "entities" }
+        ),
+        format!("Undo {}", ctx.history.depth()),
+        profile_label(workspace.profile()),
+        frame
+            .fps
+            .map_or_else(|| "Idle".to_owned(), |fps| format!("{fps} FPS")),
+    ];
+    let mut x = status.right() - pad;
+    for (slot, item) in items.iter().enumerate().rev() {
+        let width = ui.fonts.measure(FontFace::Ui, size, item);
+        x -= width;
+        let color = if slot == items.len() - 1 && frame.fps.is_some() {
+            theme.accent
+        } else {
+            theme.muted
+        };
+        ui.label_sized(
+            Rect::new(x, status.y, width + 1.0, status.height),
+            item,
+            size,
+            color,
         );
-        if ui.button(widget_id("shell", "new-tab"), plus, "+") {
-            actions.push(ShellAction::NewTab);
+        x -= pad;
+        if slot > 0 {
+            ui.vline(x, status.y + 5.0, status.height - 10.0);
+            x -= pad;
         }
     }
+    ui.label_sized(
+        Rect::new(
+            status.x + pad,
+            status.y,
+            (x - status.x - pad * 2.0).max(0.0),
+            status.height,
+        ),
+        &left_text,
+        size,
+        left_color,
+    );
 }
 
-/// A dock toggle drawn as a window with its left or right pane filled.
-fn dock_icon(ui: &mut Ui<'_>, id: u64, rect: Rect, left: bool, open: bool) -> bool {
-    let response = ui.interact(id, rect);
-    let theme = ui.theme;
-    if response.hovered {
-        ui.canvas
-            .draw_box(rect, BoxStyle::filled(theme.hover, theme.radius / 2.0));
-        ui.set_cursor(CursorShape::Pointer);
-    }
-    let icon = rect.shrink(rect.width * 0.25);
-    let color = if open { theme.accent } else { theme.muted };
-    let corner = theme.radius / 4.0;
-    ui.canvas.draw_box(
-        icon,
-        BoxStyle {
-            fill: Color::TRANSPARENT,
-            border: color,
-            border_width: theme.border_width.max(1.0),
-            radius: corner,
-        },
-    );
-    let pane = icon.width * 0.38;
-    let pane_x = if left { icon.x } else { icon.right() - pane };
-    ui.canvas.draw_box(
-        Rect::new(pane_x, icon.y, pane, icon.height),
-        BoxStyle::filled(color, corner),
-    );
-    response.clicked
-}
-
-fn draw_launchpad(
+/// Home: Center Stage applets grouped by category in a grid of wide cards
+/// whose descriptions wrap instead of being cut.
+fn draw_home(
     workspace: &Workspace,
     ui: &mut Ui<'_>,
     ctx: &AppletContext<'_>,
@@ -424,16 +763,8 @@ fn draw_launchpad(
     actions: &mut Vec<ShellAction>,
 ) {
     let theme = ui.theme;
-    let pad = theme.padding();
-    let heading_size = theme.ui_size * 1.8;
-    let heading = ui.fonts.line_height(FontFace::Ui, heading_size);
-    ui.text(
-        Point::new(area.x + pad, area.y + pad),
-        "Launchpad",
-        FontFace::Ui,
-        heading_size,
-        theme.text,
-    );
+    let pad = theme.padding;
+    let margin = pad * 3.0;
     let hub = workspace.launchpad().hub();
     let pinned = ctx
         .world
@@ -441,70 +772,71 @@ fn draw_launchpad(
         .get_str("launchpad.boot_into")
         .unwrap_or("hub")
         .to_owned();
-    let plural = |count: usize, one: &str, many: &str| {
-        format!("{count} {}", if count == 1 { one } else { many })
-    };
-    let subtitle = format!(
-        "{} · {} installed · pin one to boot straight into it",
-        plural(hub.studios.len(), "studio", "studios"),
-        plural(hub.utilities.len(), "utility", "utilities")
+    let inner = Rect::new(
+        area.x + margin,
+        area.y + margin,
+        (area.width - margin * 2.0).max(1.0),
+        area.height,
     );
-    let line = ui.row_height();
-    ui.label(
-        Rect::new(
-            area.x + pad,
-            area.y + pad + heading,
-            area.width - pad * 2.0,
-            line,
-        ),
-        &subtitle,
-        theme.muted,
-    );
-    let mut y = area.y + pad * 2.0 + heading + line;
-
-    let columns = (((area.width - pad) / (theme.card_width + pad)).floor() as usize).max(1);
-    let card_width = ((area.width - pad * (columns as f32 + 1.0)) / columns as f32).max(1.0);
-    let card_height = line * 3.5;
-    for (title, list, empty) in [
-        (
-            "STUDIOS",
-            &hub.studios,
-            "No studios installed yet; they arrive as packages.",
-        ),
-        ("UTILITIES", &hub.utilities, "No utilities installed."),
+    let columns = (((inner.width + pad) / (theme.card_width + pad)).floor() as usize).max(1);
+    let card_width = ((inner.width - pad * (columns as f32 - 1.0)) / columns as f32).max(1.0);
+    let mut y = inner.y;
+    for (category, list) in [
+        (crate::AppletCategory::Studio, &hub.studios),
+        (crate::AppletCategory::Inspector, &hub.inspectors),
     ] {
-        ui.label(
-            Rect::new(area.x + pad, y, area.width, line),
-            title,
+        ui.label_sized(
+            Rect::new(inner.x, y, inner.width, ui.row_height()),
+            &category.plural().to_uppercase(),
+            theme.small_size,
             theme.muted,
         );
-        y += line;
+        y += ui.row_height();
         if list.is_empty() {
-            ui.label(
-                Rect::new(area.x + pad, y, area.width, line),
-                empty,
-                theme.muted.fade(0.7),
+            let note = format!(
+                "No {} are installed. They arrive as packages.",
+                category.plural().to_lowercase()
             );
-            y += line + pad;
+            y += ui.wrapped(inner.x, y, inner.width, &note, theme.ui_size, theme.muted) + margin;
             continue;
         }
-        for (index, manifest) in list.iter().enumerate() {
-            let column = index % columns;
-            let row = index / columns;
-            let card = Rect::new(
-                area.x + pad + column as f32 * (card_width + pad),
-                y + row as f32 * (card_height + pad),
-                card_width,
-                card_height,
-            );
-            let is_pinned = manifest.id.as_str() == pinned;
-            if let Some(action) = draw_card(ui, manifest, card, is_pinned) {
-                actions.push(action);
+        for row in list.chunks(columns) {
+            let height = row
+                .iter()
+                .map(|manifest| card_height(ui, manifest, card_width))
+                .fold(0.0_f32, f32::max);
+            for (column, manifest) in row.iter().enumerate() {
+                let card = Rect::new(
+                    inner.x + column as f32 * (card_width + pad),
+                    y,
+                    card_width,
+                    height,
+                );
+                if let Some(action) = draw_card(ui, manifest, card, manifest.id.as_str() == pinned)
+                {
+                    actions.push(action);
+                }
             }
+            y += height + pad;
         }
-        let rows = list.len().div_ceil(columns);
-        y += rows as f32 * (card_height + pad) + pad;
+        y += margin - pad;
     }
+}
+
+fn name_size(ui: &Ui<'_>) -> f32 {
+    (ui.theme.ui_size + ui.theme.heading_size) / 2.0
+}
+
+fn card_height(ui: &Ui<'_>, manifest: &AppletManifest, width: f32) -> f32 {
+    let pad = ui.theme.padding;
+    let text_width = width - pad * 3.0 - name_size(ui) * 1.6;
+    pad * 1.5
+        + ui.fonts.line_height(FontFace::Ui, name_size(ui))
+        + pad / 2.0
+        + ui.wrapped_height(&manifest.summary, text_width, ui.theme.ui_size)
+        + pad
+        + ui.row_height()
+        + pad
 }
 
 fn draw_card(
@@ -514,83 +846,75 @@ fn draw_card(
     pinned: bool,
 ) -> Option<ShellAction> {
     let theme = ui.theme;
-    let pad = theme.padding();
-    let line = ui.row_height();
+    let pad = theme.padding;
     let response = ui.interact(widget_id("launchpad/card", manifest.id.as_str()), card);
-    let border = if pinned || response.hovered {
-        theme.accent
-    } else {
-        theme.raised
-    };
     ui.canvas.draw_box(
         card,
         BoxStyle {
             fill: if response.hovered {
                 theme.hover
             } else {
-                theme.raised
+                theme.surface
             },
-            border,
-            border_width: theme.border_width.max(1.0),
+            border: if response.hovered || pinned {
+                theme.accent
+            } else {
+                theme.border
+            },
+            border_width: theme.hairline(),
             radius: theme.radius,
         },
     );
     if response.hovered {
         ui.set_cursor(CursorShape::Pointer);
     }
-    let name_size = theme.ui_size * 1.2;
+    let name_size = name_size(ui);
+    let icon_size = name_size * 1.6;
+    ui.label_centered_sized(
+        Rect::new(card.x + pad, card.y + pad * 1.5, icon_size, icon_size),
+        &manifest.icon,
+        name_size * 1.2,
+        theme.accent,
+    );
+    let text_x = card.x + pad * 2.0 + icon_size;
+    let text_width = card.right() - pad - text_x;
     ui.text(
-        Point::new(card.x + pad, card.y + pad),
+        Point::new(text_x, card.y + pad * 1.5),
         &manifest.name,
         FontFace::Ui,
         name_size,
         theme.text,
     );
-    let kind = match (manifest.category, manifest.home_zone) {
-        (AppletCategory::Studio, _) => "Studio",
-        (AppletCategory::Utility, Zone::LeftDock) => "Utility · left dock",
-        (AppletCategory::Utility, Zone::RightDock) => "Utility · right dock",
-        (AppletCategory::Utility, _) => "Utility",
-    };
-    let name_height = ui.fonts.line_height(FontFace::Ui, name_size);
-    ui.label(
-        Rect::new(
-            card.x + pad,
-            card.y + pad + name_height,
-            card.width - pad * 2.0,
-            line * 0.9,
-        ),
-        kind,
-        theme.accent,
-    );
-    ui.label(
-        Rect::new(
-            card.x + pad,
-            card.y + pad + name_height + line * 0.9,
-            card.width - pad * 2.0,
-            line,
-        ),
+    let summary_y = card.y + pad * 2.0 + ui.fonts.line_height(FontFace::Ui, name_size);
+    ui.wrapped(
+        text_x,
+        summary_y,
+        text_width,
         &manifest.summary,
+        theme.ui_size,
         theme.muted,
     );
-
-    let pin = Rect::new(
-        card.right() - line - pad / 2.0,
-        card.y + pad / 2.0,
-        line,
-        line,
+    let row = ui.row_height();
+    let toggle_row = Rect::new(text_x, card.bottom() - pad - row, text_width, row);
+    let pin_id = widget_id("launchpad/pin", manifest.id.as_str());
+    let switch = Rect::new(toggle_row.x, toggle_row.y, row * 1.8, row);
+    let clicked = ui.toggle(pin_id, switch, pinned);
+    ui.label_sized(
+        Rect::new(
+            switch.right() + pad / 2.0,
+            toggle_row.y,
+            toggle_row.width - switch.width - pad / 2.0,
+            row,
+        ),
+        if pinned {
+            "Opens at launch"
+        } else {
+            "Pin as boot"
+        },
+        theme.small_size,
+        if pinned { theme.accent } else { theme.muted },
     );
-    let pin_response = ui.interact(widget_id("launchpad/pin", manifest.id.as_str()), pin);
-    if pinned || pin_response.hovered {
-        let fill = if pinned { theme.accent } else { theme.hover };
-        ui.canvas.draw_box(pin, BoxStyle::filled(fill, line / 2.0));
-    }
-    let pin_color = if pinned { theme.on_accent } else { theme.muted };
-    ui.label_centered(pin, "📌", pin_color);
-    if pin_response.hovered {
-        ui.set_cursor(CursorShape::Pointer);
-    }
-    if pin_response.clicked {
+    if clicked {
         return Some(ShellAction::TogglePin(manifest.id.clone()));
     }
     response
@@ -598,11 +922,116 @@ fn draw_card(
         .then(|| ShellAction::OpenApplet(manifest.id.clone()))
 }
 
+fn draw_dialog(ui: &mut Ui<'_>, viewport: Rect, dialog: &Dialog, actions: &mut Vec<ShellAction>) {
+    let theme = ui.theme;
+    let pad = theme.padding;
+    ui.canvas.set_layer(Layer::Overlay);
+    ui.fill(viewport, theme.base.fade(0.6));
+    // The backdrop takes every click outside the dialog.
+    let _ = ui.interact(widget_id("shell/dialog", "backdrop"), viewport);
+    let width = (theme.card_width * 1.4).min(viewport.width - pad * 4.0);
+    let body_height = ui.wrapped_height(&dialog.body, width - pad * 4.0, theme.ui_size);
+    let height = pad * 6.0 + ui.line_height() + body_height + ui.row_height();
+    let panel = Rect::new(
+        viewport.x + (viewport.width - width) / 2.0,
+        viewport.y + (viewport.height - height) / 2.0,
+        width,
+        height,
+    );
+    ui.canvas.draw_box(
+        panel,
+        BoxStyle {
+            fill: theme.panel,
+            border: theme.border,
+            border_width: theme.hairline(),
+            radius: theme.radius,
+        },
+    );
+    let x = panel.x + pad * 2.0;
+    let mut y = panel.y + pad * 2.0;
+    ui.text(
+        Point::new(x, y),
+        &dialog.title,
+        FontFace::Ui,
+        theme.ui_size,
+        theme.text,
+    );
+    y += ui.line_height() + pad;
+    ui.wrapped(
+        x,
+        y,
+        width - pad * 4.0,
+        &dialog.body,
+        theme.ui_size,
+        theme.muted,
+    );
+    let row = ui.row_height();
+    let button_width =
+        |ui: &Ui<'_>, text: &str| ui.fonts.measure(FontFace::Ui, theme.ui_size, text) + pad * 4.0;
+    let confirm_width = button_width(ui, &dialog.confirm);
+    let cancel_width = button_width(ui, &dialog.cancel);
+    let confirm = Rect::new(
+        panel.right() - pad * 2.0 - confirm_width,
+        panel.bottom() - pad * 2.0 - row,
+        confirm_width,
+        row,
+    );
+    let cancel = Rect::new(confirm.x - pad - cancel_width, confirm.y, cancel_width, row);
+    if ui.button(widget_id("shell/dialog", "cancel"), cancel, &dialog.cancel) {
+        actions.push(ShellAction::DialogAnswer(false));
+    }
+    if ui.primary_button(
+        widget_id("shell/dialog", "confirm"),
+        confirm,
+        &dialog.confirm,
+        true,
+    ) {
+        actions.push(ShellAction::DialogAnswer(true));
+    }
+    ui.canvas.set_layer(Layer::Base);
+}
+
+fn draw_drop_overlay(ui: &mut Ui<'_>, viewport: Rect) {
+    let theme = ui.theme;
+    let pad = theme.padding;
+    ui.canvas.set_layer(Layer::Overlay);
+    ui.fill(viewport, theme.base.fade(0.75));
+    let width = (theme.card_width * 1.6).min(viewport.width - pad * 4.0);
+    let line = ui.row_height();
+    let target = Rect::new(
+        viewport.x + (viewport.width - width) / 2.0,
+        viewport.y + (viewport.height - line * 3.0) / 2.0,
+        width,
+        line * 3.0,
+    );
+    ui.canvas.draw_box(
+        target,
+        BoxStyle {
+            fill: theme.panel,
+            border: theme.accent,
+            border_width: theme.hairline() * 2.0,
+            radius: theme.radius,
+        },
+    );
+    ui.label_centered(
+        Rect::new(target.x, target.y + pad, target.width, line),
+        "Drop to open",
+        theme.text,
+    );
+    ui.label_centered_sized(
+        Rect::new(target.x, target.y + pad + line, target.width, line),
+        "Sue reads the file's content and opens it in the applet that fits",
+        theme.small_size,
+        theme.muted,
+    );
+    ui.canvas.set_layer(Layer::Base);
+}
+
 /// Carries out `actions`. Pin toggles become undoable rice edits of
 /// `launchpad.boot_into`, so they persist and `Ctrl+Z` reverts them.
 ///
 /// # Errors
-/// If opening an applet or recording the rice edit fails.
+/// If opening an applet or recording an edit fails.
 pub fn apply_actions(
     workspace: &mut Workspace,
     ctx: &mut AppletContext<'_>,
@@ -618,12 +1047,14 @@ pub fn apply_actions(
                 let (_, right) = workspace.docks_open();
                 workspace.set_right_dock(!right);
             }
+            ShellAction::SelectDock(index) => workspace.select_dock(index),
             ShellAction::NewTab => {
                 workspace.new_tab();
             }
             ShellAction::ActivateTab(index) => workspace.activate_tab(index),
             ShellAction::CloseTab(index) => workspace.close_tab(index, ctx),
             ShellAction::OpenApplet(id) => workspace.open_applet(&id, ctx)?,
+            ShellAction::OpenSettings(page) => workspace.open_settings(page.as_deref(), ctx)?,
             ShellAction::TogglePin(id) => {
                 let current = ctx
                     .world
@@ -639,9 +1070,41 @@ pub fn apply_actions(
                     "launchpad.boot_into",
                     RiceValue::Text(next),
                 ))?;
+                workspace.invalidate();
             }
             ShellAction::Focus(focus) => workspace.set_focus(focus),
+            ShellAction::Undo => {
+                ctx.history.undo(ctx.world)?;
+                workspace.invalidate();
+            }
+            ShellAction::Redo => {
+                ctx.history.redo(ctx.world)?;
+                workspace.invalidate();
+            }
+            ShellAction::Post(request) => workspace.post(request),
+            ShellAction::DialogAnswer(yes) => workspace.post(ShellRequest::Command(
+                if yes {
+                    "dialog.confirm"
+                } else {
+                    "dialog.cancel"
+                }
+                .to_owned(),
+            )),
         }
     }
     workspace.process_requests(ctx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn profiles_read_as_words() {
+        assert_eq!(profile_label(HardwareProfile::HighRefresh), "High Refresh");
+        assert_eq!(
+            profile_label(HardwareProfile::LegacyLowSpec),
+            "Legacy Low Spec"
+        );
+    }
 }

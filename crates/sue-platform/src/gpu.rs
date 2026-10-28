@@ -2,6 +2,30 @@
 
 use crate::{GpuTier, GpuVendor, GraphicsApi, HardwareCapabilities, PlatformError};
 
+/// Which GPU draws a window (`display.gpu_preference`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum GpuPreference {
+    /// The GPU that drives the display, so frames never cross adapters.
+    #[default]
+    Auto,
+    /// The power-saving integrated GPU.
+    Integrated,
+    /// The high-performance discrete GPU.
+    Discrete,
+}
+
+impl GpuPreference {
+    /// Reads a setting: `integrated`, `discrete`, and anything else is `auto`.
+    #[must_use]
+    pub fn from_setting(value: &str) -> Self {
+        match value {
+            "integrated" => Self::Integrated,
+            "discrete" => Self::Discrete,
+            _ => Self::Auto,
+        }
+    }
+}
+
 /// The GPU objects every renderer needs.
 pub struct GpuContext {
     /// The wgpu instance.
@@ -33,26 +57,44 @@ impl GpuContext {
     pub fn headless() -> Result<Self, PlatformError> {
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        pollster::block_on(Self::with_instance(instance, None))
+        // Offscreen frames are never shown, so the power-saving GPU is enough.
+        pollster::block_on(Self::with_instance(
+            instance,
+            None,
+            GpuPreference::Integrated,
+        ))
     }
 
-    /// Picks an adapter compatible with `surface` (if any) and opens a device.
+    /// Picks an adapter compatible with `surface` (if any) by `preference`
+    /// and opens a device.
     pub(crate) async fn with_instance(
         instance: wgpu::Instance,
         surface: Option<&wgpu::Surface<'_>>,
+        preference: GpuPreference,
     ) -> Result<Self, PlatformError> {
-        let mut adapter = None;
+        let mut adapter = match preference {
+            GpuPreference::Auto => display_adapter(&instance, surface).await,
+            GpuPreference::Integrated | GpuPreference::Discrete => None,
+        };
+        let power_preference = match preference {
+            GpuPreference::Discrete => wgpu::PowerPreference::HighPerformance,
+            GpuPreference::Integrated => wgpu::PowerPreference::LowPower,
+            // Windows lists the display GPU first; elsewhere the integrated
+            // GPU usually drives the display.
+            GpuPreference::Auto if cfg!(windows) => wgpu::PowerPreference::None,
+            GpuPreference::Auto => wgpu::PowerPreference::LowPower,
+        };
         for force_fallback_adapter in [false, true] {
+            if adapter.is_some() {
+                break;
+            }
             let options = wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
+                power_preference,
                 force_fallback_adapter,
                 compatible_surface: surface,
                 ..Default::default()
             };
-            if let Ok(found) = instance.request_adapter(&options).await {
-                adapter = Some(found);
-                break;
-            }
+            adapter = instance.request_adapter(&options).await.ok();
         }
         let adapter =
             adapter.ok_or_else(|| PlatformError::Gpu("no compatible GPU adapter".to_owned()))?;
@@ -84,6 +126,35 @@ impl GpuContext {
     pub fn describe(&self, base: HardwareCapabilities) -> HardwareCapabilities {
         describe_adapter(&self.adapter.get_info(), base)
     }
+}
+
+/// The adapter for the GPU that drives the primary display, on Windows.
+///
+/// DXGI lists that GPU first, after applying the per-app choice in the system
+/// graphics settings. Drawing on any other GPU makes Windows copy every frame
+/// across adapters, and that copy keeps a time-critical driver thread busy
+/// even while the window sleeps (measured: a full core, with the integrated
+/// GPU drawing for a monitor on the discrete one).
+async fn display_adapter(
+    instance: &wgpu::Instance,
+    surface: Option<&wgpu::Surface<'_>>,
+) -> Option<wgpu::Adapter> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let adapters = instance.enumerate_adapters(wgpu::Backends::all()).await;
+    let display = adapters
+        .iter()
+        .find(|adapter| adapter.get_info().backend == wgpu::Backend::Dx12)?
+        .get_info();
+    // The same GPU through the first backend wgpu itself would choose.
+    adapters.into_iter().find(|adapter| {
+        let info = adapter.get_info();
+        info.vendor == display.vendor
+            && info.device == display.device
+            && info.device_type != wgpu::DeviceType::Cpu
+            && surface.is_none_or(|target| adapter.is_surface_supported(target))
+    })
 }
 
 /// Fills GPU facts into `base` from adapter information.
@@ -224,6 +295,46 @@ mod tests {
             subgroup_max_size: 128,
             transient_saves_memory: None,
             limit_bucket: None,
+        }
+    }
+
+    #[test]
+    fn gpu_preference_reads_its_setting() {
+        assert_eq!(
+            GpuPreference::from_setting("integrated"),
+            GpuPreference::Integrated
+        );
+        assert_eq!(
+            GpuPreference::from_setting("discrete"),
+            GpuPreference::Discrete
+        );
+        assert_eq!(GpuPreference::from_setting("auto"), GpuPreference::Auto);
+        assert_eq!(GpuPreference::from_setting("bogus"), GpuPreference::Auto);
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU; run with --ignored --nocapture"]
+    fn auto_draws_on_the_display_gpu() {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let gpu = pollster::block_on(GpuContext::with_instance(
+            instance,
+            None,
+            GpuPreference::Auto,
+        ))
+        .unwrap();
+        println!("auto draws on {}", gpu.adapter_label());
+        if cfg!(windows) {
+            let display = pollster::block_on(gpu.instance.enumerate_adapters(wgpu::Backends::DX12))
+                .into_iter()
+                .next()
+                .unwrap()
+                .get_info();
+            let chosen = gpu.adapter.get_info();
+            assert_eq!(
+                (chosen.vendor, chosen.device),
+                (display.vendor, display.device)
+            );
         }
     }
 

@@ -12,24 +12,34 @@
 //! asks for [`FramePacing::Sleep`]. The `wgpu` surface is created through its
 //! safe API, so this crate keeps `unsafe` forbidden like every other one.
 //!
-//! Specification: `HUMANZ.md` §3.1–3.2.
+//! The rest of the OS surface lives here too: [`AudioOutput`] (a `cpal`
+//! stream fed by a lock-free ring), [`list_dir`] and [`write_atomic`], and
+//! hand-offs to the system browser, file manager and native dialogs.
+//!
+//! Specification: `HUMANZ.md` §3.1, §3.2 and §3.5.
 
+mod audio;
 mod desktop;
 mod device;
 mod fs;
 mod gpu;
 mod host;
 mod input;
+mod os;
 mod paths;
 
+pub use audio::{
+    AudioConfig, AudioOutput, AudioSink, AudioStreamInfo, NullAudio, RealtimeStatus,
+    audio_output_devices,
+};
 pub use desktop::{
     CursorShape, DesktopApp, DesktopHost, DesktopOptions, FramePacing, MAIN_SURFACE, run_desktop,
 };
 pub use device::{
     FormFactor, GpuTier, GpuVendor, GraphicsApi, HardwareCapabilities, OsFamily, PowerSource,
 };
-pub use fs::write_atomic;
-pub use gpu::{GpuContext, WindowSurface, describe_adapter};
+pub use fs::{DirEntryInfo, list_dir, write_atomic};
+pub use gpu::{GpuContext, GpuPreference, WindowSurface, describe_adapter};
 pub use host::{
     HeadlessHost, PlatformError, PlatformHost, SafeAreaInsets, SurfaceDescriptor, SurfaceId,
     SurfaceInfo,
@@ -38,6 +48,7 @@ pub use input::{
     FileDrop, InputEvent, Key, KeyEvent, Modifiers, MouseButton, MouseEvent, NamedKey, Point,
     ScreenEdge, StylusSample, SwipeDirection, TouchGesture, WindowEvent,
 };
+pub use os::{FileFilter, open_url, pick_open_file, pick_save_file, reveal_folder, web_url};
 pub use paths::PlatformPaths;
 /// The `wgpu` version Sue renders with, re-exported so renderers match it.
 pub use wgpu;

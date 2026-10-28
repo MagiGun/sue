@@ -1,20 +1,19 @@
 //! Quick Notes: one scratch note in the arena, edited only through
-//! transactions on the global undo tree.
+//! transactions on the global undo tree, and autosaved by the runtime.
 
 use sue_core::txn::{DeleteText, InsertText};
 use sue_core::{AssetHandle, StringBuffer};
-use sue_platform::{InputEvent, Key, NamedKey, Point};
+use sue_platform::{CursorShape, InputEvent, Key, NamedKey, Point};
 use sue_rice::{RiceDeclaration, RiceParameter};
 use sue_wm::{
-    AppletCategory, AppletContext, AppletError, AppletId, AppletManifest, BoxStyle, FontFace,
-    InputResponse, Rect, SueApplet, Ui, Zone,
+    AppletCategory, AppletContext, AppletError, AppletId, AppletManifest, FontFace, InputResponse,
+    Rect, SueApplet, Ui, Zone, widget_id,
 };
+
+use crate::engine::NOTE_NAME;
 
 /// The applet id.
 pub const ID: &str = "quick-notes";
-
-/// Name of the arena entity holding the note; every instance shares it.
-pub const NOTE_NAME: &str = "Quick Note";
 
 const FONT_SIZE: &str = "quick_notes.font_size";
 
@@ -29,13 +28,15 @@ impl SueApplet for QuickNotes {
     fn manifest(&self) -> AppletManifest {
         AppletManifest {
             id: AppletId::new(ID).expect("the Quick Notes id is valid"),
-            name: "Quick Notes".to_owned(),
+            name: "Notes".to_owned(),
             category: AppletCategory::Utility,
             home_zone: Zone::LeftDock,
             uses_timeline: false,
-            summary: "Jot something down without leaving what you're doing.".to_owned(),
+            summary: "Jot something down without leaving what you're doing. Saved automatically."
+                .to_owned(),
             opens: Vec::new(),
-            accepts_drops: false,
+            icon: "\u{1F4DD}".to_owned(),
+            singleton: false,
         }
     }
 
@@ -43,7 +44,7 @@ impl SueApplet for QuickNotes {
         vec![RiceDeclaration::new(
             FONT_SIZE,
             RiceParameter::IntRange {
-                value: 15,
+                value: 14,
                 min: Some(8),
                 max: Some(48),
             },
@@ -101,47 +102,34 @@ impl SueApplet for QuickNotes {
 
     fn draw(&mut self, ui: &mut Ui<'_>, area: Rect, ctx: &mut AppletContext<'_>) {
         let theme = ui.theme;
-        let size = ctx.rice().get_f64(FONT_SIZE).unwrap_or(15.0) as f32;
+        let size = ctx.rice().get_f64(FONT_SIZE).unwrap_or(14.0) as f32;
         let text = self
             .note
             .and_then(|note| ctx.arena().get(note).ok())
             .and_then(|entity| entity.string_buffer())
             .map_or("", StringBuffer::as_str);
-        let border = if ctx.focused {
-            theme.accent
-        } else {
-            theme.raised
-        };
-        ui.canvas.draw_box(
-            area,
-            BoxStyle {
-                fill: theme.background,
-                border,
-                border_width: theme.border_width.max(1.0),
-                radius: theme.radius / 2.0,
-            },
-        );
-        let pad = theme.padding();
-        let inner = area.shrink(pad);
+        let response = ui.interact(widget_id("quick-notes", "page"), area);
+        if response.hovered {
+            ui.set_cursor(CursorShape::Text);
+        }
         let line = ui.fonts.line_height(FontFace::Ui, size);
-        let lines = ui.fonts.wrap(FontFace::Ui, size, text, inner.width);
+        let lines = ui.fonts.wrap(FontFace::Ui, size, text, area.width);
         let content = lines.len() as f32 * line;
         self.scroll =
-            (self.scroll - ui.wheel_in(area)).clamp(0.0, (content - inner.height).max(0.0));
-        ui.canvas.push_clip(inner);
+            (self.scroll - ui.wheel_in(area)).clamp(0.0, (content - area.height).max(0.0));
         if text.is_empty() {
             ui.text(
-                Point::new(inner.x, inner.y),
-                "Type a note…",
+                Point::new(area.x, area.y),
+                "Type a note. It saves itself.",
                 FontFace::Ui,
                 size,
                 theme.muted,
             );
         }
         for (row, range) in lines.iter().enumerate() {
-            let y = inner.y + row as f32 * line - self.scroll;
+            let y = area.y + row as f32 * line - self.scroll;
             ui.text(
-                Point::new(inner.x, y),
+                Point::new(area.x, y),
                 &text[range.clone()],
                 FontFace::Ui,
                 size,
@@ -150,13 +138,9 @@ impl SueApplet for QuickNotes {
         }
         if ctx.focused {
             let last = lines.last().cloned().unwrap_or(0..0);
-            let x = inner.x + ui.fonts.measure(FontFace::Ui, size, &text[last]);
-            let y = inner.y + (lines.len().max(1) - 1) as f32 * line - self.scroll;
-            ui.canvas.draw_box(
-                Rect::new(x + 1.0, y, 1.5, line),
-                BoxStyle::filled(theme.accent, 0.0),
-            );
+            let x = area.x + ui.fonts.measure(FontFace::Ui, size, &text[last]);
+            let y = area.y + (lines.len().max(1) - 1) as f32 * line - self.scroll;
+            ui.caret(Rect::new(x + 1.0, y, 1.5, line));
         }
-        ui.canvas.pop_clip();
     }
 }

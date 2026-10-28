@@ -265,7 +265,7 @@ impl AtomicUpdater {
         }
     }
 
-    /// Runs the whole pipeline — stage, verify, activate — then keeps the new
+    /// Runs the whole pipeline (stage, verify, activate), then keeps the new
     /// generation only if `health_check` approves it, rolling back otherwise.
     ///
     /// # Errors

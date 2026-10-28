@@ -1,0 +1,14 @@
+# Midnight: a cool, blue-black palette.
+[colors]
+base = "#0d1117"
+panel = "#111722"
+chrome = "#0b0f16"
+surface = "#1a2230"
+hover = "#222c3c"
+border = "#263041"
+text = "#e6edf3"
+muted = "#8b98a9"
+accent = "#2f9ef4"
+on_accent = "#ffffff"
+alert = "#f85149"
+success = "#3fb950"

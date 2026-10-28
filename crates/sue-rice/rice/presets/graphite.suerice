@@ -1,0 +1,14 @@
+# Graphite: the default neutral studio palette.
+[colors]
+base = "#121212"
+panel = "#181818"
+chrome = "#141414"
+surface = "#222222"
+hover = "#2a2a2a"
+border = "#2b2b2b"
+text = "#e4e4e4"
+muted = "#888888"
+accent = "#3b82f6"
+on_accent = "#ffffff"
+alert = "#e5484d"
+success = "#3fb950"

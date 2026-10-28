@@ -1,12 +1,16 @@
 //! The applet contract every tool, utility and studio implements (LAW 1).
 
 use std::fmt;
+use std::path::PathBuf;
+use std::time::Instant;
 
 use sue_core::{Arena, AssetHandle, CoreError, NodeId, ReversibleTransaction, TxnError, UndoStack};
-use sue_platform::{FormFactor, InputEvent};
+use sue_platform::{AudioSink, FormFactor, InputEvent};
 use sue_rice::{HardwareProfile, RiceDeclaration, RiceSchema};
 
-use crate::{ArenaEdit, Rect, RenderDemand, RiceEdit, Ui, WmError, World, Zone};
+use crate::{
+    ArenaEdit, Catalog, PropertyGroup, Rect, RenderDemand, RiceEdit, Ui, WmError, World, Zone,
+};
 
 /// An applet's unique id: `[a-z][a-z0-9-]*`, e.g. `quick-notes`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -45,13 +49,30 @@ impl fmt::Display for AppletId {
     }
 }
 
-/// Where an applet is listed on the Hub.
+/// What kind of applet this is, which decides where the shell lists it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AppletCategory {
-    /// A small everyday tool (file explorer, player, notes, converter).
-    Utility,
-    /// A full creative environment (DAW, CAD, IDE, …).
+    /// A full creative environment, listed on Home.
     Studio,
+    /// A viewer for one kind of asset, listed on Home.
+    Inspector,
+    /// A dock tool, listed on its activity rail.
+    Utility,
+    /// Sue's own preferences: opened from the gear, the menu and a key.
+    System,
+}
+
+impl AppletCategory {
+    /// Plural section title on Home, e.g. `Studios`.
+    #[must_use]
+    pub const fn plural(self) -> &'static str {
+        match self {
+            Self::Studio => "Studios",
+            Self::Inspector => "Inspectors",
+            Self::Utility => "Utilities",
+            Self::System => "System",
+        }
+    }
 }
 
 /// Broad kinds of assets, used to pick an applet that can open one.
@@ -61,6 +82,8 @@ pub enum MediaClass {
     Image,
     /// UTF-8 text.
     Text,
+    /// Decoded audio.
+    Audio,
     /// Raw bytes (byte map).
     Binary,
 }
@@ -72,22 +95,24 @@ pub struct AppletManifest {
     pub id: AppletId,
     /// Display name.
     pub name: String,
-    /// Hub category.
+    /// Category: where the shell lists the applet.
     pub category: AppletCategory,
     /// Zone the applet lives in: dock applets are mounted into their dock at
-    /// boot; Center Stage applets open in tabs.
+    /// boot and picked on its rail; Center Stage applets open in tabs.
     pub home_zone: Zone,
     /// `true` if the applet works on time-based media, which shows the timeline.
     pub uses_timeline: bool,
-    /// One-line description for the Hub.
+    /// What it does, in a sentence or two (shown whole, never cut).
     pub summary: String,
     /// Asset kinds the applet can open (see [`SueApplet::open`]).
     pub opens: Vec<MediaClass>,
-    /// `true` if files dropped on the window are offered to this applet.
-    pub accepts_drops: bool,
+    /// A one-character icon from the bundled fonts.
+    pub icon: String,
+    /// `true` if at most one tab may host the applet.
+    pub singleton: bool,
 }
 
-/// Something an applet asks the shell to do after the current call.
+/// Something an applet (or the shell) asks for after the current call.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ShellRequest {
     /// Open `handle` in the first applet that opens `class`.
@@ -97,8 +122,22 @@ pub enum ShellRequest {
         /// What it is.
         class: MediaClass,
     },
-    /// Open an applet in the active tab.
-    OpenApplet(AppletId),
+    /// Open an applet, optionally at a place inside it (see
+    /// [`SueApplet::navigate`]).
+    OpenApplet {
+        /// Which applet.
+        id: AppletId,
+        /// Where inside it, e.g. a Settings page id.
+        target: Option<String>,
+    },
+    /// Read a file from disk and open it (handled by the engine).
+    OpenFile(PathBuf),
+    /// Open a web address in the system browser (handled by the engine).
+    OpenUrl(String),
+    /// An engine command, e.g. `rice.export` (handled by the engine).
+    Command(String),
+    /// Show a message in the status bar.
+    Notify(String),
 }
 
 /// What an applet may touch while handling a call. Applets hold handles, not
@@ -116,6 +155,12 @@ pub struct AppletContext<'a> {
     pub requests: &'a mut Vec<ShellRequest>,
     /// `true` while the applet being called has keyboard focus.
     pub focused: bool,
+    /// Settings pages, live choices and system tables.
+    pub catalog: &'a Catalog,
+    /// The audio output, when this host has one.
+    pub audio: Option<&'a mut dyn AudioSink>,
+    /// Properties of the active Center Stage applet, for the Inspector.
+    pub inspection: Vec<PropertyGroup>,
 }
 
 impl AppletContext<'_> {
@@ -166,6 +211,7 @@ impl fmt::Debug for AppletContext<'_> {
             .field("history", &self.history)
             .field("form_factor", &self.form_factor)
             .field("profile", &self.profile)
+            .field("audio", &self.audio.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -180,6 +226,29 @@ pub enum InputResponse {
         /// `true` if something visible changed.
         redraw: bool,
     },
+}
+
+/// What a timer tick did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Tick {
+    /// `true` if something visible changed.
+    pub redraw: bool,
+    /// When the applet wants the next tick, if it wants one.
+    pub wake: Option<Instant>,
+}
+
+impl Tick {
+    /// Merges two ticks: redraw if either asks, wake at the earlier time.
+    #[must_use]
+    pub fn combine(self, other: Self) -> Self {
+        Self {
+            redraw: self.redraw || other.redraw,
+            wake: match (self.wake, other.wake) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            },
+        }
+    }
 }
 
 /// An error raised by an applet.
@@ -243,8 +312,25 @@ pub trait SueApplet: Send {
         Err(AppletError::new("this applet does not open assets"))
     }
 
-    /// Handles input the window manager did not consume: keyboard input while
-    /// the applet has focus, and dropped files for applets that accept drops.
+    /// Moves to a place inside the applet, e.g. a Settings page. Returns
+    /// `false` if the target is unknown.
+    fn navigate(&mut self, target: &str) -> bool {
+        let _ = target;
+        false
+    }
+
+    /// Runs a named command such as `save`. Returns `false` if the applet
+    /// does not have it.
+    ///
+    /// # Errors
+    /// If the command fails.
+    fn command(&mut self, name: &str, ctx: &mut AppletContext<'_>) -> Result<bool, AppletError> {
+        let _ = (name, ctx);
+        Ok(false)
+    }
+
+    /// Handles keyboard and other input the window manager did not consume,
+    /// while the applet has focus.
     ///
     /// # Errors
     /// Any failure while handling the event.
@@ -254,21 +340,40 @@ pub trait SueApplet: Send {
         ctx: &mut AppletContext<'_>,
     ) -> Result<InputResponse, AppletError>;
 
+    /// `true` while the applet needs every key first, even global shortcuts
+    /// (for example while recording a new shortcut).
+    fn captures_keys(&self) -> bool {
+        false
+    }
+
     /// Draws the applet into `area` and handles pointer interaction there.
     fn draw(&mut self, ui: &mut Ui<'_>, area: Rect, ctx: &mut AppletContext<'_>) {
         let _ = (ui, area, ctx);
     }
 
-    /// A title for the mode indicator, e.g. `Image Viewer — photo.jxl`.
+    /// A title for its tab, e.g. `photo.jxl`.
     fn title(&self, world: &World) -> Option<String> {
         let _ = world;
         None
+    }
+
+    /// Properties of what the applet shows, for the Inspector.
+    fn inspect(&self, world: &World) -> Vec<PropertyGroup> {
+        let _ = world;
+        Vec::new()
     }
 
     /// Advances animations by `dt` seconds. Static applets keep the default,
     /// which never asks for frames.
     fn update(&mut self, _dt: f32, _ctx: &mut AppletContext<'_>) -> RenderDemand {
         RenderDemand::Sleep
+    }
+
+    /// Does timed work (feeding audio, a clock) without a frame being drawn.
+    /// Called on every frame and whenever a requested wake time passes.
+    fn tick(&mut self, now: Instant, ctx: &mut AppletContext<'_>) -> Tick {
+        let _ = (now, ctx);
+        Tick::default()
     }
 
     /// Called when the applet's tab closes or switches to another applet.
@@ -278,6 +383,7 @@ pub trait SueApplet: Send {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn validates_applet_ids() {
@@ -289,5 +395,26 @@ mod tests {
         for bad in ["", "Quick", "1st", "with space", "under_score"] {
             assert!(AppletId::new(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn ticks_combine() {
+        let now = Instant::now();
+        let soon = Tick {
+            redraw: false,
+            wake: Some(now),
+        };
+        let later = Tick {
+            redraw: true,
+            wake: Some(now + Duration::from_secs(1)),
+        };
+        assert_eq!(
+            soon.combine(later),
+            Tick {
+                redraw: true,
+                wake: Some(now)
+            }
+        );
+        assert_eq!(Tick::default().combine(later).wake, later.wake);
     }
 }

@@ -13,9 +13,21 @@ pub struct PlatformPaths {
     pub data_dir: PathBuf,
     /// Disposable caches (thumbnails, tiles).
     pub cache_dir: PathBuf,
+    /// The user's home folder, where the Files panel starts.
+    pub home_dir: PathBuf,
 }
 
 impl PlatformPaths {
+    /// Resolves the directories of this desktop OS from the process
+    /// environment.
+    ///
+    /// # Errors
+    /// As [`resolve`](Self::resolve); always on mobile, which needs a sandbox
+    /// root.
+    pub fn detect() -> Result<Self, PlatformError> {
+        Self::resolve(OsFamily::current(), |name| std::env::var(name).ok(), None)
+    }
+
     /// Resolves the directories for `os`.
     ///
     /// `env` looks up environment variables; it is injected so resolution is a
@@ -43,19 +55,29 @@ impl PlatformPaths {
             OsFamily::Windows => {
                 let roaming = var("APPDATA")?;
                 let local = var("LOCALAPPDATA").unwrap_or_else(|_| roaming.clone());
+                // %APPDATA% is <home>\AppData\Roaming when USERPROFILE is unset.
+                let home_dir = var("USERPROFILE").unwrap_or_else(|_| {
+                    roaming
+                        .parent()
+                        .and_then(Path::parent)
+                        .map_or_else(|| roaming.clone(), Path::to_path_buf)
+                });
                 Ok(Self {
                     config_dir: roaming.join("Sue"),
                     data_dir: local.join("Sue"),
                     cache_dir: local.join("Sue").join("cache"),
+                    home_dir,
                 })
             }
             OsFamily::MacOs => {
-                let library = var("HOME")?.join("Library");
+                let home_dir = var("HOME")?;
+                let library = home_dir.join("Library");
                 let support = library.join("Application Support").join("Sue");
                 Ok(Self {
                     config_dir: support.clone(),
                     data_dir: support,
                     cache_dir: library.join("Caches").join("Sue"),
+                    home_dir,
                 })
             }
             OsFamily::Android | OsFamily::Ios => {
@@ -64,6 +86,7 @@ impl PlatformPaths {
                     config_dir: root.join("config"),
                     data_dir: root.join("data"),
                     cache_dir: root.join("cache"),
+                    home_dir: root.join("documents"),
                 })
             }
             OsFamily::Linux | OsFamily::Other => {
@@ -83,10 +106,16 @@ impl PlatformPaths {
                     Some(path) => path,
                     None => home()?.join(".cache"),
                 };
+                let home_dir = home().unwrap_or_else(|_| {
+                    config
+                        .parent()
+                        .map_or_else(|| config.clone(), Path::to_path_buf)
+                });
                 Ok(Self {
                     config_dir: config.join("sue"),
                     data_dir: data.join("sue"),
                     cache_dir: cache.join("sue"),
+                    home_dir,
                 })
             }
         }
@@ -108,6 +137,12 @@ impl PlatformPaths {
     #[must_use]
     pub fn models_dir(&self) -> PathBuf {
         self.data_dir.join("models")
+    }
+
+    /// Notes and other documents Sue saves on its own.
+    #[must_use]
+    pub fn notes_dir(&self) -> PathBuf {
+        self.data_dir.join("notes")
     }
 }
 
@@ -142,6 +177,7 @@ mod tests {
                 .join("cache")
         );
         assert_eq!(paths.packages_dir(), paths.data_dir.join("packages"));
+        assert_eq!(paths.home_dir, Path::new(r"C:\Users\a"));
     }
 
     #[test]
@@ -164,6 +200,7 @@ mod tests {
             paths.cache_dir,
             Path::new("/home/a").join(".cache").join("sue")
         );
+        assert_eq!(paths.home_dir, Path::new("/home/a"));
     }
 
     #[test]
