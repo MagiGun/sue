@@ -1617,21 +1617,30 @@ impl Shell {
         }
         let keymap = self.config.keymap;
         let typing = ctx.text_edit_focused();
+        // Chords the open studio uses itself stay with it.
+        let reserved: Vec<sue_rice::Keybind> = self
+            .studio
+            .as_ref()
+            .and_then(|studio| io.applets.get(studio))
+            .map(|applet| applet.reserved_keys())
+            .unwrap_or_default();
+        let take = |input: &mut egui::InputState, bind: &sue_rice::Keybind| {
+            !reserved.contains(bind) && keys::consume(input, bind)
+        };
         let (undo, redo, settings, left, right, timeline, reset, open, save, quit) =
             ctx.input_mut(|input| {
-                let redo =
-                    keys::consume(input, &keymap.redo) || keys::consume(input, &keymap.redo_alt);
+                let redo = take(input, &keymap.redo) || take(input, &keymap.redo_alt);
                 (
-                    keys::consume(input, &keymap.undo),
+                    take(input, &keymap.undo),
                     redo,
-                    keys::consume(input, &keymap.open_settings),
-                    keys::consume(input, &keymap.toggle_left_drawer),
-                    keys::consume(input, &keymap.toggle_right_drawer),
-                    keys::consume(input, &keymap.toggle_timeline),
-                    keys::consume(input, &keymap.reset_camera),
-                    keys::consume(input, &keymap.open_file),
-                    keys::consume(input, &keymap.save),
-                    keys::consume(input, &keymap.quit),
+                    take(input, &keymap.open_settings),
+                    take(input, &keymap.toggle_left_drawer),
+                    take(input, &keymap.toggle_right_drawer),
+                    take(input, &keymap.toggle_timeline),
+                    take(input, &keymap.reset_camera),
+                    take(input, &keymap.open_file),
+                    take(input, &keymap.save),
+                    take(input, &keymap.quit),
                 )
             });
         if undo {
@@ -1672,8 +1681,8 @@ impl Shell {
             }
             let (palette, escape) = ctx.input_mut(|input| {
                 (
-                    keys::consume(input, &keymap.command_palette)
-                        || keys::consume(input, &keymap.command_palette_alt),
+                    take(input, &keymap.command_palette)
+                        || take(input, &keymap.command_palette_alt),
                     self.window.is_some()
                         && self.window_appear.target() > 0.0
                         && input.key_pressed(egui::Key::Escape),
@@ -1685,7 +1694,14 @@ impl Shell {
             if escape {
                 self.close_window();
             }
-            let _ = (left, right, timeline, reset);
+            // The side panels stay with studios, so their keys work too.
+            if left {
+                self.toggle_drawer(true, io.applets);
+            }
+            if right {
+                self.toggle_drawer(false, io.applets);
+            }
+            let _ = (timeline, reset);
             return;
         }
         if left {
@@ -2350,6 +2366,35 @@ impl Shell {
             let open = !self.hub;
             self.set_hub(open);
         }
+        // Command, for the palette everywhere (studios may keep Tab).
+        let command_text = painter.layout_no_wrap("Command".to_owned(), font.clone(), theme.text);
+        let command = Rect::from_min_size(
+            pos2(hub.right(), rect.top()),
+            vec2(command_text.size().x + theme.padding * 2.0, rect.height()),
+        );
+        let command_response = root
+            .interact(command, Id::unique("sue-status-command"), Sense::click())
+            .on_hover_text("The command palette");
+        if command_response.hovered() || self.palette.is_some() {
+            painter.rect_filled(command, 0.0, theme.hover);
+        }
+        painter.galley(
+            pos2(
+                command.left() + theme.padding,
+                rect.center().y - command_text.size().y / 2.0,
+            ),
+            command_text,
+            theme.text,
+        );
+        painter.vline(
+            command.right(),
+            rect.shrink2(vec2(0.0, 5.0)).y_range(),
+            theme.hairline(),
+        );
+        if command_response.clicked() {
+            self.open_palette();
+        }
+        let hub = command;
         let rect = Rect::from_min_max(pos2(hub.right(), rect.top()), rect.max);
         let mode_label = Self::mode_buttons(io.applets)
             .into_iter()

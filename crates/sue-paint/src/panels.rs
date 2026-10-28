@@ -126,10 +126,17 @@ fn header(
     )
 }
 
+/// How much of a menu bar `width` wide the way back to the canvas takes:
+/// its label, or only its icon when the window is narrow.
+pub(crate) fn back_width(width: f32) -> f32 {
+    if width < 820.0 { 34.0 } else { 146.0 }
+}
+
 /// The button at the right of the menu bar that goes back to the canvas.
 pub(crate) fn back_button(ui: &mut Ui, bar: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
+    let wide = back_width(bar.width()) > 40.0;
     let rect = Rect::from_min_max(
-        pos2(bar.right() - 140.0, bar.top() + 3.0),
+        pos2(bar.right() - back_width(bar.width()) + 6.0, bar.top() + 3.0),
         pos2(bar.right() - 6.0, bar.bottom() - 3.0),
     );
     let response = ui.interact(rect, Id::unique("sue-paint-back"), Sense::click());
@@ -143,13 +150,15 @@ pub(crate) fn back_button(ui: &mut Ui, bar: Rect, cx: &mut AppletContext<'_>, th
         Icon::Canvas,
         theme.muted,
     );
-    painter.text(
-        rect.left_center() + vec2(28.0, 0.0),
-        Align2::LEFT_CENTER,
-        "Back to Canvas",
-        theme.font(theme.small_size + 0.5),
-        theme.text,
-    );
+    if wide {
+        painter.text(
+            rect.left_center() + vec2(28.0, 0.0),
+            Align2::LEFT_CENTER,
+            "Back to Canvas",
+            theme.font(theme.small_size + 0.5),
+            theme.text,
+        );
+    }
     if response
         .on_hover_text("Leave Sue Paint for the canvas (the picture stays in your project)")
         .clicked()
@@ -355,13 +364,64 @@ impl SuePaint {
             );
             response.on_hover_text(tip).clicked()
         };
-        if chip(ui, sub, self.sub, self.sub_active, "Sub color") {
+        if chip(
+            ui,
+            sub,
+            self.sub,
+            self.sub_active && !self.transparent,
+            "Sub color",
+        ) {
             self.sub_active = true;
+            self.transparent = false;
             self.hex = color::hex(self.sub);
         }
-        if chip(ui, main, self.main, !self.sub_active, "Main color") {
+        if chip(
+            ui,
+            main,
+            self.main,
+            !self.sub_active && !self.transparent,
+            "Main color",
+        ) {
             self.sub_active = false;
+            self.transparent = false;
             self.hex = color::hex(self.main);
+        }
+        // The transparent color: brushes erase with it (C switches).
+        let clear = Rect::from_min_size(sub.right_bottom() + vec2(4.0, -10.0), vec2(10.0, 10.0));
+        let response = ui.interact(
+            clear,
+            Id::unique(("sue-paint-transparent", clear.min.x as i32)),
+            Sense::click(),
+        );
+        let painter = ui.painter();
+        for (index, cell) in [
+            Rect::from_min_size(clear.min, vec2(5.0, 5.0)),
+            Rect::from_min_size(clear.min + vec2(5.0, 5.0), vec2(5.0, 5.0)),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let _ = index;
+            painter.rect_filled(cell, 0.0, Color32::from_gray(200));
+        }
+        painter.rect_stroke(
+            clear,
+            0.0,
+            Stroke::new(
+                if self.transparent { 2.0 } else { 1.0 },
+                if self.transparent {
+                    theme.border_active
+                } else {
+                    theme.border
+                },
+            ),
+            StrokeKind::Outside,
+        );
+        if response
+            .on_hover_text("Transparent color: brushes erase (C)")
+            .clicked()
+        {
+            self.transparent = !self.transparent;
         }
     }
 

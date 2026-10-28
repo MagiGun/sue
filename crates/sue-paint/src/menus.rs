@@ -7,6 +7,23 @@ fn act(label: &str, command: &str) -> MenuItem {
     MenuItem::action(label, command)
 }
 
+/// What the menus call `command`, if a menu has it.
+#[must_use]
+pub fn label_of<'m>(menus: &'m [Menu], command: &str) -> Option<&'m str> {
+    fn find<'m>(items: &'m [MenuItem], command: &str) -> Option<&'m str> {
+        items.iter().find_map(|item| match item {
+            MenuItem::Action {
+                label,
+                command: found,
+                ..
+            } if found == command => Some(label.as_str()),
+            MenuItem::Sub { items, .. } => find(items, command),
+            _ => None,
+        })
+    }
+    menus.iter().find_map(|menu| find(&menu.items, command))
+}
+
 fn sub(label: &str, items: Vec<MenuItem>) -> MenuItem {
     MenuItem::sub(label, items)
 }
@@ -509,6 +526,7 @@ pub fn menus() -> Vec<Menu> {
                     ],
                 ),
                 act("Hide All Palettes", "window.hide_all"),
+                act("Hide Menu Bar", "window.hide_menus"),
                 SEP,
                 act("Command Bar", "window.command_bar"),
                 act("Tool", "window.tool"),

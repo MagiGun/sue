@@ -92,9 +92,13 @@ pub(crate) enum Gesture {
         trail: Vec<(f64, [f32; 2])>,
         correction: u32,
         flick: bool,
+        /// Shift and drag: one straight line, drawn on release.
+        line: bool,
     },
     /// Scrolling the view.
     Pan { last: Pos2 },
+    /// Ctrl+Alt and drag: the brush size follows the pointer across.
+    BrushSize { start: f32, size: f32 },
     /// Turning the view.
     Rotate { start: f32, rotation: f32 },
     /// A rectangle, ellipse, line or gradient from `from` to `to` (picture
@@ -174,6 +178,10 @@ pub struct SuePaint {
     pub(crate) main: [u8; 3],
     pub(crate) sub: [u8; 3],
     pub(crate) sub_active: bool,
+    /// Painting with the transparent color: brushes erase (CSP's C).
+    pub(crate) transparent: bool,
+    /// The menu bar and command bar are hidden (CSP's Shift+Tab).
+    pub(crate) menus_hidden: bool,
     pub(crate) hue: f32,
     pub(crate) recent: History,
     pub(crate) docs: Vec<Doc>,
@@ -256,6 +264,8 @@ impl Default for SuePaint {
             thumbs: HashMap::new(),
             preview: None,
             last_dir: None,
+            transparent: false,
+            menus_hidden: false,
             pending_export: None,
             shown: false,
             clock: (0.0, 1.0 / 60.0),
@@ -384,6 +394,7 @@ fn implemented(command: &str) -> bool {
             | "window.history"
             | "window.timeline"
             | "help.shortcuts"
+            | "window.hide_menus"
             | "help.about"
     )
 }
@@ -1604,6 +1615,7 @@ impl SuePaint {
                 };
             }
             "window.command_bar" => self.panels.command_bar = !self.panels.command_bar,
+            "window.hide_menus" => self.menus_hidden = !self.menus_hidden,
             "window.tool" => self.panels.tool = !self.panels.tool,
             "window.sub_tool" => self.panels.sub_tool = !self.panels.sub_tool,
             "window.tool_property" => self.panels.tool_property = !self.panels.tool_property,
@@ -1684,12 +1696,20 @@ impl SuePaint {
         let none = Modifiers::NONE;
         for (modifiers, key, name) in shortcuts() {
             if ctx.input_mut(|input| input.consume_key(modifiers, key)) {
-                self.run(name, cx);
+                if implemented(name) {
+                    self.run(name, cx);
+                } else {
+                    let label = crate::menus::label_of(&self.menus, name).unwrap_or(name);
+                    cx.notify(format!("{label} is not in Sue Paint yet"));
+                }
             }
         }
 
+        // Tools, by Clip Studio Paint's letters.
         for (key, letter) in [
+            (Key::Slash, '/'),
             (Key::H, 'H'),
+            (Key::O, 'O'),
             (Key::K, 'K'),
             (Key::M, 'M'),
             (Key::W, 'W'),
@@ -1697,16 +1717,34 @@ impl SuePaint {
             (Key::P, 'P'),
             (Key::B, 'B'),
             (Key::E, 'E'),
+            (Key::J, 'J'),
             (Key::G, 'G'),
             (Key::U, 'U'),
+            (Key::T, 'T'),
+            (Key::Y, 'Y'),
         ] {
             if ctx.input_mut(|input| input.consume_key(none, key)) {
                 self.toolbox.cycle(letter);
             }
         }
+        // R: the hand's Rotate sub tool.
+        if ctx.input_mut(|input| input.consume_key(none, Key::R)) {
+            self.toolbox.pick(crate::tools::Tool::Hand);
+            self.toolbox.pick_sub(crate::tools::Tool::Hand, 1);
+        }
+        for (key, forward) in [(Key::Comma, false), (Key::Period, true)] {
+            if ctx.input_mut(|input| input.consume_key(none, key)) {
+                self.toolbox.step_sub(forward);
+            }
+        }
         if ctx.input_mut(|input| input.consume_key(none, Key::X)) {
             std::mem::swap(&mut self.main, &mut self.sub);
+            self.transparent = false;
             self.hex = color::hex(self.drawing_color());
+        }
+        // C: between the drawing color and the transparent color.
+        if ctx.input_mut(|input| input.consume_key(none, Key::C)) {
+            self.transparent = !self.transparent;
         }
         for (key, grow) in [(Key::OpenBracket, false), (Key::CloseBracket, true)] {
             if ctx.input_mut(|input| input.consume_key(none, key)) {
@@ -1765,23 +1803,36 @@ impl SuePaint {
         // The menu bar, with the way back to the canvas at its right. While
         // the studio comes in or goes out, every palette slides in from or
         // out to its edge of the window.
-        let top_height = 26.0 + if self.panels.command_bar { 34.0 } else { 0.0 };
+        let top_height = if self.menus_hidden {
+            0.0
+        } else {
+            26.0 + if self.panels.command_bar { 34.0 } else { 0.0 }
+        };
         let lift = self.hide * top_height;
         let bar = Rect::from_min_size(full.min - vec2(0.0, lift), vec2(full.width(), 26.0));
-        ui.painter().rect_filled(bar, 0.0, theme.panel);
-        let mut menubar = std::mem::take(&mut self.menubar);
-        let picked = {
-            let arena = &cx.world.arena;
-            let history = &*cx.history;
-            let state = |command: &str| self.state(command, arena, history);
-            menubar.ui(ui, bar, &self.menus, &state, &theme)
-        };
-        self.menubar = menubar;
-        crate::panels::back_button(ui, bar, cx, &theme);
-        ui.painter()
-            .hline(bar.x_range(), bar.bottom(), theme.hairline());
+        let mut picked = None;
+        if !self.menus_hidden {
+            ui.painter().rect_filled(bar, 0.0, theme.panel);
+            // The menus stop short of the way back to the canvas, which
+            // shrinks to its icon when the window is narrow.
+            let back = crate::panels::back_width(bar.width());
+            let menus = Rect::from_min_max(bar.min, pos2(bar.right() - back, bar.bottom()));
+            let mut menubar = std::mem::take(&mut self.menubar);
+            picked = {
+                let arena = &cx.world.arena;
+                let history = &*cx.history;
+                let state = |command: &str| self.state(command, arena, history);
+                let mut clipped = ui.new_child(egui::UiBuilder::new().max_rect(menus));
+                clipped.set_clip_rect(menus.intersect(ui.clip_rect()));
+                menubar.ui(&mut clipped, menus, &self.menus, &state, &theme)
+            };
+            self.menubar = menubar;
+            crate::panels::back_button(ui, bar, cx, &theme);
+            ui.painter()
+                .hline(bar.x_range(), bar.bottom(), theme.hairline());
+        }
 
-        if self.panels.command_bar {
+        if self.panels.command_bar && !self.menus_hidden {
             let top = bar.bottom();
             let strip = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), top + 34.0));
             self.command_bar(ui, strip, cx, &theme);
@@ -1847,43 +1898,83 @@ impl SuePaint {
     }
 }
 
-/// The studio's chords. egui ignores extra Shift and Alt when matching, so
-/// each chord comes before the plainer chords on the same key.
-fn shortcuts() -> [(Modifiers, Key, &'static str); 30] {
+/// The studio's chords, Clip Studio Paint's defaults. egui ignores extra
+/// Shift and Alt when matching, so each chord comes before the plainer
+/// chords on the same key.
+fn shortcuts() -> Vec<(Modifiers, Key, &'static str)> {
     let command = Modifiers::COMMAND;
     let shifted = Modifiers::COMMAND | Modifiers::SHIFT;
+    let alt = Modifiers::ALT;
+    let shift = Modifiers::SHIFT;
     let none = Modifiers::NONE;
-    [
+    vec![
+        // File.
+        (shifted | alt, Key::K, "help.shortcuts"),
+        (command, Key::K, "file.preferences"),
+        (shifted, Key::S, "file.save_as"),
+        (command | alt, Key::S, "file.save_as"),
+        (shift | alt, Key::S, "file.save_as"),
+        (command, Key::P, "file.print"),
         (shifted, Key::N, "layer.new"),
         (command, Key::N, "file.new"),
         (command, Key::W, "file.close"),
-        (command, Key::E, "layer.merge_down"),
-        (shifted, Key::D, "select.again"),
+        // Edit.
+        (shifted, Key::T, "edit.transform.free"),
+        (command, Key::T, "edit.transform.scale"),
+        (command, Key::U, "filter.hue"),
         (shifted, Key::I, "select.invert"),
-        (command, Key::A, "select.all"),
-        (command, Key::D, "select.none"),
-        (Modifiers::ALT, Key::Delete, "edit.fill"),
-        (Modifiers::ALT, Key::Backspace, "edit.fill"),
-        (none, Key::Delete, "edit.clear"),
-        (none, Key::Backspace, "edit.clear"),
         (command, Key::I, "filter.invert"),
-        (command | Modifiers::ALT, Key::Num0, "view.actual"),
-        (command, Key::Num0, "view.fit"),
-        (command, Key::Plus, "view.zoom_in"),
-        (command, Key::Equals, "view.zoom_in"),
-        (command, Key::Minus, "view.zoom_out"),
-        (command, Key::CloseBracket, "layer.order.up"),
-        (command, Key::OpenBracket, "layer.order.down"),
-        (Modifiers::ALT, Key::CloseBracket, "layer.select_above"),
-        (Modifiers::ALT, Key::OpenBracket, "layer.select_below"),
-        (shifted, Key::Tab, "window.prev_tab"),
-        (command, Key::Tab, "window.next_tab"),
         (command, Key::X, "edit.cut"),
         (command, Key::C, "edit.copy"),
         (command, Key::V, "edit.paste"),
+        (none, Key::F2, "edit.cut"),
+        (none, Key::F3, "edit.copy"),
+        (none, Key::F4, "edit.paste"),
+        (command, Key::Delete, "edit.clear"),
+        (command, Key::Backspace, "edit.clear"),
+        (shift, Key::Delete, "edit.fill"),
+        (shift, Key::Backspace, "edit.fill"),
+        (alt, Key::Delete, "edit.fill"),
+        (alt, Key::Backspace, "edit.fill"),
+        (none, Key::Delete, "edit.clear"),
+        (none, Key::Backspace, "edit.clear"),
+        // Layer.
+        (command | alt, Key::G, "layer.toggle.clip"),
+        (command, Key::G, "layer.new.folder"),
+        (shifted, Key::E, "layer.merge_visible"),
+        (shift | alt, Key::E, "layer.merge_selected"),
+        (command, Key::E, "layer.merge_down"),
+        (alt, Key::CloseBracket, "layer.select_above"),
+        (alt, Key::OpenBracket, "layer.select_below"),
+        (command, Key::CloseBracket, "layer.order.up"),
+        (command, Key::OpenBracket, "layer.order.down"),
+        // Selection.
+        (shifted, Key::D, "select.again"),
+        (shift, Key::F7, "select.invert"),
+        (command, Key::A, "select.all"),
+        (command, Key::D, "select.none"),
+        // View.
+        (command | alt, Key::Num0, "view.actual"),
+        (command, Key::Num0, "view.fit"),
+        (shifted, Key::Num2, "view.rotate_reset"),
+        (command, Key::Plus, "view.zoom_in"),
+        (command, Key::Equals, "view.zoom_in"),
+        (command, Key::Semicolon, "view.zoom_in"),
+        (command, Key::Minus, "view.zoom_out"),
+        (command, Key::R, "view.ruler_bar"),
+        (command, Key::Num1, "view.snap_ruler"),
+        (command, Key::Num2, "view.snap_special"),
+        (command, Key::Num3, "view.snap_grid"),
         (none, Key::Minus, "view.rotate_left"),
         (none, Key::Equals, "view.rotate_right"),
-        (Modifiers::ALT, Key::I, "help.shortcuts"),
+        // Window.
+        (shifted, Key::Tab, "window.prev_tab"),
+        (command, Key::Tab, "window.next_tab"),
+        (shift, Key::Tab, "window.hide_menus"),
+        (none, Key::Tab, "window.hide_all"),
+        // Help.
+        (none, Key::F1, "help.shortcuts"),
+        (alt, Key::I, "help.shortcuts"),
     ]
 }
 
@@ -2018,6 +2109,15 @@ impl SueApplet for SuePaint {
         self.picture()
     }
 
+    fn reserved_keys(&self) -> Vec<sue_rice::Keybind> {
+        // Clip Studio Paint's: Tab and Shift+Tab hide the palettes and the
+        // menus, / is the Zoom tool and Ctrl+0 fits the picture.
+        ["Tab", "Shift+Tab", "/", "Ctrl+0"]
+            .iter()
+            .filter_map(|chord| chord.parse().ok())
+            .collect()
+    }
+
     fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
         match pick.purpose.as_str() {
             "open" => self.open_picked(cx, path, false),
@@ -2148,7 +2248,11 @@ mod tests {
                     && (!early.alt || late.alt);
                 assert!(!swallows, "{name} would swallow {later}");
             }
-            assert!(implemented(name), "{name} is bound but not implemented");
+            let menus = crate::menus::menus();
+            assert!(
+                implemented(name) || crate::menus::label_of(&menus, name).is_some(),
+                "{name} is bound but neither built nor in a menu"
+            );
         }
     }
 

@@ -696,4 +696,11 @@ pub trait SueApplet: Send {
     fn window_title(&self) -> Option<String> {
         None
     }
+
+    /// Chords a studio uses itself while it is open, which the shell then
+    /// leaves to it (Sue Paint's `Tab` hides its palettes, as painting apps
+    /// do, instead of opening the command palette).
+    fn reserved_keys(&self) -> Vec<sue_rice::Keybind> {
+        Vec::new()
+    }
 }

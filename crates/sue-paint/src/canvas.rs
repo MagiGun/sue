@@ -288,6 +288,11 @@ impl SuePaint {
                             self.press(pos, modifiers, space, viewport, size, cx)
                         }
                         PointerButton::Middle => self.gesture = Some(Gesture::Pan { last: pos }),
+                        // A right-click picks a color, as in Clip Studio Paint.
+                        PointerButton::Secondary => {
+                            self.pick(pos, 0, viewport, size, cx);
+                            self.gesture = Some(Gesture::Pick { mode: 0 });
+                        }
                         _ => {}
                     }
                 }
@@ -307,11 +312,21 @@ impl SuePaint {
             }
         }
         if response.hovered() && !blocked {
-            let (scroll, zoom) = ctx.input(|input| (input.smooth_scroll_delta, input.zoom_delta()));
+            let (scroll, zoom, shift) = ctx.input(|input| {
+                (
+                    input.smooth_scroll_delta,
+                    input.zoom_delta(),
+                    input.modifiers.shift,
+                )
+            });
             if let (Some(pointer), Some(doc)) =
                 (response.hover_pos(), self.docs.get_mut(self.active))
             {
-                if (zoom - 1.0).abs() > 1e-4 {
+                if shift && (scroll.x != 0.0 || scroll.y != 0.0) {
+                    // Shift and the wheel turn the view.
+                    doc.view
+                        .rotate_by(viewport, size, (scroll.x + scroll.y) * 0.15);
+                } else if (zoom - 1.0).abs() > 1e-4 {
                     doc.view.zoom_at(viewport, size, pointer, zoom);
                 } else if scroll.y != 0.0 {
                     doc.view
@@ -370,6 +385,35 @@ impl SuePaint {
         };
         let p = doc.view.to_picture(viewport, size, pos);
         let mut tool = self.toolbox.tool();
+        // Clip Studio Paint's modifiers: Space scrolls, Shift and Space
+        // turn the view, Ctrl and Space click to zoom in and Alt and Space
+        // to zoom out; Ctrl and Shift pick the layer under the pointer;
+        // Ctrl and Alt drag the brush size; Alt picks a color.
+        if space && modifiers.shift {
+            self.gesture = Some(Gesture::Rotate {
+                start: angle(pos - viewport.center()),
+                rotation: doc.view.rotation,
+            });
+            return;
+        }
+        if space && (modifiers.command || modifiers.alt) {
+            let factor = if modifiers.alt { 1.0 / 1.5 } else { 1.5 };
+            if let Some(doc) = self.docs.get_mut(self.active) {
+                doc.view.zoom_at(viewport, size, pos, factor);
+            }
+            return;
+        }
+        if modifiers.command && modifiers.shift && !space {
+            self.pick_layer_at(&cx.world.arena, p);
+            return;
+        }
+        if modifiers.command && modifiers.alt && tool.paints() {
+            self.gesture = Some(Gesture::BrushSize {
+                start: pos.x,
+                size: self.toolbox.current().tip.size,
+            });
+            return;
+        }
         if space {
             tool = Tool::Hand;
         } else if modifiers.alt && tool.paints() && tool != Tool::Eraser && tool != Tool::Figure {
@@ -421,8 +465,12 @@ impl SuePaint {
                 };
                 let offset = info.style.offset;
                 let rgb = color::unit(self.drawing_color());
+                let mut tip = sub.tip;
+                if self.transparent {
+                    tip.eraser = true;
+                }
                 let mut stroke =
-                    BrushStroke::new(info.id, sub.tip, rgb, info.alpha_locked && !sub.tip.eraser);
+                    BrushStroke::new(info.id, tip, rgb, info.alpha_locked && !tip.eraser);
                 let shifted = doc
                     .selection
                     .as_ref()
@@ -446,6 +494,7 @@ impl SuePaint {
                     trail: vec![(self.clock.0, local)],
                     correction: sub.correction,
                     flick: sub.flick,
+                    line: modifiers.shift,
                 });
             }
             Tool::Figure | Tool::Gradient => {
@@ -529,10 +578,15 @@ impl SuePaint {
                 raw,
                 shifted,
                 trail,
+                line,
                 ..
             } => {
                 let local = [p.x - offset[0] as f32, p.y - offset[1] as f32];
                 *raw = local;
+                if *line {
+                    // A straight line waits for the release.
+                    return;
+                }
                 trail.push((time, local));
                 if trail.len() > 64 {
                     trail.drain(..trail.len() - 64);
@@ -546,6 +600,11 @@ impl SuePaint {
             Gesture::Pan { last } => {
                 doc.view.pan += pos - *last;
                 *last = pos;
+            }
+            Gesture::BrushSize { start, size } => {
+                let factor = ((pos.x - *start) / 120.0).exp();
+                let next = (*size * factor).clamp(0.5, 2000.0);
+                self.toolbox.current_mut().tip.size = next;
             }
             Gesture::Rotate { start, rotation } => {
                 let now = angle(pos - viewport.center());
@@ -597,9 +656,15 @@ impl SuePaint {
                 trail,
                 correction,
                 flick,
+                line,
             } => {
                 let Some(doc) = self.docs.get_mut(self.active) else {
                     return;
+                };
+                let (correction, flick) = if line {
+                    (0, false)
+                } else {
+                    (correction, flick)
                 };
                 let layer = stroke.layer();
                 let selection = shifted.as_ref().or(doc.selection.as_ref());
@@ -623,8 +688,12 @@ impl SuePaint {
                     .last()
                     .map_or(pressure, |sample| sample.pressure);
                 if let Some(raster) = doc::raster_mut(&mut cx.world.arena, layer) {
-                    for point in stabilizer.catch_up(raw) {
-                        stroke.to(raster, point, last, selection);
+                    if line {
+                        stroke.to(raster, raw, last, selection);
+                    } else {
+                        for point in stabilizer.catch_up(raw) {
+                            stroke.to(raster, point, last, selection);
+                        }
                     }
                     stroke.end(raster, finish, selection);
                 }
@@ -726,11 +795,51 @@ impl SuePaint {
                     cx.record(ArenaEdit(steps));
                 }
             }
-            Gesture::Pan { .. } | Gesture::Rotate { .. } | Gesture::Pick { .. } => {}
+            Gesture::Pan { .. }
+            | Gesture::Rotate { .. }
+            | Gesture::Pick { .. }
+            | Gesture::BrushSize { .. } => {}
         }
     }
 
     /// Picks the color under `pos`: as shown, or from the current layer.
+    /// Makes the topmost visible layer with paint under picture point `p`
+    /// the current layer (Ctrl, Shift and click).
+    fn pick_layer_at(&mut self, arena: &sue_core::Arena, p: Pos2) {
+        let Some(doc) = self.docs.get_mut(self.active) else {
+            return;
+        };
+        let hit = doc::layers(arena, doc.picture)
+            .into_iter()
+            .rev()
+            .find(|info| {
+                if !info.style.visible {
+                    return false;
+                }
+                let Some(raster) = doc::raster(arena, info.id) else {
+                    return false;
+                };
+                let (x, y) = (
+                    p.x as i64 - info.style.offset[0],
+                    p.y as i64 - info.style.offset[1],
+                );
+                if x < 0
+                    || y < 0
+                    || x >= i64::from(raster.width())
+                    || y >= i64::from(raster.height())
+                {
+                    return false;
+                }
+                raster.bytes().is_some_and(|bytes| {
+                    let at = ((y as usize * raster.width() as usize) + x as usize) * 4 + 3;
+                    bytes.get(at).is_some_and(|alpha| *alpha > 0)
+                })
+            });
+        if let Some(info) = hit {
+            doc.layer = Some(info.id);
+        }
+    }
+
     fn pick(
         &mut self,
         pos: Pos2,

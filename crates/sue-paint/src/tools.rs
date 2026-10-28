@@ -126,8 +126,12 @@ impl Tool {
             Self::Eraser => Some('E'),
             Self::Fill | Self::Gradient => Some('G'),
             Self::Figure => Some('U'),
-            Self::Text => Some('T'),
+            Self::Text | Self::Balloon => Some('T'),
             Self::Operation => Some('O'),
+            Self::Zoom => Some('/'),
+            Self::Blend => Some('J'),
+            Self::Frame | Self::Ruler => Some('U'),
+            Self::CorrectLine => Some('Y'),
             _ => None,
         }
     }
@@ -590,6 +594,19 @@ impl Toolbox {
     pub fn of(&self, tool: Tool) -> &SubTool {
         let (_, subs, index) = self.set(tool);
         &subs[(*index).min(subs.len() - 1)]
+    }
+
+    /// Picks the sub tool before (or, `forward`, after) the current one,
+    /// going round (CSP's comma and period).
+    pub fn step_sub(&mut self, forward: bool) {
+        let tool = self.tool;
+        let set = self.set_mut(tool);
+        let count = set.1.len().max(1);
+        set.2 = if forward {
+            (set.2 + 1) % count
+        } else {
+            (set.2 + count - 1) % count
+        };
     }
 
     /// Picks the next tool sharing `key`, starting after the current one

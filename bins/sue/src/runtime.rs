@@ -1599,6 +1599,47 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn studios_keep_the_keys_they_reserve() {
+        let (mut runtime, root) = runtime("reserved-keys");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
+            Vec::new()
+        });
+        runtime.request(ShellRequest::Hub(false), &mut NoTextures, start);
+        // On the canvas, Tab opens the command palette.
+        frame_with(
+            &mut runtime,
+            &ctx,
+            start,
+            vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
+        );
+        assert!(runtime.shell.palette_open());
+        runtime.shell.dismiss_overlays();
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
+            Vec::new()
+        });
+        // In Sue Paint, Tab hides the palettes, as in Clip Studio Paint.
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
+            Vec::new()
+        });
+        assert!(runtime.shell.studio_reveal() > 0.999);
+        frame_with(
+            &mut runtime,
+            &ctx,
+            start,
+            vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
+        );
+        assert!(!runtime.shell.palette_open(), "Tab stayed with Sue Paint");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn spawned_entities_undo_and_redo_with_their_buffers() {
         let (mut runtime, root) = runtime("spawn");
         let ctx = egui::Context::default();
