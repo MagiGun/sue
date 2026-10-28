@@ -204,6 +204,75 @@ impl IngestRoute {
     }
 }
 
+impl NativeFormat {
+    /// Display name, e.g. `JPEG XL`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::JpegXl { .. } => "JPEG XL",
+            Self::Jpeg => "JPEG",
+            Self::Png => "PNG",
+            Self::Gif => "GIF",
+            Self::WebP => "WebP",
+            Self::Bmp => "BMP",
+            Self::Tiff => "TIFF",
+            Self::Psd => "PSD",
+            Self::Ico => "ICO",
+            Self::Avif => "AVIF",
+            Self::Heif => "HEIF",
+            Self::Mp3 => "MP3",
+            Self::Flac => "FLAC",
+            Self::Wav => "WAV",
+            Self::Ogg => "Ogg",
+            Self::Midi => "MIDI",
+            Self::M4a => "M4A",
+            Self::Mp4 => "MP4",
+            Self::QuickTime => "QuickTime",
+            Self::Matroska => "Matroska",
+            Self::Avi => "AVI",
+            Self::Glb => "glTF binary",
+            Self::Pdf => "PDF",
+            Self::Font => "font",
+        }
+    }
+}
+
+impl StructuredFormat {
+    /// Display name, e.g. `TOML`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Json => "JSON",
+            Self::Xml => "XML",
+            Self::Svg => "SVG",
+            Self::Html => "HTML",
+            Self::Toml => "TOML",
+            Self::Markdown => "Markdown",
+            Self::Script => "script",
+            Self::PlainText => "plain text",
+        }
+    }
+}
+
+impl BinarySignature {
+    /// Display name, e.g. `ZIP`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Zip => "ZIP",
+            Self::Gzip => "gzip",
+            Self::Zstd => "zstd",
+            Self::SevenZip => "7z",
+            Self::Xz => "xz",
+            Self::Elf => "ELF",
+            Self::PortableExecutable => "PE",
+            Self::MachO => "Mach-O",
+            Self::Wasm => "WASM",
+            Self::Sqlite => "SQLite",
+        }
+    }
+}
+
 /// Routes a stream by content alone. Only the first 64 KiB are read.
 ///
 /// ```

@@ -6,10 +6,15 @@ This guide is for people who want to *use* Sue: listeners, writers, artists,
 musicians, filmmakers, makers and coders. It has no technical jargon. When a term
 needs explaining, it is explained the first time it appears.
 
-> **Where things stand:** Sue v1.0 "Faustian Enigma" is the foundation release.
-> This guide describes the experience Sue is built for. Today's build contains
-> the engine underneath it and a self-check. The windows, studios and tools
-> described below are added in the releases that follow.
+> **Where things stand:** This guide describes the experience Sue is built for.
+> Sue v1.0 "Faustian Enigma" already opens its own window, with the Hub and
+> pinning, Quick Notes, a Drop Zone, and Settings for every option, which you
+> can undo and which are saved as you go. Drop a JPEG XL picture, a text file
+> or any other file on the window, and Sue opens it in the right viewer. The
+> big studios, the file explorer, the media player, the web browser and the
+> timeline are added in the releases that follow. For now, Sue reads your
+> `.suerice` file only when it starts, so close Sue before you edit the file by
+> hand.
 
 ---
 

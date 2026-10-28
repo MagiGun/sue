@@ -1,17 +1,19 @@
-//! Tabs, docks and the global keymap, tied to the scheduler.
+//! Tabs, docked applets, focus and the global keymap, tied to the scheduler.
 
 use std::fmt;
 
-use sue_platform::{FormFactor, InputEvent, SafeAreaInsets, ScreenEdge, TouchGesture};
+use sue_core::AssetHandle;
+use sue_platform::{FileDrop, FormFactor, InputEvent, SafeAreaInsets, ScreenEdge, TouchGesture};
 use sue_rice::HardwareProfile;
 
 use crate::{
-    AppletContext, AppletId, BootTarget, FrameScheduler, FrameTicket, InputResponse, Launchpad,
-    LayoutRequest, LayoutSolution, Rect, RenderDemand, SpringDamper, SpringMode, SueApplet,
-    WmConfig, WmError, solve_layout,
+    AppletContext, AppletId, AppletManifest, BootTarget, FrameScheduler, FrameTicket,
+    InputResponse, Launchpad, LayoutRequest, LayoutSolution, MediaClass, Rect, RenderDemand,
+    ShellRequest, SpringDamper, SpringMode, SueApplet, Ui, WmConfig, WmError, World, Zone,
+    solve_layout,
 };
 
-/// One tab: the Hub, or a mounted applet.
+/// One Center Stage tab: the Hub, or a mounted applet.
 pub enum Tab {
     /// The Launchpad Hub.
     Hub,
@@ -44,13 +46,31 @@ impl fmt::Debug for Tab {
     }
 }
 
-/// The running shell: tabs, the two dock springs, the global keymap and the
-/// frame scheduler.
+/// Which applet receives keyboard input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Focus {
+    /// The active Center Stage tab.
+    Center,
+    /// The docked applet at this index (see [`Workspace::docked`]).
+    Dock(usize),
+}
+
+struct Docked {
+    zone: Zone,
+    id: AppletId,
+    applet: Box<dyn SueApplet>,
+}
+
+/// The running shell: tabs, docked applets, the two dock springs, the global
+/// keymap and the frame scheduler.
 pub struct Workspace {
     launchpad: Launchpad,
     config: WmConfig,
+    profile: HardwareProfile,
     tabs: Vec<Tab>,
     active: usize,
+    docks: Vec<Docked>,
+    focus: Focus,
     left_open: bool,
     right_open: bool,
     left_spring: SpringDamper,
@@ -63,8 +83,15 @@ impl fmt::Debug for Workspace {
         f.debug_struct("Workspace")
             .field("tabs", &self.tabs)
             .field("active", &self.active)
-            .field("left_open", &self.left_open)
-            .field("right_open", &self.right_open)
+            .field(
+                "docks",
+                &self
+                    .docks
+                    .iter()
+                    .map(|dock| dock.id.as_str())
+                    .collect::<Vec<_>>(),
+            )
+            .field("focus", &self.focus)
             .finish_non_exhaustive()
     }
 }
@@ -82,21 +109,26 @@ impl Workspace {
     ) -> Self {
         let open = form_factor == FormFactor::Desktop;
         let reveal = if open { 1.0 } else { 0.0 };
-        let mode = SpringMode::for_profile(profile, config.animations);
+        let mode = SpringMode::for_profile(profile, config.instant_transitions);
         let spring = SpringDamper::new(config.spring, mode, reveal);
         let mut scheduler = FrameScheduler::new(profile, display_hz);
         scheduler.invalidate_all();
-        Self {
+        let mut workspace = Self {
             launchpad,
             config,
+            profile,
             tabs: vec![Tab::Hub],
             active: 0,
+            docks: Vec::new(),
+            focus: Focus::Center,
             left_open: open,
             right_open: open,
             left_spring: spring,
             right_spring: spring,
             scheduler,
-        }
+        };
+        workspace.sync_pin();
+        workspace
     }
 
     /// The applet registry.
@@ -105,15 +137,71 @@ impl Workspace {
         &self.launchpad
     }
 
-    /// Opens the boot target (the pinned applet, or the Hub) in the first tab.
+    /// The current window-manager config.
+    #[must_use]
+    pub fn config(&self) -> &WmConfig {
+        &self.config
+    }
+
+    /// The active hardware profile.
+    #[must_use]
+    pub fn profile(&self) -> HardwareProfile {
+        self.profile
+    }
+
+    fn sync_pin(&mut self) {
+        let pinned = AppletId::new(&self.config.boot_into)
+            .ok()
+            .filter(|id| self.launchpad.manifest(id).is_some());
+        match pinned {
+            Some(id) => {
+                // The id was just checked against the launchpad.
+                let _ = self.launchpad.pin_boot(&id);
+            }
+            None => self.launchpad.unpin_boot(),
+        }
+    }
+
+    /// Applies a new config (after a rice edit, undo or redo): metrics, springs,
+    /// keymap and the pinned boot applet.
+    pub fn apply_config(&mut self, config: WmConfig) {
+        let mode = SpringMode::for_profile(self.profile, config.instant_transitions);
+        for spring in [&mut self.left_spring, &mut self.right_spring] {
+            let (position, target) = (spring.position(), spring.target());
+            *spring = SpringDamper::new(config.spring, mode, position);
+            spring.set_target(target);
+        }
+        self.config = config;
+        self.sync_pin();
+        self.scheduler.invalidate_all();
+    }
+
+    /// Mounts every dock applet, then opens the boot target (the pinned
+    /// applet, or the Hub) in the first tab.
     ///
     /// # Errors
-    /// If the pinned applet fails to mount.
+    /// If an applet fails to mount.
     pub fn boot(&mut self, ctx: &mut AppletContext<'_>) -> Result<BootTarget, WmError> {
+        let docked: Vec<AppletManifest> = self
+            .launchpad
+            .manifests()
+            .filter(|manifest| matches!(manifest.home_zone, Zone::LeftDock | Zone::RightDock))
+            .cloned()
+            .collect();
+        for manifest in docked {
+            let mut applet = self.launchpad.instantiate(&manifest.id)?;
+            applet.mount(ctx)?;
+            self.docks.push(Docked {
+                zone: manifest.home_zone,
+                id: manifest.id,
+                applet,
+            });
+        }
         let target = self.launchpad.boot_target();
         if let BootTarget::Applet(id) = &target {
             self.open_applet(id, ctx)?;
         }
+        self.process_requests(ctx)?;
         Ok(target)
     }
 
@@ -121,8 +209,35 @@ impl Workspace {
     pub fn new_tab(&mut self) -> usize {
         self.tabs.push(Tab::Hub);
         self.active = self.tabs.len() - 1;
+        self.focus = Focus::Center;
         self.scheduler.invalidate_all();
         self.active
+    }
+
+    /// Makes tab `index` active.
+    pub fn activate_tab(&mut self, index: usize) {
+        if index < self.tabs.len() {
+            self.active = index;
+            self.focus = Focus::Center;
+            self.scheduler.invalidate_all();
+        }
+    }
+
+    /// Closes tab `index`; the last tab turns back into the Hub.
+    pub fn close_tab(&mut self, index: usize, ctx: &mut AppletContext<'_>) {
+        if index >= self.tabs.len() {
+            return;
+        }
+        let closed = if self.tabs.len() == 1 {
+            std::mem::replace(&mut self.tabs[0], Tab::Hub)
+        } else {
+            self.tabs.remove(index)
+        };
+        if let Tab::Applet { mut applet, .. } = closed {
+            applet.unmount(ctx);
+        }
+        self.active = self.active.min(self.tabs.len() - 1);
+        self.scheduler.invalidate_all();
     }
 
     /// Mounts `id` in the active tab, unmounting whatever was there.
@@ -149,7 +264,62 @@ impl Workspace {
         {
             old.unmount(ctx);
         }
+        self.focus = Focus::Center;
         self.scheduler.invalidate_all();
+        Ok(())
+    }
+
+    /// Opens `handle` in the first Center Stage applet whose manifest opens
+    /// `class`: in the active tab if it already shows that applet or the Hub,
+    /// otherwise in a new tab.
+    ///
+    /// # Errors
+    /// [`WmError::NothingOpens`] if no installed applet opens `class`, or the
+    /// applet's own error.
+    pub fn open_asset(
+        &mut self,
+        handle: AssetHandle,
+        class: MediaClass,
+        ctx: &mut AppletContext<'_>,
+    ) -> Result<(), WmError> {
+        let id = self
+            .launchpad
+            .manifests()
+            .find(|manifest| {
+                manifest.home_zone == Zone::CenterStage && manifest.opens.contains(&class)
+            })
+            .map(|manifest| manifest.id.clone())
+            .ok_or(WmError::NothingOpens(class))?;
+        let reuse = match &self.tabs[self.active] {
+            Tab::Hub => false,
+            Tab::Applet { id: current, .. } => current == &id,
+        };
+        if !reuse {
+            if self.tabs[self.active].applet_id().is_some() {
+                self.new_tab();
+            }
+            self.open_applet(&id, ctx)?;
+        }
+        if let Tab::Applet { applet, .. } = &mut self.tabs[self.active] {
+            applet.open(handle, ctx)?;
+        }
+        self.focus = Focus::Center;
+        self.scheduler.invalidate_all();
+        Ok(())
+    }
+
+    /// Carries out the requests applets queued in `ctx`.
+    ///
+    /// # Errors
+    /// The first request that fails.
+    pub fn process_requests(&mut self, ctx: &mut AppletContext<'_>) -> Result<(), WmError> {
+        let requests = std::mem::take(ctx.requests);
+        for request in requests {
+            match request {
+                ShellRequest::OpenAsset { handle, class } => self.open_asset(handle, class, ctx)?,
+                ShellRequest::OpenApplet(id) => self.open_applet(&id, ctx)?,
+            }
+        }
         Ok(())
     }
 
@@ -159,10 +329,85 @@ impl Workspace {
         &self.tabs
     }
 
+    /// Index of the active tab.
+    #[must_use]
+    pub fn active_index(&self) -> usize {
+        self.active
+    }
+
     /// The active tab.
     #[must_use]
     pub fn active_tab(&self) -> &Tab {
         &self.tabs[self.active]
+    }
+
+    /// A short title for tab `index`.
+    #[must_use]
+    pub fn tab_title(&self, index: usize, world: &World) -> String {
+        match self.tabs.get(index) {
+            Some(Tab::Applet { id, applet }) => applet.title(world).unwrap_or_else(|| {
+                self.launchpad
+                    .manifest(id)
+                    .map_or_else(|| id.to_string(), |manifest| manifest.name.clone())
+            }),
+            Some(Tab::Hub) | None => "Launchpad".to_owned(),
+        }
+    }
+
+    /// Docked applets as `(index, zone, manifest)`.
+    pub fn docked(&self) -> impl Iterator<Item = (usize, Zone, Option<&AppletManifest>)> {
+        self.docks
+            .iter()
+            .enumerate()
+            .map(|(index, dock)| (index, dock.zone, self.launchpad.manifest(&dock.id)))
+    }
+
+    /// Draws docked applet `index` into `area`.
+    pub fn draw_dock(
+        &mut self,
+        index: usize,
+        ui: &mut Ui<'_>,
+        area: Rect,
+        ctx: &mut AppletContext<'_>,
+    ) {
+        ctx.focused = self.focus == Focus::Dock(index);
+        if let Some(dock) = self.docks.get_mut(index) {
+            dock.applet.draw(ui, area, ctx);
+        }
+        ctx.focused = false;
+    }
+
+    /// Draws the active tab's applet into `area`. Returns `false` for the Hub.
+    pub fn draw_active(
+        &mut self,
+        ui: &mut Ui<'_>,
+        area: Rect,
+        ctx: &mut AppletContext<'_>,
+    ) -> bool {
+        ctx.focused = self.focus == Focus::Center;
+        let drawn = match &mut self.tabs[self.active] {
+            Tab::Applet { applet, .. } => {
+                applet.draw(ui, area, ctx);
+                true
+            }
+            Tab::Hub => false,
+        };
+        ctx.focused = false;
+        drawn
+    }
+
+    /// Which applet receives keyboard input.
+    #[must_use]
+    pub fn focus(&self) -> Focus {
+        self.focus
+    }
+
+    /// Moves keyboard focus.
+    pub fn set_focus(&mut self, focus: Focus) {
+        if self.focus != focus {
+            self.focus = focus;
+            self.scheduler.invalidate_all();
+        }
     }
 
     /// `true` if the active applet edits time-based media, which shows the
@@ -203,18 +448,49 @@ impl Workspace {
 
     /// Switches the hardware profile, e.g. when the device enters battery saver.
     pub fn set_profile(&mut self, profile: HardwareProfile) {
-        let mode = SpringMode::for_profile(profile, self.config.animations);
+        self.profile = profile;
+        let mode = SpringMode::for_profile(profile, self.config.instant_transitions);
         self.left_spring.set_mode(mode);
         self.right_spring.set_mode(mode);
         self.scheduler.set_profile(profile);
+        self.scheduler.invalidate_all();
     }
 
-    /// Routes one input event: global shortcuts and edge swipes first, then
-    /// the active applet.
+    /// Asks for a full redraw.
+    pub fn invalidate(&mut self) {
+        self.scheduler.invalidate_all();
+    }
+
+    fn focused_applet(&mut self) -> Option<&mut Box<dyn SueApplet>> {
+        match self.focus {
+            Focus::Center => match &mut self.tabs[self.active] {
+                Tab::Applet { applet, .. } => Some(applet),
+                Tab::Hub => None,
+            },
+            Focus::Dock(index) => self.docks.get_mut(index).map(|dock| &mut dock.applet),
+        }
+    }
+
+    /// Routes one input event: global shortcuts and edge swipes first, dropped
+    /// files to applets that accept drops, everything else to the focused
+    /// applet. Requests queued by applets are carried out before returning.
     ///
     /// # Errors
-    /// Undo/redo failures, or the applet's own error.
+    /// Undo/redo failures, or an applet's error.
     pub fn dispatch(
+        &mut self,
+        event: &InputEvent,
+        ctx: &mut AppletContext<'_>,
+    ) -> Result<InputResponse, WmError> {
+        let response = self.route(event, ctx)?;
+        self.process_requests(ctx)?;
+        if response == (InputResponse::Consumed { redraw: true }) {
+            self.scheduler.invalidate_all();
+        }
+        Ok(response)
+    }
+
+    fn route(
         &mut self,
         event: &InputEvent,
         ctx: &mut AppletContext<'_>,
@@ -235,14 +511,12 @@ impl Workspace {
                     self.new_tab();
                     return Ok(consumed);
                 }
-                if keymap.redo.matches(key) {
-                    let changed = ctx.history.redo(ctx.arena)?;
-                    self.scheduler.invalidate_all();
+                if keymap.redo.matches(key) || keymap.redo_alt.matches(key) {
+                    let changed = ctx.history.redo(ctx.world)?;
                     return Ok(InputResponse::Consumed { redraw: changed });
                 }
                 if keymap.undo.matches(key) {
-                    let changed = ctx.history.undo(ctx.arena)?;
-                    self.scheduler.invalidate_all();
+                    let changed = ctx.history.undo(ctx.world)?;
                     return Ok(InputResponse::Consumed { redraw: changed });
                 }
             }
@@ -255,30 +529,45 @@ impl Workspace {
                 }
                 return Ok(consumed);
             }
+            InputEvent::FileDrop(FileDrop::Dropped(_)) => {
+                let mut response = InputResponse::Ignored;
+                for dock in &mut self.docks {
+                    let accepts = self
+                        .launchpad
+                        .manifest(&dock.id)
+                        .is_some_and(|manifest| manifest.accepts_drops);
+                    if accepts && dock.applet.handle_input(event, ctx)? != InputResponse::Ignored {
+                        response = consumed;
+                    }
+                }
+                return Ok(response);
+            }
             _ => {}
         }
-        let response = match &mut self.tabs[self.active] {
-            Tab::Applet { applet, .. } => applet.handle_input(event, ctx)?,
-            Tab::Hub => InputResponse::Ignored,
+        ctx.focused = true;
+        let response = match self.focused_applet() {
+            Some(applet) => applet.handle_input(event, ctx),
+            None => Ok(InputResponse::Ignored),
         };
-        if response == consumed {
-            self.scheduler.invalidate_all();
-        }
-        Ok(response)
+        ctx.focused = false;
+        Ok(response?)
     }
 
-    /// Advances springs and the active applet by `dt` seconds and returns what
-    /// the host should do next.
+    /// Advances springs and applets by `dt` seconds and returns what the host
+    /// should do next.
     pub fn update(&mut self, dt: f32, ctx: &mut AppletContext<'_>) -> RenderDemand {
         let left_moving = self.left_spring.step(dt);
         let right_moving = self.right_spring.step(dt);
-        let applet_demand = match &mut self.tabs[self.active] {
+        let mut applets = match &mut self.tabs[self.active] {
             Tab::Applet { applet, .. } => applet.update(dt, ctx),
             Tab::Hub => RenderDemand::Sleep,
         };
+        for dock in &mut self.docks {
+            applets = applets.combine(dock.applet.update(dt, ctx));
+        }
         self.scheduler
-            .set_animating(left_moving || right_moving || !applet_demand.is_sleep());
-        self.scheduler.demand().combine(applet_demand)
+            .set_animating(left_moving || right_moving || !applets.is_sleep());
+        self.scheduler.demand().combine(applets)
     }
 
     /// Starts a frame if one is needed (see [`FrameScheduler::begin_frame`]).
@@ -317,10 +606,9 @@ impl Workspace {
 mod tests {
     use super::*;
     use crate::launchpad::tests::fixture;
-    use crate::{AppletCategory, Placement, register_rice};
-    use sue_core::{Arena, AssetHandle, StringBuffer, UndoStack, txn::InsertText};
+    use crate::{AppletCategory, AppletError, Placement, register_rice};
+    use sue_core::{StringBuffer, UndoStack, txn::InsertText};
     use sue_platform::{Key, KeyEvent, Modifiers};
-    use sue_rice::RiceSchema;
 
     /// Types characters into a note, through the undo tree.
     #[derive(Default)]
@@ -329,19 +617,30 @@ mod tests {
     }
 
     impl SueApplet for Typist {
-        fn manifest(&self) -> crate::AppletManifest {
-            crate::AppletManifest {
+        fn manifest(&self) -> AppletManifest {
+            AppletManifest {
                 id: AppletId::new("typist").unwrap(),
                 name: "Typist".into(),
                 category: AppletCategory::Utility,
-                home_zone: crate::Zone::LeftDock,
+                home_zone: Zone::CenterStage,
                 uses_timeline: false,
                 summary: String::new(),
+                opens: vec![MediaClass::Text],
+                accepts_drops: false,
             }
         }
 
-        fn mount(&mut self, ctx: &mut AppletContext<'_>) -> Result<(), crate::AppletError> {
-            self.note = Some(ctx.arena.spawn("note", StringBuffer::new()));
+        fn mount(&mut self, ctx: &mut AppletContext<'_>) -> Result<(), AppletError> {
+            self.note = Some(ctx.world.arena.spawn("note", StringBuffer::new()));
+            Ok(())
+        }
+
+        fn open(
+            &mut self,
+            asset: AssetHandle,
+            _ctx: &mut AppletContext<'_>,
+        ) -> Result<(), AppletError> {
+            self.note = Some(asset);
             Ok(())
         }
 
@@ -349,7 +648,7 @@ mod tests {
             &mut self,
             event: &InputEvent,
             ctx: &mut AppletContext<'_>,
-        ) -> Result<InputResponse, crate::AppletError> {
+        ) -> Result<InputResponse, AppletError> {
             let (
                 Some(note),
                 InputEvent::Keyboard(KeyEvent {
@@ -365,40 +664,40 @@ mod tests {
                 return Ok(InputResponse::Ignored);
             }
             let end = ctx
-                .arena
+                .arena()
                 .get(note)?
                 .string_buffer()
                 .map_or(0, StringBuffer::len);
-            ctx.history
-                .apply(ctx.arena, InsertText::new(note, end, text.clone()))?;
+            ctx.edit_arena(InsertText::new(note, end, text.clone()))?;
             Ok(InputResponse::Consumed { redraw: true })
         }
     }
 
     struct Engine {
-        arena: Arena,
-        history: UndoStack<Arena>,
-        rice: RiceSchema,
+        world: World,
+        history: UndoStack<World>,
+        requests: Vec<ShellRequest>,
     }
 
     impl Engine {
         fn new() -> Self {
-            let mut rice = RiceSchema::new();
-            register_rice(&mut rice).unwrap();
+            let mut world = World::default();
+            register_rice(&mut world.rice).unwrap();
             Self {
-                arena: Arena::new(),
+                world,
                 history: UndoStack::new(),
-                rice,
+                requests: Vec::new(),
             }
         }
 
         fn ctx(&mut self, profile: HardwareProfile) -> AppletContext<'_> {
             AppletContext {
-                arena: &mut self.arena,
+                world: &mut self.world,
                 history: &mut self.history,
-                rice: &self.rice,
                 form_factor: FormFactor::Desktop,
                 profile,
+                requests: &mut self.requests,
+                focused: false,
             }
         }
 
@@ -411,21 +710,19 @@ mod tests {
             launchpad
                 .pin_boot(&AppletId::new("typist").unwrap())
                 .unwrap();
-            Workspace::new(
-                launchpad,
-                WmConfig::from_rice(&self.rice).unwrap(),
-                profile,
-                60,
-                form_factor,
-            )
+            let mut config = WmConfig::from_rice(&self.world.rice).unwrap();
+            config.boot_into = "typist".to_owned();
+            Workspace::new(launchpad, config, profile, 60, form_factor)
         }
     }
 
-    fn text_of(engine: &Engine) -> String {
+    fn text_of(engine: &Engine, name: &str) -> String {
         engine
+            .world
             .arena
             .iter()
-            .find_map(|(_, entity)| entity.string_buffer().map(|text| text.as_str().to_owned()))
+            .find(|(_, entity)| entity.name() == name)
+            .and_then(|(_, entity)| entity.string_buffer().map(|text| text.as_str().to_owned()))
             .unwrap_or_default()
     }
 
@@ -444,13 +741,13 @@ mod tests {
                 )
                 .unwrap();
         }
-        assert_eq!(text_of(&engine), "Sue");
+        assert_eq!(text_of(&engine, "note"), "Sue");
         let undo = InputEvent::Keyboard(KeyEvent::press(Key::Character('Z'), Modifiers::CTRL));
-        assert_eq!(
-            workspace.dispatch(&undo, &mut engine.ctx(profile)).unwrap(),
-            InputResponse::Consumed { redraw: true }
-        );
-        assert_eq!(text_of(&engine), "Su");
+        workspace.dispatch(&undo, &mut engine.ctx(profile)).unwrap();
+        assert_eq!(text_of(&engine, "note"), "Su");
+        let redo = InputEvent::Keyboard(KeyEvent::press(Key::Character('Y'), Modifiers::CTRL));
+        workspace.dispatch(&redo, &mut engine.ctx(profile)).unwrap();
+        assert_eq!(text_of(&engine, "note"), "Sue");
     }
 
     #[test]
@@ -481,7 +778,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_hardware_snaps_instantly() {
+    fn legacy_hardware_and_instant_transitions_snap() {
         let mut engine = Engine::new();
         let profile = HardwareProfile::LegacyLowSpec;
         let mut workspace = engine.workspace(profile, FormFactor::Desktop);
@@ -492,6 +789,13 @@ mod tests {
             workspace.update(1.0 / 30.0, &mut engine.ctx(profile)),
             RenderDemand::Sleep
         );
+
+        let mut fast = engine.workspace(HardwareProfile::HighRefresh, FormFactor::Desktop);
+        let mut config = fast.config().clone();
+        config.instant_transitions = true;
+        fast.apply_config(config);
+        fast.set_right_dock(false);
+        assert_eq!(fast.dock_reveal().1, 0.0);
     }
 
     #[test]
@@ -526,6 +830,37 @@ mod tests {
     }
 
     #[test]
+    fn assets_open_in_the_applet_that_declares_their_class() {
+        let mut engine = Engine::new();
+        let profile = HardwareProfile::Balanced;
+        let mut workspace = engine.workspace(profile, FormFactor::Desktop);
+        workspace.boot(&mut engine.ctx(profile)).unwrap();
+        let doc = engine
+            .world
+            .arena
+            .spawn("doc.md", StringBuffer::from("# hi"));
+        engine.requests.push(ShellRequest::OpenAsset {
+            handle: doc,
+            class: MediaClass::Text,
+        });
+        workspace
+            .process_requests(&mut engine.ctx(profile))
+            .unwrap();
+        assert_eq!(workspace.tabs().len(), 1, "the typist tab is reused");
+        workspace
+            .dispatch(
+                &InputEvent::Keyboard(KeyEvent::typed('!')),
+                &mut engine.ctx(profile),
+            )
+            .unwrap();
+        assert_eq!(text_of(&engine, "doc.md"), "# hi!");
+        assert!(matches!(
+            workspace.open_asset(doc, MediaClass::Image, &mut engine.ctx(profile)),
+            Err(WmError::NothingOpens(MediaClass::Image))
+        ));
+    }
+
+    #[test]
     fn new_tabs_open_the_hub_and_timelines_follow_the_applet() {
         let mut engine = Engine::new();
         let profile = HardwareProfile::Balanced;
@@ -537,7 +872,7 @@ mod tests {
             .unwrap();
         assert_eq!(workspace.tabs().len(), 2);
         assert!(workspace.active_tab().applet_id().is_none());
-        assert!(!workspace.timeline_active());
+        assert_eq!(workspace.tab_title(1, &engine.world), "Launchpad");
         workspace
             .open_applet(&AppletId::new("video").unwrap(), &mut engine.ctx(profile))
             .unwrap();
@@ -548,6 +883,8 @@ mod tests {
             FormFactor::Desktop,
         );
         assert!(matches!(layout.bottom, Placement::Tiled(_)));
+        workspace.close_tab(1, &mut engine.ctx(profile));
+        assert_eq!((workspace.tabs().len(), workspace.active_index()), (1, 0));
         assert_eq!(workspace.launchpad().len(), 2);
     }
 }

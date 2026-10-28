@@ -30,20 +30,24 @@ this specification to its implementation status.
 
 ```text
 bins/sue      ──► every crate below
-sue-wm        ──► sue-rice, sue-platform, sue-core
+sue-wm        ──► sue-rice, sue-platform, sue-core   + wgpu, fontdue, epaint_default_fonts
 sue-ai        ──► sue-platform, sue-core
 sue-rice      ──► sue-platform, sue-core
-sue-io        ──► sue-core
-sue-pkg       ──► sha2, ed25519-dalek, semver   (no engine crates)
-sue-core      ──► nothing                        (leaf)
-sue-platform  ──► nothing                        (leaf)
+sue-io        ──► sue-core                            + jxl-oxide, zune-jpegxl
+sue-pkg       ──► sha2, ed25519-dalek, semver         (no engine crates)
+sue-core      ──► nothing                              (leaf)
+sue-platform  ──► winit, wgpu, pollster                (no engine crates)
 ```
 
-The graph is acyclic by construction. `sue-core` and `sue-platform` are leaves, so
-the data kernel never depends on an operating system, and the OS layer never
-depends on the data model. `unsafe` code is forbidden workspace-wide
-(`[workspace.lints] rust.unsafe_code = "forbid"`). Native FFI added to
-`sue-platform` later MUST relax that lint for that crate only.
+The graph is acyclic by construction. `sue-core` and `sue-platform` are leaves
+among the engine crates, so the data kernel never depends on an operating
+system, and the OS layer never depends on the data model. `winit` (windows and
+OS input) is used only by `sue-platform`. `wgpu` is a portable graphics API: the
+platform host owns the device and window surface, and `sue-wm` records draw
+calls with it. `unsafe` code is forbidden workspace-wide
+(`[workspace.lints] rust.unsafe_code = "forbid"`). The `wgpu` window surface is
+created through its safe API, so `sue-platform` keeps the lint too. Native FFI
+added to `sue-platform` later MUST relax it for that crate only.
 
 ---
 
@@ -194,9 +198,11 @@ root ── A ── B ── C          undo ×2, then apply D:
 - `checkout(node)` walks to any node: it undoes up to the lowest common ancestor,
   then redoes down to the target. The cost is the path length.
 
-`UndoStack<T>` is generic. The same engine drives arena edits
-(`UndoStack<Arena>`) and Settings edits (`UndoStack<RiceSchema>` with
-`SetRiceValue`).
+`UndoStack<T>` is generic. The shell keeps **one global history**,
+`UndoStack<sue_wm::World>`, where `World { arena, rice }` holds everything
+undoable. `ArenaEdit(txn)` and `RiceEdit(txn)` lift arena and rice transactions
+onto the world, so a single `Ctrl+Z` (or `Ctrl+Shift+Z` / `Ctrl+Y` to redo) steps
+back through note edits and theme edits in the order they happened.
 
 ### 1.6 Time base
 
@@ -259,7 +265,7 @@ image or texture cache to default to `.jxl`.
 | Method | Purpose |
 | --- | --- |
 | `probe` | Parse the container or codestream header without decoding pixels |
-| `decode_progressive(bytes, ProgressiveTarget)` | Decode to `DcPreview`, a given pass, or `Full`, into a `RasterTile2D` |
+| `decode(bytes, ProgressiveTarget)` | Decode to `DcPreview` (1:8), a given pass, or `Full`, into an `Rgba8` `RasterTile2D` plus `JxlImageInfo` |
 | `transcode_jpeg_lossless(jpeg)` | JPEG → JXL with reconstruction data |
 | `reconstruct_jpeg(jxl)` | JXL with `jbrd` → the original JPEG bytes |
 | `encode_layers(layers, effort)` | Encode a layered canvas |
@@ -281,10 +287,26 @@ if ratio == 0:  xsize = (small ? (u(5) + 1) * 8 : U32(…))
 else:           xsize = ysize * {1/1, 12/10, 4/3, 3/2, 16/9, 5/4, 2/1}[ratio - 1]
 ```
 
-The `ContainerOnlyPipeline` shipped in v1.0 implements `probe` completely. Its
-pixel operations return `JxlError::CodecUnavailable` until a codec package
-(`sue.codec.jxl`) is installed through `sue-pkg`. `reconstruct_jpeg` first checks
-for a `jbrd` box and reports `NoJpegReconstruction` when there is none.
+`NativeJxlPipeline` is the pipeline Sue ships:
+
+- **Decoding** uses the pure-Rust `jxl-oxide` decoder. The first frame is
+  rendered to 8-bit samples in the image's encoding (sRGB for typical files), and
+  gray, gray + alpha and RGB are widened to RGBA. `DcPreview` box-filters the
+  full decode by 8; until the streaming decoder lands, `Pass(n)` decodes fully.
+  CMYK images are reported as unsupported.
+- **JPEG reconstruction** (`reconstruct_jpeg`) rebuilds the original JPEG bit for
+  bit from the `jbrd` box through `jxl-oxide`, after checking
+  `jpeg_reconstruction_status`.
+- **Encoding** (`encode_layers`) is lossless modular encoding with the pure-Rust
+  `zune-jpegxl` encoder, for one `Gray8`, `Rgba8` or `RgbaF32` layer of at least
+  2×2 pixels. A test encodes and decodes a test card and checks every pixel.
+- **Lossless JPEG recompression** (`transcode_jpeg_lossless`) still returns
+  `JxlError::CodecUnavailable`: no pure-Rust JPEG→JXL transcoder exists yet.
+
+`sue_io::ingest_bytes` uses the pipeline for drag and drop: a JPEG XL decodes into
+an `Rgba8` raster entity; text becomes a `StringBuffer`; anything else, including
+media Sue has no decoder for yet, becomes a `Gray8` byte-map raster. Each entity
+carries metadata (`bytes`, `route`, `format`, size, decode time and entropy).
 
 ### 2.3 Tile cache
 
@@ -329,9 +351,26 @@ Relative `XDG_*` values are ignored, as the XDG Base Directory specification
 requires. On mobile, the sandbox root comes from the native runtime (for example
 `Context.getFilesDir()` or `NSFileManager`).
 
-`HeadlessHost` is a complete, real `PlatformHost` with virtual surfaces and an
-injectable input queue. CI, the self-check and remote scripting use it, and native
-windowed hosts implement the same trait.
+Two hosts implement the trait:
+
+- `HeadlessHost` has virtual surfaces and an injectable input queue. CI, the
+  self-check, offscreen snapshots and remote scripting use it.
+- `DesktopHost` opens one native window (`winit` 0.30) with a `wgpu` 30 surface,
+  sRGB where available and presented with vsync. It fills `HardwareCapabilities`
+  from the adapter (API, vendor, tier; a GL-only driver counts as legacy) and the
+  monitor's refresh rate. It translates OS events into `InputEvent`s: mouse,
+  wheel (`input.wheel_line_px` per notch), keyboard with text, window resize and
+  focus, and file drag and drop (`FileDrop::{Hovered, Cancelled, Dropped}`).
+  `create_surface` reports `Unsupported`, because this host drives a single
+  main window.
+
+`run_desktop(app, options)` drives a `DesktopApp` from the `winit` event loop.
+Input events reach the app, which answers whether to redraw. Each frame returns
+a `FramePacing`: `Sleep` puts the loop into `ControlFlow::Wait` (no frames, no
+CPU), and `Animate { target_hz }` either chains redraws behind vsync or
+schedules the next one with `ControlFlow::WaitUntil` when the profile caps the
+rate below the display's. Measured on the reference machine (AMD Radeon,
+Vulkan), an idle window drew one frame and used no CPU time over ten seconds.
 
 ### 3.2 Form-factor topologies
 
@@ -405,8 +444,28 @@ sub-steps of at most 1/240 s. That is stable for every riceable stiffness
 ($\omega\,\Delta t \ll 2$), and frame time is clamped to 0.25 s so a long stall
 does not cause a burst. A spring is **settled** when $|x - x_\text{target}|$ and
 $|v|$ are both below $10^{-3}$. It then snaps exactly to the target and
-reports `Sleep`. Under `LegacyLowSpec`, or when the user turns animations off,
-`SpringMode::InstantSnap` skips integration entirely: transitions take 0 ms.
+reports `Sleep`. Under `LegacyLowSpec`, or when the user enables
+`motion.instant_transitions`, `SpringMode::InstantSnap` skips integration
+entirely: transitions take 0 ms.
+
+**GPU renderer.** The shell draws into a `Canvas`: a renderer-agnostic list of
+rounded boxes, text runs and arena images (by `AssetHandle`, never pixels), each
+with its clip rectangle. `UiRenderer` draws a canvas with **one instanced `wgpu`
+pipeline**. Every quad carries its rectangle, colors, corner radius, border,
+kind and clip. The fragment shader antialiases rounded boxes with a signed
+distance function, samples glyph coverage from an R8 atlas, and samples arena
+images as sRGB (or byte maps as gray). It clips per instance and blends
+premultiplied alpha. Consecutive quads that share a texture form one draw
+call. Text uses `fontdue` with the bundled Ubuntu Light, Hack and Noto Emoji
+(monochrome) fonts. Glyphs are rasterized at physical size, packed into the
+atlas on shelves, and snapped to whole pixels. Images larger than the device's
+texture limit are box-filtered down on upload. Offscreen tests read the
+rendered pixels back and check them exactly.
+
+**Telemetry.** The top bar shows `Render: SLEEP (0 FPS)` whenever the frame just
+drawn is the last one before the loop sleeps, and `Render: ACTIVE (N FPS)`
+(measured over the last second of animation) while springs or applets keep
+frames coming, followed by the active `HardwareProfile`.
 
 ### 3.5 Real-time audio thread isolation
 
@@ -431,25 +490,62 @@ Every tool, utility and studio implements `SueApplet` (LAW 1):
 
 ```rust
 pub trait SueApplet: Send {
-    fn manifest(&self) -> AppletManifest;
+    fn manifest(&self) -> AppletManifest;   // id, name, category, home zone, opens, accepts_drops
     fn rice_declarations(&self) -> Vec<RiceDeclaration> { Vec::new() }
     fn mount(&mut self, ctx: &mut AppletContext<'_>) -> Result<(), AppletError>;
+    fn open(&mut self, asset: AssetHandle, ctx: &mut AppletContext<'_>) -> Result<(), AppletError>;
     fn handle_input(&mut self, event: &InputEvent, ctx: &mut AppletContext<'_>)
         -> Result<InputResponse, AppletError>;
+    fn draw(&mut self, ui: &mut Ui<'_>, area: Rect, ctx: &mut AppletContext<'_>) {}
+    fn title(&self, world: &World) -> Option<String> { None }
     fn update(&mut self, dt: f32, ctx: &mut AppletContext<'_>) -> RenderDemand { RenderDemand::Sleep }
     fn unmount(&mut self, ctx: &mut AppletContext<'_>) {}
 }
 ```
 
-Applets hold `AssetHandle`s, not data, and change the arena only through
-transactions on the shared `UndoStack<Arena>` in `AppletContext`. The
-`Launchpad` is a runtime registry of applet factories. It knows nothing about
-specific applets. `hub()` groups the installed applets into Studios and
-Utilities, `pin_boot` stores the `pinned_boot_applet`, and `boot_target()`
-resolves it at startup. A pinned applet that has been uninstalled falls back to
-the Hub instead of failing. `Workspace` owns the tabs (each one the Hub or a
-mounted applet), the dock springs, the global keymap (dock toggles, undo, redo,
-new tab, all read from rice) and the `FrameScheduler`.
+Applets hold `AssetHandle`s, not data. They change the world only through
+`ctx.edit_arena(txn)` / `ctx.edit_rice(txn)` on the global `UndoStack<World>`,
+and they ask the shell for things through `ctx.request(ShellRequest::…)`, which
+the workspace carries out after the call. The `Launchpad` is a runtime registry
+of applet factories and knows nothing about specific applets. `hub()` groups the
+installed applets into Studios and Utilities, `pin_boot` stores the
+`pinned_boot_applet`, and `boot_target()` resolves it at startup. A pinned applet
+that has been uninstalled falls back to the Hub instead of failing.
+
+`Workspace` owns the Center Stage tabs (each one the Hub or a mounted applet),
+the docked applets, keyboard focus, the dock springs, the global keymap and the
+`FrameScheduler`. At boot, every applet whose `home_zone` is `LeftDock` or
+`RightDock` is mounted into that dock. Assets open by **media class**: an
+applet's manifest lists the classes it opens (`Image`, `Text`, `Binary`), and
+`open_asset` picks the first Center Stage applet that declares the class. No
+table maps formats to applets. Dropped files go to applets that set
+`accepts_drops`; keyboard input goes to the focused applet after the global
+shortcuts.
+
+The **desktop shell** (`draw_shell`) is the only chrome:
+
+- **Top bar:** dock toggles, the title, a mode chip (the active tab's title),
+  tabs with close buttons, the new-tab button, and the telemetry badge.
+- **Docks:** each docked applet is drawn under its name, clipped to the dock
+  while the spring slides it. On narrow windows and phones the docks become
+  overlay drawers.
+- **Center Stage:** the active applet, or the **Launchpad**: Studio and Utility
+  cards in a grid sized by `launchpad.card_width`, each with a 📌 pin. Clicking a
+  pin is an undoable rice edit of `launchpad.boot_into`, so pinning persists and
+  `Ctrl+Z` unpins.
+- **Drop overlay:** shown while a file hovers over the window.
+
+The built-in applets are registered by the binary, like any package would
+register its own:
+
+| Applet | Zone | Opens | What it does |
+| --- | --- | --- | --- |
+| Quick Notes | Left dock | — | One shared note; every keystroke is an `InsertText`/`DeleteText` transaction |
+| Drop Zone | Left dock | drops | Reads dropped files (`io.max_ingest_mib` cap), runs `ingest_bytes`, opens the result, and lists recent ingests |
+| Settings | Right dock | — | The live rice GUI (§4.3) |
+| Text Studio | Center | `Text` | Caret editor with line numbers, arrows / Home / End navigation and undoable edits |
+| Image Viewer | Center | `Image` | Decoded raster with drag-to-pan, zoom around the pointer and a metadata card |
+| Hex Inspector | Center | `Binary` | Hex rows plus a spatial byte map of the whole file, kept in sync |
 
 ---
 
@@ -508,6 +604,33 @@ never stops Sue from booting.
   byte for byte, comments and spacing included. For a changed key it splices
   only the new value into the original value span. Defaults registered at runtime
   are inserted at the end of their section, or in a new section.
+
+**In the live shell.** The Settings applet renders every parameter of the live
+rice with the `Ui` toolkit:
+
+| Parameter | Control |
+| --- | --- |
+| `Bool` | Toggle |
+| `IntRange` / `FloatRange` | Draggable slider with its value (a number field when unbounded) |
+| `ColorHex` | Swatch plus hex field |
+| `EnumChoice` | List of choices (for example the hardware profile selector) |
+| `Keybind` | "Press a chord…" recorder |
+| `ShaderPath` / `Text` | Text field |
+
+Text fields commit on `Enter` and cancel on `Escape`. A slider drag previews
+live: it sets the schema directly, so the whole UI follows the value as you
+drag. On release the preview is reverted and one `RiceEdit(SetRiceValue)` is
+recorded, so a whole drag is one undo step. After any change (an edit, a
+preview, an undo or a redo) the runtime re-reads `WmConfig`, the
+`HardwareProfile`, the `Theme` and the UI font. Once no drag is in progress, it
+writes the rice back with `write_atomic` (write a temporary file, sync it to
+disk, rename it over the old one) to `<config>/rice/default.suerice`. On first
+launch that file is seeded with a byte-for-byte copy of the shipped default. A
+test edits a value, persists it, checks that exactly one line changed, undoes
+the edit, and checks that the file is identical to the original again.
+
+The file is read once, at boot, and is not watched yet. An edit made in a text
+editor while Sue runs is overwritten by the next change made in Settings.
 
 ### 4.4 Registration (LAW 3)
 
@@ -658,16 +781,25 @@ separators are measured against, and it exercises the full zero-copy path.
 | §1.3 Seven typed components | **Implemented** | `sue-core/src/component.rs` |
 | §1.4 Projections, mask, pointer stability | **Implemented** | `sue-core/src/projection.rs`, `arena.rs` |
 | §1.5 Delta-tree undo, `checkout` | **Implemented** | `sue-core/src/undo.rs`, `txn.rs` |
+| §1.5 One global history for arena and rice edits | **Implemented** (`UndoStack<World>`) | `sue-wm/src/world.rs` |
 | §2.1 Three-tier sniffer | **Implemented** | `sue-io/src/sniff.rs` |
 | §2.2 JXL probe (boxes + `SizeHeader`) | **Implemented** | `sue-io/src/jxl.rs` |
-| §2.2 JXL pixel decode / encode / JPEG transcode | Trait defined; returns `CodecUnavailable` until a codec package exists | `sue-io/src/jxl.rs` |
+| §2.2 JXL pixel decode and JPEG reconstruction | **Implemented** with `jxl-oxide` (no CMYK yet; the DC preview and pass targets come from a full decode until a streaming decoder lands) | `sue-io/src/jxl.rs` |
+| §2.2 Lossless JXL encode | **Implemented** with `zune-jpegxl` (one `Gray8`, `Rgba8` or `RgbaF32` layer; multi-layer planned) | `sue-io/src/jxl.rs` |
+| §2.2 Lossless JPEG → JXL recompression | Planned; returns `CodecUnavailable` | `sue-io/src/jxl.rs` |
+| §2.2 Drag-and-drop ingest (sniff → raster, text or bytes entity) | **Implemented** (spawning the entity is not yet an undoable transaction) | `sue-io/src/ingest.rs`, `bins/sue/src/drop_zone.rs` |
 | §2.3 Tile cache, byte map | **Implemented** | `sue-io/src/tile_cache.rs`, `bytemap.rs` |
-| §3.1 `PlatformHost`, paths, `HeadlessHost` | **Implemented** (native windowed hosts planned) | `sue-platform` |
+| §3.1 `PlatformHost`, paths, `HeadlessHost` | **Implemented** | `sue-platform` |
+| §3.1 Native desktop host (`winit` window, `wgpu` surface, input, file drops, 0 FPS idle) | **Implemented** (one window; tested on Windows) | `sue-platform/src/desktop.rs`, `gpu.rs` |
+| §3.1 Native mobile hosts (Android, iOS) | Planned (the mobile topologies already run on `HeadlessHost`) | — |
 | §3.2–3.4 Topologies, layout, springs, scheduler | **Implemented** | `sue-wm` |
-| §3.4 GPU renderer backends | Planned | — |
+| §3.4 GPU renderer (rounded boxes, borders, clipping, images, text) | **Implemented** with one instanced `wgpu` pipeline and a `fontdue` glyph atlas | `sue-wm/src/gpu.rs`, `ui.wgsl`, `text.rs` |
+| §3.4 Multi-pass shader effects (`shaders.*` in the rice) | Planned; the paths are parsed and editable but not rendered | — |
 | §3.5 Real-time audio thread | Specified; planned with the DAW | — |
-| §3.6 Applets, Launchpad, pin-to-boot, workspace | **Implemented** (reference applet: Quick Notes) | `sue-wm`, `bins/sue/src/quick_notes.rs` |
+| §3.6 Applets, Launchpad, pin-to-boot, workspace, shell | **Implemented** (six built-in applets, see §3.6) | `sue-wm`, `bins/sue/src` |
+| §3.6 Timeline applet | Planned; the layout reserves the zone, but no built-in applet uses it yet | — |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |
+| §4.3 Live Settings GUI, undoable edits, atomic persistence | **Implemented** (the file is read at boot; watching it for outside edits is planned) | `bins/sue/src/settings.rs`, `runtime.rs` |
 | §5 Hashes, Ed25519, resolver, generations, atomic pointer | **Implemented** | `sue-pkg` |
 | §5 Package download, binary deltas, WASM plugin loading | Planned | — |
 | §6 Formats, backends, registry, zero-copy tasks | **Implemented** (reference kernel on `CpuSimd`) | `sue-ai` |

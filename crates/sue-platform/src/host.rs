@@ -17,6 +17,14 @@ pub enum PlatformError {
     InvalidSurface(&'static str),
     /// No surface has this id.
     UnknownSurface(SurfaceId),
+    /// The host cannot do this.
+    Unsupported(&'static str),
+    /// No usable GPU adapter, device or surface.
+    Gpu(String),
+    /// The windowing system failed.
+    Window(String),
+    /// The application failed to start.
+    App(String),
 }
 
 impl fmt::Display for PlatformError {
@@ -26,6 +34,10 @@ impl fmt::Display for PlatformError {
             Self::MissingSandbox => f.write_str("mobile hosts need the app sandbox directory"),
             Self::InvalidSurface(reason) => write!(f, "invalid surface: {reason}"),
             Self::UnknownSurface(id) => write!(f, "unknown surface {}", id.0),
+            Self::Unsupported(what) => write!(f, "unsupported: {what}"),
+            Self::Gpu(reason) => write!(f, "GPU: {reason}"),
+            Self::Window(reason) => write!(f, "window: {reason}"),
+            Self::App(reason) => write!(f, "application: {reason}"),
         }
     }
 }

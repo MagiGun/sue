@@ -4,8 +4,8 @@ use sue_rice::{Keybind, RiceDeclaration, RiceError, RiceParameter, RiceSchema};
 
 use crate::{LayoutMetrics, SpringParams, WmError};
 
-/// Every parameter the window manager reads, with its default. The shipped
-/// `default.suerice` must match these exactly (tested below).
+/// Every parameter the window manager and its renderer read, with defaults.
+/// The shipped `default.suerice` must match these exactly (tested below).
 #[must_use]
 pub fn rice_declarations() -> Vec<RiceDeclaration> {
     let int = |value, min, max| RiceParameter::IntRange {
@@ -23,6 +23,15 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
             .parse()
             .unwrap_or_else(|error| panic!("built-in keybind {text}: {error}")),
     };
+    let color = |hex: &str| RiceParameter::ColorHex {
+        value: hex
+            .parse()
+            .unwrap_or_else(|error| panic!("built-in color {hex}: {error}")),
+    };
+    let choice = |value: &str, options: &[&str]| RiceParameter::EnumChoice {
+        value: value.to_owned(),
+        options: options.iter().map(|&option| option.to_owned()).collect(),
+    };
     let profiles = [
         "auto",
         "high-refresh",
@@ -30,89 +39,157 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
         "legacy-low-spec",
         "mobile-battery-saver",
     ];
+    let declare = RiceDeclaration::new;
     vec![
-        RiceDeclaration::new(
+        declare(
             "profile.hardware",
-            RiceParameter::EnumChoice {
-                value: "auto".to_owned(),
-                options: profiles.map(str::to_owned).into(),
-            },
+            choice("auto", &profiles),
             "Frame pacing and shader budget",
         ),
-        RiceDeclaration::new(
+        declare(
             "launchpad.boot_into",
             RiceParameter::Text {
                 value: "hub".to_owned(),
             },
             "Applet id to open at launch, or \"hub\" for the Launchpad",
         ),
-        RiceDeclaration::new(
+        declare(
+            "launchpad.card_width",
+            int(240, 160, 480),
+            "Width of Launchpad cards (px)",
+        ),
+        declare(
             "layout.gap",
             int(8, 0, 64),
             "Space between tiled panes (px)",
         ),
-        RiceDeclaration::new(
+        declare(
+            "layout.border_width",
+            int(1, 0, 16),
+            "Pane border thickness (px)",
+        ),
+        declare(
+            "layout.corner_radius",
+            float(8.0, 0.0, 24.0),
+            "Pane corner rounding (px)",
+        ),
+        declare(
+            "layout.top_bar_height",
+            int(40, 28, 96),
+            "Height of the top bar (px)",
+        ),
+        declare(
             "layout.left_dock_width",
-            int(280, 160, 640),
+            int(300, 160, 640),
             "Left dock width (px)",
         ),
-        RiceDeclaration::new(
+        declare(
             "layout.right_dock_width",
             int(340, 160, 720),
             "Right dock width (px)",
         ),
-        RiceDeclaration::new(
+        declare(
             "layout.timeline_height",
             int(220, 96, 600),
             "Bottom timeline height (px)",
         ),
-        RiceDeclaration::new(
+        declare(
             "layout.min_center_width",
             int(480, 240, 1600),
             "Narrowest Center Stage before docks float (px)",
         ),
-        RiceDeclaration::new(
+        declare(
             "layout.drawer_max_fraction",
             float(0.85, 0.5, 1.0),
             "Widest a phone drawer may be, as a share of the screen",
         ),
-        RiceDeclaration::new(
+        declare(
             "layout.sheet_max_fraction",
             float(0.4, 0.2, 0.9),
             "Tallest the phone timeline sheet may peek, as a share of the screen",
         ),
-        RiceDeclaration::new(
-            "motion.animations",
-            RiceParameter::Bool { value: true },
-            "Spring animations (always off on legacy-low-spec)",
+        declare(
+            "motion.instant_transitions",
+            RiceParameter::Bool { value: false },
+            "Snap panels in 0 ms instead of animating them",
         ),
-        RiceDeclaration::new(
+        declare(
             "motion.spring_stiffness",
             float(170.0, 10.0, 1000.0),
             "Spring constant k",
         ),
-        RiceDeclaration::new(
+        declare(
             "motion.spring_damping",
             float(26.0, 0.0, 120.0),
             "Damping coefficient c",
         ),
-        RiceDeclaration::new(
+        declare(
+            "colors.background",
+            color("#14111a"),
+            "Workspace background",
+        ),
+        declare("colors.surface", color("#1f1a26"), "Pane surface"),
+        declare(
+            "colors.raised",
+            color("#2a2333"),
+            "Cards, fields and buttons",
+        ),
+        declare("colors.hover", color("#382e44"), "Hovered controls"),
+        declare(
+            "colors.accent",
+            color("#c9a227"),
+            "Focus ring and highlights",
+        ),
+        declare(
+            "colors.on_accent",
+            color("#14111a"),
+            "Text on accent surfaces",
+        ),
+        declare(
+            "colors.alert",
+            color("#a4243b"),
+            "Errors and destructive actions",
+        ),
+        declare("colors.text", color("#e6dfd3"), "Primary text"),
+        declare(
+            "colors.muted",
+            color("#8f8599"),
+            "Secondary text and outlines",
+        ),
+        declare(
+            "typography.ui_font",
+            choice("Ubuntu Light", &["Ubuntu Light", "Hack"]),
+            "UI font (bundled)",
+        ),
+        declare("typography.ui_size", int(14, 8, 32), "UI font size (px)"),
+        declare(
+            "typography.mono_size",
+            int(13, 8, 32),
+            "Code and hex font size (px)",
+        ),
+        declare(
+            "input.wheel_line_px",
+            int(48, 8, 200),
+            "Pixels scrolled per mouse-wheel notch",
+        ),
+        declare(
             "keys.toggle_left_dock",
             chord("Super+B"),
             "Show or hide the left dock",
         ),
-        RiceDeclaration::new(
+        declare(
             "keys.toggle_right_dock",
             chord("Super+N"),
             "Show or hide the right dock",
         ),
-        RiceDeclaration::new(
+        declare(
             "keys.new_tab",
             chord("Ctrl+T"),
             "Open a new tab on the Launchpad",
         ),
-        RiceDeclaration::new("keys.undo", chord("Ctrl+Z"), "Undo the last change"),
-        RiceDeclaration::new("keys.redo", chord("Ctrl+Shift+Z"), "Redo"),
+        declare("keys.undo", chord("Ctrl+Z"), "Undo the last change"),
+        declare("keys.redo", chord("Ctrl+Shift+Z"), "Redo"),
+        declare("keys.redo_alt", chord("Ctrl+Y"), "Redo (alternative)"),
     ]
 }
 
@@ -138,6 +215,8 @@ pub struct Keymap {
     pub undo: Keybind,
     /// Redo.
     pub redo: Keybind,
+    /// Redo, second binding.
+    pub redo_alt: Keybind,
 }
 
 /// Window manager settings, read from rice.
@@ -147,14 +226,16 @@ pub struct WmConfig {
     pub metrics: LayoutMetrics,
     /// Spring constants for panel motion.
     pub spring: SpringParams,
-    /// `false` turns every spring into an instant snap.
-    pub animations: bool,
+    /// `true` turns every spring into an instant snap.
+    pub instant_transitions: bool,
     /// Global shortcuts.
     pub keymap: Keymap,
     /// `profile.hardware`: `"auto"` or a profile name.
     pub hardware_profile: String,
     /// `launchpad.boot_into`: an applet id, or `"hub"`.
     pub boot_into: String,
+    /// Pixels scrolled per wheel notch.
+    pub wheel_line_px: f32,
 }
 
 impl WmConfig {
@@ -192,18 +273,20 @@ impl WmConfig {
                 damping: number("motion.spring_damping")?,
                 mass: 1.0,
             },
-            animations: schema
-                .get_bool("motion.animations")
-                .ok_or(WmError::MissingRice("motion.animations"))?,
+            instant_transitions: schema
+                .get_bool("motion.instant_transitions")
+                .ok_or(WmError::MissingRice("motion.instant_transitions"))?,
             keymap: Keymap {
                 toggle_left_dock: keybind("keys.toggle_left_dock")?,
                 toggle_right_dock: keybind("keys.toggle_right_dock")?,
                 new_tab: keybind("keys.new_tab")?,
                 undo: keybind("keys.undo")?,
                 redo: keybind("keys.redo")?,
+                redo_alt: keybind("keys.redo_alt")?,
             },
             hardware_profile: text("profile.hardware")?,
             boot_into: text("launchpad.boot_into")?,
+            wheel_line_px: number("input.wheel_line_px")?,
         })
     }
 }
@@ -241,7 +324,9 @@ mod tests {
         assert_eq!(config.metrics.gap, 8.0);
         assert_eq!(config.spring.stiffness, 170.0);
         assert_eq!(config.keymap.redo.to_string(), "Ctrl+Shift+Z");
+        assert_eq!(config.keymap.redo_alt.to_string(), "Ctrl+Y");
         assert_eq!(config.boot_into, "hub");
+        assert!(!config.instant_transitions);
         assert!(matches!(
             WmConfig::from_rice(&RiceSchema::new()),
             Err(WmError::MissingRice(_))

@@ -58,6 +58,8 @@ pub enum MouseEvent {
         /// Vertical scroll in logical pixels.
         delta_y: f32,
     },
+    /// The pointer left the window.
+    Left,
 }
 
 /// Keyboard modifier state.
@@ -360,6 +362,37 @@ pub enum InputEvent {
     TouchGesture(TouchGesture),
     /// Pressure-sensitive stylus.
     StylusPressure(StylusSample),
+    /// The window changed.
+    Window(WindowEvent),
+    /// A file is being dragged onto, or was dropped on, the window.
+    FileDrop(FileDrop),
+}
+
+/// Changes to the window itself.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum WindowEvent {
+    /// The drawable area changed size or pixel density.
+    Resized {
+        /// Width in logical pixels.
+        width: f32,
+        /// Height in logical pixels.
+        height: f32,
+        /// Physical pixels per logical pixel.
+        scale_factor: f32,
+    },
+    /// The window gained (`true`) or lost keyboard focus.
+    Focused(bool),
+}
+
+/// A file dragged from the operating system.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FileDrop {
+    /// A file hovers over the window.
+    Hovered(std::path::PathBuf),
+    /// The drag left the window without dropping.
+    Cancelled,
+    /// A file was dropped on the window.
+    Dropped(std::path::PathBuf),
 }
 
 #[cfg(test)]

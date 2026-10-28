@@ -33,10 +33,10 @@ pub enum SpringMode {
 
 impl SpringMode {
     /// `InstantSnap` when the profile forbids spring physics (`LegacyLowSpec`)
-    /// or the user turned animations off; `Physics` otherwise.
+    /// or the user enabled `motion.instant_transitions`; `Physics` otherwise.
     #[must_use]
-    pub fn for_profile(profile: HardwareProfile, animations_enabled: bool) -> Self {
-        if animations_enabled && profile.budget().spring_physics {
+    pub fn for_profile(profile: HardwareProfile, instant_transitions: bool) -> Self {
+        if !instant_transitions && profile.budget().spring_physics {
             Self::Physics
         } else {
             Self::InstantSnap
@@ -210,15 +210,16 @@ mod tests {
     #[test]
     fn instant_snap_bypasses_physics() {
         assert_eq!(
-            SpringMode::for_profile(HardwareProfile::LegacyLowSpec, true),
+            SpringMode::for_profile(HardwareProfile::LegacyLowSpec, false),
             SpringMode::InstantSnap
         );
         assert_eq!(
-            SpringMode::for_profile(HardwareProfile::Balanced, false),
-            SpringMode::InstantSnap
+            SpringMode::for_profile(HardwareProfile::Balanced, true),
+            SpringMode::InstantSnap,
+            "instant_transitions snaps on any profile"
         );
         assert_eq!(
-            SpringMode::for_profile(HardwareProfile::HighRefresh, true),
+            SpringMode::for_profile(HardwareProfile::HighRefresh, false),
             SpringMode::Physics
         );
         let mut spring = SpringDamper::new(PARAMS, SpringMode::InstantSnap, 0.0);

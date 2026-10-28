@@ -245,8 +245,8 @@ mod tests {
             Control::ColorPicker { .. }
         ));
         assert!(matches!(
-            tree.widget("motion.animations").unwrap().control,
-            Control::Toggle { on: true }
+            tree.widget("motion.instant_transitions").unwrap().control,
+            Control::Toggle { on: false }
         ));
         assert!(matches!(
             &tree.widget("profile.hardware").unwrap().control,
@@ -263,7 +263,7 @@ mod tests {
             Control::ShaderPicker { .. }
         ));
         assert!(matches!(
-            tree.widget("typography.ui_font").unwrap().control,
+            tree.widget("launchpad.boot_into").unwrap().control,
             Control::TextField { .. }
         ));
     }

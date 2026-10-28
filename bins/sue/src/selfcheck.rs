@@ -1,5 +1,5 @@
-//! The boot self-check: exercises every subsystem through the shared engine
-//! state, proving they work and that they talk to each other.
+//! The headless self-check: exercises every subsystem through the shared
+//! engine state, proving they work and that they talk to each other.
 
 use std::f32::consts::TAU;
 use std::fmt;
@@ -8,26 +8,30 @@ use sue_ai::{
     AiTask, ComputeBackend, GgufHeader, LocalModelRegistry, MidSideStemSplit, ZeroCopyTensorTask,
 };
 use sue_core::txn::{AttachProjection, InsertText};
-use sue_core::{ComponentKind, PCMFloat1D, Projection, StringBuffer, TimeSpan};
+use sue_core::{Arena, ComponentKind, PCMFloat1D, Projection, StringBuffer, TimeSpan, UndoStack};
 use sue_io::{
-    ContainerOnlyPipeline, IngestRoute, JXL_CONTAINER_SIGNATURE, JxlError, JxlPipeline,
-    NativeFormat, StructuredFormat, TileCache, TileKey, byte_map_tile, sniff_stream,
+    IngestOptions, IngestRoute, IngestView, JxlPipeline, NativeFormat, NativeJxlPipeline,
+    ProgressiveTarget, StructuredFormat, TileCache, TileKey, ingest_bytes, sniff_stream,
 };
 use sue_pkg::{
     AtomicUpdater, Dependency, PackageIndex, PackageKind, PackageManifest, SignedManifest,
     SigningKey, TrustStore, UpdateOutcome, Version, resolve,
 };
 use sue_platform::{
-    FormFactor, InputEvent, Key, KeyEvent, Modifiers, NamedKey, PlatformHost, SafeAreaInsets,
-    SurfaceDescriptor,
+    FileDrop, FormFactor, GpuContext, HeadlessHost, InputEvent, Key, KeyEvent, Modifiers, NamedKey,
+    PlatformHost, SafeAreaInsets, SurfaceDescriptor,
 };
 use sue_rice::{
     DEFAULT_RICE, HardwareProfile, Keybind, RiceSchema, RiceValue, SetRiceValue, SettingsTree,
 };
-use sue_wm::{AppletContext, AppletId, Placement, Rect, RenderDemand, WmConfig, Workspace};
+use sue_wm::{
+    AppletContext, Canvas, Focus, Fonts, FrameTarget, Placement, Rect, RenderDemand, RiceEdit,
+    ShellFrame, Tab, Theme, Ui, UiInput, UiState, WmConfig, Workspace, draw_shell,
+    render_offscreen,
+};
 
 use crate::engine::Engine;
-use crate::quick_notes;
+use crate::{image_viewer, quick_notes, snapshot};
 
 /// Seed of the throwaway publisher key used to sign the self-check's sample
 /// packages. It is trusted only by the self-check's own `TrustStore`.
@@ -41,6 +45,14 @@ type SamplePackage = (
     &'static [u8],
     &'static [(&'static str, &'static str)],
 );
+
+/// What the checks run against.
+pub struct Subject {
+    /// The headless platform host.
+    pub host: HeadlessHost,
+    /// The booted engine.
+    pub engine: Engine,
+}
 
 /// The outcome of one subsystem check.
 pub struct Check {
@@ -82,10 +94,10 @@ impl fmt::Display for Report {
     }
 }
 
-type CheckFn = fn(&mut Engine) -> Result<String, String>;
+type CheckFn = fn(&mut Subject) -> Result<String, String>;
 
-/// Runs every check against `engine`, in dependency order.
-pub fn run(engine: &mut Engine) -> Report {
+/// Runs every check against `subject`, in dependency order.
+pub fn run(subject: &mut Subject) -> Report {
     let checks: [(&'static str, CheckFn); 7] = [
         ("platform", check_platform),
         ("rice", check_rice),
@@ -100,7 +112,7 @@ pub fn run(engine: &mut Engine) -> Report {
             .into_iter()
             .map(|(name, check)| Check {
                 name,
-                outcome: check(engine),
+                outcome: check(subject),
             })
             .collect(),
     }
@@ -123,8 +135,8 @@ fn count(n: usize, singular: &str, plural: &str) -> String {
     format!("{n} {}", if n == 1 { singular } else { plural })
 }
 
-fn check_platform(engine: &mut Engine) -> Result<String, String> {
-    let host = &mut engine.host;
+fn check_platform(subject: &mut Subject) -> Result<String, String> {
+    let host = &mut subject.host;
     let surface = host
         .create_surface(&SurfaceDescriptor {
             title: format!("Sue {}", sue_core::SUE_VERSION),
@@ -152,35 +164,44 @@ fn check_platform(engine: &mut Engine) -> Result<String, String> {
     ))
 }
 
-fn check_rice(engine: &mut Engine) -> Result<String, String> {
-    let schema = &mut engine.rice;
-    let tree = SettingsTree::build(schema);
+fn check_rice(subject: &mut Subject) -> Result<String, String> {
+    let engine = &mut subject.engine;
+    let tree = SettingsTree::build(&engine.world.rice);
     ensure(
-        tree.widget_count() == schema.len(),
+        tree.widget_count() == engine.world.rice.len(),
         "a parameter has no Settings widget",
     )?;
-    let gap = schema
+    let gap = engine
+        .world
+        .rice
         .get_i64("layout.gap")
         .ok_or("layout.gap is missing")?;
     let edited = (gap + 4).min(64);
 
     engine
-        .rice_history
+        .history
         .apply(
-            schema,
-            SetRiceValue::new("layout.gap", RiceValue::Int(edited)),
+            &mut engine.world,
+            RiceEdit(SetRiceValue::new("layout.gap", RiceValue::Int(edited))),
         )
         .map_err(text)?;
-    ensure(tree.is_stale(schema), "the Settings tree missed the edit")?;
-    let written = schema.to_suerice();
+    ensure(
+        tree.is_stale(&engine.world.rice),
+        "the Settings tree missed the edit",
+    )?;
+    let written = engine.world.rice.to_suerice();
     let reparsed = RiceSchema::parse(&written).map_err(text)?;
     ensure(
         reparsed.get_i64("layout.gap") == Some(edited),
         "the edit was not written back",
     )?;
-    engine.rice_history.undo(schema).map_err(text)?;
     ensure(
-        schema.get_i64("layout.gap") == Some(gap),
+        Theme::from_rice(&engine.world.rice).gap == edited as f32,
+        "the live theme did not follow the edit",
+    )?;
+    engine.history.undo(&mut engine.world).map_err(text)?;
+    ensure(
+        engine.world.rice.get_i64("layout.gap") == Some(gap),
         "undo did not restore the gap",
     )?;
     ensure(
@@ -190,22 +211,23 @@ fn check_rice(engine: &mut Engine) -> Result<String, String> {
     )?;
 
     Ok(format!(
-        "{} params → {} widgets in {} sections · gap {gap}→{edited}→{gap} via undo · {} · profile {}",
-        schema.len(),
+        "{} params → {} widgets in {} sections · gap {gap}→{edited}→{gap} via global undo · {} · profile {}",
+        engine.world.rice.len(),
         tree.widget_count(),
         tree.sections.len(),
         engine.rice_source,
-        engine.profile
+        engine.workspace.profile()
     ))
 }
 
-fn check_arena(engine: &mut Engine) -> Result<String, String> {
-    let (arena, history) = (&mut engine.arena, &mut engine.history);
+fn check_arena(subject: &mut Subject) -> Result<String, String> {
+    let arena = &mut subject.engine.world.arena;
+    let mut history: UndoStack<Arena> = UndoStack::new();
     let doc = arena.spawn(
         "Faustian Enigma.md",
         StringBuffer::from("# Faustian Enigma\n"),
     );
-    let length = |arena: &sue_core::Arena| -> Result<usize, String> {
+    let length = |arena: &Arena| -> Result<usize, String> {
         Ok(arena
             .get(doc)
             .map_err(text)?
@@ -218,7 +240,7 @@ fn check_arena(engine: &mut Engine) -> Result<String, String> {
     history
         .apply(arena, InsertText::new(doc, end, "A jack of all trades.\n"))
         .map_err(text)?;
-    let buffer_address = |arena: &sue_core::Arena| {
+    let buffer_address = |arena: &Arena| {
         arena
             .get(doc)
             .ok()
@@ -269,38 +291,21 @@ fn check_arena(engine: &mut Engine) -> Result<String, String> {
     ))
 }
 
-/// A minimal JPEG XL container: signature, `ftyp`, an 8×8 codestream and a
-/// JPEG reconstruction box.
-fn sample_jxl() -> Vec<u8> {
-    let boxed = |kind: &[u8; 4], payload: &[u8]| {
-        let size = u32::try_from(payload.len() + 8).unwrap_or(u32::MAX);
-        [&size.to_be_bytes()[..], kind, payload].concat()
-    };
-    [
-        JXL_CONTAINER_SIGNATURE.to_vec(),
-        boxed(b"ftyp", b"jxl \0\0\0\0jxl "),
-        boxed(b"jxlc", &[0xFF, 0x0A, 0x41, 0x00]),
-        boxed(b"jbrd", &[0; 8]),
-    ]
-    .concat()
-}
+fn check_sniffer(subject: &mut Subject) -> Result<String, String> {
+    let pipeline = NativeJxlPipeline;
+    let card = snapshot::test_card();
+    let jxl = pipeline.encode_layers(&[&card], 3).map_err(text)?;
+    let decoded = pipeline
+        .decode(&jxl, ProgressiveTarget::Full)
+        .map_err(text)?;
+    ensure(
+        decoded.tile == card,
+        "lossless JPEG XL round trip changed pixels",
+    )?;
+    let preview = pipeline
+        .decode(&jxl, ProgressiveTarget::DcPreview)
+        .map_err(text)?;
 
-/// Deterministic high-entropy bytes (xorshift64).
-fn noise(len: usize) -> Vec<u8> {
-    let mut state = 0x2545_F491_4F6C_DD1D_u64;
-    (0..len)
-        .map(|_| {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state.to_le_bytes()[7]
-        })
-        .collect()
-}
-
-fn check_sniffer(engine: &mut Engine) -> Result<String, String> {
-    let jxl = sample_jxl();
-    let noise = noise(4096);
     let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".as_slice();
     let json = br#"{"motto": "jack of all trades"}"#.as_slice();
     let routes = [
@@ -308,10 +313,9 @@ fn check_sniffer(engine: &mut Engine) -> Result<String, String> {
         ("png", sniff_stream(png)),
         ("rice", sniff_stream(DEFAULT_RICE.as_bytes())),
         ("json", sniff_stream(json)),
-        ("noise", sniff_stream(&noise)),
     ];
     ensure(
-        routes[0].1 == IngestRoute::Native(NativeFormat::JpegXl { container: true }),
+        routes[0].1 == IngestRoute::Native(NativeFormat::JpegXl { container: false }),
         "JXL misrouted",
     )?;
     ensure(
@@ -326,40 +330,29 @@ fn check_sniffer(engine: &mut Engine) -> Result<String, String> {
         routes[3].1 == IngestRoute::Structured(StructuredFormat::Json),
         "JSON misrouted",
     )?;
-    let IngestRoute::ByteMap(hint) = routes[4].1 else {
-        return Err("noise was not sent to the byte map".to_owned());
-    };
     let summary: Vec<String> = routes
         .iter()
         .map(|(label, route)| format!("{label}→T{}", route.tier() as u8))
         .collect();
 
-    let pipeline = ContainerOnlyPipeline;
-    let probe = pipeline.probe(&jxl).map_err(text)?;
+    let arena = &mut subject.engine.world.arena;
+    let options = IngestOptions { byte_map_width: 64 };
+    let image = ingest_bytes(arena, "card.jxl", jxl.clone(), &pipeline, options).map_err(text)?;
     ensure(
-        probe.width == Some(8) && probe.height == Some(8),
-        "JXL size header misread",
+        image.view == IngestView::Raster,
+        "JXL did not ingest as a raster",
     )?;
-    ensure(probe.has_jpeg_reconstruction, "jbrd box not found")?;
+    let bytes = ingest_bytes(
+        arena,
+        "noise.bin",
+        b"\x7fELF\x02\x01\x01\0".repeat(64),
+        &pipeline,
+        options,
+    )
+    .map_err(text)?;
     ensure(
-        matches!(
-            pipeline.reconstruct_jpeg(&jxl),
-            Err(JxlError::CodecUnavailable { .. })
-        ),
-        "the container-only pipeline claimed to decode",
-    )?;
-
-    let width = engine
-        .rice
-        .get_i64("io.byte_map_width")
-        .and_then(|width| u32::try_from(width).ok())
-        .ok_or("io.byte_map_width is missing")?;
-    let tile = byte_map_tile(noise, width).map_err(text)?;
-    let (columns, rows) = (tile.width(), tile.height());
-    let handle = engine.arena.spawn("noise.bin", tile);
-    ensure(
-        engine.arena.get(handle).map_err(text)?.base_kind() == ComponentKind::RasterTile2D,
-        "byte map is not a raster",
+        bytes.view == IngestView::Bytes,
+        "binary did not ingest as a byte map",
     )?;
 
     let mut cache = TileCache::new(1 << 20);
@@ -376,15 +369,19 @@ fn check_sniffer(engine: &mut Engine) -> Result<String, String> {
     )?;
 
     Ok(format!(
-        "{} ({:.2} bits/B) · JXL {}x{} + jbrd, pixels await codec package · byte map {columns}x{rows} → {handle} · tile cache hit",
+        "{} · JXL {}x{} decoded bit-exact ({} B lossless, {}x{} preview) · ingest → raster {} + byte map {} · tile cache hit",
         summary.join(" "),
-        hint.entropy_bits_per_byte,
-        probe.width.unwrap_or(0),
-        probe.height.unwrap_or(0),
+        decoded.info.width,
+        decoded.info.height,
+        jxl.len(),
+        preview.tile.width(),
+        preview.tile.height(),
+        image.handle,
+        bytes.handle,
     ))
 }
 
-fn check_packages(_engine: &mut Engine) -> Result<String, String> {
+fn check_packages(_subject: &mut Subject) -> Result<String, String> {
     let publisher = SigningKey::from_bytes(&SELF_CHECK_SEED);
     let mut trust = TrustStore::new();
     trust
@@ -483,10 +480,9 @@ fn check_packages(_engine: &mut Engine) -> Result<String, String> {
     ))
 }
 
-fn check_ai(engine: &mut Engine) -> Result<String, String> {
-    let os = engine.host.os();
-    let capabilities = engine.host.capabilities().clone();
-    let available = ComputeBackend::detect_available(os, &capabilities);
+fn check_ai(subject: &mut Subject) -> Result<String, String> {
+    let engine = &mut subject.engine;
+    let available = ComputeBackend::detect_available(engine.os, &engine.capabilities);
 
     let mut header = b"GGUF".to_vec();
     header.extend_from_slice(&3_u32.to_le_bytes());
@@ -498,7 +494,7 @@ fn check_ai(engine: &mut Engine) -> Result<String, String> {
     registry
         .register(MidSideStemSplit::descriptor())
         .map_err(text)?;
-    let budget = capabilities.memory_bytes.unwrap_or(u64::MAX);
+    let budget = engine.capabilities.memory_bytes.unwrap_or(u64::MAX);
     let selection = registry
         .select(AiTask::StemSeparation, &available, budget)
         .ok_or("no stem separator fits this device")?;
@@ -514,20 +510,21 @@ fn check_ai(engine: &mut Engine) -> Result<String, String> {
             [phase.sin(), 0.5 * phase.sin() + 0.25 * (3.0 * phase).sin()]
         })
         .collect();
-    let mix = engine.arena.spawn(
+    let arena = &mut engine.world.arena;
+    let mix = arena.spawn(
         "mix.wav",
         PCMFloat1D::new(48_000, 2, samples).map_err(text)?,
     );
-    let stems = engine.arena.spawn(
+    let stems = arena.spawn(
         "stems.wav",
         PCMFloat1D::silence(48_000, 2, frames).map_err(text)?,
     );
     let report = MidSideStemSplit
-        .run(&mut engine.arena, mix, stems, &available)
+        .run(arena, mix, stems, &available)
         .map_err(text)?;
 
     let read = |handle| -> Result<Vec<f32>, String> {
-        let entity = engine.arena.get(handle).map_err(text)?;
+        let entity = arena.get(handle).map_err(text)?;
         let pcm = entity
             .component(ComponentKind::PCMFloat1D)
             .and_then(|data| data.as_pcm());
@@ -570,109 +567,220 @@ fn frames_to_settle(workspace: &mut Workspace, ctx: &mut AppletContext<'_>) -> u
     frames
 }
 
-fn check_window_manager(engine: &mut Engine) -> Result<String, String> {
-    let detected = engine.profile;
-    let keymap = WmConfig::from_rice(&engine.rice).map_err(text)?.keymap;
-    let (workspace, mut ctx) = engine.shell();
-
-    let hub = workspace.launchpad().hub();
-    let (studios, utilities) = (hub.studios.len(), hub.utilities.len());
-    let boot = workspace.launchpad().boot_target();
-
-    let notes = AppletId::new(quick_notes::ID).map_err(text)?;
-    workspace.open_applet(&notes, &mut ctx).map_err(text)?;
-    let typed = "Sue!";
-    for ch in typed.chars() {
-        workspace
-            .dispatch(&InputEvent::Keyboard(KeyEvent::typed(ch)), &mut ctx)
-            .map_err(text)?;
+/// Draws the shell offscreen and checks the top bar's color. `None` without a
+/// GPU adapter.
+fn render_shell(engine: &mut Engine) -> Result<Option<String>, String> {
+    let Ok(gpu) = GpuContext::headless() else {
+        return Ok(None);
+    };
+    let fonts = Fonts::new()?;
+    let theme = Theme::from_rice(&engine.world.rice);
+    let (width, height) = (960, 600);
+    let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
+    let (input, mut state) = (UiInput::default(), UiState::default());
+    let mut canvas = Canvas::new(viewport);
+    {
+        let (workspace, mut ctx) = engine.shell();
+        let mut ui = Ui {
+            canvas: &mut canvas,
+            fonts: &fonts,
+            theme: &theme,
+            input: &input,
+            state: &mut state,
+        };
+        let frame = ShellFrame {
+            viewport,
+            safe_area: SafeAreaInsets::ZERO,
+            form_factor: FormFactor::Desktop,
+            telemetry: "Render: SLEEP (0 FPS) · self-check",
+            sleeping: true,
+        };
+        draw_shell(workspace, &mut ui, &mut ctx, &frame);
     }
-    let backspace = InputEvent::Keyboard(KeyEvent::press(
-        Key::Named(NamedKey::Backspace),
-        Modifiers::NONE,
-    ));
-    workspace.dispatch(&backspace, &mut ctx).map_err(text)?;
-    let note_text = |ctx: &AppletContext<'_>| {
-        ctx.arena
+    let target = FrameTarget {
+        width,
+        height,
+        scale: 1.0,
+    };
+    let pixels = render_offscreen(
+        &gpu.device,
+        &gpu.queue,
+        target,
+        &canvas,
+        &fonts,
+        &engine.world.arena,
+        theme.background,
+    )?;
+    let surface = engine
+        .world
+        .rice
+        .get_color("colors.surface")
+        .ok_or("colors.surface is missing")?;
+    // Row 1 lies inside the top bar and above its buttons.
+    let probe = &pixels[(width as usize + width as usize / 2) * 4..][..3];
+    ensure(
+        probe
             .iter()
-            .find(|(_, entity)| entity.name() == quick_notes::NOTE_NAME)
-            .and_then(|(_, entity)| {
-                entity
-                    .string_buffer()
-                    .map(|buffer| buffer.as_str().to_owned())
-            })
-            .unwrap_or_default()
-    };
-    ensure(note_text(&ctx) == "Sue", "typing or backspace failed")?;
-    workspace
-        .dispatch(&press(keymap.undo), &mut ctx)
-        .map_err(text)?;
-    ensure(
-        note_text(&ctx) == "Sue!",
-        "undo did not restore the deleted character",
+            .zip([surface.r, surface.g, surface.b])
+            .all(|(&got, want)| got.abs_diff(want) <= 2),
+        "the top bar did not render in colors.surface",
     )?;
-    workspace
-        .dispatch(&press(keymap.redo), &mut ctx)
-        .map_err(text)?;
-    ensure(note_text(&ctx) == "Sue", "redo failed")?;
+    Ok(Some(format!(
+        "shell rendered on {} ({} draw commands)",
+        gpu.adapter_label(),
+        canvas.commands().len()
+    )))
+}
 
-    workspace.set_profile(HardwareProfile::Balanced);
-    workspace
-        .dispatch(&press(keymap.toggle_left_dock), &mut ctx)
+fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
+    let engine = &mut subject.engine;
+    let detected = engine.workspace.profile();
+    let keymap = WmConfig::from_rice(&engine.world.rice)
+        .map_err(text)?
+        .keymap;
+    let samples = std::env::temp_dir().join(format!("sue-self-check-{}", std::process::id()));
+    std::fs::create_dir_all(&samples).map_err(text)?;
+    let dropped = samples.join("card.jxl");
+    let card = NativeJxlPipeline
+        .encode_layers(&[&snapshot::test_card()], 1)
         .map_err(text)?;
-    let animated = frames_to_settle(workspace, &mut ctx);
-    workspace.set_profile(HardwareProfile::LegacyLowSpec);
-    workspace
-        .dispatch(&press(keymap.toggle_left_dock), &mut ctx)
-        .map_err(text)?;
-    let snapped = frames_to_settle(workspace, &mut ctx);
-    workspace.set_profile(detected);
-    ensure(
-        animated > snapped && snapped <= 1,
-        "springs or instant snap misbehaved",
-    )?;
-    ensure(workspace.docks_open().0, "left dock should be open again")?;
+    std::fs::write(&dropped, card).map_err(text)?;
 
-    let desktop = workspace.layout(
-        Rect::new(0.0, 0.0, 1280.0, 800.0),
-        SafeAreaInsets::ZERO,
-        FormFactor::Desktop,
-    );
-    let insets = SafeAreaInsets {
-        top: 47.0,
-        right: 0.0,
-        bottom: 34.0,
-        left: 0.0,
-    };
-    let phone = workspace.layout(
-        Rect::new(0.0, 0.0, 390.0, 844.0),
-        insets,
-        FormFactor::Mobile,
-    );
-    ensure(
-        matches!(desktop.left, Placement::Tiled(_)),
-        "desktop left dock should tile",
-    )?;
-    ensure(
-        matches!(phone.left, Placement::Drawer { .. }),
-        "phone left dock should be a drawer",
-    )?;
-    ensure(
-        phone.center == Rect::new(0.0, 47.0, 390.0, 763.0),
-        "phone Center Stage must fill the safe area",
-    )?;
-    ensure(
-        workspace.begin_frame().is_none(),
-        "an idle workspace still renders",
-    )?;
+    let result = (|| -> Result<String, String> {
+        let (workspace, mut ctx) = engine.shell();
+        let hub = workspace.launchpad().hub();
+        let (studios, utilities) = (hub.studios.len(), hub.utilities.len());
+        let boot = workspace.launchpad().boot_target();
+        let docks: Vec<(usize, String)> = workspace
+            .docked()
+            .filter_map(|(index, _, manifest)| Some((index, manifest?.id.to_string())))
+            .collect();
+        let notes = docks
+            .iter()
+            .find(|(_, id)| id == quick_notes::ID)
+            .map(|(index, _)| *index)
+            .ok_or("Quick Notes is not docked")?;
 
-    Ok(format!(
-        "hub: {}, {} · boot {boot:?} · quick-notes typed \"{typed}\" ⌫ undo redo → \"Sue\" · dock {animated} frames (balanced) vs {snapped} (legacy snap) · center {}px desktop / {}px phone · idle → 0 FPS",
-        count(studios, "studio", "studios"),
-        count(utilities, "utility", "utilities"),
-        desktop.center.width,
-        phone.center.width
-    ))
+        workspace.set_focus(Focus::Dock(notes));
+        for ch in "Sue!".chars() {
+            workspace
+                .dispatch(&InputEvent::Keyboard(KeyEvent::typed(ch)), &mut ctx)
+                .map_err(text)?;
+        }
+        let backspace = InputEvent::Keyboard(KeyEvent::press(
+            Key::Named(NamedKey::Backspace),
+            Modifiers::NONE,
+        ));
+        workspace.dispatch(&backspace, &mut ctx).map_err(text)?;
+        let note_text = |ctx: &AppletContext<'_>| {
+            ctx.world
+                .arena
+                .iter()
+                .find(|(_, entity)| entity.name() == quick_notes::NOTE_NAME)
+                .and_then(|(_, entity)| {
+                    entity
+                        .string_buffer()
+                        .map(|buffer| buffer.as_str().to_owned())
+                })
+                .unwrap_or_default()
+        };
+        ensure(note_text(&ctx) == "Sue", "typing or backspace failed")?;
+        workspace
+            .dispatch(&press(keymap.undo), &mut ctx)
+            .map_err(text)?;
+        ensure(
+            note_text(&ctx) == "Sue!",
+            "undo did not restore the deleted character",
+        )?;
+        workspace
+            .dispatch(&press(keymap.redo_alt), &mut ctx)
+            .map_err(text)?;
+        ensure(note_text(&ctx) == "Sue", "Ctrl+Y redo failed")?;
+
+        workspace
+            .dispatch(
+                &InputEvent::FileDrop(FileDrop::Dropped(dropped.clone())),
+                &mut ctx,
+            )
+            .map_err(text)?;
+        let opened = matches!(workspace.active_tab(), Tab::Applet { id, .. } if id.as_str() == image_viewer::ID);
+        ensure(
+            opened,
+            "the dropped JPEG XL did not open in the Image Viewer",
+        )?;
+        let title = workspace.tab_title(workspace.active_index(), ctx.world);
+
+        workspace.set_profile(HardwareProfile::Balanced);
+        workspace
+            .dispatch(&press(keymap.toggle_left_dock), &mut ctx)
+            .map_err(text)?;
+        let animated = frames_to_settle(workspace, &mut ctx);
+        workspace.set_profile(HardwareProfile::LegacyLowSpec);
+        workspace
+            .dispatch(&press(keymap.toggle_left_dock), &mut ctx)
+            .map_err(text)?;
+        let snapped = frames_to_settle(workspace, &mut ctx);
+        workspace.set_profile(detected);
+        // Switching profiles repaints once; then the scene must go idle.
+        frames_to_settle(workspace, &mut ctx);
+        ensure(
+            animated > snapped && snapped <= 1,
+            "springs or instant snap misbehaved",
+        )?;
+        ensure(workspace.docks_open().0, "left dock should be open again")?;
+
+        let desktop = workspace.layout(
+            Rect::new(0.0, 0.0, 1280.0, 800.0),
+            SafeAreaInsets::ZERO,
+            FormFactor::Desktop,
+        );
+        let insets = SafeAreaInsets {
+            top: 47.0,
+            right: 0.0,
+            bottom: 34.0,
+            left: 0.0,
+        };
+        let phone = workspace.layout(
+            Rect::new(0.0, 0.0, 390.0, 844.0),
+            insets,
+            FormFactor::Mobile,
+        );
+        ensure(
+            matches!(desktop.left, Placement::Tiled(_)),
+            "desktop left dock should tile",
+        )?;
+        ensure(
+            matches!(phone.left, Placement::Drawer { .. }),
+            "phone left dock should be a drawer",
+        )?;
+        ensure(
+            phone.center == Rect::new(0.0, 47.0, 390.0, 763.0),
+            "phone Center Stage must fill the safe area",
+        )?;
+        ensure(
+            workspace.begin_frame().is_none(),
+            "an idle workspace still renders",
+        )?;
+        Ok(format!(
+            "hub: {}, {} · docks {} · boot {boot:?} · notes \"Sue!\" ⌫ undo redo → \"Sue\" · drop → {title} · dock {animated} frames (balanced) vs {snapped} (legacy snap) · center {}px desktop / {}px phone · idle → 0 FPS",
+            count(studios, "studio", "studios"),
+            count(utilities, "utility", "utilities"),
+            docks
+                .iter()
+                .map(|(_, id)| id.as_str())
+                .collect::<Vec<_>>()
+                .join("+"),
+            desktop.center.width,
+            phone.center.width
+        ))
+    })();
+    let _ = std::fs::remove_dir_all(&samples);
+    let mut detail = result?;
+    match render_shell(engine)? {
+        Some(rendered) => detail = format!("{detail} · {rendered}"),
+        None => detail = format!("{detail} · GPU render skipped (no adapter)"),
+    }
+    Ok(detail)
 }
 
 #[cfg(test)]
@@ -681,8 +789,10 @@ mod tests {
 
     #[test]
     fn every_subsystem_passes() {
-        let mut engine = Engine::boot().expect("engine boots");
-        let report = run(&mut engine);
+        let host = HeadlessHost::detect().expect("platform paths resolve");
+        let engine = Engine::boot(&host).expect("engine boots");
+        let mut subject = Subject { host, engine };
+        let report = run(&mut subject);
         assert!(report.passed(), "{report}");
         assert_eq!(report.checks.len(), 7);
     }

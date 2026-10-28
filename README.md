@@ -23,40 +23,59 @@ Switching from "Document" to "Video", or from "2D" to "3D", attaches a new
 
 ## Where things stand
 
-v1.0 "Faustian Enigma" is the **foundation release**. It contains the seven
-kernel crates below and a headless executable that boots every subsystem and runs
-a self-check. The windowed shell, the studios, and the codec and AI model backends
-are built on top of this foundation in later releases. `HUMANZ.md` §7 lists, part
-by part, what is implemented today and what is only specified.
+v1.0 "Faustian Enigma" contains the seven kernel crates below and the `sue`
+executable, which opens a **native GPU window**:
+
+- a top bar with the active mode and a live render meter
+  (`Render: SLEEP (0 FPS)` while nothing changes),
+- a Left Dock with Quick Notes and a Drop Zone,
+- a Launchpad of Studio and Utility cards in the center, with pin-to-boot,
+- the live Settings for every `.suerice` parameter in the Right Dock. Every
+  edit applies at once, can be undone with `Ctrl+Z`, and is saved back to the
+  file.
+
+Drop a file on the window and Sue routes it by its content. A JPEG XL image is
+decoded and opens in the Image Viewer, text opens in the Text Studio, and
+anything else opens in the Hex Inspector. The large studios (DAW, video, CAD,
+IDE, game engine) and the AI model runtimes come in later releases. `HUMANZ.md`
+§7 lists, part by part, what is implemented today and what is only specified.
 
 ## Crate map
 
 | Crate | Role | Key types |
 | --- | --- | --- |
 | [`sue-core`](crates/sue-core) | The substrate: arena, entities, projections, undo tree | `Arena`, `AssetHandle`, `ComponentData`, `ProjectionMask`, `ReversibleTransaction`, `UndoStack` |
-| [`sue-platform`](crates/sue-platform) | The only place OS-specific code may live | `PlatformHost`, `HeadlessHost`, `FormFactor`, `InputEvent`, `HardwareCapabilities` |
+| [`sue-platform`](crates/sue-platform) | The only place OS-specific code may live: hosts, native window, GPU device | `PlatformHost`, `HeadlessHost`, `DesktopHost`, `run_desktop`, `GpuContext`, `InputEvent` |
 | [`sue-rice`](crates/sue-rice) | `.suerice` parser, live Settings GUI descriptors, hardware profiles | `RiceSchema`, `RiceParameter`, `SettingsTree`, `HardwareProfile` |
-| [`sue-io`](crates/sue-io) | Magic-byte sniffer, JPEG XL pipeline, tile cache, byte-map fallback | `sniff_stream`, `IngestRoute`, `JxlPipeline`, `TileCache` |
+| [`sue-io`](crates/sue-io) | Magic-byte sniffer, JPEG XL codec, ingest, tile cache, byte-map fallback | `sniff_stream`, `ingest_bytes`, `NativeJxlPipeline`, `TileCache` |
 | [`sue-pkg`](crates/sue-pkg) | Content-addressed packages, Ed25519 trust, resolver, atomic generations | `PackageManifest`, `ContentHash`, `TrustStore`, `PackageIndex`, `resolve`, `AtomicUpdater` |
 | [`sue-ai`](crates/sue-ai) | Offline, zero-copy AI substrate | `LocalModelRegistry`, `ComputeBackend`, `ZeroCopyTensorTask` |
-| [`sue-wm`](crates/sue-wm) | Adaptive tiling/touch window manager | `SueApplet`, `Launchpad`, `Workspace`, `solve_layout`, `SpringDamper`, `FrameScheduler` |
-| [`bins/sue`](bins/sue) | The executable: boot + self-check diagnostics | — |
+| [`sue-wm`](crates/sue-wm) | Adaptive tiling/touch window manager, immediate-mode UI, GPU renderer | `SueApplet`, `Launchpad`, `Workspace`, `World`, `Ui`, `UiRenderer`, `SpringDamper`, `FrameScheduler` |
+| [`bins/sue`](bins/sue) | The executable: desktop shell, built-in applets, self-check, snapshots | — |
 
 ```text
 bins/sue      ──► every crate below
-sue-wm        ──► sue-rice, sue-platform, sue-core
+sue-wm        ──► sue-rice, sue-platform, sue-core   + wgpu, fontdue, epaint_default_fonts
 sue-ai        ──► sue-platform, sue-core
 sue-rice      ──► sue-platform, sue-core
-sue-io        ──► sue-core
-sue-pkg       ──► sha2, ed25519-dalek, semver   (no engine crates)
-sue-core      ──► nothing                        (leaf)
-sue-platform  ──► nothing                        (leaf)
+sue-io        ──► sue-core                            + jxl-oxide, zune-jpegxl
+sue-pkg       ──► sha2, ed25519-dalek, semver         (no engine crates)
+sue-core      ──► nothing                              (leaf)
+sue-platform  ──► winit, wgpu, pollster                (no engine crates)
 ```
 
 ## Quick start
 
 ```bash
 cargo run -p sue
+```
+
+```bash
+cargo run -p sue -- --self-check
+```
+
+```bash
+cargo run -p sue -- --snapshot target/snapshots
 ```
 
 ```bash
@@ -67,10 +86,19 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-`cargo run -p sue` boots Sue v1.0 "Faustian Enigma" in headless mode and prints
-a diagnostics log. The log shows the Arena, the rice introspection, the sniffer,
-the package manager, the AI registry and the window manager working together.
-The process exits non-zero if any check fails.
+`cargo run -p sue` opens the Sue v1.0 "Faustian Enigma" window. It needs a
+graphics driver with Vulkan, DirectX 12, Metal or OpenGL ES. Your settings live
+in `default.suerice` in the `rice` folder of your config directory
+(`%APPDATA%\Sue` on Windows, `~/Library/Application Support/Sue` on macOS,
+`~/.config/sue` on Linux). The first launch creates it as a copy of the shipped
+defaults.
+
+`--self-check` boots every subsystem headlessly and prints a diagnostics log.
+The log shows the Arena, the rice introspection, the sniffer, the package
+manager, the AI registry and the window manager working together. When a GPU is
+available it also renders the shell offscreen. The process exits non-zero if any
+check fails. `--snapshot <dir>` renders four views of the shell (Launchpad,
+Image Viewer, Text Studio, Hex Inspector) into PNG files in `<dir>`.
 
 ## Read next
 

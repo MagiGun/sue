@@ -7,13 +7,15 @@ use crate::{
 };
 
 /// An asset: a base component plus any number of projection components, at
-/// most one per kind.
+/// most one per kind, and free-form string metadata (source path, byte length,
+/// codec details).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entity {
     name: String,
     base: ComponentKind,
     projections: ProjectionMask,
     components: BTreeMap<ComponentKind, ComponentData>,
+    metadata: BTreeMap<String, String>,
 }
 
 impl Entity {
@@ -24,6 +26,7 @@ impl Entity {
             base: kind,
             projections: ProjectionMask::EMPTY.with(Projection::of_kind(kind)),
             components: BTreeMap::from([(kind, base)]),
+            metadata: BTreeMap::new(),
         }
     }
 
@@ -31,6 +34,25 @@ impl Entity {
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// The metadata value for `key`.
+    #[must_use]
+    pub fn meta(&self, key: &str) -> Option<&str> {
+        self.metadata.get(key).map(String::as_str)
+    }
+
+    /// Sets a metadata value, returning the previous one. Metadata describes an
+    /// asset (where it came from, how it was decoded); it is not edit state.
+    pub fn set_meta(&mut self, key: impl Into<String>, value: impl Into<String>) -> Option<String> {
+        self.metadata.insert(key.into(), value.into())
+    }
+
+    /// All metadata, ordered by key.
+    pub fn metadata(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.metadata
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
     }
 
     /// Kind of the base component given at spawn.
@@ -449,6 +471,20 @@ mod tests {
             arena.detach_projection(handle, Projection::Mesh3D),
             Err(CoreError::NotProjected { .. })
         ));
+    }
+
+    #[test]
+    fn entities_carry_metadata() {
+        let mut arena = Arena::new();
+        let handle = arena.spawn("photo.jxl", StringBuffer::new());
+        let entity = arena.get_mut(handle).unwrap();
+        assert_eq!(entity.set_meta("source", "C:/photos/photo.jxl"), None);
+        assert_eq!(entity.set_meta("bytes", "1024"), None);
+        assert_eq!(entity.set_meta("bytes", "2048").as_deref(), Some("1024"));
+        let entity = arena.get(handle).unwrap();
+        assert_eq!(entity.meta("bytes"), Some("2048"));
+        assert_eq!(entity.metadata().count(), 2);
+        assert_eq!(entity.meta("missing"), None);
     }
 
     #[test]

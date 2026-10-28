@@ -212,6 +212,8 @@ pub(crate) mod tests {
                 home_zone: Zone::CenterStage,
                 uses_timeline: self.uses_timeline,
                 summary: String::new(),
+                opens: Vec::new(),
+                accepts_drops: false,
             }
         }
 

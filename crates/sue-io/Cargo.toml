@@ -8,7 +8,10 @@ publish.workspace = true
 repository.workspace = true
 
 [dependencies]
+jxl-oxide.workspace = true
 sue-core.workspace = true
+zune-core.workspace = true
+zune-jpegxl.workspace = true
 
 [lints]
 workspace = true

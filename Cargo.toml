@@ -22,6 +22,17 @@ ed25519-dalek = "3"
 semver = "1"
 sha2 = "0.11"
 
+# Phase 3: native window, GPU, text and JPEG XL.
+epaint_default_fonts = "0.33"
+fontdue = "0.9"
+jxl-oxide = "0.12"
+pollster = "1"
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "dx12", "metal", "gles", "vulkan", "wgsl"] }
+winit = "0.30"
+zune-core = "0.5"
+zune-jpegxl = "0.5"
+bytemuck = "1"
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 rust_2018_idioms = { level = "warn", priority = -1 }

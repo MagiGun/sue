@@ -1,11 +1,16 @@
 [package]
 name = "sue-platform"
-description = "Sue's OS abstraction: platform hosts, form factors, hardware capabilities, paths and unified input."
+description = "Sue's OS abstraction: platform hosts (headless and native winit/wgpu), form factors, hardware capabilities, paths and unified input."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 repository.workspace = true
+
+[dependencies]
+pollster.workspace = true
+wgpu.workspace = true
+winit.workspace = true
 
 [lints]
 workspace = true

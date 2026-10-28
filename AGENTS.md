@@ -82,12 +82,15 @@ Architecture reference: [`HUMANZ.md`](HUMANZ.md). User-facing intent:
      where useful, and
   2. a **ready-to-copy commit message** that the human can review, edit or paste
      into their own terminal.
+- By default, suggested commit messages **MUST NOT** include a
+  `Co-Authored-By:` trailer or any other AI attribution line. Add one only when
+  the human explicitly asks for it.
 
 ---
 
 ## Definition of done
 
-Run these before handing off. All three must pass with **zero warnings**:
+Run these before handing off. All four must pass with **zero warnings**:
 
 ```bash
 cargo fmt --all --check
@@ -101,6 +104,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+```bash
+cargo run -p sue -- --self-check
+```
+
 `unsafe` code is forbidden workspace-wide (`[workspace.lints]`). Only
 `sue-platform` may relax this, for audited FFI, and only with a human's approval.
 
@@ -111,10 +118,11 @@ cargo test --workspace
 - <crate/file>: <what changed and why>
 
 ## Verification
-- cargo fmt / clippy / test: <results>
+- cargo fmt / clippy / test / self-check: <results>
 
 ## Suggested commit message
 <type>(<scope>): <imperative summary, ≤ 72 chars>
 
 <body: what and why, wrapped at 72 columns>
+(no Co-Authored-By trailer unless the human asks for one)
 ```

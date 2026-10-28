@@ -136,6 +136,12 @@ impl FrameScheduler {
         }
     }
 
+    /// `true` while an animation keeps frames coming.
+    #[must_use]
+    pub fn animating(&self) -> bool {
+        self.animating
+    }
+
     /// Frames rendered so far.
     #[must_use]
     pub fn frames_rendered(&self) -> u64 {

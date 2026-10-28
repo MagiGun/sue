@@ -14,12 +14,14 @@ hardware = "auto"          # {auto|high-refresh|balanced|legacy-low-spec|mobile-
 
 [launchpad]
 boot_into = "hub"          # @text Applet id to open at launch, or "hub" for the Launchpad
+card_width = 240           # [160..480] Width of Launchpad cards (px)
 
 [layout]
 gap = 8                    # [0..64] Space between tiled panes (px)
-border_width = 2           # [0..16] Pane border thickness (px)
-corner_radius = 6.0        # [0.0..24.0] Pane corner rounding (px)
-left_dock_width = 280      # [160..640] Left dock width (px)
+border_width = 1           # [0..16] Pane border thickness (px)
+corner_radius = 8.0        # [0.0..24.0] Pane corner rounding (px)
+top_bar_height = 40        # [28..96] Height of the top bar (px)
+left_dock_width = 300      # [160..640] Left dock width (px)
 right_dock_width = 340     # [160..720] Right dock width (px)
 timeline_height = 220      # [96..600] Bottom timeline height (px)
 min_center_width = 480     # [240..1600] Narrowest Center Stage before docks float (px)
@@ -27,20 +29,28 @@ drawer_max_fraction = 0.85 # [0.5..1.0] Widest a phone drawer may be, as a share
 sheet_max_fraction = 0.4   # [0.2..0.9] Tallest the phone timeline sheet may peek, as a share of the screen
 
 [motion]
-animations = true          # Spring animations (always off on legacy-low-spec)
+instant_transitions = false # Snap panels in 0 ms instead of animating them
 spring_stiffness = 170.0   # [10.0..1000.0] Spring constant k
 spring_damping = 26.0      # [0.0..120.0] Damping coefficient c
 
 [colors]
 background = "#14111a"     # Workspace background
 surface = "#1f1a26"        # Pane surface
+raised = "#2a2333"         # Cards, fields and buttons
+hover = "#382e44"          # Hovered controls
 accent = "#c9a227"         # Focus ring and highlights
+on_accent = "#14111a"      # Text on accent surfaces
 alert = "#a4243b"          # Errors and destructive actions
 text = "#e6dfd3"           # Primary text
+muted = "#8f8599"          # Secondary text and outlines
 
 [typography]
-ui_font = "Inter"          # @text UI font family
-ui_size = 14               # [8..32] UI font size (pt)
+ui_font = "Ubuntu Light"   # {Ubuntu Light|Hack} UI font (bundled)
+ui_size = 14               # [8..32] UI font size (px)
+mono_size = 13             # [8..32] Code and hex font size (px)
+
+[input]
+wheel_line_px = 48         # [8..200] Pixels scrolled per mouse-wheel notch
 
 [shaders]
 background = ""            # @shader Optional background shader pass (empty for none)
@@ -48,9 +58,10 @@ blur_passes = 2            # [0..8] Frosted-glass blur passes
 
 [io]
 byte_map_width = 64        # [16..1024] Columns in the hex / byte-map view of unknown files
+max_ingest_mib = 512       # [1..4096] Largest file accepted by drag and drop (MiB)
 
 [quick_notes]
-font_size = 15             # [8..48] Note text size (pt)
+font_size = 15             # [8..48] Note text size (px)
 
 [keys]
 toggle_left_dock = "Super+B"   # Show or hide the left dock
@@ -58,3 +69,4 @@ toggle_right_dock = "Super+N"  # Show or hide the right dock
 new_tab = "Ctrl+T"             # Open a new tab on the Launchpad
 undo = "Ctrl+Z"                # Undo the last change
 redo = "Ctrl+Shift+Z"          # Redo
+redo_alt = "Ctrl+Y"            # Redo (alternative)

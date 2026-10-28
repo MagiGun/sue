@@ -2,11 +2,11 @@
 
 use std::fmt;
 
-use sue_core::{Arena, CoreError, TxnError, UndoStack};
+use sue_core::{Arena, AssetHandle, CoreError, NodeId, ReversibleTransaction, TxnError, UndoStack};
 use sue_platform::{FormFactor, InputEvent};
 use sue_rice::{HardwareProfile, RiceDeclaration, RiceSchema};
 
-use crate::{RenderDemand, WmError, Zone};
+use crate::{ArenaEdit, Rect, RenderDemand, RiceEdit, Ui, WmError, World, Zone};
 
 /// An applet's unique id: `[a-z][a-z0-9-]*`, e.g. `quick-notes`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -54,6 +54,17 @@ pub enum AppletCategory {
     Studio,
 }
 
+/// Broad kinds of assets, used to pick an applet that can open one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MediaClass {
+    /// A decoded raster image.
+    Image,
+    /// UTF-8 text.
+    Text,
+    /// Raw bytes (byte map).
+    Binary,
+}
+
 /// Static facts about an applet.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppletManifest {
@@ -63,33 +74,95 @@ pub struct AppletManifest {
     pub name: String,
     /// Hub category.
     pub category: AppletCategory,
-    /// Zone the applet lives in by default.
+    /// Zone the applet lives in: dock applets are mounted into their dock at
+    /// boot; Center Stage applets open in tabs.
     pub home_zone: Zone,
     /// `true` if the applet works on time-based media, which shows the timeline.
     pub uses_timeline: bool,
     /// One-line description for the Hub.
     pub summary: String,
+    /// Asset kinds the applet can open (see [`SueApplet::open`]).
+    pub opens: Vec<MediaClass>,
+    /// `true` if files dropped on the window are offered to this applet.
+    pub accepts_drops: bool,
+}
+
+/// Something an applet asks the shell to do after the current call.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ShellRequest {
+    /// Open `handle` in the first applet that opens `class`.
+    OpenAsset {
+        /// The entity.
+        handle: AssetHandle,
+        /// What it is.
+        class: MediaClass,
+    },
+    /// Open an applet in the active tab.
+    OpenApplet(AppletId),
 }
 
 /// What an applet may touch while handling a call. Applets hold handles, not
-/// data, and change the arena only through transactions on `history`.
+/// data, and change the world only through transactions on `history`.
 pub struct AppletContext<'a> {
-    /// The shared arena.
-    pub arena: &'a mut Arena,
-    /// The shared undo tree.
-    pub history: &'a mut UndoStack<Arena>,
-    /// The live rice.
-    pub rice: &'a RiceSchema,
+    /// The arena and the live rice.
+    pub world: &'a mut World,
+    /// The global undo tree.
+    pub history: &'a mut UndoStack<World>,
     /// Device form factor.
     pub form_factor: FormFactor,
     /// Active hardware profile.
     pub profile: HardwareProfile,
+    /// Requests for the shell, processed after the call returns.
+    pub requests: &'a mut Vec<ShellRequest>,
+    /// `true` while the applet being called has keyboard focus.
+    pub focused: bool,
+}
+
+impl AppletContext<'_> {
+    /// The arena.
+    #[must_use]
+    pub fn arena(&self) -> &Arena {
+        &self.world.arena
+    }
+
+    /// The live rice.
+    #[must_use]
+    pub fn rice(&self) -> &RiceSchema {
+        &self.world.rice
+    }
+
+    /// Applies an arena transaction through the global undo tree.
+    ///
+    /// # Errors
+    /// The transaction's error; nothing is recorded then.
+    pub fn edit_arena<X>(&mut self, txn: X) -> Result<NodeId, TxnError>
+    where
+        X: ReversibleTransaction<Arena> + 'static,
+    {
+        self.history.apply(self.world, ArenaEdit(txn))
+    }
+
+    /// Applies a rice transaction through the global undo tree.
+    ///
+    /// # Errors
+    /// The transaction's error; nothing is recorded then.
+    pub fn edit_rice<X>(&mut self, txn: X) -> Result<NodeId, TxnError>
+    where
+        X: ReversibleTransaction<RiceSchema> + 'static,
+    {
+        self.history.apply(self.world, RiceEdit(txn))
+    }
+
+    /// Queues a request for the shell.
+    pub fn request(&mut self, request: ShellRequest) {
+        self.requests.push(request);
+    }
 }
 
 impl fmt::Debug for AppletContext<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AppletContext")
-            .field("entities", &self.arena.len())
+            .field("entities", &self.world.arena.len())
             .field("history", &self.history)
             .field("form_factor", &self.form_factor)
             .field("profile", &self.profile)
@@ -155,13 +228,23 @@ pub trait SueApplet: Send {
         Vec::new()
     }
 
-    /// Called when the applet is opened in a tab.
+    /// Called when the applet is mounted in a tab or dock.
     ///
     /// # Errors
     /// Any reason the applet cannot start.
     fn mount(&mut self, ctx: &mut AppletContext<'_>) -> Result<(), AppletError>;
 
-    /// Handles input the window manager did not consume.
+    /// Opens an asset of a [`MediaClass`] the manifest lists in `opens`.
+    ///
+    /// # Errors
+    /// If the applet cannot show this asset.
+    fn open(&mut self, asset: AssetHandle, ctx: &mut AppletContext<'_>) -> Result<(), AppletError> {
+        let _ = (asset, ctx);
+        Err(AppletError::new("this applet does not open assets"))
+    }
+
+    /// Handles input the window manager did not consume: keyboard input while
+    /// the applet has focus, and dropped files for applets that accept drops.
     ///
     /// # Errors
     /// Any failure while handling the event.
@@ -170,6 +253,17 @@ pub trait SueApplet: Send {
         event: &InputEvent,
         ctx: &mut AppletContext<'_>,
     ) -> Result<InputResponse, AppletError>;
+
+    /// Draws the applet into `area` and handles pointer interaction there.
+    fn draw(&mut self, ui: &mut Ui<'_>, area: Rect, ctx: &mut AppletContext<'_>) {
+        let _ = (ui, area, ctx);
+    }
+
+    /// A title for the mode indicator, e.g. `Image Viewer — photo.jxl`.
+    fn title(&self, world: &World) -> Option<String> {
+        let _ = world;
+        None
+    }
 
     /// Advances animations by `dt` seconds. Static applets keep the default,
     /// which never asks for frames.

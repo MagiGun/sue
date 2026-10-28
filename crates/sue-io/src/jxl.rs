@@ -1,9 +1,16 @@
-//! The JPEG XL pipeline: native container and header probing, plus the
-//! codec-facing trait that codec packages implement.
+//! The JPEG XL pipeline: native container and header probing, real pixel
+//! decoding (`jxl-oxide`), JPEG bitstream reconstruction, and lossless
+//! encoding (`zune-jpegxl`).
 
 use std::fmt;
+use std::io::Cursor;
 
-use sue_core::RasterTile2D;
+use jxl_oxide::{JpegReconstructionStatus, JxlImage, PixelFormat as JxlPixelFormat};
+use sue_core::{PixelFormat, PixelStorage, RasterTile2D};
+use zune_core::bit_depth::BitDepth;
+use zune_core::colorspace::ColorSpace;
+use zune_core::options::EncoderOptions;
+use zune_jpegxl::JxlSimpleEncoder;
 
 /// The 12-byte signature box that starts every JPEG XL container.
 pub const JXL_CONTAINER_SIGNATURE: [u8; 12] = [
@@ -12,6 +19,9 @@ pub const JXL_CONTAINER_SIGNATURE: [u8; 12] = [
 
 /// The marker that starts a bare JPEG XL codestream.
 pub const JXL_CODESTREAM_SIGNATURE: [u8; 2] = [0xFF, 0x0A];
+
+/// Scale of a [`ProgressiveTarget::DcPreview`] image relative to the original.
+pub const DC_PREVIEW_SCALE: u32 = 8;
 
 /// An ISO-BMFF box type.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -76,7 +86,11 @@ pub enum JxlError {
         /// What is wrong.
         reason: &'static str,
     },
-    /// The file has no `jbrd` box, so the original JPEG cannot be rebuilt.
+    /// The codestream could not be decoded.
+    Decode(String),
+    /// The image could not be encoded.
+    Encode(String),
+    /// The file has no usable `jbrd` box, so the original JPEG cannot be rebuilt.
     NoJpegReconstruction,
     /// Nothing to encode.
     NoLayers,
@@ -95,6 +109,8 @@ impl fmt::Display for JxlError {
             Self::MalformedBox { offset, reason } => {
                 write!(f, "malformed box at byte {offset}: {reason}")
             }
+            Self::Decode(reason) => write!(f, "JPEG XL decoding failed: {reason}"),
+            Self::Encode(reason) => write!(f, "JPEG XL encoding failed: {reason}"),
             Self::NoJpegReconstruction => f.write_str("no JPEG reconstruction data (jbrd box)"),
             Self::NoLayers => f.write_str("no layers to encode"),
             Self::CodecUnavailable { operation } => write!(
@@ -110,7 +126,7 @@ impl std::error::Error for JxlError {}
 /// How far a progressive decode should go.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProgressiveTarget {
-    /// The 1:8 DC image: enough for instant thumbnails.
+    /// A 1:8 preview: enough for instant thumbnails.
     DcPreview,
     /// Stop after this many AC passes.
     Pass(u8),
@@ -118,8 +134,38 @@ pub enum ProgressiveTarget {
     Full,
 }
 
-/// The codec-facing JPEG XL interface. Codec packages implement it; every
-/// image and texture cache in Sue goes through it (LAW 6).
+/// Facts about a decoded image.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JxlImageInfo {
+    /// Width of the full image.
+    pub width: u32,
+    /// Height of the full image.
+    pub height: u32,
+    /// Colour model of the codestream, e.g. `"RGB"` or `"Gray + alpha"`.
+    pub color_model: &'static str,
+    /// `true` if the image has an alpha channel.
+    pub has_alpha: bool,
+    /// Bits per sample of the original image.
+    pub bits_per_sample: u32,
+    /// Number of frames loaded (animations have more than one).
+    pub frames: usize,
+    /// `true` if the original JPEG can be rebuilt bit for bit.
+    pub jpeg_reconstruction: bool,
+    /// Downscale factor of the returned tile (1 for a full decode).
+    pub scale: u32,
+}
+
+/// A decoded image: an `Rgba8` tile in the sRGB encoding, plus its facts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DecodedJxl {
+    /// The pixels, ready for the arena.
+    pub tile: RasterTile2D,
+    /// What was decoded.
+    pub info: JxlImageInfo,
+}
+
+/// The codec-facing JPEG XL interface. Every image and texture cache in Sue
+/// goes through it (LAW 6).
 pub trait JxlPipeline: Send + Sync {
     /// Implementation name, for diagnostics.
     fn name(&self) -> &'static str;
@@ -132,15 +178,11 @@ pub trait JxlPipeline: Send + Sync {
         probe_jxl(bytes)
     }
 
-    /// Decodes up to `target` into a tile.
+    /// Decodes the first frame up to `target` into an `Rgba8` tile.
     ///
     /// # Errors
-    /// Probe errors, or codec errors.
-    fn decode_progressive(
-        &self,
-        bytes: &[u8],
-        target: ProgressiveTarget,
-    ) -> Result<RasterTile2D, JxlError>;
+    /// Probe errors, or [`JxlError::Decode`].
+    fn decode(&self, bytes: &[u8], target: ProgressiveTarget) -> Result<DecodedJxl, JxlError>;
 
     /// Recompresses a JPEG losslessly, keeping the data to rebuild it exactly.
     ///
@@ -154,32 +196,73 @@ pub trait JxlPipeline: Send + Sync {
     /// [`JxlError::NoJpegReconstruction`], probe errors, or codec errors.
     fn reconstruct_jpeg(&self, jxl: &[u8]) -> Result<Vec<u8>, JxlError>;
 
-    /// Encodes a layered canvas.
+    /// Encodes a canvas losslessly.
     ///
     /// # Errors
-    /// [`JxlError::NoLayers`], or codec errors.
+    /// [`JxlError::NoLayers`], or [`JxlError::Encode`].
     fn encode_layers(&self, layers: &[&RasterTile2D], effort: u8) -> Result<Vec<u8>, JxlError>;
 }
 
-/// The pipeline Sue ships with before a codec package is installed: probing is
-/// complete and native; pixel operations report [`JxlError::CodecUnavailable`].
+/// The pipeline Sue ships with: native probing, `jxl-oxide` for decoding and
+/// JPEG reconstruction, and `zune-jpegxl` for lossless (modular) encoding.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct ContainerOnlyPipeline;
+pub struct NativeJxlPipeline;
 
-impl JxlPipeline for ContainerOnlyPipeline {
+fn read_image(bytes: &[u8]) -> Result<JxlImage, JxlError> {
+    probe_jxl(bytes)?;
+    JxlImage::builder()
+        .read(Cursor::new(bytes))
+        .map_err(|error| JxlError::Decode(error.to_string()))
+}
+
+impl JxlPipeline for NativeJxlPipeline {
     fn name(&self) -> &'static str {
-        "container-only"
+        "jxl-oxide + zune-jpegxl"
     }
 
-    fn decode_progressive(
-        &self,
-        bytes: &[u8],
-        _target: ProgressiveTarget,
-    ) -> Result<RasterTile2D, JxlError> {
-        probe_jxl(bytes)?;
-        Err(JxlError::CodecUnavailable {
-            operation: "progressive decoding",
-        })
+    fn decode(&self, bytes: &[u8], target: ProgressiveTarget) -> Result<DecodedJxl, JxlError> {
+        let image = read_image(bytes)?;
+        let format = image.pixel_format();
+        if format.has_black() {
+            return Err(JxlError::Decode(
+                "CMYK images are not supported yet".to_owned(),
+            ));
+        }
+        let render = image
+            .render_frame(0)
+            .map_err(|error| JxlError::Decode(error.to_string()))?;
+        let mut stream = render.stream();
+        let (width, height, channels) = (stream.width(), stream.height(), stream.channels());
+        let mut samples = vec![0_u8; width as usize * height as usize * channels as usize];
+        let written = stream.write_to_buffer(&mut samples);
+        if written != samples.len() {
+            return Err(JxlError::Decode(
+                "the decoder produced too few samples".to_owned(),
+            ));
+        }
+        let rgba = expand_to_rgba(&samples, channels as usize)?;
+        let tile = RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, rgba)
+            .map_err(|error| JxlError::Decode(error.to_string()))?;
+        let (tile, scale) = match target {
+            ProgressiveTarget::DcPreview => {
+                (downscale_rgba(&tile, DC_PREVIEW_SCALE)?, DC_PREVIEW_SCALE)
+            }
+            // Pass targets decode fully until the streaming decoder lands.
+            ProgressiveTarget::Pass(_) | ProgressiveTarget::Full => (tile, 1),
+        };
+        let header = image.image_header();
+        let info = JxlImageInfo {
+            width: image.width(),
+            height: image.height(),
+            color_model: color_model_name(format),
+            has_alpha: format.has_alpha(),
+            bits_per_sample: header.metadata.bit_depth.bits_per_sample(),
+            frames: image.num_loaded_frames(),
+            jpeg_reconstruction: image.jpeg_reconstruction_status()
+                == JpegReconstructionStatus::Available,
+            scale,
+        };
+        Ok(DecodedJxl { tile, info })
     }
 
     fn transcode_jpeg_lossless(&self, jpeg: &[u8]) -> Result<Vec<u8>, JxlError> {
@@ -192,22 +275,119 @@ impl JxlPipeline for ContainerOnlyPipeline {
     }
 
     fn reconstruct_jpeg(&self, jxl: &[u8]) -> Result<Vec<u8>, JxlError> {
-        if !probe_jxl(jxl)?.has_jpeg_reconstruction {
+        let image = read_image(jxl)?;
+        if image.jpeg_reconstruction_status() != JpegReconstructionStatus::Available {
             return Err(JxlError::NoJpegReconstruction);
         }
-        Err(JxlError::CodecUnavailable {
-            operation: "JPEG reconstruction",
-        })
+        let mut jpeg = Vec::new();
+        image
+            .reconstruct_jpeg(&mut jpeg)
+            .map_err(|error| JxlError::Decode(error.to_string()))?;
+        Ok(jpeg)
     }
 
-    fn encode_layers(&self, layers: &[&RasterTile2D], _effort: u8) -> Result<Vec<u8>, JxlError> {
-        if layers.is_empty() {
-            return Err(JxlError::NoLayers);
+    fn encode_layers(&self, layers: &[&RasterTile2D], effort: u8) -> Result<Vec<u8>, JxlError> {
+        let layer = match layers {
+            [] => return Err(JxlError::NoLayers),
+            [layer] => *layer,
+            _ => {
+                return Err(JxlError::Encode(
+                    "layered encoding is not supported yet; flatten the canvas first".to_owned(),
+                ));
+            }
+        };
+        if layer.width() < 2 || layer.height() < 2 {
+            return Err(JxlError::Encode(
+                "the image must be at least 2x2 pixels".to_owned(),
+            ));
         }
-        Err(JxlError::CodecUnavailable {
-            operation: "layered encoding",
-        })
+        let (colorspace, pixels): (ColorSpace, std::borrow::Cow<'_, [u8]>) = match layer.pixels() {
+            PixelStorage::U8(bytes) if layer.format() == PixelFormat::Gray8 => {
+                (ColorSpace::Luma, bytes.into())
+            }
+            PixelStorage::U8(bytes) => (ColorSpace::RGBA, bytes.into()),
+            PixelStorage::F32(samples) => (
+                ColorSpace::RGBA,
+                samples
+                    .iter()
+                    .map(|&sample| (sample.clamp(0.0, 1.0) * 255.0).round() as u8)
+                    .collect::<Vec<u8>>()
+                    .into(),
+            ),
+        };
+        let options = EncoderOptions::new(
+            layer.width() as usize,
+            layer.height() as usize,
+            colorspace,
+            BitDepth::Eight,
+        )
+        .set_effort(effort);
+        let mut encoded = Vec::new();
+        JxlSimpleEncoder::new(&pixels, options)
+            .encode(&mut encoded)
+            .map_err(|error| JxlError::Encode(error.to_string()))?;
+        Ok(encoded)
     }
+}
+
+fn color_model_name(format: JxlPixelFormat) -> &'static str {
+    match format {
+        JxlPixelFormat::Gray => "Gray",
+        JxlPixelFormat::Graya => "Gray + alpha",
+        JxlPixelFormat::Rgb => "RGB",
+        JxlPixelFormat::Rgba => "RGB + alpha",
+        JxlPixelFormat::Cmyk => "CMYK",
+        JxlPixelFormat::Cmyka => "CMYK + alpha",
+    }
+}
+
+/// Widens 1-, 2-, 3- or 4-channel samples to RGBA.
+fn expand_to_rgba(samples: &[u8], channels: usize) -> Result<Vec<u8>, JxlError> {
+    let pixel = |chunk: &[u8]| -> [u8; 4] {
+        match *chunk {
+            [gray] => [gray, gray, gray, u8::MAX],
+            [gray, alpha] => [gray, gray, gray, alpha],
+            [r, g, b] => [r, g, b, u8::MAX],
+            [r, g, b, a] => [r, g, b, a],
+            _ => [0, 0, 0, 0],
+        }
+    };
+    if !(1..=4).contains(&channels) {
+        return Err(JxlError::Decode(format!(
+            "unsupported channel count {channels}"
+        )));
+    }
+    Ok(samples.chunks_exact(channels).flat_map(pixel).collect())
+}
+
+/// Box-filters an `Rgba8` tile down by `factor`.
+fn downscale_rgba(tile: &RasterTile2D, factor: u32) -> Result<RasterTile2D, JxlError> {
+    let source = tile
+        .bytes()
+        .ok_or(JxlError::Decode("expected 8-bit pixels".to_owned()))?;
+    let (width, height) = (
+        tile.width().div_ceil(factor),
+        tile.height().div_ceil(factor),
+    );
+    let mut out = Vec::with_capacity(width as usize * height as usize * 4);
+    for y in 0..height {
+        for x in 0..width {
+            let mut sum = [0_u32; 4];
+            let mut count = 0;
+            for sy in (y * factor)..((y + 1) * factor).min(tile.height()) {
+                for sx in (x * factor)..((x + 1) * factor).min(tile.width()) {
+                    let offset = (sy as usize * tile.width() as usize + sx as usize) * 4;
+                    for (total, &sample) in sum.iter_mut().zip(&source[offset..offset + 4]) {
+                        *total += u32::from(sample);
+                    }
+                    count += 1;
+                }
+            }
+            out.extend(sum.map(|total| (total / count.max(1)) as u8));
+        }
+    }
+    RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, out)
+        .map_err(|error| JxlError::Decode(error.to_string()))
 }
 
 /// Probes a JPEG XL codestream or container without decoding pixels.
@@ -509,24 +689,102 @@ mod tests {
         ));
     }
 
+    /// A deterministic RGBA test card: gradients plus an alpha ramp.
+    fn test_card(width: u32, height: u32) -> RasterTile2D {
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                pixels.extend([
+                    (x * 255 / (width - 1)) as u8,
+                    (y * 255 / (height - 1)) as u8,
+                    ((x + y) % 256) as u8,
+                    (255 - (x * 128 / width)) as u8,
+                ]);
+            }
+        }
+        RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels).unwrap()
+    }
+
     #[test]
-    fn container_only_pipeline_is_honest_about_missing_codecs() {
-        let pipeline = ContainerOnlyPipeline;
-        let jxl = [0xFF, 0x0A, 0x41, 0x00];
-        assert_eq!(pipeline.probe(&jxl).unwrap().width, Some(8));
+    fn lossless_encode_then_decode_round_trips_every_pixel() {
+        let pipeline = NativeJxlPipeline;
+        let card = test_card(37, 23);
+        let encoded = pipeline.encode_layers(&[&card], 3).unwrap();
+        let probe = pipeline.probe(&encoded).unwrap();
+        assert_eq!((probe.width, probe.height), (Some(37), Some(23)));
+
+        let decoded = pipeline.decode(&encoded, ProgressiveTarget::Full).unwrap();
+        assert_eq!(decoded.tile, card);
+        assert_eq!((decoded.info.width, decoded.info.height), (37, 23));
+        assert!(decoded.info.has_alpha);
+        assert_eq!(decoded.info.color_model, "RGB + alpha");
+        assert_eq!(decoded.info.bits_per_sample, 8);
+        assert_eq!((decoded.info.frames, decoded.info.scale), (1, 1));
+        assert!(!decoded.info.jpeg_reconstruction);
+    }
+
+    #[test]
+    fn grayscale_images_decode_to_opaque_rgba() {
+        let pipeline = NativeJxlPipeline;
+        let gray: Vec<u8> = (0..64_u32).map(|v| (v * 4) as u8).collect();
+        let tile = RasterTile2D::from_bytes(8, 8, PixelFormat::Gray8, gray.clone()).unwrap();
+        let decoded = pipeline
+            .decode(
+                &pipeline.encode_layers(&[&tile], 1).unwrap(),
+                ProgressiveTarget::Full,
+            )
+            .unwrap();
+        assert_eq!(decoded.info.color_model, "Gray");
+        let (pixels, _) = decoded.tile.bytes().unwrap().as_chunks::<4>();
+        for (pixel, &value) in pixels.iter().zip(&gray) {
+            assert_eq!(*pixel, [value, value, value, 255]);
+        }
+    }
+
+    #[test]
+    fn dc_previews_are_one_eighth_scale() {
+        let pipeline = NativeJxlPipeline;
+        let encoded = pipeline.encode_layers(&[&test_card(64, 40)], 1).unwrap();
+        let preview = pipeline
+            .decode(&encoded, ProgressiveTarget::DcPreview)
+            .unwrap();
+        assert_eq!((preview.tile.width(), preview.tile.height()), (8, 5));
+        assert_eq!(preview.info.scale, DC_PREVIEW_SCALE);
+        assert_eq!((preview.info.width, preview.info.height), (64, 40));
+    }
+
+    #[test]
+    fn pipeline_reports_unsupported_operations_honestly() {
+        let pipeline = NativeJxlPipeline;
+        let header_only = [0xFF, 0x0A, 0x41, 0x00];
+        assert_eq!(pipeline.probe(&header_only).unwrap().width, Some(8));
         assert!(matches!(
-            pipeline.decode_progressive(&jxl, ProgressiveTarget::DcPreview),
-            Err(JxlError::CodecUnavailable { .. })
+            pipeline.decode(&header_only, ProgressiveTarget::Full),
+            Err(JxlError::Decode(_))
         ));
         assert_eq!(
-            pipeline.reconstruct_jpeg(&jxl),
+            pipeline.decode(b"GIF89a", ProgressiveTarget::Full),
+            Err(JxlError::NotJxl)
+        );
+        let encoded = pipeline.encode_layers(&[&test_card(4, 4)], 1).unwrap();
+        assert_eq!(
+            pipeline.reconstruct_jpeg(&encoded),
             Err(JxlError::NoJpegReconstruction)
         );
         assert_eq!(
             pipeline.transcode_jpeg_lossless(b"GIF89a"),
             Err(JxlError::NotJpeg)
         );
+        assert!(matches!(
+            pipeline.transcode_jpeg_lossless(b"\xFF\xD8\xFF\xE0"),
+            Err(JxlError::CodecUnavailable { .. })
+        ));
         assert_eq!(pipeline.encode_layers(&[], 7), Err(JxlError::NoLayers));
+        let card = test_card(4, 4);
+        assert!(matches!(
+            pipeline.encode_layers(&[&card, &card], 1),
+            Err(JxlError::Encode(_))
+        ));
         assert_eq!(FourCc(*b"jx\x01c").to_string(), "jx\\x01c");
     }
 }
