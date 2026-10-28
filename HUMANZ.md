@@ -919,6 +919,32 @@ palette (`ShellRequest::OpenStudio`) and leaves with `CloseStudio`; the rails,
 the drawers, the status bar, the palette, Settings and the global undo, save
 and open keys stay with it, and `Ctrl+O` asks the studio first.
 
+**Shared features and the Sue menu.** Sue owns its features and every
+studio uses them: one color wheel (`color_button`), one way to pick and save
+files (`FilePick`, answered by the File Manager), one Converter, one Player,
+one theme system, and the shared models below. When a studio needs more, the
+shared feature gains a mode or parameter. Work moves between studios by
+`EntityId`: `ShellRequest::OpenIn { entity, applet }` opens an entity in a
+studio (on its card, made if needed) or puts it on the canvas, and
+`ShellRequest::SendEntity` hands one to a tool (`SueApplet::take_entity`).
+
+The **Sue button**, at the top of the left rail in the canvas and in every
+studio, opens the **Sue menu**: a marking-menu wheel built for what is in
+focus (the open studio's `studio_focus`, else the selected card). Its first
+wheel leads to the open studio's own wheel, Send To, File, Project and
+Studios, then Command Palette and Settings. The shell fills Project (open,
+save, save as), File (New File's wheels, Open File), Send To (every studio
+whose `accepts` takes the entity, and Canvas from inside a studio) and
+Studios (the Hub, the canvas, each studio). Everything else comes from the
+applets' `sue_actions(focus, current)`: `SueAction`s on a named wheel
+(`wheel::PROJECT`, `wheel::FILE`, `wheel::SEND_TO`, or the studio's own name)
+with the request each runs. The File Manager adds itself and Show in File
+Manager or Explorer for an entity with a source file; the Converter adds
+Convert for any picture (Sue Paint's layered ones flattened through
+`sue_paint::composite::flatten`) or sound; the Player adds songs; Sue Paint
+adds its own wheel while open and opens picture files from the canvas as new
+pictures. A wheel with nothing on it does not show.
+
 **Studio themes.** A studio whose rice section (its id with `-` as `_`)
 has a `theme` wears `Theme::for_studio`: a preset's colors, the Sue theme
 (`sue-theme`, the global colors, so it follows every change to them), or its

@@ -134,6 +134,16 @@ cargo run -p sue -- --self-check
 - Put values people may want to tune in the rice (`sue-rice`), so they appear
   in Settings by themselves.
 - Register applets, operators and presets instead of keeping lists by hand.
+- Sue owns every feature; studios use them. A studio never builds its own
+  color picker, file dialog, converter, brush engine, font list, 3D view or
+  exporter when Sue has one (the shared widgets in `sue-wm`, the File
+  Manager's `FilePick`, the Converter, the shared models). When a studio
+  needs more than a feature offers, give that feature a new mode or
+  parameter so every studio gains it, instead of copying it.
+- Studios are woven together. Work moves between them by `EntityId`
+  (`ShellRequest::OpenIn`, `ShellRequest::SendEntity`, the Sue menu's Send
+  To), never by exporting a file and importing it again. Offer what a studio
+  or tool can do for the thing in focus through `SueApplet::sue_actions`.
 - Draw nothing when nothing moves, and respect `HardwareProfile` and
   `FormFactor`.
 - The default look is monochrome. Internal image caches default to JPEG XL.

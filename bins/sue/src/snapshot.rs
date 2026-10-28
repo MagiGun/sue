@@ -510,6 +510,13 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         runtime.shell.toggle_drawer_applet(id, &runtime.applets);
     }
     shoot(&mut runtime, &mut camera, "11b-sue-paint-wide")?;
+    // 11c. The Sue menu, in Sue Paint, and its Send To wheel.
+    runtime.request(ShellRequest::SueMenu, &mut camera.painter, camera.now);
+    shoot(&mut runtime, &mut camera, "11c-sue-menu")?;
+    runtime.shell.sue_menu_open("Send To");
+    shoot(&mut runtime, &mut camera, "11d-sue-menu-send-to")?;
+    runtime.shell.dismiss_overlays();
+    camera.settle(&mut runtime);
     for id in &open {
         runtime.shell.toggle_drawer_applet(id, &runtime.applets);
     }

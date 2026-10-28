@@ -144,6 +144,9 @@ impl Radial {
                     outer + theme.shadow_blur * 0.5,
                     theme.shadow.gamma_multiply(0.25 * alpha),
                 );
+                // A solid disc under the wedges, so whatever is behind the
+                // menu (a studio's palettes) never shows through it.
+                painter.circle_filled(self.center, outer + 1.0, theme.panel.gamma_multiply(alpha));
                 let slice = TAU / labels.len().max(1) as f32;
                 for (index, label) in labels.iter().enumerate() {
                     let middle = index as f32 * slice - FRAC_PI_2;
@@ -160,11 +163,21 @@ impl Radial {
                     }
                     let hot = self.hovered == Some(index);
                     let fill = if hot { theme.hover } else { theme.pill };
-                    painter.add(Shape::convex_polygon(
-                        points.clone(),
-                        fill.gamma_multiply(alpha),
-                        Stroke::NONE,
-                    ));
+                    // A ring slice is not convex: fill it as quads from the
+                    // outer arc to the inner one.
+                    let mut mesh = egui::Mesh::default();
+                    let color = fill.gamma_multiply(alpha);
+                    for &point in &points {
+                        mesh.colored_vertex(point, color);
+                    }
+                    let last = points.len() as u32 - 1;
+                    for step in 0..steps as u32 {
+                        let (outer_a, outer_b) = (step, step + 1);
+                        let (inner_a, inner_b) = (last - step, last - step - 1);
+                        mesh.add_triangle(outer_a, outer_b, inner_b);
+                        mesh.add_triangle(outer_a, inner_b, inner_a);
+                    }
+                    painter.add(Shape::mesh(mesh));
                     painter.add(Shape::closed_line(
                         points,
                         Stroke::new(

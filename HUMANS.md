@@ -90,6 +90,25 @@ Startup.
 - Everything moves on springs: nothing jumps, it glides into place and then
   stops. When nothing moves, Sue draws nothing at all.
 
+### The Sue button
+
+At the very top left, in the canvas and in every studio, is the **Sue**
+button. It opens the Sue menu, a round menu like the right-click one, made
+for whatever you are working on. It leads to:
+
+- the open studio's own wheel (in Sue Paint: new, open, import as a layer,
+  export, reset the palettes, shortcuts);
+- **Send To**: the thing you are working on, into another studio or tool,
+  with no exporting and importing. A picture from Sue Paint goes onto the
+  canvas or into the Converter; a song goes to the Player; a picture file on
+  the canvas opens in Sue Paint; any file shows in the File Manager. Studios
+  that come later (a video editor, say) appear here by themselves;
+- **File**: a new file, open a file, the File Manager, the Converter, adding
+  music;
+- **Project**: open, save and save as;
+- **Studios**: the Hub, the canvas and every studio;
+- the command palette and Settings.
+
 ### The top pill
 
 A floating bar at the top of the canvas with just two buttons:

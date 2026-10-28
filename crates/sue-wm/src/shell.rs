@@ -52,6 +52,10 @@ enum RadialPage {
     Kinds,
     /// The exact kinds of one kind of file.
     Templates(String),
+    /// The Sue menu's first wheel.
+    Sue,
+    /// One of the Sue menu's wheels, by name.
+    Wheel(String),
 }
 
 /// What a wedge of the marking menu does.
@@ -207,6 +211,11 @@ pub struct Shell {
     studio_area: Rect,
     presets: Vec<sue_rice::ThemePreset>,
     radial_page: RadialPage,
+    /// The wheels the marking menu came through, to go back.
+    radial_back: Vec<RadialPage>,
+    /// The Sue menu, built for the context it opened in: its first wheel
+    /// and its named wheels.
+    sue_wheels: Vec<(String, Vec<(String, RadialAction)>)>,
     spawn_point: Option<Pos2>,
     interactive: bool,
     space_down: bool,
@@ -294,6 +303,8 @@ impl Shell {
             studio_area: Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 720.0)),
             presets: sue_rice::builtin_presets(),
             radial_page: RadialPage::Root,
+            radial_back: Vec::new(),
+            sue_wheels: Vec::new(),
             spawn_point: None,
             interactive: false,
             space_down: false,
@@ -719,6 +730,7 @@ impl Shell {
     /// Opens the marking menu at a screen point.
     pub fn open_radial(&mut self, at: Pos2) {
         self.radial_page = RadialPage::Root;
+        self.radial_back.clear();
         let canvas_point = self.camera.to_canvas(self.canvas, at);
         self.radial = Some(Radial::open(
             at,
@@ -726,6 +738,228 @@ impl Shell {
             self.config.spring,
             self.spring_mode(),
         ));
+        self.touch();
+    }
+
+    /// The entity the Sue menu is about: what the open studio works on, or
+    /// what is selected on the canvas.
+    fn sue_focus(&self, io: &ShellIo<'_>) -> Option<sue_core::EntityId> {
+        match &self.studio {
+            Some(studio) => io
+                .applets
+                .get(studio)
+                .and_then(|applet| applet.studio_focus()),
+            None => self
+                .selected
+                .and_then(|node| io.world.scene.get(node))
+                .and_then(|node| io.world.arena.get(node.entity).ok())
+                .map(sue_core::Entity::id),
+        }
+    }
+
+    /// Builds the Sue menu for the context: Project, File and Send To for
+    /// the thing in focus, the open studio's own wheel, Studios, and every
+    /// wheel applets add to.
+    fn build_sue_menu(&mut self, io: &ShellIo<'_>) {
+        let focus_id = self.sue_focus(io);
+        let focus = focus_id.and_then(|id| io.world.arena.get_by_id(id).ok());
+        let mut wheels: Vec<(String, Vec<(String, RadialAction)>)> = Vec::new();
+        let add = |wheels: &mut Vec<(String, Vec<(String, RadialAction)>)>,
+                   wheel: &str,
+                   label: String,
+                   action: RadialAction| {
+            match wheels.iter_mut().find(|(name, _)| name == wheel) {
+                Some((_, items)) => items.push((label, action)),
+                None => wheels.push((wheel.to_owned(), vec![(label, action)])),
+            }
+        };
+        let request = RadialAction::Request;
+        // Projects and files.
+        add(
+            &mut wheels,
+            crate::wheel::PROJECT,
+            "Open Project".to_owned(),
+            request(ShellRequest::PickFile(
+                crate::FilePick::open(None, "open", "Open Project").extensions(&["sue"]),
+            )),
+        );
+        add(
+            &mut wheels,
+            crate::wheel::PROJECT,
+            "Save Project".to_owned(),
+            request(ShellRequest::Command("file.save".to_owned())),
+        );
+        add(
+            &mut wheels,
+            crate::wheel::PROJECT,
+            "Save Project As".to_owned(),
+            request(ShellRequest::Command("file.save_as".to_owned())),
+        );
+        add(
+            &mut wheels,
+            crate::wheel::FILE,
+            "New File \u{203a}".to_owned(),
+            RadialAction::Open(RadialPage::Kinds),
+        );
+        add(
+            &mut wheels,
+            crate::wheel::FILE,
+            "Open File".to_owned(),
+            request(ShellRequest::Command("file.open".to_owned())),
+        );
+        // The thing in focus, into the studios that take it.
+        if let (Some(id), Some(entity)) = (focus_id, focus) {
+            for (manifest, applet) in io.applets.iter() {
+                let current = self.studio.as_ref() == Some(&manifest.id);
+                if manifest.role == AppletRole::Studio && !current && applet.accepts(entity) {
+                    add(
+                        &mut wheels,
+                        crate::wheel::SEND_TO,
+                        manifest.name.clone(),
+                        request(ShellRequest::OpenIn {
+                            entity: id,
+                            applet: manifest.id.clone(),
+                        }),
+                    );
+                }
+            }
+            if self.studio.is_some()
+                && let Some(handle) = io.world.arena.handle_of(id)
+            {
+                add(
+                    &mut wheels,
+                    crate::wheel::SEND_TO,
+                    "Canvas".to_owned(),
+                    request(ShellRequest::Place {
+                        entity: handle,
+                        focus: true,
+                    }),
+                );
+            }
+        }
+        // What every applet adds, the open studio's own wheel first.
+        let mut studio_wheel = None;
+        for (manifest, applet) in io.applets.iter() {
+            let current = self.studio.as_ref() == Some(&manifest.id);
+            if current {
+                studio_wheel = Some(manifest.name.clone());
+            }
+            for action in applet.sue_actions(focus, current) {
+                add(
+                    &mut wheels,
+                    &action.wheel,
+                    action.label,
+                    request(action.request),
+                );
+            }
+        }
+        // Where to go.
+        add(
+            &mut wheels,
+            "Studios",
+            "Hub".to_owned(),
+            request(ShellRequest::Hub(true)),
+        );
+        if self.studio.is_some() {
+            add(
+                &mut wheels,
+                "Studios",
+                "Canvas".to_owned(),
+                request(ShellRequest::CloseStudio),
+            );
+        }
+        let mut studios: Vec<_> = io
+            .applets
+            .manifests()
+            .filter(|manifest| manifest.role == AppletRole::Studio)
+            .collect();
+        studios.sort_by_key(|manifest| manifest.order);
+        for manifest in studios {
+            if self.studio.as_ref() != Some(&manifest.id) {
+                add(
+                    &mut wheels,
+                    "Studios",
+                    manifest.name.clone(),
+                    request(ShellRequest::OpenStudio(manifest.id.clone())),
+                );
+            }
+        }
+        // The first wheel: the open studio's wheel, then the rest.
+        let order = |name: &str| match name {
+            n if Some(n) == studio_wheel.as_deref() => 0,
+            crate::wheel::SEND_TO => 1,
+            crate::wheel::FILE => 2,
+            crate::wheel::PROJECT => 3,
+            "Studios" => 5,
+            _ => 4,
+        };
+        wheels.sort_by_key(|(name, _)| order(name));
+        let mut first: Vec<(String, RadialAction)> = wheels
+            .iter()
+            .map(|(name, _)| {
+                (
+                    format!("{name} \u{203a}"),
+                    RadialAction::Open(RadialPage::Wheel(name.clone())),
+                )
+            })
+            .collect();
+        first.push(("Command Palette".to_owned(), request(ShellRequest::Palette)));
+        first.push((
+            "Settings".to_owned(),
+            request(ShellRequest::OpenSettings(None)),
+        ));
+        wheels.insert(0, (String::new(), first));
+        self.sue_wheels = wheels;
+    }
+
+    /// Opens the Sue menu by the Sue button: a wheel just inside the top
+    /// left corner, built for what is in focus.
+    pub fn open_sue_menu(&mut self, io: &ShellIo<'_>, screen: Rect) {
+        self.dismiss_overlays();
+        self.build_sue_menu(io);
+        let reach = self.config.radial_radius + 70.0;
+        let at = pos2(
+            (screen.left() + 40.0 + reach).min(screen.center().x),
+            (screen.top() + 30.0 + reach).min(screen.center().y),
+        );
+        let canvas_point = self.camera.to_canvas(self.canvas, at);
+        self.radial = Some(Radial::open(
+            at,
+            canvas_point,
+            self.config.spring,
+            self.spring_mode(),
+        ));
+        self.radial_page = RadialPage::Sue;
+        self.radial_back.clear();
+        self.touch();
+    }
+
+    /// The Sue menu's labels on its current wheel (scripted runs).
+    #[must_use]
+    pub fn sue_menu_labels(&self) -> Vec<String> {
+        self.radial_items_now()
+            .into_iter()
+            .map(|(label, _)| label)
+            .collect()
+    }
+
+    fn radial_items_now(&self) -> Vec<(String, RadialAction)> {
+        let name = match &self.radial_page {
+            RadialPage::Sue => String::new(),
+            RadialPage::Wheel(name) => name.clone(),
+            _ => return Vec::new(),
+        };
+        self.sue_wheels
+            .iter()
+            .find(|(wheel, _)| *wheel == name)
+            .map(|(_, items)| items.clone())
+            .unwrap_or_default()
+    }
+
+    /// Goes into the Sue menu's wheel named `name` (scripted runs).
+    pub fn sue_menu_open(&mut self, name: &str) {
+        self.radial_back.push(self.radial_page.clone());
+        self.radial_page = RadialPage::Wheel(name.to_owned());
         self.touch();
     }
 
@@ -1203,6 +1437,46 @@ impl Shell {
             ShellRequest::OpenStudio(id) => self.open_studio(id, io),
             ShellRequest::CloseStudio => self.close_studio(io, true),
             ShellRequest::Hub(open) => self.set_hub(open),
+            ShellRequest::SueMenu => {
+                let screen = self.studio_area.union(self.canvas);
+                self.open_sue_menu(io, screen);
+            }
+            ShellRequest::OpenIn { entity, applet } => {
+                let Some(handle) = io.world.arena.handle_of(entity) else {
+                    self.notify("That is gone", true);
+                    return None;
+                };
+                let studio = io
+                    .applets
+                    .manifest(&applet)
+                    .is_some_and(|manifest| manifest.role == AppletRole::Studio);
+                if studio {
+                    // The studio opens on the entity's card, made if needed.
+                    let card =
+                        Self::card_of(entity, io.world).or_else(|| self.place(handle, false, io));
+                    if let Some(node) = card {
+                        self.select(Some(node), io.world);
+                    }
+                    self.open_studio(applet, io);
+                } else {
+                    if self.studio.is_some() {
+                        self.close_studio(io, false);
+                    }
+                    self.place(handle, true, io);
+                }
+            }
+            ShellRequest::SendEntity {
+                to,
+                purpose,
+                entity,
+            } => {
+                let view = self.view(now, 0.0);
+                let theme = self.theme.clone();
+                let (applets, mut cx) = split(io, &theme, view);
+                if let Some(applet) = applets.get_mut(&to) {
+                    applet.take_entity(&purpose, entity, &mut cx);
+                }
+            }
             ShellRequest::Saved { path, note } => self.notify_saved(&path, &note),
             ShellRequest::CloseWindow => self.close_window(),
             ShellRequest::OpenWindow(id) => self.open_window(id),
@@ -1423,6 +1697,7 @@ impl Shell {
             self.studio_layer(root, &studio, false, io, &theme, now, dt);
             self.chrome_ui(root, &layout, io, &theme, now, dt);
             let screen = root.max_rect();
+            self.radial_ui(&ctx, screen, io, &theme, now);
             self.hub_ui(&ctx, screen, io, &theme, now);
             self.palette_ui(&ctx, io, &theme, now);
             self.window_ui(&ctx, screen, io, &theme, now, dt);
@@ -1462,8 +1737,8 @@ impl Shell {
         }
         if self.studio_shown.is_none() {
             self.selection_pill_ui(&ctx, io, &theme, now, dt);
-            self.radial_ui(&ctx, root.max_rect(), io, &theme, now);
         }
+        self.radial_ui(&ctx, root.max_rect(), io, &theme, now);
         self.hub_ui(&ctx, root.max_rect(), io, &theme, now);
         self.palette_ui(&ctx, io, &theme, now);
         self.window_ui(&ctx, root.max_rect(), io, &theme, now, dt);
@@ -2217,6 +2492,57 @@ impl Shell {
                 )
             })
             .collect();
+        let mut rect = rect;
+        if left {
+            // The Sue button, top left in the canvas and in every studio:
+            // the Sue menu, built for what is in focus.
+            let button = Rect::from_min_size(rect.min, vec2(rect.width(), rect.width() + 4.0));
+            let response = root
+                .interact(button, Id::unique("sue-button"), Sense::click())
+                .on_hover_text(
+                    "Sue: projects, files, and sending what you work on to other studios",
+                );
+            let open = self.radial.is_some()
+                && self.radial_page != RadialPage::Root
+                && matches!(self.radial_page, RadialPage::Sue | RadialPage::Wheel(_));
+            let painter = root.painter();
+            let face = button.shrink(5.0);
+            painter.rect_filled(
+                face,
+                theme.control_radius,
+                if open || response.hovered() {
+                    theme.active
+                } else {
+                    theme.pill
+                },
+            );
+            painter.rect_stroke(
+                face,
+                theme.control_radius,
+                if open {
+                    theme.hairline_active()
+                } else {
+                    theme.hairline()
+                },
+                egui::StrokeKind::Inside,
+            );
+            painter.text(
+                face.center(),
+                Align2::CENTER_CENTER,
+                "Sue",
+                theme.font(theme.small_size + 0.5),
+                theme.text,
+            );
+            if response.clicked() {
+                if open {
+                    self.dismiss_overlays();
+                } else {
+                    self.open_sue_menu(io, root.max_rect());
+                }
+            }
+            painter.hline(rect.x_range(), button.bottom(), theme.hairline());
+            rect.min.y = button.bottom() + 2.0;
+        }
         let mut ui = root.new_child(
             UiBuilder::new()
                 .max_rect(rect)
@@ -2953,6 +3279,7 @@ impl Shell {
                     })
                     .collect()
             }
+            RadialPage::Sue | RadialPage::Wheel(_) => self.radial_items_now(),
             RadialPage::Templates(kind) => Self::templates(applets)
                 .into_iter()
                 .filter(|(_, template)| &template.category == kind)
@@ -2993,6 +3320,7 @@ impl Shell {
                             radius,
                             screen,
                         ));
+                        self.radial_back.push(self.radial_page.clone());
                         self.radial_page = page;
                     }
                     RadialAction::Template(id, key) => {
@@ -3021,10 +3349,10 @@ impl Shell {
             }
             RadialOutcome::Back => {
                 radial.ascend();
-                self.radial_page = match &self.radial_page {
+                self.radial_page = self.radial_back.pop().unwrap_or(match &self.radial_page {
                     RadialPage::Templates(_) => RadialPage::Kinds,
                     _ => RadialPage::Root,
-                };
+                });
             }
             RadialOutcome::Dismissed => self.radial_page = RadialPage::Root,
             RadialOutcome::Open => {}

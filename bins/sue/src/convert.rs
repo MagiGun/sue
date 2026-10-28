@@ -235,6 +235,23 @@ fn row(ui: &mut Ui, label: &str, theme: &Theme, add: impl FnOnce(&mut Ui)) {
 }
 
 impl Convert {
+    /// What kind of input an entity makes: a picture (layered or not), a
+    /// sound, or nothing the Converter takes.
+    fn kind_of_entity(entity: &sue_core::Entity) -> Option<Kind> {
+        if entity.component(ComponentKind::PCMFloat1D).is_some() {
+            Some(Kind::Sound)
+        } else if sue_model::picture::is_picture(entity)
+            || (entity.component(ComponentKind::RasterTile2D).is_some()
+                && entity.meta(meta::ENTROPY).is_none())
+        {
+            Some(Kind::Picture)
+        } else {
+            entity
+                .meta(meta::SOURCE)
+                .map(|path| ops::kind_of(Path::new(path), &[]))
+        }
+    }
+
     fn add_path(&mut self, path: &Path) {
         if path.is_dir() {
             let Ok(entries) = sue_platform::list_dir(path, false) else {
@@ -423,12 +440,25 @@ impl Convert {
         out: &Path,
     ) -> Result<String, String> {
         let entity = cx.arena().get(handle).map_err(|error| error.to_string())?;
+        // A layered picture (Sue Paint's) is flattened the way it exports.
+        let flat = sue_model::picture::is_picture(entity)
+            .then(|| {
+                sue_paint::composite::flatten(
+                    cx.arena(),
+                    entity.id(),
+                    sue_paint::composite::RenderOptions::default(),
+                )
+            })
+            .flatten();
         let (bytes, note) = match kind {
             Kind::Picture => {
-                let tile = entity
-                    .component(ComponentKind::RasterTile2D)
-                    .and_then(|data| data.as_raster())
-                    .ok_or("the picture is gone")?;
+                let tile = match &flat {
+                    Some(flat) => flat,
+                    None => entity
+                        .component(ComponentKind::RasterTile2D)
+                        .and_then(|data| data.as_raster())
+                        .ok_or("the picture is gone")?,
+                };
                 let changed = ops::transform_picture(tile, &options.picture, target)?;
                 let note = format!("{} by {} pixels", changed.width(), changed.height());
                 (
@@ -1218,6 +1248,75 @@ impl SueApplet for Convert {
                 .then(|| std::time::Instant::now() + Duration::from_millis(100)),
             ..Tick::default()
         }
+    }
+
+    fn sue_actions(
+        &self,
+        focus: Option<&sue_core::Entity>,
+        _current: bool,
+    ) -> Vec<sue_wm::SueAction> {
+        let me = || AppletId::new(ID).expect("a valid id");
+        let mut actions = vec![sue_wm::SueAction::new(
+            sue_wm::wheel::FILE,
+            "Convert Files",
+            ShellRequest::OpenWindow(me()),
+        )];
+        if let Some(entity) = focus
+            && Self::kind_of_entity(entity).is_some()
+        {
+            actions.push(sue_wm::SueAction::new(
+                sue_wm::wheel::SEND_TO,
+                "Convert",
+                ShellRequest::SendEntity {
+                    to: me(),
+                    purpose: "add".to_owned(),
+                    entity: entity.id(),
+                },
+            ));
+        }
+        actions
+    }
+
+    fn take_entity(
+        &mut self,
+        _purpose: &str,
+        entity: sue_core::EntityId,
+        cx: &mut AppletContext<'_>,
+    ) {
+        let Some(handle) = cx.arena().handle_of(entity) else {
+            return;
+        };
+        let Ok(found) = cx.arena().get(handle) else {
+            return;
+        };
+        let source = found
+            .meta(meta::SOURCE)
+            .map(PathBuf::from)
+            .filter(|path| path.is_file() && !sue_model::picture::is_picture(found));
+        let name = found.name().to_owned();
+        let kind = Self::kind_of_entity(found);
+        match (source, kind) {
+            (Some(path), _) => self.add_path(&path),
+            (None, Some(kind)) => {
+                if !self
+                    .inputs
+                    .iter()
+                    .any(|input| input.source == Source::Entity(handle))
+                {
+                    self.inputs.push(Input {
+                        source: Source::Entity(handle),
+                        name,
+                        kind,
+                        size: 0,
+                        status: Status::Waiting,
+                    });
+                }
+            }
+            (None, None) => return,
+        }
+        cx.request(ShellRequest::ShowDrawer(
+            AppletId::new(ID).expect("a valid id"),
+        ));
     }
 
     fn picked(&mut self, pick: &FilePick, path: &Path, _cx: &mut AppletContext<'_>) {

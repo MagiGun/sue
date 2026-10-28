@@ -1640,6 +1640,136 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_sue_menu_follows_the_context_and_sends_work_between_studios() {
+        let (mut runtime, root) = runtime("sue-menu");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        runtime.request(ShellRequest::Hub(false), &mut NoTextures, start);
+
+        // On the canvas: projects, files and the studios.
+        runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
+        assert!(runtime.shell.radial_open());
+        let first = runtime.shell.sue_menu_labels();
+        for wheel in [
+            "File \u{203a}",
+            "Project \u{203a}",
+            "Studios \u{203a}",
+            "Command Palette",
+        ] {
+            assert!(
+                first.iter().any(|label| label == wheel),
+                "{wheel} in {first:?}"
+            );
+        }
+        runtime.shell.sue_menu_open("File");
+        assert!(
+            runtime
+                .shell
+                .sue_menu_labels()
+                .iter()
+                .any(|label| label == "File Manager")
+        );
+        runtime.shell.dismiss_overlays();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+
+        // In Sue Paint, on a new picture: its own wheel first, and Send To.
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        runtime.request(
+            ShellRequest::Create {
+                applet: paint.clone(),
+                key: "Square Post".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        assert_eq!(runtime.shell.studio(), Some(&paint));
+        runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
+        let first = runtime.shell.sue_menu_labels();
+        assert_eq!(
+            first[0], "Sue Paint \u{203a}",
+            "the open studio's wheel first: {first:?}"
+        );
+        runtime.shell.sue_menu_open("Send To");
+        let send = runtime.shell.sue_menu_labels();
+        assert!(
+            send.iter().any(|label| label == "Canvas")
+                && send.iter().any(|label| label == "Convert"),
+            "{send:?}"
+        );
+        runtime.shell.dismiss_overlays();
+
+        // The picture goes to the Converter, flattened into a PNG.
+        let picture = runtime
+            .engine
+            .world
+            .arena
+            .iter()
+            .find(|(_, entity)| sue_model::picture::is_picture(entity))
+            .map(|(_, entity)| entity.id())
+            .unwrap();
+        let convert = AppletId::new(crate::convert::ID).unwrap();
+        runtime.request(
+            ShellRequest::SendEntity {
+                to: convert.clone(),
+                purpose: "add".to_owned(),
+                entity: picture,
+            },
+            &mut NoTextures,
+            start,
+        );
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: convert,
+                command: "convert.run".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        let home = runtime.engine.catalog.folders["home"].clone();
+        let written = std::fs::read_dir(&home)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| path.extension().is_some_and(|extension| extension == "png"))
+            .expect("the flattened picture was written");
+        let png = sue_io::decode_png(&std::fs::read(&written).unwrap()).unwrap();
+        let pixels =
+            sue_model::picture::size(runtime.engine.world.arena.get_by_id(picture).unwrap())
+                .unwrap();
+        assert_eq!(
+            [png.tile.width(), png.tile.height()],
+            pixels,
+            "the whole picture, flattened"
+        );
+
+        // Send To Canvas leaves the studio; Open In goes back to it.
+        let handle = runtime.engine.world.arena.handle_of(picture).unwrap();
+        runtime.request(
+            ShellRequest::Place {
+                entity: handle,
+                focus: true,
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        assert_eq!(runtime.shell.studio(), None);
+        runtime.request(
+            ShellRequest::OpenIn {
+                entity: picture,
+                applet: paint.clone(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(runtime.shell.studio(), Some(&paint));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn spawned_entities_undo_and_redo_with_their_buffers() {
         let (mut runtime, root) = runtime("spawn");
         let ctx = egui::Context::default();

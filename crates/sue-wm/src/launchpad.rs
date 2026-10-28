@@ -167,6 +167,12 @@ impl Applets {
             .find(|(manifest, applet)| manifest.role == AppletRole::Node && applet.accepts(entity))
             .map(|(manifest, _)| manifest.id.clone())
     }
+    /// Every applet with its manifest.
+    pub fn iter(&self) -> impl Iterator<Item = (&AppletManifest, &dyn SueApplet)> {
+        self.list
+            .iter()
+            .map(|(manifest, applet)| (manifest, applet.as_ref()))
+    }
 
     /// Every applet, mutably.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (&AppletManifest, &mut Box<dyn SueApplet>)> {

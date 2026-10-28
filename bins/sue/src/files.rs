@@ -1568,6 +1568,55 @@ impl SueApplet for Files {
         true
     }
 
+    fn sue_actions(
+        &self,
+        focus: Option<&sue_core::Entity>,
+        _current: bool,
+    ) -> Vec<sue_wm::SueAction> {
+        let me = || sue_wm::AppletId::new(ID).expect("a valid id");
+        let mut actions = vec![sue_wm::SueAction::new(
+            sue_wm::wheel::FILE,
+            "File Manager",
+            ShellRequest::OpenWindow(me()),
+        )];
+        if let Some(path) = focus
+            .and_then(|entity| entity.meta(sue_io::meta::SOURCE))
+            .map(PathBuf::from)
+            .filter(|path| path.exists())
+        {
+            actions.push(sue_wm::SueAction::new(
+                sue_wm::wheel::SEND_TO,
+                "File Manager",
+                ShellRequest::SendFile {
+                    to: me(),
+                    purpose: "show".to_owned(),
+                    path: path.clone(),
+                },
+            ));
+            actions.push(sue_wm::SueAction::new(
+                sue_wm::wheel::FILE,
+                "Show in Explorer",
+                ShellRequest::Command(format!("reveal-file:{}", path.display())),
+            ));
+        }
+        actions
+    }
+
+    fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
+        if pick.purpose == "show" {
+            // Show a file, selected in its folder, in the large window.
+            self.sync(cx);
+            self.pick = None;
+            if let Some(folder) = path.parent() {
+                self.go(folder.to_path_buf());
+            }
+            self.selected = Some(path.to_path_buf());
+            cx.request(ShellRequest::OpenWindow(
+                sue_wm::AppletId::new(ID).expect("a valid id"),
+            ));
+        }
+    }
+
     fn window_title(&self) -> Option<String> {
         Some(
             self.pick

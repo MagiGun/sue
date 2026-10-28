@@ -1772,6 +1772,38 @@ impl SueApplet for Player {
         }
     }
 
+    fn sue_actions(
+        &self,
+        focus: Option<&sue_core::Entity>,
+        _current: bool,
+    ) -> Vec<sue_wm::SueAction> {
+        let me = || AppletId::new(ID).expect("a valid id");
+        let mut actions = vec![sue_wm::SueAction::new(
+            sue_wm::wheel::FILE,
+            "Add Music to the Player",
+            ShellRequest::AppletCommand {
+                applet: me(),
+                command: "player.add".to_owned(),
+            },
+        )];
+        if let Some(path) = focus
+            .and_then(|entity| entity.meta(sue_io::meta::SOURCE))
+            .map(PathBuf::from)
+            .filter(|path| library::is_audio(path) && path.is_file())
+        {
+            actions.push(sue_wm::SueAction::new(
+                sue_wm::wheel::SEND_TO,
+                "Player",
+                ShellRequest::SendFile {
+                    to: me(),
+                    purpose: "import".to_owned(),
+                    path,
+                },
+            ));
+        }
+        actions
+    }
+
     fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
         if pick.purpose == "import" {
             self.import(path.to_path_buf(), cx);

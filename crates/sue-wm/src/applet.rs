@@ -276,6 +276,27 @@ pub enum ShellRequest {
         /// The command, e.g. `player.next`.
         command: String,
     },
+    /// Open an entity in an applet: a studio takes its card (made if the
+    /// entity has none) and opens on it; a node applet puts it on the
+    /// canvas. How work moves between studios.
+    OpenIn {
+        /// The entity.
+        entity: sue_core::EntityId,
+        /// The studio or applet.
+        applet: AppletId,
+    },
+    /// Hand an entity to an applet (`SueApplet::take_entity`), e.g. a
+    /// picture to the Converter.
+    SendEntity {
+        /// Who gets it.
+        to: AppletId,
+        /// What it is for.
+        purpose: String,
+        /// The entity.
+        entity: sue_core::EntityId,
+    },
+    /// Open the Sue menu.
+    SueMenu,
     /// Hand a file to an applet, as if it had picked it (`Add to Player`).
     SendFile {
         /// Who gets it.
@@ -367,6 +388,40 @@ impl FilePick {
                 .extension()
                 .map(|ext| ext.to_string_lossy().to_ascii_lowercase())
                 .is_some_and(|ext| self.extensions.contains(&ext))
+    }
+}
+
+/// The Sue menu's wheels every applet can add to.
+pub mod wheel {
+    /// Projects: open, save, show.
+    pub const PROJECT: &str = "Project";
+    /// Files: new, open, the File Manager.
+    pub const FILE: &str = "File";
+    /// The thing in focus, into another studio or tool.
+    pub const SEND_TO: &str = "Send To";
+}
+
+/// One thing the Sue menu offers, for the thing in focus or for Sue as a
+/// whole. Applets add them (`SueApplet::sue_actions`), so the menu grows
+/// with every studio and tool, and none has to be named by the shell.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SueAction {
+    /// The wheel it sits on: one of [`wheel`], or a studio's own name.
+    pub wheel: String,
+    /// What people read.
+    pub label: String,
+    /// What it asks for.
+    pub request: ShellRequest,
+}
+
+impl SueAction {
+    /// An action on `wheel`.
+    pub fn new(wheel: impl Into<String>, label: impl Into<String>, request: ShellRequest) -> Self {
+        Self {
+            wheel: wheel.into(),
+            label: label.into(),
+            request,
+        }
     }
 }
 
@@ -695,6 +750,25 @@ pub trait SueApplet: Send {
     /// The floating window's title, when not the applet's name.
     fn window_title(&self) -> Option<String> {
         None
+    }
+
+    /// What the Sue menu offers from this applet for `focus` (the entity
+    /// the current studio works on, or the one selected on the canvas).
+    /// `current` is `true` when this applet is the open studio.
+    fn sue_actions(&self, focus: Option<&Entity>, current: bool) -> Vec<SueAction> {
+        let _ = (focus, current);
+        Vec::new()
+    }
+
+    /// Receives an entity another applet sent with
+    /// [`ShellRequest::SendEntity`].
+    fn take_entity(
+        &mut self,
+        purpose: &str,
+        entity: sue_core::EntityId,
+        cx: &mut AppletContext<'_>,
+    ) {
+        let _ = (purpose, entity, cx);
     }
 
     /// Chords a studio uses itself while it is open, which the shell then

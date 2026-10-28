@@ -1993,6 +1993,11 @@ fn shortcuts() -> Vec<(Modifiers, Key, &'static str)> {
     ]
 }
 
+/// Sue Paint's applet id.
+fn me_id() -> AppletId {
+    AppletId::new(ID).expect("a valid id")
+}
+
 /// Mirrors RGBA pixels left to right and/or top to bottom.
 pub(crate) fn mirror(pixels: &mut [u8], width: u32, height: u32, flip_h: bool, flip_v: bool) {
     let source = pixels.to_vec();
@@ -2133,7 +2138,59 @@ impl SueApplet for SuePaint {
             .collect()
     }
 
+    fn sue_actions(&self, focus: Option<&Entity>, current: bool) -> Vec<sue_wm::SueAction> {
+        let me = || AppletId::new(ID).expect("a valid id");
+        let command = |name: &str| ShellRequest::AppletCommand {
+            applet: me(),
+            command: name.to_owned(),
+        };
+        if current {
+            // Sue Paint's own wheel while it is open.
+            return [
+                ("New Picture", "file.new"),
+                ("Open Picture", "file.open"),
+                ("Import as a Layer", "file.import.image"),
+                ("Export as PNG", "file.export.png"),
+                ("Export as JPEG", "file.export.jpg"),
+                ("Export as JPEG XL", "file.export.jxl"),
+                ("Reset Palette Layout", "window.workspace.reset"),
+                ("Shortcuts", "help.shortcuts"),
+            ]
+            .into_iter()
+            .map(|(label, name)| sue_wm::SueAction::new("Sue Paint", label, command(name)))
+            .collect();
+        }
+        // A picture file on the canvas (a PNG, say) opens as a new picture.
+        let file = focus
+            .filter(|entity| !picture::is_picture(entity))
+            .filter(|entity| {
+                entity
+                    .component(sue_core::ComponentKind::RasterTile2D)
+                    .is_some()
+            })
+            .and_then(|entity| entity.meta(sue_io::meta::SOURCE))
+            .map(PathBuf::from)
+            .filter(|path| path.is_file());
+        match file {
+            Some(path) => vec![sue_wm::SueAction::new(
+                sue_wm::wheel::SEND_TO,
+                "Sue Paint",
+                ShellRequest::SendFile {
+                    to: me(),
+                    purpose: "open".to_owned(),
+                    path,
+                },
+            )],
+            None => Vec::new(),
+        }
+    }
+
     fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
+        if matches!(pick.purpose.as_str(), "open" | "layer")
+            && cx.view.studio.as_ref().map(AppletId::as_str) != Some(ID)
+        {
+            cx.request(ShellRequest::OpenStudio(me_id()));
+        }
         match pick.purpose.as_str() {
             "open" => self.open_picked(cx, path, false),
             "layer" => self.open_picked(cx, path, true),
