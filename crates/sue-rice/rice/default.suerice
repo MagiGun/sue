@@ -96,6 +96,14 @@ sort = "name"                  # {name|modified|size|kind} What the File Manager
 card_size = 112                # [64..256] Width of the File Manager's cards (px)
 saved = ""                     # @text Saved folders, separated by |
 
+[player]
+shuffle = false                # Play songs in a random order
+repeat = "off"                 # {off|all|one} Repeat the queue, one song, or nothing
+autoplay = true                # Go on to the next song when one ends
+normalize = true               # Even out loudness between songs
+preload = true                 # Decode the next song early so it starts at once
+covers = true                  # Show cover pictures kept next to the songs
+
 [io]
 jxl_effort = 7                 # [1..9] JPEG XL effort for conversions (higher is smaller and slower)
 jpeg_lossless_transcode = true # Recompress JPEG to JPEG XL bit for bit when a recompression codec is installed

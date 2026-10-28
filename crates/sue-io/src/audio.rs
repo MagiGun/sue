@@ -30,6 +30,12 @@ pub struct AudioInfo {
     pub artist: Option<String>,
     /// Album tag.
     pub album: Option<String>,
+    /// Track number tag (`3`, or the `3` of `3/12`).
+    pub track: Option<u32>,
+    /// Album artist tag.
+    pub album_artist: Option<String>,
+    /// Genre tag.
+    pub genre: Option<String>,
 }
 
 /// A decoded track.
@@ -91,10 +97,20 @@ impl MediaSource for SharedBytes {
 
 fn read_tags(revision: &MetadataRevision, info: &mut AudioInfo) {
     for tag in revision.tags() {
+        if tag.std_key == Some(StandardTagKey::TrackNumber) && info.track.is_none() {
+            let text = tag.value.to_string();
+            info.track = text
+                .split('/')
+                .next()
+                .and_then(|number| number.trim().parse().ok());
+            continue;
+        }
         let slot = match tag.std_key {
             Some(StandardTagKey::TrackTitle) => &mut info.title,
             Some(StandardTagKey::Artist) => &mut info.artist,
             Some(StandardTagKey::Album) => &mut info.album,
+            Some(StandardTagKey::AlbumArtist) => &mut info.album_artist,
+            Some(StandardTagKey::Genre) => &mut info.genre,
             _ => continue,
         };
         let value = tag.value.to_string();
@@ -102,6 +118,57 @@ fn read_tags(revision: &MetadataRevision, info: &mut AudioInfo) {
             *slot = Some(value.trim().to_owned());
         }
     }
+}
+
+/// Reads a track's tags, format and length from the file at `path`
+/// without decoding its sound, so a whole music folder can be listed
+/// quickly. `frames` is 0 when the container does not say.
+///
+/// # Errors
+/// If the file cannot be read or holds no audio.
+pub fn probe_audio(path: &std::path::Path) -> Result<AudioInfo, String> {
+    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    let stream = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(extension) = path.extension().and_then(|extension| extension.to_str()) {
+        hint.with_extension(extension);
+    }
+    let mut probed = symphonia::default::get_probe()
+        .format(
+            &hint,
+            stream,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .map_err(|error| error.to_string())?;
+    let mut info = AudioInfo::default();
+    if let Some(revision) = probed.metadata.get().as_ref().and_then(|log| log.current()) {
+        read_tags(revision, &mut info);
+    }
+    let format = &mut probed.format;
+    if let Some(revision) = format.metadata().current() {
+        read_tags(revision, &mut info);
+    }
+    let track = format
+        .tracks()
+        .iter()
+        .find(|track| track.codec_params.codec != CODEC_TYPE_NULL)
+        .ok_or_else(|| "the file has no audio track".to_owned())?;
+    let params = &track.codec_params;
+    info.sample_rate = params.sample_rate.unwrap_or(0);
+    info.channels = params.channels.map_or(0, |set| set.count()) as u16;
+    info.frames = params.n_frames.map_or(0, |frames| frames as usize);
+    info.codec = symphonia::default::get_codecs()
+        .get_codec(params.codec)
+        .map_or_else(
+            || "Audio".to_owned(),
+            |codec| match codec.short_name {
+                name if name.starts_with("pcm") => "PCM".to_owned(),
+                "vorbis" => "Vorbis".to_owned(),
+                name => name.to_uppercase(),
+            },
+        );
+    Ok(info)
 }
 
 /// Decodes a whole track. `extension` (e.g. `mp3`) helps the prober; the
@@ -258,6 +325,21 @@ mod tests {
             })
             .collect();
         PCMFloat1D::new(rate, 2, samples).unwrap()
+    }
+
+    #[test]
+    fn probing_reads_the_length_without_decoding() {
+        let wav = encode_wav(&tone(48_000, 24_000));
+        let path = std::env::temp_dir().join(format!("sue-probe-{}.wav", std::process::id()));
+        std::fs::write(&path, &wav).unwrap();
+        let info = probe_audio(&path).unwrap();
+        assert_eq!(
+            (info.sample_rate, info.channels, info.frames),
+            (48_000, 2, 24_000)
+        );
+        assert_eq!(info.codec, "PCM");
+        let _ = std::fs::remove_file(&path);
+        assert!(probe_audio(&path).is_err(), "a missing file is an error");
     }
 
     #[test]

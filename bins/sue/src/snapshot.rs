@@ -388,6 +388,51 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     }
     shoot(&mut runtime, &mut camera, "09b-file-manager")?;
     runtime.shell.close_window();
+
+    // 9c. The large Player, with the sample song added and playing.
+    let player = AppletId::new(crate::player::ID).map_err(|error| error.to_string())?;
+    runtime.request(
+        ShellRequest::SendFile {
+            to: player.clone(),
+            purpose: "import".to_owned(),
+            path: home.clone(),
+        },
+        &mut camera.painter,
+        camera.now,
+    );
+    for _ in 0..80 {
+        runtime.timer(&mut camera.painter, camera.now);
+        camera.now += Duration::from_millis(25);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    runtime.request(
+        ShellRequest::AppletCommand {
+            applet: player.clone(),
+            command: "player.toggle".to_owned(),
+        },
+        &mut camera.painter,
+        camera.now,
+    );
+    for _ in 0..40 {
+        runtime.timer(&mut camera.painter, camera.now);
+        camera.now += Duration::from_millis(25);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    runtime.request(
+        ShellRequest::OpenWindow(player.clone()),
+        &mut camera.painter,
+        camera.now,
+    );
+    shoot(&mut runtime, &mut camera, "09c-player")?;
+    runtime.request(
+        ShellRequest::AppletCommand {
+            applet: player,
+            command: "player.toggle".to_owned(),
+        },
+        &mut camera.painter,
+        camera.now,
+    );
+    runtime.shell.close_window();
     let _ = runtime
         .engine
         .world

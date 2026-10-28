@@ -70,7 +70,7 @@ pub use spring::{SpringDamper, SpringMode, SpringParams};
 pub use text::{ArenaText, TYPING_PAUSE, Typing};
 pub use theme::Theme;
 pub use timeline::{Block, TimelineEvent, TimelineState, timecode};
-pub use transport::{Clip, Transport, pcm_of};
+pub use transport::{Clip, ClipSource, Transport, pcm_of};
 pub use world::{
     APP_CLASS_PREFIX, ArenaEdit, Batch, NewEntity, PlaceNode, RemoveNode, RiceEdit, SetNodeProp,
     SetNodeRect, SpawnNode, World,

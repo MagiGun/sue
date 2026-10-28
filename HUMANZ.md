@@ -607,7 +607,8 @@ else:           xsize = ysize * {1/1, 12/10, 4/3, 3/2, 16/9, 5/4, 2/1}[ratio - 1
 `sue_io::ingest_bytes` turns any opened or dropped file into one entity, routed
 by content: JPEG XL decodes through the pipeline, PNG and JPEG through
 `zune-png` / `zune-jpeg`, all into `Rgba8` rasters; MP3, FLAC, WAV, Ogg Vorbis
-and AAC / M4A decode through `symphonia` into `PCMFloat1D`; text becomes a
+and AAC / M4A decode through `symphonia` into `PCMFloat1D` (`probe_audio`
+reads a file's tags and length without decoding it); text becomes a
 `StringBuffer`; anything else, including media Sue has no decoder for yet,
 becomes a `Gray8` byte-map raster. Each entity carries metadata (`bytes`,
 `route`, `format`, size, decode time, colour and depth, codec and tags,
@@ -871,8 +872,10 @@ registers the callback thread with the OS real-time scheduler
 (`audio_thread_priority`: MMCSS on Windows) on its first call and reports
 whether the OS granted it. The stream opens when something first plays and
 reopens when its settings change. The shared `Transport` (used by the Player,
-audio entities and the timeline) keeps decoded tracks in the arena and tops the
-ring up every 40 ms from the next slice of the clip, resampled linearly to the
+audio entities and the timeline) plays a `Clip` whose `ClipSource` is an
+arena entity or a `Shared<PCMFloat1D>` held outside the arena (the Player's
+library, which is not project data); it tops the ring up every 40 ms from the
+next slice of the clip, resampled linearly to the
 device rate; the ring is the device boundary, like a texture upload. A DAW graph
 will run on the same ring discipline.
 
@@ -1034,7 +1037,7 @@ register its own:
 | Image | Node | Image (palette only); Paint/Visual Track | Decoded JPEG XL, PNG or JPEG; 1:1 Zoom, Pixel Grid, Re-encode .jxl (bit-exact for JPEG when a codec allows), Inspect Hex |
 | Code / Hex | Node | Code / Hex (palette only); Code: Rust, Python, JavaScript, HTML, CSS, JSON, Shell Script | Code in a monospace `TextEdit`, or a selectable hex dump of any file's bytes; Copy All |
 | File Manager | Left drawer and window | n/a | Folder tabs with back and forward; a typed or copied path bar; list or card view (`files.view`), sort (`files.sort`), card size; picture thumbnails decoded and shrunk on a background thread; search of the folder or, on a background thread, everything under it (2,000 results, 200,000 entries at most); places (project, home and its usual folders, `sue_platform::roots`) and saved folders (`files.saved`, undoable rice edits); new folder, rename, copy path, show in Explorer; the large window answers every `FilePick` |
-| Player | Left drawer | n/a | Every decoded track as a playlist; waveform scrubber, play, stop, volume |
+| Player | Left drawer and window | n/a | A music library in the data folder (a versioned tab-separated text file: songs with tags and length from `sue_io::probe_audio`, playlists, hand-made albums, likes); albums from the tags, artists, search; a queue with shuffle, repeat off, all or one, and autoplay; songs decoded on a background thread into `Shared` buffers, the next one ahead of time, with loudness evening; shuffle, previous, play, next, repeat, seek, volume and mute; covers from a collection's picture or `cover.jpg` and the like beside the songs; `player.*` settings; palette commands |
 | Convert | Left drawer | n/a | Pictures to lossless JPEG XL, PNG or JPEG (`io.jpeg_quality`), songs to 16-bit WAV |
 | Notes | Left drawer | n/a | One shared note in a `TextEdit`, autosaved every `general.autosave_seconds` and on exit |
 | Inspector | Right drawer | n/a | The selected node's place, size and properties, its entity's projections, memory and metadata |

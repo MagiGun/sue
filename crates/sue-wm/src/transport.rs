@@ -1,9 +1,11 @@
-//! The audio transport shared by the Player drawer, audio entities and the
-//! timeline. The track stays in the arena; each tick feeds the platform
-//! sink's ring with the next slice of the clip, resampled to the device rate
-//! (the ring is the device boundary, like a texture upload for images).
+//! The audio transport shared by the Player, audio entities and the
+//! timeline. A clip plays an arena entity, or a decoded track held in a
+//! [`Shared`] buffer (the Player's library, which is not project data);
+//! each tick feeds the platform sink's ring with the next slice of the
+//! clip, resampled to the device rate (the ring is the device boundary,
+//! like a texture upload for images).
 
-use sue_core::{AssetHandle, ComponentKind, PCMFloat1D};
+use sue_core::{AssetHandle, ComponentKind, PCMFloat1D, Shared};
 use sue_platform::AudioSink;
 
 use crate::World;
@@ -62,11 +64,47 @@ fn resample(
     out
 }
 
+/// Where a clip's sound comes from.
+#[derive(Clone, PartialEq)]
+pub enum ClipSource {
+    /// An audio entity in the arena.
+    Entity(AssetHandle),
+    /// A decoded track outside the arena, shared without copying.
+    Stream(Shared<PCMFloat1D>),
+}
+
+impl std::fmt::Debug for ClipSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Entity(handle) => f.debug_tuple("Entity").field(handle).finish(),
+            Self::Stream(pcm) => write!(f, "Stream({} frames)", pcm.frames()),
+        }
+    }
+}
+
+impl ClipSource {
+    /// The entity, if the sound comes from the arena.
+    #[must_use]
+    pub fn entity(&self) -> Option<AssetHandle> {
+        match self {
+            Self::Entity(handle) => Some(*handle),
+            Self::Stream(_) => None,
+        }
+    }
+
+    fn pcm<'w>(&'w self, world: &'w World) -> Option<&'w PCMFloat1D> {
+        match self {
+            Self::Entity(handle) => pcm_of(world, *handle),
+            Self::Stream(pcm) => Some(pcm),
+        }
+    }
+}
+
 /// What is loaded into the transport.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Clip {
-    /// The audio entity.
-    pub source: AssetHandle,
+    /// Where the sound comes from.
+    pub source: ClipSource,
     /// First frame to play.
     pub start: usize,
     /// Frame to stop at.
@@ -170,7 +208,7 @@ impl Transport {
         if !self.playing {
             return false;
         }
-        let Some(pcm) = pcm_of(world, clip.source) else {
+        let Some(pcm) = clip.source.pcm(world) else {
             self.playing = false;
             return true;
         };
@@ -227,7 +265,7 @@ mod tests {
         let mut transport = Transport::default();
         transport.load(
             Clip {
-                source: handle,
+                source: ClipSource::Entity(handle),
                 start: 2_000,
                 end: 4_000,
                 gain: 0.5,
@@ -248,5 +286,35 @@ mod tests {
         assert!(ended, "the clip never ended");
         assert!(!transport.is_playing());
         assert!(transport.position() >= 3_999.0);
+    }
+
+    #[test]
+    fn a_shared_track_plays_without_the_arena() {
+        let pcm = PCMFloat1D::new(8_000, 1, vec![0.25; 8_000]).unwrap();
+        let shared = Shared::new(pcm);
+        let mut sink = NullAudio::new(8_000, 2, 4_000);
+        let mut transport = Transport::default();
+        transport.load(
+            Clip {
+                source: ClipSource::Stream(shared.clone()),
+                start: 0,
+                end: 8_000,
+                gain: 1.0,
+                owner: "player".to_owned(),
+            },
+            Some(&mut sink),
+        );
+        transport.set_playing(true, Some(&mut sink));
+        let world = World::default();
+        let mut ended = false;
+        for _ in 0..64 {
+            ended = transport.pump(&world, &mut sink, 1.0);
+            sink.advance(1_000);
+            if ended {
+                break;
+            }
+        }
+        assert!(ended);
+        assert_eq!(shared.holders(), 2, "played from the one buffer, no copy");
     }
 }

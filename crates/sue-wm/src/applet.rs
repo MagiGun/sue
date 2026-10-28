@@ -269,6 +269,22 @@ pub enum ShellRequest {
     },
     /// Show an applet's window (its `window_ui`) floating over the screen.
     OpenWindow(AppletId),
+    /// Run one of an applet's commands, as the palette does.
+    AppletCommand {
+        /// The applet.
+        applet: AppletId,
+        /// The command, e.g. `player.next`.
+        command: String,
+    },
+    /// Hand a file to an applet, as if it had picked it (`Add to Player`).
+    SendFile {
+        /// Who gets it.
+        to: AppletId,
+        /// What it is for, e.g. `import`.
+        purpose: String,
+        /// The file or folder.
+        path: PathBuf,
+    },
     /// Close the floating window.
     CloseWindow,
     /// A file was written: say where, and show it in its folder on a click.
@@ -297,6 +313,8 @@ pub struct FilePick {
     pub save_as: Option<String>,
     /// The folder to start in.
     pub start: Option<PathBuf>,
+    /// `true` when a whole folder may be chosen too.
+    pub folders: bool,
 }
 
 impl FilePick {
@@ -324,6 +342,13 @@ impl FilePick {
     #[must_use]
     pub fn extensions(mut self, extensions: &[&str]) -> Self {
         self.extensions = extensions.iter().map(|&ext| ext.to_owned()).collect();
+        self
+    }
+
+    /// The same request, also taking a whole folder.
+    #[must_use]
+    pub fn or_folder(mut self) -> Self {
+        self.folders = true;
         self
     }
 

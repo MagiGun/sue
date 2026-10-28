@@ -503,6 +503,7 @@ impl Engine {
                         ]),
                     ),
                     group("Status", vec![fact("audio.stream"), fact("audio.realtime")]),
+                    group("Player", vec![section("player")]),
                 ],
             ),
             SettingsPage::new(
@@ -579,6 +580,7 @@ impl Engine {
             ("home", self.paths.home_dir.clone()),
             ("rice", self.paths.rice_dir()),
             ("notes", self.paths.notes_dir()),
+            ("player", self.paths.data_dir.join("player")),
         ] {
             catalog.folders.insert(name.to_owned(), folder);
         }

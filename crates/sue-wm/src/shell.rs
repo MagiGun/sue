@@ -1204,6 +1204,25 @@ impl Shell {
             ShellRequest::Saved { path, note } => self.notify_saved(&path, &note),
             ShellRequest::CloseWindow => self.close_window(),
             ShellRequest::OpenWindow(id) => self.open_window(id),
+            ShellRequest::AppletCommand { applet, command } => {
+                let view = self.view(now, 0.0);
+                let theme = self.theme.clone();
+                let (applets, mut cx) = split(io, &theme, view);
+                if let Some(target) = applets.get_mut(&applet)
+                    && !target.command(&command, &mut cx)
+                {
+                    cx.fail(format!("{command} is not available"));
+                }
+            }
+            ShellRequest::SendFile { to, purpose, path } => {
+                let pick = crate::FilePick::open(Some(to.clone()), &purpose, "");
+                let view = self.view(now, 0.0);
+                let theme = self.theme.clone();
+                let (applets, mut cx) = split(io, &theme, view);
+                if let Some(applet) = applets.get_mut(&to) {
+                    applet.picked(&pick, &path, &mut cx);
+                }
+            }
             ShellRequest::PickFile(pick) => {
                 // The first applet that picks files shows it in its window.
                 let picker = io.applets.iter_mut().find_map(|(manifest, applet)| {
@@ -1766,7 +1785,7 @@ impl Shell {
                     (
                         id,
                         Clip {
-                            source: node.entity,
+                            source: crate::ClipSource::Entity(node.entity),
                             start: start_frame as usize,
                             end: end_frame as usize,
                             gain: node.prop("gain", 1.0) as f32,

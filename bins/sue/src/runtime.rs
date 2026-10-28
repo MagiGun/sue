@@ -1415,6 +1415,92 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_player_adds_a_folder_of_songs_and_plays_through_them() {
+        let (mut runtime, root) = runtime("player");
+        let music = root.join("music");
+        std::fs::create_dir_all(music.join("disc")).unwrap();
+        for (name, value) in [("one.wav", 0.1_f32), ("disc/two.wav", 0.2)] {
+            let pcm = sue_core::PCMFloat1D::new(8_000, 1, vec![value; 8_000]).unwrap();
+            std::fs::write(music.join(name), sue_io::encode_wav(&pcm)).unwrap();
+        }
+        let mut now = Instant::now();
+        let player = AppletId::new(crate::player::ID).unwrap();
+        // The File Manager's Add to Player, on a whole folder.
+        runtime.request(
+            ShellRequest::SendFile {
+                to: player.clone(),
+                purpose: "import".to_owned(),
+                path: music.clone(),
+            },
+            &mut NoTextures,
+            now,
+        );
+        let library = runtime.engine.catalog.folders["player"].join("library.txt");
+        let songs = move || {
+            std::fs::read_to_string(&library)
+                .map(|text| {
+                    text.lines()
+                        .filter(|line| line.starts_with("song\t"))
+                        .count()
+                })
+                .unwrap_or(0)
+        };
+        let mut wait = |runtime: &mut Runtime, until: &dyn Fn(&Runtime) -> bool| {
+            for _ in 0..400 {
+                if until(runtime) {
+                    return true;
+                }
+                runtime.timer(&mut NoTextures, now);
+                now += Duration::from_millis(50);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            false
+        };
+        assert!(
+            wait(&mut runtime, &|_| songs() == 2),
+            "both songs are in the library"
+        );
+
+        // Play: the song decodes in the background, then plays from its
+        // shared buffer, not from the arena.
+        let entities = runtime.engine.world.arena.len();
+        let command = |name: &str| ShellRequest::AppletCommand {
+            applet: player.clone(),
+            command: name.to_owned(),
+        };
+        runtime.request(command("player.toggle"), &mut NoTextures, Instant::now());
+        let playing_stream = |runtime: &Runtime| {
+            runtime.transport.is_playing()
+                && runtime.transport.clip().is_some_and(|clip| {
+                    clip.owner == "player" && matches!(clip.source, sue_wm::ClipSource::Stream(_))
+                })
+        };
+        assert!(wait(&mut runtime, &playing_stream), "the first song plays");
+        assert_eq!(
+            runtime.engine.world.arena.len(),
+            entities,
+            "nothing went into the arena"
+        );
+        let frames_of = |runtime: &Runtime| match runtime.transport.clip().map(|clip| &clip.source)
+        {
+            Some(sue_wm::ClipSource::Stream(pcm)) => pcm.samples()[0],
+            _ => 0.0,
+        };
+        let first = frames_of(&runtime);
+
+        // Next: the other song, already decoded ahead.
+        runtime.request(command("player.next"), &mut NoTextures, Instant::now());
+        assert!(wait(&mut runtime, &|runtime| playing_stream(runtime)
+            && frames_of(runtime) != first));
+        // Pause, and play again.
+        runtime.request(command("player.toggle"), &mut NoTextures, Instant::now());
+        assert!(!runtime.transport.is_playing());
+        runtime.request(command("player.toggle"), &mut NoTextures, Instant::now());
+        assert!(runtime.transport.is_playing());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn spawned_entities_undo_and_redo_with_their_buffers() {
         let (mut runtime, root) = runtime("spawn");
         let ctx = egui::Context::default();

@@ -104,7 +104,7 @@ impl AudioNode {
         let sink = cx.audio.as_deref_mut();
         cx.transport.load(
             Clip {
-                source: scene_node.entity,
+                source: sue_wm::ClipSource::Entity(scene_node.entity),
                 start,
                 end,
                 gain,

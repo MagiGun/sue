@@ -26,7 +26,7 @@ mod raster;
 mod sniff;
 mod tile_cache;
 
-pub use audio::{AudioInfo, DecodedAudio, decode_audio, encode_wav};
+pub use audio::{AudioInfo, DecodedAudio, decode_audio, encode_wav, probe_audio};
 pub use bytemap::{byte_map_tile, shannon_entropy};
 pub use formats::{
     CompressedAudioFormat, DelimitedFormat, JpegFormat, JxlFormat, KeptFormat, ObjFormat,

@@ -164,8 +164,24 @@ one to slide its drawer open; click it again to tuck it away.
   makes one, and **Open in Explorer** shows the folder in your system's file
   manager. "Open the large File Manager" shows it all in a big window.
   Hidden system clutter stays hidden.
-- **Player** (left): play music (MP3, FLAC, WAV, Ogg, M4A) while you work in any
-  mode, with a waveform you can click to jump, and a volume slider.
+- **Player** (left): your music library (MP3, FLAC, WAV, Ogg, M4A and more),
+  playing while you work anywhere in Sue. It works like the music apps you
+  know: the song playing with its cover and a heart to like it; Shuffle,
+  Previous, a big Play and Pause, Next and Repeat (the queue, or one song);
+  a bar to jump around the song; and the volume with a mute button. Browse
+  **Songs**, **Albums** (made from the songs' tags, or put together by hand
+  with New Album), **Artists**, **Liked** songs, **Playlists** and the
+  **Queue**, and search them all by title, artist, album or genre. Each
+  song's `+` (or a right-click) plays it next, adds it to the queue or to a
+  playlist, likes it, or shows it in Explorer. Playlists and your own albums
+  can be renamed, given a cover picture, reordered and deleted. Add songs
+  with **Add Music** or, in the File Manager, pick a song or a whole folder
+  and click **Add to Player**. Your library is yours alone: it is kept by
+  Sue, not in your projects. Under Settings, Audio & DSP, Player you can
+  turn on shuffle and repeat, going on to the next song, evening out
+  loudness between songs, loading the next song early, and cover pictures.
+  "Open the Large Player" shows it in a big window with a sidebar, and the
+  command palette has Play or Pause, Next Song and Previous Song.
 - **Convert** (left): turn a picture into JPEG XL, PNG or JPEG, or a song into
   WAV. The new file is saved next to the original.
 - **Notes** (left): jot something down. Notes save themselves.

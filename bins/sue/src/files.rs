@@ -7,7 +7,7 @@
 //! Dot files and the Windows legacy junctions (`NetHood`, `Start Menu` and
 //! the like) are hidden unless `files.show_hidden` is on.
 
-mod thumbs;
+pub(crate) mod thumbs;
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -1168,6 +1168,19 @@ impl Files {
                     path.display()
                 )));
             }
+            let playable = path.is_dir() || crate::player::library::is_audio(&path);
+            if self.pick.is_none()
+                && playable
+                && widgets::pill_button(ui, "Add to Player", false, theme)
+                    .on_hover_text("Add this song, or every song in this folder, to the Player")
+                    .clicked()
+            {
+                cx.request(ShellRequest::SendFile {
+                    to: sue_wm::AppletId::new(crate::player::ID).expect("a valid id"),
+                    purpose: "import".to_owned(),
+                    path: path.clone(),
+                });
+            }
             if self.pick.is_none() && widgets::pill_button(ui, "Open", false, theme).clicked() {
                 if path.is_dir() {
                     self.go(path.clone());
@@ -1207,6 +1220,13 @@ impl Files {
                     chosen = Some(dir.join(name));
                 }
             } else {
+                if pick.folders
+                    && widgets::pill_button(ui, "Choose This Folder", true, theme)
+                        .on_hover_text(dir.display().to_string())
+                        .clicked()
+                {
+                    chosen = Some(dir.clone());
+                }
                 let file = self
                     .selected
                     .clone()
