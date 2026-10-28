@@ -70,7 +70,7 @@ impl SueApplet for Player {
         let tracks: Vec<AssetHandle> = cx
             .arena()
             .iter()
-            .filter(|(_, entity)| entity.base_kind() == ComponentKind::PCMFloat1D)
+            .filter(|(_, entity)| entity.base_kind() == Some(ComponentKind::PCMFloat1D))
             .map(|(handle, _)| handle)
             .collect();
         let current = cx

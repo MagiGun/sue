@@ -89,7 +89,7 @@ impl SueApplet for Hex {
 
     fn accepts(&self, entity: &Entity) -> bool {
         entity.meta(meta::ENTROPY).is_some()
-            || (entity.base_kind() == ComponentKind::StringBuffer
+            || (entity.base_kind() == Some(ComponentKind::StringBuffer)
                 && entity.meta(KIND) == Some(KIND_CODE))
     }
 
@@ -123,7 +123,7 @@ impl SueApplet for Hex {
         let Ok(entity) = cx.world.arena.get_mut(handle) else {
             return;
         };
-        if entity.base_kind() == ComponentKind::StringBuffer {
+        if entity.base_kind() == Some(ComponentKind::StringBuffer) {
             if let Some(buffer) = entity.string_buffer_mut() {
                 let mut text = ArenaText::new(buffer, &mut ops);
                 egui::TextEdit::multiline(&mut text)

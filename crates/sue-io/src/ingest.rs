@@ -346,7 +346,7 @@ mod tests {
         let ingested = ingest_bytes(&mut arena, "card.jxl", encoded, &pipeline, OPTIONS).unwrap();
         assert_eq!(ingested.view, IngestView::Raster);
         let entity = arena.get(ingested.handle).unwrap();
-        assert_eq!(entity.base_kind(), ComponentKind::RasterTile2D);
+        assert_eq!(entity.base_kind(), Some(ComponentKind::RasterTile2D));
         assert_eq!(entity.meta(meta::WIDTH), Some("4"));
         assert_eq!(entity.meta(meta::FORMAT), Some("JPEG XL"));
         assert_eq!(entity.meta(meta::ROUTE), Some("Tier 1: JPEG XL"));
@@ -385,7 +385,7 @@ mod tests {
         .unwrap();
         assert_eq!(ingested.view, IngestView::Audio);
         let entity = arena.get(ingested.handle).unwrap();
-        assert_eq!(entity.base_kind(), ComponentKind::PCMFloat1D);
+        assert_eq!(entity.base_kind(), Some(ComponentKind::PCMFloat1D));
         assert_eq!(entity.meta(meta::SAMPLE_RATE), Some("8000"));
         assert_eq!(entity.meta(meta::CODEC), Some("PCM"));
     }

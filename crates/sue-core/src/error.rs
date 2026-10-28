@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{AssetHandle, ComponentKind, Projection};
+use crate::{AssetHandle, ComponentKind, EntityId, Projection, RelationError};
 
 /// Errors raised by the kernel: stale handles, projection rules and buffer
 /// invariants.
@@ -60,6 +60,12 @@ pub enum CoreError {
     },
     /// A component buffer violates its layout invariant.
     InvalidBuffer(&'static str),
+    /// No live entity has this id.
+    UnknownId(EntityId),
+    /// The id is nil or already used by another entity.
+    DuplicateId(EntityId),
+    /// A relation would break a tree.
+    Relation(RelationError),
 }
 
 impl fmt::Display for CoreError {
@@ -96,6 +102,9 @@ impl fmt::Display for CoreError {
                 write!(f, "offset {offset} is not on a UTF-8 character boundary")
             }
             Self::InvalidBuffer(reason) => write!(f, "invalid buffer: {reason}"),
+            Self::UnknownId(id) => write!(f, "no entity has the id {id}"),
+            Self::DuplicateId(id) => write!(f, "the id {id} is nil or already in use"),
+            Self::Relation(error) => write!(f, "{error}"),
         }
     }
 }

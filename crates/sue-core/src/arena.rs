@@ -1,39 +1,179 @@
 //! The generational entity arena.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
+use crate::codec::{CodecError, Reader, Writer};
+use crate::registry::components_equal;
 use crate::{
-    AssetHandle, ComponentData, ComponentKind, CoreError, Projection, ProjectionMask, StringBuffer,
+    AssetHandle, Component, ComponentData, ComponentKind, ComponentRegistry, ComponentType,
+    CoreError, EntityId, Projection, ProjectionMask, Properties, Relation, RelationStore,
+    StringBuffer, Value,
 };
 
-/// An asset: a base component plus any number of projection components, at
-/// most one per kind, and free-form string metadata (source path, byte length,
-/// codec details).
-#[derive(Clone, Debug, PartialEq)]
+/// An asset: a stable id, a class that says what it is, an optional base
+/// buffer plus projection buffers (at most one per kind), extension
+/// components (at most one per type), properties and string metadata.
+#[derive(Clone, Debug)]
 pub struct Entity {
+    id: EntityId,
     name: String,
-    base: ComponentKind,
+    class: String,
+    base: Option<ComponentKind>,
     projections: ProjectionMask,
     components: BTreeMap<ComponentKind, ComponentData>,
     metadata: BTreeMap<String, String>,
+    properties: Properties,
+    ext: BTreeMap<String, Box<dyn Component>>,
+    revision: u64,
+}
+
+impl PartialEq for Entity {
+    /// Equal content; the revision counter is ignored.
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.name == other.name
+            && self.class == other.class
+            && self.base == other.base
+            && self.projections == other.projections
+            && self.components == other.components
+            && self.metadata == other.metadata
+            && self.properties == other.properties
+            && self.ext.len() == other.ext.len()
+            && self
+                .ext
+                .iter()
+                .zip(&other.ext)
+                .all(|((a_name, a), (b_name, b))| {
+                    a_name == b_name && components_equal(a.as_ref(), b.as_ref())
+                })
+    }
 }
 
 impl Entity {
-    fn new(name: String, base: ComponentData) -> Self {
+    /// An entity named `name` with a fresh id, whose base is `base`. Its
+    /// class defaults to the base kind's ([`ComponentKind::default_class`]).
+    pub fn new(name: impl Into<String>, base: impl Into<ComponentData>) -> Self {
+        let base = base.into();
         let kind = base.kind();
         Self {
-            name,
-            base: kind,
+            class: kind.default_class().to_owned(),
+            base: Some(kind),
             projections: ProjectionMask::EMPTY.with(Projection::of_kind(kind)),
             components: BTreeMap::from([(kind, base)]),
-            metadata: BTreeMap::new(),
+            ..Self::empty(name, "sue.entity")
         }
+    }
+
+    /// An entity with no base buffer: a folder, a group, a scene, a table
+    /// or anything made only of extension components and relations.
+    pub fn empty(name: impl Into<String>, class: impl Into<String>) -> Self {
+        Self {
+            id: EntityId::new(),
+            name: name.into(),
+            class: class.into(),
+            base: None,
+            projections: ProjectionMask::EMPTY,
+            components: BTreeMap::new(),
+            metadata: BTreeMap::new(),
+            properties: Properties::new(),
+            ext: BTreeMap::new(),
+            revision: 0,
+        }
+    }
+
+    /// With a given id (loading, or redoing a creation).
+    #[must_use]
+    pub fn with_id(mut self, id: EntityId) -> Self {
+        self.id = id;
+        self
+    }
+
+    /// With a class, e.g. `sue.document` or `noelle.scene`.
+    #[must_use]
+    pub fn with_class(mut self, class: impl Into<String>) -> Self {
+        self.class = class.into();
+        self
+    }
+
+    /// With a metadata entry.
+    #[must_use]
+    pub fn with_meta(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.set_meta(key, value);
+        self
+    }
+
+    /// With a property.
+    #[must_use]
+    pub fn with_property(mut self, key: impl Into<String>, value: impl Into<Value>) -> Self {
+        self.properties.set(key, value);
+        self
+    }
+
+    /// With an extension component.
+    #[must_use]
+    pub fn with_ext(mut self, component: impl Component) -> Self {
+        self.set_ext(Box::new(component));
+        self
+    }
+
+    /// With a projection buffer next to the base.
+    ///
+    /// # Errors
+    /// [`CoreError::AlreadyProjected`] if that kind is already present.
+    pub fn with_component(
+        mut self,
+        component: impl Into<ComponentData>,
+    ) -> Result<Self, CoreError> {
+        let component = component.into();
+        let projection = Projection::of_kind(component.kind());
+        if self.components.contains_key(&component.kind()) {
+            return Err(CoreError::AlreadyProjected {
+                handle: AssetHandle::NULL,
+                projection,
+            });
+        }
+        if self.base.is_none() {
+            self.base = Some(component.kind());
+        }
+        self.projections.insert(projection);
+        self.components.insert(component.kind(), component);
+        Ok(self)
+    }
+
+    /// The stable id.
+    #[must_use]
+    pub fn id(&self) -> EntityId {
+        self.id
     }
 
     /// Human-readable name, e.g. a file name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Renames the entity, returning the old name.
+    pub fn set_name(&mut self, name: impl Into<String>) -> String {
+        std::mem::replace(&mut self.name, name.into())
+    }
+
+    /// What the entity is, e.g. `sue.image` or `cad.part`. Features decide
+    /// whether they can open an entity by its class first.
+    #[must_use]
+    pub fn class(&self) -> &str {
+        &self.class
+    }
+
+    /// Changes the class, returning the old one.
+    pub fn set_class(&mut self, class: impl Into<String>) -> String {
+        std::mem::replace(&mut self.class, class.into())
+    }
+
+    /// The arena revision of the last mutable access: compare with a value
+    /// saved earlier to know whether caches (thumbnails, renders) are stale.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// The metadata value for `key`.
@@ -48,6 +188,11 @@ impl Entity {
         self.metadata.insert(key.into(), value.into())
     }
 
+    /// Removes a metadata value.
+    pub fn remove_meta(&mut self, key: &str) -> Option<String> {
+        self.metadata.remove(key)
+    }
+
     /// All metadata, ordered by key.
     pub fn metadata(&self) -> impl Iterator<Item = (&str, &str)> {
         self.metadata
@@ -55,9 +200,26 @@ impl Entity {
             .map(|(key, value)| (key.as_str(), value.as_str()))
     }
 
-    /// Kind of the base component given at spawn.
+    /// The properties (edit state any feature can read).
     #[must_use]
-    pub fn base_kind(&self) -> ComponentKind {
+    pub fn properties(&self) -> &Properties {
+        &self.properties
+    }
+
+    /// The properties, mutably. Mutations must come from a transaction.
+    pub fn properties_mut(&mut self) -> &mut Properties {
+        &mut self.properties
+    }
+
+    /// One property.
+    #[must_use]
+    pub fn property(&self, key: &str) -> Option<&Value> {
+        self.properties.get(key)
+    }
+
+    /// Kind of the base buffer, if the entity has one.
+    #[must_use]
+    pub fn base_kind(&self) -> Option<ComponentKind> {
         self.base
     }
 
@@ -97,13 +259,130 @@ impl Entity {
             .as_string_buffer_mut()
     }
 
+    /// The extension component of type `T`.
+    #[must_use]
+    pub fn ext<T: ComponentType>(&self) -> Option<&T> {
+        self.ext.get(T::NAME)?.as_any().downcast_ref()
+    }
+
+    /// The extension component of type `T`, mutably.
+    pub fn ext_mut<T: ComponentType>(&mut self) -> Option<&mut T> {
+        self.ext.get_mut(T::NAME)?.as_any_mut().downcast_mut()
+    }
+
+    /// The extension component named `name`, whatever its type.
+    #[must_use]
+    pub fn ext_named(&self, name: &str) -> Option<&dyn Component> {
+        self.ext.get(name).map(AsRef::as_ref)
+    }
+
+    /// Adds or replaces an extension component, returning the old one.
+    pub fn set_ext(&mut self, component: Box<dyn Component>) -> Option<Box<dyn Component>> {
+        self.ext.insert(component.type_name().to_owned(), component)
+    }
+
+    /// Removes the extension component named `name`.
+    pub fn remove_ext(&mut self, name: &str) -> Option<Box<dyn Component>> {
+        self.ext.remove(name)
+    }
+
+    /// Every extension component, ordered by type name.
+    pub fn exts(&self) -> impl Iterator<Item = &dyn Component> {
+        self.ext.values().map(AsRef::as_ref)
+    }
+
+    /// Points every entity link (properties, AST children, extension
+    /// components) through `map`.
+    pub fn remap_entities(&mut self, map: &mut dyn FnMut(EntityId) -> EntityId) {
+        self.properties
+            .values_mut()
+            .for_each(|value| value.remap_entities(map));
+        if let Some(ComponentData::ASTNode(node)) = self.components.get_mut(&ComponentKind::ASTNode)
+        {
+            node.remap_children(map);
+        }
+        for component in self.ext.values_mut() {
+            component.remap_entities(map);
+        }
+    }
+
     /// Approximate heap footprint of every component, in bytes.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.components
             .values()
             .map(ComponentData::heap_bytes)
-            .sum()
+            .sum::<usize>()
+            + self.ext.values().map(|ext| ext.heap_bytes()).sum::<usize>()
+    }
+
+    /// Writes the entity (everything but its revision).
+    pub fn encode(&self, out: &mut Writer) {
+        out.raw(&self.id.to_bytes());
+        out.str(&self.name);
+        out.str(&self.class);
+        out.str(self.base.map_or("", ComponentKind::name));
+        out.len(self.components.len());
+        for component in self.components.values() {
+            out.str(component.kind().name());
+            out.nested(|out| component.encode(out));
+        }
+        out.len(self.metadata.len());
+        for (key, value) in &self.metadata {
+            out.str(key);
+            out.str(value);
+        }
+        self.properties.encode(out);
+        out.len(self.ext.len());
+        for component in self.ext.values() {
+            out.str(component.type_name());
+            out.varint(u64::from(component.version()));
+            out.nested(|out| component.encode(out));
+        }
+    }
+
+    /// Reads an entity. Extension components decode through `registry`;
+    /// unknown ones are kept opaque.
+    ///
+    /// # Errors
+    /// If the bytes are malformed.
+    pub fn decode(
+        input: &mut Reader<'_>,
+        registry: &ComponentRegistry,
+    ) -> Result<Self, CodecError> {
+        let mut id = [0; 16];
+        id.copy_from_slice(input.raw(16)?);
+        let mut entity = Self::empty(input.str()?, input.str()?).with_id(EntityId::from_bytes(id));
+        let base = input.str()?;
+        for _ in 0..input.len(2)? {
+            let name = input.str()?;
+            let kind = ComponentKind::from_name(&name)
+                .ok_or_else(|| input.error(format!("unknown built-in component {name}")))?;
+            let mut body = input.nested()?;
+            let component = ComponentData::decode(kind, &mut body)?;
+            entity.projections.insert(Projection::of_kind(kind));
+            entity.components.insert(kind, component);
+        }
+        if !base.is_empty() {
+            let kind = ComponentKind::from_name(&base)
+                .filter(|kind| entity.components.contains_key(kind))
+                .ok_or_else(|| input.error(format!("missing base component {base}")))?;
+            entity.base = Some(kind);
+        }
+        for _ in 0..input.len(2)? {
+            let key = input.str()?;
+            entity.metadata.insert(key, input.str()?);
+        }
+        entity.properties = Properties::decode(input)?;
+        for _ in 0..input.len(3)? {
+            let name = input.str()?;
+            let version =
+                u32::try_from(input.varint()?).map_err(|_| input.error("version overflows"))?;
+            let bytes = input.bytes()?;
+            let component = registry.decode(&name, version, bytes)?;
+            entity.ext.insert(name, component);
+        }
+        Ok(entity)
     }
 }
 
@@ -113,7 +392,9 @@ struct Slot {
     entity: Option<Entity>,
 }
 
-/// Generational slot arena of [`Entity`]s, addressed by [`AssetHandle`].
+/// Generational slot arena of [`Entity`]s, addressed by [`AssetHandle`] at
+/// runtime and by [`EntityId`] for good, plus the [`RelationStore`] that
+/// links them.
 ///
 /// `spawn` and `despawn` are O(1). Despawning bumps the slot generation, so old
 /// handles go stale instead of aliasing the next occupant. Mutation needs
@@ -124,6 +405,9 @@ pub struct Arena {
     slots: Vec<Slot>,
     free: Vec<u32>,
     live: usize,
+    ids: HashMap<EntityId, AssetHandle>,
+    relations: RelationStore,
+    revision: u64,
 }
 
 impl Arena {
@@ -154,6 +438,19 @@ impl Arena {
         self.live == 0
     }
 
+    /// Increases on every change (spawn, despawn, mutable access, relation
+    /// edit), so "is the document modified" and "is this cache stale" are
+    /// one comparison.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn bump(&mut self) -> u64 {
+        self.revision += 1;
+        self.revision
+    }
+
     /// Creates an entity named `name` whose base component is `base`.
     ///
     /// # Panics
@@ -163,41 +460,67 @@ impl Arena {
         name: impl Into<String>,
         base: impl Into<ComponentData>,
     ) -> AssetHandle {
-        self.insert(Entity::new(name.into(), base.into()))
+        self.insert(Entity::new(name, base))
     }
 
-    /// Puts back an entity that [`despawn`](Self::despawn) returned, under a
-    /// new handle (redoing a creation brings the same buffers back).
+    /// Puts an entity into the arena. If its id is nil or already taken, it
+    /// gets a fresh id (see [`Self::insert_keep_id`] to refuse instead).
     ///
     /// # Panics
     /// If more than `u32::MAX` slots would be needed.
-    pub fn insert(&mut self, entity: Entity) -> AssetHandle {
+    pub fn insert(&mut self, mut entity: Entity) -> AssetHandle {
+        if entity.id.is_nil() || self.ids.contains_key(&entity.id) {
+            entity.id = EntityId::new();
+        }
+        self.place(entity)
+    }
+
+    /// Puts an entity into the arena under its own id.
+    ///
+    /// # Errors
+    /// [`CoreError::DuplicateId`] if the id is nil or taken.
+    pub fn insert_keep_id(&mut self, entity: Entity) -> Result<AssetHandle, CoreError> {
+        if entity.id.is_nil() || self.ids.contains_key(&entity.id) {
+            return Err(CoreError::DuplicateId(entity.id));
+        }
+        Ok(self.place(entity))
+    }
+
+    fn place(&mut self, mut entity: Entity) -> AssetHandle {
+        entity.revision = self.bump();
+        let id = entity.id;
         self.live += 1;
-        if let Some(index) = self.free.pop() {
+        let handle = if let Some(index) = self.free.pop() {
             let slot = &mut self.slots[index as usize];
             slot.entity = Some(entity);
-            return AssetHandle::new(index, slot.generation);
-        }
-        let index = u32::try_from(self.slots.len()).expect("arena exceeded u32::MAX slots");
-        self.slots.push(Slot {
-            generation: 1,
-            entity: Some(entity),
-        });
-        AssetHandle::new(index, 1)
+            AssetHandle::new(index, slot.generation)
+        } else {
+            let index = u32::try_from(self.slots.len()).expect("arena exceeded u32::MAX slots");
+            self.slots.push(Slot {
+                generation: 1,
+                entity: Some(entity),
+            });
+            AssetHandle::new(index, 1)
+        };
+        self.ids.insert(id, handle);
+        handle
     }
 
     /// Puts back an entity that [`despawn`](Self::despawn) removed from
     /// `handle`, under the same handle when its slot was not reused since,
     /// so later edits that name the handle still apply (redo). Otherwise
     /// the entity gets a new handle.
-    pub fn restore(&mut self, handle: AssetHandle, entity: Entity) -> AssetHandle {
+    pub fn restore(&mut self, handle: AssetHandle, mut entity: Entity) -> AssetHandle {
         let index = handle.index();
         let reusable = self.slots.get(index as usize).is_some_and(|slot| {
             slot.entity.is_none() && slot.generation == handle.generation().wrapping_add(1)
-        }) && self.free.contains(&index);
+        }) && self.free.contains(&index)
+            && !self.ids.contains_key(&entity.id);
         if !reusable {
             return self.insert(entity);
         }
+        entity.revision = self.bump();
+        self.ids.insert(entity.id, handle);
         self.free.retain(|free| *free != index);
         let slot = &mut self.slots[index as usize];
         slot.generation = handle.generation();
@@ -206,11 +529,25 @@ impl Arena {
         handle
     }
 
-    /// Removes an entity and returns it. Every handle to it becomes stale.
+    /// Removes an entity and returns it. Every handle to it becomes stale,
+    /// and every relation to or from it is dropped (use
+    /// [`Self::despawn_with_relations`] to keep them for undo).
     ///
     /// # Errors
     /// [`CoreError::StaleHandle`] if the handle is not live.
     pub fn despawn(&mut self, handle: AssetHandle) -> Result<Entity, CoreError> {
+        self.despawn_with_relations(handle)
+            .map(|(entity, _)| entity)
+    }
+
+    /// Removes an entity and the relations that touch it, returning both.
+    ///
+    /// # Errors
+    /// [`CoreError::StaleHandle`] if the handle is not live.
+    pub fn despawn_with_relations(
+        &mut self,
+        handle: AssetHandle,
+    ) -> Result<(Entity, Vec<Relation>), CoreError> {
         let slot = self
             .slots
             .get_mut(handle.index() as usize)
@@ -223,7 +560,10 @@ impl Arena {
             slot.generation += 1;
             self.free.push(handle.index());
         }
-        Ok(entity)
+        self.ids.remove(&entity.id);
+        let relations = self.relations.remove_involving(entity.id);
+        self.bump();
+        Ok((entity, relations))
     }
 
     /// `true` if `handle` refers to a live entity.
@@ -244,16 +584,87 @@ impl Arena {
             .ok_or(CoreError::StaleHandle(handle))
     }
 
-    /// The entity behind `handle`, mutably.
+    /// The entity behind `handle`, mutably. This marks it changed.
     ///
     /// # Errors
     /// [`CoreError::StaleHandle`] if the handle is not live.
     pub fn get_mut(&mut self, handle: AssetHandle) -> Result<&mut Entity, CoreError> {
-        self.slots
+        let revision = self.revision + 1;
+        let entity = self
+            .slots
             .get_mut(handle.index() as usize)
             .filter(|slot| slot.generation == handle.generation())
             .and_then(|slot| slot.entity.as_mut())
-            .ok_or(CoreError::StaleHandle(handle))
+            .ok_or(CoreError::StaleHandle(handle))?;
+        entity.revision = revision;
+        self.revision = revision;
+        Ok(entity)
+    }
+
+    /// The handle of the entity with `id`, if it is live.
+    #[must_use]
+    pub fn handle_of(&self, id: EntityId) -> Option<AssetHandle> {
+        self.ids.get(&id).copied()
+    }
+
+    /// The entity with `id`.
+    ///
+    /// # Errors
+    /// [`CoreError::UnknownId`] if no live entity has it.
+    pub fn get_by_id(&self, id: EntityId) -> Result<&Entity, CoreError> {
+        let handle = self.handle_of(id).ok_or(CoreError::UnknownId(id))?;
+        self.get(handle)
+    }
+
+    /// The entity with `id`, mutably. This marks it changed.
+    ///
+    /// # Errors
+    /// [`CoreError::UnknownId`] if no live entity has it.
+    pub fn get_by_id_mut(&mut self, id: EntityId) -> Result<&mut Entity, CoreError> {
+        let handle = self.handle_of(id).ok_or(CoreError::UnknownId(id))?;
+        self.get_mut(handle)
+    }
+
+    /// The relations between entities.
+    #[must_use]
+    pub fn relations(&self) -> &RelationStore {
+        &self.relations
+    }
+
+    /// Adds or updates a relation between two live entities, returning the
+    /// edge it replaced.
+    ///
+    /// # Errors
+    /// [`CoreError::UnknownId`] for a missing end, or [`CoreError::Relation`]
+    /// if the edge breaks a tree.
+    pub fn relate(&mut self, relation: Relation) -> Result<Option<Relation>, CoreError> {
+        for id in [relation.from, relation.to] {
+            if !self.ids.contains_key(&id) {
+                return Err(CoreError::UnknownId(id));
+            }
+        }
+        let previous = self
+            .relations
+            .get(relation.from, &relation.kind, relation.to);
+        self.relations
+            .insert(relation)
+            .map_err(CoreError::Relation)?;
+        self.bump();
+        Ok(previous)
+    }
+
+    /// Removes a relation, returning it.
+    pub fn unrelate(&mut self, from: EntityId, kind: &str, to: EntityId) -> Option<Relation> {
+        let removed = self.relations.remove(from, kind, to);
+        if removed.is_some() {
+            self.bump();
+        }
+        removed
+    }
+
+    /// Registers a tree kind (one parent, no cycles) for this document.
+    pub fn add_tree_kind(&mut self, kind: impl Into<String>) {
+        self.relations.add_tree_kind(kind);
     }
 
     /// Borrows `read` shared and `write` exclusively at the same time, without
@@ -272,6 +683,7 @@ impl Arena {
         }
         self.get(read)?;
         self.get(write)?;
+        let revision = self.bump();
         // Two distinct live handles cannot share a slot: a slot has one generation.
         let (read_index, write_index) = (read.index() as usize, write.index() as usize);
         let (reader, writer) = if read_index < write_index {
@@ -282,7 +694,10 @@ impl Arena {
             (&high[0], &mut low[write_index])
         };
         match (reader.entity.as_ref(), writer.entity.as_mut()) {
-            (Some(reader), Some(writer)) => Ok((reader, writer)),
+            (Some(reader), Some(writer)) => {
+                writer.revision = revision;
+                Ok((reader, writer))
+            }
             (None, _) => Err(CoreError::StaleHandle(read)),
             (_, None) => Err(CoreError::StaleHandle(write)),
         }
@@ -314,6 +729,7 @@ impl Arena {
 
     /// Attaches `projection` by adding `component` next to the existing ones.
     /// Existing buffers are neither copied, moved on the heap, nor mutated.
+    /// An entity without a base takes this component as its base.
     ///
     /// # Errors
     /// [`CoreError::ProjectionMismatch`], [`CoreError::AlreadyProjected`] or
@@ -329,6 +745,9 @@ impl Arena {
         let entity = self.get_mut(handle)?;
         entity.components.insert(kind, component);
         entity.projections.insert(projection);
+        if entity.base.is_none() {
+            entity.base = Some(kind);
+        }
         Ok(())
     }
 
@@ -345,7 +764,7 @@ impl Arena {
     ) -> Result<ComponentData, CoreError> {
         let entity = self.get_mut(handle)?;
         let kind = projection.native_kind();
-        if kind == entity.base {
+        if Some(kind) == entity.base {
             return Err(CoreError::CannotDetachBase { handle, projection });
         }
         let component = entity
@@ -372,17 +791,63 @@ impl Arena {
             .map(|(handle, _)| handle)
     }
 
+    /// Handles of every live entity of `class`.
+    pub fn with_class<'a>(&'a self, class: &'a str) -> impl Iterator<Item = AssetHandle> + 'a {
+        self.iter()
+            .filter(move |(_, entity)| entity.class == class)
+            .map(|(handle, _)| handle)
+    }
+
     /// Approximate heap footprint of all component payloads, in bytes.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.iter().map(|(_, entity)| entity.heap_bytes()).sum()
+    }
+
+    /// Writes every live entity (in slot order) and every relation.
+    pub fn encode(&self, out: &mut Writer) {
+        out.len(self.live);
+        for (_, entity) in self.iter() {
+            out.nested(|out| entity.encode(out));
+        }
+        self.relations.encode(out);
+    }
+
+    /// Reads an arena written by [`Self::encode`]. Handles are new; ids are
+    /// kept.
+    ///
+    /// # Errors
+    /// If the bytes are malformed or two entities share an id.
+    pub fn decode(
+        input: &mut Reader<'_>,
+        registry: &ComponentRegistry,
+    ) -> Result<Self, CodecError> {
+        let count = input.len(1)?;
+        let mut arena = Self::with_capacity(count);
+        for _ in 0..count {
+            let mut body = input.nested()?;
+            let entity = Entity::decode(&mut body, registry)?;
+            arena
+                .insert_keep_id(entity)
+                .map_err(|error| input.error(error.to_string()))?;
+        }
+        let relations = RelationStore::decode(input)?;
+        for relation in relations.iter() {
+            if !arena.ids.contains_key(&relation.from) || !arena.ids.contains_key(&relation.to) {
+                return Err(input.error("a relation names a missing entity"));
+            }
+        }
+        arena.relations = relations;
+        Ok(arena)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MeshBuffer3D, PCMFloat1D, PixelFormat, RasterTile2D, TimeSpan};
+    use crate::{
+        CHILD, MeshBuffer3D, OpaqueComponent, PCMFloat1D, PixelFormat, RasterTile2D, TimeSpan,
+    };
 
     #[test]
     fn spawn_get_despawn() {
@@ -391,12 +856,16 @@ mod tests {
         assert_eq!(arena.len(), 1);
         let entity = arena.get(handle).unwrap();
         assert_eq!(entity.name(), "note.txt");
-        assert_eq!(entity.base_kind(), ComponentKind::StringBuffer);
+        assert_eq!(entity.base_kind(), Some(ComponentKind::StringBuffer));
+        assert_eq!(entity.class(), "sue.text");
         assert_eq!(entity.string_buffer().unwrap().as_str(), "hello");
+        let id = entity.id();
+        assert_eq!(arena.handle_of(id), Some(handle));
         let removed = arena.despawn(handle).unwrap();
         assert_eq!(removed.name(), "note.txt");
         assert!(arena.is_empty());
         assert_eq!(arena.get(handle), Err(CoreError::StaleHandle(handle)));
+        assert_eq!(arena.get_by_id(id), Err(CoreError::UnknownId(id)));
         assert!(arena.despawn(handle).is_err());
     }
 
@@ -404,15 +873,32 @@ mod tests {
     fn restored_entities_keep_their_handle_unless_the_slot_was_reused() {
         let mut arena = Arena::new();
         let handle = arena.spawn("a", StringBuffer::new());
+        let id = arena.get(handle).unwrap().id();
         let entity = arena.despawn(handle).unwrap();
         assert_eq!(arena.restore(handle, entity), handle);
         assert!(arena.get(handle).is_ok());
+        assert_eq!(arena.handle_of(id), Some(handle));
         let entity = arena.despawn(handle).unwrap();
         let other = arena.spawn("b", StringBuffer::new());
         let restored = arena.restore(handle, entity);
         assert_ne!(restored, handle);
         assert_ne!(restored, other);
         assert_eq!(arena.len(), 2);
+        assert_eq!(arena.get(restored).unwrap().id(), id, "the id survives");
+    }
+
+    #[test]
+    fn ids_are_unique_within_an_arena() {
+        let mut arena = Arena::new();
+        let first = arena.spawn("a", StringBuffer::new());
+        let id = arena.get(first).unwrap().id();
+        let copy = arena.get(first).unwrap().clone();
+        assert_eq!(
+            arena.insert_keep_id(copy.clone()),
+            Err(CoreError::DuplicateId(id))
+        );
+        let second = arena.insert(copy);
+        assert_ne!(arena.get(second).unwrap().id(), id);
     }
 
     #[test]
@@ -426,6 +912,21 @@ mod tests {
         assert!(!arena.contains(first));
         assert!(arena.contains(second));
         assert!(!arena.contains(AssetHandle::NULL));
+    }
+
+    #[test]
+    fn revisions_track_changes() {
+        let mut arena = Arena::new();
+        let a = arena.spawn("a", StringBuffer::new());
+        let b = arena.spawn("b", StringBuffer::new());
+        let seen = arena.get(a).unwrap().revision();
+        let before = arena.revision();
+        arena.get(a).unwrap();
+        assert_eq!(arena.revision(), before, "reading changes nothing");
+        arena.get_mut(b).unwrap();
+        assert_eq!(arena.get(a).unwrap().revision(), seen);
+        assert!(arena.get(b).unwrap().revision() > seen);
+        assert!(arena.revision() > before);
     }
 
     #[test]
@@ -517,17 +1018,85 @@ mod tests {
     }
 
     #[test]
-    fn entities_carry_metadata() {
+    fn entities_carry_metadata_and_properties() {
         let mut arena = Arena::new();
         let handle = arena.spawn("photo.jxl", StringBuffer::new());
         let entity = arena.get_mut(handle).unwrap();
         assert_eq!(entity.set_meta("source", "C:/photos/photo.jxl"), None);
         assert_eq!(entity.set_meta("bytes", "1024"), None);
         assert_eq!(entity.set_meta("bytes", "2048").as_deref(), Some("1024"));
+        entity.properties_mut().set("photo.exposure", 0.5);
         let entity = arena.get(handle).unwrap();
         assert_eq!(entity.meta("bytes"), Some("2048"));
         assert_eq!(entity.metadata().count(), 2);
         assert_eq!(entity.meta("missing"), None);
+        assert_eq!(entity.properties().f64("photo.exposure"), Some(0.5));
+    }
+
+    #[test]
+    fn empty_entities_and_relations() {
+        let mut arena = Arena::new();
+        let folder = arena.insert(Entity::empty("Album", "sue.folder"));
+        let song = arena.spawn("song", PCMFloat1D::silence(48_000, 2, 16).unwrap());
+        let folder_id = arena.get(folder).unwrap().id();
+        let song_id = arena.get(song).unwrap().id();
+        assert_eq!(arena.get(folder).unwrap().base_kind(), None);
+        arena
+            .relate(Relation::new(folder_id, CHILD, song_id))
+            .unwrap();
+        assert_eq!(arena.relations().children(folder_id), vec![song_id]);
+        assert!(matches!(
+            arena.relate(Relation::new(folder_id, CHILD, EntityId::new())),
+            Err(CoreError::UnknownId(_))
+        ));
+        assert!(matches!(
+            arena.relate(Relation::new(song_id, CHILD, folder_id)),
+            Err(CoreError::Relation(_))
+        ));
+        let (_, relations) = arena.despawn_with_relations(song).unwrap();
+        assert_eq!(relations.len(), 1);
+        assert!(arena.relations().is_empty());
+        assert_eq!(arena.with_class("sue.folder").count(), 1);
+    }
+
+    #[test]
+    fn arenas_round_trip_through_bytes() {
+        let mut arena = Arena::new();
+        let doc = arena.spawn("doc", StringBuffer::from("hello"));
+        let group = arena.insert(
+            Entity::empty("group", "sue.group")
+                .with_property("ui.color", Value::Int(3))
+                .with_ext(OpaqueComponent {
+                    type_name: "future.thing".into(),
+                    version: 9,
+                    bytes: vec![1, 2, 3],
+                }),
+        );
+        arena
+            .attach_projection(
+                doc,
+                Projection::Timeline,
+                TimeSpan::new(5, 10).unwrap().into(),
+            )
+            .unwrap();
+        let (doc_id, group_id) = (arena.get(doc).unwrap().id(), arena.get(group).unwrap().id());
+        arena
+            .relate(Relation::new(group_id, CHILD, doc_id))
+            .unwrap();
+        arena.get_mut(doc).unwrap().set_meta("source", "a.txt");
+
+        let mut out = Writer::new();
+        arena.encode(&mut out);
+        let bytes = out.into_bytes();
+        let back = Arena::decode(&mut Reader::new(&bytes), &ComponentRegistry::new()).unwrap();
+        assert_eq!(back.len(), 2);
+        assert_eq!(back.get_by_id(doc_id).unwrap(), arena.get(doc).unwrap());
+        assert_eq!(back.get_by_id(group_id).unwrap(), arena.get(group).unwrap());
+        assert_eq!(back.relations(), arena.relations());
+
+        let mut again = Writer::new();
+        back.encode(&mut again);
+        assert_eq!(again.into_bytes(), bytes, "saving a loaded file is stable");
     }
 
     #[test]

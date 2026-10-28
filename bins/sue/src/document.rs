@@ -231,7 +231,8 @@ impl SueApplet for Document {
     }
 
     fn accepts(&self, entity: &Entity) -> bool {
-        entity.base_kind() == ComponentKind::StringBuffer && entity.meta(KIND) != Some(KIND_CODE)
+        entity.base_kind() == Some(ComponentKind::StringBuffer)
+            && entity.meta(KIND) != Some(KIND_CODE)
     }
 
     fn node_size(&self, _entity: &Entity) -> egui::Vec2 {

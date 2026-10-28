@@ -3,7 +3,8 @@
 use std::fmt;
 use std::ops::Range;
 
-use crate::{AssetHandle, CoreError};
+use crate::codec::{CodecError, Reader, Writer};
+use crate::{CoreError, EntityId};
 
 /// Discriminant of the seven typed buffer components.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -47,6 +48,26 @@ impl ComponentKind {
             Self::MeshBuffer3D => "MeshBuffer3D",
             Self::TimeSpan => "TimeSpan",
             Self::ASTNode => "ASTNode",
+        }
+    }
+
+    /// The kind with [`Self::name`] `name`.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+
+    /// The class an entity gets when this kind is its base.
+    #[must_use]
+    pub const fn default_class(self) -> &'static str {
+        match self {
+            Self::StringBuffer => "sue.text",
+            Self::PCMFloat1D => "sue.audio",
+            Self::VectorSpline2D => "sue.vector",
+            Self::RasterTile2D => "sue.image",
+            Self::MeshBuffer3D => "sue.mesh",
+            Self::TimeSpan => "sue.span",
+            Self::ASTNode => "sue.node",
         }
     }
 }
@@ -617,12 +638,13 @@ impl TimeSpan {
 // ─── ASTNode ────────────────────────────────────────────────────────────────
 
 /// A node of a syntax tree or scene graph. `span` is a byte range into the
-/// entity's `StringBuffer`; children are other entities, forming a DAG.
+/// entity's `StringBuffer`; children are other entities (by stable id),
+/// forming a DAG.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ASTNode {
     kind: String,
     span: Range<usize>,
-    children: Vec<AssetHandle>,
+    children: Vec<EntityId>,
 }
 
 impl ASTNode {
@@ -643,7 +665,7 @@ impl ASTNode {
 
     /// Adds child entities.
     #[must_use]
-    pub fn with_children(mut self, children: impl IntoIterator<Item = AssetHandle>) -> Self {
+    pub fn with_children(mut self, children: impl IntoIterator<Item = EntityId>) -> Self {
         self.children.extend(children);
         self
     }
@@ -662,8 +684,15 @@ impl ASTNode {
 
     /// Child entities.
     #[must_use]
-    pub fn children(&self) -> &[AssetHandle] {
+    pub fn children(&self) -> &[EntityId] {
         &self.children
+    }
+
+    /// Points every child link through `map`.
+    pub fn remap_children(&mut self, map: &mut dyn FnMut(EntityId) -> EntityId) {
+        for child in &mut self.children {
+            *child = map(*child);
+        }
     }
 }
 
@@ -803,6 +832,143 @@ impl ComponentData {
     }
 }
 
+fn invalid(input: &Reader<'_>, error: &CoreError) -> CodecError {
+    input.error(error.to_string())
+}
+
+impl ComponentData {
+    /// Writes the payload. The seven built-in encodings are frozen: new data
+    /// types are extension components, never new built-in kinds.
+    pub fn encode(&self, out: &mut Writer) {
+        match self {
+            Self::StringBuffer(text) => out.str(text.as_str()),
+            Self::PCMFloat1D(pcm) => {
+                out.u32(pcm.sample_rate);
+                out.varint(u64::from(pcm.channels));
+                out.f32s(&pcm.samples);
+            }
+            Self::VectorSpline2D(spline) => {
+                out.bool(spline.closed);
+                out.f32s(spline.knots.as_flattened());
+            }
+            Self::RasterTile2D(tile) => {
+                out.u32(tile.width);
+                out.u32(tile.height);
+                out.u8(match tile.format {
+                    PixelFormat::Gray8 => 0,
+                    PixelFormat::Rgba8 => 1,
+                    PixelFormat::RgbaF32 => 2,
+                });
+                match &tile.pixels {
+                    PixelStorage::U8(bytes) => out.bytes(bytes),
+                    PixelStorage::F32(samples) => out.f32s(samples),
+                }
+            }
+            Self::MeshBuffer3D(mesh) => {
+                out.f32s(mesh.positions.as_flattened());
+                out.len(mesh.indices.len());
+                mesh.indices.iter().for_each(|index| out.u32(*index));
+            }
+            Self::TimeSpan(span) => {
+                out.varint_signed(span.start);
+                out.varint_signed(span.duration);
+            }
+            Self::ASTNode(node) => {
+                out.str(&node.kind);
+                out.varint(node.span.start as u64);
+                out.varint(node.span.end as u64);
+                out.len(node.children.len());
+                node.children
+                    .iter()
+                    .for_each(|child| out.raw(&child.to_bytes()));
+            }
+        }
+    }
+
+    /// Reads a payload of `kind` written by [`Self::encode`], checking every
+    /// invariant the constructors check.
+    ///
+    /// # Errors
+    /// If the bytes are malformed or break an invariant.
+    pub fn decode(kind: ComponentKind, input: &mut Reader<'_>) -> Result<Self, CodecError> {
+        let usize_of = |input: &mut Reader<'_>| -> Result<usize, CodecError> {
+            let value = input.varint()?;
+            usize::try_from(value).map_err(|_| input.error("offset overflows"))
+        };
+        Ok(match kind {
+            ComponentKind::StringBuffer => Self::StringBuffer(StringBuffer::from(input.str()?)),
+            ComponentKind::PCMFloat1D => {
+                let rate = input.u32()?;
+                let channels =
+                    u16::try_from(input.varint()?).map_err(|_| input.error("too many channels"))?;
+                let samples = input.f32s()?;
+                let pcm = PCMFloat1D::new(rate, channels, samples);
+                Self::PCMFloat1D(pcm.map_err(|error| invalid(input, &error))?)
+            }
+            ComponentKind::VectorSpline2D => {
+                let closed = input.bool()?;
+                let flat = input.f32s()?;
+                if flat.len() % 2 != 0 {
+                    return Err(input.error("odd spline coordinate count"));
+                }
+                let knots = flat.as_chunks::<2>().0.to_vec();
+                let spline = VectorSpline2D::new(knots, closed);
+                Self::VectorSpline2D(spline.map_err(|error| invalid(input, &error))?)
+            }
+            ComponentKind::RasterTile2D => {
+                let (width, height) = (input.u32()?, input.u32()?);
+                let tile = match input.u8()? {
+                    0 => RasterTile2D::from_bytes(
+                        width,
+                        height,
+                        PixelFormat::Gray8,
+                        input.bytes()?.to_vec(),
+                    ),
+                    1 => RasterTile2D::from_bytes(
+                        width,
+                        height,
+                        PixelFormat::Rgba8,
+                        input.bytes()?.to_vec(),
+                    ),
+                    2 => RasterTile2D::from_f32(width, height, input.f32s()?),
+                    other => return Err(input.error(format!("unknown pixel format {other}"))),
+                };
+                Self::RasterTile2D(tile.map_err(|error| invalid(input, &error))?)
+            }
+            ComponentKind::MeshBuffer3D => {
+                let flat = input.f32s()?;
+                if flat.len() % 3 != 0 {
+                    return Err(input.error("mesh coordinate count is not a multiple of three"));
+                }
+                let positions = flat.as_chunks::<3>().0.to_vec();
+                let count = input.len(4)?;
+                let indices = (0..count).map(|_| input.u32()).collect::<Result<_, _>>()?;
+                let mesh = MeshBuffer3D::new(positions, indices);
+                Self::MeshBuffer3D(mesh.map_err(|error| invalid(input, &error))?)
+            }
+            ComponentKind::TimeSpan => {
+                let (start, duration) = (input.varint_signed()?, input.varint_signed()?);
+                let span = TimeSpan::new(start, duration);
+                Self::TimeSpan(span.map_err(|error| invalid(input, &error))?)
+            }
+            ComponentKind::ASTNode => {
+                let kind = input.str()?;
+                let (start, end) = (usize_of(input)?, usize_of(input)?);
+                let count = input.len(16)?;
+                let mut children = Vec::with_capacity(count);
+                for _ in 0..count {
+                    let mut bytes = [0; 16];
+                    bytes.copy_from_slice(input.raw(16)?);
+                    children.push(EntityId::from_bytes(bytes));
+                }
+                let node =
+                    ASTNode::new(kind, start..end).map_err(|error| invalid(input, &error))?;
+                Self::ASTNode(node.with_children(children))
+            }
+        })
+    }
+}
+
 macro_rules! component_from {
     ($($variant:ident),* $(,)?) => {
         $(
@@ -915,10 +1081,58 @@ mod tests {
     fn ast_nodes_link_children() {
         let node = ASTNode::new("fn_item", 0..12)
             .unwrap()
-            .with_children([AssetHandle::new(3, 1)]);
-        assert_eq!(node.children(), &[AssetHandle::new(3, 1)]);
+            .with_children([EntityId::from_u128(3)]);
+        assert_eq!(node.children(), &[EntityId::from_u128(3)]);
         let (start, end) = (5, 1);
         assert!(ASTNode::new("bad", start..end).is_err());
+    }
+
+    #[test]
+    fn every_built_in_component_round_trips() {
+        let components: Vec<ComponentData> = vec![
+            StringBuffer::from("héllo").into(),
+            PCMFloat1D::new(44_100, 2, vec![0.5, -0.5, 0.25, 1.0])
+                .unwrap()
+                .into(),
+            VectorSpline2D::new(vec![[0.0, 0.0], [1.0, 2.0], [3.0, 2.0], [4.0, 0.0]], true)
+                .unwrap()
+                .into(),
+            RasterTile2D::from_bytes(2, 1, PixelFormat::Rgba8, vec![1, 2, 3, 4, 5, 6, 7, 8])
+                .unwrap()
+                .into(),
+            RasterTile2D::from_f32(1, 1, vec![0.1, 0.2, 0.3, 1.0])
+                .unwrap()
+                .into(),
+            MeshBuffer3D::quad(2.0, 1.0).into(),
+            TimeSpan::new(-5, 10).unwrap().into(),
+            ASTNode::new("fn_item", 2..9)
+                .unwrap()
+                .with_children([EntityId::new()])
+                .into(),
+        ];
+        for component in components {
+            let mut out = Writer::new();
+            component.encode(&mut out);
+            let bytes = out.into_bytes();
+            let mut input = Reader::new(&bytes);
+            assert_eq!(
+                ComponentData::decode(component.kind(), &mut input).unwrap(),
+                component
+            );
+            assert!(input.is_empty());
+        }
+        let mut out = Writer::new();
+        out.u32(0);
+        out.varint(1);
+        out.f32s(&[]);
+        let bytes = out.into_bytes();
+        assert!(
+            ComponentData::decode(ComponentKind::PCMFloat1D, &mut Reader::new(&bytes)).is_err()
+        );
+        assert_eq!(
+            ComponentKind::from_name("RasterTile2D"),
+            Some(ComponentKind::RasterTile2D)
+        );
     }
 
     #[test]

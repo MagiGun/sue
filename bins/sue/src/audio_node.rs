@@ -234,7 +234,7 @@ impl SueApplet for AudioNode {
     }
 
     fn accepts(&self, entity: &Entity) -> bool {
-        entity.base_kind() == ComponentKind::PCMFloat1D
+        entity.base_kind() == Some(ComponentKind::PCMFloat1D)
     }
 
     fn node_size(&self, _entity: &Entity) -> egui::Vec2 {
