@@ -1,282 +1,151 @@
-//! Text measurement, layout and rasterization with `fontdue` and the bundled
-//! fonts (Ubuntu Light, Hack, Noto Emoji). One [`Fonts`] serves both the UI
-//! layout and the GPU renderer, so what is measured is what is drawn.
+//! Text editing over the arena. [`ArenaText`] lets an `egui::TextEdit` edit
+//! an entity's `StringBuffer` in place (no copy of the text, LAW 2) while it
+//! records every insert and delete. [`Typing`] groups those deltas into one
+//! undo step per burst of typing and records it in the global `UndoStack`,
+//! so `Ctrl+Z` and `Ctrl+Y` work the same in every text field (LAW 6).
 
-use fontdue::{Font, FontSettings, Metrics};
+use std::any::TypeId;
+use std::ops::Range;
+use std::time::{Duration, Instant};
 
-use crate::FontFace;
+use egui::TextBuffer;
+use egui::text::CharIndex;
+use sue_core::txn::{TextEdits, TextOp};
+use sue_core::{AssetHandle, StringBuffer, UndoStack};
 
-/// Which loaded font a glyph comes from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum FontId {
-    /// Ubuntu Light.
-    Proportional,
-    /// Hack.
-    Monospace,
-    /// Noto Emoji (monochrome), the fallback for symbols.
-    Emoji,
-    /// The egui icon font, the last fallback for UI symbols.
-    Icons,
+use crate::{ArenaEdit, World};
+
+/// How long a pause ends a burst of typing.
+pub const TYPING_PAUSE: Duration = Duration::from_millis(900);
+
+fn byte_of(text: &str, char_index: usize) -> usize {
+    text.char_indices()
+        .nth(char_index)
+        .map_or(text.len(), |(byte, _)| byte)
 }
 
-/// A glyph placed on a line.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PlacedGlyph {
-    /// Font the glyph comes from.
-    pub font: FontId,
-    /// Glyph index in that font.
-    pub glyph: u16,
-    /// Pen position of the glyph's origin, from the line start.
-    pub x: f32,
-    /// Horizontal advance.
-    pub advance: f32,
-    /// Byte index of the character in the source text.
-    pub byte_index: usize,
+/// An entity's text, editable by egui, recording what changes.
+pub struct ArenaText<'a> {
+    buffer: &'a mut StringBuffer,
+    ops: &'a mut Vec<TextOp>,
 }
 
-/// The bundled fonts.
-pub struct Fonts {
-    proportional: Font,
-    monospace: Font,
-    emoji: Font,
-    icons: Font,
-    proportional_face: FontId,
-}
-
-impl std::fmt::Debug for Fonts {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Fonts")
-            .field("ui_face", &self.proportional_face)
-            .finish_non_exhaustive()
+impl<'a> ArenaText<'a> {
+    /// Wraps `buffer`; changes are appended to `ops`.
+    pub fn new(buffer: &'a mut StringBuffer, ops: &'a mut Vec<TextOp>) -> Self {
+        Self { buffer, ops }
     }
 }
 
-impl Fonts {
-    /// Loads the bundled fonts.
-    ///
-    /// # Errors
-    /// If a bundled font fails to parse (a broken build).
-    pub fn new() -> Result<Self, String> {
-        let load =
-            |bytes: &[u8]| Font::from_bytes(bytes, FontSettings::default()).map_err(str::to_owned);
-        Ok(Self {
-            proportional: load(epaint_default_fonts::UBUNTU_LIGHT)?,
-            monospace: load(epaint_default_fonts::HACK_REGULAR)?,
-            emoji: load(epaint_default_fonts::NOTO_EMOJI_REGULAR)?,
-            icons: load(epaint_default_fonts::EMOJI_ICON)?,
-            proportional_face: FontId::Proportional,
-        })
+impl TextBuffer for ArenaText<'_> {
+    fn is_mutable(&self) -> bool {
+        true
     }
 
-    /// Chooses the font used for [`FontFace::Ui`] from the rice name
-    /// (`typography.ui_font`): `"Hack"` selects the monospaced font.
-    pub fn set_ui_font(&mut self, name: &str) {
-        self.proportional_face = if name.eq_ignore_ascii_case("hack") {
-            FontId::Monospace
-        } else {
-            FontId::Proportional
-        };
+    fn as_str(&self) -> &str {
+        self.buffer.as_str()
     }
 
-    fn primary(&self, face: FontFace) -> FontId {
-        match face {
-            FontFace::Ui => self.proportional_face,
-            FontFace::Mono => FontId::Monospace,
+    fn insert_text(&mut self, text: &str, char_index: CharIndex) -> usize {
+        let offset = byte_of(self.buffer.as_str(), char_index.0);
+        if text.is_empty() || self.buffer.insert(offset, text).is_err() {
+            return 0;
         }
+        self.ops.push(TextOp::Insert {
+            offset,
+            text: text.to_owned(),
+        });
+        text.chars().count()
     }
 
-    /// The loaded font for `id`.
-    #[must_use]
-    pub fn font(&self, id: FontId) -> &Font {
-        match id {
-            FontId::Proportional => &self.proportional,
-            FontId::Monospace => &self.monospace,
-            FontId::Emoji => &self.emoji,
-            FontId::Icons => &self.icons,
+    fn delete_char_range(&mut self, char_range: Range<CharIndex>) {
+        let text = self.buffer.as_str();
+        let (start, end) = (
+            byte_of(text, char_range.start.0),
+            byte_of(text, char_range.end.0),
+        );
+        if start >= end {
+            return;
         }
-    }
-
-    /// `true` if every non-space character of `text` has a glyph in a
-    /// bundled font, so it will not render as a blank box.
-    #[must_use]
-    pub fn covers(&self, text: &str) -> bool {
-        text.chars().filter(|ch| !ch.is_whitespace()).all(|ch| {
-            [
-                &self.proportional,
-                &self.monospace,
-                &self.emoji,
-                &self.icons,
-            ]
-            .iter()
-            .any(|font| font.lookup_glyph_index(ch) != 0)
-        })
-    }
-
-    /// Distance from the line top to the baseline.
-    #[must_use]
-    pub fn ascent(&self, face: FontFace, size: f32) -> f32 {
-        self.font(self.primary(face))
-            .horizontal_line_metrics(size)
-            .map_or(size * 0.8, |metrics| metrics.ascent)
-    }
-
-    /// Height of one line.
-    #[must_use]
-    pub fn line_height(&self, face: FontFace, size: f32) -> f32 {
-        self.font(self.primary(face))
-            .horizontal_line_metrics(size)
-            .map_or(size * 1.2, |metrics| metrics.new_line_size)
-    }
-
-    /// Places every character of one line, falling back to the emoji font for
-    /// symbols the primary font lacks.
-    #[must_use]
-    pub fn layout(&self, face: FontFace, size: f32, text: &str) -> Vec<PlacedGlyph> {
-        let primary = self.primary(face);
-        let mut glyphs = Vec::with_capacity(text.len());
-        let mut pen = 0.0;
-        let mut previous: Option<(FontId, u16)> = None;
-        for (byte_index, ch) in text.char_indices() {
-            let mut font_id = primary;
-            let mut glyph = self.font(primary).lookup_glyph_index(ch);
-            if glyph == 0 && !ch.is_whitespace() {
-                for (fallback_id, fallback) in [
-                    (FontId::Monospace, &self.monospace),
-                    (FontId::Emoji, &self.emoji),
-                    (FontId::Icons, &self.icons),
-                ] {
-                    let index = fallback.lookup_glyph_index(ch);
-                    if index != 0 && fallback_id != primary {
-                        font_id = fallback_id;
-                        glyph = index;
-                        break;
-                    }
-                }
-            }
-            let font = self.font(font_id);
-            if let Some((previous_font, previous_glyph)) = previous
-                && previous_font == font_id
-            {
-                pen += font
-                    .horizontal_kern_indexed(previous_glyph, glyph, size)
-                    .unwrap_or(0.0);
-            }
-            let advance = font.metrics_indexed(glyph, size).advance_width;
-            glyphs.push(PlacedGlyph {
-                font: font_id,
-                glyph,
-                x: pen,
-                advance,
-                byte_index,
+        if let Ok(removed) = self.buffer.remove(start..end) {
+            self.ops.push(TextOp::Delete {
+                offset: start,
+                text: removed,
             });
-            pen += advance;
-            previous = Some((font_id, glyph));
         }
-        glyphs
     }
 
-    /// Width of one line of text.
-    #[must_use]
-    pub fn measure(&self, face: FontFace, size: f32, text: &str) -> f32 {
-        self.layout(face, size, text)
-            .last()
-            .map_or(0.0, |glyph| glyph.x + glyph.advance)
+    fn type_id(&self) -> TypeId {
+        TypeId::of::<ArenaText<'static>>()
     }
+}
 
-    /// X offset of the caret placed before byte `index` (or at the end).
-    #[must_use]
-    pub fn caret_x(&self, face: FontFace, size: f32, text: &str, index: usize) -> f32 {
-        let glyphs = self.layout(face, size, text);
-        glyphs
-            .iter()
-            .find(|glyph| glyph.byte_index >= index)
-            .map_or_else(
-                || glyphs.last().map_or(0.0, |glyph| glyph.x + glyph.advance),
-                |glyph| glyph.x,
-            )
-    }
+/// Groups typing into undo steps.
+#[derive(Debug, Default)]
+pub struct Typing {
+    pending: Option<(TextEdits, Instant)>,
+}
 
-    /// Byte index of the caret position nearest to `x`.
-    #[must_use]
-    pub fn hit_index(&self, face: FontFace, size: f32, text: &str, x: f32) -> usize {
-        for glyph in self.layout(face, size, text) {
-            if x < glyph.x + glyph.advance / 2.0 {
-                return glyph.byte_index;
-            }
+impl Typing {
+    /// Records `ops` typed into `handle` at `now`. A different entity or a
+    /// pause first closes the open group.
+    pub fn record(
+        &mut self,
+        history: &mut UndoStack<World>,
+        handle: AssetHandle,
+        ops: Vec<TextOp>,
+        now: Instant,
+    ) {
+        if ops.is_empty() {
+            return;
         }
-        text.len()
+        let stale = self.pending.as_ref().is_some_and(|(group, last)| {
+            group.handle() != handle || now.duration_since(*last) >= TYPING_PAUSE
+        });
+        if stale {
+            self.flush(history);
+        }
+        let (group, last) = self
+            .pending
+            .get_or_insert_with(|| (TextEdits::new(handle), now));
+        for op in ops {
+            group.push(op);
+        }
+        *last = now;
     }
 
-    /// The longest prefix of `text` that fits in `width`, cut at a character
-    /// boundary, with an ellipsis if anything was dropped.
-    #[must_use]
-    pub fn elide(&self, face: FontFace, size: f32, text: &str, width: f32) -> String {
-        if self.measure(face, size, text) <= width {
-            return text.to_owned();
+    /// Closes the open group into one undo step.
+    pub fn flush(&mut self, history: &mut UndoStack<World>) {
+        if let Some((group, _)) = self.pending.take()
+            && !group.is_empty()
+        {
+            history.record(ArenaEdit(group));
         }
-        let budget = width - self.measure(face, size, "…");
-        let cut = self
-            .layout(face, size, text)
-            .into_iter()
-            .find(|glyph| glyph.x + glyph.advance > budget)
-            .map_or(text.len(), |glyph| glyph.byte_index);
-        format!("{}…", &text[..cut])
     }
 
-    /// Splits `text` into lines no wider than `width`, breaking at spaces when
-    /// possible and honouring explicit newlines. Returns byte ranges.
-    #[must_use]
-    pub fn wrap(
-        &self,
-        face: FontFace,
-        size: f32,
-        text: &str,
-        width: f32,
-    ) -> Vec<std::ops::Range<usize>> {
-        let mut lines = Vec::new();
-        let mut line_start = 0;
-        for paragraph in text.split_inclusive('\n') {
-            let content = paragraph.trim_end_matches('\n');
-            let base = line_start;
-            let glyphs = self.layout(face, size, content);
-            let mut start = 0;
-            let mut start_x = 0.0;
-            let mut last_space: Option<usize> = None;
-            for glyph in &glyphs {
-                let ch = content[glyph.byte_index..].chars().next().unwrap_or(' ');
-                if glyph.x + glyph.advance - start_x > width && glyph.byte_index > start {
-                    let cut = last_space
-                        .filter(|&space| space > start)
-                        .unwrap_or(glyph.byte_index);
-                    lines.push(base + start..base + cut);
-                    start = if last_space == Some(cut) {
-                        cut + 1
-                    } else {
-                        cut
-                    };
-                    start_x = glyphs
-                        .iter()
-                        .find(|g| g.byte_index >= start)
-                        .map_or(glyph.x, |g| g.x);
-                    last_space = None;
-                }
-                if ch == ' ' {
-                    last_space = Some(glyph.byte_index);
-                }
-            }
-            lines.push(base + start..base + content.len());
-            line_start += paragraph.len();
+    /// Closes the group once typing paused. Returns `true` if it did.
+    pub fn flush_if_paused(&mut self, history: &mut UndoStack<World>, now: Instant) -> bool {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|(_, last)| now.duration_since(*last) >= TYPING_PAUSE)
+        {
+            self.flush(history);
+            return true;
         }
-        if text.ends_with('\n') || text.is_empty() {
-            lines.push(text.len()..text.len());
-        }
-        lines
+        false
     }
 
-    /// Rasterizes one glyph at `size` pixels: an 8-bit coverage bitmap.
+    /// When the open group will close by itself.
     #[must_use]
-    pub fn rasterize(&self, font: FontId, glyph: u16, size: f32) -> (Metrics, Vec<u8>) {
-        self.font(font).rasterize_indexed(glyph, size)
+    pub fn deadline(&self) -> Option<Instant> {
+        self.pending.as_ref().map(|(_, last)| *last + TYPING_PAUSE)
+    }
+
+    /// `true` while a group is open.
+    #[must_use]
+    pub fn is_open(&self) -> bool {
+        self.pending.is_some()
     }
 }
 
@@ -284,117 +153,61 @@ impl Fonts {
 mod tests {
     use super::*;
 
-    fn fonts() -> Fonts {
-        Fonts::new().expect("bundled fonts load")
+    fn text(world: &World, handle: AssetHandle) -> String {
+        world
+            .arena
+            .get(handle)
+            .unwrap()
+            .string_buffer()
+            .unwrap()
+            .as_str()
+            .to_owned()
     }
 
     #[test]
-    fn measures_grow_with_text_and_size() {
-        let fonts = fonts();
-        let short = fonts.measure(FontFace::Ui, 14.0, "Sue");
-        let long = fonts.measure(FontFace::Ui, 14.0, "Sue Engine");
-        assert!(short > 0.0 && long > short);
-        assert!(fonts.measure(FontFace::Ui, 28.0, "Sue") > short * 1.8);
-        assert!(fonts.line_height(FontFace::Ui, 14.0) > 14.0);
-        assert!(fonts.ascent(FontFace::Ui, 14.0) > 0.0);
-    }
-
-    #[test]
-    fn monospace_advances_are_uniform() {
-        let fonts = fonts();
-        let narrow = fonts.measure(FontFace::Mono, 13.0, "iiii");
-        let wide = fonts.measure(FontFace::Mono, 13.0, "WWWW");
-        assert!((narrow - wide).abs() < 0.01);
-    }
-
-    #[test]
-    fn symbols_fall_back_to_the_emoji_font() {
-        let fonts = fonts();
-        let glyphs = fonts.layout(FontFace::Ui, 16.0, "a📌");
-        assert_eq!(glyphs[0].font, FontId::Proportional);
-        assert_eq!(glyphs[1].font, FontId::Emoji);
-        assert_ne!(glyphs[1].glyph, 0);
-        assert_eq!(glyphs[1].byte_index, 1);
-    }
-
-    #[test]
-    fn every_shell_symbol_has_a_glyph() {
-        let fonts = fonts();
-        // Rail and title icons, the gear, chevrons, transport and close marks.
-        for symbol in [
-            "\u{1F4C1}",
-            "\u{1F3B5}",
-            "\u{1F504}",
-            "\u{1F4DD}",
-            "\u{1F50D}",
-            "\u{1F310}",
-            "\u{1F558}",
-            "\u{2699}",
-            "\u{25BE}",
-            "\u{00D7}",
-            "\u{25B6}",
-            "\u{23F8}",
-            "\u{23EE}",
-            "\u{23ED}",
-            "\u{1F4C4}",
-            "\u{1F5BC}",
-            "\u{1F522}",
-            "\u{2190}",
-            "\u{2191}",
-            "\u{1F50A}",
-        ] {
-            assert!(fonts.covers(symbol), "no glyph for {symbol:?}");
+    fn typing_edits_the_arena_in_place_and_undoes_in_bursts() {
+        let mut world = World::default();
+        let handle = world
+            .arena
+            .spawn("doc", StringBuffer::from("héllo".to_owned()));
+        let mut history = UndoStack::new();
+        let mut typing = Typing::default();
+        let start = Instant::now();
+        let mut ops = Vec::new();
+        {
+            let buffer = world
+                .arena
+                .get_mut(handle)
+                .unwrap()
+                .string_buffer_mut()
+                .unwrap();
+            let mut editable = ArenaText::new(buffer, &mut ops);
+            // Char indices, not bytes: "é" is two bytes.
+            assert_eq!(editable.insert_text("!", CharIndex(5)), 1);
+            editable.delete_char_range(CharIndex(0)..CharIndex(1));
+            editable.insert_text("H", CharIndex(0));
         }
-        assert!(!fonts.covers("\u{4E00}\u{10FFFD}"));
-    }
-
-    #[test]
-    fn carets_and_hits_round_trip() {
-        let fonts = fonts();
-        let text = "héllo";
-        let x = fonts.caret_x(FontFace::Mono, 13.0, text, 3);
-        assert_eq!(fonts.hit_index(FontFace::Mono, 13.0, text, x + 0.1), 3);
-        assert_eq!(fonts.hit_index(FontFace::Mono, 13.0, text, 1e6), text.len());
-        assert_eq!(
-            fonts.caret_x(FontFace::Mono, 13.0, text, text.len()),
-            fonts.measure(FontFace::Mono, 13.0, text)
-        );
-    }
-
-    #[test]
-    fn wrapping_breaks_at_spaces_and_newlines() {
-        let fonts = fonts();
-        let text = "alpha beta gamma\ndelta";
-        let width = fonts.measure(FontFace::Mono, 13.0, "alpha beta ");
-        let lines: Vec<&str> = fonts
-            .wrap(FontFace::Mono, 13.0, text, width)
-            .into_iter()
-            .map(|range| &text[range])
-            .collect();
-        assert_eq!(lines, ["alpha beta", "gamma", "delta"]);
-        let empty = fonts.wrap(FontFace::Ui, 14.0, "", 100.0);
-        assert_eq!(empty.len(), 1);
-        assert!(empty[0].is_empty());
-    }
-
-    #[test]
-    fn eliding_keeps_a_prefix() {
-        let fonts = fonts();
-        let text = "Faustian Enigma";
-        let width = fonts.measure(FontFace::Ui, 14.0, "Faust")
-            + fonts.measure(FontFace::Ui, 14.0, "…")
-            + 0.5;
-        let elided = fonts.elide(FontFace::Ui, 14.0, text, width);
-        assert!(elided.starts_with("Faust") && elided.ends_with('…'));
-        assert_eq!(fonts.elide(FontFace::Ui, 14.0, text, 1e6), text);
-    }
-
-    #[test]
-    fn glyphs_rasterize_to_coverage() {
-        let fonts = fonts();
-        let glyph = fonts.layout(FontFace::Ui, 24.0, "S")[0];
-        let (metrics, bitmap) = fonts.rasterize(glyph.font, glyph.glyph, 24.0);
-        assert_eq!(bitmap.len(), metrics.width * metrics.height);
-        assert!(bitmap.iter().any(|&coverage| coverage > 200));
+        assert_eq!(text(&world, handle), "Héllo!");
+        typing.record(&mut history, handle, ops, start);
+        // A second burst after a pause is its own step.
+        let mut more = Vec::new();
+        {
+            let buffer = world
+                .arena
+                .get_mut(handle)
+                .unwrap()
+                .string_buffer_mut()
+                .unwrap();
+            ArenaText::new(buffer, &mut more).insert_text("?", CharIndex(6));
+        }
+        typing.record(&mut history, handle, more, start + TYPING_PAUSE * 2);
+        typing.flush(&mut history);
+        assert_eq!(history.len(), 2);
+        history.undo(&mut world).unwrap();
+        assert_eq!(text(&world, handle), "Héllo!");
+        history.undo(&mut world).unwrap();
+        assert_eq!(text(&world, handle), "héllo");
+        history.redo(&mut world).unwrap();
+        assert_eq!(text(&world, handle), "Héllo!");
     }
 }

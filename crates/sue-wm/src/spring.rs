@@ -120,6 +120,18 @@ impl SpringDamper {
 
     /// `true` if position and velocity are within
     /// [`SETTLE_EPSILON`](Self::SETTLE_EPSILON) of rest at the target.
+    /// Jumps to `value` and rests there: direct manipulation such as a drag
+    /// follows the pointer exactly.
+    pub fn snap_to(&mut self, value: f32) {
+        self.target = value;
+        self.snap();
+    }
+
+    /// Changes the spring constants (after a rice edit).
+    pub fn set_params(&mut self, params: SpringParams) {
+        self.params = params;
+    }
+
     #[must_use]
     pub fn is_settled(&self) -> bool {
         (self.position - self.target).abs() < Self::SETTLE_EPSILON

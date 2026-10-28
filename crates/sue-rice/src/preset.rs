@@ -57,20 +57,16 @@ impl ThemePreset {
 #[must_use]
 pub fn builtin_presets() -> Vec<ThemePreset> {
     [
+        ("void", "Void", include_str!("../rice/presets/void.suerice")),
         (
             "graphite",
             "Graphite",
             include_str!("../rice/presets/graphite.suerice"),
         ),
         (
-            "midnight",
-            "Midnight",
-            include_str!("../rice/presets/midnight.suerice"),
-        ),
-        (
-            "daylight",
-            "Daylight",
-            include_str!("../rice/presets/daylight.suerice"),
+            "paper",
+            "Paper",
+            include_str!("../rice/presets/paper.suerice"),
         ),
     ]
     .into_iter()
@@ -93,7 +89,16 @@ mod tests {
         let rice = RiceSchema::parse(DEFAULT_RICE).unwrap();
         assert!(presets[0].is_active(&rice));
         assert!(!presets[1].is_active(&rice));
-        assert!(presets.iter().all(|preset| preset.values.len() == 12));
+        assert!(presets.iter().all(|preset| preset.values.len() == 13));
+        // Every preset is achromatic.
+        for preset in &presets {
+            for (path, value) in &preset.values {
+                let crate::RiceValue::Color(rgba) = value else {
+                    panic!("{path} is not a color");
+                };
+                assert!(rgba.r == rgba.g && rgba.g == rgba.b, "{} {path}", preset.id);
+            }
+        }
     }
 
     #[test]
@@ -105,7 +110,7 @@ mod tests {
         assert!(!txn.is_empty());
         history.apply(&mut rice, txn).unwrap();
         assert!(presets[2].is_active(&rice));
-        assert_eq!(history.history(), vec!["Apply the Daylight theme"]);
+        assert_eq!(history.history(), vec!["Apply the Paper theme"]);
         history.undo(&mut rice).unwrap();
         assert!(presets[0].is_active(&rice));
         assert!(presets[0].transaction(&rice).is_empty());

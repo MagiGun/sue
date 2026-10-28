@@ -1,8 +1,19 @@
 //! Hand-offs to the operating system: the default web browser, the file
-//! manager, and native open and save dialogs.
+//! manager, native open and save dialogs, and the clipboard.
 
 use std::io;
 use std::path::{Path, PathBuf};
+
+/// Puts `text` on the system clipboard (`arboard`). Text fields copy and
+/// paste through egui on their own; this is for buttons such as "Copy path".
+///
+/// # Errors
+/// The clipboard's message when it is unavailable.
+pub fn copy_text(text: &str) -> Result<(), String> {
+    arboard::Clipboard::new()
+        .and_then(|mut clipboard| clipboard.set_text(text.to_owned()))
+        .map_err(|error| error.to_string())
+}
 
 /// Normalizes what a user typed into a URL bar: `example.com` becomes
 /// `https://example.com`. Only `http` and `https` URLs are accepted, so a

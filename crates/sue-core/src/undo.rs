@@ -171,6 +171,20 @@ impl<T> UndoStack<T> {
         mut txn: Box<dyn ReversibleTransaction<T>>,
     ) -> Result<NodeId, TxnError> {
         txn.apply(target)?;
+        Ok(self.push(txn))
+    }
+
+    /// Records `txn` as a child of the cursor without applying it, for an edit
+    /// that already happened in place (text typed into a live editor). Undo
+    /// reverts it like any other node, and redo re-applies it.
+    pub fn record<X>(&mut self, txn: X) -> NodeId
+    where
+        X: ReversibleTransaction<T> + 'static,
+    {
+        self.push(Box::new(txn))
+    }
+
+    fn push(&mut self, txn: Box<dyn ReversibleTransaction<T>>) -> NodeId {
         let id = NodeId(self.nodes.len());
         let parent = self.cursor;
         let depth = self.nodes[parent.0].depth + 1;
@@ -186,7 +200,7 @@ impl<T> UndoStack<T> {
         parent_node.children.push(id);
         parent_node.preferred = Some(id);
         self.cursor = id;
-        Ok(id)
+        id
     }
 
     /// Reverts the transaction at the cursor and moves to its parent.

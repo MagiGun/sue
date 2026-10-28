@@ -28,7 +28,9 @@ pub use jxl::{
     DC_PREVIEW_SCALE, DecodedJxl, FourCc, JXL_CODESTREAM_SIGNATURE, JXL_CONTAINER_SIGNATURE,
     JxlError, JxlImageInfo, JxlPipeline, JxlProbe, NativeJxlPipeline, ProgressiveTarget, probe_jxl,
 };
-pub use raster::{DecodedRaster, RasterInfo, decode_jpeg, decode_png, encode_png, encode_png_rgba};
+pub use raster::{
+    DecodedRaster, RasterInfo, decode_jpeg, decode_png, encode_jpeg, encode_png, encode_png_rgba,
+};
 pub use sniff::{
     BinarySignature, ByteMapHint, IngestRoute, IngestTier, NativeFormat, StructuredFormat,
     sniff_stream,

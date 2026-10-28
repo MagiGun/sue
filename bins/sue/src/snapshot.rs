@@ -1,37 +1,39 @@
 //! Offscreen snapshots: boots the real shell headlessly against a fresh,
-//! temporary profile (so the defaults are what you see), opens sample files
-//! through the same path as the window, and renders each scene with the GPU
-//! renderer into a PNG.
+//! temporary profile (so the defaults are what you see), drives it through
+//! scripted scenes with real egui frames (springs glide to rest at a fixed
+//! frame time), and paints each scene with the GPU into a PNG.
 
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use egui::{Pos2, Rect, vec2};
 use sue_core::{PCMFloat1D, PixelFormat, RasterTile2D};
 use sue_io::{JxlPipeline, NativeJxlPipeline, encode_png, encode_png_rgba, encode_wav};
 use sue_platform::{
-    FormFactor, GpuContext, HardwareCapabilities, HeadlessHost, OsFamily, PlatformPaths,
-    SafeAreaInsets,
+    EguiPainter, FormFactor, FramePacing, GpuContext, HardwareCapabilities, HeadlessHost, OsFamily,
+    PlatformPaths, wgpu,
 };
 use sue_rice::DEFAULT_RICE;
-use sue_wm::{FrameTarget, Rect, render_offscreen};
+use sue_wm::{AppletId, NodeId, ShellRequest};
 
 use crate::engine::{BootOptions, Engine};
 use crate::runtime::Runtime;
 
-/// A 256x160 test card: hue ramps, a gray wedge and an alpha border.
+/// A 256x160 test card: gray ramps, a checker and a soft border.
 pub fn test_card() -> RasterTile2D {
     let (width, height) = (256_u32, 160_u32);
     let mut pixels = Vec::with_capacity((width * height * 4) as usize);
     for y in 0..height {
         for x in 0..width {
-            let (r, g, b) = if y < 120 {
-                (x as u8, (y * 2) as u8, (255 - x) as u8)
+            let value = if y < 80 {
+                x as u8
+            } else if y < 120 {
+                if (x / 16 + y / 16) % 2 == 0 { 230 } else { 40 }
             } else {
-                let gray = ((x / 32) * 36) as u8;
-                (gray, gray, gray)
+                ((x / 32) * 36) as u8
             };
             let edge = x < 4 || y < 4 || x >= width - 4 || y >= height - 4;
-            pixels.extend([r, g, b, if edge { 96 } else { 255 }]);
+            pixels.extend([value, value, value, if edge { 96 } else { 255 }]);
         }
     }
     RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels).expect("test card size")
@@ -69,7 +71,8 @@ fn sample_tone() -> PCMFloat1D {
 
 /// Writes the sample files the scenes open into `home`.
 fn write_samples(home: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(home.join("Projects")).map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(home.join("Documents")).map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(home.join("Pictures")).map_err(|error| error.to_string())?;
     let card = test_card();
     let jxl = NativeJxlPipeline
         .encode_layers(&[&card], 3)
@@ -90,6 +93,73 @@ fn write_samples(home: &Path) -> Result<(), String> {
         std::fs::write(home.join(name), bytes).map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+/// Drives the runtime with egui frames and paints the last one.
+struct Camera2 {
+    ctx: egui::Context,
+    painter: EguiPainter,
+    size: [u32; 2],
+    start: Instant,
+    now: Instant,
+}
+
+impl Camera2 {
+    fn frame(&mut self, runtime: &mut Runtime) -> egui::FullOutput {
+        let raw = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                Pos2::ZERO,
+                vec2(self.size[0] as f32, self.size[1] as f32),
+            )),
+            time: Some(self.now.duration_since(self.start).as_secs_f64()),
+            max_texture_side: Some(self.painter.max_texture_side()),
+            ..egui::RawInput::default()
+        };
+        let now = self.now;
+        let output = self
+            .ctx
+            .run_ui(raw, |ui| runtime.ui(ui, &mut self.painter, now));
+        self.now += Duration::from_millis(8);
+        output
+    }
+
+    /// Runs frames until the shell sleeps.
+    fn settle(&mut self, runtime: &mut Runtime) {
+        for count in 0.. {
+            let output = self.frame(runtime);
+            self.painter.apply_textures(output.textures_delta);
+            let asleep = !matches!(runtime.pacing(self.now), FramePacing::Animate { .. });
+            if (asleep && count > 3) || count > 600 {
+                break;
+            }
+        }
+    }
+
+    /// Runs frames until the shell sleeps, then paints one more.
+    fn shoot(&mut self, runtime: &mut Runtime, path: &Path) -> Result<(), String> {
+        self.settle(runtime);
+        let output = self.frame(runtime);
+        let pixels = self.painter.paint_offscreen(
+            &self.ctx,
+            self.size,
+            runtime.theme().void,
+            output.shapes,
+            output.textures_delta,
+            output.pixels_per_point,
+        )?;
+        std::fs::write(path, encode_png_rgba(self.size[0], self.size[1], &pixels)?)
+            .map_err(|error| error.to_string())
+    }
+}
+
+fn node_of(runtime: &Runtime, applet: &str) -> Option<NodeId> {
+    runtime
+        .engine
+        .world
+        .scene
+        .iter()
+        .find(|(_, node)| node.applet.as_str() == applet)
+        .map(|(id, _)| id)
 }
 
 /// Renders the shell's main scenes into `dir` as PNG files and returns
@@ -120,58 +190,126 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         gpu_label: Some(gpu.adapter_label()),
     };
     let mut runtime = Runtime::new(Engine::boot_with(&host, options)?)?;
-
-    let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
-    let frame = FrameTarget {
-        width,
-        height,
-        scale: 1.0,
+    let start = Instant::now();
+    let mut camera = Camera2 {
+        ctx: egui::Context::default(),
+        painter: EguiPainter::new(&gpu, wgpu::TextureFormat::Rgba8UnormSrgb),
+        size: [width, height],
+        start,
+        now: start,
     };
     let mut written = Vec::new();
-    let mut shoot = |runtime: &mut Runtime, name: &str| -> Result<(), String> {
-        // Two frames: the second lays out against the first one's widgets.
-        runtime.frame(viewport, SafeAreaInsets::ZERO, Instant::now());
-        let output = runtime.frame(viewport, SafeAreaInsets::ZERO, Instant::now());
-        let pixels = render_offscreen(
-            &gpu.device,
-            &gpu.queue,
-            frame,
-            &output.canvas,
-            &runtime.fonts,
-            &runtime.engine.world.arena,
-            runtime.theme().base,
-        )?;
-        let path = dir.join(format!("{name}.png"));
-        std::fs::write(&path, encode_png_rgba(width, height, &pixels)?)
-            .map_err(|error| error.to_string())?;
-        written.push(path);
-        Ok(())
-    };
-
+    let mut shoot =
+        |runtime: &mut Runtime, camera: &mut Camera2, name: &str| -> Result<(), String> {
+            let path = dir.join(format!("{name}.png"));
+            camera.shoot(runtime, &path)?;
+            written.push(path);
+            Ok(())
+        };
     let home = paths.home_dir;
-    shoot(&mut runtime, "01-home")?;
-    for (page, name) in [
-        ("appearance", "02-settings-appearance"),
-        ("display", "03-settings-display"),
-        ("audio", "04-settings-audio"),
-        ("keymaps", "05-settings-keymaps"),
-    ] {
-        runtime.open_settings(Some(page));
-        shoot(&mut runtime, name)?;
+
+    // 1. The canvas as Sue opens: three live entities and the top pill.
+    shoot(&mut runtime, &mut camera, "01-canvas")?;
+
+    // 2. A paint stroke, then the selection pill above the paint layer.
+    let paint = node_of(&runtime, crate::paint::ID).ok_or("no paint layer")?;
+    runtime.with_context(&mut camera.painter, camera.now, |cx| {
+        crate::paint::scribble(cx, paint);
+    });
+    runtime.request(
+        ShellRequest::Select(Some(paint)),
+        &mut camera.painter,
+        camera.now,
+    );
+    shoot(&mut runtime, &mut camera, "02-selection-pill")?;
+
+    // 3. Document mode: the camera frames the document, text selected.
+    runtime.request(
+        ShellRequest::Mode(crate::document::ID.to_owned()),
+        &mut camera.painter,
+        camera.now,
+    );
+    if let Some(document) = node_of(&runtime, crate::document::ID) {
+        crate::document::select_words(&camera.ctx, document, 30, 38);
     }
-    runtime.open_path(&home.join("test-card.jxl"));
-    shoot(&mut runtime, "06-image-viewer")?;
-    runtime.open_path(&home.join("README.md"));
-    runtime.show_dock(crate::history::ID);
-    shoot(&mut runtime, "07-text-studio")?;
-    runtime.open_path(&home.join("archive.zip"));
-    runtime.show_dock(crate::inspector::ID);
-    shoot(&mut runtime, "08-hex-inspector")?;
-    runtime.open_path(&home.join("chord.wav"));
-    shoot(&mut runtime, "09-player")?;
-    runtime.open_path(&home.join("photo.png"));
-    runtime.show_dock(crate::convert::ID);
-    shoot(&mut runtime, "10-convert")?;
+    shoot(&mut runtime, &mut camera, "03-document-mode")?;
+
+    // 4. Everything projected onto the open timeline, audio selected.
+    for applet in [crate::document::ID, crate::paint::ID, crate::audio_node::ID] {
+        if let Some(node) = node_of(&runtime, applet) {
+            let seconds = if applet == crate::audio_node::ID {
+                3.0
+            } else {
+                4.0
+            };
+            runtime.with_context(&mut camera.painter, camera.now, |cx| {
+                sue_wm::project_to_timeline(cx, node, seconds);
+            });
+        }
+    }
+    camera.settle(&mut runtime);
+    runtime.request(ShellRequest::ResetCamera, &mut camera.painter, camera.now);
+    runtime.shell.seek(1.25);
+    if let Some(audio) = node_of(&runtime, crate::audio_node::ID) {
+        runtime.request(
+            ShellRequest::Select(Some(audio)),
+            &mut camera.painter,
+            camera.now,
+        );
+    }
+    shoot(&mut runtime, &mut camera, "04-timeline")?;
+
+    // 5. The marking menu and 6. the command palette.
+    runtime.request(
+        ShellRequest::Timeline(false),
+        &mut camera.painter,
+        camera.now,
+    );
+    runtime.request(ShellRequest::Select(None), &mut camera.painter, camera.now);
+    let center = runtime.shell.canvas_rect().center();
+    runtime.shell.open_radial(center);
+    shoot(&mut runtime, &mut camera, "05-radial-menu")?;
+    runtime.shell.dismiss_overlays();
+    runtime.shell.open_palette();
+    runtime.shell.palette_query("new");
+    shoot(&mut runtime, &mut camera, "06-command-palette")?;
+
+    // 7 and 8. Settings, on two categories.
+    for (page, name) in [
+        ("appearance", "07-settings-appearance"),
+        ("display", "08-settings-display"),
+    ] {
+        runtime.request(
+            ShellRequest::OpenSettings(Some(page.to_owned())),
+            &mut camera.painter,
+            camera.now,
+        );
+        shoot(&mut runtime, &mut camera, name)?;
+    }
+    runtime.shell.close_window();
+    runtime.shell.dismiss_overlays();
+
+    // 9. Files and the Inspector open, with a JPEG XL picture on the canvas.
+    runtime.open_path(&home.join("test-card.jxl"), &mut camera.painter, camera.now);
+    for drawer in [crate::files::ID, crate::inspector::ID] {
+        runtime.request(
+            ShellRequest::ShowDrawer(AppletId::new(drawer).map_err(|error| error.to_string())?),
+            &mut camera.painter,
+            camera.now,
+        );
+    }
+    shoot(&mut runtime, &mut camera, "09-drawers-image")?;
+
+    // 10. Code / Hex on an unknown file, with the History drawer.
+    runtime.open_path(&home.join("archive.zip"), &mut camera.painter, camera.now);
+    runtime.request(
+        ShellRequest::ShowDrawer(
+            AppletId::new(crate::history::ID).map_err(|error| error.to_string())?,
+        ),
+        &mut camera.painter,
+        camera.now,
+    );
+    shoot(&mut runtime, &mut camera, "10-code-hex")?;
     let _ = std::fs::remove_dir_all(&root);
     Ok(written)
 }

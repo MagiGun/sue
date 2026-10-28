@@ -1,13 +1,12 @@
-//! The runtime applet registry behind the Hub, and pin-to-boot.
+//! The Launchpad: the runtime registry of applets (LAW 1), and [`Applets`],
+//! the live instances the shell drives.
 
-use std::fmt;
-
+use sue_core::Entity;
 use sue_rice::RiceDeclaration;
 
-use crate::{AppletCategory, AppletId, AppletManifest, SueApplet, WmError};
+use crate::{AppletId, AppletManifest, AppletRole, SueApplet, WmError};
 
-/// Builds a fresh applet instance. Factories must be cheap and side-effect
-/// free; heavy work belongs in [`SueApplet::mount`].
+/// Builds a fresh applet.
 pub type AppletFactory = Box<dyn Fn() -> Box<dyn SueApplet> + Send + Sync>;
 
 struct Registration {
@@ -15,57 +14,28 @@ struct Registration {
     factory: AppletFactory,
 }
 
-/// What Sue opens at launch.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum BootTarget {
-    /// The Hub, listing every installed applet.
-    Hub,
-    /// A pinned applet.
-    Applet(AppletId),
-}
-
-/// What Home lists: Center Stage applets grouped by category, each group
-/// sorted by name. Dock utilities live on their rails and Settings behind
-/// the gear, so they are not listed.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HubView<'a> {
-    /// Full creative environments.
-    pub studios: Vec<&'a AppletManifest>,
-    /// Viewers for one kind of asset.
-    pub inspectors: Vec<&'a AppletManifest>,
-}
-
-/// The registry of installed applets. It knows applets only through their
-/// factories and manifests; nothing here lists applets by name (LAW 1).
+/// Every installed applet, registered at runtime.
 #[derive(Default)]
 pub struct Launchpad {
     registrations: Vec<Registration>,
-    pinned_boot_applet: Option<AppletId>,
 }
 
-impl fmt::Debug for Launchpad {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Launchpad")
-            .field(
-                "applets",
-                &self
-                    .manifests()
-                    .map(|manifest| manifest.id.as_str())
-                    .collect::<Vec<_>>(),
-            )
-            .field("pinned_boot_applet", &self.pinned_boot_applet)
+impl std::fmt::Debug for Launchpad {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.manifests().map(|manifest| manifest.id.as_str()))
             .finish()
     }
 }
 
 impl Launchpad {
-    /// An empty launchpad.
+    /// An empty Launchpad.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Installs an applet. The factory is called once to read the manifest.
+    /// Registers an applet factory.
     ///
     /// # Errors
     /// [`WmError::DuplicateApplet`] if the id is taken.
@@ -85,7 +55,7 @@ impl Launchpad {
         Ok(id)
     }
 
-    /// Uninstalls an applet. Returns `true` if it was installed.
+    /// Removes an applet. Returns `false` if it was not installed.
     pub fn unregister(&mut self, id: &AppletId) -> bool {
         let before = self.registrations.len();
         self.registrations
@@ -99,78 +69,14 @@ impl Launchpad {
         self.manifests().find(|manifest| &manifest.id == id)
     }
 
-    /// Every installed applet, in installation order.
+    /// Every manifest, in registration order.
     pub fn manifests(&self) -> impl Iterator<Item = &AppletManifest> {
         self.registrations
             .iter()
             .map(|registration| &registration.manifest)
     }
 
-    /// The Home listing: studios and inspectors, each sorted by name.
-    #[must_use]
-    pub fn hub(&self) -> HubView<'_> {
-        let sorted = |category: AppletCategory| {
-            let mut listed: Vec<&AppletManifest> = self
-                .manifests()
-                .filter(|manifest| {
-                    manifest.category == category && manifest.home_zone == crate::Zone::CenterStage
-                })
-                .collect();
-            listed.sort_by(|a, b| a.name.cmp(&b.name));
-            listed
-        };
-        HubView {
-            studios: sorted(AppletCategory::Studio),
-            inspectors: sorted(AppletCategory::Inspector),
-        }
-    }
-
-    /// Pins `id` so Sue boots straight into it.
-    ///
-    /// # Errors
-    /// [`WmError::UnknownApplet`] if it is not installed.
-    pub fn pin_boot(&mut self, id: &AppletId) -> Result<(), WmError> {
-        if self.manifest(id).is_none() {
-            return Err(WmError::UnknownApplet(id.clone()));
-        }
-        self.pinned_boot_applet = Some(id.clone());
-        Ok(())
-    }
-
-    /// Boots into the Hub again.
-    pub fn unpin_boot(&mut self) {
-        self.pinned_boot_applet = None;
-    }
-
-    /// The pinned applet, if any.
-    #[must_use]
-    pub fn pinned_boot_applet(&self) -> Option<&AppletId> {
-        self.pinned_boot_applet.as_ref()
-    }
-
-    /// What to open at launch. A pinned applet that has since been uninstalled
-    /// falls back to the Hub.
-    #[must_use]
-    pub fn boot_target(&self) -> BootTarget {
-        match &self.pinned_boot_applet {
-            Some(id) if self.manifest(id).is_some() => BootTarget::Applet(id.clone()),
-            _ => BootTarget::Hub,
-        }
-    }
-
-    /// A fresh instance of `id`.
-    ///
-    /// # Errors
-    /// [`WmError::UnknownApplet`].
-    pub fn instantiate(&self, id: &AppletId) -> Result<Box<dyn SueApplet>, WmError> {
-        self.registrations
-            .iter()
-            .find(|registration| &registration.manifest.id == id)
-            .map(|registration| (registration.factory)())
-            .ok_or_else(|| WmError::UnknownApplet(id.clone()))
-    }
-
-    /// Every riceable declared by installed applets.
+    /// Every riceable the installed applets declare.
     #[must_use]
     pub fn rice_declarations(&self) -> Vec<RiceDeclaration> {
         self.registrations
@@ -179,160 +85,164 @@ impl Launchpad {
             .collect()
     }
 
+    /// One live instance of every applet.
+    #[must_use]
+    pub fn instantiate(&self) -> Applets {
+        let mut list: Vec<(AppletManifest, Box<dyn SueApplet>)> = self
+            .registrations
+            .iter()
+            .map(|registration| (registration.manifest.clone(), (registration.factory)()))
+            .collect();
+        list.sort_by_key(|(manifest, _)| manifest.order);
+        Applets { list }
+    }
+
     /// Number of installed applets.
     #[must_use]
     pub fn len(&self) -> usize {
         self.registrations.len()
     }
 
-    /// `true` if no applet is installed.
+    /// `true` with nothing installed.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.registrations.is_empty()
     }
 }
 
+/// The live applets, sorted by their manifest order.
+#[derive(Default)]
+pub struct Applets {
+    list: Vec<(AppletManifest, Box<dyn SueApplet>)>,
+}
+
+impl std::fmt::Debug for Applets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.list.iter().map(|(manifest, _)| manifest.id.as_str()))
+            .finish()
+    }
+}
+
+impl Applets {
+    /// Every manifest, sorted.
+    pub fn manifests(&self) -> impl Iterator<Item = &AppletManifest> {
+        self.list.iter().map(|(manifest, _)| manifest)
+    }
+
+    /// Manifests with `role`, sorted.
+    pub fn with_role(&self, role: AppletRole) -> impl Iterator<Item = &AppletManifest> {
+        self.manifests()
+            .filter(move |manifest| manifest.role == role)
+    }
+
+    /// The manifest of `id`.
+    #[must_use]
+    pub fn manifest(&self, id: &AppletId) -> Option<&AppletManifest> {
+        self.manifests().find(|manifest| &manifest.id == id)
+    }
+
+    /// The applet `id`.
+    pub fn get_mut(&mut self, id: &AppletId) -> Option<&mut Box<dyn SueApplet>> {
+        self.list
+            .iter_mut()
+            .find(|(manifest, _)| &manifest.id == id)
+            .map(|(_, applet)| applet)
+    }
+
+    /// The applet `id`.
+    #[must_use]
+    pub fn get(&self, id: &AppletId) -> Option<&dyn SueApplet> {
+        self.list
+            .iter()
+            .find(|(manifest, _)| &manifest.id == id)
+            .map(|(_, applet)| applet.as_ref())
+    }
+
+    /// The first node applet that accepts `entity`.
+    #[must_use]
+    pub fn node_applet_for(&self, entity: &Entity) -> Option<AppletId> {
+        self.list
+            .iter()
+            .find(|(manifest, applet)| manifest.role == AppletRole::Node && applet.accepts(entity))
+            .map(|(manifest, _)| manifest.id.clone())
+    }
+
+    /// Every applet, mutably.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&AppletManifest, &mut Box<dyn SueApplet>)> {
+        self.list
+            .iter_mut()
+            .map(|(manifest, applet)| (&*manifest, applet))
+    }
+
+    /// `true` while some applet needs every key.
+    #[must_use]
+    pub fn captures_keys(&self) -> bool {
+        self.list.iter().any(|(_, applet)| applet.captures_keys())
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::{AppletContext, AppletError, InputResponse, Zone};
-    use sue_platform::InputEvent;
-    use sue_rice::RiceParameter;
+    use crate::{AppletContext, ModeSpec, SpawnSpec};
 
-    /// A minimal applet for tests.
-    pub(crate) struct Fixture {
-        pub(crate) id: &'static str,
-        pub(crate) name: &'static str,
-        pub(crate) category: AppletCategory,
-        pub(crate) uses_timeline: bool,
-    }
+    /// A node applet for tests.
+    pub(crate) struct Probe(pub &'static str, pub AppletRole, pub i32);
 
-    impl SueApplet for Fixture {
+    impl SueApplet for Probe {
         fn manifest(&self) -> AppletManifest {
-            AppletManifest {
-                id: AppletId::new(self.id).unwrap(),
-                name: self.name.to_owned(),
-                category: self.category,
-                home_zone: if self.category == AppletCategory::Utility {
-                    Zone::LeftDock
-                } else {
-                    Zone::CenterStage
-                },
-                uses_timeline: self.uses_timeline,
-                summary: String::new(),
-                opens: Vec::new(),
-                icon: "F".to_owned(),
-                singleton: self.category == AppletCategory::System,
+            let mut manifest = AppletManifest::new(self.0, self.0, self.1, "*");
+            manifest.order = self.2;
+            if self.1 == AppletRole::Node {
+                manifest.mode = Some(ModeSpec {
+                    label: self.0.to_owned(),
+                    in_pill: true,
+                });
+                manifest.spawn = Some(SpawnSpec {
+                    button: format!("+ {}", self.0),
+                    label: format!("New {}", self.0),
+                });
+                manifest.lane = Some(format!("{} Track", self.0));
             }
+            manifest
         }
 
-        fn rice_declarations(&self) -> Vec<RiceDeclaration> {
-            vec![RiceDeclaration::new(
-                format!("{}.enabled", self.id.replace('-', "_")),
-                RiceParameter::Bool { value: true },
-                "Fixture toggle",
-            )]
-        }
-
-        fn mount(&mut self, _ctx: &mut AppletContext<'_>) -> Result<(), AppletError> {
-            Ok(())
-        }
-
-        fn handle_input(
-            &mut self,
-            _event: &InputEvent,
-            _ctx: &mut AppletContext<'_>,
-        ) -> Result<InputResponse, AppletError> {
-            Ok(InputResponse::Ignored)
-        }
-    }
-
-    pub(crate) fn fixture(
-        id: &'static str,
-        name: &'static str,
-        category: AppletCategory,
-        uses_timeline: bool,
-    ) -> impl Fn() -> Box<dyn SueApplet> + Send + Sync + 'static {
-        move || {
-            Box::new(Fixture {
-                id,
-                name,
-                category,
-                uses_timeline,
+        fn new_entity(&mut self, _cx: &mut AppletContext<'_>) -> Option<crate::NewEntity> {
+            Some(crate::NewEntity {
+                name: self.0.to_owned(),
+                base: sue_core::StringBuffer::new().into(),
+                meta: Vec::new(),
+                size: egui::vec2(200.0, 120.0),
+                props: Vec::new(),
             })
         }
     }
 
-    fn launchpad() -> Launchpad {
+    #[test]
+    fn applets_register_once_and_come_back_sorted() {
         let mut launchpad = Launchpad::new();
         launchpad
-            .register(fixture(
-                "video",
-                "Video Editor",
-                AppletCategory::Studio,
-                true,
-            ))
+            .register(|| Box::new(Probe("paint", AppletRole::Node, 20)))
             .unwrap();
         launchpad
-            .register(fixture(
-                "player",
-                "Media Player",
-                AppletCategory::Utility,
-                false,
-            ))
+            .register(|| Box::new(Probe("document", AppletRole::Node, 10)))
             .unwrap();
-        launchpad
-            .register(fixture("hex", "Hex", AppletCategory::Inspector, false))
-            .unwrap();
-        launchpad
-            .register(fixture("cad", "CAD Studio", AppletCategory::Studio, false))
-            .unwrap();
-        launchpad
-    }
-
-    #[test]
-    fn groups_and_sorts_the_hub() {
-        let launchpad = launchpad();
-        let hub = launchpad.hub();
-        let names =
-            |list: &[&AppletManifest]| list.iter().map(|m| m.name.clone()).collect::<Vec<_>>();
-        assert_eq!(names(&hub.studios), ["CAD Studio", "Video Editor"]);
-        assert_eq!(names(&hub.inspectors), ["Hex"]);
-        assert_eq!(launchpad.len(), 4);
-        assert_eq!(launchpad.rice_declarations().len(), 4);
-    }
-
-    #[test]
-    fn rejects_duplicates() {
-        let mut launchpad = launchpad();
         assert!(matches!(
-            launchpad.register(fixture("cad", "CAD Again", AppletCategory::Studio, false)),
+            launchpad.register(|| Box::new(Probe("paint", AppletRole::Node, 1))),
             Err(WmError::DuplicateApplet(_))
         ));
+        let applets = launchpad.instantiate();
+        let order: Vec<&str> = applets.manifests().map(|m| m.id.as_str()).collect();
+        assert_eq!(order, ["document", "paint"]);
+        assert!(launchpad.unregister(&AppletId::new("paint").unwrap()));
+        assert_eq!(launchpad.len(), 1);
     }
 
     #[test]
-    fn pins_and_falls_back_to_the_hub() {
-        let mut launchpad = launchpad();
-        assert_eq!(launchpad.boot_target(), BootTarget::Hub);
-        let cad = AppletId::new("cad").unwrap();
-        launchpad.pin_boot(&cad).unwrap();
-        assert_eq!(launchpad.boot_target(), BootTarget::Applet(cad.clone()));
-        assert!(launchpad.unregister(&cad));
-        assert_eq!(launchpad.boot_target(), BootTarget::Hub);
-        assert_eq!(launchpad.pinned_boot_applet(), Some(&cad));
-        assert!(
-            launchpad
-                .pin_boot(&AppletId::new("ghost").unwrap())
-                .is_err()
-        );
-        launchpad.unpin_boot();
-        assert!(launchpad.pinned_boot_applet().is_none());
-        assert!(launchpad.instantiate(&cad).is_err());
-        assert!(
-            launchpad
-                .instantiate(&AppletId::new("video").unwrap())
-                .is_ok()
-        );
+    fn ids_are_validated() {
+        assert!(AppletId::new("hex-view2").is_ok());
+        assert!(AppletId::new("Hex").is_err());
+        assert!(AppletId::new("2hex").is_err());
     }
 }

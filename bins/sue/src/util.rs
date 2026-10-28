@@ -2,19 +2,6 @@
 
 use std::path::{Path, PathBuf};
 
-use sue_io::IngestView;
-use sue_wm::MediaClass;
-
-/// Maps an ingest view onto the media class applets declare.
-pub fn media_class(view: IngestView) -> MediaClass {
-    match view {
-        IngestView::Raster => MediaClass::Image,
-        IngestView::Text => MediaClass::Text,
-        IngestView::Audio => MediaClass::Audio,
-        IngestView::Bytes => MediaClass::Binary,
-    }
-}
-
 /// `1.4 MiB`, `812.0 KiB`, `96 B`.
 pub fn human_bytes(bytes: u64) -> String {
     const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
@@ -84,14 +71,6 @@ mod tests {
         assert_eq!(clock(0.4), "0:00");
         assert_eq!(clock(187.9), "3:07");
         assert_eq!(clock(3723.0), "1:02:03");
-    }
-
-    #[test]
-    fn views_map_to_media_classes() {
-        assert_eq!(media_class(IngestView::Raster), MediaClass::Image);
-        assert_eq!(media_class(IngestView::Text), MediaClass::Text);
-        assert_eq!(media_class(IngestView::Audio), MediaClass::Audio);
-        assert_eq!(media_class(IngestView::Bytes), MediaClass::Binary);
     }
 
     #[test]

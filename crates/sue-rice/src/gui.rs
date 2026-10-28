@@ -224,21 +224,24 @@ mod tests {
         assert_eq!(tree.widget_count(), schema.len());
         assert_eq!(tree.sections[0].title, "General");
 
-        let gap = tree.widget("layout.gap").unwrap();
-        assert_eq!(gap.label, "Gap");
-        assert_eq!(gap.tooltip.as_deref(), Some("Space between panels (px)"));
+        let gap = tree.widget("layout.padding").unwrap();
+        assert_eq!(gap.label, "Padding");
+        assert_eq!(
+            gap.tooltip.as_deref(),
+            Some("Space inside drawers, pills and controls (px)")
+        );
         assert_eq!(
             gap.control,
             Control::Slider {
-                value: 0.0,
-                min: 0.0,
-                max: 32.0,
+                value: 8.0,
+                min: 2.0,
+                max: 24.0,
                 step: 1.0,
                 integer: true
             }
         );
         assert!(matches!(
-            tree.widget("colors.accent").unwrap().control,
+            tree.widget("colors.void").unwrap().control,
             Control::ColorPicker { .. }
         ));
         assert!(matches!(
@@ -256,7 +259,7 @@ mod tests {
             }
         );
         assert!(matches!(
-            tree.widget("launchpad.boot_into").unwrap().control,
+            tree.widget("launchpad.boot_mode").unwrap().control,
             Control::TextField { .. }
         ));
         let shaders =
@@ -293,11 +296,11 @@ mod tests {
         let mut schema = RiceSchema::parse(DEFAULT_RICE).unwrap();
         let tree = SettingsTree::build(&schema);
         assert!(!tree.is_stale(&schema));
-        schema.set("layout.gap", RiceValue::Int(10)).unwrap();
+        schema.set("layout.padding", RiceValue::Int(10)).unwrap();
         assert!(tree.is_stale(&schema));
         let rebuilt = SettingsTree::build(&schema);
         assert!(
-            matches!(rebuilt.widget("layout.gap").unwrap().control, Control::Slider { value, .. } if value == 10.0)
+            matches!(rebuilt.widget("layout.padding").unwrap().control, Control::Slider { value, .. } if value == 10.0)
         );
     }
 }

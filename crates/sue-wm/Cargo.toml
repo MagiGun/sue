@@ -1,6 +1,6 @@
 [package]
 name = "sue-wm"
-description = "Sue's adaptive window manager: SueApplet, the Launchpad, desktop tiling and mobile drawers, spring physics, the dirty-frame scheduler and the wgpu UI renderer."
+description = "Sue's adaptive window manager: SueApplet, the Launchpad, desktop tiling and mobile drawers, spring physics, the dirty-frame scheduler and the egui shell: infinite canvas, floating pills, radial menu, command palette and timeline."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,13 +8,10 @@ publish.workspace = true
 repository.workspace = true
 
 [dependencies]
-bytemuck.workspace = true
-epaint_default_fonts.workspace = true
-fontdue.workspace = true
+egui.workspace = true
 sue-core.workspace = true
 sue-platform.workspace = true
 sue-rice.workspace = true
-wgpu.workspace = true
 
 [lints]
 workspace = true

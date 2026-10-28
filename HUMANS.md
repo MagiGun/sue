@@ -7,17 +7,15 @@ musicians, filmmakers, makers and coders. It has no technical jargon. When a ter
 needs explaining, it is explained the first time it appears.
 
 > **Where things stand:** This guide describes the experience Sue is built for.
-> Sue v1.0 "Faustian Enigma" already opens its own window with the layout
-> below: Home with pinning; Files, Player, Convert and Notes on the left;
-> Inspector, Browser and History on the right; a Text Studio, an Image Viewer
-> and a Hex Inspector in the middle; and Settings with eight categories and a
-> search box. Everything you change can be undone and is saved as you go. Drop
-> a picture, a song, a text file or any other file on the window, and Sue opens
-> it in the right place. The big studios, the timeline, and a web browser built
-> into the window are added in the releases that follow; for now, web pages
-> open in your usual browser. Sue reads your `.suerice` file when it starts (or
-> when you press Reload in Settings), so close Sue or reload after you edit the
-> file by hand.
+> Sue v1.0 "Faustian Enigma" already opens its own window onto the infinite
+> canvas described below, with a document, a paint layer and a piece of audio
+> on it. You can write, draw, listen, split and level audio, view pictures and
+> raw bytes, line things up on the timeline, browse files, play music, convert
+> files and keep notes. Everything you change can be undone and is saved as you
+> go. The big studios (music, video, 3D) and a web browser built into the window
+> are added in the releases that follow. Sue reads your `.suerice` file when it
+> starts (or when you press Reload in Settings), so close Sue or reload after you
+> edit the file by hand.
 
 ---
 
@@ -30,8 +28,7 @@ Most days you'll use it for everyday jobs:
 - a **fast file explorer** for browsing your folders and drives,
 - a **music and media player** for your MP3s and videos,
 - a **notes app** for quick thoughts and lists,
-- a **file converter**: drop a file in, get it out in another format,
-- a **web browser** for looking things up while you work.
+- a **file converter**: drop a file in, get it out in another format.
 
 When you need more, one click turns Sue into a full studio:
 
@@ -45,93 +42,129 @@ When you need more, one click turns Sue into a full studio:
 | Code editor (IDE) | Write and run programs |
 | Game engine | Build and play games |
 
-Every studio works on **the same files at the same time**. Open a song in the
-music studio and its waveform also shows up in the video editor's timeline.
-Nothing is exported, imported or converted between them.
+Every studio works on **the same files at the same time**. Put a song on the
+timeline and it is the same song you see on the canvas. Nothing is exported,
+imported or converted between them.
 
 ---
 
 ## How the screen works
 
-Sue's window looks like a studio workstation: panels sit edge to edge, with
-thin lines between them and no wasted space.
+Sue's window is one big **infinite canvas**: a dark board with a faint dot grid
+that goes on forever in every direction. Everything you work on sits on it as a
+card. Sue is black, white and grays only, so your own pictures and words are the
+only color you see.
 
 ```text
-┌───────────────────────────────────────────────────────────────────┐
-│ File Edit Workspace Tools Settings │ Home │ Notes.md x │ +     (gear) │
-├────┬────────────┬──────────────────────────────┬────────────┬────┤
-│ R  │ LEFT DOCK  │        CENTER STAGE          │ RIGHT DOCK │ R  │
-│ A  │ Files      │   (changes to fit your task) │ Inspector  │ A  │
-│ I  │ Player     │                              │ Browser    │ I  │
-│ L  │ Convert    ├──────────────────────────────┤ History    │ L  │
-│    │ Notes      │  TIMELINE (only for audio,   │            │    │
-│    │            │  video and animation)        │            │    │
-├────┴────────────┴──────────────────────────────┴────────────┴────┤
-│ Notes.md                       3 entities   Undo 4   Balanced   Idle │
-└───────────────────────────────────────────────────────────────────┘
+┌───┬──────────────────────────────────────────────────────────┬───┐
+│ F │      [ Canvas  Document  Paint  Timeline  Code / Hex ]    │ I │
+│ P │      [ + Text  + Paint  + Audio ]  [ Command (Tab) ]      │ H │
+│ C │                                                          │   │
+│ N │   ┌ Welcome ─────────┐         [ Brush  Line  Rect ... ] │   │
+│   │   │ # Welcome to Sue │         ┌ Sketch ──────────────┐  │   │
+│   │   │ text you can type│         │   (you can draw here)│  │   │
+│   │   └──────────────────┘         └──────────────────────┘  │   │
+│   │                                ┌ Chord ───────────────┐  │   │
+│   │                                │ ▁▃▅▇▅▃▁ waveform      │  │   │
+│ ⚙ │                                └──────────────────────┘  │   │
+├───┴──────────────────────────────────────────────────────────┴───┤
+│ Canvas  Sketch                 4 entities  Undo 1  Balanced  Idle │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-- The **header** along the top holds the menus, your **tabs** and the gear that
-  opens Settings. The small panel icons at its corners show or hide the docks.
-- The thin **rails** at the far left and far right hold one icon per tool.
-  Click an icon to show that tool in its dock; click it again to tuck the dock
-  away.
-- The **status bar** at the bottom says what you are working on, and shows
-  "Idle" whenever nothing is moving on screen.
+### Moving around
 
-### Home and Pin-to-Boot
+- **Zoom** with the mouse wheel, from 10% to 3200%. The point under the pointer
+  stays put, so you zoom right into what you are looking at.
+- **Pan** by dragging with the middle mouse button, or hold **Space** and drag.
+- Everything moves on springs: nothing jumps, it glides into place and then
+  stops. When nothing moves, Sue draws nothing at all.
 
-The first tab is always **Home**. It shows all your installed **Studios** (the
-big creative tools) and **Inspectors** (viewers for one kind of file) as cards
-with a short description. Click one to open it in a new tab. A new tab (`+`)
-starts on Home too.
+### The top pill
 
-Maybe you only ever use Sue as a CAD tool, or only as an MP3 player. Then
-**pin** that mode with the "Pin as boot" switch on its card. From then on Sue
-opens straight into it when it starts. Unpin it whenever you like.
+A floating bar at the top of the canvas:
 
-### Left Dock: your daily utilities
+- **Modes** (Canvas, Document, Paint, Timeline, Code / Hex) glide the camera to
+  the thing you want to work on, about a quarter of a second each. Canvas shows
+  everything again.
+- **+ Text, + Paint, + Audio** put a new document, paint layer or audio clip in
+  view.
+- **Command (Tab)** opens the command palette.
 
-The left side holds the tools you reach for all day:
+### The selection pill
 
-- **Files**: browse your folders and open any file with one click. Sue looks
-  at what is inside the file and opens it in the right place.
-- **Player**: play music (MP3, FLAC, WAV, Ogg, M4A) while you work in any other
-  mode, with a playlist, a position bar and a volume slider.
-- **Convert**: turn a picture into JPEG XL or PNG, or a song into WAV. The new
-  file is saved next to the original.
-- **Notes**: jot something down without leaving what you're doing. Notes save
-  themselves.
+Click a card and a second floating bar springs up right above it, with only the
+tools that card needs:
 
-You can also drop a file anywhere on the window to open it.
+- **Documents:** H1, H2, Bold, Monospace, a smaller or larger text size, and
+  Project to Timeline. Headings and bold stay as marks in the text (`#`, `**`),
+  so the text is always plain and portable.
+- **Paint layers:** Brush, Line, Rect, Eraser, a size slider, the gray value
+  (click to step from white to black), Export .jxl and Project to Timeline.
+- **Audio:** Play or Pause, Gain down and up, Split (at the playhead, or in the
+  middle), Normalize and Open in Timeline. None of these change the recording
+  itself: the two halves of a split share the very same sound.
+- **Pictures:** 1:1 Zoom (one picture pixel per screen pixel), Pixel Grid,
+  Re-encode .jxl and Inspect Hex.
 
-### Center Stage: the workspace that changes shape
+Click empty canvas and the pill fades away. Drag a card by its title to move
+it, or by its bottom right corner to resize it. Double-click a title to switch
+to that card's mode.
 
-The middle of the screen **adapts to your task**. It's a page when you write, a
-canvas when you draw, a 3D view when you model, and a code editor when you code.
+### The marking menu and the command palette
 
-The **timeline** along the bottom stays hidden until you work with something
-that moves through time: audio, video or animation. Then it slides up on its own.
+**Right-click** anywhere on the canvas: a round menu grows around the pointer
+with New Document, New Paint Layer, New Audio Node, Toggle Timeline, Command
+Palette and Reset Camera. Click a slice, or hold the right button, drag toward a
+slice and let go.
 
-### Right Dock: reference and control
+Press **Tab** (or `/`) for the **command palette**: start typing and it finds
+any action, mode or tool by a few letters, such as "np" for New Paint Layer.
 
-The right side keeps your references and controls nearby:
+### The timeline
 
-- **Inspector**: shows the details of whatever is open in the middle: the
-  words and lines of a text, the size and colors of a picture, the numbers
-  under the cursor of the Hex Inspector.
-- **Browser**: look things up. Type an address or pick a bookmark; for now
-  pages open in your usual web browser.
-- **History**: every change you made, as a list you can click to go back (or
-  forward again) to any moment.
+Project to Timeline (or the Timeline mode) slides the **timeline** up from the
+bottom. It has a Document Track, a Paint/Visual Track and an Audio Track. Each
+block on it *is* the card on the canvas, not a copy. Drag blocks to move them,
+click the ruler to move the playhead, and press **Space** (or the Play button)
+to play: audio blocks sound as the playhead passes them.
+
+### Drawers on the sides
+
+The thin **rails** at the far left and far right hold one icon per tool. Click
+one to slide its drawer open; click it again to tuck it away.
+
+- **Files** (left): browse folders, with quick jumps to your project, Desktop,
+  Documents, Downloads, Pictures and Music. Click a file to put it on the
+  canvas. Hidden system clutter stays hidden.
+- **Player** (left): play music (MP3, FLAC, WAV, Ogg, M4A) while you work in any
+  mode, with a waveform you can click to jump, and a volume slider.
+- **Convert** (left): turn a picture into JPEG XL, PNG or JPEG, or a song into
+  WAV. The new file is saved next to the original.
+- **Notes** (left): jot something down. Notes save themselves.
+- **Inspector** (right): the details of the selected card: its place and size
+  on the canvas, which views it has (Document, Timeline and so on), and the
+  facts of its file, such as a JPEG XL picture's size and colors.
+- **History** (right): every change you made, as a tree you can click to go back
+  (or forward again) to any moment.
+
+You can also drop any file anywhere on the window to put it on the canvas.
+
+### Text, everywhere
+
+Every place you type (documents, code, notes, search boxes) works the same: drag
+to select, double-click a word, `Ctrl+A` to select all, `Ctrl+C`, `Ctrl+X` and
+`Ctrl+V` to copy, cut and paste, and `Ctrl+Z` and `Ctrl+Y` to undo and redo.
+Undo is one history for everything: typing, moving a card, a paint stroke or a
+Settings slider all go back in the order you did them.
 
 ### Settings
 
-The gear in the header (or `Ctrl+,`) opens **Settings** as its own tab. A list
-of categories runs down the left (General, Appearance & Rice, Display &
-Graphics, Audio & DSP, Files & Codecs, Local AI, Packages & Updates, Keymaps),
-and the page on the right shows only that category. Start typing anywhere to
-search all of them.
+The gear at the bottom of the left rail (or `Ctrl+,`) opens **Settings** as a
+floating window. A list of categories runs down the left (General, Appearance &
+Rice, Display & Graphics, Audio & DSP, Files & Codecs, Local AI, Packages &
+Updates, Keymaps), and the right side shows only that category. Type in "Filter
+settings..." to search all of them.
 
 ---
 
@@ -140,15 +173,12 @@ search all of them.
 Sue runs on **Windows, Linux, macOS, Android and iOS**. It is the same app with
 the same files and the same tools on each.
 
-- **On a computer**, Sue arranges its panels side by side like tiles, and you
-  can show, hide and resize them with the mouse or keyboard.
-- **On a tablet**, the side panels slide out of the way so your drawing area is
-  as big as possible. A pen gets pressure-sensitive strokes and round pop-up
-  menus.
-- **On a phone**, the side panels become **drawers** you swipe in from the edge
-  of the screen. The timeline becomes a **sheet** you pull up from the bottom,
-  within reach of your thumb. One screen shows at a time, and you step back
-  with a swipe.
+- **On a computer**, the drawers push the canvas aside, and you work with the
+  mouse and keyboard.
+- **On a tablet**, the drawers slide over the canvas so your drawing area stays
+  as big as possible. A pen gets pressure-sensitive strokes.
+- **On a phone**, the drawers slide in from the edges and the timeline becomes a
+  **sheet** you pull up from the bottom, within reach of your thumb.
 
 ---
 
@@ -178,34 +208,37 @@ checked to make sure it hasn't been tampered with before it is installed.
 ## Interactive ricing (`.suerice`)
 
 "Ricing" is the hobby of customizing exactly how your setup looks and feels.
-In Sue you can change **every border, gap, color, font, animation, shader
-(visual effect) and keyboard shortcut**.
+In Sue you can change **every border, gap, color, font, animation, spring and
+keyboard shortcut**.
 
 All of it lives in a plain text file ending in **`.suerice`**. You can edit it in
 any text editor, but you never have to. Sue reads the file and builds the
 controls for it in **Settings**:
 
 - on/off options become **switches**,
-- numbers with a range become **sliders**,
-- colors become **color swatches** with their hex code,
+- numbers with a range become **sliders** with their value beside them,
+- colors become **swatches** with their hex code,
 - short lists of choices become **side-by-side buttons**, longer ones
   **drop-downs**,
 - shortcuts become **key caps**: click one and press the new keys.
 
-**Appearance & Rice** also offers ready-made themes (Graphite, Midnight and
-Daylight) that change every color at once, and one `Ctrl+Z` brings yours back.
+**Appearance & Rice** also offers ready-made themes (Void, Graphite and Paper)
+that change every color at once, and one `Ctrl+Z` brings yours back. They are
+all black, white and gray: Sue's look stays out of the way of your work. If an
+older `.suerice` file has a tinted color in it, Sue resets that color to the
+monochrome default the next time it starts and keeps a copy of your old file.
 
 A line like this in your `.suerice` file:
 
 ```toml
-gap = 8   # [0..64] Space between panels
+padding = 8   # [2..24] Space inside drawers, pills and controls (px)
 ```
 
-shows up in Settings as a slider from 0 to 64 labelled "Gap", with the
-description "Space between panels" under it. Move the slider and the file
-updates. Edit the file and the slider moves the next time Sue reads it. You can
-share your `.suerice` file with friends or download other people's looks from
-the package manager.
+shows up in Settings as a slider from 2 to 24 labelled "Padding", with the
+description "Space inside drawers, pills and controls (px)" under it. Move the
+slider and the file updates. Edit the file and the slider moves the next time
+Sue reads it. You can share your `.suerice` file with friends or download other
+people's looks from the package manager.
 
 ---
 
@@ -218,12 +251,12 @@ Sue is built to be **light when it can be and powerful when it should be**:
 - On older or low-power machines, Sue skips animations and jumps straight to
   the end result, so it stays quick.
 - On phones in battery-saver mode, Sue lowers its frame rate to save power.
+- On high-end machines, Sue uses all of it: smooth 120 Hz and faster motion on
+  springs, at the full refresh rate of your screen.
 - On computers with two graphics chips, Sue draws with the one your screen is
   plugged into, so an idle window really stays idle. You can pick the other
   chip under **Display & Graphics** in Settings; the change applies the next
   time Sue starts.
-- On high-end machines, Sue uses all of it: smooth 240 Hz+ motion, spring
-  animations, and multi-layer visual effects.
 
 Sue picks the right mode for your device by itself. You can always change it
 in Settings.

@@ -1,25 +1,26 @@
-//! `sue`: boots Sue v1.0 "Faustian Enigma" in a native GPU window, or runs the
-//! headless self-check, or renders offscreen snapshots.
+//! `sue`: boots Sue v1.0 "Faustian Enigma" on its infinite canvas in a native
+//! GPU window, or runs the headless self-check, or renders offscreen snapshots.
 
 mod applets;
-mod browser;
+mod audio_node;
 mod convert;
 mod desktop;
+mod document;
 mod engine;
 mod files;
-mod hex_inspector;
+mod hex;
 mod history;
-mod image_viewer;
+mod image;
 mod inspector;
 #[cfg(test)]
 mod laws;
+mod notes;
+mod paint;
 mod player;
-mod quick_notes;
 mod runtime;
 mod selfcheck;
 mod settings;
 mod snapshot;
-mod text_studio;
 mod util;
 
 use std::path::PathBuf;
@@ -31,7 +32,7 @@ use sue_platform::HeadlessHost;
 const USAGE: &str = "\
 Usage: sue [--self-check | --snapshot <dir> | --version | --help]
 
-  (no flags)        Open the Sue window (GPU shell)
+  (no flags)        Open the Sue window (the infinite canvas)
   --self-check      Boot every subsystem headlessly and verify they work together
   --snapshot <dir>  Render the shell offscreen into PNG files in <dir>
   --version         Print the version

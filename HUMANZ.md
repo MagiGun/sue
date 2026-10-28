@@ -30,23 +30,25 @@ repository, this one contains no em dashes, en dashes or middle dots (LAW 8).
 ### 0.1 Crate graph
 
 ```text
-bins/sue      ──► every crate below
-sue-wm        ──► sue-rice, sue-platform, sue-core   + wgpu, fontdue, epaint_default_fonts
+bins/sue      ──► every crate below                   + egui
+sue-wm        ──► sue-rice, sue-platform, sue-core   + egui
 sue-ai        ──► sue-platform, sue-core
 sue-rice      ──► sue-platform, sue-core
-sue-io        ──► sue-core                            + jxl-oxide, zune-jpegxl, zune-png, zune-jpeg, symphonia
+sue-io        ──► sue-core                            + jxl-oxide, zune-jpegxl, zune-png, zune-jpeg, jpeg-encoder, symphonia
 sue-pkg       ──► sha2, ed25519-dalek, semver         (no engine crates)
 sue-core      ──► nothing                              (leaf)
-sue-platform  ──► winit, wgpu, pollster, cpal, audio_thread_priority, rfd, open   (no engine crates)
+sue-platform  ──► winit, wgpu, egui, egui-winit, egui-wgpu, arboard, pollster, cpal, audio_thread_priority, rfd, open   (no engine crates)
 ```
 
 The graph is acyclic by construction. `sue-core` and `sue-platform` are leaves
 among the engine crates, so the data kernel never depends on an operating
 system, and the OS layer never depends on the data model. `winit` (windows and
 OS input), `cpal` (audio devices), `rfd` (native dialogs) and `open` (the
-system browser and file manager) are used only by `sue-platform`. `wgpu` is a
-portable graphics API: the platform host owns the device and window surface,
-and `sue-wm` records draw calls with it. `unsafe` code is forbidden workspace-wide
+system browser and file manager), `arboard` (the clipboard), `egui-winit` (OS
+input for egui) and `egui-wgpu` (egui's painter) are used only by
+`sue-platform`. `egui` itself is a portable, immediate-mode widget library with
+no OS bindings: `sue-wm` builds the whole shell with it, and the platform host
+paints what it produces. `unsafe` code is forbidden workspace-wide
 (`[workspace.lints] rust.unsafe_code = "forbid"`). The `wgpu` window surface is
 created through its safe API, so `sue-platform` keeps the lint too. Native FFI
 added to `sue-platform` later MUST relax it for that crate only.
@@ -347,7 +349,9 @@ the `PlatformHost` trait and the portable services next to it:
 | Service | What it does |
 | --- | --- |
 | `AudioOutput` / `AudioSink` | A `cpal` output stream fed from a lock-free ring (§3.5); `NullAudio` is a device-free clock for tests |
-| `list_dir`, `write_atomic` | Sorted folder listings for the Files panel; crash-safe writes (temporary file, sync, rename) |
+| `list_dir`, `hidden_by_os`, `write_atomic` | Sorted folder listings for the Files drawer, without dot files or, on Windows, the legacy junctions (`NetHood`, `PrintHood`, `Cookies`, `SendTo`, `Recent`, `Start Menu`, `Templates`, `Application Data`, `Local Settings`, `My Documents`); crash-safe writes (temporary file, sync, rename) |
+| `copy_text` | The system clipboard (`arboard`) for buttons such as Copy All; text fields copy and paste through `egui-winit` |
+| `EguiPainter`, `TextureUpload` | Paints egui frames with `egui-wgpu` into the window or an offscreen texture; uploads image pixels the caller borrows from the arena straight into GPU textures (LAW 2) |
 | `open_url`, `reveal_folder` | The system browser (only `http` and `https`, validated by `web_url`) and file manager |
 | `pick_open_file`, `pick_save_file` | Native open and save dialogs (`rfd`) |
 
@@ -370,10 +374,12 @@ Two hosts implement the trait:
 - `HeadlessHost` has virtual surfaces and an injectable input queue. CI, the
   self-check, offscreen snapshots and remote scripting use it.
 - `DesktopHost` opens one native window titled `Sue` (`winit` 0.30) with a
-  `wgpu` 30 surface, sRGB where available and presented with vsync. It fills
-  `HardwareCapabilities` from the adapter and the monitor's refresh rate, and
-  translates OS events into `InputEvent`s: mouse, wheel (`input.wheel_line_px`
-  per notch), keyboard with text, resize and focus, and file drag and drop.
+  `wgpu` 30 surface, sRGB where available and presented with vsync, and runs
+  egui 0.37 on it: `egui-winit` turns OS events into egui input (mouse, wheel,
+  keyboard, text and IME, the clipboard, file drops) and `EguiPainter` draws
+  each frame. It fills `HardwareCapabilities` from the adapter and the
+  monitor's refresh rate. The application builds every frame into egui's root
+  `Ui` through `DesktopApp::ui`.
 
 **GPU choice.** The window draws on the GPU picked by `display.gpu_preference`
 (`GpuPreference`). `auto`, the default, uses the GPU that drives the display: on
@@ -391,28 +397,33 @@ window opens, so a change applies after a restart. Offscreen rendering
 (snapshots, tests) uses the integrated GPU, since nothing is presented.
 
 **Frame pacing (the event loop).** `run_desktop(app, options)` drives a
-`DesktopApp`. Pacing is decided in one place: every time the loop is about to
-wait (`about_to_wait`), it asks the application for a `FramePacing`:
+`DesktopApp`. Every time the loop is about to wait (`about_to_wait`) it combines
+two questions: the application's `FramePacing`, and when egui wants its next
+frame (`repaint_delay` of the last frame: zero while a widget animates or the
+shell called `request_repaint`, the caret's blink time while a text field has
+focus, never otherwise).
 
-| `FramePacing` | Loop step |
+| Answer | Loop step |
 | --- | --- |
-| `Sleep` | `ControlFlow::Wait`: no frames and no CPU until input arrives |
-| `WakeAt(t)` | `ControlFlow::WaitUntil(t)`, then `DesktopApp::timer` runs timed work without drawing unless it asks to |
-| `Animate { target_hz }` | Request the next redraw now when vsync paces it; with a lower cap, wait for the next frame slot after the last frame |
+| `Animate { target_hz }`, or egui's repaint is due | Request the next redraw now when vsync paces it; with a lower cap, wait for the next frame slot after the last frame |
+| `WakeAt(t)` or a later egui repaint | `ControlFlow::WaitUntil` the earlier one; a due `WakeAt` runs `DesktopApp::timer`, which redraws only if it asks to |
+| `Sleep`, and egui wants nothing | `ControlFlow::Wait`: no frames and no CPU until input arrives |
 
 The loop never requests a redraw from inside the redraw handler (some platforms
 drop such requests); it does so from `about_to_wait`, so an animation started by
-a click keeps its frames coming with no further input. Closing the window asks
-the application first (`close_requested`), which can show a confirmation, and
-`exit` lets it save before the loop ends.
+a click keeps its frames coming with no further input. Input events ask for one
+redraw each; `egui-winit` also reports the redraw event itself as needing a
+repaint, and the loop ignores that one, or it would draw forever. Closing the
+window asks the application first (`close_requested`), which can show a
+confirmation, and `exit` lets it save before the loop ends.
 
 ### 3.2 Form-factor topologies
 
 | `FormFactor` | `Topology` | Input model | Geometry |
 | --- | --- | --- | --- |
-| `Desktop` | `DesktopTiling` | Mouse + keyboard, keybinds from rice | A flush workstation: header, rails, tiled docks, Center Stage, status bar |
-| `Tablet` | `TabletStylus` | Stylus pressure curves ($p' = p^{\gamma}$), radial marking menus | Same chrome, but docks overlay Center Stage as drawers so the canvas stays large |
-| `Mobile` | `MobilePocket` | Touch gestures, edge swipes | Header over a single pane; no rails or status bar; docks are edge drawers that switch their applets in a strip; the timeline is a thumb-zone bottom sheet |
+| `Desktop` | `Tiled` | Mouse + keyboard, keybinds from rice | Rails at both edges; the drawers and the timeline push the canvas aside |
+| `Tablet` | `Overlay` | Stylus pressure curves ($p' = p^{\gamma}$), the radial marking menu | Same chrome, but drawers slide over the canvas so it stays large |
+| `Mobile` | `Overlay` | Touch, edge swipes | Drawers capped at `layout.drawer_max_fraction` of the screen; the timeline is a thumb-zone sheet capped at `layout.sheet_max_fraction` |
 
 Classification follows Android's resource-qualifier convention: on a mobile OS, a
 smallest screen side of **at least 600 dp** is a tablet (`FormFactor::classify`).
@@ -420,38 +431,37 @@ Desktop operating systems are `Desktop`.
 
 ### 3.3 Layout solver
 
-`solve_layout(&LayoutRequest) -> LayoutSolution` is a pure function. Its
-solution names every region: `header`, the optional `status` bar and
-`left_rail` / `right_rail`, and the four applet zones (`LeftDock`,
-`CenterStage`, `RightDock`, `BottomTimeline`) as
-`Placement::{Hidden, Tiled(Rect), Drawer { edge, rect, bounds, reveal }, BottomSheet { rect, detent }}`.
+`solve_layout(&LayoutRequest) -> LayoutSolution` is a pure function. It names
+every region in screen points: `left_rail`, `right_rail`, `status`, the visible
+part of each drawer (`left_drawer`, `right_drawer`) and its full-width rect slid
+by its reveal (`left_drawer_full`, `right_drawer_full`), the same pair for the
+timeline, and the `canvas`.
 
 ```text
-┌──────────────────────────── header (30 px) ─────────────────────────────┐
-├──────┬────────────┬──────────────────────────────┬────────────┬──────┤
-│ rail │ left dock  │        Center Stage          │ right dock │ rail │
-│ 38px │  260 px    │  (timeline below when used)  │   280 px   │ 38px │
-├──────┴────────────┴──────────────────────────────┴────────────┴──────┤
-└──────────────────────────── status bar (22 px) ─────────────────────────┘
+┌──────┬────────────┬──────────────────────────────────┬────────────┬──────┐
+│ rail │ left       │          infinite canvas         │ right      │ rail │
+│ 36px │ drawer     │  (top pill and selection pill    │ drawer     │ 36px │
+│      │ 260 px x   │   float over it)                 │ 280 px x   │      │
+│      │ reveal     ├──────────────────────────────────┤ reveal     │      │
+│      │            │ timeline, 240 px x reveal        │            │      │
+├──────┴────────────┴──────────────────────────────────┴────────────┴──────┤
+└──────────────────────────────── status bar (22 px) ──────────────────────┘
 ```
 
-- **Inputs:** viewport, safe-area insets, form factor, dock reveal fractions
-  (driven by springs, §3.4), whether a time-based asset is active, and
-  `LayoutMetrics` (gap, header, status bar and rail sizes, dock widths, timeline
-  height, minimum center width, drawer and sheet fractions), all read from rice.
-- **Desktop:** the header spans the top and the status bar the bottom. The rails
-  sit at both edges; between them, docks take `width x reveal`, Center Stage
-  fills the rest, and the timeline takes the bottom of the center column only
-  when `timeline_active`. With the default `layout.gap = 0` every region is
-  flush, separated by 1 px hairlines in `colors.border`. If Center Stage would
-  fall below `min_center_width`, the right dock (then the left) becomes a
-  drawer that slides over Center Stage within the region between the rails.
-- **Mobile:** Center Stage fills the safe area under the header. A drawer's
-  width is `min(dock_width, drawer_max_fraction x safe_width)`; the timeline is
-  a `BottomSheet` at the `Peek` detent, capped at `sheet_max_fraction`.
-- **Invariants (tested):** tiled regions never overlap, the desktop regions are
-  edge to edge (rail, dock, center, dock, rail), and nothing is placed outside
-  the safe area.
+- **Inputs:** viewport, safe-area insets, form factor, the three reveal
+  fractions (spring positions, §3.4) and `LayoutMetrics` (rail, drawer,
+  timeline and status bar sizes, minimum canvas width, drawer and sheet
+  fractions), all read from rice.
+- **Tiled (desktop):** drawers take `width x reveal` and push the canvas; the
+  timeline takes `height x reveal` from the bottom of the canvas column. If the
+  canvas would fall below `layout.min_canvas_width`, both drawers shrink evenly.
+  Drawer content is laid out at full width and slid, never squeezed, so a
+  drawer glides open instead of reflowing.
+- **Overlay (tablet, phone):** the canvas keeps the whole middle; drawers and the
+  timeline slide over it within their caps.
+- **Invariants (tested):** closed drawers leave the canvas between the rails,
+  half-open drawers push it by exactly half their width, and narrow windows
+  shrink drawers before the canvas.
 
 ### 3.4 Hybrid render scheduler
 
@@ -479,53 +489,63 @@ low-power mode becomes `MobileBatterySaver`; a software or legacy GPU, or at mos
 `HighRefresh`; otherwise `Balanced`. The user can override it with
 `profile.hardware`.
 
-**Pacing in the runtime.** The shell runtime answers the host's pacing question
-from four facts, in order:
+**Pacing in the runtime.** The runtime answers the host's pacing question from
+these facts, in order:
 
-1. A spring is moving, damage is waiting, or an applet animates: `Animate`.
-   Damage includes changes made *while* drawing a frame (a click handled by an
-   immediate-mode button), so a click on a dock toggle schedules the frames
-   that play its animation.
-2. Within `motion.settle_grace_ms` (300 ms) of the last change: `Animate`, so
-   anything that changed visually finishes drawing.
-3. Timed work is pending: `WakeAt(earliest)` for the next caret blink
-   (`motion.caret_blink_ms`, only while a caret is on screen), a status message
-   to clear, the player's next audio top-up, or a pending note autosave.
-4. Otherwise `Sleep`: 0 FPS and no CPU.
+1. A spring is moving (a drawer, the timeline, the camera, a pill, the marking
+   menu, the palette), a node is being dragged, or the timeline plays:
+   `Animate`. The shell also calls `request_repaint`, so egui asks for the next
+   frame too.
+2. Within `motion.settle_grace_ms` (300 ms) of the last change: `Animate`.
+3. Timed work is pending: `WakeAt(earliest)` for the next audio top-up while
+   something plays (every 40 ms), a burst of typing to close into one undo step
+   (`TYPING_PAUSE`, 900 ms), a status message to clear, or a pending note
+   autosave.
+4. Otherwise `Sleep`: 0 FPS and no CPU. A focused text field still blinks its
+   caret through egui's own repaint delay (`motion.caret_blink_ms`; 0 keeps it
+   solid and the window fully asleep).
 
-Each frame measures real elapsed time,
-`dt = now - last_frame` clamped to $[0.0001, 0.05]$ s, so a stall never makes an
-animation jump; the first frame after sleeping advances by one nominal frame.
-Springs see `dt x motion.animation_speed`. A runtime test clicks the left dock
-toggle with simulated input and then calls only `pacing` and `frame`: the
-animation runs to the end over many frames and the scene then sleeps.
+Each frame measures real elapsed time, `dt = now - last_frame` clamped to
+$[0.0001, 0.05]$ s; the first frame after sleeping advances by one nominal
+frame. Springs see `dt x motion.animation_speed`. The self-check drives the
+whole shell through real egui frames and asserts that the drawer glides over
+many frames (and snaps in one on `LegacyLowSpec`), that a mode switch glides
+the camera, and that afterwards neither the runtime nor egui asks for a frame.
 
-**Spring physics.** Panel motion uses a damped harmonic oscillator,
+**Spring physics.** Everything that moves uses a damped harmonic oscillator,
 $F = -kx - cv$, so $m\ddot{x} = -k(x - x_\text{target}) - c\dot{x}$. The
-damping ratio is $\zeta = c / (2\sqrt{km})$. The shipped defaults ($k = 170$,
-$c = 26$, $m = 1$) give $\zeta \approx 1.0$: critically damped, fast and with no
-overshoot. `SpringDamper` integrates with semi-implicit (symplectic) Euler in
-sub-steps of at most 1/240 s. A spring is **settled** when
-$|x - x_\text{target}|$ and $|v|$ are both below $10^{-3}$. It then snaps
-exactly to the target. Under `LegacyLowSpec`, or when the user enables
-`motion.instant_transitions`, `SpringMode::InstantSnap` skips integration
-entirely: transitions take 0 ms.
+damping ratio is $\zeta = c / (2\sqrt{km})$. Drawers, pills and the marking
+menu use $k = 260$, $c = 32$ ($\zeta \approx 0.99$). The camera uses $k = 600$,
+$c = 49$ ($\zeta \approx 1.0$): critically damped, it covers 98% of the way to
+a framed entity in about 0.24 s (tested). `SpringDamper` integrates with
+semi-implicit (symplectic) Euler in sub-steps of at most 1/240 s. A spring is
+**settled** when $|x - x_\text{target}|$ and $|v|$ are both below $10^{-3}$
+(the camera's pan settles within a twentieth of a screen pixel); it then snaps
+exactly to the target. Under `LegacyLowSpec`, or with
+`motion.instant_transitions`, `SpringMode::InstantSnap` skips integration:
+transitions take 0 ms.
 
-**GPU renderer.** The shell draws into a `Canvas`: a renderer-agnostic list of
-rounded boxes, text runs and arena images (by `AssetHandle`, never pixels), each
-with its clip rectangle, on two layers. The overlay layer (menus, drop-downs,
-tooltips, dialogs) draws after the base layer and wins hit tests. `UiRenderer`
-draws a canvas with **one instanced `wgpu` pipeline**. The fragment shader
-antialiases rounded boxes with a signed distance function, samples glyph
-coverage from an R8 atlas, and samples arena images as sRGB (or byte maps as
-gray). It clips per instance and blends premultiplied alpha. Text uses `fontdue`
-with the bundled Ubuntu Light, Hack, Noto Emoji and egui icon fonts; a test
-checks that every symbol the shell draws has a glyph. GPU textures of entities
-that leave the arena are released.
+**The camera.** The canvas `Camera` is three springs: the canvas point at the
+center of the view, and the natural log of the zoom (so zooming feels even at
+10% and at 3200%). The wheel zooms by `canvas.zoom_step` per notch around the
+pointer, which keeps showing the same canvas point for the whole glide. Dragging
+snaps the pan springs, so the canvas sticks to the pointer. Framing an entity
+sets all three targets; fitting never magnifies past 200% (1:1 and the wheel go
+further).
 
-**Telemetry.** The status bar shows the active tab, the arena entity count, the
-undo depth, the hardware profile and the frame state: `Idle` while the scene
-sleeps, `N FPS` (measured over the last second) while it animates.
+**Painting.** egui tessellates every frame and `EguiPainter` draws it with
+`egui-wgpu`. The canvas is an egui layer with a camera transform
+(`set_transform_layer`), so entity nodes are ordinary egui widgets, text fields
+included, at any zoom; hit testing and pointer positions follow the transform.
+Images (pictures, paint layers) are uploaded from the arena's own bytes into
+native textures by key and version: a paint layer's version is its `revision`
+metadata, bumped by every stroke and by undo and redo. Textures no frame used
+are freed.
+
+**Telemetry.** The status bar shows the mode and the selected entity (or the
+latest message) on the left; the arena entity count, the undo depth, the
+hardware profile, the zoom and the frame state (`Idle` while asleep, `N FPS`
+measured over the last second while animating) on the right.
 
 ### 3.5 Real-time audio thread isolation
 
@@ -547,107 +567,123 @@ audio callback ──(atomics: frames played, underruns)──► UI
 (used when the device accepts a fixed size) and `audio.realtime_priority`, which
 registers the callback thread with the OS real-time scheduler
 (`audio_thread_priority`: MMCSS on Windows) on its first call and reports
-whether the OS granted it. The stream opens when the Player first plays and
-reopens when its settings change. The Player keeps decoded tracks in the arena
-and tops the ring up every 40 ms from the next slice, resampled linearly to the
+whether the OS granted it. The stream opens when something first plays and
+reopens when its settings change. The shared `Transport` (used by the Player,
+audio entities and the timeline) keeps decoded tracks in the arena and tops the
+ring up every 40 ms from the next slice of the clip, resampled linearly to the
 device rate; the ring is the device boundary, like a texture upload. A DAW graph
 will run on the same ring discipline.
 
-### 3.6 Applets, the Launchpad, docks and Settings
+### 3.6 Applets, the Launchpad, the canvas and its chrome
 
 Every tool, utility and studio implements `SueApplet` (LAW 1):
 
 ```rust
 pub trait SueApplet: Send {
-    fn manifest(&self) -> AppletManifest;   // id, name, category, zone, opens, icon, singleton
+    fn manifest(&self) -> AppletManifest;   // id, name, role, icon, order, mode, spawn, lane
     fn rice_declarations(&self) -> Vec<RiceDeclaration> { Vec::new() }
-    fn mount(&mut self, ctx: &mut AppletContext<'_>) -> Result<(), AppletError>;
-    fn open(&mut self, asset: AssetHandle, ctx: &mut AppletContext<'_>) -> Result<(), AppletError>;
+    fn accepts(&self, entity: &Entity) -> bool { false }            // for opened files
+    fn node_size(&self, entity: &Entity) -> Vec2;
+    fn new_entity(&mut self, cx: &mut AppletContext<'_>) -> Option<NewEntity> { None }
+    fn node_ui(&mut self, ui: &mut Ui, node: NodeId, cx: &mut AppletContext<'_>) {}
+    fn pill_ui(&mut self, ui: &mut Ui, node: NodeId, cx: &mut AppletContext<'_>) {}
+    fn duration(&self, node: &SceneNode, world: &World) -> f64 { 4.0 }
+    fn drawer_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {}
+    fn window_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {}
+    fn tick(&mut self, cx: &mut AppletContext<'_>) -> Tick { Tick::default() }
+    fn commands(&self) -> Vec<PaletteEntry> { Vec::new() }
+    fn command(&mut self, name: &str, cx: &mut AppletContext<'_>) -> bool { false }
     fn navigate(&mut self, target: &str) -> bool { false }        // e.g. a Settings page
-    fn command(&mut self, name: &str, ctx: &mut AppletContext<'_>) -> Result<bool, AppletError>;
-    fn handle_input(&mut self, event: &InputEvent, ctx: &mut AppletContext<'_>)
-        -> Result<InputResponse, AppletError>;
     fn captures_keys(&self) -> bool { false }                      // e.g. recording a shortcut
-    fn draw(&mut self, ui: &mut Ui<'_>, area: Rect, ctx: &mut AppletContext<'_>) {}
-    fn title(&self, world: &World) -> Option<String> { None }
-    fn inspect(&self, world: &World) -> Vec<PropertyGroup> { Vec::new() }
-    fn update(&mut self, dt: f32, ctx: &mut AppletContext<'_>) -> RenderDemand { RenderDemand::Sleep }
-    fn tick(&mut self, now: Instant, ctx: &mut AppletContext<'_>) -> Tick { Tick::default() }
-    fn unmount(&mut self, ctx: &mut AppletContext<'_>) {}
 }
 ```
 
-Applets hold `AssetHandle`s, not data. They change the world only through
-`ctx.edit_arena(txn)` / `ctx.edit_rice(txn)` on the global `UndoStack<World>`,
-and they ask for things through `ctx.request(ShellRequest::…)`: opening an
-asset or an applet (carried out by the workspace), or opening a file or URL,
-running an engine command and showing a message (carried out by the engine).
-`AppletContext` also lends them the engine's `Catalog` (Settings pages, live
-choices, system tables, theme presets, well-known folders), the audio sink when
-one is open, and the Inspector's properties of the active tab.
+The **role** decides where an applet lives: `Node` applets draw one kind of
+entity on the canvas and its selection pill, `LeftDrawer` and `RightDrawer`
+applets sit on a rail, and the `Window` applet (Settings) floats over the
+canvas. Nothing in the shell names an applet: the modes of the top pill come
+from manifests' `mode`, the spawn buttons and the marking menu's New wedges from
+`spawn`, the timeline's lanes from `lane`, the rail icons from `icon` and
+`order`, and opened files go to the first node applet that `accepts` the
+ingested entity. `Launchpad` is the runtime registry of factories; `Applets` is
+the set of live instances, sorted by `order`.
 
-The `Launchpad` is a runtime registry of applet factories and knows nothing
-about specific applets. A manifest's **category** decides where the shell lists
-it: `Studio` and `Inspector` applets fill the two sections of Home,
-`Utility` applets sit on the rail of their dock, and the `System` applet
-(Settings) opens from the gear, the Settings menu and `keys.open_settings`.
-`pin_boot` stores the boot applet and `boot_target()` resolves it at startup; a
-pinned applet that has since been uninstalled falls back to Home.
+Applets hold `AssetHandle`s and `NodeId`s, never media. They change the world
+only through the global `UndoStack<World>` (`cx.apply`, `cx.edit_rice`, or
+`cx.record` for an edit that already happened in place), and ask for things
+through `cx.request(ShellRequest::…)`: select, focus or frame a node, switch
+mode, spawn, open the timeline or Settings, open a file, run an engine command,
+show a message.
 
-`Workspace` owns the tabs, the docks, keyboard focus, the dock springs, the
-global keymap and the `FrameScheduler`:
+**The scene.** `World` holds the arena, the live rice and the `Scene`: one
+`SceneNode` per card on the canvas, holding an `AssetHandle`, the applet that
+draws it, its rect in canvas units, its stacking order and a few numeric
+properties (a document's `font_size`; an audio clip's `clip_start`, `clip_end`
+and `gain`; `t0` and `dur` on the timeline). Several nodes may show one entity:
+splitting audio places a second node over the same samples. `SpawnNode` (create
+an entity and its node; redo restores the same entity under the same handle),
+`PlaceNode`, `RemoveNode` (the entity stays in the arena), `SetNodeRect`,
+`SetNodeProp` and `Batch` (several steps as one, atomic) are the scene's
+transactions.
 
-- **Tabs.** The first tab is **Home** and cannot close. `+` (or `keys.new_tab`)
-  opens a new tab showing Home, which the next applet opened fills in place.
-  Applets marked `singleton` (Settings) are activated instead of opened twice.
-- **Docks.** Every `LeftDock` and `RightDock` applet is mounted at boot and keeps
-  its state. Each dock shows one of them, picked on its rail; clicking the shown
-  one again closes the dock.
-- **Routing.** Assets open by media class (`Image`, `Text`, `Audio`, `Binary`):
-  the first applet whose manifest opens the class gets it. A dock applet (the
-  Player) is brought into view in its dock; a Center Stage applet gets a tab.
-  No table maps formats to applets.
-- **Keys.** Global shortcuts from `[keys]` run first (docks, tabs, Home,
-  Settings, open, save, quit, undo, redo), unless the focused applet captures
-  keys; everything else goes to the focused applet. A file dropped anywhere goes
-  to the engine, which reads it (capped at `io.max_ingest_mib`), ingests it and
-  routes it.
+**The shell** (`Shell::ui`) draws, in order: the canvas (void fill, an adaptive
+dot or line grid that keeps 14 to 112 points between marks, and the scene layer
+with every visible node as a card: title bar with name and kind, a dot when it
+is on the timeline, the applet's content, a resize grip), the rails, the
+drawers, the timeline, the status bar, then the floating surfaces:
 
-The **desktop shell** (`draw_shell`) is the only chrome:
+| Surface | Behavior |
+| --- | --- |
+| Top pill | Centered over the canvas. Modes (Canvas, the node applets' modes, and Timeline between the visual and code modes), spawn buttons, and `Command (Tab)`. Fades and slides in at boot. |
+| Selection pill | Above the selected node's top edge, clamped into view, drawn by its applet's `pill_ui`. Springs in and out; when the selection moves to another node it glides from the old place. |
+| Marking menu | Right-click: wedges whose radius grows on a spring (`layout.radial_radius`). Click a wedge, or press, drag and release. |
+| Command palette | `Tab` or `/` when no text field has focus: fuzzy search (in-order letters, bonuses for runs and word starts) over shell actions, every mode, spawn and drawer, and the applets' `commands`. |
+| Settings window | Over a scrim; 190 px category sidebar, filter field, one page at a time (§4.3). |
+| Quit dialog | When `general.confirm_on_exit` is on. |
 
-- **Header:** the left dock toggle (aligned with the rail), the menus (File,
-  Edit, Workspace, Tools, Settings) on the overlay layer with their shortcuts,
-  the flush tab bar (the active tab has `colors.surface` and a
-  `layout.tab_accent` line in `colors.accent`), the gear, and the right dock
-  toggle.
-- **Rails:** one icon per dock applet, with a tooltip; the shown one is lit and
-  marked by an accent bar on the outer edge.
-- **Docks:** the shown applet under its name, with a hairline on the inner edge.
-- **Center Stage:** the active applet, or **Home**: Studios and Inspectors in a
-  grid of cards at least `launchpad.card_width` wide. Descriptions wrap and are
-  never cut. Each card has a "Pin as boot" switch, an undoable rice edit of
-  `launchpad.boot_into`.
-- **Status bar:** the active tab or the latest message on the left; entities,
-  undo depth, profile and frame state on the right.
-- **Overlays:** the quit confirmation (`general.confirm_on_exit`) and the drop
-  overlay while a file hovers over the window.
+Interaction: the wheel zooms around the pointer, the middle button or Space
+plus drag pans (a tap on Space plays or pauses the timeline instead), a click on
+a node selects and raises it, a double-click on its title focuses it (its mode,
+framed), dragging the title moves it and the grip resizes it (one undo step each
+on release), a click on empty canvas deselects, `Delete` removes the selected
+node from the canvas, and a file dropped anywhere is ingested and placed.
+
+**Text and undo.** Every text surface is an `egui::TextEdit`. Documents, code
+and the note edit the arena's `StringBuffer` in place through `ArenaText`, an
+egui `TextBuffer` that records each insert and delete as a byte-offset delta.
+`Typing` groups a burst (same entity, no pause of 900 ms) into one
+`TextEdits` transaction and records it, already applied, in the global undo
+tree. The shell consumes the riced undo and redo chords (`Ctrl+Z`,
+`Ctrl+Shift+Z`, `Ctrl+Y`) before any widget sees them, closes the open burst,
+and walks the global tree, so text fields never run egui's private undo.
+
+**The timeline** is a bottom drawer on a spring. Its lanes are the distinct
+`lane` names of the node applets; its blocks are the nodes whose entity carries
+the `Timeline` projection, at `t0` for `dur` seconds (audio: the clip's length).
+Project to Timeline is one undoable `Batch`: it attaches the projection (a
+`TimeSpan` component next to the entity's own data, nothing copied), places the
+block after the last one in its lane, and opens the timeline. Blocks drag along
+their lane (one `SetNodeProp` on release); the ruler and the playhead seek;
+play advances the playhead with real time and plays each audio block through the
+shared `Transport` as the playhead crosses it.
 
 The built-in applets are registered by the binary, like any package would
 register its own:
 
-| Applet | Category | Zone | Opens | What it does |
-| --- | --- | --- | --- | --- |
-| Files | Utility | Left dock | n/a | Lists `general.workspace_dir` (or the home folder), folders first; folders open in place, files open in the applet that fits them |
-| Player | Utility | Left dock | `Audio` | Plays decoded tracks through the audio sink: title and tags, play and pause, previous and next, a scrubber, the riced volume, a playlist |
-| Convert | Utility | Left dock | n/a | Converts an opened picture to lossless JPEG XL or PNG, or a song to 16-bit WAV, next to the source or into `io.convert_dir` |
-| Notes | Utility | Left dock | n/a | One shared note; every keystroke is a transaction; autosaved every `general.autosave_seconds` and on exit |
-| Inspector | Utility | Right dock | n/a | The active tab's `inspect()` properties: counts and caret for text; size, depth, channels and zoom for pictures; integers and floats at the hex cursor |
-| Browser | Utility | Right dock | n/a | An address bar and `browser.bookmarks`; pages open in the system browser (there is no embedded web engine yet) |
-| History | Utility | Right dock | n/a | The undo tree, branches indented; a click checks out any state |
-| Text Studio | Studio | Center | `Text` | Caret editor with line numbers, undoable edits, Save (`keys.save`) and Save As |
-| Image Viewer | Inspector | Center | `Image` | Decoded JPEG XL, PNG or JPEG with drag-to-pan, zoom around the pointer and Fit |
-| Hex Inspector | Inspector | Center | `Binary` | Hex rows beside a spatial byte map of the whole file, with a byte cursor |
-| Settings | System | Center | n/a | Preferences by category (§4.3) |
+| Applet | Role | Mode, spawn, lane | What it does |
+| --- | --- | --- | --- |
+| Document | Node | Document; `+ Text`, New Document; Document Track | Markdown-like text (`#`, `##`, `**`, backticks styled, never hidden) in a `TextEdit`; pill: H1, H2, Bold, Monospace, text size, Project to Timeline |
+| Paint | Node | Paint; `+ Paint`, New Paint Layer; Paint/Visual Track | An RGBA raster in the arena; Brush, Line, Rect, Eraser, size, gray value; strokes keep 64 px undo tiles; Export .jxl (lossless) |
+| Audio | Node | Audio (palette only); `+ Audio`, New Audio Node; Audio Track | Waveform of a clip of a `PCMFloat1D`; Play or Pause, Gain, Split (zero-copy), Normalize, Open in Timeline |
+| Image | Node | Image (palette only); Paint/Visual Track | Decoded JPEG XL, PNG or JPEG; 1:1 Zoom, Pixel Grid, Re-encode .jxl (bit-exact for JPEG when a codec allows), Inspect Hex |
+| Code / Hex | Node | Code / Hex | Code in a monospace `TextEdit`, or a selectable hex dump of any file's bytes; Copy All |
+| Files | Left drawer | n/a | Folders with quick jumps (Project, Desktop, Documents, Downloads, Pictures, Music); files open on the canvas |
+| Player | Left drawer | n/a | Every decoded track as a playlist; waveform scrubber, play, stop, volume |
+| Convert | Left drawer | n/a | Pictures to lossless JPEG XL, PNG or JPEG (`io.jpeg_quality`), songs to 16-bit WAV |
+| Notes | Left drawer | n/a | One shared note in a `TextEdit`, autosaved every `general.autosave_seconds` and on exit |
+| Inspector | Right drawer | n/a | The selected node's place, size and properties, its entity's projections, memory and metadata |
+| History | Right drawer | n/a | The undo tree, branches indented; a click checks out any state |
+| Settings | Window | n/a | Preferences by category (§4.3) |
 
 ---
 
@@ -709,23 +745,22 @@ never stops Sue from booting.
   only the new value into the original value span. Defaults registered at runtime
   are inserted at the end of their section, or in a new section.
 
-**Settings.** Preferences open as a single Center Stage tab (the gear, the
-Settings menu, or `keys.open_settings`, `Ctrl+,`). A category sidebar
-(`layout.settings_sidebar_width`, 190 px) lists the pages; the main pane shows
-only the chosen page, under a live filter field. Typing anywhere starts a
-search; while a filter is active, matching parameters from every page are
-listed by page, and the sidebar shows how many match on each.
+**Settings.** Preferences open as a floating window over the canvas (the
+gear at the foot of the left rail, or `keys.open_settings`, `Ctrl+,`). A
+category sidebar (`layout.settings_sidebar_width`, 190 px) lists the pages; the
+right pane shows only the chosen page, under a "Filter settings..." field.
+While a filter is active, matching parameters from every page are listed.
 
 The pages are data the engine registers in its `Catalog`, like applets, so
 packages can add their own:
 
 | Page | Holds |
 | --- | --- |
-| General | The boot target (Home or any Center Stage applet), the Files folder, hidden files, autosave interval, quit confirmation, the note file, Quick Notes, browser bookmarks |
-| Appearance & Rice | Theme presets, every color, panel geometry, typography, the rice file with Reload, Export and Open Folder |
-| Display & Graphics | The hardware profile, the active profile and GPU, the frame-rate cap, the settle grace, UI scale, wheel speed, motion (instant snap, animation speed, spring constants, caret blink, message time) |
+| General | The boot mode (Canvas or any node applet's mode), the Files folder, hidden files, autosave interval, quit confirmation, the note file and its text size |
+| Appearance & Rice | Theme presets, every color, geometry (padding, hairlines, radii, pill and rail sizes, drawer and timeline sizes, the marking menu, shadows), the canvas (zoom limits, wheel step, grid), typography, the rice file with Reload, Export and Open Folder |
+| Display & Graphics | The hardware profile, the active profile and GPU, the GPU preference, the frame-rate cap, the settle grace, UI scale, list wheel speed, motion (instant snap, animation speed, drawer and camera spring constants, caret blink, message time) |
 | Audio & DSP | Output device, sample rate, buffer size, real-time priority, volume, and the live stream and real-time status |
-| Files & Codecs | JPEG XL effort, bit-exact JPEG recompression, the conversion folder, the open-file size limit, byte-map width, the built-in codecs |
+| Files & Codecs | JPEG XL effort, bit-exact JPEG recompression, the conversion folder and JPEG quality, the open-file size limit, byte-map width, new paint layers' size and brush, the built-in codecs |
 | Local AI | The compute backend (backends this machine lacks are greyed out), the VRAM budget, which model and backend a task would use now, the model folder and the model files found in it |
 | Packages & Updates | The signature policy, the installed applets, installed packages, the active generation and rollback state |
 | Keymaps | Every shortcut as an action and a key cap |
@@ -735,14 +770,15 @@ parameter stays reachable (LAW 3, tested).
 
 | Parameter | Control |
 | --- | --- |
-| `Bool` | Toggle |
-| `IntRange` / `FloatRange` | Slider with a slim track, an accent fill and a compact thumb, and its value on the right (click it to type); a text field when unbounded |
+| `Bool` | A black and white switch |
+| `IntRange` / `FloatRange` | Slider with a 4 px track, a filled part and a round thumb, its value on the right |
 | `ColorHex` | Swatch plus hex field |
-| `EnumChoice`, or a text parameter with live choices | A segmented control beside the label when it fits, on its own line under the description when it does not, a compact drop-down beyond six options |
+| `EnumChoice` | A segmented control for up to five short options, else a compact drop-down |
+| A text parameter with live choices (output device, boot mode) | A drop-down |
 | `Keybind` | A key cap; click it and press the new chord (`Esc` cancels; global shortcuts are held back while recording) |
 | `ShaderPath` / `Text` | Text field |
 
-Text fields commit on `Enter` and cancel on `Escape`. A slider drag previews
+Text fields commit when they lose focus. A slider drag previews
 live: it sets the schema directly, so the whole UI follows the value as you
 drag. On release the preview is reverted and one `RiceEdit(SetRiceValue)` is
 recorded, so a whole drag is one undo step. After any change (an edit, a
@@ -753,8 +789,10 @@ back with `write_atomic` to `<config>/rice/default.suerice`. A test edits a
 value, persists it, checks that exactly one line changed, undoes the edit, and
 checks that the file is identical to the original again.
 
-**Theme presets.** Graphite (the default), Midnight and Daylight ship as
-`.suerice` files with a `[colors]` section. Applying one is a single
+**Theme presets.** Void (the default), Graphite and Paper ship as `.suerice`
+files with a `[colors]` section. All three are pure grays, from `#000000` to
+`#ffffff`; a test checks that every shipped color, preset or default, is
+achromatic. Applying one is a single
 `SetRiceValues` step; the switcher marks the preset whose colors are all in
 effect, or none for custom colors.
 
@@ -774,13 +812,15 @@ Tests check that the shipped `default.suerice` matches the declarations key for
 key, description included, and that it holds no undeclared key.
 
 **Format and migration.** The shipped file declares its format in its header
-(`# sue-rice format 2`). Each released default is frozen in `rice/history/`. At
-boot, `migrate` brings an older file up to date: a value still equal to the old
-default takes the new default (so the old purple and gold palette and the 8 px
-gaps of format 1 become the graphite palette and flush panels), a value the user
-changed is carried over when its key still exists and the value passes the new
-checks, and the rest is reported. The old file is kept as
-`default.suerice.v1.bak`. A file that does not parse is moved to
+(`# sue-rice format 3`). Each released default is frozen in `rice/history/`
+(`v1`, `v2`). At boot, `migrate` brings an older file up to date: a value still
+equal to the old default takes the new default (so the purple and gold palette
+of format 1 and the blue `#3b82f6` accent of format 2 become the monochrome
+palette), a value the user changed is carried over when its key still exists
+and the value passes the new checks, and the rest is reported. Any color that
+is not a gray is reset to its default even in a current file (`purged`), so a
+tinted color never survives a start. The old file is kept as
+`default.suerice.v<format>.bak`. A file that does not parse is moved to
 `default.suerice.broken` and the defaults are used, so a typo never stops Sue
 from starting.
 
@@ -935,23 +975,25 @@ separators are measured against, and it exercises the full zero-copy path.
 | §2.2 Ingest of opened and dropped files (sniff, then raster, audio, text or bytes entity) | **Implemented** (decoding runs on the UI thread; spawning the entity is not yet an undoable transaction) | `sue-io/src/ingest.rs`, `bins/sue/src/runtime.rs` |
 | §2.3 Tile cache, byte map | **Implemented** | `sue-io/src/tile_cache.rs`, `bytemap.rs` |
 | §3.1 `PlatformHost`, paths, `HeadlessHost` | **Implemented** | `sue-platform` |
-| §3.1 Native desktop host (`winit` window, `wgpu` surface, input, file drops) | **Implemented** (one window; tested on Windows) | `sue-platform/src/desktop.rs`, `gpu.rs` |
+| §3.1 Native desktop host (`winit` window, `wgpu` surface, egui input, IME, clipboard, file drops) | **Implemented** (one window; tested on Windows) | `sue-platform/src/desktop.rs`, `gpu.rs`, `paint.rs` |
 | §3.1 GPU choice (`display.gpu_preference`: auto, integrated, discrete) | **Implemented**; `auto` draws on the display GPU, which a device test checks on Windows | `sue-platform/src/gpu.rs`, `bins/sue/src/desktop.rs` |
-| §3.1 Frame pacing: redraws requested from `about_to_wait`, timed wakes, close confirmation | **Implemented**; a test animates a clicked dock toggle to the end with no further input | `sue-platform/src/desktop.rs`, `bins/sue/src/runtime.rs` |
+| §3.1 Frame pacing: application and egui repaint requests combined in `about_to_wait`, timed wakes, close confirmation | **Implemented**; the self-check asserts that neither the runtime nor egui asks for frames once idle | `sue-platform/src/desktop.rs`, `bins/sue/src/runtime.rs` |
 | §3.1 Native dialogs, system browser, file manager | **Implemented** with `rfd` and `open` (web addresses limited to `http` and `https`) | `sue-platform/src/os.rs` |
 | §3.1 Native mobile hosts (Android, iOS) | Planned (the mobile topologies already run on `HeadlessHost`) | n/a |
-| §3.2 to 3.4 Topologies, workstation layout, springs, scheduler | **Implemented** | `sue-wm` |
-| §3.4 GPU renderer (rounded boxes, borders, clipping, images, text, overlay layer) | **Implemented** with one instanced `wgpu` pipeline and a `fontdue` glyph atlas | `sue-wm/src/gpu.rs`, `ui.wgsl`, `text.rs`, `canvas.rs` |
+| §3.2 to 3.4 Topologies, layout, springs, spring camera, scheduler | **Implemented** | `sue-wm` |
+| §3.4 Painting with egui (`egui-wgpu`), arena images as native textures | **Implemented**; the self-check renders a frame on the GPU and counts tinted pixels (zero) | `sue-platform/src/paint.rs` |
 | §3.4 Multi-pass shader effects | Planned (the `ShaderPath` parameter type exists; no shipped parameter uses it yet) | n/a |
-| §3.5 Audio output (ring, atomic gain, real-time priority) | **Implemented** with `cpal`; the player is tested headlessly with `NullAudio`, and a device test streams to the real output | `sue-platform/src/audio.rs`, `bins/sue/src/player.rs` |
+| §3.5 Audio output (ring, atomic gain, real-time priority) and the shared transport | **Implemented** with `cpal`; the transport is tested headlessly with `NullAudio`, and a device test streams to the real output | `sue-platform/src/audio.rs`, `sue-wm/src/transport.rs` |
 | §3.5 DAW audio graph | Specified; planned with the DAW studio | n/a |
-| §3.6 Applets, Launchpad, rails, docks, tabs, menus, Home, status bar | **Implemented** (eleven built-in applets, see §3.6) | `sue-wm`, `bins/sue/src` |
-| §3.6 Studios beyond Text Studio (document, vector and paint, DAW, video, 3D and CAD, IDE, game engine) | Planned; Home lists only installed applets and says the rest arrive as packages | n/a |
-| §3.6 Timeline applet | Planned; the layout reserves the zone, but no built-in applet uses it yet | n/a |
-| §3.6 Embedded web view | Planned; the Browser opens pages in the system browser | n/a |
+| §3.6 Applets, Launchpad, infinite canvas, top and selection pills, marking menu, palette, drawers, status bar | **Implemented** (twelve built-in applets, see §3.6) | `sue-wm`, `bins/sue/src` |
+| §3.6 Text editing over the arena with one global undo (`ArenaText`, `Typing`) | **Implemented**; the self-check types, undoes with `Ctrl+Z` and redoes with `Ctrl+Y` through egui events | `sue-wm/src/text.rs`, `sue-core/src/txn.rs` |
+| §3.6 Timeline: lanes, projected blocks, playhead, playback of audio blocks | **Implemented** (blocks are moved, not trimmed; video lanes arrive with the video studio) | `sue-wm/src/timeline.rs`, `shell.rs` |
+| §3.6 Studios beyond the built-in entity kinds (DAW, video, 3D and CAD, IDE, game engine) | Planned; they arrive as packages that register node applets | n/a |
+| §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
+| §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |
-| §4.3 Settings tab: categories, search, segmented and slider controls, presets, undoable edits, atomic persistence | **Implemented** (the file is read at boot and by Reload from Disk; watching it for outside edits is planned) | `bins/sue/src/settings.rs`, `runtime.rs`, `engine.rs` |
-| §4.4 Rice format marker and migration from format 1 | **Implemented**, with a backup of the old file | `sue-rice/src/migrate.rs`, `bins/sue/src/engine.rs` |
+| §4.3 Settings window: categories, filter, segmented, slider, switch, color and keycap controls, presets, undoable edits, atomic persistence | **Implemented** (the file is read at boot and by Reload from Disk; watching it for outside edits is planned) | `bins/sue/src/settings.rs`, `runtime.rs`, `engine.rs` |
+| §4.4 Rice format marker, migration from formats 1 and 2, tinted colors reset | **Implemented**, with a backup of the old file | `sue-rice/src/migrate.rs`, `bins/sue/src/engine.rs` |
 | §5 Hashes, Ed25519, resolver, generations, atomic pointer | **Implemented** | `sue-pkg` |
 | §5 Package download, binary deltas, WASM plugin loading | Planned (the signature policy is riced and shown; nothing installs packages yet) | n/a |
 | §6 Formats, backends, registry, zero-copy tasks | **Implemented** (reference kernel on `CpuSimd`) | `sue-ai` |

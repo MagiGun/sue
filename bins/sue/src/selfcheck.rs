@@ -19,22 +19,13 @@ use sue_pkg::{
     SigningKey, TrustStore, UpdateOutcome, Version, resolve,
 };
 use sue_platform::{
-    FileDrop, FormFactor, FramePacing, GpuContext, HeadlessHost, InputEvent, Key, KeyEvent,
-    Modifiers, MouseButton, MouseEvent, NamedKey, PlatformHost, Point, SafeAreaInsets,
-    SurfaceDescriptor,
+    EguiPainter, FramePacing, GpuContext, HeadlessHost, NoTextures, PlatformHost, SurfaceDescriptor,
 };
-use sue_rice::{
-    DEFAULT_RICE, HardwareProfile, Keybind, RiceSchema, RiceValue, SetRiceValue, SettingsTree,
-};
-use sue_wm::{
-    AppletContext, Canvas, Fonts, FrameTarget, Placement, Rect, RenderDemand, RiceEdit, ShellFrame,
-    Tab, Theme, Ui, UiInput, UiState, WmConfig, Workspace, Zone, draw_shell, render_offscreen,
-    widget_id,
-};
+use sue_rice::{DEFAULT_RICE, RiceSchema, RiceValue, SetRiceValue, SettingsTree};
+use sue_wm::{AppletRole, NodeId, RiceEdit, ShellRequest, Theme};
 
-use crate::engine::NOTE_NAME;
 use crate::runtime::Runtime;
-use crate::{image_viewer, quick_notes, settings, snapshot};
+use crate::snapshot;
 
 /// Seed of the throwaway publisher key used to sign the self-check's sample
 /// packages. It is trusted only by the self-check's own `TrustStore`.
@@ -177,15 +168,15 @@ fn check_rice(subject: &mut Subject) -> Result<String, String> {
     let gap = engine
         .world
         .rice
-        .get_i64("layout.gap")
-        .ok_or("layout.gap is missing")?;
-    let edited = (gap + 4).min(32);
+        .get_i64("layout.padding")
+        .ok_or("layout.padding is missing")?;
+    let edited = (gap + 4).min(24);
 
     engine
         .history
         .apply(
             &mut engine.world,
-            RiceEdit(SetRiceValue::new("layout.gap", RiceValue::Int(edited))),
+            RiceEdit(SetRiceValue::new("layout.padding", RiceValue::Int(edited))),
         )
         .map_err(text)?;
     ensure(
@@ -195,17 +186,17 @@ fn check_rice(subject: &mut Subject) -> Result<String, String> {
     let written = engine.world.rice.to_suerice();
     let reparsed = RiceSchema::parse(&written).map_err(text)?;
     ensure(
-        reparsed.get_i64("layout.gap") == Some(edited),
+        reparsed.get_i64("layout.padding") == Some(edited),
         "the edit was not written back",
     )?;
     ensure(
-        Theme::from_rice(&engine.world.rice).gap == edited as f32,
+        Theme::from_rice(&engine.world.rice).padding == edited as f32,
         "the live theme did not follow the edit",
     )?;
     engine.history.undo(&mut engine.world).map_err(text)?;
     ensure(
-        engine.world.rice.get_i64("layout.gap") == Some(gap),
-        "undo did not restore the gap",
+        engine.world.rice.get_i64("layout.padding") == Some(gap),
+        "undo did not restore the padding",
     )?;
     ensure(
         RiceSchema::parse(DEFAULT_RICE).map_err(text)?.to_suerice()
@@ -214,12 +205,12 @@ fn check_rice(subject: &mut Subject) -> Result<String, String> {
     )?;
 
     Ok(format!(
-        "{} params → {} widgets in {} sections; gap {gap}→{edited}→{gap} via global undo; {}; profile {}",
+        "{} params, {} widgets in {} sections; padding {gap} to {edited} and back via global undo; {}; profile {}",
         engine.world.rice.len(),
         tree.widget_count(),
         tree.sections.len(),
         engine.rice_source,
-        engine.workspace.profile()
+        engine.profile
     ))
 }
 
@@ -556,292 +547,382 @@ fn check_ai(subject: &mut Subject) -> Result<String, String> {
     ))
 }
 
-fn press(keybind: Keybind) -> InputEvent {
-    InputEvent::Keyboard(KeyEvent::press(keybind.key, keybind.modifiers))
-}
+/// The headless clock's zero, so egui sees one monotonic time across runs.
+static ORIGIN: std::sync::LazyLock<Instant> = std::sync::LazyLock::new(Instant::now);
 
-/// Renders frames at 60 Hz until the workspace asks to sleep.
-fn frames_to_settle(workspace: &mut Workspace, ctx: &mut AppletContext<'_>) -> usize {
-    let mut frames = 0;
-    while workspace.update(1.0 / 60.0, ctx) != RenderDemand::Sleep && frames < 10_000 {
-        workspace.begin_frame();
-        frames += 1;
+/// One headless frame's input at `clock`.
+fn raw_input(clock: Instant, events: Vec<egui::Event>) -> egui::RawInput {
+    egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1440.0, 900.0),
+        )),
+        events,
+        time: Some(clock.saturating_duration_since(*ORIGIN).as_secs_f64()),
+        ..egui::RawInput::default()
     }
-    frames
 }
 
-/// Draws the shell offscreen and checks the header's color. `None` without a
-/// GPU adapter.
-fn render_shell(runtime: &mut Runtime) -> Result<Option<String>, String> {
+/// Runs headless egui frames of the whole shell every 8 ms until it sleeps.
+/// `events` go into the first frame. Returns the number of frames.
+fn run_frames(
+    runtime: &mut Runtime,
+    ctx: &egui::Context,
+    clock: &mut Instant,
+    events: Vec<egui::Event>,
+) -> usize {
+    let mut events = Some(events);
+    for count in 1..=1_500 {
+        let raw = raw_input(*clock, events.take().unwrap_or_default());
+        let now = *clock;
+        ctx.run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now))
+            .drop_without_applying_deltas();
+        *clock += Duration::from_millis(8);
+        if count > 2 && !matches!(runtime.pacing(*clock), FramePacing::Animate { .. }) {
+            return count;
+        }
+    }
+    1_500
+}
+
+fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+    egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    }
+}
+
+fn node_of(runtime: &Runtime, applet: &str) -> Option<NodeId> {
+    runtime
+        .engine
+        .world
+        .scene
+        .iter()
+        .find(|(_, node)| node.applet.as_str() == applet)
+        .map(|(id, _)| id)
+}
+
+fn text_of(runtime: &Runtime, node: NodeId) -> String {
+    runtime
+        .engine
+        .world
+        .scene
+        .get(node)
+        .and_then(|node| runtime.engine.world.arena.get(node.entity).ok())
+        .and_then(|entity| entity.string_buffer())
+        .map_or_else(String::new, |text| text.as_str().to_owned())
+}
+
+/// Paints one frame of the shell with the GPU and counts pixels that are
+/// not gray. `None` without an adapter.
+fn render_shell(runtime: &mut Runtime, clock: Instant) -> Result<Option<String>, String> {
     let Ok(gpu) = GpuContext::headless() else {
         return Ok(None);
     };
-    let fonts = Fonts::new()?;
-    let engine = &mut runtime.engine;
-    let theme = Theme::from_rice(&engine.world.rice);
-    let (width, height) = (960, 600);
-    let viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
-    let (input, mut state) = (UiInput::default(), UiState::default());
-    let mut canvas = Canvas::new(viewport);
-    {
-        let (workspace, mut ctx) = engine.shell();
-        let mut ui = Ui {
-            canvas: &mut canvas,
-            fonts: &fonts,
-            theme: &theme,
-            input: &input,
-            state: &mut state,
+    let mut painter = EguiPainter::new(&gpu, sue_platform::wgpu::TextureFormat::Rgba8UnormSrgb);
+    let ctx = egui::Context::default();
+    let size = [960_u32, 600_u32];
+    let mut output = None;
+    for frame in 0..3 {
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(size[0] as f32, size[1] as f32),
+            )),
+            time: Some(f64::from(frame) * 0.008),
+            ..egui::RawInput::default()
         };
-        let frame = ShellFrame {
-            viewport,
-            safe_area: SafeAreaInsets::ZERO,
-            form_factor: FormFactor::Desktop,
-            fps: None,
-            message: None,
-            dialog: None,
-        };
-        draw_shell(workspace, &mut ui, &mut ctx, &frame);
+        let full = ctx.run_ui(raw, |ui| runtime.ui(ui, &mut painter, clock));
+        if frame < 2 {
+            painter.apply_textures(full.textures_delta);
+        } else {
+            output = Some(full);
+        }
     }
-    let target = FrameTarget {
-        width,
-        height,
-        scale: 1.0,
-    };
-    let pixels = render_offscreen(
-        &gpu.device,
-        &gpu.queue,
-        target,
-        &canvas,
-        &fonts,
-        &engine.world.arena,
-        theme.base,
+    let output = output.ok_or("no frame")?;
+    let primitives = output.shapes.len();
+    let pixels = painter.paint_offscreen(
+        &ctx,
+        size,
+        runtime.theme().void,
+        output.shapes,
+        output.textures_delta,
+        output.pixels_per_point,
     )?;
-    let chrome = engine
-        .world
-        .rice
-        .get_color("colors.chrome")
-        .ok_or("colors.chrome is missing")?;
-    // Row 1 lies inside the header, between the menus and the tabs' text.
-    let probe = &pixels[(width as usize + width as usize - 120) * 4..][..3];
-    ensure(
-        probe
-            .iter()
-            .zip([chrome.r, chrome.g, chrome.b])
-            .all(|(&got, want)| got.abs_diff(want) <= 2),
-        "the header did not render in colors.chrome",
-    )?;
+    let chromatic = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|pixel| {
+            let (low, high) = (
+                pixel[0].min(pixel[1]).min(pixel[2]),
+                pixel[0].max(pixel[1]).max(pixel[2]),
+            );
+            high - low > 3
+        })
+        .count();
+    let lit = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|pixel| pixel[0] > 40)
+        .count();
+    ensure(lit > 1_000, "the GPU frame came out blank")?;
+    ensure(chromatic == 0, &format!("{chromatic} pixels are not gray"))?;
     Ok(Some(format!(
-        "shell rendered on {} ({} draw commands)",
-        gpu.adapter_label(),
-        canvas.len()
+        "rendered on {} ({primitives} shapes, 0 tinted pixels)",
+        gpu.adapter_label()
     )))
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "one scripted session through the shell"
+)]
 fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
     let runtime = &mut subject.runtime;
-    let detected = runtime.engine.workspace.profile();
-    let keymap = WmConfig::from_rice(&runtime.engine.world.rice)
-        .map_err(text)?
-        .keymap;
-    let samples = std::env::temp_dir().join(format!("sue-self-check-{}", std::process::id()));
-    std::fs::create_dir_all(&samples).map_err(text)?;
-    let dropped = samples.join("card.jxl");
-    let card = NativeJxlPipeline
-        .encode_layers(&[&snapshot::test_card()], 1)
+    let ctx = egui::Context::default();
+    let mut clock = (*ORIGIN).max(Instant::now());
+    let mut tex = NoTextures;
+
+    // The canvas Sue boots into.
+    let kinds: Vec<String> = runtime
+        .engine
+        .world
+        .scene
+        .iter()
+        .map(|(_, node)| node.applet.as_str().to_owned())
+        .collect();
+    ensure(
+        kinds == ["document", "paint", "audio"],
+        "Sue did not boot into a document, a paint layer and an audio waveform",
+    )?;
+    let roles = |role: AppletRole| runtime.applets.with_role(role).count();
+    let (nodes, left, right, windows) = (
+        roles(AppletRole::Node),
+        roles(AppletRole::LeftDrawer),
+        roles(AppletRole::RightDrawer),
+        roles(AppletRole::Window),
+    );
+    run_frames(runtime, &ctx, &mut clock, Vec::new());
+    ensure(
+        runtime.shell.mode() == "canvas",
+        "boot did not open the canvas",
+    )?;
+
+    // A drawer glides on its spring, and snaps on legacy hardware.
+    runtime.request(
+        ShellRequest::ShowDrawer(sue_wm::AppletId::new(crate::files::ID).map_err(text)?),
+        &mut tex,
+        clock,
+    );
+    let glide = run_frames(runtime, &ctx, &mut clock, Vec::new());
+    ensure(
+        runtime.shell.left_reveal() > 0.999,
+        "the drawer did not open all the way",
+    )?;
+    let profile = runtime.engine.profile;
+    runtime
+        .engine
+        .history
+        .apply(
+            &mut runtime.engine.world,
+            RiceEdit(SetRiceValue::new(
+                "profile.hardware",
+                RiceValue::Text("legacy-low-spec".to_owned()),
+            )),
+        )
         .map_err(text)?;
-    std::fs::write(&dropped, card).map_err(text)?;
-    let viewport = Rect::new(0.0, 0.0, 1280.0, 800.0);
+    run_frames(runtime, &ctx, &mut clock, Vec::new());
+    runtime.request(
+        ShellRequest::ShowDrawer(sue_wm::AppletId::new(crate::player::ID).map_err(text)?),
+        &mut tex,
+        clock,
+    );
+    let snap = run_frames(runtime, &ctx, &mut clock, Vec::new());
+    runtime
+        .engine
+        .history
+        .undo(&mut runtime.engine.world)
+        .map_err(text)?;
+    run_frames(runtime, &ctx, &mut clock, Vec::new());
+    ensure(
+        glide > snap,
+        "springs did not glide, or legacy did not snap",
+    )?;
 
-    let result = (|| -> Result<String, String> {
-        let (studios, inspectors, left, right) = {
-            let workspace = &runtime.engine.workspace;
-            let hub = workspace.launchpad().hub();
-            let rail = |zone| {
-                workspace
-                    .dock_applets(zone)
-                    .iter()
-                    .map(|(_, manifest)| manifest.id.to_string())
-                    .collect::<Vec<_>>()
-                    .join("+")
-            };
-            (
-                hub.studios.len(),
-                hub.inspectors.len(),
-                rail(Zone::LeftDock),
-                rail(Zone::RightDock),
-            )
-        };
-        let boot = runtime.engine.workspace.launchpad().boot_target();
+    // A mode switch frames the document on the camera spring.
+    let before = runtime.shell.camera().center();
+    runtime.request(ShellRequest::Mode("document".to_owned()), &mut tex, clock);
+    let framed = run_frames(runtime, &ctx, &mut clock, Vec::new());
+    let document = node_of(runtime, crate::document::ID).ok_or("no document")?;
+    ensure(
+        runtime.shell.camera().center().distance(before) > 1.0 && framed > 10,
+        "the camera teleported instead of gliding",
+    )?;
+    ensure(
+        runtime.shell.selected() == Some(document) && runtime.shell.selection_pill_visible(),
+        "the document's selection pill did not appear",
+    )?;
 
-        // Quick Notes: typing, backspace, undo and the alternative redo.
-        runtime.show_dock(quick_notes::ID);
-        for ch in "Sue!".chars() {
-            runtime.handle(&InputEvent::Keyboard(KeyEvent::typed(ch)));
-        }
-        runtime.handle(&InputEvent::Keyboard(KeyEvent::press(
-            Key::Named(NamedKey::Backspace),
-            Modifiers::NONE,
-        )));
-        let note_text = |runtime: &Runtime| {
-            runtime
-                .engine
-                .world
-                .arena
-                .iter()
-                .find(|(_, entity)| entity.name() == NOTE_NAME)
-                .and_then(|(_, entity)| {
-                    entity
-                        .string_buffer()
-                        .map(|buffer| buffer.as_str().to_owned())
-                })
-                .unwrap_or_default()
-        };
-        ensure(
-            note_text(runtime).ends_with("Sue"),
-            "typing or backspace failed",
-        )?;
-        runtime.handle(&press(keymap.undo));
-        ensure(
-            note_text(runtime).ends_with("Sue!"),
-            "undo did not restore the deleted character",
-        )?;
-        runtime.handle(&press(keymap.redo_alt));
-        ensure(note_text(runtime).ends_with("Sue"), "Ctrl+Y redo failed")?;
+    // Typing goes into the arena; Ctrl+Z and Ctrl+Y go through the UndoStack.
+    let original = text_of(runtime, document);
+    crate::document::select_words(&ctx, document, 0, 0);
+    run_frames(runtime, &ctx, &mut clock, Vec::new());
+    run_frames(
+        runtime,
+        &ctx,
+        &mut clock,
+        vec![egui::Event::Text("Sue ".to_owned())],
+    );
+    let typed = text_of(runtime, document);
+    ensure(
+        typed == format!("Sue {original}"),
+        "typing did not reach the arena",
+    )?;
+    run_frames(
+        runtime,
+        &ctx,
+        &mut clock,
+        vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+    );
+    ensure(
+        text_of(runtime, document) == original,
+        "Ctrl+Z did not undo the typing",
+    )?;
+    run_frames(
+        runtime,
+        &ctx,
+        &mut clock,
+        vec![key(egui::Key::Y, egui::Modifiers::COMMAND)],
+    );
+    ensure(
+        text_of(runtime, document) == typed,
+        "Ctrl+Y did not redo the typing",
+    )?;
 
-        // A file dropped anywhere opens in the applet its content fits.
-        runtime.handle(&InputEvent::FileDrop(FileDrop::Dropped(dropped.clone())));
-        let workspace = &runtime.engine.workspace;
-        let opened = matches!(workspace.active_tab(), Tab::Applet { id, .. } if id.as_str() == image_viewer::ID);
-        ensure(
-            opened,
-            "the dropped JPEG XL did not open in the Image Viewer",
-        )?;
-        let title = workspace.tab_title(workspace.active_index(), &runtime.engine.world);
+    // A paint stroke is one undo step that stores only its tiles.
+    let paint = node_of(runtime, crate::paint::ID).ok_or("no paint layer")?;
+    let tiles = runtime.with_context(&mut tex, clock, |cx| crate::paint::scribble(cx, paint));
+    ensure(tiles > 0, "the stroke touched no tiles")?;
+    runtime
+        .engine
+        .history
+        .undo(&mut runtime.engine.world)
+        .map_err(text)?;
+    runtime
+        .engine
+        .history
+        .redo(&mut runtime.engine.world)
+        .map_err(text)?;
 
-        // Settings is one tab, however often it is asked for.
-        runtime.handle(&press(keymap.open_settings));
-        runtime.handle(&press(keymap.home));
-        runtime.handle(&press(keymap.open_settings));
-        let settings_tabs = runtime
-            .engine
-            .workspace
-            .tabs()
-            .iter()
-            .filter(|tab| {
-                tab.applet_id()
-                    .is_some_and(|id| id.as_str() == settings::ID)
-            })
-            .count();
-        ensure(settings_tabs == 1, "Settings opened more than one tab")?;
-
-        // The pacing fix: a clicked dock toggle animates to the end with no
-        // further input, then the scene goes back to sleep.
+    // Projection onto the timeline, which springs open.
+    let audio = node_of(runtime, crate::audio_node::ID).ok_or("no audio")?;
+    runtime.with_context(&mut tex, clock, |cx| {
+        sue_wm::project_to_timeline(cx, audio, 3.0)
+    });
+    let timeline = run_frames(runtime, &ctx, &mut clock, Vec::new());
+    let entity = runtime
+        .engine
+        .world
+        .scene
+        .get(audio)
+        .map(|node| node.entity)
+        .ok_or("audio vanished")?;
+    ensure(
         runtime
             .engine
-            .workspace
-            .set_profile(HardwareProfile::Balanced);
-        let mut now = Instant::now();
-        runtime.frame(viewport, SafeAreaInsets::ZERO, now);
-        let toggle = runtime
-            .widget_rect(widget_id("shell", "toggle-left"))
-            .ok_or("the left dock toggle was not drawn")?;
-        let center = Point::new(
-            toggle.x + toggle.width / 2.0,
-            toggle.y + toggle.height / 2.0,
-        );
-        runtime.handle(&InputEvent::Mouse(MouseEvent::Moved { position: center }));
-        for pressed in [true, false] {
-            runtime.handle(&InputEvent::Mouse(MouseEvent::Button {
-                button: MouseButton::Left,
-                pressed,
-                position: center,
-            }));
-            now += Duration::from_millis(16);
-            runtime.frame(viewport, SafeAreaInsets::ZERO, now);
-        }
-        ensure(
-            !runtime.engine.workspace.docks_open().0,
-            "the click missed the toggle",
-        )?;
-        let mut animated = 0;
-        while matches!(runtime.pacing(now), FramePacing::Animate { .. }) && animated < 2_000 {
-            now += Duration::from_millis(16);
-            runtime.frame(viewport, SafeAreaInsets::ZERO, now);
-            if runtime.engine.workspace.is_animating() {
-                animated += 1;
-            }
-        }
-        ensure(
-            runtime.engine.workspace.dock_reveal().0 == 0.0,
-            "the dock animation stopped before the end",
-        )?;
-        ensure(
-            !matches!(
-                runtime.pacing(now + Duration::from_secs(1)),
-                FramePacing::Animate { .. }
-            ),
-            "frames kept coming after the animation",
-        )?;
+            .world
+            .arena
+            .get(entity)
+            .map_err(text)?
+            .projections()
+            .contains(Projection::Timeline),
+        "Project to Timeline did not attach the projection",
+    )?;
+    ensure(
+        runtime.shell.timeline_open() && runtime.shell.timeline_reveal() > 0.999 && timeline > 5,
+        "the timeline did not spring open",
+    )?;
 
-        // Legacy hardware snaps in one frame.
-        let (workspace, mut ctx) = runtime.engine.shell();
-        workspace.set_profile(HardwareProfile::LegacyLowSpec);
-        workspace
-            .dispatch(&press(keymap.toggle_left_dock), &mut ctx)
-            .map_err(text)?;
-        let snapped = frames_to_settle(workspace, &mut ctx);
-        workspace.set_profile(detected);
-        // Switching profiles repaints once; then the scene must go idle.
-        frames_to_settle(workspace, &mut ctx);
-        ensure(
-            animated > snapped && snapped <= 1,
-            "springs or instant snap misbehaved",
-        )?;
-        ensure(workspace.docks_open().0, "left dock should be open again")?;
+    // The marking menu grows on its spring; the palette filters.
+    runtime.request(ShellRequest::Timeline(false), &mut tex, clock);
+    runtime
+        .shell
+        .open_radial(runtime.shell.canvas_rect().center());
+    let radial = run_frames(runtime, &ctx, &mut clock, Vec::new());
+    ensure(
+        runtime.shell.radial_open() && radial > 5,
+        "the marking menu did not open on its spring",
+    )?;
+    run_frames(
+        runtime,
+        &ctx,
+        &mut clock,
+        vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+    );
+    runtime.shell.open_palette();
+    runtime.shell.palette_query("paint layer");
+    run_frames(runtime, &ctx, &mut clock, Vec::new());
+    ensure(runtime.shell.palette_open(), "the palette did not open")?;
+    run_frames(
+        runtime,
+        &ctx,
+        &mut clock,
+        vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+    );
+    let paints = runtime
+        .engine
+        .world
+        .scene
+        .iter()
+        .filter(|(_, node)| node.applet.as_str() == crate::paint::ID)
+        .count();
+    ensure(paints == 2, "the palette's New Paint Layer did not run")?;
 
-        let desktop = workspace.layout(
-            Rect::new(0.0, 0.0, 1280.0, 800.0),
-            SafeAreaInsets::ZERO,
-            FormFactor::Desktop,
-        );
-        let insets = SafeAreaInsets {
-            top: 47.0,
-            right: 0.0,
-            bottom: 34.0,
-            left: 0.0,
-        };
-        let phone = workspace.layout(
-            Rect::new(0.0, 0.0, 390.0, 844.0),
-            insets,
-            FormFactor::Mobile,
-        );
-        ensure(
-            matches!(desktop.left, Placement::Tiled(_)) && desktop.left_rail.is_some(),
-            "desktop left dock should tile beside its rail",
-        )?;
-        ensure(
-            matches!(phone.left, Placement::Drawer { .. }) && phone.left_rail.is_none(),
-            "phone left dock should be a drawer",
-        )?;
-        ensure(
-            phone.center.width == 390.0,
-            "phone Center Stage must fill the safe width",
-        )?;
-        ensure(
-            workspace.begin_frame().is_none(),
-            "an idle workspace still renders",
-        )?;
-        Ok(format!(
-            "home: {}, {}; rails {left} | {right}; boot {boot:?}; notes typed, undone, redone; drop → {title}; Settings opens once; clicked dock animated {animated} frames to the end (balanced) vs {snapped} (legacy snap), then 0 FPS; center {}px desktop / {}px phone",
-            count(studios, "studio", "studios"),
-            count(inspectors, "inspector", "inspectors"),
-            desktop.center.width,
-            phone.center.width
-        ))
-    })();
-    let _ = std::fs::remove_dir_all(&samples);
-    let mut detail = result?;
-    match render_shell(runtime)? {
+    // Then the shell sleeps, and egui asks for no frame either (its own hover
+    // fades finish first, a second or so of headless time).
+    run_frames(runtime, &ctx, &mut clock, Vec::new());
+    clock += Duration::from_secs(2);
+    for _ in 0..2 {
+        let now = clock;
+        ctx.run_ui(raw_input(now, Vec::new()), |ui| {
+            runtime.ui(ui, &mut NoTextures, now);
+        })
+        .drop_without_applying_deltas();
+        clock += Duration::from_millis(8);
+    }
+    let raw = raw_input(clock, Vec::new());
+    let now = clock;
+    let output = ctx.run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
+    let delay = output
+        .viewport_output
+        .values()
+        .next()
+        .map_or(Duration::MAX, |viewport| viewport.repaint_delay);
+    output.drop_without_applying_deltas();
+    ensure(
+        delay > Duration::from_secs(60),
+        &format!(
+            "egui keeps asking for frames while idle (every {delay:?}, from {:?})",
+            ctx.repaint_causes()
+        ),
+    )?;
+    ensure(
+        matches!(
+            runtime.pacing(clock + Duration::from_secs(5)),
+            FramePacing::Sleep | FramePacing::WakeAt(_)
+        ),
+        "the idle shell keeps drawing",
+    )?;
+    let mut detail = format!(
+        "booted into canvas with document, paint, audio; {nodes} node kinds, {left}+{right} drawer applets, {windows} window; drawer glided {glide} frames ({}) vs {snap} (legacy snap); camera framed the document in {framed} frames; typed, Ctrl+Z, Ctrl+Y through the UndoStack; stroke touched {tiles} tiles, undone and redone; timeline projected and sprang open; marking menu and palette; then 0 FPS",
+        sue_wm::profile_label(profile)
+    );
+    match render_shell(runtime, clock)? {
         Some(rendered) => detail = format!("{detail}; {rendered}"),
         None => detail = format!("{detail}; GPU render skipped (no adapter)"),
     }

@@ -180,6 +180,25 @@ pub fn encode_png_rgba(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>
     encode_png_pixels(width as usize, height as usize, ColorSpace::RGBA, pixels)
 }
 
+/// Encodes an 8-bit raster as baseline JPEG at `quality` (1 to 100).
+///
+/// # Errors
+/// Float rasters, sides over 65535 pixels, or encoder failures.
+pub fn encode_jpeg(tile: &RasterTile2D, quality: u8) -> Result<Vec<u8>, String> {
+    let bytes = tile.bytes().ok_or("only 8-bit pictures encode as JPEG")?;
+    let side =
+        |value: u32| u16::try_from(value).map_err(|_| "JPEG sides stop at 65535 pixels".to_owned());
+    let color = match tile.format() {
+        PixelFormat::Gray8 => jpeg_encoder::ColorType::Luma,
+        _ => jpeg_encoder::ColorType::Rgba,
+    };
+    let mut out = Vec::new();
+    jpeg_encoder::Encoder::new(&mut out, quality.clamp(1, 100))
+        .encode(bytes, side(tile.width())?, side(tile.height())?, color)
+        .map_err(|error| format!("JPEG encoder: {error}"))?;
+    Ok(out)
+}
+
 fn encode_png_pixels(
     width: usize,
     height: usize,

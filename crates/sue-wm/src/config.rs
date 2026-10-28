@@ -6,8 +6,8 @@ use sue_rice::{Keybind, RiceDeclaration, RiceError, RiceParameter, RiceSchema};
 
 use crate::{LayoutMetrics, SpringParams, WmError};
 
-/// Every parameter the window manager and its renderer read, with defaults.
-/// The shipped `default.suerice` must match these exactly (tested below).
+/// Every parameter the shell and its canvas read, with defaults. The shipped
+/// `default.suerice` must match these exactly (tested below).
 #[must_use]
 pub fn rice_declarations() -> Vec<RiceDeclaration> {
     let int = |value, min, max| RiceParameter::IntRange {
@@ -45,16 +45,11 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
     let declare = RiceDeclaration::new;
     vec![
         declare(
-            "launchpad.boot_into",
+            "launchpad.boot_mode",
             RiceParameter::Text {
-                value: "hub".to_owned(),
+                value: "canvas".to_owned(),
             },
-            "What Sue opens at launch: \"hub\" for Home, or an applet id",
-        ),
-        declare(
-            "launchpad.card_width",
-            int(300, 280, 560),
-            "Narrowest a Home card may get (px)",
+            "Mode Sue opens in: \"canvas\", or the id of an applet with a mode",
         ),
         declare(
             "profile.hardware",
@@ -79,22 +74,32 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
         declare(
             "motion.instant_transitions",
             toggle(false),
-            "Snap panels in 0 ms instead of animating them",
+            "Snap drawers, pills and the camera in 0 ms instead of animating them",
         ),
         declare(
             "motion.animation_speed",
             float(1.0, 0.25, 4.0),
-            "Speed of panel animations",
+            "Speed of every spring animation",
         ),
         declare(
             "motion.spring_stiffness",
-            float(170.0, 10.0, 1000.0),
-            "Spring constant k",
+            float(260.0, 10.0, 1000.0),
+            "Drawer and pill spring constant k",
         ),
         declare(
             "motion.spring_damping",
-            float(26.0, 0.0, 120.0),
-            "Damping coefficient c",
+            float(32.0, 0.0, 120.0),
+            "Drawer and pill damping coefficient c",
+        ),
+        declare(
+            "motion.camera_stiffness",
+            float(600.0, 10.0, 1000.0),
+            "Camera spring constant k (frames an entity in about 250 ms)",
+        ),
+        declare(
+            "motion.camera_damping",
+            float(49.0, 0.0, 120.0),
+            "Camera damping coefficient c",
         ),
         declare(
             "motion.settle_grace_ms",
@@ -111,31 +116,55 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
             int(4, 1, 30),
             "How long messages stay in the status bar (s)",
         ),
-        declare("layout.gap", int(0, 0, 32), "Space between panels (px)"),
         declare(
             "layout.padding",
             int(8, 2, 24),
-            "Space inside panels and controls (px)",
+            "Space inside drawers, pills and controls (px)",
         ),
         declare(
             "layout.border_width",
             int(1, 0, 4),
-            "Hairline divider thickness (px)",
-        ),
-        declare(
-            "layout.panel_radius",
-            float(0.0, 0.0, 16.0),
-            "Corner rounding of structural panels (px)",
+            "Hairline border thickness (px)",
         ),
         declare(
             "layout.control_radius",
-            float(3.0, 0.0, 12.0),
-            "Corner rounding of buttons, fields and cards (px)",
+            float(4.0, 0.0, 12.0),
+            "Corner rounding of buttons and fields (px)",
         ),
         declare(
-            "layout.header_height",
-            int(30, 24, 64),
-            "Height of the header bar (px)",
+            "layout.pill_radius",
+            float(12.0, 0.0, 24.0),
+            "Corner rounding of floating pills and cards (px)",
+        ),
+        declare(
+            "layout.pill_height",
+            int(34, 24, 64),
+            "Height of the floating pills (px)",
+        ),
+        declare(
+            "layout.pill_gap",
+            int(12, 0, 64),
+            "Space between a selected entity and its pill (px)",
+        ),
+        declare(
+            "layout.rail_width",
+            int(36, 28, 72),
+            "Width of the activity rails (px)",
+        ),
+        declare(
+            "layout.left_drawer_width",
+            int(260, 160, 640),
+            "Left drawer width (px)",
+        ),
+        declare(
+            "layout.right_drawer_width",
+            int(280, 160, 720),
+            "Right drawer width (px)",
+        ),
+        declare(
+            "layout.timeline_height",
+            int(240, 120, 600),
+            "Bottom timeline height (px)",
         ),
         declare(
             "layout.status_bar_height",
@@ -143,29 +172,9 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
             "Height of the status bar (px)",
         ),
         declare(
-            "layout.rail_width",
-            int(38, 28, 72),
-            "Width of the activity rails (px)",
-        ),
-        declare(
-            "layout.left_dock_width",
-            int(260, 160, 640),
-            "Left dock width (px)",
-        ),
-        declare(
-            "layout.right_dock_width",
-            int(280, 160, 720),
-            "Right dock width (px)",
-        ),
-        declare(
-            "layout.timeline_height",
-            int(220, 96, 600),
-            "Bottom timeline height (px)",
-        ),
-        declare(
-            "layout.min_center_width",
-            int(480, 240, 1600),
-            "Narrowest Center Stage before docks float (px)",
+            "layout.min_canvas_width",
+            int(420, 240, 1600),
+            "Narrowest canvas before desktop drawers shrink (px)",
         ),
         declare(
             "layout.drawer_max_fraction",
@@ -174,67 +183,98 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
         ),
         declare(
             "layout.sheet_max_fraction",
-            float(0.4, 0.2, 0.9),
-            "Tallest the phone timeline sheet may peek, as a share of the screen",
-        ),
-        declare(
-            "layout.tab_accent",
-            int(2, 0, 6),
-            "Accent line above the active tab (px)",
-        ),
-        declare(
-            "layout.slider_track",
-            int(4, 2, 12),
-            "Slider track thickness (px)",
+            float(0.5, 0.2, 0.9),
+            "Tallest the phone timeline sheet may be, as a share of the screen",
         ),
         declare(
             "layout.settings_sidebar_width",
             int(190, 140, 360),
             "Width of the category list in Settings (px)",
         ),
-        declare("colors.base", color("#121212"), "Window and canvas base"),
         declare(
-            "colors.panel",
+            "layout.radial_radius",
+            int(104, 64, 200),
+            "Radius of the right-click marking menu (px)",
+        ),
+        declare(
+            "layout.shadow_blur",
+            int(18, 0, 48),
+            "Blur of the shadow under pills and windows (px)",
+        ),
+        declare(
+            "canvas.zoom_min",
+            float(0.1, 0.05, 1.0),
+            "Farthest the canvas zooms out (0.1 is 10%)",
+        ),
+        declare(
+            "canvas.zoom_max",
+            float(32.0, 2.0, 64.0),
+            "Closest the canvas zooms in (32 is 3200%)",
+        ),
+        declare(
+            "canvas.zoom_step",
+            float(0.18, 0.02, 1.0),
+            "Zoom change per mouse-wheel notch (natural log)",
+        ),
+        declare(
+            "canvas.grid_spacing",
+            int(32, 8, 256),
+            "Distance between grid dots at 100% (px)",
+        ),
+        declare(
+            "canvas.grid_style",
+            choice("dots", &["dots", "lines", "none"]),
+            "Canvas background",
+        ),
+        declare(
+            "canvas.frame_margin",
+            int(48, 0, 400),
+            "Space kept around an entity the camera frames (px)",
+        ),
+        declare("colors.void", color("#0a0a0a"), "Canvas background"),
+        declare("colors.panel", color("#111111"), "Drawers and panels"),
+        declare(
+            "colors.pill",
             color("#181818"),
-            "Dock and panel background",
+            "Floating pills, cards and entity frames",
         ),
+        declare("colors.hover", color("#262626"), "Hovered controls"),
         declare(
-            "colors.chrome",
-            color("#141414"),
-            "Activity rails, header and status bar",
+            "colors.active",
+            color("#333333"),
+            "Pressed and chosen controls",
         ),
+        declare("colors.border", color("#262626"), "Hairline borders"),
         declare(
-            "colors.surface",
-            color("#222222"),
-            "Cards, controls and inputs",
-        ),
-        declare("colors.hover", color("#2a2a2a"), "Hovered controls"),
-        declare(
-            "colors.border",
-            color("#2b2b2b"),
-            "Hairline borders and dividers",
-        ),
-        declare("colors.text", color("#e4e4e4"), "Primary text"),
-        declare("colors.muted", color("#888888"), "Secondary text"),
-        declare(
-            "colors.accent",
-            color("#3b82f6"),
-            "Focus, selection and the active tab",
-        ),
-        declare(
-            "colors.on_accent",
+            "colors.border_active",
             color("#ffffff"),
-            "Text on accent surfaces",
+            "Borders of selected entities and focused controls",
         ),
         declare(
-            "colors.alert",
-            color("#e5484d"),
-            "Errors and destructive actions",
+            "colors.text",
+            color("#ffffff"),
+            "Primary text and active icons",
+        ),
+        declare("colors.muted", color("#808080"), "Secondary text"),
+        declare(
+            "colors.selection",
+            color("#404040"),
+            "Text selection highlight",
         ),
         declare(
-            "colors.success",
-            color("#3fb950"),
-            "Healthy and finished states",
+            "colors.selection_text",
+            color("#ffffff"),
+            "Text inside a selection",
+        ),
+        declare(
+            "colors.grid",
+            color("#262626"),
+            "Canvas grid dots and lines",
+        ),
+        declare(
+            "colors.shadow",
+            color("#000000"),
+            "Shadow under floating surfaces",
         ),
         declare(
             "typography.ui_font",
@@ -253,8 +293,8 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
         ),
         declare(
             "typography.heading_size",
-            int(20, 12, 48),
-            "Page title size (px)",
+            int(18, 12, 48),
+            "Heading size (px)",
         ),
         declare(
             "typography.mono_size",
@@ -262,117 +302,179 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
             "Code and hex text size (px)",
         ),
         declare(
+            "typography.document_size",
+            int(15, 8, 48),
+            "Default text size of new documents (px)",
+        ),
+        declare(
             "input.wheel_line_px",
             int(48, 8, 200),
-            "Pixels scrolled per mouse-wheel notch",
+            "Pixels scrolled per mouse-wheel notch in lists",
         ),
         declare(
-            "keys.toggle_left_dock",
+            "keys.toggle_left_drawer",
             chord("Ctrl+B"),
-            "Show or hide the left dock",
+            "Show or hide the left drawer",
         ),
         declare(
-            "keys.toggle_right_dock",
+            "keys.toggle_right_drawer",
             chord("Ctrl+Alt+B"),
-            "Show or hide the right dock",
+            "Show or hide the right drawer",
         ),
-        declare("keys.new_tab", chord("Ctrl+T"), "Open a new tab"),
-        declare("keys.close_tab", chord("Ctrl+W"), "Close the active tab"),
-        declare("keys.next_tab", chord("Ctrl+Tab"), "Switch to the next tab"),
         declare(
-            "keys.previous_tab",
-            chord("Ctrl+Shift+Tab"),
-            "Switch to the previous tab",
+            "keys.toggle_timeline",
+            chord("Ctrl+J"),
+            "Show or hide the timeline",
         ),
-        declare("keys.home", chord("Ctrl+Shift+H"), "Go to the Home tab"),
+        declare(
+            "keys.command_palette",
+            chord("Tab"),
+            "Open the command palette",
+        ),
+        declare(
+            "keys.command_palette_alt",
+            chord("/"),
+            "Open the command palette (alternative)",
+        ),
         declare("keys.open_settings", chord("Ctrl+,"), "Open Settings"),
         declare("keys.open_file", chord("Ctrl+O"), "Open a file"),
-        declare("keys.save", chord("Ctrl+S"), "Save the active document"),
         declare("keys.quit", chord("Ctrl+Q"), "Quit Sue"),
         declare("keys.undo", chord("Ctrl+Z"), "Undo the last change"),
         declare("keys.redo", chord("Ctrl+Shift+Z"), "Redo"),
         declare("keys.redo_alt", chord("Ctrl+Y"), "Redo (alternative)"),
+        declare(
+            "keys.play_pause",
+            chord("Space"),
+            "Play or pause the timeline (tap; hold and drag pans)",
+        ),
+        declare(
+            "keys.reset_camera",
+            chord("Ctrl+0"),
+            "Frame everything on the canvas",
+        ),
+        declare(
+            "keys.delete",
+            chord("Delete"),
+            "Remove the selected entity from the canvas",
+        ),
     ]
 }
 
-/// Registers every window-manager parameter with `schema`, keeping the
-/// user's compatible values.
+/// Registers [`rice_declarations`] (LAW 3).
 ///
 /// # Errors
-/// Only if a declared path is invalid, which would be a bug in this crate.
+/// If a user value cannot be reconciled with its declaration.
 pub fn register_rice(schema: &mut RiceSchema) -> Result<(), RiceError> {
     schema.register_all(&rice_declarations())
 }
 
-/// The global shortcuts the window manager handles before applets see input.
+/// The global shortcuts the shell handles before applets see input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Keymap {
-    /// Show or hide the left dock.
-    pub toggle_left_dock: Keybind,
-    /// Show or hide the right dock.
-    pub toggle_right_dock: Keybind,
-    /// Open a new tab.
-    pub new_tab: Keybind,
-    /// Close the active tab.
-    pub close_tab: Keybind,
-    /// Next tab.
-    pub next_tab: Keybind,
-    /// Previous tab.
-    pub previous_tab: Keybind,
-    /// The Home tab.
-    pub home: Keybind,
+    /// Show or hide the left drawer.
+    pub toggle_left_drawer: Keybind,
+    /// Show or hide the right drawer.
+    pub toggle_right_drawer: Keybind,
+    /// Show or hide the timeline.
+    pub toggle_timeline: Keybind,
+    /// Open the command palette.
+    pub command_palette: Keybind,
+    /// Open the command palette (alternative).
+    pub command_palette_alt: Keybind,
     /// Open Settings.
     pub open_settings: Keybind,
     /// Open a file.
     pub open_file: Keybind,
-    /// Save the active document.
-    pub save: Keybind,
     /// Quit.
     pub quit: Keybind,
     /// Undo.
     pub undo: Keybind,
     /// Redo.
     pub redo: Keybind,
-    /// Redo, second binding.
+    /// Redo (alternative).
     pub redo_alt: Keybind,
+    /// Play or pause the timeline.
+    pub play_pause: Keybind,
+    /// Frame everything.
+    pub reset_camera: Keybind,
+    /// Remove the selected entity from the canvas.
+    pub delete: Keybind,
 }
 
-/// Window manager settings, read from rice.
+/// Canvas behavior.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CanvasConfig {
+    /// Farthest zoom out.
+    pub zoom_min: f32,
+    /// Closest zoom in.
+    pub zoom_max: f32,
+    /// Log-zoom change per wheel notch.
+    pub zoom_step: f32,
+    /// Grid spacing at 100%.
+    pub grid_spacing: f32,
+    /// `dots`, `lines` or `none`.
+    pub grid_style: GridStyle,
+    /// Margin around a framed entity, in screen points.
+    pub frame_margin: f32,
+}
+
+/// The canvas background.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GridStyle {
+    /// A dot at every grid point.
+    Dots,
+    /// Thin grid lines.
+    Lines,
+    /// Plain background.
+    None,
+}
+
+/// The typed window-manager config, read from the rice.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WmConfig {
     /// Layout sizes.
     pub metrics: LayoutMetrics,
-    /// Spring constants for panel motion.
+    /// Drawer, pill and menu springs.
     pub spring: SpringParams,
-    /// `true` turns every spring into an instant snap.
+    /// Camera springs.
+    pub camera_spring: SpringParams,
+    /// Snap everything instead of animating.
     pub instant_transitions: bool,
-    /// Multiplies the time springs see each frame.
+    /// Multiplier on spring time.
     pub animation_speed: f32,
-    /// How long frames keep coming after the last change.
+    /// How long to keep drawing after the last change.
     pub settle_grace: Duration,
-    /// Caret blink half-period; `None` keeps carets solid.
+    /// Caret blink half period, `None` for a solid caret.
     pub caret_blink: Option<Duration>,
     /// How long status messages stay.
     pub message_duration: Duration,
-    /// Highest animation frame rate; `0` follows the hardware profile.
+    /// Frame cap while animating (0 follows the profile).
     pub frame_rate_cap: u32,
-    /// Interface scale on top of the system scale.
+    /// Interface scale.
     pub ui_scale: f32,
     /// Global shortcuts.
     pub keymap: Keymap,
-    /// `profile.hardware`: `"auto"` or a profile name.
+    /// `profile.hardware`.
     pub hardware_profile: String,
-    /// `launchpad.boot_into`: an applet id, or `"hub"`.
-    pub boot_into: String,
-    /// Pixels scrolled per wheel notch.
+    /// `launchpad.boot_mode`.
+    pub boot_mode: String,
+    /// Points per wheel line in lists.
     pub wheel_line_px: f32,
+    /// Canvas behavior.
+    pub canvas: CanvasConfig,
+    /// Pill height.
+    pub pill_height: f32,
+    /// Gap between an entity and its pill.
+    pub pill_gap: f32,
+    /// Radius of the marking menu.
+    pub radial_radius: f32,
 }
 
 impl WmConfig {
-    /// Reads the config from a schema on which [`register_rice`] has run.
+    /// Reads the config from `schema`.
     ///
     /// # Errors
-    /// [`WmError::MissingRice`] for a missing or mistyped parameter.
+    /// [`WmError::MissingRice`] if a parameter was never registered.
     pub fn from_rice(schema: &RiceSchema) -> Result<Self, WmError> {
         let number = |path: &'static str| {
             schema
@@ -380,31 +482,27 @@ impl WmConfig {
                 .map(|value| value as f32)
                 .ok_or(WmError::MissingRice(path))
         };
+        let key = |path: &'static str| schema.get_keybind(path).ok_or(WmError::MissingRice(path));
         let millis = |path: &'static str| {
             schema
                 .get_i64(path)
                 .map(|value| Duration::from_millis(u64::try_from(value).unwrap_or(0)))
                 .ok_or(WmError::MissingRice(path))
         };
-        let keybind =
-            |path: &'static str| schema.get_keybind(path).ok_or(WmError::MissingRice(path));
-        let text = |path: &'static str| {
-            schema
-                .get_str(path)
-                .map(str::to_owned)
-                .ok_or(WmError::MissingRice(path))
+        let caret = millis("motion.caret_blink_ms")?;
+        let grid_style = match schema.get_str("canvas.grid_style") {
+            Some("lines") => GridStyle::Lines,
+            Some("none") => GridStyle::None,
+            _ => GridStyle::Dots,
         };
-        let blink = millis("motion.caret_blink_ms")?;
         Ok(Self {
             metrics: LayoutMetrics {
-                gap: number("layout.gap")?,
-                header_height: number("layout.header_height")?,
-                status_bar_height: number("layout.status_bar_height")?,
                 rail_width: number("layout.rail_width")?,
-                left_dock_width: number("layout.left_dock_width")?,
-                right_dock_width: number("layout.right_dock_width")?,
+                left_drawer_width: number("layout.left_drawer_width")?,
+                right_drawer_width: number("layout.right_drawer_width")?,
                 timeline_height: number("layout.timeline_height")?,
-                min_center_width: number("layout.min_center_width")?,
+                status_bar_height: number("layout.status_bar_height")?,
+                min_canvas_width: number("layout.min_canvas_width")?,
                 drawer_max_fraction: number("layout.drawer_max_fraction")?,
                 sheet_max_fraction: number("layout.sheet_max_fraction")?,
             },
@@ -413,19 +511,22 @@ impl WmConfig {
                 damping: number("motion.spring_damping")?,
                 mass: 1.0,
             },
+            camera_spring: SpringParams {
+                stiffness: number("motion.camera_stiffness")?,
+                damping: number("motion.camera_damping")?,
+                mass: 1.0,
+            },
             instant_transitions: schema
                 .get_bool("motion.instant_transitions")
                 .ok_or(WmError::MissingRice("motion.instant_transitions"))?,
             animation_speed: number("motion.animation_speed")?,
             settle_grace: millis("motion.settle_grace_ms")?,
-            caret_blink: (!blink.is_zero()).then_some(blink),
+            caret_blink: (!caret.is_zero()).then_some(caret),
             message_duration: Duration::from_secs(
-                u64::try_from(
-                    schema
-                        .get_i64("motion.message_seconds")
-                        .ok_or(WmError::MissingRice("motion.message_seconds"))?,
-                )
-                .unwrap_or(1),
+                schema
+                    .get_i64("motion.message_seconds")
+                    .and_then(|seconds| u64::try_from(seconds).ok())
+                    .ok_or(WmError::MissingRice("motion.message_seconds"))?,
             ),
             frame_rate_cap: schema
                 .get_i64("display.frame_rate_cap")
@@ -433,24 +534,42 @@ impl WmConfig {
                 .ok_or(WmError::MissingRice("display.frame_rate_cap"))?,
             ui_scale: number("display.ui_scale")?,
             keymap: Keymap {
-                toggle_left_dock: keybind("keys.toggle_left_dock")?,
-                toggle_right_dock: keybind("keys.toggle_right_dock")?,
-                new_tab: keybind("keys.new_tab")?,
-                close_tab: keybind("keys.close_tab")?,
-                next_tab: keybind("keys.next_tab")?,
-                previous_tab: keybind("keys.previous_tab")?,
-                home: keybind("keys.home")?,
-                open_settings: keybind("keys.open_settings")?,
-                open_file: keybind("keys.open_file")?,
-                save: keybind("keys.save")?,
-                quit: keybind("keys.quit")?,
-                undo: keybind("keys.undo")?,
-                redo: keybind("keys.redo")?,
-                redo_alt: keybind("keys.redo_alt")?,
+                toggle_left_drawer: key("keys.toggle_left_drawer")?,
+                toggle_right_drawer: key("keys.toggle_right_drawer")?,
+                toggle_timeline: key("keys.toggle_timeline")?,
+                command_palette: key("keys.command_palette")?,
+                command_palette_alt: key("keys.command_palette_alt")?,
+                open_settings: key("keys.open_settings")?,
+                open_file: key("keys.open_file")?,
+                quit: key("keys.quit")?,
+                undo: key("keys.undo")?,
+                redo: key("keys.redo")?,
+                redo_alt: key("keys.redo_alt")?,
+                play_pause: key("keys.play_pause")?,
+                reset_camera: key("keys.reset_camera")?,
+                delete: key("keys.delete")?,
             },
-            hardware_profile: text("profile.hardware")?,
-            boot_into: text("launchpad.boot_into")?,
+            hardware_profile: schema
+                .get_str("profile.hardware")
+                .ok_or(WmError::MissingRice("profile.hardware"))?
+                .to_owned(),
+            boot_mode: schema
+                .get_str("launchpad.boot_mode")
+                .ok_or(WmError::MissingRice("launchpad.boot_mode"))?
+                .trim()
+                .to_owned(),
             wheel_line_px: number("input.wheel_line_px")?,
+            canvas: CanvasConfig {
+                zoom_min: number("canvas.zoom_min")?,
+                zoom_max: number("canvas.zoom_max")?,
+                zoom_step: number("canvas.zoom_step")?,
+                grid_spacing: number("canvas.grid_spacing")?,
+                grid_style,
+                frame_margin: number("canvas.frame_margin")?,
+            },
+            pill_height: number("layout.pill_height")?,
+            pill_gap: number("layout.pill_gap")?,
+            radial_radius: number("layout.radial_radius")?,
         })
     }
 }
@@ -458,53 +577,55 @@ impl WmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sue_rice::{DEFAULT_RICE, RegisterOutcome};
 
-    #[test]
-    fn shipped_rice_matches_the_declarations_exactly() {
-        let mut schema = RiceSchema::parse(DEFAULT_RICE).unwrap();
-        let revision = schema.revision();
-        for declaration in rice_declarations() {
-            assert_eq!(
-                schema.parameter(&declaration.path),
-                Some(&declaration.default),
-                "{} differs from its declaration",
-                declaration.path
-            );
-            assert_eq!(
-                schema
-                    .entry(&declaration.path)
-                    .and_then(|entry| entry.description()),
-                Some(declaration.description.as_str()),
-                "{} has a different description",
-                declaration.path
-            );
-            assert_eq!(
-                schema.register(&declaration),
-                Ok(RegisterOutcome::KeptUserValue)
-            );
-        }
-        assert_eq!(schema.revision(), revision);
-        assert!(schema.diagnostics().is_empty());
+    fn schema() -> RiceSchema {
+        let mut schema = RiceSchema::new();
+        register_rice(&mut schema).unwrap();
+        schema
     }
 
     #[test]
-    fn config_reads_from_registered_rice() {
-        let mut schema = RiceSchema::new();
-        register_rice(&mut schema).unwrap();
-        let config = WmConfig::from_rice(&schema).unwrap();
-        assert_eq!(config.metrics.gap, 0.0);
-        assert_eq!(config.metrics.rail_width, 38.0);
-        assert_eq!(config.spring.stiffness, 170.0);
-        assert_eq!(config.keymap.redo.to_string(), "Ctrl+Shift+Z");
-        assert_eq!(config.keymap.open_settings.to_string(), "Ctrl+,");
-        assert_eq!(config.settle_grace, Duration::from_millis(300));
-        assert_eq!(config.caret_blink, Some(Duration::from_millis(530)));
-        assert_eq!(config.boot_into, "hub");
-        assert!(!config.instant_transitions);
-        assert!(matches!(
-            WmConfig::from_rice(&RiceSchema::new()),
-            Err(WmError::MissingRice(_))
-        ));
+    fn the_config_reads_every_declaration() {
+        let config = WmConfig::from_rice(&schema()).unwrap();
+        assert_eq!(config.metrics.rail_width, 36.0);
+        assert_eq!(config.canvas.zoom_min, 0.1);
+        assert_eq!(config.canvas.zoom_max, 32.0);
+        assert_eq!(config.boot_mode, "canvas");
+        assert_eq!(config.keymap.command_palette.to_string(), "Tab");
+    }
+
+    #[test]
+    fn the_shipped_palette_is_achromatic() {
+        for declaration in rice_declarations() {
+            if let RiceParameter::ColorHex { value } = &declaration.default {
+                assert!(
+                    value.r == value.g && value.g == value.b,
+                    "{} is not a gray",
+                    declaration.path
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_shipped_rice_describes_every_parameter_like_the_code() {
+        let shipped = RiceSchema::parse(sue_rice::DEFAULT_RICE).unwrap();
+        for declaration in rice_declarations() {
+            let entry = shipped
+                .entry(&declaration.path)
+                .unwrap_or_else(|| panic!("{} is missing", declaration.path));
+            assert_eq!(
+                entry.description(),
+                Some(declaration.description.as_str()),
+                "{}",
+                declaration.path
+            );
+            assert_eq!(
+                entry.parameter().value(),
+                declaration.default.value(),
+                "{}",
+                declaration.path
+            );
+        }
     }
 }

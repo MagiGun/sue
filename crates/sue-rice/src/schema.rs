@@ -697,8 +697,8 @@ accent = \"#c9a227\" # Focus ring
         );
         assert!(schema.len() >= 20);
         assert_eq!(schema.sections()[0], "general");
-        assert_eq!(schema.get_i64("layout.gap"), Some(0));
-        assert_eq!(schema.get_f64("motion.spring_stiffness"), Some(170.0));
+        assert_eq!(schema.get_i64("layout.rail_width"), Some(36));
+        assert_eq!(schema.get_f64("motion.spring_stiffness"), Some(260.0));
         assert_eq!(schema.get_str("profile.hardware"), Some("auto"));
         assert_eq!(
             schema.get_keybind("keys.redo").unwrap().to_string(),

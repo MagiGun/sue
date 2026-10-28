@@ -1,61 +1,42 @@
-//! The native desktop host: one `winit` window with a `wgpu` surface, an
-//! event-driven loop that sleeps at 0 FPS, and translation of OS input into
-//! [`InputEvent`]s.
+//! The native desktop host: one `winit` window, a `wgpu` surface, and egui
+//! (`egui-winit` for input, IME and the clipboard; [`EguiPainter`] for
+//! drawing).
 //!
-//! Pacing is decided in one place: every time the loop is about to wait it
-//! asks the application for its [`FramePacing`]. While anything animates the
-//! loop requests the next redraw itself (paced by vsync, or by a timer for a
-//! lower frame-rate cap), so animations run to the end without any input.
+//! Rendering is event-driven (LAW 4). After every frame the loop asks two
+//! questions: does the application still animate (a spring in motion, which
+//! also calls `request_repaint`), and when does egui want its next frame
+//! (a hover fade, a caret blink)? With neither, it blocks in
+//! [`ControlFlow::Wait`] and draws nothing until input arrives.
 
-use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{ElementState, MouseScrollDelta, StartCause, WindowEvent as OsWindowEvent};
+use winit::event::{StartCause, WindowEvent as OsWindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{Key as OsKey, ModifiersState, NamedKey as OsNamedKey};
-use winit::window::{CursorIcon, Window, WindowId};
+use winit::window::{Window, WindowId};
 
 use crate::gpu::{GpuContext, GpuPreference, WindowSurface};
+use crate::paint::EguiPainter;
 use crate::{
-    FileDrop, FormFactor, HardwareCapabilities, InputEvent, Key, KeyEvent, Modifiers, MouseButton,
-    MouseEvent, NamedKey, OsFamily, PlatformError, PlatformHost, PlatformPaths, Point,
-    SafeAreaInsets, SurfaceDescriptor, SurfaceId, SurfaceInfo, WindowEvent,
+    FormFactor, HardwareCapabilities, InputEvent, OsFamily, PlatformError, PlatformHost,
+    PlatformPaths, SafeAreaInsets, SurfaceDescriptor, SurfaceId, SurfaceInfo,
 };
 
-/// How the application wants its next frames scheduled.
+/// What the application wants from the loop after a frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FramePacing {
-    /// Nothing changes: block until the next input event (0 FPS).
+    /// Nothing moves: draw nothing until input arrives (0 FPS).
     Sleep,
-    /// Nothing moves, but something changes at this instant (a caret blink,
-    /// audio to feed, a message to clear): block until then, then call
-    /// [`DesktopApp::timer`].
+    /// Nothing moves, but timed work is due at this instant (an audio queue
+    /// to top up, a message to clear, an autosave).
     WakeAt(Instant),
-    /// Keep rendering, at most `target_hz` frames per second.
+    /// Something moves: keep drawing at up to `target_hz`.
     Animate {
-        /// Frame-rate cap.
+        /// Frame rate cap from the hardware profile.
         target_hz: u32,
     },
-}
-
-/// Pointer shapes the application can ask for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum CursorShape {
-    /// The arrow.
-    Default,
-    /// A hand, over clickable things.
-    Pointer,
-    /// An I-beam, over text.
-    Text,
-    /// An open hand, over draggable things.
-    Grab,
-    /// A closed hand, while dragging.
-    Grabbing,
-    /// Horizontal resize, over sliders.
-    ResizeHorizontal,
 }
 
 /// Window options.
@@ -67,37 +48,39 @@ pub struct DesktopOptions {
     pub width: f32,
     /// Initial height in logical pixels.
     pub height: f32,
-    /// Pixels scrolled per wheel notch (from rice).
-    pub wheel_line_px: f32,
     /// Which GPU draws the window (from rice).
     pub gpu: GpuPreference,
 }
 
 /// An application driven by the desktop host.
 pub trait DesktopApp {
-    /// Called once the window and GPU are ready.
+    /// Called once the window and GPU exist.
     ///
     /// # Errors
-    /// A message that aborts start-up.
+    /// A message explaining why the application cannot start.
     fn start(&mut self, host: &mut DesktopHost) -> Result<(), String>;
 
-    /// Handles one input event. Returns `true` if the scene must be redrawn.
-    fn input(&mut self, host: &mut DesktopHost, event: InputEvent) -> bool;
+    /// Builds one frame of the interface into the root `ui`, which covers
+    /// the window.
+    fn ui(&mut self, ui: &mut egui::Ui, host: &mut DesktopHost);
 
-    /// A [`FramePacing::WakeAt`] deadline passed. Returns `true` if the scene
-    /// must be redrawn.
-    fn timer(&mut self, host: &mut DesktopHost) -> bool;
+    /// Runs timed work that [`FramePacing::WakeAt`] asked for. Returns `true`
+    /// if the window must be redrawn.
+    fn timer(&mut self, host: &mut DesktopHost) -> bool {
+        let _ = host;
+        false
+    }
 
-    /// Draws one frame (see [`DesktopHost::acquire_frame`]).
-    fn frame(&mut self, host: &mut DesktopHost);
-
-    /// How to pace what comes next. Asked every time the event loop is about
-    /// to wait, so it is the single source of truth for frame scheduling.
+    /// What the loop should do next.
     fn pacing(&mut self, now: Instant) -> FramePacing;
 
-    /// The user asked to close the window. Returns `true` to close now, or
-    /// `false` to keep the window open (for example to ask first).
-    fn close_requested(&mut self, host: &mut DesktopHost) -> bool;
+    /// The user asked to close the window. Return `true` to close now, or
+    /// `false` to keep running (for example to ask first, then call
+    /// [`DesktopHost::request_exit`]).
+    fn close_requested(&mut self, host: &mut DesktopHost) -> bool {
+        let _ = host;
+        true
+    }
 
     /// The loop is about to end: save what must survive.
     fn exit(&mut self, host: &mut DesktopHost) {
@@ -105,25 +88,35 @@ pub trait DesktopApp {
     }
 }
 
-/// The native desktop [`PlatformHost`]: a single main window with a GPU surface.
+/// The id of the main window surface.
+pub const MAIN_SURFACE: SurfaceId = SurfaceId(0);
+
+/// The live window with its GPU surface and egui state.
 pub struct DesktopHost {
     window: Arc<Window>,
     gpu: GpuContext,
     surface: WindowSurface,
+    painter: EguiPainter,
+    egui: egui_winit::State,
+    ctx: egui::Context,
     os: OsFamily,
     form_factor: FormFactor,
     capabilities: HardwareCapabilities,
     paths: PlatformPaths,
     info: SurfaceInfo,
-    events: VecDeque<InputEvent>,
-    modifiers: Modifiers,
-    cursor: Point,
-    wheel_line_px: f32,
+    clear: egui::Color32,
+    repaint_at: Option<Instant>,
     exit_requested: bool,
 }
 
-/// The id of the main window surface.
-pub const MAIN_SURFACE: SurfaceId = SurfaceId(1);
+impl std::fmt::Debug for DesktopHost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DesktopHost")
+            .field("gpu", &self.gpu)
+            .field("info", &self.info)
+            .finish_non_exhaustive()
+    }
+}
 
 impl DesktopHost {
     fn create(
@@ -153,6 +146,17 @@ impl DesktopHost {
         ))?;
         let size = window.inner_size();
         let surface = WindowSurface::new(surface, &gpu, size.width, size.height)?;
+        let painter = EguiPainter::new(&gpu, surface.format());
+
+        let ctx = egui::Context::default();
+        let egui = egui_winit::State::new(
+            ctx.clone(),
+            egui::ViewportId::ROOT,
+            event_loop,
+            Some(window.scale_factor() as f32),
+            window.theme(),
+            Some(painter.max_texture_side()),
+        );
 
         let os = OsFamily::current();
         let paths = PlatformPaths::detect()?;
@@ -167,178 +171,102 @@ impl DesktopHost {
             ..HardwareCapabilities::probe_portable()
         });
         let scale = window.scale_factor() as f32;
-        let (width, height) = (size.width as f32 / scale, size.height as f32 / scale);
-        let form_factor = FormFactor::classify(os, width.min(height));
+        let info = SurfaceInfo {
+            id: MAIN_SURFACE,
+            title: options.title.clone(),
+            width: size.width as f32 / scale,
+            height: size.height as f32 / scale,
+            scale_factor: scale,
+            safe_area: SafeAreaInsets::default(),
+        };
         Ok(Self {
-            info: SurfaceInfo {
-                id: MAIN_SURFACE,
-                title: options.title.clone(),
-                width,
-                height,
-                scale_factor: scale,
-                safe_area: SafeAreaInsets::ZERO,
-            },
             window,
             gpu,
             surface,
+            painter,
+            egui,
+            ctx,
             os,
-            form_factor,
+            form_factor: FormFactor::Desktop,
             capabilities,
             paths,
-            events: VecDeque::new(),
-            modifiers: Modifiers::NONE,
-            cursor: Point::default(),
-            wheel_line_px: options.wheel_line_px,
+            info,
+            clear: egui::Color32::BLACK,
+            repaint_at: None,
             exit_requested: false,
         })
     }
 
-    /// The GPU device and queue.
+    /// The GPU objects.
     #[must_use]
     pub fn gpu(&self) -> &GpuContext {
         &self.gpu
     }
 
-    /// The swap-chain texture format.
+    /// The egui context of the window.
     #[must_use]
-    pub fn surface_format(&self) -> wgpu::TextureFormat {
-        self.surface.format()
+    pub fn egui(&self) -> &egui::Context {
+        &self.ctx
     }
 
-    /// Size of the swap chain in physical pixels.
-    #[must_use]
-    pub fn physical_size(&self) -> (u32, u32) {
-        self.surface.size()
+    /// Uploads images for the interface (see [`crate::TextureUpload`]).
+    pub fn textures(&mut self) -> &mut EguiPainter {
+        &mut self.painter
     }
 
-    /// The main window: logical size, scale factor and safe area.
+    /// The window's logical size and scale.
     #[must_use]
     pub fn window_info(&self) -> &SurfaceInfo {
         &self.info
     }
 
-    /// The next swap-chain texture, or `None` to skip this frame.
-    pub fn acquire_frame(&mut self) -> Option<wgpu::SurfaceTexture> {
-        self.surface.acquire(&self.gpu)
+    /// The color behind everything egui draws.
+    pub fn set_clear_color(&mut self, color: egui::Color32) {
+        self.clear = color;
     }
 
-    /// Presents a finished frame.
-    pub fn present(&self, frame: wgpu::SurfaceTexture) {
-        self.window.pre_present_notify();
-        self.gpu.queue.present(frame);
-    }
-
-    /// Asks the OS for a pointer shape.
-    pub fn set_cursor(&self, shape: CursorShape) {
-        let icon = match shape {
-            CursorShape::Default => CursorIcon::Default,
-            CursorShape::Pointer => CursorIcon::Pointer,
-            CursorShape::Text => CursorIcon::Text,
-            CursorShape::Grab => CursorIcon::Grab,
-            CursorShape::Grabbing => CursorIcon::Grabbing,
-            CursorShape::ResizeHorizontal => CursorIcon::EwResize,
-        };
-        self.window.set_cursor(icon);
-    }
-
-    /// Asks the event loop to quit after this callback.
+    /// Asks the loop to end after this event.
     pub fn request_exit(&mut self) {
         self.exit_requested = true;
     }
 
-    /// Updates the pixels scrolled per wheel notch.
-    pub fn set_wheel_line_px(&mut self, pixels: f32) {
-        self.wheel_line_px = pixels;
-    }
-
-    fn resized(&mut self, width: u32, height: u32) -> InputEvent {
-        self.surface.resize(&self.gpu, width, height);
-        let scale = self.window.scale_factor() as f32;
-        self.info.scale_factor = scale;
-        self.info.width = width as f32 / scale;
-        self.info.height = height as f32 / scale;
-        InputEvent::Window(WindowEvent::Resized {
-            width: self.info.width,
-            height: self.info.height,
-            scale_factor: scale,
-        })
-    }
-
-    /// Translates one OS window event; `None` for events Sue does not use.
-    fn translate(&mut self, event: &OsWindowEvent) -> Option<InputEvent> {
-        let scale = self.info.scale_factor.max(f32::EPSILON);
-        Some(match event {
-            OsWindowEvent::KeyboardInput {
-                event,
-                is_synthetic,
-                ..
-            } => {
-                if *is_synthetic {
-                    return None;
-                }
-                let pressed = event.state == ElementState::Pressed;
-                let text = event
-                    .text
-                    .as_ref()
-                    .filter(|_| pressed)
-                    .map(|text| text.to_string())
-                    .filter(|text| !text.chars().any(char::is_control));
-                let key = map_key(&event.logical_key)
-                    .or_else(|| text.as_ref()?.chars().next().map(Key::Character))?;
-                InputEvent::Keyboard(KeyEvent {
-                    key,
-                    pressed,
-                    modifiers: self.modifiers,
-                    text,
-                })
+    /// Builds, paints and presents one frame.
+    fn frame<A: DesktopApp>(&mut self, app: &mut A) {
+        let raw = self.egui.take_egui_input(&self.window);
+        let ctx = self.ctx.clone();
+        let output = ctx.run_ui(raw, |ui| app.ui(ui, self));
+        self.egui
+            .handle_platform_output(&self.window, output.platform_output);
+        let delay = output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map_or(Duration::MAX, |viewport| viewport.repaint_delay);
+        // Anything past a day is egui's "never".
+        self.repaint_at = (delay < Duration::from_secs(86_400)).then(|| Instant::now() + delay);
+        let (width, height) = self.surface.size();
+        match self.surface.acquire(&self.gpu) {
+            Some(frame) => {
+                let view = frame
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+                self.painter.paint(
+                    &ctx,
+                    &view,
+                    [width, height],
+                    self.clear,
+                    output.shapes,
+                    output.textures_delta,
+                    output.pixels_per_point,
+                );
+                self.window.pre_present_notify();
+                self.gpu.queue.present(frame);
             }
-            OsWindowEvent::ModifiersChanged(modifiers) => {
-                self.modifiers = map_modifiers(modifiers.state());
-                return None;
+            None => {
+                // Keep egui's textures in step and try again next frame.
+                self.painter.apply_textures(output.textures_delta);
+                self.repaint_at = Some(Instant::now() + Duration::from_millis(16));
             }
-            OsWindowEvent::CursorMoved { position, .. } => {
-                self.cursor = Point::new(position.x as f32 / scale, position.y as f32 / scale);
-                InputEvent::Mouse(MouseEvent::Moved {
-                    position: self.cursor,
-                })
-            }
-            OsWindowEvent::CursorLeft { .. } => InputEvent::Mouse(MouseEvent::Left),
-            OsWindowEvent::MouseInput { state, button, .. } => {
-                let button = match button {
-                    winit::event::MouseButton::Left => MouseButton::Left,
-                    winit::event::MouseButton::Right => MouseButton::Right,
-                    winit::event::MouseButton::Middle => MouseButton::Middle,
-                    winit::event::MouseButton::Back => MouseButton::Back,
-                    winit::event::MouseButton::Forward => MouseButton::Forward,
-                    winit::event::MouseButton::Other(_) => return None,
-                };
-                InputEvent::Mouse(MouseEvent::Button {
-                    button,
-                    pressed: *state == ElementState::Pressed,
-                    position: self.cursor,
-                })
-            }
-            OsWindowEvent::MouseWheel { delta, .. } => {
-                let (delta_x, delta_y) = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => {
-                        (x * self.wheel_line_px, y * self.wheel_line_px)
-                    }
-                    MouseScrollDelta::PixelDelta(position) => {
-                        (position.x as f32 / scale, position.y as f32 / scale)
-                    }
-                };
-                InputEvent::Mouse(MouseEvent::Wheel { delta_x, delta_y })
-            }
-            OsWindowEvent::HoveredFile(path) => {
-                InputEvent::FileDrop(FileDrop::Hovered(path.clone()))
-            }
-            OsWindowEvent::HoveredFileCancelled => InputEvent::FileDrop(FileDrop::Cancelled),
-            OsWindowEvent::DroppedFile(path) => {
-                InputEvent::FileDrop(FileDrop::Dropped(path.clone()))
-            }
-            OsWindowEvent::Focused(focused) => InputEvent::Window(WindowEvent::Focused(*focused)),
-            _ => return None,
-        })
+        }
     }
 }
 
@@ -402,13 +330,12 @@ impl PlatformHost for DesktopHost {
     }
 
     fn poll_events(&mut self) -> Vec<InputEvent> {
-        self.events.drain(..).collect()
+        // egui receives the window's input directly.
+        Vec::new()
     }
 }
 
-/// Opens the main window and runs `app` until the window closes. Rendering is
-/// event-driven: with [`FramePacing::Sleep`] the loop blocks in
-/// [`ControlFlow::Wait`] and draws nothing until input arrives (LAW 4).
+/// Opens the main window and runs `app` until the window closes.
 ///
 /// # Errors
 /// Window, GPU or application start-up failures.
@@ -438,7 +365,7 @@ struct Runner<A> {
     exiting: bool,
 }
 
-/// What the loop does next for one pacing decision.
+/// What the loop does next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Step {
     /// Block until input.
@@ -447,31 +374,39 @@ enum Step {
     WaitUntil(Instant),
     /// Request a redraw now, then block until it arrives.
     Redraw,
-    /// Run the application's timer now.
-    Timer,
 }
 
-/// Turns a pacing decision into a loop step. Uncapped animation is paced by
-/// vsync (presenting blocks), so it redraws at once; a lower cap waits for
-/// the next frame slot after `last_frame`.
+/// Combines the application's pacing with egui's next repaint. Uncapped
+/// animation is paced by vsync (presenting blocks), so it redraws at once; a
+/// lower cap waits for the next frame slot after `last_frame`.
 fn plan_step(
     pacing: FramePacing,
+    repaint_at: Option<Instant>,
     now: Instant,
     last_frame: Option<Instant>,
     display_hz: u32,
 ) -> Step {
-    match pacing {
-        FramePacing::Sleep => Step::Wait,
-        FramePacing::WakeAt(at) if at <= now => Step::Timer,
-        FramePacing::WakeAt(at) => Step::WaitUntil(at),
-        FramePacing::Animate { target_hz } => {
-            let interval = Duration::from_secs_f64(1.0 / f64::from(target_hz.max(1)));
-            match last_frame.map(|last| last + interval) {
-                Some(next) if target_hz < display_hz && next > now => Step::WaitUntil(next),
-                _ => Step::Redraw,
-            }
-        }
+    let animate = match pacing {
+        FramePacing::Animate { target_hz } => Some(target_hz),
+        _ => None,
+    };
+    if animate.is_some() || repaint_at.is_some_and(|at| at <= now) {
+        let target_hz = animate.unwrap_or(display_hz).max(1);
+        let interval = Duration::from_secs_f64(1.0 / f64::from(target_hz));
+        return match last_frame.map(|last| last + interval) {
+            Some(next) if target_hz < display_hz && next > now => Step::WaitUntil(next),
+            _ => Step::Redraw,
+        };
     }
+    let timer = match pacing {
+        FramePacing::WakeAt(at) => Some(at),
+        _ => None,
+    };
+    [timer, repaint_at]
+        .into_iter()
+        .flatten()
+        .min()
+        .map_or(Step::Wait, Step::WaitUntil)
 }
 
 impl<A: DesktopApp> Runner<A> {
@@ -496,30 +431,31 @@ impl<A: DesktopApp> ApplicationHandler for Runner<A> {
         let Some(host) = self.host.as_mut() else {
             return;
         };
-        let display_hz = host.capabilities.display_refresh_hz;
-        let mut step = plan_step(
-            self.app.pacing(Instant::now()),
-            Instant::now(),
-            self.last_frame,
-            display_hz,
-        );
-        if step == Step::Timer {
+        let now = Instant::now();
+        let mut pacing = self.app.pacing(now);
+        if let FramePacing::WakeAt(at) = pacing
+            && at <= now
+        {
             if self.app.timer(host) {
                 host.window.request_redraw();
             }
-            step = match plan_step(
-                self.app.pacing(Instant::now()),
-                Instant::now(),
-                self.last_frame,
-                display_hz,
-            ) {
+            pacing = match self.app.pacing(Instant::now()) {
                 // A deadline that is still due would spin the loop: retry soon.
-                Step::Timer => Step::WaitUntil(Instant::now() + Duration::from_millis(1)),
+                FramePacing::WakeAt(at) if at <= Instant::now() => {
+                    FramePacing::WakeAt(Instant::now() + Duration::from_millis(1))
+                }
                 other => other,
             };
         }
-        match step {
-            Step::Wait | Step::Timer => event_loop.set_control_flow(ControlFlow::Wait),
+        let display_hz = host.capabilities.display_refresh_hz;
+        match plan_step(
+            pacing,
+            host.repaint_at,
+            Instant::now(),
+            self.last_frame,
+            display_hz,
+        ) {
+            Step::Wait => event_loop.set_control_flow(ControlFlow::Wait),
             Step::WaitUntil(at) => event_loop.set_control_flow(ControlFlow::WaitUntil(at)),
             Step::Redraw => {
                 host.window.request_redraw();
@@ -565,31 +501,33 @@ impl<A: DesktopApp> ApplicationHandler for Runner<A> {
         let Some(host) = self.host.as_mut() else {
             return;
         };
-        let translated = match &event {
+        let response = host.egui.on_window_event(&host.window, &event);
+        // egui asks to repaint after any event, the redraw itself included;
+        // answering that one would draw forever.
+        if response.repaint && !matches!(event, OsWindowEvent::RedrawRequested) {
+            host.window.request_redraw();
+        }
+        match event {
             OsWindowEvent::CloseRequested => {
                 if self.app.close_requested(host) {
                     self.finish(event_loop);
-                } else {
-                    host.window.request_redraw();
+                    return;
                 }
-                return;
-            }
-            OsWindowEvent::RedrawRequested => {
-                self.last_frame = Some(Instant::now());
-                self.app.frame(host);
-                if host.exit_requested {
-                    self.finish(event_loop);
-                }
-                return;
-            }
-            OsWindowEvent::Resized(size) => Some(host.resized(size.width, size.height)),
-            other => host.translate(other),
-        };
-        if let Some(input) = translated {
-            host.events.push_back(input.clone());
-            if self.app.input(host, input) {
                 host.window.request_redraw();
             }
+            OsWindowEvent::Resized(size) => {
+                host.surface.resize(&host.gpu, size.width, size.height);
+                let scale = host.window.scale_factor() as f32;
+                host.info.width = size.width as f32 / scale;
+                host.info.height = size.height as f32 / scale;
+                host.info.scale_factor = scale;
+                host.window.request_redraw();
+            }
+            OsWindowEvent::RedrawRequested => {
+                host.frame(&mut self.app);
+                self.last_frame = Some(Instant::now());
+            }
+            _ => {}
         }
         if host.exit_requested {
             self.finish(event_loop);
@@ -597,114 +535,53 @@ impl<A: DesktopApp> ApplicationHandler for Runner<A> {
     }
 }
 
-fn map_modifiers(state: ModifiersState) -> Modifiers {
-    Modifiers {
-        ctrl: state.control_key(),
-        alt: state.alt_key(),
-        shift: state.shift_key(),
-        super_key: state.super_key(),
-    }
-}
-
-/// Maps an OS key to a Sue key; `None` for keys Sue does not name.
-fn map_key(key: &OsKey) -> Option<Key> {
-    match key {
-        OsKey::Character(text) => {
-            let mut chars = text.chars();
-            match (chars.next(), chars.next()) {
-                (Some(ch), None) => Some(Key::Character(ch)),
-                _ => None,
-            }
-        }
-        OsKey::Named(named) => map_named(*named).map(Key::Named),
-        _ => None,
-    }
-}
-
-fn map_named(named: OsNamedKey) -> Option<NamedKey> {
-    Some(match named {
-        OsNamedKey::Space => NamedKey::Space,
-        OsNamedKey::Enter => NamedKey::Enter,
-        OsNamedKey::Escape => NamedKey::Escape,
-        OsNamedKey::Tab => NamedKey::Tab,
-        OsNamedKey::Backspace => NamedKey::Backspace,
-        OsNamedKey::Delete => NamedKey::Delete,
-        OsNamedKey::ArrowUp => NamedKey::ArrowUp,
-        OsNamedKey::ArrowDown => NamedKey::ArrowDown,
-        OsNamedKey::ArrowLeft => NamedKey::ArrowLeft,
-        OsNamedKey::ArrowRight => NamedKey::ArrowRight,
-        OsNamedKey::Home => NamedKey::Home,
-        OsNamedKey::End => NamedKey::End,
-        OsNamedKey::PageUp => NamedKey::PageUp,
-        OsNamedKey::PageDown => NamedKey::PageDown,
-        OsNamedKey::F1 => NamedKey::F(1),
-        OsNamedKey::F2 => NamedKey::F(2),
-        OsNamedKey::F3 => NamedKey::F(3),
-        OsNamedKey::F4 => NamedKey::F(4),
-        OsNamedKey::F5 => NamedKey::F(5),
-        OsNamedKey::F6 => NamedKey::F(6),
-        OsNamedKey::F7 => NamedKey::F(7),
-        OsNamedKey::F8 => NamedKey::F(8),
-        OsNamedKey::F9 => NamedKey::F(9),
-        OsNamedKey::F10 => NamedKey::F(10),
-        OsNamedKey::F11 => NamedKey::F(11),
-        OsNamedKey::F12 => NamedKey::F(12),
-        _ => return None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn keys_map_to_sue_keys() {
-        assert_eq!(
-            map_key(&OsKey::Character("a".into())),
-            Some(Key::Character('a'))
-        );
-        assert_eq!(map_key(&OsKey::Character("ab".into())), None);
-        assert_eq!(
-            map_key(&OsKey::Named(OsNamedKey::Enter)),
-            Some(Key::Named(NamedKey::Enter))
-        );
-        assert_eq!(
-            map_key(&OsKey::Named(OsNamedKey::F11)),
-            Some(Key::Named(NamedKey::F(11)))
-        );
-        assert_eq!(map_key(&OsKey::Named(OsNamedKey::CapsLock)), None);
-    }
-
-    #[test]
     fn pacing_turns_into_loop_steps() {
         let now = Instant::now();
-        assert_eq!(plan_step(FramePacing::Sleep, now, None, 60), Step::Wait);
-        let later = now + Duration::from_millis(500);
+        let soon = now + Duration::from_millis(40);
         assert_eq!(
-            plan_step(FramePacing::WakeAt(later), now, None, 60),
-            Step::WaitUntil(later)
+            plan_step(FramePacing::Sleep, None, now, None, 60),
+            Step::Wait
         );
         assert_eq!(
-            plan_step(FramePacing::WakeAt(now), now, None, 60),
-            Step::Timer
+            plan_step(FramePacing::WakeAt(soon), None, now, None, 60),
+            Step::WaitUntil(soon)
         );
-        // Uncapped animation asks for the next frame at once: vsync paces it.
-        let uncapped = FramePacing::Animate { target_hz: 144 };
-        assert_eq!(plan_step(uncapped, now, Some(now), 144), Step::Redraw);
-        // A 30 Hz cap on a 144 Hz display waits for the next frame slot.
-        let capped = FramePacing::Animate { target_hz: 30 };
+        // egui asks for a frame later (a caret blink): wait for it.
+        assert_eq!(
+            plan_step(FramePacing::Sleep, Some(soon), now, None, 60),
+            Step::WaitUntil(soon)
+        );
+        // egui asks for a frame now (a spring called request_repaint).
+        assert_eq!(
+            plan_step(FramePacing::Sleep, Some(now), now, Some(now), 60),
+            Step::Redraw
+        );
+        // Animating at the display rate redraws at once; vsync paces it.
+        assert_eq!(
+            plan_step(
+                FramePacing::Animate { target_hz: 120 },
+                None,
+                now,
+                Some(now),
+                120
+            ),
+            Step::Redraw
+        );
+        // A 30 FPS cap on a 60 Hz display waits for the next slot.
         assert!(matches!(
-            plan_step(capped, now, Some(now), 144),
-            Step::WaitUntil(at) if at > now
+            plan_step(
+                FramePacing::Animate { target_hz: 30 },
+                None,
+                now,
+                Some(now),
+                60
+            ),
+            Step::WaitUntil(_)
         ));
-        let slot = now + Duration::from_millis(40);
-        assert_eq!(plan_step(capped, slot, Some(now), 144), Step::Redraw);
-    }
-
-    #[test]
-    fn modifiers_map_one_to_one() {
-        let state = ModifiersState::CONTROL | ModifiersState::SHIFT;
-        let mapped = map_modifiers(state);
-        assert!(mapped.ctrl && mapped.shift && !mapped.alt && !mapped.super_key);
     }
 }

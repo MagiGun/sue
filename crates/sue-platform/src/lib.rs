@@ -7,10 +7,11 @@
 //!
 //! Two hosts implement the trait. [`HeadlessHost`] has virtual surfaces and an
 //! injectable input queue, for CI, the self-check and remote scripting.
-//! [`DesktopHost`] opens a native `winit` window with a `wgpu` surface and is
-//! driven by [`run_desktop`], which sleeps at 0 FPS whenever the application
-//! asks for [`FramePacing::Sleep`]. The `wgpu` surface is created through its
-//! safe API, so this crate keeps `unsafe` forbidden like every other one.
+//! [`DesktopHost`] opens a native `winit` window with a `wgpu` surface and
+//! egui on top (`egui-winit` input and clipboard, [`EguiPainter`] drawing),
+//! driven by [`run_desktop`], which sleeps at 0 FPS whenever neither the
+//! application nor egui wants a frame. The `wgpu` surface is created through
+//! its safe API, so this crate keeps `unsafe` forbidden like every other one.
 //!
 //! The rest of the OS surface lives here too: [`AudioOutput`] (a `cpal`
 //! stream fed by a lock-free ring), [`list_dir`] and [`write_atomic`], and
@@ -26,6 +27,7 @@ mod gpu;
 mod host;
 mod input;
 mod os;
+mod paint;
 mod paths;
 
 pub use audio::{
@@ -33,12 +35,12 @@ pub use audio::{
     audio_output_devices,
 };
 pub use desktop::{
-    CursorShape, DesktopApp, DesktopHost, DesktopOptions, FramePacing, MAIN_SURFACE, run_desktop,
+    DesktopApp, DesktopHost, DesktopOptions, FramePacing, MAIN_SURFACE, run_desktop,
 };
 pub use device::{
     FormFactor, GpuTier, GpuVendor, GraphicsApi, HardwareCapabilities, OsFamily, PowerSource,
 };
-pub use fs::{DirEntryInfo, list_dir, write_atomic};
+pub use fs::{DirEntryInfo, hidden_by_os, list_dir, write_atomic};
 pub use gpu::{GpuContext, GpuPreference, WindowSurface, describe_adapter};
 pub use host::{
     HeadlessHost, PlatformError, PlatformHost, SafeAreaInsets, SurfaceDescriptor, SurfaceId,
@@ -48,7 +50,10 @@ pub use input::{
     FileDrop, InputEvent, Key, KeyEvent, Modifiers, MouseButton, MouseEvent, NamedKey, Point,
     ScreenEdge, StylusSample, SwipeDirection, TouchGesture, WindowEvent,
 };
-pub use os::{FileFilter, open_url, pick_open_file, pick_save_file, reveal_folder, web_url};
+pub use os::{
+    FileFilter, copy_text, open_url, pick_open_file, pick_save_file, reveal_folder, web_url,
+};
+pub use paint::{EguiPainter, NoTextures, TextureUpload};
 pub use paths::PlatformPaths;
 /// The `wgpu` version Sue renders with, re-exported so renderers match it.
 pub use wgpu;

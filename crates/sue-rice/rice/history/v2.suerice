@@ -1,0 +1,126 @@
+# Sue v1.0 "Faustian Enigma": default rice
+# "A jack of all trades is a master of none,
+#  but oftentimes better than a master of one."
+#
+# sue-rice format 2
+#
+# Every key below is a live control in Settings. Metadata lives in the
+# trailing comment:   [min..max]  slider       {a|b|c}  choice
+#                     @color @keybind @shader @text   force a widget
+# Text after the metadata becomes the description shown in Settings.
+
+[general]
+workspace_dir = ""             # @text Folder the Files panel opens in (empty for your home folder)
+autosave_seconds = 30          # [0..600] Save Quick Notes this often, in seconds (0 turns autosave off)
+confirm_on_exit = true         # Ask before closing the window
+
+[launchpad]
+boot_into = "hub"              # @text What Sue opens at launch: "hub" for Home, or an applet id
+card_width = 300               # [280..560] Narrowest a Home card may get (px)
+
+[profile]
+hardware = "auto"              # {auto|high-refresh|balanced|legacy-low-spec|mobile-battery-saver} Frame pacing and effect budget
+
+[display]
+frame_rate_cap = 0             # [0..360] Highest frame rate while animating (0 follows the hardware profile)
+ui_scale = 1.0                 # [0.75..2.0] Interface scale on top of the system scale
+gpu_preference = "auto"        # {auto|integrated|discrete} GPU that draws the window; auto uses the display's GPU (applies after a restart)
+
+[motion]
+instant_transitions = false    # Snap panels in 0 ms instead of animating them
+animation_speed = 1.0          # [0.25..4.0] Speed of panel animations
+spring_stiffness = 170.0       # [10.0..1000.0] Spring constant k
+spring_damping = 26.0          # [0.0..120.0] Damping coefficient c
+settle_grace_ms = 300          # [0..2000] Keep drawing this long after the last change (ms)
+caret_blink_ms = 530           # [0..2000] Caret blink interval (0 keeps the caret solid)
+message_seconds = 4            # [1..30] How long messages stay in the status bar (s)
+
+[layout]
+gap = 0                        # [0..32] Space between panels (px)
+padding = 8                    # [2..24] Space inside panels and controls (px)
+border_width = 1               # [0..4] Hairline divider thickness (px)
+panel_radius = 0.0             # [0.0..16.0] Corner rounding of structural panels (px)
+control_radius = 3.0           # [0.0..12.0] Corner rounding of buttons, fields and cards (px)
+header_height = 30             # [24..64] Height of the header bar (px)
+status_bar_height = 22         # [16..48] Height of the status bar (px)
+rail_width = 38                # [28..72] Width of the activity rails (px)
+left_dock_width = 260          # [160..640] Left dock width (px)
+right_dock_width = 280         # [160..720] Right dock width (px)
+timeline_height = 220          # [96..600] Bottom timeline height (px)
+min_center_width = 480         # [240..1600] Narrowest Center Stage before docks float (px)
+drawer_max_fraction = 0.85     # [0.5..1.0] Widest a phone drawer may be, as a share of the screen
+sheet_max_fraction = 0.4       # [0.2..0.9] Tallest the phone timeline sheet may peek, as a share of the screen
+tab_accent = 2                 # [0..6] Accent line above the active tab (px)
+slider_track = 4               # [2..12] Slider track thickness (px)
+settings_sidebar_width = 190   # [140..360] Width of the category list in Settings (px)
+
+[colors]
+base = "#121212"               # Window and canvas base
+panel = "#181818"              # Dock and panel background
+chrome = "#141414"             # Activity rails, header and status bar
+surface = "#222222"            # Cards, controls and inputs
+hover = "#2a2a2a"              # Hovered controls
+border = "#2b2b2b"             # Hairline borders and dividers
+text = "#e4e4e4"               # Primary text
+muted = "#888888"              # Secondary text
+accent = "#3b82f6"             # Focus, selection and the active tab
+on_accent = "#ffffff"          # Text on accent surfaces
+alert = "#e5484d"              # Errors and destructive actions
+success = "#3fb950"            # Healthy and finished states
+
+[typography]
+ui_font = "Ubuntu Light"       # {Ubuntu Light|Hack} Interface font (bundled)
+ui_size = 13                   # [8..32] Interface text size (px)
+small_size = 11                # [8..24] Caption and status bar text size (px)
+heading_size = 20              # [12..48] Page title size (px)
+mono_size = 12                 # [8..32] Code and hex text size (px)
+
+[input]
+wheel_line_px = 48             # [8..200] Pixels scrolled per mouse-wheel notch
+
+[files]
+show_hidden = false            # List files and folders whose names start with a dot
+
+[io]
+jxl_effort = 7                 # [1..9] JPEG XL effort for conversions (higher is smaller and slower)
+jpeg_lossless_transcode = true # Recompress JPEG to JPEG XL bit for bit when a recompression codec is installed
+byte_map_width = 64            # [16..1024] Columns in the byte map of unknown files
+max_ingest_mib = 512           # [1..4096] Largest file Sue opens (MiB)
+convert_dir = ""               # @text Folder for converted files (empty saves next to the source)
+
+[audio]
+output_device = ""             # @text Output device (empty for the system default)
+sample_rate = "48000"          # {44100|48000|96000} Sample rate (Hz)
+buffer_frames = "512"          # {128|256|512|1024|2048} Buffer size (frames per callback)
+realtime_priority = true       # Ask the OS to schedule the audio thread in real time
+volume = 0.8                   # [0.0..1.0] Player volume
+
+[ai]
+backend = "auto"               # {auto|cpu-simd|vulkan|cuda|metal} Where AI kernels run
+model_dir = ""                 # @text Folder with offline models (empty for Sue's data folder)
+vram_budget_mib = 2048         # [256..65536] Most GPU memory AI models may use (MiB)
+
+[packages]
+require_signatures = true      # Only accept packages with a valid Ed25519 signature
+
+[browser]
+bookmarks = "https://www.rust-lang.org, https://docs.rs, https://jpeg.org/jpegxl" # @text Bookmarks, separated by commas
+
+[quick_notes]
+font_size = 14                 # [8..48] Note text size (px)
+
+[keys]
+toggle_left_dock = "Ctrl+B"        # Show or hide the left dock
+toggle_right_dock = "Ctrl+Alt+B"   # Show or hide the right dock
+new_tab = "Ctrl+T"                 # Open a new tab
+close_tab = "Ctrl+W"               # Close the active tab
+next_tab = "Ctrl+Tab"              # Switch to the next tab
+previous_tab = "Ctrl+Shift+Tab"    # Switch to the previous tab
+home = "Ctrl+Shift+H"              # Go to the Home tab
+open_settings = "Ctrl+,"           # Open Settings
+open_file = "Ctrl+O"               # Open a file
+save = "Ctrl+S"                    # Save the active document
+quit = "Ctrl+Q"                    # Quit Sue
+undo = "Ctrl+Z"                    # Undo the last change
+redo = "Ctrl+Shift+Z"              # Redo
+redo_alt = "Ctrl+Y"                # Redo (alternative)

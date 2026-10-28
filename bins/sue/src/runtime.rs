@@ -1,12 +1,11 @@
-//! The shell runtime shared by the live window and offscreen snapshots:
-//! input folding, frame building and pacing, timers, engine commands, file
-//! opening and persistence.
+//! The runtime shared by the live window and offscreen snapshots: one egui
+//! frame of the shell, timers, engine commands, file opening and saving.
 //!
-//! Pacing (LAW 4): frames keep coming while a spring moves, while damage is
-//! waiting, and for a short riced grace period after any change, so an
-//! animation started by a click runs to the end with no further input. Then
-//! the scene sleeps at 0 FPS, waking only for timed work: a caret blink, the
-//! player's audio queue, a status message to clear, a pending autosave.
+//! Pacing (LAW 4): frames keep coming while a spring moves (the shell asks
+//! egui for them with `request_repaint`) and for a short riced grace period
+//! after any change. Then the window sleeps at 0 FPS, waking only for timed
+//! work: the audio queue while something plays, a status message to clear,
+//! a typing burst to close into one undo step, a pending autosave.
 
 use std::collections::VecDeque;
 use std::collections::hash_map::DefaultHasher;
@@ -14,20 +13,26 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use sue_core::StringBuffer;
-use sue_io::{IngestOptions, NativeJxlPipeline, ingest_bytes, meta};
+use egui::{Align2, Id, Order, RichText, Sense};
+use sue_io::{IngestOptions, IngestView, NativeJxlPipeline, ingest_bytes, meta};
 use sue_platform::{
-    AudioOutput, AudioSink, CursorShape, FileDrop, FileFilter, FramePacing, InputEvent, KeyEvent,
-    MouseEvent, NamedKey, SafeAreaInsets, write_atomic,
+    AudioConfig, AudioOutput, AudioSink, FileFilter, FramePacing, TextureUpload, write_atomic,
 };
 use sue_rice::{RiceSchema, SetRiceValues};
-use sue_wm::{
-    Canvas, Dialog, Fonts, InputResponse, Rect, RiceEdit, ShellFrame, ShellRequest, Theme, Ui,
-    UiInput, UiState, apply_actions, draw_shell,
-};
+use sue_wm::{Applets, RiceEdit, Shell, ShellIo, ShellRequest, Theme, Transport, Typing, widgets};
 
+use crate::document::{KIND, KIND_CODE};
 use crate::engine::{Engine, NOTE_NAME};
-use crate::util::{file_name, human_bytes, media_class};
+use crate::util::{file_name, human_bytes};
+
+/// How often the audio queue is topped up while something plays.
+const FEED_INTERVAL: Duration = Duration::from_millis(40);
+
+/// Extensions opened as code in Code / Hex rather than as documents.
+const CODE_EXTENSIONS: [&str; 16] = [
+    "rs", "py", "js", "ts", "c", "h", "cpp", "hpp", "java", "go", "toml", "json", "wgsl", "sh",
+    "lua", "cs",
+];
 
 /// Frame-rate telemetry for the status bar.
 #[derive(Debug, Default)]
@@ -67,50 +72,6 @@ impl Telemetry {
     }
 }
 
-/// One built frame.
-#[derive(Debug)]
-pub struct FrameOutput {
-    /// What to draw.
-    pub canvas: Canvas,
-    /// Pointer shape requested by the widgets under the pointer.
-    pub cursor: Option<CursorShape>,
-}
-
-/// What an open dialog decides.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Question {
-    Quit,
-}
-
-/// The engine plus everything the shell needs between frames.
-pub struct Runtime {
-    /// Every subsystem.
-    pub engine: Engine,
-    /// The bundled fonts.
-    pub fonts: Fonts,
-    theme: Theme,
-    input: UiInput,
-    state: UiState,
-    telemetry: Telemetry,
-    applied_revision: u64,
-    saved_revision: u64,
-    catalog_fingerprint: String,
-    audio_config: Option<sue_platform::AudioConfig>,
-    last_frame: Option<Instant>,
-    animating: bool,
-    last_change: Option<Instant>,
-    caret_epoch: Instant,
-    caret_drawn: bool,
-    caret_shown: bool,
-    next_tick: Option<Instant>,
-    message: Option<(String, bool, Instant)>,
-    dialog: Option<(Dialog, Question)>,
-    quit: bool,
-    interactive: bool,
-    note_saved: Option<u64>,
-    next_autosave: Option<Instant>,
-}
-
 fn text_hash(text: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     text.hash(&mut hasher);
@@ -136,15 +97,67 @@ fn catalog_fingerprint(rice: &RiceSchema) -> String {
     .join("\u{1F}")
 }
 
+/// Borrows everything a shell frame touches, field by field.
+macro_rules! shell_io {
+    ($runtime:expr, $textures:expr) => {
+        ShellIo {
+            world: &mut $runtime.engine.world,
+            history: &mut $runtime.engine.history,
+            typing: &mut $runtime.typing,
+            applets: &mut $runtime.applets,
+            catalog: &$runtime.engine.catalog,
+            textures: &mut *$textures,
+            audio: $runtime.engine.audio.as_deref_mut(),
+            transport: &mut $runtime.transport,
+            requests: &mut $runtime.engine.requests,
+            fps: ($runtime.telemetry.fps() > 0).then(|| $runtime.telemetry.fps()),
+        }
+    };
+}
+
+/// The engine plus everything the shell needs between frames.
+pub struct Runtime {
+    /// Every subsystem.
+    pub engine: Engine,
+    /// The shell.
+    pub shell: Shell,
+    /// The live applets.
+    pub applets: Applets,
+    /// Typing waiting to become one undo step.
+    pub typing: Typing,
+    /// The audio transport.
+    pub transport: Transport,
+    telemetry: Telemetry,
+    applied_revision: u64,
+    saved_revision: u64,
+    catalog_fingerprint: String,
+    audio_config: Option<AudioConfig>,
+    next_feed: Option<Instant>,
+    next_tick: Option<Instant>,
+    asked_for_audio: bool,
+    confirm_quit: bool,
+    quit: bool,
+    interactive: bool,
+    booted: bool,
+    note_saved: Option<u64>,
+    next_autosave: Option<Instant>,
+}
+
 impl Runtime {
     /// Wraps a booted engine.
     ///
     /// # Errors
-    /// If the bundled fonts fail to load.
+    /// Never today; kept for start-up checks.
     pub fn new(engine: Engine) -> Result<Self, String> {
-        let mut fonts = Fonts::new()?;
         let theme = Theme::from_rice(&engine.world.rice);
-        fonts.set_ui_font(&theme.ui_font);
+        let shell = Shell::new(
+            engine.config.clone(),
+            theme,
+            engine.profile,
+            engine.capabilities.display_refresh_hz,
+            engine.form_factor,
+        );
+        let applets = engine.launchpad.instantiate();
         let revision = engine.world.rice.revision();
         let fingerprint = catalog_fingerprint(&engine.world.rice);
         let note = engine
@@ -154,36 +167,30 @@ impl Runtime {
             .find(|(_, entity)| entity.name() == NOTE_NAME)
             .and_then(|(_, entity)| entity.string_buffer())
             .map(|text| text_hash(text.as_str()));
-        let mut state = UiState::default();
-        state.caret_visible = true;
         Ok(Self {
             engine,
-            fonts,
-            theme,
-            input: UiInput::default(),
-            state,
+            shell,
+            applets,
+            typing: Typing::default(),
+            transport: Transport::default(),
             telemetry: Telemetry::default(),
             applied_revision: revision,
             saved_revision: revision,
             catalog_fingerprint: fingerprint,
             audio_config: None,
-            last_frame: None,
-            animating: false,
-            last_change: None,
-            caret_epoch: Instant::now(),
-            caret_drawn: false,
-            caret_shown: true,
+            next_feed: None,
             next_tick: None,
-            message: None,
-            dialog: None,
+            asked_for_audio: false,
+            confirm_quit: false,
             quit: false,
             interactive: false,
+            booted: false,
             note_saved: note,
             next_autosave: None,
         })
     }
 
-    /// Lets the runtime use the OS: native dialogs, the browser, audio.
+    /// Lets the runtime use the OS: native dialogs, the file manager, audio.
     #[must_use]
     pub fn interactive(mut self, interactive: bool) -> Self {
         self.interactive = interactive;
@@ -192,7 +199,7 @@ impl Runtime {
 
     /// The current theme.
     pub fn theme(&self) -> &Theme {
-        &self.theme
+        self.shell.theme()
     }
 
     /// `true` once the user confirmed quitting.
@@ -201,8 +208,104 @@ impl Runtime {
         self.quit
     }
 
-    /// Re-applies config, profile, theme and font after any rice change
-    /// (an edit, a live slider preview, an undo or a redo).
+    /// Builds one frame of the whole window into the root `ui`.
+    pub fn ui(&mut self, ui: &mut egui::Ui, textures: &mut dyn TextureUpload, now: Instant) {
+        if !self.booted {
+            self.booted = true;
+            self.shell
+                .set_canvas(ui.max_rect().shrink2(egui::vec2(36.0, 11.0)));
+            let mut io = shell_io!(self, textures);
+            self.shell.boot(&mut io, now);
+        }
+        {
+            let mut io = shell_io!(self, textures);
+            self.shell.ui(ui, &mut io, now);
+        }
+        if self.confirm_quit {
+            self.quit_dialog(ui.ctx());
+        }
+        self.serve_requests(textures, now);
+        self.refresh_rice();
+        if self.shell.is_animating() {
+            self.telemetry.record(now);
+        } else {
+            self.telemetry.reset();
+        }
+        self.track_note(now);
+        if !ui.ctx().input(|input| input.pointer.any_down())
+            && let Some(Err(error)) = self.persist()
+        {
+            self.shell
+                .notify(format!("Could not save the rice: {error}"), true);
+        }
+    }
+
+    fn quit_dialog(&mut self, ctx: &egui::Context) {
+        let theme = self.shell.theme().clone();
+        let screen = ctx.content_rect();
+        egui::Area::new(Id::unique("sue-quit-scrim"))
+            .order(Order::Middle)
+            .fixed_pos(screen.min)
+            .show(ctx, |ui| {
+                ui.allocate_rect(screen, Sense::click());
+                ui.painter()
+                    .rect_filled(screen, 0.0, theme.shadow.gamma_multiply(0.5));
+            });
+        let mut answer = None;
+        egui::Area::new(Id::unique("sue-quit"))
+            .order(Order::Foreground)
+            .pivot(Align2::CENTER_CENTER)
+            .fixed_pos(screen.center())
+            .show(ctx, |ui| {
+                widgets::window_frame(&theme).show(ui, |ui| {
+                    egui::Frame::new()
+                        .inner_margin(egui::Margin::same(16))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new("Quit Sue?")
+                                    .size(theme.heading_size)
+                                    .color(theme.text),
+                            );
+                            ui.label(
+                                RichText::new("Your note and settings are saved first.")
+                                    .color(theme.muted),
+                            );
+                            ui.add_space(theme.padding);
+                            ui.horizontal(|ui| {
+                                if widgets::pill_button(ui, "Quit", true, &theme).clicked() {
+                                    answer = Some(true);
+                                }
+                                if widgets::pill_button(ui, "Cancel", false, &theme).clicked() {
+                                    answer = Some(false);
+                                }
+                            });
+                        });
+                });
+            });
+        let (enter, escape) = ctx.input(|input| {
+            (
+                input.key_pressed(egui::Key::Enter),
+                input.key_pressed(egui::Key::Escape),
+            )
+        });
+        if enter {
+            answer = Some(true);
+        }
+        if escape {
+            answer = Some(false);
+        }
+        if let Some(yes) = answer {
+            self.confirm_quit = false;
+            if yes {
+                self.shutdown();
+                self.quit = true;
+            }
+            self.shell.touch();
+        }
+    }
+
+    /// Re-applies config, profile and theme after any rice change (an edit,
+    /// a live slider preview, an undo or a redo).
     fn refresh_rice(&mut self) {
         let revision = self.engine.world.rice.revision();
         if revision == self.applied_revision {
@@ -210,10 +313,12 @@ impl Runtime {
         }
         self.applied_revision = revision;
         if let Err(error) = self.engine.refresh_config() {
-            self.notify(format!("Settings: {error}"), true);
+            self.shell.notify(format!("Settings: {error}"), true);
+            return;
         }
-        self.theme = Theme::from_rice(&self.engine.world.rice);
-        self.fonts.set_ui_font(&self.theme.ui_font);
+        let theme = Theme::from_rice(&self.engine.world.rice);
+        self.shell
+            .apply_config(self.engine.config.clone(), theme, self.engine.profile);
         let fingerprint = catalog_fingerprint(&self.engine.world.rice);
         if fingerprint != self.catalog_fingerprint {
             self.catalog_fingerprint = fingerprint;
@@ -227,264 +332,27 @@ impl Runtime {
         }
     }
 
-    fn notify(&mut self, text: impl Into<String>, error: bool) {
-        let duration = self.engine.workspace.config().message_duration;
-        self.message = Some((text.into(), error, Instant::now() + duration));
-        self.engine.workspace.invalidate();
-    }
-
-    fn caret_phase(&self, now: Instant) -> (bool, Option<Instant>) {
-        match self.engine.workspace.config().caret_blink {
-            Some(half) => {
-                let half_ms = half.as_millis().max(1);
-                let elapsed = now.duration_since(self.caret_epoch).as_millis();
-                let phase = elapsed / half_ms;
-                let next = self.caret_epoch
-                    + Duration::from_millis(
-                        u64::try_from((phase + 1) * half_ms).unwrap_or(u64::MAX),
-                    );
-                (phase.is_multiple_of(2), Some(next))
-            }
-            None => (true, None),
-        }
-    }
-
-    /// Folds one event in. Returns `true` if the scene must be redrawn; plain
-    /// pointer motion only redraws when the hovered widget changes (LAW 4).
-    pub fn handle(&mut self, event: &InputEvent) -> bool {
-        let now = Instant::now();
-        if let Some(answer) = self.dialog_key(event) {
-            self.answer(answer);
-            self.last_change = Some(now);
-            return true;
-        }
-        let redraw = match event {
-            InputEvent::Mouse(MouseEvent::Moved { position }) => {
-                let changes = self.state.hover_changes(Some(*position));
-                self.input.apply(event);
-                changes || self.input.down
-            }
-            InputEvent::Mouse(_) => {
-                self.caret_epoch = now;
-                self.input.apply(event)
-            }
-            InputEvent::Window(_) => true,
-            InputEvent::FileDrop(drop) => {
-                self.input.apply(event);
-                if matches!(drop, FileDrop::Dropped(_)) {
-                    self.dispatch(event);
-                }
-                true
-            }
-            InputEvent::Keyboard(_) => {
-                self.caret_epoch = now;
-                self.dispatch(event)
-            }
-            _ => self.dispatch(event),
-        };
-        self.serve_requests();
-        self.refresh_rice();
-        self.track_note(now);
-        if redraw {
-            self.last_change = Some(now);
-        }
-        redraw
-    }
-
-    fn dispatch(&mut self, event: &InputEvent) -> bool {
-        if self.dialog.is_some() {
-            return false;
-        }
-        let (workspace, mut ctx) = self.engine.shell();
-        match workspace.dispatch(event, &mut ctx) {
-            Ok(response) => response != InputResponse::Ignored,
-            Err(error) => {
-                self.notify(error.to_string(), true);
-                true
-            }
-        }
-    }
-
-    /// Enter and Escape answer an open dialog.
-    fn dialog_key(&self, event: &InputEvent) -> Option<bool> {
-        self.dialog.as_ref()?;
-        match event {
-            InputEvent::Keyboard(KeyEvent {
-                key: sue_platform::Key::Named(NamedKey::Enter),
-                pressed: true,
-                ..
-            }) => Some(true),
-            InputEvent::Keyboard(KeyEvent {
-                key: sue_platform::Key::Named(NamedKey::Escape),
-                pressed: true,
-                ..
-            }) => Some(false),
-            _ => None,
-        }
-    }
-
-    fn answer(&mut self, yes: bool) {
-        if let Some((_, question)) = self.dialog.take() {
-            match (question, yes) {
-                (Question::Quit, true) => self.quit = true,
-                (Question::Quit, false) => {}
-            }
-        }
-        self.engine.workspace.invalidate();
-    }
-
-    /// Asks to quit, with a confirmation when the rice wants one.
-    pub fn request_quit(&mut self) {
-        let confirm = self
-            .engine
-            .world
-            .rice
-            .get_bool("general.confirm_on_exit")
-            .unwrap_or(true);
-        if confirm {
-            self.dialog = Some((
-                Dialog {
-                    title: "Quit Sue?".to_owned(),
-                    body: "Your notes and settings are saved. Open tabs close.".to_owned(),
-                    confirm: "Quit".to_owned(),
-                    cancel: "Cancel".to_owned(),
-                },
-                Question::Quit,
-            ));
-            self.engine.workspace.invalidate();
-        } else {
-            self.quit = true;
-        }
-    }
-
-    /// The window's close button: `true` to close now.
-    pub fn close_requested(&mut self) -> bool {
-        if self.quit {
-            return true;
-        }
-        self.request_quit();
-        self.quit
-    }
-
-    /// Builds one frame for a `viewport` in logical pixels.
-    pub fn frame(
-        &mut self,
-        viewport: Rect,
-        safe_area: SafeAreaInsets,
-        now: Instant,
-    ) -> FrameOutput {
-        let target_hz = self.engine.workspace.target_hz().max(1);
-        // Real elapsed time, clamped so a stall never jumps an animation; the
-        // first frame after sleeping advances by one nominal frame.
-        let dt = match self.last_frame {
-            Some(last) if self.animating => {
-                now.duration_since(last).as_secs_f32().clamp(0.0001, 0.05)
-            }
-            _ => 1.0 / target_hz as f32,
-        };
-        self.last_frame = Some(now);
-        let (visible, _) = self.caret_phase(now);
-        self.state.caret_visible = visible;
-        self.refresh_rice();
-        self.expire_message(now);
-        self.engine.workspace.begin_frame();
-        let demand = {
-            let (workspace, mut ctx) = self.engine.shell();
-            let tick = workspace.tick(now, &mut ctx);
-            self.next_tick = tick.wake;
-            workspace.update(dt, &mut ctx)
-        };
-        let fps = if self.animating {
-            self.telemetry.record(now);
-            Some(self.telemetry.fps().max(1))
-        } else {
-            self.telemetry.reset();
-            None
-        };
-
-        self.state.begin_frame();
-        let mut canvas = Canvas::new(viewport);
-        let message = self
-            .message
-            .as_ref()
-            .map(|(text, error, _)| (text.clone(), *error));
-        let dialog = self.dialog.as_ref().map(|(dialog, _)| dialog.clone());
-        let mut answer = None;
-        {
-            let (workspace, mut ctx) = self.engine.shell();
-            let form_factor = ctx.form_factor;
-            let mut ui = Ui {
-                canvas: &mut canvas,
-                fonts: &self.fonts,
-                theme: &self.theme,
-                input: &self.input,
-                state: &mut self.state,
-            };
-            let frame = ShellFrame {
-                viewport,
-                safe_area,
-                form_factor,
-                fps,
-                message: message
-                    .as_ref()
-                    .map(|(text, error)| (text.as_str(), *error)),
-                dialog: dialog.as_ref(),
-            };
-            let actions = draw_shell(workspace, &mut ui, &mut ctx, &frame);
-            let (answers, actions): (Vec<_>, Vec<_>) = actions
-                .into_iter()
-                .partition(|action| matches!(action, sue_wm::ShellAction::DialogAnswer(_)));
-            if let Some(sue_wm::ShellAction::DialogAnswer(yes)) = answers.first() {
-                answer = Some(*yes);
-            }
-            if let Err(error) = apply_actions(workspace, &mut ctx, actions) {
-                ctx.requests.push(ShellRequest::Notify(error.to_string()));
-            }
-        }
-        self.state.end_frame(&self.input);
-        self.input.end_frame();
-        if let Some(yes) = answer {
-            self.answer(yes);
-        }
-        self.serve_requests();
-        self.refresh_rice();
-        self.track_note(now);
-        self.caret_drawn = self.state.caret_drawn;
-        self.caret_shown = self.state.caret_visible;
-        self.animating = self.engine.workspace.is_animating() || demand.is_active();
-        if self.animating || self.engine.workspace.has_damage() {
-            self.last_change = Some(now);
-        }
-        FrameOutput {
-            canvas,
-            cursor: self.state.cursor,
-        }
-    }
-
-    /// How the host should pace what comes next.
-    #[must_use]
+    /// What the loop should do next (LAW 4).
     pub fn pacing(&self, now: Instant) -> FramePacing {
         if self.quit {
             return FramePacing::Sleep;
         }
-        let target_hz = self.engine.workspace.target_hz();
-        if self.animating || self.engine.workspace.has_damage() {
-            return FramePacing::Animate { target_hz };
+        let shell = self.shell.pacing(now);
+        if matches!(shell, FramePacing::Animate { .. }) {
+            return shell;
         }
-        let grace = self.engine.workspace.config().settle_grace;
-        if self.last_change.is_some_and(|change| now < change + grace) {
-            return FramePacing::Animate { target_hz };
-        }
-        let caret = if self.caret_drawn {
-            self.caret_phase(now).1
-        } else {
-            None
+        let shell_wake = match shell {
+            FramePacing::WakeAt(at) => Some(at),
+            _ => None,
         };
         [
-            caret,
-            self.message.as_ref().map(|(_, _, until)| *until),
-            self.next_tick,
+            shell_wake,
+            self.transport
+                .is_playing()
+                .then_some(self.next_feed.unwrap_or(now)),
             self.next_autosave,
+            self.typing.deadline(),
+            self.next_tick,
         ]
         .into_iter()
         .flatten()
@@ -492,38 +360,50 @@ impl Runtime {
         .map_or(FramePacing::Sleep, FramePacing::WakeAt)
     }
 
-    /// Runs timed work that is due. Returns `true` if the scene must be
+    /// Runs timed work that is due. Returns `true` if the window must be
     /// redrawn.
-    pub fn timer(&mut self, now: Instant) -> bool {
-        let mut redraw = false;
-        if self.caret_drawn && self.caret_phase(now).0 != self.caret_shown {
-            redraw = true;
-        }
-        redraw |= self.expire_message(now);
+    pub fn timer(&mut self, textures: &mut dyn TextureUpload, now: Instant) -> bool {
+        let mut redraw = self.shell.expire(now);
         if self.next_autosave.is_some_and(|due| due <= now) {
             self.save_note();
         }
-        if self.next_tick.is_some_and(|due| due <= now) {
-            let (workspace, mut ctx) = self.engine.shell();
-            let tick = workspace.tick(now, &mut ctx);
+        if self.typing.flush_if_paused(&mut self.engine.history, now) {
+            redraw = true;
+        }
+        if self.transport.is_playing() && self.next_feed.is_none_or(|due| due <= now) {
+            let volume = self
+                .engine
+                .world
+                .rice
+                .get_f64("audio.volume")
+                .unwrap_or(0.8) as f32;
+            match self.engine.audio.as_deref_mut() {
+                Some(sink) => {
+                    self.asked_for_audio = false;
+                    self.transport.pump(&self.engine.world, sink, volume);
+                }
+                None if !self.asked_for_audio => {
+                    self.asked_for_audio = true;
+                    self.open_audio();
+                }
+                None => {}
+            }
+            self.next_feed = Some(now + FEED_INTERVAL);
+            redraw = true;
+        }
+        if !self.transport.is_playing() {
+            self.next_feed = None;
+        }
+        if self.next_tick.is_none_or(|due| due <= now) {
+            let tick = {
+                let mut io = shell_io!(self, textures);
+                self.shell.tick(&mut io, now)
+            };
             self.next_tick = tick.wake;
-            redraw |= tick.redraw;
-            self.serve_requests();
+            redraw |= tick.repaint || tick.animating;
+            self.serve_requests(textures, now);
         }
         redraw
-    }
-
-    fn expire_message(&mut self, now: Instant) -> bool {
-        if self
-            .message
-            .as_ref()
-            .is_some_and(|(_, _, until)| *until <= now)
-        {
-            self.message = None;
-            self.engine.workspace.invalidate();
-            return true;
-        }
-        false
     }
 
     /// Notices note edits and schedules an autosave.
@@ -534,53 +414,83 @@ impl Runtime {
             .rice
             .get_i64("general.autosave_seconds")
             .unwrap_or(30);
-        let current = self.note_text().map(|text| text_hash(&text));
+        let current = self.note_hash();
         if current != self.note_saved && self.next_autosave.is_none() && seconds > 0 {
             self.next_autosave =
                 Some(now + Duration::from_secs(u64::try_from(seconds).unwrap_or(30)));
         }
     }
 
-    fn note_text(&self) -> Option<String> {
+    fn note_hash(&self) -> Option<u64> {
         self.engine
             .world
             .arena
             .iter()
             .find(|(_, entity)| entity.name() == NOTE_NAME)
             .and_then(|(_, entity)| entity.string_buffer())
-            .map(|text| StringBuffer::as_str(text).to_owned())
+            .map(|text| text_hash(text.as_str()))
     }
 
-    /// Writes the Quick Note if it changed since the last save.
+    /// Writes the note if it changed since the last save.
     pub fn save_note(&mut self) {
         self.next_autosave = None;
-        let Some(text) = self.note_text() else {
-            return;
-        };
-        let hash = text_hash(&text);
-        if Some(hash) == self.note_saved {
+        let hash = self.note_hash();
+        if hash == self.note_saved {
             return;
         }
+        let Some(text) = self
+            .engine
+            .world
+            .arena
+            .iter()
+            .find(|(_, entity)| entity.name() == NOTE_NAME)
+            .and_then(|(_, entity)| entity.string_buffer())
+        else {
+            return;
+        };
         let path = self.engine.note_path();
-        match write_atomic(&path, text.as_bytes()) {
-            Ok(()) => self.note_saved = Some(hash),
-            Err(error) => self.notify(format!("Could not save the note: {error}"), true),
+        match write_atomic(&path, text.as_str().as_bytes()) {
+            Ok(()) => self.note_saved = hash,
+            Err(error) => self
+                .shell
+                .notify(format!("Could not save the note: {error}"), true),
         }
     }
 
-    /// Saves what must survive: the note and the rice.
+    /// Asks before closing when the rice says so. Returns `true` to close.
+    pub fn close_requested(&mut self) -> bool {
+        if self.quit {
+            return true;
+        }
+        if self
+            .engine
+            .world
+            .rice
+            .get_bool("general.confirm_on_exit")
+            .unwrap_or(true)
+        {
+            self.confirm_quit = true;
+            self.shell.touch();
+            return false;
+        }
+        self.shutdown();
+        true
+    }
+
+    /// Saves what must survive: the note, the open typing group and the rice.
     pub fn shutdown(&mut self) {
+        self.typing.flush(&mut self.engine.history);
         self.save_note();
         if let Some(Err(error)) = self.persist() {
             eprintln!("sue: could not save the rice: {error}");
         }
     }
 
-    /// Writes the rice back to its file if it changed and no slider is being
-    /// dragged. Untouched lines are written byte for byte.
+    /// Writes the rice back to its file if it changed. Untouched lines are
+    /// written byte for byte.
     pub fn persist(&mut self) -> Option<std::io::Result<PathBuf>> {
         let revision = self.engine.world.rice.revision();
-        if revision == self.saved_revision || self.state.active.is_some() {
+        if revision == self.saved_revision {
             return None;
         }
         self.saved_revision = revision;
@@ -589,60 +499,42 @@ impl Runtime {
     }
 
     /// Carries out what applets and the shell asked the engine for.
-    fn serve_requests(&mut self) {
+    fn serve_requests(&mut self, textures: &mut dyn TextureUpload, now: Instant) {
         for _ in 0..8 {
-            let mut requests = self.engine.workspace.take_outbox();
-            requests.append(&mut self.engine.requests);
+            let requests = std::mem::take(&mut self.engine.requests);
             if requests.is_empty() {
                 return;
             }
             for request in requests {
-                match request {
-                    ShellRequest::OpenFile(path) => self.open_path(&path),
-                    ShellRequest::OpenUrl(url) => self.open_url(&url),
-                    ShellRequest::Notify(text) => self.notify(text, false),
-                    ShellRequest::Command(command) => self.run_command(&command),
-                    other => self.engine.requests.push(other),
+                let leftover = {
+                    let mut io = shell_io!(self, textures);
+                    self.shell.handle(request, &mut io, now)
+                };
+                match leftover {
+                    Some(ShellRequest::Notify(text)) => self.shell.notify(text, false),
+                    Some(ShellRequest::Fail(text)) => self.shell.notify(text, true),
+                    Some(ShellRequest::OpenFile(path)) => self.open_path(&path, textures, now),
+                    Some(ShellRequest::Command(command)) => self.run_command(&command),
+                    Some(_) | None => {}
                 }
             }
-            // Anything left (an asset to open) goes back through the workspace.
-            let (workspace, mut ctx) = self.engine.shell();
-            if let Err(error) = workspace.process_requests(&mut ctx) {
-                let text = error.to_string();
-                self.notify(text, true);
-            }
-        }
-    }
-
-    fn open_url(&mut self, url: &str) {
-        if !self.interactive {
-            self.notify(format!("Would open {url} in the system browser"), false);
-            return;
-        }
-        match sue_platform::open_url(url) {
-            Ok(url) => self.notify(format!("Opened {url} in your browser"), false),
-            Err(error) => self.notify(format!("Cannot open {url}: {error}"), true),
         }
     }
 
     fn run_command(&mut self, command: &str) {
         match command {
             "file.open" => self.pick_and_open(),
-            "file.save" => {
-                let (workspace, mut ctx) = self.engine.shell();
-                match workspace.command_active("save", &mut ctx) {
-                    Ok(true) => {}
-                    Ok(false) => self.notify("This tab has nothing to save", false),
-                    Err(error) => self.notify(error.to_string(), true),
+            "app.quit" => {
+                if self.close_requested() {
+                    self.quit = true;
                 }
             }
-            "file.save_as" => self.save_as(),
-            "app.quit" => self.request_quit(),
-            "dialog.confirm" => self.answer(true),
-            "dialog.cancel" => self.answer(false),
             "rice.reload" => self.reload_rice(),
             "rice.export" => self.export_rice(),
-            "rice.reveal" => self.reveal(&self.engine.paths.rice_dir()),
+            "rice.reveal" => {
+                let dir = self.engine.paths.rice_dir();
+                self.reveal(&dir);
+            }
             "ai.rescan" => {
                 self.engine.rebuild_catalog();
                 let found = self
@@ -651,64 +543,53 @@ impl Runtime {
                     .tables
                     .get("models")
                     .map_or(0, |table| table.rows.len());
-                self.notify(format!("Found {found} model files"), false);
+                self.shell
+                    .notify(format!("Found {found} model files"), false);
             }
             "ai.reveal" => {
                 let dir = self.engine.model_dir();
                 let _ = std::fs::create_dir_all(&dir);
                 self.reveal(&dir);
             }
-            "audio.start" => self.open_audio(),
+            "audio.start" => {
+                if self.engine.audio.is_none() {
+                    self.open_audio();
+                }
+            }
             other => match other.strip_prefix("reveal:") {
                 Some(path) => self.reveal(Path::new(path)),
-                None => self.notify(format!("Unknown command {other}"), true),
+                None => self.shell.notify(format!("Unknown command {other}"), true),
             },
         }
     }
 
     fn reveal(&mut self, dir: &Path) {
         if !self.interactive {
-            self.notify(format!("Folder: {}", dir.display()), false);
+            self.shell
+                .notify(format!("Folder: {}", dir.display()), false);
             return;
         }
         if let Err(error) = sue_platform::reveal_folder(dir) {
-            self.notify(format!("Cannot open the folder: {error}"), true);
+            self.shell
+                .notify(format!("Cannot open the folder: {error}"), true);
         }
     }
 
     fn pick_and_open(&mut self) {
         if !self.interactive {
-            self.notify("Choosing files needs the desktop window", false);
+            self.shell
+                .notify("Choosing files needs the desktop window", false);
             return;
         }
         let start = self.engine.paths.home_dir.clone();
         if let Some(path) = sue_platform::pick_open_file("Open File", Some(&start), &[]) {
-            self.open_path(&path);
+            self.engine.requests.push(ShellRequest::OpenFile(path));
         }
     }
 
-    fn save_as(&mut self) {
-        if !self.interactive {
-            self.notify("Saving to a new file needs the desktop window", false);
-            return;
-        }
-        let name = self
-            .engine
-            .workspace
-            .tab_title(self.engine.workspace.active_index(), &self.engine.world);
-        let start = self.engine.paths.home_dir.clone();
-        if let Some(path) = sue_platform::pick_save_file("Save As", Some(&start), &name, &[]) {
-            let (workspace, mut ctx) = self.engine.shell();
-            if let Err(error) =
-                workspace.command_active(&format!("save_as:{}", path.display()), &mut ctx)
-            {
-                self.notify(error.to_string(), true);
-            }
-        }
-    }
-
-    /// Reads a file and opens it in the applet that fits its content.
-    pub fn open_path(&mut self, path: &Path) {
+    /// Reads a file, puts it in the arena and places it on the canvas in the
+    /// applet that shows its content.
+    pub fn open_path(&mut self, path: &Path, textures: &mut dyn TextureUpload, now: Instant) {
         let name = file_name(path);
         let limit_mib = self
             .engine
@@ -721,7 +602,7 @@ impl Runtime {
             .unwrap_or(u64::MAX)
             .saturating_mul(1024 * 1024);
         let bytes = match std::fs::metadata(path) {
-            Ok(metadata) if metadata.is_dir() => Err("folders open in the Files panel".to_owned()),
+            Ok(metadata) if metadata.is_dir() => Err("folders open in the Files drawer".to_owned()),
             Ok(metadata) if metadata.len() > limit => Err(format!(
                 "it is {}, over the {limit_mib} MiB limit (io.max_ingest_mib)",
                 human_bytes(metadata.len())
@@ -732,7 +613,8 @@ impl Runtime {
         let bytes = match bytes {
             Ok(bytes) => bytes,
             Err(reason) => {
-                self.notify(format!("Cannot open {name}: {reason}"), true);
+                self.shell
+                    .notify(format!("Cannot open {name}: {reason}"), true);
                 return;
             }
         };
@@ -754,25 +636,31 @@ impl Runtime {
         ) {
             Ok(ingested) => ingested,
             Err(error) => {
-                self.notify(format!("Cannot open {name}: {error}"), true);
+                self.shell
+                    .notify(format!("Cannot open {name}: {error}"), true);
                 return;
             }
         };
+        let code = ingested.view == IngestView::Text
+            && path.extension().is_some_and(|extension| {
+                CODE_EXTENSIONS.contains(&extension.to_string_lossy().to_ascii_lowercase().as_str())
+            });
         if let Ok(entity) = self.engine.world.arena.get_mut(ingested.handle) {
             entity.set_meta(meta::SOURCE, path.display().to_string());
-        }
-        let class = media_class(ingested.view);
-        let (workspace, mut ctx) = self.engine.shell();
-        let opened = workspace.open_asset(ingested.handle, class, &mut ctx);
-        match opened {
-            Ok(()) => {
-                if let Some(note) = ingested.note {
-                    self.notify(format!("{name}: {note}"), false);
-                }
+            if code {
+                entity.set_meta(KIND, KIND_CODE);
             }
-            Err(error) => self.notify(format!("Cannot open {name}: {error}"), true),
         }
-        self.serve_requests();
+        let placed = {
+            let mut io = shell_io!(self, textures);
+            self.shell.place(ingested.handle, true, &mut io)
+        };
+        if placed.is_some()
+            && let Some(note) = ingested.note
+        {
+            self.shell.notify(format!("{name}: {note}"), false);
+        }
+        self.serve_requests(textures, now);
     }
 
     /// Opens (or reopens) the audio output with the riced device and format.
@@ -796,9 +684,16 @@ impl Runtime {
                 );
                 self.engine.audio = Some(sink);
                 self.engine.audio_error = None;
+                // The queue of the old stream is gone: start the clip again.
+                let position = self.transport.position();
+                self.transport
+                    .seek(position, self.engine.audio.as_deref_mut());
+                let playing = self.transport.is_playing();
+                self.transport
+                    .set_playing(playing, self.engine.audio.as_deref_mut());
             }
             Err(error) => {
-                self.notify(format!("Audio: {error}"), true);
+                self.shell.notify(format!("Audio: {error}"), true);
                 self.engine.audio_error = Some(error.to_string());
             }
         }
@@ -812,14 +707,16 @@ impl Runtime {
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
             Err(error) => {
-                self.notify(format!("Cannot read {}: {error}", path.display()), true);
+                self.shell
+                    .notify(format!("Cannot read {}: {error}", path.display()), true);
                 return;
             }
         };
         let disk = match RiceSchema::parse(&text) {
             Ok(disk) => disk,
             Err(error) => {
-                self.notify(format!("The rice file has an error: {error}"), true);
+                self.shell
+                    .notify(format!("The rice file has an error: {error}"), true);
                 return;
             }
         };
@@ -833,25 +730,30 @@ impl Runtime {
             })
             .collect();
         if changes.is_empty() {
-            self.notify("The rice file matches what Sue shows", false);
+            self.shell
+                .notify("The rice file matches what Sue shows", false);
             return;
         }
         let count = changes.len();
         let txn = SetRiceValues::new("Reload default.suerice", changes);
+        self.typing.flush(&mut self.engine.history);
         match self
             .engine
             .history
             .apply(&mut self.engine.world, RiceEdit(txn))
         {
-            Ok(_) => self.notify(format!("Reloaded {count} values from disk"), false),
-            Err(error) => self.notify(format!("Reload failed: {error}"), true),
+            Ok(_) => self
+                .shell
+                .notify(format!("Reloaded {count} values from disk"), false),
+            Err(error) => self.shell.notify(format!("Reload failed: {error}"), true),
         }
         self.refresh_rice();
     }
 
     fn export_rice(&mut self) {
         if !self.interactive {
-            self.notify("Exporting needs the desktop window", false);
+            self.shell
+                .notify("Exporting needs the desktop window", false);
             return;
         }
         let filters = [FileFilter {
@@ -864,209 +766,137 @@ impl Runtime {
         {
             let text = self.engine.world.rice.to_suerice();
             match write_atomic(&path, text.as_bytes()) {
-                Ok(()) => self.notify(format!("Exported the rice to {}", path.display()), false),
-                Err(error) => self.notify(format!("Export failed: {error}"), true),
+                Ok(()) => self
+                    .shell
+                    .notify(format!("Exported the rice to {}", path.display()), false),
+                Err(error) => self.shell.notify(format!("Export failed: {error}"), true),
             }
         }
     }
 
-    /// Where widget `id` was drawn in the latest frame.
-    #[must_use]
-    pub fn widget_rect(&self, id: sue_wm::WidgetId) -> Option<Rect> {
-        self.state.hit_rect(id)
+    /// Runs `work` with an applet context, as an applet would (snapshots,
+    /// scripted runs and tests), then serves what it asked for.
+    pub fn with_context<R>(
+        &mut self,
+        textures: &mut dyn TextureUpload,
+        now: Instant,
+        work: impl FnOnce(&mut sue_wm::AppletContext<'_>) -> R,
+    ) -> R {
+        let result = {
+            let mut io = shell_io!(self, textures);
+            self.shell.with_context(&mut io, now, work)
+        };
+        self.serve_requests(textures, now);
+        result
     }
 
-    /// Shows the dock applet `id` (for snapshots and scripted runs).
-    pub fn show_dock(&mut self, id: &str) {
-        if let Ok(id) = sue_wm::AppletId::new(id) {
-            self.engine.workspace.show_dock_applet(&id);
-        }
-    }
-
-    /// Opens Settings at `page` (for snapshots and scripted runs).
-    pub fn open_settings(&mut self, page: Option<&str>) {
-        let (workspace, mut ctx) = self.engine.shell();
-        let _ = workspace.open_settings(page, &mut ctx);
+    /// Runs a shell request as if an applet had asked (snapshots, scripted
+    /// runs and tests).
+    pub fn request(
+        &mut self,
+        request: ShellRequest,
+        textures: &mut dyn TextureUpload,
+        now: Instant,
+    ) {
+        self.engine.requests.push(request);
+        self.serve_requests(textures, now);
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::engine::tests::temp_host;
-    use sue_platform::{Key, Modifiers, MouseButton, Point};
-    use sue_rice::{DEFAULT_RICE, RiceValue, SetRiceValue};
-    use sue_wm::{RiceEdit, widget_id};
+    use egui::{Pos2, vec2};
+    use sue_platform::NoTextures;
+    use sue_wm::AppletId;
 
-    fn runtime(tag: &str) -> (Runtime, PathBuf) {
+    pub(crate) fn runtime(tag: &str) -> (Runtime, PathBuf) {
         let (host, root) = temp_host(tag);
         let runtime = Runtime::new(Engine::boot(&host).unwrap()).unwrap();
         (runtime, root)
     }
 
-    const VIEWPORT: Rect = Rect::new(0.0, 0.0, 1280.0, 800.0);
-
-    fn click(runtime: &mut Runtime, point: Point, now: &mut Instant) {
-        for pressed in [true, false] {
-            runtime.handle(&InputEvent::Mouse(MouseEvent::Button {
-                button: MouseButton::Left,
-                pressed,
-                position: point,
-            }));
-            *now += Duration::from_millis(16);
-            runtime.frame(VIEWPORT, SafeAreaInsets::ZERO, *now);
+    /// Runs frames of `size` until the shell sleeps, at a fixed frame time.
+    pub(crate) fn frames(
+        runtime: &mut Runtime,
+        ctx: &egui::Context,
+        size: egui::Vec2,
+        start: Instant,
+        mut input: impl FnMut(usize) -> Vec<egui::Event>,
+    ) -> usize {
+        let mut count = 0;
+        let mut now = start;
+        loop {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, size)),
+                events: input(count),
+                time: Some(now.duration_since(start).as_secs_f64()),
+                ..egui::RawInput::default()
+            };
+            ctx.run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now))
+                .drop_without_applying_deltas();
+            count += 1;
+            now += Duration::from_millis(8);
+            let asleep = !matches!(runtime.pacing(now), FramePacing::Animate { .. });
+            if (asleep && count > 2) || count > 2_000 {
+                return count;
+            }
         }
     }
 
     #[test]
-    fn a_clicked_dock_toggle_animates_to_the_end_without_more_input() {
-        let (mut runtime, root) = runtime("pacing");
+    fn a_mode_switch_glides_the_camera_and_then_sleeps() {
+        let (mut runtime, root) = runtime("mode");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
+            Vec::new()
+        });
+        let before = runtime.shell.camera().center();
+        runtime.request(
+            ShellRequest::Mode("document".to_owned()),
+            &mut NoTextures,
+            start,
+        );
+        let count = frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
+            Vec::new()
+        });
+        assert!(count > 10, "the camera must animate ({count} frames)");
+        assert!(runtime.shell.camera().center().distance(before) > 1.0);
+        assert_eq!(runtime.shell.mode(), "document");
+        assert!(runtime.shell.selected().is_some());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn spawned_entities_undo_and_redo_with_their_buffers() {
+        let (mut runtime, root) = runtime("spawn");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
+            Vec::new()
+        });
+        let before = runtime.engine.world.scene.len();
+        runtime.request(
+            ShellRequest::Spawn(AppletId::new("paint").unwrap()),
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(runtime.engine.world.scene.len(), before + 1);
         runtime
             .engine
-            .workspace
-            .set_profile(sue_rice::HardwareProfile::Balanced);
-        let mut now = Instant::now();
-        runtime.frame(VIEWPORT, SafeAreaInsets::ZERO, now);
-        let toggle = runtime
-            .state
-            .hit_rect(widget_id("shell", "toggle-left"))
-            .expect("the left dock toggle is drawn");
-        let center = Point::new(
-            toggle.x + toggle.width / 2.0,
-            toggle.y + toggle.height / 2.0,
-        );
-        runtime.handle(&InputEvent::Mouse(MouseEvent::Moved { position: center }));
-        click(&mut runtime, center, &mut now);
-        assert!(
-            !runtime.engine.workspace.docks_open().0,
-            "the click closed the dock"
-        );
-
-        // No input from here on: the host only asks for pacing and frames.
-        let mut frames = 0;
-        while matches!(runtime.pacing(now), FramePacing::Animate { .. }) {
-            now += Duration::from_millis(16);
-            runtime.frame(VIEWPORT, SafeAreaInsets::ZERO, now);
-            frames += 1;
-            assert!(frames < 2_000, "the animation never settled");
-        }
-        assert_eq!(
-            runtime.engine.workspace.dock_reveal().0,
-            0.0,
-            "ran to the end"
-        );
-        assert!(
-            frames > 10,
-            "animated over many frames, not one jump ({frames})"
-        );
-        assert!(!matches!(runtime.pacing(now), FramePacing::Animate { .. }));
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn idle_scenes_sleep_after_the_grace_period() {
-        let (mut runtime, root) = runtime("idle");
-        let now = Instant::now();
-        runtime.frame(VIEWPORT, SafeAreaInsets::ZERO, now);
-        let later = now + Duration::from_secs(5);
-        runtime.frame(VIEWPORT, SafeAreaInsets::ZERO, later);
-        assert_eq!(
-            runtime.pacing(later + Duration::from_secs(1)),
-            FramePacing::Sleep
-        );
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn rice_edits_persist_byte_cleanly_and_undo_restores_the_file() {
-        let (mut runtime, root) = runtime("persist");
-        assert!(runtime.persist().is_none(), "nothing changed yet");
-        let engine = &mut runtime.engine;
-        engine
             .history
-            .apply(
-                &mut engine.world,
-                RiceEdit(SetRiceValue::new("layout.padding", RiceValue::Int(13))),
-            )
+            .undo(&mut runtime.engine.world)
             .unwrap();
-        let path = runtime.persist().unwrap().unwrap();
-        let written = std::fs::read_to_string(&path).unwrap();
-        let original = DEFAULT_RICE.replace("\r\n", "\n");
-        let changed: Vec<(&str, &str)> = original
-            .lines()
-            .zip(written.lines())
-            .filter(|(before, after)| before != after)
-            .collect();
-        assert_eq!(original.lines().count(), written.lines().count());
-        assert_eq!(changed.len(), 1, "{changed:?}");
-        assert!(changed[0].1.starts_with("padding = 13 "));
-
-        let engine = &mut runtime.engine;
-        engine.history.undo(&mut engine.world).unwrap();
-        runtime.persist().unwrap().unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        assert_eq!(runtime.engine.world.scene.len(), before);
+        // Undoing a spawn also takes the entity out of the arena.
+        runtime
+            .engine
+            .history
+            .redo(&mut runtime.engine.world)
+            .unwrap();
+        assert_eq!(runtime.engine.world.scene.len(), before + 1);
         let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn dropped_files_open_and_quitting_asks_first() {
-        let (mut runtime, root) = runtime("drop");
-        let file = root.join("notes.md");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(&file, "# Sue\n").unwrap();
-        runtime.handle(&InputEvent::FileDrop(FileDrop::Dropped(file.clone())));
-        let workspace = &runtime.engine.workspace;
-        assert_eq!(
-            workspace.tab_title(workspace.active_index(), &runtime.engine.world),
-            "notes.md"
-        );
-        let quit = InputEvent::Keyboard(KeyEvent::press(Key::Character('q'), Modifiers::CTRL));
-        runtime.handle(&quit);
-        assert!(!runtime.wants_exit(), "a dialog asks first");
-        runtime.handle(&InputEvent::Keyboard(KeyEvent::press(
-            Key::Named(NamedKey::Escape),
-            Modifiers::NONE,
-        )));
-        assert!(!runtime.wants_exit());
-        runtime.handle(&quit);
-        runtime.handle(&InputEvent::Keyboard(KeyEvent::press(
-            Key::Named(NamedKey::Enter),
-            Modifiers::NONE,
-        )));
-        assert!(runtime.wants_exit());
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn notes_autosave_once_they_change() {
-        let (mut runtime, root) = runtime("autosave");
-        let now = Instant::now();
-        runtime.show_dock(crate::quick_notes::ID);
-        for ch in "hi".chars() {
-            runtime.handle(&InputEvent::Keyboard(KeyEvent::typed(ch)));
-        }
-        runtime.frame(VIEWPORT, SafeAreaInsets::ZERO, now);
-        let FramePacing::WakeAt(due) = runtime.pacing(now + Duration::from_secs(2)) else {
-            panic!("an autosave is scheduled");
-        };
-        assert!(due > now);
-        runtime.timer(now + Duration::from_secs(31));
-        assert_eq!(
-            std::fs::read_to_string(runtime.engine.note_path()).unwrap(),
-            "hi"
-        );
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn telemetry_counts_frames_over_the_last_second() {
-        let mut telemetry = Telemetry::default();
-        let start = Instant::now();
-        for frame in 0..=60 {
-            telemetry.record(start + Duration::from_millis(frame * 1000 / 60));
-        }
-        assert!((59..=61).contains(&telemetry.fps()), "{}", telemetry.fps());
-        telemetry.reset();
-        assert_eq!(telemetry.fps(), 0);
     }
 }

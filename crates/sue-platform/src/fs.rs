@@ -27,12 +27,35 @@ pub struct DirEntryInfo {
 ///
 /// # Errors
 /// If `dir` itself cannot be read.
+/// Compatibility junctions Windows keeps in every profile for programs from
+/// before Vista. They cannot be opened, so they are never listed unless hidden
+/// entries are shown.
+const LEGACY_JUNCTIONS: [&str; 10] = [
+    "Application Data",
+    "Cookies",
+    "Local Settings",
+    "My Documents",
+    "NetHood",
+    "PrintHood",
+    "Recent",
+    "SendTo",
+    "Start Menu",
+    "Templates",
+];
+
+/// `true` for entries the OS hides from people: dot files everywhere, and
+/// the legacy junctions on Windows.
+#[must_use]
+pub fn hidden_by_os(name: &str) -> bool {
+    name.starts_with('.') || (cfg!(windows) && LEGACY_JUNCTIONS.contains(&name))
+}
+
 pub fn list_dir(dir: &Path, show_hidden: bool) -> io::Result<Vec<DirEntryInfo>> {
     let mut entries: Vec<DirEntryInfo> = fs::read_dir(dir)?
         .filter_map(Result::ok)
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if !show_hidden && name.starts_with('.') {
+            if !show_hidden && hidden_by_os(&name) {
                 return None;
             }
             let path = entry.path();

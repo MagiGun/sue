@@ -1,75 +1,22 @@
-//! The live GPU window: the shell runtime driven by the native desktop host.
+//! The live GPU window: the runtime driven by the native desktop host.
 
 use std::time::Instant;
 
 use sue_platform::{
-    CursorShape, DesktopApp, DesktopHost, DesktopOptions, FramePacing, GpuPreference, InputEvent,
-    MouseEvent, PlatformHost, PlatformPaths, Point, WindowEvent, audio_output_devices, run_desktop,
-    wgpu, write_atomic,
+    DesktopApp, DesktopHost, DesktopOptions, FramePacing, GpuPreference, PlatformHost,
+    PlatformPaths, audio_output_devices, run_desktop, write_atomic,
 };
 use sue_rice::{DEFAULT_RICE, RiceSchema};
-use sue_wm::{FrameTarget, Rect, UiRenderer};
 
 use crate::engine::{BootOptions, Engine, RICE_FILE};
 use crate::runtime::Runtime;
 
-/// The window title.
+/// The window title (LAW 8: exactly `Sue`).
 pub const TITLE: &str = "Sue";
 
 #[derive(Default)]
 struct DesktopShell {
     runtime: Option<Runtime>,
-    renderer: Option<UiRenderer>,
-}
-
-impl DesktopShell {
-    fn ui_scale(runtime: &Runtime) -> f32 {
-        runtime.engine.workspace.config().ui_scale.max(0.25)
-    }
-
-    /// Maps window coordinates onto the scaled interface.
-    fn scale_event(event: InputEvent, scale: f32) -> InputEvent {
-        let point = |point: Point| Point::new(point.x / scale, point.y / scale);
-        match event {
-            InputEvent::Mouse(MouseEvent::Moved { position }) => {
-                InputEvent::Mouse(MouseEvent::Moved {
-                    position: point(position),
-                })
-            }
-            InputEvent::Mouse(MouseEvent::Button {
-                button,
-                pressed,
-                position,
-            }) => InputEvent::Mouse(MouseEvent::Button {
-                button,
-                pressed,
-                position: point(position),
-            }),
-            InputEvent::Mouse(MouseEvent::Wheel { delta_x, delta_y }) => {
-                InputEvent::Mouse(MouseEvent::Wheel {
-                    delta_x: delta_x / scale,
-                    delta_y: delta_y / scale,
-                })
-            }
-            InputEvent::Window(WindowEvent::Resized {
-                width,
-                height,
-                scale_factor,
-            }) => InputEvent::Window(WindowEvent::Resized {
-                width: width / scale,
-                height: height / scale,
-                scale_factor,
-            }),
-            other => other,
-        }
-    }
-
-    fn sync(host: &mut DesktopHost, runtime: &Runtime) {
-        host.set_wheel_line_px(runtime.engine.workspace.config().wheel_line_px);
-        if runtime.wants_exit() {
-            host.request_exit();
-        }
-    }
 }
 
 impl DesktopApp for DesktopShell {
@@ -86,72 +33,26 @@ impl DesktopApp for DesktopShell {
         };
         let engine = Engine::boot_with(&*host, options)?;
         let runtime = Runtime::new(engine)?.interactive(true);
-        eprintln!(
-            "sue: {TITLE} on {}, rice {}",
-            host.gpu().adapter_label(),
-            runtime.engine.rice_source
-        );
-        self.renderer = Some(UiRenderer::new(&host.gpu().device, host.surface_format()));
-        Self::sync(host, &runtime);
+        host.set_clear_color(runtime.theme().void);
         self.runtime = Some(runtime);
         Ok(())
     }
 
-    fn input(&mut self, host: &mut DesktopHost, event: InputEvent) -> bool {
+    fn ui(&mut self, ui: &mut egui::Ui, host: &mut DesktopHost) {
         let Some(runtime) = self.runtime.as_mut() else {
-            return false;
+            return;
         };
-        let event = Self::scale_event(event, Self::ui_scale(runtime));
-        let redraw = runtime.handle(&event);
-        Self::sync(host, runtime);
-        redraw
+        runtime.ui(ui, host.textures(), Instant::now());
+        host.set_clear_color(runtime.theme().void);
+        if runtime.wants_exit() {
+            host.request_exit();
+        }
     }
 
     fn timer(&mut self, host: &mut DesktopHost) -> bool {
-        let Some(runtime) = self.runtime.as_mut() else {
-            return false;
-        };
-        let redraw = runtime.timer(Instant::now());
-        Self::sync(host, runtime);
-        redraw
-    }
-
-    fn frame(&mut self, host: &mut DesktopHost) {
-        let (Some(runtime), Some(renderer)) = (self.runtime.as_mut(), self.renderer.as_mut())
-        else {
-            return;
-        };
-        let info = host.window_info().clone();
-        let ui_scale = Self::ui_scale(runtime);
-        let viewport = Rect::new(0.0, 0.0, info.width / ui_scale, info.height / ui_scale);
-        let output = runtime.frame(viewport, info.safe_area, Instant::now());
-        host.set_cursor(output.cursor.unwrap_or(CursorShape::Default));
-        if let Some(frame) = host.acquire_frame() {
-            let view = frame
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor::default());
-            let (width, height) = host.physical_size();
-            let gpu = host.gpu();
-            renderer.render(
-                &gpu.device,
-                &gpu.queue,
-                &view,
-                FrameTarget {
-                    width,
-                    height,
-                    scale: info.scale_factor * ui_scale,
-                },
-                &output.canvas,
-                &runtime.fonts,
-                &runtime.engine.world.arena,
-                runtime.theme().base,
-            );
-            host.present(frame);
-        }
-        if let Some(Err(error)) = runtime.persist() {
-            eprintln!("sue: could not save the rice: {error}");
-        }
-        Self::sync(host, runtime);
+        self.runtime
+            .as_mut()
+            .is_some_and(|runtime| runtime.timer(host.textures(), Instant::now()))
     }
 
     fn pacing(&mut self, now: Instant) -> FramePacing {
@@ -182,7 +83,6 @@ pub fn run() -> Result<(), String> {
             title: TITLE.to_owned(),
             width: 1440.0,
             height: 900.0,
-            wheel_line_px: 48.0,
             gpu: gpu_preference(),
         },
     )
@@ -202,22 +102,4 @@ fn gpu_preference() -> GpuPreference {
                 .map(GpuPreference::from_setting)
         })
         .unwrap_or_default()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_interface_scale_maps_pointer_coordinates() {
-        let event = InputEvent::Mouse(MouseEvent::Moved {
-            position: Point::new(300.0, 150.0),
-        });
-        assert_eq!(
-            DesktopShell::scale_event(event, 1.5),
-            InputEvent::Mouse(MouseEvent::Moved {
-                position: Point::new(200.0, 100.0)
-            })
-        );
-    }
 }

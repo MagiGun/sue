@@ -163,7 +163,15 @@ impl Arena {
         name: impl Into<String>,
         base: impl Into<ComponentData>,
     ) -> AssetHandle {
-        let entity = Entity::new(name.into(), base.into());
+        self.insert(Entity::new(name.into(), base.into()))
+    }
+
+    /// Puts back an entity that [`despawn`](Self::despawn) returned, under a
+    /// new handle (redoing a creation brings the same buffers back).
+    ///
+    /// # Panics
+    /// If more than `u32::MAX` slots would be needed.
+    pub fn insert(&mut self, entity: Entity) -> AssetHandle {
         self.live += 1;
         if let Some(index) = self.free.pop() {
             let slot = &mut self.slots[index as usize];
@@ -176,6 +184,26 @@ impl Arena {
             entity: Some(entity),
         });
         AssetHandle::new(index, 1)
+    }
+
+    /// Puts back an entity that [`despawn`](Self::despawn) removed from
+    /// `handle`, under the same handle when its slot was not reused since,
+    /// so later edits that name the handle still apply (redo). Otherwise
+    /// the entity gets a new handle.
+    pub fn restore(&mut self, handle: AssetHandle, entity: Entity) -> AssetHandle {
+        let index = handle.index();
+        let reusable = self.slots.get(index as usize).is_some_and(|slot| {
+            slot.entity.is_none() && slot.generation == handle.generation().wrapping_add(1)
+        }) && self.free.contains(&index);
+        if !reusable {
+            return self.insert(entity);
+        }
+        self.free.retain(|free| *free != index);
+        let slot = &mut self.slots[index as usize];
+        slot.generation = handle.generation();
+        slot.entity = Some(entity);
+        self.live += 1;
+        handle
     }
 
     /// Removes an entity and returns it. Every handle to it becomes stale.
@@ -370,6 +398,21 @@ mod tests {
         assert!(arena.is_empty());
         assert_eq!(arena.get(handle), Err(CoreError::StaleHandle(handle)));
         assert!(arena.despawn(handle).is_err());
+    }
+
+    #[test]
+    fn restored_entities_keep_their_handle_unless_the_slot_was_reused() {
+        let mut arena = Arena::new();
+        let handle = arena.spawn("a", StringBuffer::new());
+        let entity = arena.despawn(handle).unwrap();
+        assert_eq!(arena.restore(handle, entity), handle);
+        assert!(arena.get(handle).is_ok());
+        let entity = arena.despawn(handle).unwrap();
+        let other = arena.spawn("b", StringBuffer::new());
+        let restored = arena.restore(handle, entity);
+        assert_ne!(restored, handle);
+        assert_ne!(restored, other);
+        assert_eq!(arena.len(), 2);
     }
 
     #[test]

@@ -1,20 +1,22 @@
 //! The built-in applets, installed into the Launchpad at runtime (LAW 1).
-//! Packages add more through the same `Launchpad::register` call; the order
-//! here is the order of the activity rails.
+//! Packages add more through the same `Launchpad::register` call; each
+//! applet's manifest decides where it shows up (canvas modes, spawn buttons,
+//! timeline lanes, rails) and in which order.
 
 use sue_wm::{Launchpad, WmError};
 
-use crate::browser::Browser;
+use crate::audio_node::AudioNode;
 use crate::convert::Convert;
+use crate::document::Document;
 use crate::files::Files;
-use crate::hex_inspector::HexInspector;
+use crate::hex::Hex;
 use crate::history::History;
-use crate::image_viewer::ImageViewer;
+use crate::image::Image;
 use crate::inspector::Inspector;
+use crate::notes::Notes;
+use crate::paint::Paint;
 use crate::player::Player;
-use crate::quick_notes::QuickNotes;
 use crate::settings::Settings;
-use crate::text_studio::TextStudio;
 
 /// A launchpad with every built-in applet installed.
 ///
@@ -22,19 +24,21 @@ use crate::text_studio::TextStudio;
 /// If two applets share an id (a build error).
 pub fn launchpad() -> Result<Launchpad, WmError> {
     let mut launchpad = Launchpad::new();
-    // Left dock.
+    // Entities on the canvas.
+    launchpad.register(|| Box::new(Document))?;
+    launchpad.register(|| Box::new(Paint::default()))?;
+    launchpad.register(|| Box::new(AudioNode))?;
+    launchpad.register(|| Box::new(Image::default()))?;
+    launchpad.register(|| Box::new(Hex::default()))?;
+    // Left drawer.
     launchpad.register(|| Box::new(Files::default()))?;
     launchpad.register(|| Box::new(Player::default()))?;
     launchpad.register(|| Box::new(Convert::default()))?;
-    launchpad.register(|| Box::new(QuickNotes::default()))?;
-    // Right dock.
+    launchpad.register(|| Box::new(Notes))?;
+    // Right drawer.
     launchpad.register(|| Box::new(Inspector))?;
-    launchpad.register(|| Box::new(Browser::default()))?;
-    launchpad.register(|| Box::new(History::default()))?;
-    // Center Stage.
-    launchpad.register(|| Box::new(TextStudio::default()))?;
-    launchpad.register(|| Box::new(ImageViewer::default()))?;
-    launchpad.register(|| Box::new(HexInspector::default()))?;
+    launchpad.register(|| Box::new(History))?;
+    // Windows.
     launchpad.register(|| Box::new(Settings::default()))?;
     Ok(launchpad)
 }

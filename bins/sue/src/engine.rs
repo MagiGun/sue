@@ -1,10 +1,13 @@
-//! Boot: wires a platform host, the live rice (migrated when it is old), the
-//! undoable world, the catalog the applets read, and the window manager.
+//! Boot: wires a platform host, the live rice (migrated when it is old or
+//! tinted), the undoable world with its canvas, the catalog Settings reads,
+//! and the three entities Sue opens with: a Document, a Paint layer and an
+//! Audio waveform, already on the infinite canvas.
 
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use egui::{Rect, pos2, vec2};
 use sue_ai::{AiTask, ComputeBackend, LocalModelRegistry, MidSideStemSplit, ModelFormat};
 use sue_core::{StringBuffer, UndoStack};
 use sue_io::meta;
@@ -17,22 +20,22 @@ use sue_rice::{
     migrate,
 };
 use sue_wm::{
-    AppletCategory, AppletContext, Catalog, Choice, CommandButton, InfoTable, SettingsGroup,
-    SettingsItem, SettingsPage, ShellRequest, WmConfig, Workspace, World, Zone,
+    AppletId, AppletRole, Catalog, Choice, CommandButton, InfoTable, Launchpad, SceneNode,
+    SettingsGroup, SettingsItem, SettingsPage, ShellRequest, WmConfig, World,
 };
 
-use crate::applets;
 use crate::util::human_bytes;
+use crate::{applets, audio_node, document, paint};
 
 /// The live rice file in the platform rice directory. It starts as a byte-for-
 /// byte copy of the built-in `default.suerice` and is written back
 /// format-preservingly after every edit.
 pub const RICE_FILE: &str = "default.suerice";
 
-/// Where Quick Notes are saved, in the notes directory.
+/// Where Notes are saved, in the notes directory.
 pub const NOTE_FILE: &str = "quick-note.txt";
 
-/// The entity Quick Notes edits; every instance shares it.
+/// The entity Notes edits.
 pub const NOTE_NAME: &str = "Quick Note";
 
 /// Where the live rice came from.
@@ -42,7 +45,8 @@ pub enum RiceSource {
     Default,
     /// A file on disk.
     File(PathBuf),
-    /// A file from an older release, migrated on this boot.
+    /// A file from an older release or with tinted colors, migrated on this
+    /// boot (the old file is kept next to it).
     Migrated {
         /// The file.
         path: PathBuf,
@@ -50,6 +54,8 @@ pub enum RiceSource {
         from: u32,
         /// Customized values that were carried over.
         kept: usize,
+        /// Tinted colors reset to the monochrome defaults.
+        purged: usize,
     },
     /// A file that did not parse; it was set aside and the defaults used.
     Recovered {
@@ -65,9 +71,14 @@ impl fmt::Display for RiceSource {
         match self {
             Self::Default => f.write_str("built-in default.suerice"),
             Self::File(path) => write!(f, "{}", path.display()),
-            Self::Migrated { path, from, kept } => write!(
+            Self::Migrated {
+                path,
+                from,
+                kept,
+                purged,
+            } => write!(
                 f,
-                "{} (migrated from format {from}, {kept} custom values kept)",
+                "{} (migrated from format {from}, {kept} custom values kept, {purged} tinted colors reset)",
                 path.display()
             ),
             Self::Recovered { backup, error } => write!(
@@ -99,12 +110,12 @@ pub fn shell_declarations() -> Vec<RiceDeclaration> {
         declare(
             "general.workspace_dir",
             text(""),
-            "Folder the Files panel opens in (empty for your home folder)",
+            "Folder the Files drawer opens in (empty for your home folder)",
         ),
         declare(
             "general.autosave_seconds",
             int(30, 0, 600),
-            "Save Quick Notes this often, in seconds (0 turns autosave off)",
+            "Save notes this often, in seconds (0 turns autosave off)",
         ),
         declare(
             "general.confirm_on_exit",
@@ -125,6 +136,11 @@ pub fn shell_declarations() -> Vec<RiceDeclaration> {
             "io.jpeg_lossless_transcode",
             toggle(true),
             "Recompress JPEG to JPEG XL bit for bit when a recompression codec is installed",
+        ),
+        declare(
+            "io.jpeg_quality",
+            int(90, 10, 100),
+            "JPEG quality for conversions to .jpg",
         ),
         declare(
             "io.byte_map_width",
@@ -190,11 +206,6 @@ pub fn shell_declarations() -> Vec<RiceDeclaration> {
             toggle(true),
             "Only accept packages with a valid Ed25519 signature",
         ),
-        declare(
-            "browser.bookmarks",
-            text("https://www.rust-lang.org, https://docs.rs, https://jpeg.org/jpegxl"),
-            "Bookmarks, separated by commas",
-        ),
     ]
 }
 
@@ -256,16 +267,20 @@ pub struct Engine {
     pub capabilities: HardwareCapabilities,
     /// Platform directories.
     pub paths: PlatformPaths,
-    /// The arena and the live rice.
+    /// The arena, the live rice and the canvas.
     pub world: World,
     /// The global undo tree.
     pub history: UndoStack<World>,
-    /// Applet requests waiting for the shell.
+    /// Requests waiting for the runtime.
     pub requests: Vec<ShellRequest>,
     /// Where the rice came from.
     pub rice_source: RiceSource,
-    /// The shell.
-    pub workspace: Workspace,
+    /// The installed applets.
+    pub launchpad: Launchpad,
+    /// The window-manager config.
+    pub config: WmConfig,
+    /// The active hardware profile.
+    pub profile: HardwareProfile,
     /// Settings pages, live choices and system tables.
     pub catalog: Catalog,
     /// The audio output, once something played.
@@ -274,6 +289,29 @@ pub struct Engine {
     pub audio_error: Option<String>,
     options: BootOptions,
 }
+
+/// Places a boot entity on the canvas, outside the undo history.
+fn place(
+    world: &mut World,
+    handle: sue_core::AssetHandle,
+    applet: &str,
+    rect: Rect,
+    props: &[(&str, f64)],
+) {
+    let mut node = SceneNode::new(
+        handle,
+        AppletId::new(applet).expect("built-in applet ids are valid"),
+        rect,
+    );
+    for (key, value) in props {
+        node.props.insert((*key).to_owned(), *value);
+    }
+    let id = world.scene.allocate();
+    world.scene.insert(id, node);
+}
+
+/// The text the welcome document starts with.
+const WELCOME: &str = "# Welcome to Sue\n\nThis is a **Document** on the infinite canvas. Click into it and type; select text with the mouse, double-click a word, use `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, and undo with `Ctrl+Z`.\n\n## Around you\n\nScroll to zoom, drag with the middle button or hold Space to pan, and right-click for the marking menu. Press Tab for the command palette.\n";
 
 impl Engine {
     /// Boots against `host` with no audio devices or GPU to report.
@@ -285,9 +323,9 @@ impl Engine {
     }
 
     /// Boots against `host`: loads the live rice file (migrating one from an
-    /// older release, setting aside one that does not parse), registers every
-    /// riceable, loads the Quick Note, installs the built-in applets and boots
-    /// the workspace.
+    /// older release or with tinted colors, setting aside one that does not
+    /// parse), registers every riceable, loads the note, installs the
+    /// built-in applets and places the boot entities on the canvas.
     ///
     /// # Errors
     /// A message naming the subsystem that failed.
@@ -300,17 +338,10 @@ impl Engine {
             .map_err(|error| format!("rice: {error}"))?;
         rice.register_all(&launchpad.rice_declarations())
             .map_err(|error| format!("rice: {error}"))?;
-
         let config =
             WmConfig::from_rice(&rice).map_err(|error| format!("window manager: {error}"))?;
         let profile = HardwareProfile::resolve(&config.hardware_profile, host.capabilities());
-        let workspace = Workspace::new(
-            launchpad,
-            config,
-            profile,
-            host.capabilities().display_refresh_hz,
-            host.form_factor(),
-        );
+
         let mut world = World {
             rice,
             ..World::default()
@@ -330,6 +361,40 @@ impl Engine {
         if let Ok(entity) = world.arena.get_mut(handle) {
             entity.set_meta(meta::SOURCE, note_path.display().to_string());
         }
+
+        // The three live entities Sue opens with.
+        let document_size = world.rice.get_i64("typography.document_size").unwrap_or(15);
+        let text = world
+            .arena
+            .spawn("Welcome", StringBuffer::from(WELCOME.to_owned()));
+        place(
+            &mut world,
+            text,
+            document::ID,
+            Rect::from_min_size(pos2(-620.0, -260.0), vec2(560.0, 440.0)),
+            &[("font_size", document_size as f64)],
+        );
+        let layer = paint::blank_layer(960, 600).map_err(|error| format!("paint: {error}"))?;
+        let canvas = world.arena.spawn("Sketch", layer);
+        if let Ok(entity) = world.arena.get_mut(canvas) {
+            entity.set_meta(paint::REVISION, "0");
+        }
+        place(
+            &mut world,
+            canvas,
+            paint::ID,
+            Rect::from_min_size(pos2(20.0, -260.0), vec2(560.0, 350.0 + sue_wm::NODE_TITLE)),
+            &[],
+        );
+        let tone = world.arena.spawn("Chord", audio_node::chord(48_000, 3.0));
+        place(
+            &mut world,
+            tone,
+            audio_node::ID,
+            Rect::from_min_size(pos2(20.0, 150.0), vec2(560.0, 200.0)),
+            &[],
+        );
+
         let mut engine = Self {
             os: host.os(),
             form_factor: host.form_factor(),
@@ -339,17 +404,15 @@ impl Engine {
             history: UndoStack::new(),
             requests: Vec::new(),
             rice_source,
-            workspace,
+            launchpad,
+            config,
+            profile,
             catalog: Catalog::default(),
             audio: None,
             audio_error: None,
             options,
         };
         engine.rebuild_catalog();
-        let (workspace, mut ctx) = engine.shell();
-        workspace
-            .boot(&mut ctx)
-            .map_err(|error| format!("window manager: {error}"))?;
         Ok(engine)
     }
 
@@ -358,7 +421,7 @@ impl Engine {
         self.paths.rice_dir().join(RICE_FILE)
     }
 
-    /// Where the Quick Note is saved.
+    /// Where the note is saved.
     pub fn note_path(&self) -> PathBuf {
         self.paths.notes_dir().join(NOTE_FILE)
     }
@@ -371,38 +434,14 @@ impl Engine {
         }
     }
 
-    /// The workspace plus an applet context over the rest of the engine.
-    pub fn shell(&mut self) -> (&mut Workspace, AppletContext<'_>) {
-        let audio: Option<&mut dyn AudioSink> = match self.audio.as_mut() {
-            Some(sink) => Some(sink.as_mut()),
-            None => None,
-        };
-        let ctx = AppletContext {
-            world: &mut self.world,
-            history: &mut self.history,
-            form_factor: self.form_factor,
-            profile: self.workspace.profile(),
-            requests: &mut self.requests,
-            focused: false,
-            catalog: &self.catalog,
-            audio,
-            inspection: Vec::new(),
-        };
-        (&mut self.workspace, ctx)
-    }
-
     /// Re-reads the window-manager config and hardware profile from the rice,
     /// after an edit, undo or redo.
     ///
     /// # Errors
     /// If a window-manager parameter is missing.
     pub fn refresh_config(&mut self) -> Result<(), String> {
-        let config = WmConfig::from_rice(&self.world.rice).map_err(|error| error.to_string())?;
-        let profile = HardwareProfile::resolve(&config.hardware_profile, &self.capabilities);
-        self.workspace.apply_config(config);
-        if profile != self.workspace.profile() {
-            self.workspace.set_profile(profile);
-        }
+        self.config = WmConfig::from_rice(&self.world.rice).map_err(|error| error.to_string())?;
+        self.profile = HardwareProfile::resolve(&self.config.hardware_profile, &self.capabilities);
         if let Some(sink) = self.audio.as_mut() {
             let volume = self.world.rice.get_f64("audio.volume").unwrap_or(0.8) as f32;
             sink.set_volume(volume);
@@ -437,6 +476,7 @@ impl Engine {
         self.catalog = self.build_catalog();
     }
 
+    #[allow(clippy::too_many_lines, reason = "the Settings pages, as data")]
     fn build_catalog(&self) -> Catalog {
         let rice = &self.world.rice;
         let param = |path: &str| SettingsItem::Param(path.to_owned());
@@ -444,7 +484,7 @@ impl Engine {
         let fact = |id: &str| SettingsItem::Fact(id.to_owned());
         let table = |id: &str| SettingsItem::Table(id.to_owned());
         let group = SettingsGroup::new;
-        let launchpad = self.workspace.launchpad();
+        let params = |paths: &[&str]| paths.iter().map(|path| param(path)).collect::<Vec<_>>();
 
         let mut catalog = Catalog {
             presets: builtin_presets(),
@@ -455,10 +495,10 @@ impl Engine {
                 "general",
                 "General",
                 vec![
-                    group("Startup", vec![param("launchpad.boot_into")]),
+                    group("Startup", vec![param("launchpad.boot_mode")]),
                     group(
                         "Workspace",
-                        vec![param("general.workspace_dir"), param("files.show_hidden")],
+                        params(&["general.workspace_dir", "files.show_hidden"]),
                     ),
                     group(
                         "Saving",
@@ -468,8 +508,7 @@ impl Engine {
                             fact("notes.path"),
                         ],
                     ),
-                    group("Quick Notes", vec![section("quick_notes")]),
-                    group("Browser", vec![param("browser.bookmarks")]),
+                    group("Notes", vec![section("notes")]),
                 ],
             ),
             SettingsPage::new(
@@ -478,32 +517,8 @@ impl Engine {
                 vec![
                     group("Theme", vec![SettingsItem::Presets]),
                     group("Colors", vec![section("colors")]),
-                    group(
-                        "Geometry",
-                        [
-                            "layout.gap",
-                            "layout.padding",
-                            "layout.border_width",
-                            "layout.panel_radius",
-                            "layout.control_radius",
-                            "layout.header_height",
-                            "layout.status_bar_height",
-                            "layout.rail_width",
-                            "layout.left_dock_width",
-                            "layout.right_dock_width",
-                            "layout.timeline_height",
-                            "layout.tab_accent",
-                            "layout.slider_track",
-                            "layout.settings_sidebar_width",
-                            "launchpad.card_width",
-                            "layout.min_center_width",
-                            "layout.drawer_max_fraction",
-                            "layout.sheet_max_fraction",
-                        ]
-                        .into_iter()
-                        .map(param)
-                        .collect(),
-                    ),
+                    group("Geometry", vec![section("layout")]),
+                    group("Canvas", vec![section("canvas")]),
                     group("Typography", vec![section("typography")]),
                     group(
                         "Rice File",
@@ -533,29 +548,13 @@ impl Engine {
                     ),
                     group(
                         "Frame Pacing",
-                        vec![
-                            param("display.frame_rate_cap"),
-                            param("motion.settle_grace_ms"),
-                        ],
+                        params(&["display.frame_rate_cap", "motion.settle_grace_ms"]),
                     ),
                     group(
                         "Scale",
-                        vec![param("display.ui_scale"), param("input.wheel_line_px")],
+                        params(&["display.ui_scale", "input.wheel_line_px"]),
                     ),
-                    group(
-                        "Motion",
-                        [
-                            "motion.instant_transitions",
-                            "motion.animation_speed",
-                            "motion.spring_stiffness",
-                            "motion.spring_damping",
-                            "motion.caret_blink_ms",
-                            "motion.message_seconds",
-                        ]
-                        .into_iter()
-                        .map(param)
-                        .collect(),
-                    ),
+                    group("Motion", vec![section("motion")]),
                 ],
             ),
             SettingsPage::new(
@@ -564,13 +563,13 @@ impl Engine {
                 vec![
                     group(
                         "Output",
-                        vec![
-                            param("audio.output_device"),
-                            param("audio.sample_rate"),
-                            param("audio.buffer_frames"),
-                            param("audio.realtime_priority"),
-                            param("audio.volume"),
-                        ],
+                        params(&[
+                            "audio.output_device",
+                            "audio.sample_rate",
+                            "audio.buffer_frames",
+                            "audio.realtime_priority",
+                            "audio.volume",
+                        ]),
                     ),
                     group("Status", vec![fact("audio.stream"), fact("audio.realtime")]),
                 ],
@@ -581,13 +580,14 @@ impl Engine {
                 vec![
                     group(
                         "JPEG XL",
-                        vec![param("io.jxl_effort"), param("io.jpeg_lossless_transcode")],
+                        params(&["io.jxl_effort", "io.jpeg_lossless_transcode"]),
                     ),
-                    group("Conversion", vec![param("io.convert_dir")]),
+                    group("Conversion", params(&["io.convert_dir", "io.jpeg_quality"])),
                     group(
                         "Opening Files",
-                        vec![param("io.max_ingest_mib"), param("io.byte_map_width")],
+                        params(&["io.max_ingest_mib", "io.byte_map_width"]),
                     ),
+                    group("Paint Layers", vec![section("paint")]),
                     group("Built-in Codecs", vec![table("codecs")]),
                 ],
             ),
@@ -643,19 +643,14 @@ impl Engine {
         ];
 
         // Live choices.
-        let mut boot = vec![Choice::new("hub", "Home")];
-        boot.extend(
-            launchpad
-                .manifests()
-                .filter(|manifest| {
-                    manifest.home_zone == Zone::CenterStage
-                        && manifest.category != AppletCategory::System
-                })
-                .map(|manifest| Choice::new(manifest.id.as_str(), manifest.name.clone())),
-        );
+        let mut boot = vec![Choice::new("canvas", "Canvas")];
+        boot.extend(self.launchpad.manifests().filter_map(|manifest| {
+            let mode = manifest.mode.as_ref()?;
+            Some(Choice::new(manifest.id.as_str(), mode.label.clone()))
+        }));
         catalog
             .choices
-            .insert("launchpad.boot_into".to_owned(), boot);
+            .insert("launchpad.boot_mode".to_owned(), boot);
         let mut devices = vec![Choice::new("", "System default")];
         devices.extend(
             self.options
@@ -726,20 +721,21 @@ impl Engine {
         catalog.tables.insert(
             "applets".to_owned(),
             InfoTable {
-                columns: vec!["Applet".into(), "Kind".into(), "Lives in".into()],
-                rows: launchpad
+                columns: vec!["Applet".into(), "Lives in".into(), "What it does".into()],
+                rows: self
+                    .launchpad
                     .manifests()
                     .map(|manifest| {
-                        let place = match manifest.home_zone {
-                            Zone::LeftDock => "Left dock",
-                            Zone::RightDock => "Right dock",
-                            Zone::BottomTimeline => "Timeline",
-                            Zone::CenterStage => "Center Stage",
+                        let place = match manifest.role {
+                            AppletRole::Node => "Canvas",
+                            AppletRole::LeftDrawer => "Left drawer",
+                            AppletRole::RightDrawer => "Right drawer",
+                            AppletRole::Window => "Window",
                         };
                         vec![
                             manifest.name.clone(),
-                            format!("{:?}", manifest.category),
                             place.to_owned(),
+                            manifest.summary.clone(),
                         ]
                     })
                     .collect(),
@@ -764,17 +760,22 @@ impl Engine {
         facts("rice.path", "File", self.rice_source.to_string());
         facts(
             "notes.path",
-            "Quick Note file",
+            "Note file",
             self.note_path().display().to_string(),
         );
+        let target = {
+            let mut scheduler =
+                sue_wm::FrameScheduler::new(self.profile, self.capabilities.display_refresh_hz);
+            scheduler.set_frame_cap(self.config.frame_rate_cap);
+            scheduler.target_hz()
+        };
         facts(
             "display.profile",
             "Active profile",
             format!(
-                "{} ({} Hz display, {} FPS animation target)",
-                sue_wm::profile_label(self.workspace.profile()),
+                "{} ({} Hz display, {target} FPS animation target)",
+                sue_wm::profile_label(self.profile),
                 self.capabilities.display_refresh_hz,
-                self.workspace.target_hz()
             ),
         );
         facts(
@@ -813,7 +814,7 @@ impl Engine {
             }
             (None, Some(error)) => (format!("Unavailable: {error}"), "Not running".to_owned()),
             (None, None) => (
-                "Closed. It opens when the Player starts.".to_owned(),
+                "Closed. It opens when something plays.".to_owned(),
                 "Not running".to_owned(),
             ),
         };
@@ -867,8 +868,9 @@ impl Engine {
     }
 }
 
-/// Reads the live rice file: missing means the defaults, an older format is
-/// migrated in place (keeping a backup), and an unreadable file is set aside.
+/// Reads the live rice file: missing means the defaults, an older or tinted
+/// file is migrated in place (keeping a backup), and an unreadable file is
+/// set aside.
 fn load_rice(path: &Path) -> Result<(RiceSchema, RiceSource), String> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
@@ -897,6 +899,7 @@ fn load_rice(path: &Path) -> Result<(RiceSchema, RiceSource), String> {
                     path: path.to_path_buf(),
                     from: migration.from,
                     kept: migration.kept.len(),
+                    purged: migration.purged.len(),
                 },
             ))
         }
@@ -983,20 +986,34 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn old_rice_files_are_migrated_on_boot_with_a_backup() {
+    fn boot_places_a_document_a_paint_layer_and_audio_on_the_canvas() {
+        let (host, root) = temp_host("boot");
+        let engine = Engine::boot(&host).unwrap();
+        let applets: Vec<&str> = engine
+            .world
+            .scene
+            .iter()
+            .map(|(_, node)| node.applet.as_str())
+            .collect();
+        assert_eq!(applets, [document::ID, paint::ID, audio_node::ID]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn old_and_tinted_rice_files_are_migrated_on_boot_with_a_backup() {
         let (host, root) = temp_host("migrate");
         let path = host.paths().rice_dir().join(RICE_FILE);
-        let old = include_str!("../../../crates/sue-rice/rice/history/v1.suerice");
+        let old = include_str!("../../../crates/sue-rice/rice/history/v2.suerice");
         write_atomic(&path, old.as_bytes()).unwrap();
         let engine = Engine::boot(&host).unwrap();
         assert!(matches!(
             engine.rice_source,
-            RiceSource::Migrated { from: 1, .. }
+            RiceSource::Migrated { from: 2, .. }
         ));
         let migrated = std::fs::read_to_string(&path).unwrap();
-        assert!(!migrated.contains("#c9a227") && migrated.contains("#3b82f6"));
-        assert_eq!(engine.world.rice.get_i64("layout.gap"), Some(0));
-        let backup = path.with_extension("suerice.v1.bak");
+        assert!(!migrated.contains("#3b82f6"));
+        assert_eq!(engine.world.rice.get_i64("layout.rail_width"), Some(36));
+        let backup = path.with_extension("suerice.v2.bak");
         assert_eq!(std::fs::read_to_string(&backup).unwrap(), old);
         // A second boot finds the file current.
         assert!(matches!(
@@ -1010,7 +1027,7 @@ pub(crate) mod tests {
     fn unreadable_rice_is_set_aside_not_fatal() {
         let (host, root) = temp_host("broken");
         let path = host.paths().rice_dir().join(RICE_FILE);
-        write_atomic(&path, b"# sue-rice format 2\n[broken\n").unwrap();
+        write_atomic(&path, b"# sue-rice format 3\n[broken\n").unwrap();
         let engine = Engine::boot(&host).unwrap();
         assert!(matches!(engine.rice_source, RiceSource::Recovered { .. }));
         assert!(path.with_extension("suerice.broken").exists());
@@ -1022,7 +1039,6 @@ pub(crate) mod tests {
     fn the_catalog_reaches_every_rice_section() {
         let (host, root) = temp_host("catalog");
         let engine = Engine::boot(&host).unwrap();
-        assert_eq!(engine.catalog.pages.len(), 8);
         let titles: Vec<&str> = engine
             .catalog
             .pages

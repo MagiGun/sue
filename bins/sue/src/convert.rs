@@ -1,16 +1,15 @@
-//! Convert: turns an opened picture into JPEG XL or PNG, or a song into WAV.
-//! Sources are the decoded assets already in the arena, so nothing is read
-//! twice; JPEG sources are recompressed bit for bit when a codec allows.
+//! Convert: turns an opened picture into JPEG XL, PNG or JPEG, or a song
+//! into WAV. Sources are the decoded assets already in the arena, so nothing
+//! is read twice; JPEG sources are recompressed bit for bit when a codec
+//! allows.
 
 use std::path::{Path, PathBuf};
 
+use egui::{RichText, Sense, Ui, vec2};
 use sue_core::{AssetHandle, ComponentKind};
-use sue_io::{JxlError, JxlPipeline, NativeJxlPipeline, encode_png, encode_wav, meta};
-use sue_platform::{InputEvent, write_atomic};
-use sue_wm::{
-    AppletCategory, AppletContext, AppletError, AppletId, AppletManifest, InputResponse, Rect,
-    ShellRequest, SueApplet, Ui, UiChoice, World, Zone, widget_id,
-};
+use sue_io::{JxlError, JxlPipeline, NativeJxlPipeline, encode_jpeg, encode_png, encode_wav, meta};
+use sue_platform::write_atomic;
+use sue_wm::{AppletContext, AppletManifest, AppletRole, SueApplet, World, widgets};
 
 use crate::util::{file_name, free_path, human_bytes};
 
@@ -24,17 +23,18 @@ pub enum Target {
     Jxl,
     /// PNG.
     Png,
+    /// Baseline JPEG at `io.jpeg_quality`.
+    Jpg,
     /// 16-bit PCM WAV.
     Wav,
 }
 
 impl Target {
-    const ALL: [Self; 3] = [Self::Jxl, Self::Png, Self::Wav];
-
     fn extension(self) -> &'static str {
         match self {
             Self::Jxl => "jxl",
             Self::Png => "png",
+            Self::Jpg => "jpg",
             Self::Wav => "wav",
         }
     }
@@ -43,6 +43,7 @@ impl Target {
         match self {
             Self::Jxl => ".jxl",
             Self::Png => ".png",
+            Self::Jpg => ".jpg",
             Self::Wav => ".wav",
         }
     }
@@ -58,7 +59,7 @@ enum Kind {
 impl Kind {
     fn targets(self) -> &'static [Target] {
         match self {
-            Self::Image => &[Target::Jxl, Target::Png],
+            Self::Image => &[Target::Jxl, Target::Png, Target::Jpg],
             Self::Audio => &[Target::Wav],
         }
     }
@@ -69,9 +70,9 @@ fn kind_of(world: &World, handle: AssetHandle) -> Option<Kind> {
     if entity.component(ComponentKind::PCMFloat1D).is_some() {
         return Some(Kind::Audio);
     }
-    // Decoded pictures carry their size; byte maps carry their entropy.
+    // Decoded pictures and paint layers; byte maps carry their entropy.
     (entity.component(ComponentKind::RasterTile2D).is_some()
-        && entity.meta(meta::WIDTH).is_some()
+        && (entity.meta(meta::WIDTH).is_some() || entity.meta(crate::paint::REVISION).is_some())
         && entity.meta(meta::ENTROPY).is_none())
     .then_some(Kind::Image)
 }
@@ -117,7 +118,7 @@ pub fn convert(
                 .ok_or("only audio converts to WAV")?;
             encode_wav(pcm)
         }
-        Target::Png | Target::Jxl => {
+        Target::Png | Target::Jxl | Target::Jpg => {
             let tile = entity
                 .component(ComponentKind::RasterTile2D)
                 .and_then(|data| data.as_raster())
@@ -127,8 +128,14 @@ pub fn convert(
                     .rice
                     .get_bool("io.jpeg_lossless_transcode")
                     .unwrap_or(true);
+            let quality = world
+                .rice
+                .get_i64("io.jpeg_quality")
+                .and_then(|quality| u8::try_from(quality).ok())
+                .unwrap_or(90);
             match target {
                 Target::Png => encode_png(tile)?,
+                Target::Jpg => encode_jpeg(tile, quality)?,
                 _ if jpeg_source => {
                     let original = entity
                         .meta(meta::SOURCE)
@@ -175,208 +182,138 @@ pub fn convert(
     Ok((path, summary))
 }
 
-/// The converter in the Left Dock.
+/// The converter in the left drawer.
 #[derive(Debug, Default)]
 pub struct Convert {
     source: Option<AssetHandle>,
-    newest: Option<AssetHandle>,
     target: Option<Target>,
     status: Option<(String, bool)>,
-    output: Option<PathBuf>,
 }
 
 impl Convert {
-    fn out_dir(ctx: &AppletContext<'_>, source: AssetHandle) -> PathBuf {
-        let riced = ctx.rice().get_str("io.convert_dir").unwrap_or("").trim();
+    fn out_dir(cx: &AppletContext<'_>, source: AssetHandle) -> PathBuf {
+        let riced = cx.rice().get_str("io.convert_dir").unwrap_or("").trim();
         if !riced.is_empty() {
             return PathBuf::from(riced);
         }
-        ctx.arena()
+        cx.arena()
             .get(source)
             .ok()
             .and_then(|entity| entity.meta(meta::SOURCE))
             .and_then(|path| Path::new(path).parent().map(Path::to_path_buf))
-            .or_else(|| ctx.catalog.folders.get("home").cloned())
+            .or_else(|| cx.catalog.folders.get("home").cloned())
             .unwrap_or_default()
     }
 }
 
 impl SueApplet for Convert {
     fn manifest(&self) -> AppletManifest {
-        AppletManifest {
-            id: AppletId::new(ID).expect("the Convert id is valid"),
-            name: "Convert".to_owned(),
-            category: AppletCategory::Utility,
-            home_zone: Zone::LeftDock,
-            uses_timeline: false,
-            summary: "Turn pictures into JPEG XL or PNG and songs into WAV.".to_owned(),
-            opens: Vec::new(),
-            icon: "\u{1F504}".to_owned(),
-            singleton: false,
-        }
+        let mut manifest = AppletManifest::new(ID, "Convert", AppletRole::LeftDrawer, "\u{1F504}");
+        manifest.summary =
+            "Turn pictures into JPEG XL, PNG or JPEG, and songs into WAV.".to_owned();
+        manifest.order = 30;
+        manifest
     }
 
-    fn mount(&mut self, _ctx: &mut AppletContext<'_>) -> Result<(), AppletError> {
-        Ok(())
-    }
-
-    fn handle_input(
-        &mut self,
-        _event: &InputEvent,
-        _ctx: &mut AppletContext<'_>,
-    ) -> Result<InputResponse, AppletError> {
-        Ok(InputResponse::Ignored)
-    }
-
-    fn draw(&mut self, ui: &mut Ui<'_>, area: Rect, ctx: &mut AppletContext<'_>) {
-        let theme = ui.theme;
-        let pad = theme.padding;
-        let row = ui.row_height();
-        let found = candidates(ctx.world);
-        // Follow new arrivals: the newest file opened becomes the source.
-        let newest = found.first().map(|(handle, _)| *handle);
-        if newest != self.newest {
-            self.newest = newest;
-            self.source = newest;
-            self.target = None;
-        }
+    fn drawer_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        let theme = cx.theme.clone();
+        let found = candidates(cx.world);
         if self
             .source
-            .is_some_and(|source| !found.iter().any(|(handle, _)| *handle == source))
+            .is_none_or(|source| found.iter().all(|(handle, _)| *handle != source))
         {
-            self.source = newest;
+            self.source = found.first().map(|(handle, _)| *handle);
         }
-        let mut y = area.y;
-        let caption = |ui: &mut Ui<'_>, y: f32, text: &str| {
-            ui.label_sized(
-                Rect::new(area.x, y, area.width, row),
-                text,
-                theme.small_size,
+        widgets::heading(ui, "Source", &theme);
+        if found.is_empty() {
+            ui.label(
+                RichText::new("Open a picture or a song first; it shows up here.")
+                    .color(theme.muted),
+            );
+            return;
+        }
+        for (handle, kind) in &found {
+            let name = cx
+                .arena()
+                .get(*handle)
+                .map_or_else(|_| String::new(), |entity| entity.name().to_owned());
+            let chosen = self.source == Some(*handle);
+            let (rect, response) = ui.allocate_exact_size(
+                vec2(ui.available_width(), theme.ui_size * 1.9),
+                Sense::click(),
+            );
+            if chosen || response.hovered() {
+                ui.painter().rect_filled(
+                    rect,
+                    4.0,
+                    if chosen { theme.active } else { theme.hover },
+                );
+            }
+            ui.painter().text(
+                rect.left_center() + vec2(8.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                &name,
+                theme.font(theme.ui_size),
+                theme.text,
+            );
+            ui.painter().text(
+                rect.right_center() - vec2(8.0, 0.0),
+                egui::Align2::RIGHT_CENTER,
+                match kind {
+                    Kind::Image => "Picture",
+                    Kind::Audio => "Audio",
+                },
+                theme.font(theme.small_size),
                 theme.muted,
             );
+            if response.clicked() {
+                self.source = Some(*handle);
+            }
+        }
+        let Some(source) = self.source else {
+            return;
         };
-        caption(ui, y, "SOURCE");
-        y += row;
-        if found.is_empty() {
-            y += ui.wrapped(
-                area.x,
-                y,
-                area.width,
-                "Open a picture (JPEG XL, PNG, JPEG) or a song (MP3, FLAC, WAV, Ogg, M4A) to convert it.",
-                theme.ui_size,
-                theme.muted,
-            ) + pad;
-        } else {
-            let options: Vec<UiChoice> = found
-                .iter()
-                .map(|(handle, _)| {
-                    UiChoice::new(
-                        ctx.arena()
-                            .get(*handle)
-                            .map_or_else(|_| "?".to_owned(), |entity| entity.name().to_owned()),
-                    )
-                })
-                .collect();
-            let selected = self
-                .source
-                .and_then(|source| found.iter().position(|(handle, _)| *handle == source));
-            if let Some(picked) = ui.dropdown(
-                widget_id("convert", "source"),
-                Rect::new(area.x, y, area.width, row),
-                &options,
-                selected,
-            ) {
-                self.source = Some(found[picked].0);
-                self.target = None;
-            }
-            y += row + pad / 2.0;
-        }
-        if ui.button(
-            widget_id("convert", "choose"),
-            Rect::new(area.x, y, area.width, row),
-            "Choose File...",
-        ) {
-            ctx.request(ShellRequest::Command("file.open".to_owned()));
-        }
-        y += row + pad;
-
-        let kind = self
-            .source
-            .and_then(|source| found.iter().find(|(handle, _)| *handle == source))
-            .map(|(_, kind)| *kind);
-        caption(ui, y, "FORMAT");
-        y += row;
-        let allowed = kind.map_or(&[][..], Kind::targets);
-        if self.target.is_none_or(|target| !allowed.contains(&target)) {
-            self.target = allowed.first().copied();
-        }
-        let options: Vec<UiChoice> = Target::ALL
+        let Some(kind) = found
             .iter()
-            .map(|target| UiChoice {
-                label: target.label().to_owned(),
-                enabled: allowed.contains(target),
-            })
+            .find(|(handle, _)| *handle == source)
+            .map(|(_, kind)| *kind)
+        else {
+            return;
+        };
+        let targets = kind.targets();
+        if self.target.is_none_or(|target| !targets.contains(&target)) {
+            self.target = targets.first().copied();
+        }
+        ui.add_space(theme.padding);
+        widgets::heading(ui, "Format", &theme);
+        let labels: Vec<String> = targets
+            .iter()
+            .map(|target| target.label().to_owned())
             .collect();
-        let selected = self.target.and_then(|target| {
-            Target::ALL
-                .iter()
-                .position(|candidate| *candidate == target)
-        });
-        if let Some(picked) = ui.segmented(
-            widget_id("convert", "target"),
-            Rect::new(area.x, y, area.width, row),
-            &options,
-            selected,
-        ) {
-            self.target = Some(Target::ALL[picked]);
+        let chosen = self
+            .target
+            .and_then(|target| targets.iter().position(|t| *t == target));
+        if let Some(index) = widgets::segmented(ui, &labels, chosen, &theme) {
+            self.target = targets.get(index).copied();
         }
-        y += row + pad;
-
-        if let (Some(source), Some(target)) = (self.source, self.target) {
-            let out_dir = Self::out_dir(ctx, source);
-            let destination = format!("Saves into {}", out_dir.display());
-            y += ui.wrapped(
-                area.x,
-                y,
-                area.width,
-                &destination,
-                theme.small_size,
-                theme.muted,
-            ) + pad;
-            if ui.primary_button(
-                widget_id("convert", "go"),
-                Rect::new(area.x, y, area.width, row),
-                &format!("Convert to {}", target.label()),
-                true,
-            ) {
-                match convert(ctx.world, source, target, &out_dir) {
-                    Ok((path, summary)) => {
-                        self.status = Some((summary, false));
-                        self.output = Some(path);
-                    }
-                    Err(error) => {
-                        self.status = Some((error, true));
-                        self.output = None;
-                    }
-                }
-            }
-            y += row + pad;
+        ui.add_space(theme.padding);
+        if widgets::pill_button(ui, "Convert", false, &theme).clicked()
+            && let Some(target) = self.target
+        {
+            let dir = Self::out_dir(cx, source);
+            self.status = Some(match convert(cx.world, source, target, &dir) {
+                Ok((_, summary)) => (summary, false),
+                Err(error) => (error, true),
+            });
         }
-        if let Some((status, error)) = &self.status {
-            let color = if *error { theme.alert } else { theme.text };
-            y += ui.wrapped(area.x, y, area.width, status, theme.small_size, color) + pad / 2.0;
-            if let Some(folder) = self.output.as_ref().and_then(|path| path.parent())
-                && ui.button(
-                    widget_id("convert", "reveal"),
-                    Rect::new(area.x, y, area.width, row),
-                    "Show in Folder",
-                )
-            {
-                ctx.request(ShellRequest::Command(format!(
-                    "reveal:{}",
-                    folder.display()
-                )));
-            }
+        if let Some((text, error)) = &self.status {
+            ui.add_space(theme.padding * 0.5);
+            let shown = if *error {
+                format!("! {text}")
+            } else {
+                text.clone()
+            };
+            ui.label(RichText::new(shown).color(theme.muted));
         }
     }
 }
@@ -434,6 +371,8 @@ mod tests {
         assert!(std::fs::read(&png).unwrap().starts_with(b"\x89PNG"));
         let (again, _) = convert(&world, picture, Target::Png, &dir).unwrap();
         assert_eq!(file_name(&again), "card (2).png", "nothing is overwritten");
+        let (jpg, _) = convert(&world, picture, Target::Jpg, &dir).unwrap();
+        assert!(std::fs::read(&jpg).unwrap().starts_with(&[0xFF, 0xD8]));
         let (wav, _) = convert(&world, song, Target::Wav, &dir).unwrap();
         assert!(std::fs::read(&wav).unwrap().starts_with(b"RIFF"));
         assert!(convert(&world, song, Target::Png, &dir).is_err());

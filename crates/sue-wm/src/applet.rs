@@ -1,18 +1,26 @@
 //! The applet contract every tool, utility and studio implements (LAW 1).
+//!
+//! Nothing in the shell names an applet. Canvas entity kinds (documents,
+//! paint layers, audio, images, hex views), drawer utilities and the
+//! Settings window all register at runtime and describe themselves through
+//! an [`AppletManifest`]: the modes in the top pill, the spawn buttons, the
+//! wedges of the marking menu, the timeline lanes and the rail icons are
+//! all read from manifests.
 
 use std::fmt;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use sue_core::{Arena, AssetHandle, CoreError, NodeId, ReversibleTransaction, TxnError, UndoStack};
-use sue_platform::{AudioSink, FormFactor, InputEvent};
-use sue_rice::{HardwareProfile, RiceDeclaration, RiceSchema};
+use egui::{Ui, Vec2, vec2};
+use sue_core::{Arena, AssetHandle, CoreError, Entity, ReversibleTransaction, TxnError, UndoStack};
+use sue_platform::{AudioSink, FormFactor, TextureUpload};
+use sue_rice::{HardwareProfile, RiceDeclaration, RiceSchema, SetRiceValue};
 
 use crate::{
-    ArenaEdit, Catalog, PropertyGroup, Rect, RenderDemand, RiceEdit, Ui, WmError, World, Zone,
+    Catalog, NewEntity, NodeId, RiceEdit, SceneNode, Theme, Transport, Typing, WmError, World,
 };
 
-/// An applet's unique id: `[a-z][a-z0-9-]*`, e.g. `quick-notes`.
+/// An applet's unique id: `[a-z][a-z0-9-]*`, e.g. `paint`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AppletId(String);
 
@@ -49,33 +57,7 @@ impl fmt::Display for AppletId {
     }
 }
 
-/// What kind of applet this is, which decides where the shell lists it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum AppletCategory {
-    /// A full creative environment, listed on Home.
-    Studio,
-    /// A viewer for one kind of asset, listed on Home.
-    Inspector,
-    /// A dock tool, listed on its activity rail.
-    Utility,
-    /// Sue's own preferences: opened from the gear, the menu and a key.
-    System,
-}
-
-impl AppletCategory {
-    /// Plural section title on Home, e.g. `Studios`.
-    #[must_use]
-    pub const fn plural(self) -> &'static str {
-        match self {
-            Self::Studio => "Studios",
-            Self::Inspector => "Inspectors",
-            Self::Utility => "Utilities",
-            Self::System => "System",
-        }
-    }
-}
-
-/// Broad kinds of assets, used to pick an applet that can open one.
+/// Broad kinds of assets, used to pick the applet that shows an opened file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MediaClass {
     /// A decoded raster image.
@@ -84,8 +66,39 @@ pub enum MediaClass {
     Text,
     /// Decoded audio.
     Audio,
-    /// Raw bytes (byte map).
+    /// Raw bytes.
     Binary,
+}
+
+/// Where an applet lives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AppletRole {
+    /// Draws one kind of entity on the canvas, with a floating pill.
+    Node,
+    /// A utility in the left drawer, picked on the left rail.
+    LeftDrawer,
+    /// A utility in the right drawer, picked on the right rail.
+    RightDrawer,
+    /// A floating window over the canvas (Settings).
+    Window,
+}
+
+/// A mode in the top pill: switching to it frames an entity of the applet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModeSpec {
+    /// Button label, e.g. `Document`.
+    pub label: String,
+    /// `false` keeps it out of the top pill (it stays in the palette).
+    pub in_pill: bool,
+}
+
+/// A way to create a new entity of the applet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpawnSpec {
+    /// Top pill button, e.g. `+ Text`.
+    pub button: String,
+    /// Marking menu wedge and palette entry, e.g. `New Document`.
+    pub label: String,
 }
 
 /// Static facts about an applet.
@@ -95,158 +108,42 @@ pub struct AppletManifest {
     pub id: AppletId,
     /// Display name.
     pub name: String,
-    /// Category: where the shell lists the applet.
-    pub category: AppletCategory,
-    /// Zone the applet lives in: dock applets are mounted into their dock at
-    /// boot and picked on its rail; Center Stage applets open in tabs.
-    pub home_zone: Zone,
-    /// `true` if the applet works on time-based media, which shows the timeline.
-    pub uses_timeline: bool,
-    /// What it does, in a sentence or two (shown whole, never cut).
+    /// What it does, in a sentence.
     pub summary: String,
-    /// Asset kinds the applet can open (see [`SueApplet::open`]).
-    pub opens: Vec<MediaClass>,
+    /// Where it lives.
+    pub role: AppletRole,
     /// A one-character icon from the bundled fonts.
     pub icon: String,
-    /// `true` if at most one tab may host the applet.
-    pub singleton: bool,
+    /// Sort key among applets of the same role (lower first).
+    pub order: i32,
+    /// Asset kinds the applet shows.
+    pub opens: Vec<MediaClass>,
+    /// Its mode, for node applets.
+    pub mode: Option<ModeSpec>,
+    /// How to create new entities, for node applets.
+    pub spawn: Option<SpawnSpec>,
+    /// Its timeline lane, e.g. `Audio Track`.
+    pub lane: Option<String>,
 }
 
-/// Something an applet (or the shell) asks for after the current call.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ShellRequest {
-    /// Open `handle` in the first applet that opens `class`.
-    OpenAsset {
-        /// The entity.
-        handle: AssetHandle,
-        /// What it is.
-        class: MediaClass,
-    },
-    /// Open an applet, optionally at a place inside it (see
-    /// [`SueApplet::navigate`]).
-    OpenApplet {
-        /// Which applet.
-        id: AppletId,
-        /// Where inside it, e.g. a Settings page id.
-        target: Option<String>,
-    },
-    /// Read a file from disk and open it (handled by the engine).
-    OpenFile(PathBuf),
-    /// Open a web address in the system browser (handled by the engine).
-    OpenUrl(String),
-    /// An engine command, e.g. `rice.export` (handled by the engine).
-    Command(String),
-    /// Show a message in the status bar.
-    Notify(String),
-}
-
-/// What an applet may touch while handling a call. Applets hold handles, not
-/// data, and change the world only through transactions on `history`.
-pub struct AppletContext<'a> {
-    /// The arena and the live rice.
-    pub world: &'a mut World,
-    /// The global undo tree.
-    pub history: &'a mut UndoStack<World>,
-    /// Device form factor.
-    pub form_factor: FormFactor,
-    /// Active hardware profile.
-    pub profile: HardwareProfile,
-    /// Requests for the shell, processed after the call returns.
-    pub requests: &'a mut Vec<ShellRequest>,
-    /// `true` while the applet being called has keyboard focus.
-    pub focused: bool,
-    /// Settings pages, live choices and system tables.
-    pub catalog: &'a Catalog,
-    /// The audio output, when this host has one.
-    pub audio: Option<&'a mut dyn AudioSink>,
-    /// Properties of the active Center Stage applet, for the Inspector.
-    pub inspection: Vec<PropertyGroup>,
-}
-
-impl AppletContext<'_> {
-    /// The arena.
-    #[must_use]
-    pub fn arena(&self) -> &Arena {
-        &self.world.arena
-    }
-
-    /// The live rice.
-    #[must_use]
-    pub fn rice(&self) -> &RiceSchema {
-        &self.world.rice
-    }
-
-    /// Applies an arena transaction through the global undo tree.
+impl AppletManifest {
+    /// A manifest with the required facts; the rest is empty.
     ///
-    /// # Errors
-    /// The transaction's error; nothing is recorded then.
-    pub fn edit_arena<X>(&mut self, txn: X) -> Result<NodeId, TxnError>
-    where
-        X: ReversibleTransaction<Arena> + 'static,
-    {
-        self.history.apply(self.world, ArenaEdit(txn))
-    }
-
-    /// Applies a rice transaction through the global undo tree.
-    ///
-    /// # Errors
-    /// The transaction's error; nothing is recorded then.
-    pub fn edit_rice<X>(&mut self, txn: X) -> Result<NodeId, TxnError>
-    where
-        X: ReversibleTransaction<RiceSchema> + 'static,
-    {
-        self.history.apply(self.world, RiceEdit(txn))
-    }
-
-    /// Queues a request for the shell.
-    pub fn request(&mut self, request: ShellRequest) {
-        self.requests.push(request);
-    }
-}
-
-impl fmt::Debug for AppletContext<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AppletContext")
-            .field("entities", &self.world.arena.len())
-            .field("history", &self.history)
-            .field("form_factor", &self.form_factor)
-            .field("profile", &self.profile)
-            .field("audio", &self.audio.is_some())
-            .finish_non_exhaustive()
-    }
-}
-
-/// How an applet reacted to an input event.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InputResponse {
-    /// Not handled; the event may go elsewhere.
-    Ignored,
-    /// Handled.
-    Consumed {
-        /// `true` if something visible changed.
-        redraw: bool,
-    },
-}
-
-/// What a timer tick did.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Tick {
-    /// `true` if something visible changed.
-    pub redraw: bool,
-    /// When the applet wants the next tick, if it wants one.
-    pub wake: Option<Instant>,
-}
-
-impl Tick {
-    /// Merges two ticks: redraw if either asks, wake at the earlier time.
+    /// # Panics
+    /// If `id` is not a valid applet id (a programming error).
     #[must_use]
-    pub fn combine(self, other: Self) -> Self {
+    pub fn new(id: &str, name: &str, role: AppletRole, icon: &str) -> Self {
         Self {
-            redraw: self.redraw || other.redraw,
-            wake: match (self.wake, other.wake) {
-                (Some(a), Some(b)) => Some(a.min(b)),
-                (a, b) => a.or(b),
-            },
+            id: AppletId::new(id).expect("built-in applet ids are valid"),
+            name: name.to_owned(),
+            summary: String::new(),
+            role,
+            icon: icon.to_owned(),
+            order: 0,
+            opens: Vec::new(),
+            mode: None,
+            spawn: None,
+            lane: None,
         }
     }
 }
@@ -286,8 +183,222 @@ impl From<TxnError> for AppletError {
     }
 }
 
-/// The contract every tool, utility and studio implements. The window manager
-/// knows applets only through this trait.
+/// Something an applet asks the shell or the engine for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ShellRequest {
+    /// A message for the status bar.
+    Notify(String),
+    /// An error for the status bar.
+    Fail(String),
+    /// Read a file and put it on the canvas.
+    OpenFile(PathBuf),
+    /// An engine command such as `audio.start`, `file.open` or `rice.reload`.
+    Command(String),
+    /// Select a node (or nothing).
+    Select(Option<NodeId>),
+    /// Switch to the node's mode and frame it.
+    Focus(NodeId),
+    /// Frame a node, optionally at a given zoom.
+    Frame {
+        /// The node.
+        node: NodeId,
+        /// Zoom in percent instead of fitting (100 shows pixels 1:1).
+        zoom_percent: Option<u32>,
+    },
+    /// Show or hide the timeline.
+    Timeline(bool),
+    /// Open Settings, optionally at a page.
+    OpenSettings(Option<String>),
+    /// Switch to a mode (`canvas` or a node applet id).
+    Mode(String),
+    /// Create a new entity of a node applet.
+    Spawn(AppletId),
+    /// Open the command palette.
+    Palette,
+    /// Frame everything.
+    ResetCamera,
+    /// Show a drawer applet.
+    ShowDrawer(AppletId),
+    /// Put an arena entity on the canvas, drawn by the applet that accepts it.
+    Place {
+        /// The entity.
+        entity: AssetHandle,
+        /// Switch to its mode and frame it.
+        focus: bool,
+    },
+}
+
+/// What an applet's tick asks for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Tick {
+    /// Redraw once.
+    pub repaint: bool,
+    /// Keep drawing every frame (something moves).
+    pub animating: bool,
+    /// Run the tick again at this instant.
+    pub wake: Option<Instant>,
+}
+
+impl Tick {
+    /// Combines two ticks.
+    #[must_use]
+    pub fn merge(self, other: Self) -> Self {
+        Self {
+            repaint: self.repaint || other.repaint,
+            animating: self.animating || other.animating,
+            wake: match (self.wake, other.wake) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            },
+        }
+    }
+}
+
+/// What the shell shows right now, for applets to read.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShellView {
+    /// The selected node.
+    pub selected: Option<NodeId>,
+    /// The canvas zoom (1.0 is 100%).
+    pub zoom: f32,
+    /// The active mode: `canvas` or a node applet id.
+    pub mode: String,
+    /// `true` while the timeline is open.
+    pub timeline_open: bool,
+    /// The timeline playhead, in seconds.
+    pub playhead: f64,
+    /// `true` while the timeline plays.
+    pub timeline_playing: bool,
+    /// The device class.
+    pub form_factor: FormFactor,
+    /// The active hardware profile.
+    pub profile: HardwareProfile,
+    /// This frame's time.
+    pub now: Instant,
+    /// Seconds since the last frame (clamped).
+    pub dt: f32,
+}
+
+/// One entry of the command palette.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaletteEntry {
+    /// What the user reads, e.g. `Paint: Export .jxl`.
+    pub label: String,
+    /// The command an applet's [`SueApplet::command`] runs.
+    pub command: String,
+    /// The shortcut, if any.
+    pub hint: String,
+}
+
+/// Everything an applet may touch during a call.
+pub struct AppletContext<'a> {
+    /// The arena, the live rice and the canvas scene.
+    pub world: &'a mut World,
+    /// The global undo tree.
+    pub history: &'a mut UndoStack<World>,
+    /// Typing waiting to become one undo step.
+    pub typing: &'a mut Typing,
+    /// Requests for the shell and the engine.
+    pub requests: &'a mut Vec<ShellRequest>,
+    /// Settings pages, live choices and system tables.
+    pub catalog: &'a Catalog,
+    /// The theme.
+    pub theme: &'a Theme,
+    /// Texture uploads for images.
+    pub textures: &'a mut dyn TextureUpload,
+    /// The audio output, once opened.
+    pub audio: Option<&'a mut (dyn AudioSink + 'static)>,
+    /// The shared audio transport.
+    pub transport: &'a mut Transport,
+    /// What the shell shows.
+    pub view: ShellView,
+}
+
+impl AppletContext<'_> {
+    /// The live rice.
+    #[must_use]
+    pub fn rice(&self) -> &RiceSchema {
+        &self.world.rice
+    }
+
+    /// The arena.
+    #[must_use]
+    pub fn arena(&self) -> &Arena {
+        &self.world.arena
+    }
+
+    /// A node of the scene.
+    #[must_use]
+    pub fn node(&self, id: NodeId) -> Option<&SceneNode> {
+        self.world.scene.get(id)
+    }
+
+    /// The entity a node shows.
+    #[must_use]
+    pub fn entity(&self, id: NodeId) -> Option<&Entity> {
+        let node = self.world.scene.get(id)?;
+        self.world.arena.get(node.entity).ok()
+    }
+
+    /// Applies `txn` and records it in the global history, closing any open
+    /// typing group first.
+    ///
+    /// # Errors
+    /// The transaction's own error; nothing is recorded then.
+    pub fn apply<X>(&mut self, txn: X) -> Result<sue_core::NodeId, TxnError>
+    where
+        X: ReversibleTransaction<World> + 'static,
+    {
+        self.typing.flush(self.history);
+        self.history.apply(self.world, txn)
+    }
+
+    /// Records `txn`, whose effect already happened in place (a finished
+    /// paint stroke), closing any open typing group first.
+    pub fn record<X>(&mut self, txn: X) -> sue_core::NodeId
+    where
+        X: ReversibleTransaction<World> + 'static,
+    {
+        self.typing.flush(self.history);
+        self.history.record(txn)
+    }
+
+    /// Applies a rice edit (see [`Self::apply`]).
+    ///
+    /// # Errors
+    /// The transaction's own error.
+    pub fn edit_rice(&mut self, txn: SetRiceValue) -> Result<sue_core::NodeId, TxnError> {
+        self.apply(RiceEdit(txn))
+    }
+
+    /// Records text a text field already typed into `handle`.
+    pub fn record_typing(&mut self, handle: AssetHandle, ops: Vec<sue_core::txn::TextOp>) {
+        let now = self.view.now;
+        self.typing.record(self.history, handle, ops, now);
+    }
+
+    /// A message for the status bar.
+    pub fn notify(&mut self, text: impl Into<String>) {
+        self.requests.push(ShellRequest::Notify(text.into()));
+    }
+
+    /// An error for the status bar.
+    pub fn fail(&mut self, text: impl Into<String>) {
+        self.requests.push(ShellRequest::Fail(text.into()));
+    }
+
+    /// Asks the shell or engine for something.
+    pub fn request(&mut self, request: ShellRequest) {
+        self.requests.push(request);
+    }
+
+    /// The audio output, if open.
+    pub fn sink(&mut self) -> Option<&mut (dyn AudioSink + 'static)> {
+        self.audio.as_deref_mut()
+    }
+}
+
+/// The trait every tool, utility and studio implements (LAW 1).
 pub trait SueApplet: Send {
     /// Static facts about the applet.
     fn manifest(&self) -> AppletManifest;
@@ -297,124 +408,75 @@ pub trait SueApplet: Send {
         Vec::new()
     }
 
-    /// Called when the applet is mounted in a tab or dock.
-    ///
-    /// # Errors
-    /// Any reason the applet cannot start.
-    fn mount(&mut self, ctx: &mut AppletContext<'_>) -> Result<(), AppletError>;
-
-    /// Opens an asset of a [`MediaClass`] the manifest lists in `opens`.
-    ///
-    /// # Errors
-    /// If the applet cannot show this asset.
-    fn open(&mut self, asset: AssetHandle, ctx: &mut AppletContext<'_>) -> Result<(), AppletError> {
-        let _ = (asset, ctx);
-        Err(AppletError::new("this applet does not open assets"))
+    /// `true` if this node applet shows `entity` (for opened files).
+    fn accepts(&self, entity: &Entity) -> bool {
+        let _ = entity;
+        false
     }
 
-    /// Moves to a place inside the applet, e.g. a Settings page. Returns
-    /// `false` if the target is unknown.
+    /// The canvas size of a node showing `entity`.
+    fn node_size(&self, entity: &Entity) -> Vec2 {
+        let _ = entity;
+        vec2(480.0, 320.0)
+    }
+
+    /// A new entity for the spawn buttons.
+    fn new_entity(&mut self, cx: &mut AppletContext<'_>) -> Option<NewEntity> {
+        let _ = cx;
+        None
+    }
+
+    /// Draws node `node`: `ui` covers its content area, in canvas units.
+    fn node_ui(&mut self, ui: &mut Ui, node: NodeId, cx: &mut AppletContext<'_>) {
+        let _ = (ui, node, cx);
+    }
+
+    /// Draws the tools of the floating selection pill for `node`.
+    fn pill_ui(&mut self, ui: &mut Ui, node: NodeId, cx: &mut AppletContext<'_>) {
+        let _ = (ui, node, cx);
+    }
+
+    /// How long a node lasts on the timeline, in seconds.
+    fn duration(&self, node: &SceneNode, world: &World) -> f64 {
+        let _ = (node, world);
+        4.0
+    }
+
+    /// Draws the drawer.
+    fn drawer_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        let _ = (ui, cx);
+    }
+
+    /// Draws the window content.
+    fn window_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        let _ = (ui, cx);
+    }
+
+    /// Timed work between frames.
+    fn tick(&mut self, cx: &mut AppletContext<'_>) -> Tick {
+        let _ = cx;
+        Tick::default()
+    }
+
+    /// Entries for the command palette.
+    fn commands(&self) -> Vec<PaletteEntry> {
+        Vec::new()
+    }
+
+    /// Runs a command. Returns `false` if the applet does not have it.
+    fn command(&mut self, name: &str, cx: &mut AppletContext<'_>) -> bool {
+        let _ = (name, cx);
+        false
+    }
+
+    /// Moves to a place inside the applet, e.g. a Settings page.
     fn navigate(&mut self, target: &str) -> bool {
         let _ = target;
         false
     }
 
-    /// Runs a named command such as `save`. Returns `false` if the applet
-    /// does not have it.
-    ///
-    /// # Errors
-    /// If the command fails.
-    fn command(&mut self, name: &str, ctx: &mut AppletContext<'_>) -> Result<bool, AppletError> {
-        let _ = (name, ctx);
-        Ok(false)
-    }
-
-    /// Handles keyboard and other input the window manager did not consume,
-    /// while the applet has focus.
-    ///
-    /// # Errors
-    /// Any failure while handling the event.
-    fn handle_input(
-        &mut self,
-        event: &InputEvent,
-        ctx: &mut AppletContext<'_>,
-    ) -> Result<InputResponse, AppletError>;
-
-    /// `true` while the applet needs every key first, even global shortcuts
-    /// (for example while recording a new shortcut).
+    /// `true` while the applet needs every key first (recording a shortcut).
     fn captures_keys(&self) -> bool {
         false
-    }
-
-    /// Draws the applet into `area` and handles pointer interaction there.
-    fn draw(&mut self, ui: &mut Ui<'_>, area: Rect, ctx: &mut AppletContext<'_>) {
-        let _ = (ui, area, ctx);
-    }
-
-    /// A title for its tab, e.g. `photo.jxl`.
-    fn title(&self, world: &World) -> Option<String> {
-        let _ = world;
-        None
-    }
-
-    /// Properties of what the applet shows, for the Inspector.
-    fn inspect(&self, world: &World) -> Vec<PropertyGroup> {
-        let _ = world;
-        Vec::new()
-    }
-
-    /// Advances animations by `dt` seconds. Static applets keep the default,
-    /// which never asks for frames.
-    fn update(&mut self, _dt: f32, _ctx: &mut AppletContext<'_>) -> RenderDemand {
-        RenderDemand::Sleep
-    }
-
-    /// Does timed work (feeding audio, a clock) without a frame being drawn.
-    /// Called on every frame and whenever a requested wake time passes.
-    fn tick(&mut self, now: Instant, ctx: &mut AppletContext<'_>) -> Tick {
-        let _ = (now, ctx);
-        Tick::default()
-    }
-
-    /// Called when the applet's tab closes or switches to another applet.
-    fn unmount(&mut self, _ctx: &mut AppletContext<'_>) {}
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
-
-    #[test]
-    fn validates_applet_ids() {
-        assert_eq!(
-            AppletId::new("quick-notes").unwrap().as_str(),
-            "quick-notes"
-        );
-        assert!(AppletId::new("cad2").is_ok());
-        for bad in ["", "Quick", "1st", "with space", "under_score"] {
-            assert!(AppletId::new(bad).is_err(), "{bad}");
-        }
-    }
-
-    #[test]
-    fn ticks_combine() {
-        let now = Instant::now();
-        let soon = Tick {
-            redraw: false,
-            wake: Some(now),
-        };
-        let later = Tick {
-            redraw: true,
-            wake: Some(now + Duration::from_secs(1)),
-        };
-        assert_eq!(
-            soon.combine(later),
-            Tick {
-                redraw: true,
-                wake: Some(now)
-            }
-        );
-        assert_eq!(Tick::default().combine(later).wake, later.wake);
     }
 }

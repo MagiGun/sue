@@ -2,7 +2,7 @@
 
 use sue_rice::HardwareProfile;
 
-use crate::Rect;
+use egui::Rect;
 
 /// Whether the host should render.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,7 +122,7 @@ impl FrameScheduler {
     pub fn invalidate(&mut self, rect: Rect) {
         self.damage = Some(match self.damage {
             None => Damage::Region(rect),
-            Some(Damage::Region(existing)) => Damage::Region(existing.union(&rect)),
+            Some(Damage::Region(existing)) => Damage::Region(existing.union(rect)),
             Some(Damage::Full) => Damage::Full,
         });
     }
@@ -201,8 +201,14 @@ mod tests {
     #[test]
     fn damage_merges_and_is_consumed_by_one_frame() {
         let mut scheduler = FrameScheduler::new(HardwareProfile::Balanced, 144);
-        scheduler.invalidate(Rect::new(0.0, 0.0, 10.0, 10.0));
-        scheduler.invalidate(Rect::new(20.0, 0.0, 10.0, 10.0));
+        scheduler.invalidate(Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(10.0, 10.0),
+        ));
+        scheduler.invalidate(Rect::from_min_size(
+            egui::pos2(20.0, 0.0),
+            egui::vec2(10.0, 10.0),
+        ));
         assert_eq!(
             scheduler.demand(),
             RenderDemand::ActiveFrame { target_hz: 60 }
@@ -210,11 +216,17 @@ mod tests {
         let ticket = scheduler.begin_frame().unwrap();
         assert_eq!(
             ticket.damage,
-            Some(Damage::Region(Rect::new(0.0, 0.0, 30.0, 10.0)))
+            Some(Damage::Region(Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(30.0, 10.0)
+            )))
         );
         assert!(scheduler.begin_frame().is_none());
         scheduler.invalidate_all();
-        scheduler.invalidate(Rect::new(1.0, 1.0, 1.0, 1.0));
+        scheduler.invalidate(Rect::from_min_size(
+            egui::pos2(1.0, 1.0),
+            egui::vec2(1.0, 1.0),
+        ));
         assert_eq!(scheduler.begin_frame().unwrap().damage, Some(Damage::Full));
     }
 

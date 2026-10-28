@@ -99,6 +99,143 @@ impl ReversibleTransaction<Arena> for DeleteText {
     }
 }
 
+/// One step of a [`TextEdits`] group, in byte offsets.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TextOp {
+    /// `text` was inserted at `offset`.
+    Insert {
+        /// Byte offset.
+        offset: usize,
+        /// The inserted text.
+        text: String,
+    },
+    /// `text` was removed from `offset`.
+    Delete {
+        /// Byte offset.
+        offset: usize,
+        /// The removed text, the delta that brings it back.
+        text: String,
+    },
+}
+
+impl TextOp {
+    fn apply(&self, buffer: &mut StringBuffer) -> Result<(), TxnError> {
+        match self {
+            Self::Insert { offset, text } => buffer.insert(*offset, text)?,
+            Self::Delete { offset, text } => {
+                buffer.remove(*offset..*offset + text.len())?;
+            }
+        }
+        Ok(())
+    }
+
+    fn revert(&self, buffer: &mut StringBuffer) -> Result<(), TxnError> {
+        match self {
+            Self::Insert { offset, text } => {
+                buffer.remove(*offset..*offset + text.len())?;
+            }
+            Self::Delete { offset, text } => buffer.insert(*offset, text)?,
+        }
+        Ok(())
+    }
+}
+
+/// A run of typing in one text entity, recorded as the inserts and deletes
+/// that happened, so one undo step takes back a burst of typing exactly.
+#[derive(Clone, Debug)]
+pub struct TextEdits {
+    handle: AssetHandle,
+    ops: Vec<TextOp>,
+}
+
+impl TextEdits {
+    /// An empty group for `handle`.
+    #[must_use]
+    pub fn new(handle: AssetHandle) -> Self {
+        Self {
+            handle,
+            ops: Vec::new(),
+        }
+    }
+
+    /// The entity the group edits.
+    #[must_use]
+    pub fn handle(&self) -> AssetHandle {
+        self.handle
+    }
+
+    /// Adds a step that already happened.
+    pub fn push(&mut self, op: TextOp) {
+        self.ops.push(op);
+    }
+
+    /// The recorded steps, oldest first.
+    #[must_use]
+    pub fn ops(&self) -> &[TextOp] {
+        &self.ops
+    }
+
+    /// `true` if nothing was recorded.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.ops.is_empty()
+    }
+}
+
+impl ReversibleTransaction<Arena> for TextEdits {
+    fn label(&self) -> String {
+        let typed: usize = self
+            .ops
+            .iter()
+            .map(|op| match op {
+                TextOp::Insert { text, .. } => text.chars().count(),
+                TextOp::Delete { .. } => 0,
+            })
+            .sum();
+        let deleted: usize = self
+            .ops
+            .iter()
+            .map(|op| match op {
+                TextOp::Delete { text, .. } => text.chars().count(),
+                TextOp::Insert { .. } => 0,
+            })
+            .sum();
+        match (typed, deleted) {
+            (0, deleted) => format!("Delete {deleted} character(s)"),
+            (typed, 0) => format!("Type {typed} character(s)"),
+            (typed, deleted) => format!("Edit text (+{typed} -{deleted})"),
+        }
+    }
+
+    fn apply(&mut self, arena: &mut Arena) -> Result<(), TxnError> {
+        let buffer = text_mut(arena, self.handle)?;
+        for (done, op) in self.ops.iter().enumerate() {
+            if let Err(error) = op.apply(buffer) {
+                // Atomic: take back what already went in.
+                for op in self.ops[..done].iter().rev() {
+                    let _ = op.revert(buffer);
+                }
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    fn revert(&mut self, arena: &mut Arena) -> Result<(), TxnError> {
+        let buffer = text_mut(arena, self.handle)?;
+        for (undone, op) in self.ops.iter().rev().enumerate() {
+            if let Err(error) = op.revert(buffer) {
+                let count = self.ops.len();
+                for op in &self.ops[count - undone..] {
+                    let _ = op.apply(buffer);
+                }
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Attaches a projection component to an entity, non-destructively.
 #[derive(Clone, Debug)]
 pub struct AttachProjection {
@@ -180,6 +317,43 @@ mod tests {
             history.history(),
             vec!["Insert 3 character(s)", "Delete 1 byte(s)"]
         );
+    }
+
+    #[test]
+    fn grouped_typing_undoes_and_redoes_as_one_step() {
+        let mut arena = Arena::new();
+        let note = arena.spawn("note", StringBuffer::from("ab".to_owned()));
+        // The editor already typed "X" at 1 and deleted "b" (now at 2).
+        arena
+            .get_mut(note)
+            .unwrap()
+            .string_buffer_mut()
+            .unwrap()
+            .insert(1, "X")
+            .unwrap();
+        arena
+            .get_mut(note)
+            .unwrap()
+            .string_buffer_mut()
+            .unwrap()
+            .remove(2..3)
+            .unwrap();
+        let mut group = TextEdits::new(note);
+        group.push(TextOp::Insert {
+            offset: 1,
+            text: "X".to_owned(),
+        });
+        group.push(TextOp::Delete {
+            offset: 2,
+            text: "b".to_owned(),
+        });
+        let mut history: UndoStack<Arena> = UndoStack::new();
+        history.record(group);
+        assert_eq!(text(&arena, note), "aX");
+        history.undo(&mut arena).unwrap();
+        assert_eq!(text(&arena, note), "ab");
+        history.redo(&mut arena).unwrap();
+        assert_eq!(text(&arena, note), "aX");
     }
 
     #[test]

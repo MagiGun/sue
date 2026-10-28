@@ -8,6 +8,7 @@ publish.workspace = true
 repository.workspace = true
 
 [dependencies]
+egui.workspace = true
 sue-ai.workspace = true
 sue-core.workspace = true
 sue-io.workspace = true

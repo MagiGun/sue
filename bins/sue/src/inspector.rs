@@ -1,108 +1,124 @@
-//! Inspector: the properties of whatever the active tab shows (characters
-//! and lines of a text, pixels and depth of a picture, the values under the
-//! hex cursor), as the applet itself reports them.
+//! Inspector: what the selected canvas entity is, live. Its place and size
+//! on the canvas, the projections it carries (Document, Timeline, Audio and
+//! so on, all views of the same arena entity), and its metadata, such as a
+//! JPEG XL file's size, color and codestream facts.
 
-use sue_platform::InputEvent;
-use sue_wm::{
-    AppletCategory, AppletContext, AppletError, AppletId, AppletManifest, FontFace, InputResponse,
-    Rect, SueApplet, Ui, Zone,
-};
+use egui::{Grid, RichText, Ui};
+use sue_core::Projection;
+use sue_wm::{AppletContext, AppletManifest, AppletRole, SueApplet, widgets};
+
+use crate::util::human_bytes;
 
 /// The applet id.
 pub const ID: &str = "inspector";
 
-/// The context panel in the Right Dock.
+/// The inspector.
 #[derive(Debug, Default)]
 pub struct Inspector;
 
 impl SueApplet for Inspector {
     fn manifest(&self) -> AppletManifest {
-        AppletManifest {
-            id: AppletId::new(ID).expect("the Inspector id is valid"),
-            name: "Inspector".to_owned(),
-            category: AppletCategory::Utility,
-            home_zone: Zone::RightDock,
-            uses_timeline: false,
-            summary: "Properties of whatever the active tab shows.".to_owned(),
-            opens: Vec::new(),
-            icon: "\u{1F50D}".to_owned(),
-            singleton: false,
-        }
+        let mut manifest =
+            AppletManifest::new(ID, "Inspector", AppletRole::RightDrawer, "\u{2139}");
+        manifest.summary = "Facts about the selected entity.".to_owned();
+        manifest.order = 10;
+        manifest
     }
 
-    fn mount(&mut self, _ctx: &mut AppletContext<'_>) -> Result<(), AppletError> {
-        Ok(())
-    }
-
-    fn handle_input(
-        &mut self,
-        _event: &InputEvent,
-        _ctx: &mut AppletContext<'_>,
-    ) -> Result<InputResponse, AppletError> {
-        Ok(InputResponse::Ignored)
-    }
-
-    fn draw(&mut self, ui: &mut Ui<'_>, area: Rect, ctx: &mut AppletContext<'_>) {
-        let theme = ui.theme;
-        let pad = theme.padding;
-        let row = ui.row_height();
-        if ctx.inspection.is_empty() {
-            ui.wrapped(
-                area.x,
-                area.y,
-                area.width,
-                "Open a file or a tool to see its properties here.",
-                theme.ui_size,
-                theme.muted,
-            );
+    fn drawer_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        let theme = cx.theme.clone();
+        ui.set_max_width(ui.available_width());
+        let Some(node_id) = cx.view.selected else {
+            ui.label(RichText::new("Select an entity on the canvas.").color(theme.muted));
             return;
+        };
+        let Some(node) = cx.node(node_id).cloned() else {
+            return;
+        };
+        let Ok(entity) = cx.arena().get(node.entity) else {
+            return;
+        };
+        ui.label(
+            RichText::new(entity.name())
+                .size(theme.heading_size)
+                .color(theme.text),
+        );
+        ui.label(
+            RichText::new(format!("Entity {}  |  node {}", node.entity, node_id.0))
+                .size(theme.small_size)
+                .color(theme.muted),
+        );
+        ui.add_space(theme.padding);
+        widgets::heading(ui, "On the canvas", &theme);
+        Grid::new("sue-inspector-rect")
+            .num_columns(4)
+            .spacing([theme.padding, 4.0])
+            .show(ui, |ui| {
+                for row in [
+                    [("X", node.rect.left()), ("Y", node.rect.top())],
+                    [("W", node.rect.width()), ("H", node.rect.height())],
+                ] {
+                    for (label, value) in row {
+                        ui.label(RichText::new(label).color(theme.muted));
+                        ui.label(
+                            RichText::new(format!("{value:.0}")).font(theme.mono(theme.ui_size)),
+                        );
+                    }
+                    ui.end_row();
+                }
+            });
+        if !node.props.is_empty() {
+            Grid::new("sue-inspector-props")
+                .num_columns(2)
+                .spacing([theme.padding, 4.0])
+                .show(ui, |ui| {
+                    for (key, value) in &node.props {
+                        ui.label(RichText::new(key).color(theme.muted));
+                        ui.label(
+                            RichText::new(format!("{value:.2}")).font(theme.mono(theme.ui_size)),
+                        );
+                        ui.end_row();
+                    }
+                });
         }
-        let names_width = ctx
-            .inspection
-            .iter()
-            .flat_map(|group| &group.properties)
-            .map(|property| {
-                ui.fonts
-                    .measure(FontFace::Ui, theme.small_size, &property.name)
-            })
-            .fold(0.0_f32, f32::max)
-            .min(area.width * 0.45);
-        let mut y = area.y;
-        for group in &ctx.inspection {
-            if y > area.bottom() {
-                break;
-            }
-            ui.label_sized(
-                Rect::new(area.x, y, area.width, row),
-                &group.title.to_uppercase(),
-                theme.small_size,
-                theme.muted,
-            );
-            y += row;
-            for property in &group.properties {
-                let value_x = area.x + names_width + pad;
-                let value_width = (area.right() - value_x).max(1.0);
-                let height = ui
-                    .wrapped_height(&property.value, value_width, theme.ui_size)
-                    .max(ui.line_height());
-                ui.label_sized(
-                    Rect::new(area.x, y, names_width, ui.line_height()),
-                    &property.name,
-                    theme.small_size,
-                    theme.muted,
+        ui.add_space(theme.padding);
+        widgets::heading(ui, "Projections", &theme);
+        let projections = entity.projections();
+        ui.horizontal_wrapped(|ui| {
+            for projection in Projection::ALL {
+                let on = projections.contains(projection);
+                ui.label(
+                    RichText::new(projection.name())
+                        .color(if on {
+                            theme.text
+                        } else {
+                            theme.muted.gamma_multiply(0.6)
+                        })
+                        .size(theme.small_size),
                 );
-                ui.wrapped(
-                    value_x,
-                    y,
-                    value_width,
-                    &property.value,
-                    theme.ui_size,
-                    theme.text,
-                );
-                y += height + pad / 2.0;
             }
-            ui.hline(area.x, y, area.width);
-            y += pad;
+        });
+        ui.label(
+            RichText::new(format!(
+                "Holds {} in memory",
+                human_bytes(entity.heap_bytes() as u64)
+            ))
+            .size(theme.small_size)
+            .color(theme.muted),
+        );
+        ui.add_space(theme.padding);
+        widgets::heading(ui, "Metadata", &theme);
+        let metadata: Vec<(String, String)> = entity
+            .metadata()
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect();
+        if metadata.is_empty() {
+            ui.label(RichText::new("None").color(theme.muted));
+        }
+        for (key, value) in metadata {
+            ui.label(RichText::new(key).size(theme.small_size).color(theme.muted));
+            ui.add(egui::Label::new(RichText::new(value).color(theme.text)).wrap());
+            ui.add_space(4.0);
         }
     }
 }
