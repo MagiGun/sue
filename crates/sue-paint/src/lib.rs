@@ -31,6 +31,7 @@ pub mod color;
 pub mod composite;
 mod dialogs;
 pub mod doc;
+mod dock;
 pub mod fill;
 pub mod filters;
 mod icons;

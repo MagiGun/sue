@@ -427,52 +427,13 @@ impl SuePaint {
 
     // ----- Left column ---------------------------------------------------------------
 
-    pub(crate) fn left_column(
+    pub(crate) fn tool_panel(
         &mut self,
         ui: &mut Ui,
         rect: Rect,
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        ui.painter().rect_filled(rect, 0.0, theme.panel);
-        ui.painter()
-            .vline(rect.right(), rect.y_range(), theme.hairline());
-        let tools = self.panels.sub_tool || self.panels.tool_property;
-        let mut top = rect.top();
-        let remaining = |top: f32| rect.bottom() - top;
-        if tools {
-            let height = if self.panels.color || self.panels.color_set {
-                (rect.height() * 0.42).max(220.0)
-            } else {
-                rect.height()
-            };
-            let area = Rect::from_min_size(
-                pos2(rect.left(), top),
-                vec2(rect.width(), height.min(remaining(top))),
-            );
-            self.tool_panel(ui, area, cx, theme);
-            top = area.bottom();
-        }
-        if self.panels.color {
-            let height = if self.panels.color_set {
-                262.0
-            } else {
-                remaining(top)
-            };
-            let area = Rect::from_min_size(
-                pos2(rect.left(), top),
-                vec2(rect.width(), height.min(remaining(top))),
-            );
-            self.color_panel(ui, area, theme);
-            top = area.bottom();
-        }
-        if self.panels.color_set && remaining(top) > 40.0 {
-            let area = Rect::from_min_max(pos2(rect.left(), top), rect.max);
-            self.color_set_panel(ui, area, theme);
-        }
-    }
-
-    fn tool_panel(&mut self, ui: &mut Ui, rect: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
         let tool = self.toolbox.tool();
         let tabs = [
             ("Sub Tool", self.panels.sub_tool),
@@ -914,7 +875,7 @@ impl SuePaint {
 
     // ----- Color ---------------------------------------------------------------------
 
-    fn color_panel(&mut self, ui: &mut Ui, rect: Rect, theme: &Theme) {
+    pub(crate) fn color_panel(&mut self, ui: &mut Ui, rect: Rect, theme: &Theme) {
         let tabs = [("Color Wheel", true), ("Color Slider", true)];
         let (body, clicked) = header(ui, rect, &tabs, self.color_tab, theme);
         if let Some(tab) = clicked {
@@ -1096,7 +1057,7 @@ impl SuePaint {
         });
     }
 
-    fn color_set_panel(&mut self, ui: &mut Ui, rect: Rect, theme: &Theme) {
+    pub(crate) fn color_set_panel(&mut self, ui: &mut Ui, rect: Rect, theme: &Theme) {
         let tabs = [("Color Set", true), ("Color History", true)];
         let (body, clicked) = header(ui, rect, &tabs, self.set_tab, theme);
         if let Some(tab) = clicked {
@@ -1211,37 +1172,13 @@ impl SuePaint {
 
     // ----- Right column: navigator and layers ------------------------------------------
 
-    pub(crate) fn right_column(
+    pub(crate) fn navigator(
         &mut self,
         ui: &mut Ui,
         rect: Rect,
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        ui.painter().rect_filled(rect, 0.0, theme.panel);
-        ui.painter()
-            .vline(rect.left(), rect.y_range(), theme.hairline());
-        let mut top = rect.top();
-        if self.panels.navigator {
-            let height = if self.panels.layer {
-                300.0_f32.min(rect.height() * 0.45)
-            } else {
-                rect.height()
-            };
-            let area = Rect::from_min_size(
-                pos2(rect.left() + 1.0, top),
-                vec2(rect.width() - 1.0, height),
-            );
-            self.navigator(ui, area, cx, theme);
-            top = area.bottom();
-        }
-        if self.panels.layer {
-            let area = Rect::from_min_max(pos2(rect.left() + 1.0, top), rect.max);
-            self.layer_panel(ui, area, cx, theme);
-        }
-    }
-
-    fn navigator(&mut self, ui: &mut Ui, rect: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
         let (body, _) = header(
             ui,
             rect,
@@ -1366,7 +1303,13 @@ impl SuePaint {
     }
 
     #[allow(clippy::too_many_lines, reason = "the layer palette's three tabs")]
-    fn layer_panel(&mut self, ui: &mut Ui, rect: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
+    pub(crate) fn layer_panel(
+        &mut self,
+        ui: &mut Ui,
+        rect: Rect,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
         let tabs = [
             ("Layer", true),
             ("Layer Property", true),

@@ -527,6 +527,7 @@ pub fn menus() -> Vec<Menu> {
                 ),
                 act("Hide All Palettes", "window.hide_all"),
                 act("Hide Menu Bar", "window.hide_menus"),
+                act("Reset Palette Layout", "window.workspace.reset"),
                 SEP,
                 act("Command Bar", "window.command_bar"),
                 act("Tool", "window.tool"),

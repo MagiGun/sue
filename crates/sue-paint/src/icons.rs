@@ -71,6 +71,44 @@ pub enum Icon {
     Canvas,
     Up,
     Down,
+    /// Three lines: a palette's menu.
+    Menu,
+    /// A ring of hues: the color wheel.
+    Wheel,
+    /// A grid of squares: the color set.
+    Swatches,
+    /// Stacked sheets: the layers.
+    Layers,
+    /// A frame with a box inside: the navigator.
+    Navigator,
+    /// Growing dots: the brush size.
+    BrushSize,
+    /// A window over another: float.
+    Float,
+    /// A magnifier with a line: search.
+    Search,
+    /// A question mark in a ring: help.
+    Help,
+    /// A wrench: settings.
+    Wrench,
+    /// An arrow into a tray: import.
+    Import,
+    /// An arrow out of a tray: export.
+    Export,
+    /// A plus: add.
+    Add,
+    /// Two arrows in a circle: replace.
+    Replace,
+    /// Lines with dots: a list.
+    List,
+    /// A sheet in a frame: a cel.
+    Cel,
+    /// Two overlapping sheets: onion skin.
+    Onion,
+    /// A pencil over a line: edit.
+    Edit,
+    /// A minus: take away or collapse.
+    Minus,
 }
 
 fn arc(center: Pos2, radius: f32, from: f32, to: f32) -> Vec<Pos2> {
@@ -606,5 +644,114 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Icon::Up => line(&[(0.22, 0.64), (0.5, 0.34), (0.78, 0.64)]),
         Icon::Down => line(&[(0.22, 0.36), (0.5, 0.66), (0.78, 0.36)]),
+        Icon::Menu => {
+            for y in [0.3, 0.5, 0.7] {
+                line(&[(0.22, y), (0.78, y)]);
+            }
+        }
+        Icon::Wheel => {
+            circle(0.5, 0.5, 0.34);
+            circle(0.5, 0.5, 0.18);
+            for angle in [0.0_f32, 60.0, 120.0, 180.0, 240.0, 300.0] {
+                let (sin, cos) = angle.to_radians().sin_cos();
+                line(&[
+                    (0.5 + cos * 0.18, 0.5 + sin * 0.18),
+                    (0.5 + cos * 0.34, 0.5 + sin * 0.34),
+                ]);
+            }
+        }
+        Icon::Swatches => {
+            for (x, y) in [(0.18, 0.18), (0.54, 0.18), (0.18, 0.54), (0.54, 0.54)] {
+                painter.rect_filled(
+                    Rect::from_min_max(p(x, y), p(x + 0.28, y + 0.28)),
+                    0.0,
+                    color,
+                );
+            }
+        }
+        Icon::Layers => {
+            closed(&[(0.5, 0.18), (0.86, 0.36), (0.5, 0.54), (0.14, 0.36)]);
+            line(&[(0.14, 0.52), (0.5, 0.7), (0.86, 0.52)]);
+            line(&[(0.14, 0.66), (0.5, 0.84), (0.86, 0.66)]);
+        }
+        Icon::Navigator => {
+            closed(&[(0.14, 0.2), (0.86, 0.2), (0.86, 0.8), (0.14, 0.8)]);
+            closed(&[(0.4, 0.38), (0.66, 0.38), (0.66, 0.6), (0.4, 0.6)]);
+        }
+        Icon::BrushSize => {
+            dot(0.24, 0.62, 0.05);
+            dot(0.44, 0.58, 0.08);
+            dot(0.7, 0.5, 0.14);
+        }
+        Icon::Float => {
+            closed(&[(0.14, 0.34), (0.62, 0.34), (0.62, 0.82), (0.14, 0.82)]);
+            line(&[
+                (0.36, 0.34),
+                (0.36, 0.16),
+                (0.86, 0.16),
+                (0.86, 0.62),
+                (0.62, 0.62),
+            ]);
+        }
+        Icon::Search => {
+            circle(0.42, 0.42, 0.24);
+            line(&[(0.6, 0.6), (0.84, 0.84)]);
+        }
+        Icon::Help => {
+            circle(0.5, 0.5, 0.36);
+            curve(0.5, 0.4, 0.12, 180.0, 400.0);
+            line(&[(0.52, 0.52), (0.5, 0.6)]);
+            dot(0.5, 0.7, 0.035);
+        }
+        Icon::Wrench => {
+            curve(0.66, 0.34, 0.18, 60.0, 330.0);
+            line(&[(0.54, 0.46), (0.2, 0.8)]);
+            line(&[(0.27, 0.86), (0.14, 0.73)]);
+        }
+        Icon::Import => {
+            line(&[(0.5, 0.14), (0.5, 0.6)]);
+            line(&[(0.32, 0.44), (0.5, 0.62), (0.68, 0.44)]);
+            line(&[(0.16, 0.64), (0.16, 0.84), (0.84, 0.84), (0.84, 0.64)]);
+        }
+        Icon::Export => {
+            line(&[(0.5, 0.62), (0.5, 0.16)]);
+            line(&[(0.32, 0.32), (0.5, 0.14), (0.68, 0.32)]);
+            line(&[(0.16, 0.64), (0.16, 0.84), (0.84, 0.84), (0.84, 0.64)]);
+        }
+        Icon::Add => {
+            line(&[(0.5, 0.2), (0.5, 0.8)]);
+            line(&[(0.2, 0.5), (0.8, 0.5)]);
+        }
+        Icon::Replace => {
+            curve(0.5, 0.5, 0.3, 200.0, 340.0);
+            curve(0.5, 0.5, 0.3, 20.0, 160.0);
+            filled(&[(0.78, 0.32), (0.86, 0.5), (0.68, 0.46)]);
+            filled(&[(0.22, 0.68), (0.14, 0.5), (0.32, 0.54)]);
+        }
+        Icon::List => {
+            for y in [0.28, 0.5, 0.72] {
+                dot(0.2, y, 0.04);
+                line(&[(0.34, y), (0.84, y)]);
+            }
+        }
+        Icon::Cel => {
+            closed(&[(0.16, 0.16), (0.84, 0.16), (0.84, 0.84), (0.16, 0.84)]);
+            closed(&[(0.3, 0.3), (0.7, 0.3), (0.7, 0.7), (0.3, 0.7)]);
+        }
+        Icon::Onion => {
+            closed(&[(0.14, 0.14), (0.62, 0.14), (0.62, 0.62), (0.14, 0.62)]);
+            closed(&[(0.38, 0.38), (0.86, 0.38), (0.86, 0.86), (0.38, 0.86)]);
+        }
+        Icon::Edit => {
+            closed(&[
+                (0.62, 0.16),
+                (0.8, 0.34),
+                (0.38, 0.76),
+                (0.2, 0.8),
+                (0.24, 0.58),
+            ]);
+            line(&[(0.16, 0.88), (0.84, 0.88)]);
+        }
+        Icon::Minus => line(&[(0.22, 0.5), (0.78, 0.5)]),
     }
 }

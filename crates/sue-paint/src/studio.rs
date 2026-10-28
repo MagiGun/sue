@@ -182,6 +182,8 @@ pub struct SuePaint {
     pub(crate) transparent: bool,
     /// The menu bar and command bar are hidden (CSP's Shift+Tab).
     pub(crate) menus_hidden: bool,
+    /// Where the palettes are docked, floating or collapsed.
+    pub(crate) dock: crate::dock::Dock,
     pub(crate) hue: f32,
     pub(crate) recent: History,
     pub(crate) docs: Vec<Doc>,
@@ -266,6 +268,7 @@ impl Default for SuePaint {
             last_dir: None,
             transparent: false,
             menus_hidden: false,
+            dock: crate::dock::Dock::default(),
             pending_export: None,
             shown: false,
             clock: (0.0, 1.0 / 60.0),
@@ -395,6 +398,7 @@ fn implemented(command: &str) -> bool {
             | "window.timeline"
             | "help.shortcuts"
             | "window.hide_menus"
+            | "window.workspace.reset"
             | "help.about"
     )
 }
@@ -1616,6 +1620,11 @@ impl SuePaint {
             }
             "window.command_bar" => self.panels.command_bar = !self.panels.command_bar,
             "window.hide_menus" => self.menus_hidden = !self.menus_hidden,
+            "window.workspace.reset" => {
+                self.dock = crate::dock::Dock::default();
+                self.panels = Panels::default();
+                self.menus_hidden = false;
+            }
             "window.tool" => self.panels.tool = !self.panels.tool,
             "window.sub_tool" => self.panels.sub_tool = !self.panels.sub_tool,
             "window.tool_property" => self.panels.tool_property = !self.panels.tool_property,
@@ -1847,51 +1856,20 @@ impl SuePaint {
         }
     }
 
-    /// Lays out the palettes around the canvas.
+    /// Lays out the palettes around the canvas: docked, collapsed or
+    /// floating (`dock`), the timeline under the canvas, and the canvas.
     fn body(&mut self, ui: &mut Ui, body: Rect, cx: &mut AppletContext<'_>, theme: &sue_wm::Theme) {
-        let column = self.panels.sub_tool
-            || self.panels.tool_property
-            || self.panels.color
-            || self.panels.color_set;
-        let left_width = if self.panels.tool { 40.0 } else { 0.0 }
-            + if column { 236.0 } else { 0.0 }
-            + if self.panels.brush_size { 58.0 } else { 0.0 };
-        let right_width = if self.panels.navigator || self.panels.layer {
-            300.0
-        } else {
-            0.0
-        };
-        let mut left = body.left() - self.hide * left_width;
-        if self.panels.tool {
-            let strip =
-                Rect::from_min_max(pos2(left, body.top()), pos2(left + 40.0, body.bottom()));
-            self.tool_strip(ui, strip, cx, theme);
-            left = strip.right();
-        }
-        if column {
-            let rect =
-                Rect::from_min_max(pos2(left, body.top()), pos2(left + 236.0, body.bottom()));
-            self.left_column(ui, rect, cx, theme);
-            left = rect.right();
-        }
-        if self.panels.brush_size {
-            let rect = Rect::from_min_max(pos2(left, body.top()), pos2(left + 58.0, body.bottom()));
-            self.size_column(ui, rect, theme);
-            left = rect.right();
-        }
-        let mut right = body.right() + self.hide * right_width;
-        if right_width > 0.0 {
-            let rect =
-                Rect::from_min_max(pos2(right - 300.0, body.top()), pos2(right, body.bottom()));
-            self.right_column(ui, rect, cx, theme);
-            right = rect.left();
-        }
-        let mut center = Rect::from_min_max(pos2(left, body.top()), pos2(right, body.bottom()));
-        if self.panels.timeline && body.height() > 360.0 {
-            let top = center.bottom() - 160.0 * (1.0 - self.hide);
+        let mut center = self.dock_ui(ui, body, cx, theme);
+        let room = center.height() > 360.0 && center.width() > 320.0;
+        if self.panels.timeline && room {
+            let height = self.dock.timeline.min(center.height() - 200.0).max(90.0);
+            let top = center.bottom() - height * (1.0 - self.hide);
             let timeline =
-                Rect::from_min_max(pos2(center.left(), top), pos2(center.right(), top + 160.0));
+                Rect::from_min_max(pos2(center.left(), top), pos2(center.right(), top + height));
             self.timeline_panel(ui, timeline, theme);
+            if self.ready {
+                self.timeline_splitter(ui, top, center.x_range(), theme);
+            }
             center.max.y = top;
         }
         self.canvas_area(ui, center, cx, theme);
