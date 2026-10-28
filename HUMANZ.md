@@ -8,8 +8,10 @@ companion is [`HUMANS.md`](HUMANS.md); the backbone rules every contributor,
 human or AI, follows are in [`AGENTS.md`](AGENTS.md).
 
 The words **MUST**, **MUST NOT**, **SHOULD** and **MAY** are used as in RFC 2119.
-Type names in `code` refer to real items in the workspace. §7 maps every part of
-this specification to its implementation status. Like every file in the
+Type names in `code` refer to real items in the workspace. §1 is the backbone
+every feature shares. §7 maps every part of this specification to its
+implementation status, and §8 maps the features Sue may grow into onto the
+backbone. Like every file in the
 repository, this one contains no em dashes, en dashes or middle dots (house
 style).
 
@@ -35,7 +37,8 @@ bins/sue      ──► every crate below                   + egui
 sue-wm        ──► sue-rice, sue-platform, sue-core   + egui
 sue-ai        ──► sue-platform, sue-core
 sue-rice      ──► sue-platform, sue-core
-sue-io        ──► sue-core                            + jxl-oxide, zune-jpegxl, zune-png, zune-jpeg, jpeg-encoder, symphonia
+sue-io        ──► sue-model, sue-core                 + jxl-oxide, zune-jpegxl, zune-png, zune-jpeg, jpeg-encoder, symphonia
+sue-model     ──► sue-core
 sue-pkg       ──► sha2, ed25519-dalek, semver         (no engine crates)
 sue-core      ──► nothing                              (leaf)
 sue-platform  ──► winit, wgpu, egui, egui-winit, egui-wgpu, arboard, pollster, cpal, audio_thread_priority, rfd, open   (no engine crates)
@@ -56,30 +59,57 @@ added to `sue-platform` later MUST relax it for that crate only.
 
 ---
 
-## 1. Relational ECS / DAG kernel (`sue-core`)
+## 1. The backbone (`sue-core`, `sue-model`)
+
+Sue is meant to grow into one app that does the work of many: documents,
+spreadsheets, design, photo, video, audio, 3D and CAD, engineering drawings, a
+game engine and more (§8). Those features will be built one by one, many years
+apart, by different people. The backbone is the part they all share, and it is
+what makes them **one** app: a feature added later reads, links, saves, undoes
+and exports the data of every feature added before it, without knowing it
+exists. The rules that protect the backbone are in [`AGENTS.md`](AGENTS.md).
+
+The backbone is these pieces, each described below:
+
+| Piece | Type names | Section |
+| --- | --- | --- |
+| One arena of entities with stable ids | `Arena`, `Entity`, `EntityId`, `AssetHandle` | §1.2, §1.3 |
+| Seven frozen built-in buffers and projections | `ComponentData`, `ComponentKind`, `Projection` | §1.4 |
+| Open, versioned extension components | `ComponentType`, `ComponentRegistry`, `OpaqueComponent` | §1.5 |
+| Typed, ordered relations | `Relation`, `RelationStore`, `OrderKey`, `CHILD`, `REF` | §1.6 |
+| A shared vocabulary | `Value`, `Properties`, `PropertySchema`, `Quantity`, `Color`, `Time`, `Rate`, `Timecode` | §1.7 |
+| Delta-tree undo and generic edits | `ReversibleTransaction`, `UndoStack`, `txn::*`, `Batch` | §1.8 |
+| The `.sue` project file | `SueFile`, `Chunk` | §1.9 |
+| One format registry and bundles | `FormatHandler`, `FormatRegistry`, `Bundle`, `InsertBundle` | §1.10 |
+| One operator registry and presets | `Operator`, `OperatorRegistry`, `Preset`, `PresetLibrary` | §1.11 |
+| Background work and shared buffers | `JobPool`, `Shared` | §1.12 |
+| Shared data models | `sue_model::*` | §1.13 |
 
 ### 1.1 Why there are no $O(N^2)$ converters
 
 A conventional suite that supports $N$ file formats and wants any-to-any
 conversion needs a converter for every ordered pair: $N(N-1) = O(N^2)$ code paths.
-Each studio also keeps its own in-memory model, so moving work from the video
-editor to the DAW is one more conversion.
+Each program also keeps its own in-memory model, so moving work from the video
+editor to the DAW is one more conversion, and usually a lossy one.
 
-Sue routes every format through **seven canonical typed buffer components**:
+Sue routes every format through **one data model**: entities made of shared
+components (§1.3 to §1.5).
 
 $$
-\text{format}_i \xrightarrow{\ \text{decode}_i\ } \text{Component} \xrightarrow{\ \text{encode}_j\ } \text{format}_j
+\text{format}_i \xrightarrow{\ \text{import}_i\ } \text{entities} \xrightarrow{\ \text{export}_j\ } \text{format}_j
 $$
 
-Supporting $N$ formats takes at most $2N$ codecs, which is $O(N)$. A codec pack
-adds one format to every studio at once. Studios never convert between
-themselves. They read the same components through **projections** (§1.4).
+Supporting $N$ formats takes at most $2N$ handlers, which is $O(N)$. A format
+handler adds one format to every feature at once. Features never convert
+between themselves: a table made by the CSV importer is the same `sue.table`
+component a spreadsheet, a BIM schedule and a chart read, and a clip on a video
+timeline points at the very entity the audio editor changes.
 
-### 1.2 The Arena and `AssetHandle`
+### 1.2 The Arena, `AssetHandle` and `EntityId`
 
 All engine data lives in `sue_core::Arena`, a generational slot arena of
-entities. An entity is addressed by an `AssetHandle`, a `#[repr(transparent)]`
-`u64`:
+entities. At runtime an entity is addressed by an `AssetHandle`, a
+`#[repr(transparent)]` `u64`:
 
 ```text
  63                              32 31                               0
@@ -104,19 +134,65 @@ Invariants:
    pipeline (§6.4). Passing the same handle twice returns
    `CoreError::AliasedHandles`.
 
+Handles are fast but temporary: they change when a document is reopened. Every
+entity therefore also has an **`EntityId`**, a random version 4 UUID that is its
+name for good. It survives saving, loading, undo and redo, copying to another
+document and sending to another device. The arena keeps an id to handle map
+(`handle_of`, `get_by_id`, `get_by_id_mut`), and `insert_keep_id` refuses a
+duplicate id (`CoreError::DuplicateId`). **Everything that links data across
+features, files or time links by `EntityId`**: relations, clips, frames on a
+page, links in a note, AST children, node graph parameters.
+
+**Revisions.** The arena counts changes: every spawn, despawn, relation edit and
+every mutable borrow (`get_mut`, `get_by_id_mut`, the writer of `split_pair`)
+raises `Arena::revision()` and stamps the entity's `Entity::revision()`. "Is the
+document modified?" and "is this thumbnail stale?" are one comparison. A
+mutable borrow that ends up changing nothing still counts; the counter errs on
+the side of rebuilding.
+
 **Concurrency model.** The target is a **lock-free shared arena**: slot pages are
 allocated in fixed-size chunks that never move. Generations are atomics. Readers
 validate a handle with one acquire-load and never block. Writers append to
 per-thread command buffers that are merged at frame boundaries, and freed memory
 is reclaimed epoch by epoch. v1.0 ships the single-writer form of the same
 contract: mutation requires `&mut Arena`, and `Arena: Send + Sync` allows any
-number of concurrent readers. Code written against the v1.0 API (handles, split
-borrows, transactions) carries over unchanged.
+number of concurrent readers. Long work runs on the job pool (§1.12) over
+`Shared` buffers and comes back as a transaction. Code written against the v1.0
+API (handles, ids, split borrows, transactions) carries over unchanged.
 
-### 1.3 Typed buffer components
+### 1.3 Entities
 
-Every entity has one **base component**, given at spawn, and at most one component
-of each kind. Each kind is a dense, typed buffer:
+An `Entity` has:
+
+| Part | Type | Meaning |
+| --- | --- | --- |
+| `id()` | `EntityId` | Stable identity (§1.2) |
+| `name()` | `String` | Display name, e.g. a file name |
+| `class()` | `String` | **What it is**: `sue.image`, `sue.sheet`, `noelle.scene`, `bim.wall`. Features decide whether they open an entity by its class first. `sue_model::class` lists the well-known ones. |
+| `base_kind()` | `Option<ComponentKind>` | The built-in buffer it was made from, if any. Folders, tables, scenes and graphs have none. |
+| `components()` | `ComponentData` | Built-in buffers, at most one per kind (§1.4) |
+| `exts()` | `dyn Component` | Extension components, at most one per type name (§1.5) |
+| `properties()` | `Properties` | Edit state any feature can read and write (§1.7) |
+| `metadata()` | `String` to `String` | Facts about where it came from (source path, codec, decode time) |
+| `revision()` | `u64` | Arena revision of its last change |
+
+`Entity::new(name, base)` makes an entity from a buffer (its class defaults to
+the kind's, e.g. `sue.text`); `Entity::empty(name, class)` makes one without a
+buffer. Builders (`with_class`, `with_property`, `with_ext`, `with_component`,
+`with_meta`, `with_id`) assemble an entity before it enters an arena.
+`remap_entities` rewrites every link inside an entity (properties, AST
+children, extension components), which is how copies get fresh ids.
+
+Class names are namespaced like every other registry key: `sue.*` for the core,
+`noelle.*` for the game engine, a feature's own prefix for its own. Classes
+starting with `sue.app.` belong to the app itself (the quick note): projects
+leave them out and opening a project keeps them (§1.9).
+
+### 1.4 The built-in buffers and projections
+
+The seven built-in components are dense, typed buffers for the data every
+feature touches. Their encodings are **frozen**: new data types are extension
+components (§1.5), never new built-in kinds.
 
 | `ComponentKind` | Payload | Layout | Zero-copy `f32` tensor view |
 | --- | --- | --- | --- |
@@ -125,49 +201,136 @@ of each kind. Each kind is a dense, typed buffer:
 | `VectorSpline2D` | Cubic Bézier chain | `Vec<[f32; 2]>` with `3n + 1` knots, `closed` | knots, flattened |
 | `RasterTile2D` | Pixel tile | `width`, `height`, `PixelFormat::{Gray8, Rgba8, RgbaF32}` | `RgbaF32` pixels |
 | `MeshBuffer3D` | Indexed triangles | `Vec<[f32; 3]>` positions, `Vec<u32>` indices | positions, flattened |
-| `TimeSpan` | Interval on the global clock | `start`, `duration` in flicks (§1.6) | n/a |
-| `ASTNode` | Syntax / scene-graph node | `kind`, byte span, `Vec<AssetHandle>` children | n/a |
+| `TimeSpan` | Interval on the global clock | `start`, `duration` in flicks (§1.7) | n/a |
+| `ASTNode` | Syntax / scene-graph node | `kind`, byte span, `Vec<EntityId>` children | n/a |
 
 Constructors validate their invariants (for example, sample count divisible by
-channel count, or triangle indices in bounds), so a component that exists is
-well-formed. `ComponentData::f32_view{,_mut}` exposes the numeric payload as a
-borrowed slice, and that slice is the tensor interface of §6.
+channel count, or triangle indices in bounds), and so does
+`ComponentData::decode`, so a component that exists is well-formed.
+`ComponentData::f32_view{,_mut}` exposes the numeric payload as a borrowed
+slice, and that slice is the tensor interface of §6.
 
-### 1.4 Entities, projections and the DAG
+A **projection** is a way of viewing an entity, one per built-in kind:
 
-A **projection** is a way of viewing an entity in a studio. There are seven, one
-per native component kind:
-
-| `Projection` | Native component | Typical studio |
+| `Projection` | Native component | Typical feature |
 | --- | --- | --- |
-| `Document` | `StringBuffer` | Document processor, notes |
-| `Audio` | `PCMFloat1D` | DAW, media player |
-| `Vector2D` | `VectorSpline2D` | Vector studio, CAD sketches |
-| `Raster2D` | `RasterTile2D` | Raster studio, file thumbnails |
-| `Mesh3D` | `MeshBuffer3D` | CAD / 3D, game engine |
-| `Timeline` | `TimeSpan` | Video editor, animation |
-| `Code` | `ASTNode` | IDE |
+| `Document` | `StringBuffer` | Documents, notes, code |
+| `Audio` | `PCMFloat1D` | Audio editing, playback |
+| `Vector2D` | `VectorSpline2D` | Vector art, sketches |
+| `Raster2D` | `RasterTile2D` | Painting, photos, thumbnails |
+| `Mesh3D` | `MeshBuffer3D` | 3D, CAD previews, game levels |
+| `Timeline` | `TimeSpan` | Video, animation, slideshows |
+| `Code` | `ASTNode` | IDE, scene trees |
 
-Each entity carries a `ProjectionMask`, a 16-bit set of the projections it
-currently supports. Switching a document into the video editor is
+Each entity carries a `ProjectionMask`. Putting a document on the timeline is
 `Arena::attach_projection(handle, Projection::Timeline, TimeSpan)`. This adds a
 `TimeSpan` component and sets one bit. It **MUST NOT** copy, move or mutate any
-existing buffer. The heap allocation behind the base component keeps its exact
-address, and a unit test asserts this pointer stability. A 2D raster becomes a 3D
-asset the same way, by attaching a `MeshBuffer3D` (for example a textured quad)
-next to the untouched `RasterTile2D`.
-
+existing buffer; the heap allocation behind every other component keeps its
+exact address, and a unit test asserts this pointer stability.
 `detach_projection` returns the removed component, so the operation can be
-reversed (§1.5). The base projection cannot be detached
-(`CoreError::CannotDetachBase`), so a projection can never destroy the data it
-views.
+reversed, and the base projection cannot be detached
+(`CoreError::CannotDetachBase`). An entity without a base takes the first
+attached buffer as its base.
 
-Entities reference each other only through handles. `ASTNode::children` and
-timeline tracks form a **directed acyclic graph** over the arena: a scene graph,
-a syntax tree and an edit decision list all use the same storage and the same
-undo machinery.
+### 1.5 Open components
 
-### 1.5 Delta-tree undo/redo
+Most future data does not fit seven buffers: a spreadsheet, a node graph, a
+rig, a BIM wall, a Noelle physics body. A feature defines such a type once:
+
+```rust
+pub trait ComponentType: Clone + Send + Sync + fmt::Debug + 'static {
+    const NAME: &'static str;   // namespaced, never changed: "sue.table"
+    const VERSION: u32;         // bumped whenever the encoding changes
+    fn encode(&self, out: &mut Writer);
+    fn decode(version: u32, input: &mut Reader<'_>) -> Result<Self, CodecError>;
+    fn heap_bytes(&self) -> usize { 0 }
+    fn remap_entities(&mut self, map: &mut dyn FnMut(EntityId) -> EntityId) {}
+}
+```
+
+and registers it: `ComponentRegistry::register::<T>()`. A blanket impl gives
+every `ComponentType` the object-safe `Component` trait the arena stores, so
+`entity.ext::<Table>()`, `entity.ext_mut::<Table>()` and `entity.ext_named("sue.table")`
+work for any type. `components_equal` compares two components by encoding.
+
+Compatibility follows from three rules:
+
+1. **Decode every old version.** `decode` receives the stored version and MUST
+   read every version up to `VERSION` (a test per old version).
+2. **Never lose the unknown.** A type that is not registered, or a version newer
+   than this build knows, decodes as an `OpaqueComponent` holding the bytes, and
+   encodes back byte for byte. A document made by a Sue with more features
+   passes through an older Sue unharmed. `ComponentRegistry::upgrade` turns an
+   opaque component into its real type once the feature is installed.
+3. **Links are ids.** `remap_entities` rewrites them when entities are copied.
+
+The binary encoding uses `sue_core::codec` (`Writer`, `Reader`): little-endian
+numbers, LEB128 varints, length-prefixed strings and nested runs, with bounds
+checks so hostile input returns `CodecError` instead of panicking or
+allocating without limit. It has no third-party dependency, so the file format
+never depends on a serializer's stability.
+
+### 1.6 Relations
+
+A `Relation` is a typed, ordered edge between two `EntityId`s with optional data
+(`Properties`). `Arena::relate` and `Arena::unrelate` keep them in the
+`RelationStore`, indexed both ways (`targets`, `sources`, `involving`).
+
+- `CHILD` (`sue.child`) is a **tree**: one parent per child, no cycles
+  (`RelationError::SecondParent`, `RelationError::Cycle`). Folders, layer
+  stacks, book chapters, scene trees, assemblies and building storeys are
+  `CHILD` trees. Other kinds can be registered as trees with `add_tree_kind`.
+- `REF` (`sue.ref`) and any other kind form a **graph**: a link in a note, a
+  material used by a mesh, a sidechain from one track to another.
+- Siblings are ordered by an `OrderKey`, a base-36 fractional key.
+  `OrderKey::between(a, b)` always finds a key strictly between two others, so
+  moving one item rewrites only that item (which also merges well in future
+  collaboration).
+- Despawning an entity drops its relations; `despawn_with_relations` returns
+  them so `DespawnEntity` can put them back on undo.
+
+### 1.7 The shared vocabulary
+
+Features agree on values, units, color and time, so their data can meet.
+
+**`Value` and `Properties`.** `Value` is the one dynamic type: `Bool`, `Int`,
+`Float`, `Text`, `Vec2`/`Vec3`/`Vec4`, `Color`, `Quantity`, `Time`, `Entity`
+(a link), `List`, `Map`, `Bytes`, and `Opaque` (a value type from a newer Sue,
+kept byte for byte). Entity properties, node parameters, cell contents, preset
+fields and relation data are all `Value`s. Keys are namespaced by the feature
+that owns them (`text.size`, `audio.gain`, `noelle.gravity`). A
+`PropertySchema` holds `PropertyDef`s (key, label, `ValueType`, default, range,
+help, group), so a generic Inspector can edit any property of any feature and
+`validate` it; unknown keys are allowed. `sue_model::register_properties` adds
+the shared ones (opacity, blend mode, fill, stroke, font, size, gain, pan,
+material, layer).
+
+**`Quantity` and units.** A number with a `Unit` from one table that covers
+length (mm to miles, typographic points and picas, CSS pixels), area, volume,
+angle, time, frequency, mass, force, pressure (Pa to psi and inches of water),
+energy (J to kWh, BTU), power (W to hp, BTU/h, tons of refrigeration),
+temperature (K, °C, °F, affine), velocity, flow (L/s, cfm, gpm), voltage,
+current, resistance, capacitance, inductance, luminous intensity, data and
+level. Conversions are exact within a dimension, and mixing dimensions is an
+error (`DimensionMismatch`), never a silent bug. `"12.5 mm".parse::<Quantity>()`
+reads user input.
+
+**`Color`.** A color carries its `ColorSpace`: sRGB, linear sRGB, Rec. 709,
+Display P3, linear Rec. 2020, Rec. 2100 PQ and HLG, ACEScg, ACES2065-1 and XYZ.
+Conversions go through CIE XYZ with matrices derived from the published
+primaries, Bradford adaptation between the D65 and ACES whites, and exact
+transfer functions (sRGB, BT.1886, PQ, HLG). Out-of-gamut values are kept, not
+clipped, so grading never loses data.
+
+**Time.** `Time` counts **flicks**: $1\ \text{s} = 705{,}600{,}000$ flicks
+(`FLICKS_PER_SECOND`). The number divides evenly by every common frame rate (24,
+25, 30, 48, 50, 60, 90, 100, 120 fps) and sample rate (8 kHz to 192 kHz,
+including 44.1 kHz). `Rate` is an exact rational rate (23.976 is 24000/1001), and
+frame and sample positions convert with no drift (a test checks NTSC rates over
+a full day). `Timecode` reads and writes SMPTE timecode, drop-frame included.
+`TimeSpan` is the built-in interval on the same clock.
+
+### 1.8 Delta-tree undo and generic edits
 
 Every mutation is a `ReversibleTransaction<T>`:
 
@@ -197,25 +360,145 @@ root ── A ── B ── C          undo ×2, then apply D:
 ```
 
 - `apply` appends a child of the cursor and moves the cursor to it.
+- `record` adds an edit that already happened in place (typing in a live
+  editor) without applying it again.
 - `undo` reverts the cursor's transaction and moves to the parent.
 - `redo` re-applies the **preferred child**: the branch most recently created or
   visited. `select_redo_branch` changes it.
 - `checkout(node)` walks to any node: it undoes up to the lowest common ancestor,
   then redoes down to the target. The cost is the path length.
 
+The kernel ships generic edits that name entities by `EntityId`, so they stay
+valid however often an entity is removed and brought back: `SpawnEntity`
+(optionally with relations), `DespawnEntity` (restores relations), `SetProperty`,
+`SetMeta`, `Rename`, `Relate`, `Unrelate`, `SetExtension` (swap a whole extension
+component; fine-grained edits like `sue_model::SetCell` and `GraphEdit` store
+smaller deltas), `InsertBundle` (§1.10) and `Batch<T>`, which applies several
+transactions as one step and takes back the done ones if a later one fails.
+
 `UndoStack<T>` is generic. The shell keeps **one global history**,
-`UndoStack<sue_wm::World>`, where `World { arena, rice }` holds everything
+`UndoStack<sue_wm::World>`, where `World { arena, rice, scene }` holds everything
 undoable. `ArenaEdit(txn)` and `RiceEdit(txn)` lift arena and rice transactions
 onto the world, so a single `Ctrl+Z` (or `Ctrl+Shift+Z` / `Ctrl+Y` to redo) steps
-back through note edits and theme edits in the order they happened.
+back through note edits, canvas moves and theme edits in the order they happened.
 
-### 1.6 Time base
+### 1.9 The `.sue` project file
 
-`TimeSpan` counts **flicks**: $1\ \text{s} = 705{,}600{,}000$ flicks
-(`FLICKS_PER_SECOND`). The number divides evenly by every common frame rate (24,
-25, 30, 48, 50, 60, 90, 100, 120 fps) and sample rate (8 kHz to 192 kHz,
-including 44.1 kHz). Audio samples and video frames therefore land on exact
-integer ticks, with no drift.
+A project is one file:
+
+```text
+magic    8 bytes   "SUE\0FILE"
+version  u32       container version (1)
+extra    bytes     length-prefixed header extension (empty in version 1)
+chunks   repeated  tag [u8; 4], version u32, length u64, payload, crc32 u32
+end      chunk     tag "END\0", length 0
+```
+
+The chunk framing never changes. Each chunk has its own version, so one part
+can evolve without touching the others, and a CRC-32 per chunk reports damage
+by name. A reader keeps every chunk it does not understand and writes it back
+unchanged (`SueFile` holds them; the app keeps the open file so they survive the
+next save). Chunks today:
+
+| Tag | Version | Holds | Owner |
+| --- | --- | --- | --- |
+| `ARNA` | 1 | Every document entity (ids, classes, buffers, extension components, properties, metadata) and every relation | `sue-core` |
+| `META` | 1 | Document properties (title, author) | `sue-core` |
+| `PRST` | 1 | A preset library (§1.11) | `sue-core` |
+| `THMB` | 1 | A preview picture (reserved) | `sue-core` |
+| `SCNE` | 1 | The canvas layout: nodes naming entities by id, rectangles, node properties | `sue-wm` |
+
+Saving a document leaves out `sue.app.*` entities (`set_arena_where`), and
+opening one replaces the document while keeping them. Loading never reuses a
+handle that was live before, so caches keyed by handle cannot show stale data.
+Saving a loaded file is byte for byte stable (a test checks it), and a document
+whose extension types are unknown to this build still round-trips byte for
+byte. Big buffers are stored raw today; compressed chunks (JPEG XL for rasters)
+are planned as a new `ARNA` version.
+
+### 1.10 Formats and bundles
+
+Every importer and exporter is a `FormatHandler` in one `FormatRegistry`:
+
+```rust
+pub trait FormatHandler: Send + Sync {
+    fn info(&self) -> FormatInfo;                  // id, name, extensions, MIME, category
+    fn sniff(&self, head: &[u8]) -> bool;          // content first
+    fn can_import(&self) -> bool;
+    fn import(&self, bytes: &[u8], name: &str, options: &Properties) -> Result<Bundle, FormatError>;
+    fn can_export(&self, entity: &Entity) -> bool;
+    fn export(&self, arena: &Arena, ids: &[EntityId], options: &Properties) -> Result<Vec<u8>, FormatError>;
+    fn options(&self) -> Vec<PropertyDef>;         // quality, sample rate, page size
+}
+```
+
+`FormatRegistry::importer_for` asks every handler's `sniff` first and falls back
+to the extension, so a misnamed file still opens. `exporters_for(entity)` lists
+what an entity can become. Export options are `PropertyDef`s, so export dialogs
+and export presets (`export.<format id>`) work for every format alike.
+
+A `Bundle` is entities plus the relations between them, outside any arena. It
+is what importers return, what the clipboard carries (`Bundle::encode`), and
+what moves between documents: `Bundle::copy_from(arena, ids, descendants)`
+lifts entities out, `renew_ids` gives the copies fresh ids and rewrites every
+link between them (properties, components, relations), and `InsertBundle` puts
+a bundle into an arena as one undo step, optionally `under` a parent.
+
+`sue_io::formats(registry)` registers every format this build knows (§2): PNG,
+JPEG, JPEG XL, WAV, MP3, FLAC, Ogg Vorbis, AAC, plain text, Markdown, CSV, TSV,
+Wavefront OBJ and `.sue`. Formats Sue recognizes but cannot decode yet (MP4,
+QuickTime, Matroska, AVI, PDF, MIDI, GIF, WebP, TIFF, BMP, PSD, AVIF, HEIF, glTF
+binary, fonts) open as entities of the right class carrying
+`sue_model::Encoded`, the original bytes, which export unchanged and wait for a
+decoder.
+
+### 1.11 Operators and presets
+
+Every action a feature offers is an `Operator<T>`: an id (`audio.normalize`), a
+label, a category, a parameter schema (`Vec<PropertyDef>`), an availability test
+on the target and the selection (a slice of `EntityId`), and `plan`, which
+returns the change as a transaction without making it. `FnOperator` builds one
+from closures. The `OperatorRegistry<T>` resolves parameters (defaults, then
+the given values, each validated) and `run` applies the plan through the undo
+history. The command palette, menus, shortcuts, macros, scripting, batch
+processing and AI tools are meant to drive features only through operators, so
+a feature is reachable everywhere the moment it registers.
+
+A `Preset` is a named set of values for one operator or format id. A
+`PresetLibrary` adds, replaces, lists by target, merges and encodes presets; it
+saves inside a project (`PRST`) or on its own, so presets travel between
+projects and people.
+
+### 1.12 Background jobs and shared buffers
+
+`JobPool` runs long work (render, export, transcode, simulate, index, infer)
+on worker threads that sleep when idle (`for_this_machine` leaves one core for
+the interface). A job gets a `JobContext` to report progress and notice
+cancellation; a panic inside a job becomes `JobError::Panicked` instead of
+taking Sue down. Jobs read data through `Shared<T>` handles (reference counted,
+copy-on-write: a write copies only while someone else still holds the buffer),
+and hand back a result that the interface applies as a transaction, so undo
+covers background work too.
+
+### 1.13 Shared data models (`sue-model`)
+
+`sue-model` defines the data shapes many features share, as registered
+extension components (`sue_model::register`):
+
+| Model | Name | Holds | Shared by |
+| --- | --- | --- | --- |
+| `TextMarks` | `sue.text.marks` | Formatting ranges over the entity's text (bold, link, heading, list, font, size, color, inline math, comment), kept in place by `on_insert` and `on_delete` | word processing, notes, Markdown, novels, LaTeX, layout |
+| `Table` | `sue.table` | Sparse cells (`Value` plus optional formula text), typed columns, A1 references, row insert and remove; `SetCell` edits | spreadsheets, databases, CSV, schedules, bills of materials, cue lists |
+| `Animation`, `Curve` | `sue.animation` | Keyframes (constant, linear, Bezier) per property key | motion graphics, animation, rigging, automation, grading keyframes |
+| `Sequence`, `Track`, `Clip` | `sue.sequence` | Tracks of clips pointing at any entity, with trims, speed and split | video editing, DAWs, slideshows, podcasts, subtitles |
+| `Notes`, `Note` | `sue.notes` | Note events with pitch, velocity, channel, lyric and expression | MIDI, piano roll, notation, singing synthesis |
+| `NodeGraph`, `NodeRegistry` | `sue.graph` | Nodes with typed ports and parameters, links, evaluation order; `GraphEdit` edits | compositing, shaders, audio patches, procedural geometry, game logic |
+| `Geometry`, `Transform` | `sue.geometry`, `sue.transform` | Double-precision points, polygons, polylines and Bezier prims with attributes per domain; placement | 3D, CAD, BIM, vector art, rigging, game levels |
+| `PageLayout` | `sue.layout` | Pages (size, margins, bleed, masters) and frames showing other entities | publishing, books, slides, PDF pages, drawing sheets |
+| `Encoded` | `sue.encoded` | The original bytes of a file Sue cannot decode yet | every format before its decoder exists |
+
+A feature that needs something new adds its own `ComponentType` the same way,
+under its own prefix, and registers it.
 
 ---
 
@@ -962,10 +1245,24 @@ separators are measured against, and it exercises the full zero-copy path.
 | Spec | Status in v1.0 | Where |
 | --- | --- | --- |
 | §1.2 Arena, handles, split borrows | **Implemented** (single-writer; lock-free arena planned) | `sue-core/src/arena.rs`, `handle.rs` |
-| §1.3 Seven typed components | **Implemented** | `sue-core/src/component.rs` |
+| §1.2 Stable `EntityId`s, id lookup, revisions | **Implemented** | `sue-core/src/id.rs`, `arena.rs` |
+| §1.3 Entities: class, optional base, properties, extensions, metadata | **Implemented** | `sue-core/src/arena.rs` |
+| §1.4 Seven frozen built-in components with validated encodings | **Implemented** | `sue-core/src/component.rs` |
 | §1.4 Projections, mask, pointer stability | **Implemented** | `sue-core/src/projection.rs`, `arena.rs` |
-| §1.5 Delta-tree undo, `checkout` | **Implemented** | `sue-core/src/undo.rs`, `txn.rs` |
-| §1.5 One global history for arena and rice edits | **Implemented** (`UndoStack<World>`) | `sue-wm/src/world.rs` |
+| §1.5 Open components, registry, opaque round trip, binary codec | **Implemented** | `sue-core/src/registry.rs`, `codec.rs` |
+| §1.6 Relations, trees, fractional order keys | **Implemented** | `sue-core/src/relation.rs` |
+| §1.7 `Value`, `Properties`, `PropertySchema` | **Implemented** | `sue-core/src/value.rs` |
+| §1.7 Units and quantities | **Implemented** (one table; derived units beyond the table are planned) | `sue-core/src/units.rs` |
+| §1.7 Managed color | **Implemented** (matrix and transfer conversions; ICC profiles and gamut mapping planned) | `sue-core/src/color.rs` |
+| §1.7 Time, rates, drop-frame timecode | **Implemented** | `sue-core/src/time.rs` |
+| §1.8 Delta-tree undo, `checkout`, `record` | **Implemented** | `sue-core/src/undo.rs` |
+| §1.8 Generic edits by id and `Batch<T>` | **Implemented** | `sue-core/src/txn.rs`, `format.rs` |
+| §1.8 One global history for arena, canvas and rice edits | **Implemented** (`UndoStack<World>`) | `sue-wm/src/world.rs` |
+| §1.9 `.sue` container, `ARNA`, `META`, `PRST`, `SCNE` | **Implemented**; save with `Ctrl+S`, open like any file; compressed chunks planned | `sue-core/src/file.rs`, `sue-wm/src/scene.rs`, `world.rs`, `bins/sue/src/runtime.rs` |
+| §1.10 Format registry, bundles, copy with fresh ids | **Implemented**; the canvas still opens dropped files through the ingest path (§2.2) and the `.sue` handler | `sue-core/src/format.rs`, `sue-io/src/formats.rs` |
+| §1.11 Operators and presets | **Implemented** in the kernel; the palette and applets do not route through operators yet | `sue-core/src/operator.rs` |
+| §1.12 Job pool and shared buffers | **Implemented**; no feature uses the pool yet | `sue-core/src/jobs.rs`, `shared.rs` |
+| §1.13 Shared models (text marks, table, curves, sequence, notes, graph, geometry, layout, encoded) | **Implemented** as data with tests; no applet edits them yet | `sue-model` |
 | §2.1 Three-tier sniffer | **Implemented** | `sue-io/src/sniff.rs` |
 | §2.2 JXL probe (boxes + `SizeHeader`) | **Implemented** | `sue-io/src/jxl.rs` |
 | §2.2 JXL pixel decode and JPEG reconstruction | **Implemented** with `jxl-oxide` (no CMYK yet; the DC preview and pass targets come from a full decode until a streaming decoder lands) | `sue-io/src/jxl.rs` |
@@ -1000,3 +1297,121 @@ separators are measured against, and it exercises the full zero-copy path.
 | §6 Formats, backends, registry, zero-copy tasks | **Implemented** (reference kernel on `CpuSimd`) | `sue-ai` |
 | §6 GGUF/ONNX inference runtimes | Planned (the Local AI page lists model files and the backend a task would use) | n/a |
 | House style: no em dashes, en dashes or middle dots | **Checked** by a test that scans every text file | `bins/sue/src/style.rs` |
+| §8 Features beyond today's applets | Ideas mapped onto the backbone; none is promised | n/a |
+
+---
+
+## 8. Feature map: how future features sit on the backbone
+
+Sue aims to cover, over time, the work people do today in many separate
+programs. Sue does not clone those programs: it has its own interface and its
+own ways of working, and many ideas below may never ship. This section exists
+so that whichever features do arrive, they arrive as parts of **one** app. For
+each area it names the entity classes, the backbone pieces (§1) it builds on,
+the formats involved, and what the feature itself must still add. Programs are
+named only to say which kind of work is meant.
+
+### 8.1 How a feature plugs in
+
+A feature (built in, or a package later, §5) only ever does these things:
+
+1. **Classes.** Picks namespaced entity classes for what it makes
+   (`noelle.scene`, `cad.part`), reusing the well-known ones in
+   `sue_model::class` when the thing is the same thing.
+2. **Data.** Stores data in built-in buffers, shared models (§1.13) or its own
+   `ComponentType`s, registered in the `ComponentRegistry`. Links are
+   `EntityId`s and `Relation`s, never handles or paths.
+3. **Edits.** Changes data only through `ReversibleTransaction`s (generic ones,
+   or its own delta transactions), so one undo history covers everything.
+4. **Actions.** Registers `Operator`s with parameter schemas, so the palette,
+   menus, shortcuts, presets, scripts and batch runs reach it at once.
+5. **Formats.** Registers `FormatHandler`s that import to bundles and export
+   entities, with options as `PropertyDef`s for presets.
+6. **Nodes.** Registers `NodeType`s if it has a node graph, so its nodes can
+   mix with other features' nodes in one `NodeGraph`.
+7. **Interface.** Registers applets with the `Launchpad` (§3.6) that draw and
+   edit entities of its classes, and riced parameters (§4) for its look.
+8. **Heavy work.** Runs it on the `JobPool` over `Shared` buffers and applies
+   the result as a transaction.
+
+Because every step goes through a registry, a feature that is missing (not
+installed, or not written yet) costs nothing and breaks nothing: its entities
+still open, save and copy, with their components kept as `OpaqueComponent`s and
+their files as `Encoded` bytes.
+
+### 8.2 Documents, writing and knowledge
+
+| Area (for example) | Entities and data | Backbone pieces | Still to build |
+| --- | --- | --- | --- |
+| Word processing (Word, Pages) | `sue.document`: `StringBuffer` plus `TextMarks`; embedded pictures and tables as `CHILD` entities placed by marks | text edits, `TextMarks`, `PropertySchema` (styles), `PageLayout` for print | paragraph and character style sheets, pagination, footnotes, tracked changes (as transactions), DOCX and ODT handlers |
+| Spreadsheets (Excel, Sheets) | `sue.sheet`: `Table`; several sheets as `CHILD` entities of a workbook folder | `Table`, `SetCell`, `Value`, `Quantity`, CSV and TSV handlers (done) | a formula engine with dependency tracking, charts (entities that `REF` a table), XLSX and ODS handlers |
+| Slideshows (PowerPoint, Keynote) | `sue.slides`: `PageLayout` with slide-sized pages; frames show text, pictures, video | `PageLayout`, `Animation` (builds), `Sequence` (timed shows) | transitions, presenter view, PPTX handler |
+| Novel writing and manuscripts (Scrivener) | a book is a `sue.folder` tree of chapter and scene documents (`CHILD`, ordered), notes and research as linked entities (`REF`) | relations, `OrderKey` reordering, `TextMarks`, properties (status, word target) | corkboard and outline views, compile to EPUB, PDF and DOCX |
+| Book publishing and ebook libraries (Calibre) | books as `sue.publication`; library metadata in properties; a catalogue `Table` | `PageLayout`, `Bundle` export, properties | EPUB and MOBI handlers, library index |
+| PDF editing and signing | `sue.publication` holding `Encoded` PDF bytes today; later pages as `PageLayout` with frames | `Encoded` (done), `PageLayout`, a signature `ComponentType` | a PDF parser and writer, annotation and form models, signing through `sue-platform` key stores |
+| Notes and knowledge bases (Obsidian, Notion) | notes as documents, links as `REF` relations (backlinks are `sources`), databases as `Table` with typed columns | relations, `Table`, `TextMarks` (`link` marks), Markdown handler (done) | graph view, templates, queries over properties |
+| Markdown | `sue.document` with Markdown text | Markdown handler (done) | live preview that maps syntax to `TextMarks` and back |
+| LaTeX and math | documents with `math` marks (LaTeX source); math solver results as values | `TextMarks`, `Value`, `Quantity` (units in answers) | a typesetter, a computer algebra operator set |
+
+### 8.3 Code and tools
+
+| Area (for example) | Entities and data | Backbone pieces | Still to build |
+| --- | --- | --- | --- |
+| Code IDE | `sue.code` documents; syntax trees as `ASTNode` entities with `EntityId` children; projects as folders | text edits, `ASTNode`, relations, `JobPool` (indexing, builds) | parsers, language servers (through `sue-platform` processes), debugger |
+| Terminal emulator | a terminal session entity; scrollback as text | `StringBuffer`, `JobPool` | PTY access in `sue-platform` (OS-specific, rule 6), escape sequence model |
+| Web browser and rendering engine | page entities; a rendered page as a raster or a layout | `PageLayout`, `RasterTile2D`, `Encoded` (HTML) | an embedded engine behind `sue-platform` (system web view) or a native one |
+| Local file transfer (LocalSend) | transfers as entities with progress properties; files arrive as bundles | `Bundle` (the unit that travels), `JobPool`, `.sue` and every `FormatHandler` | discovery and encrypted transport in `sue-platform` |
+| Remote desktop and collaboration (RustDesk, Tailscale, AnyDesk, TeamViewer) | sessions as entities | `EntityId` (stable across devices), transactions as the unit of change, `OrderKey` (merge-friendly ordering) | screen capture and input injection in `sue-platform`, a sync protocol that ships transactions, conflict rules |
+
+### 8.4 Design, photo and video
+
+| Area (for example) | Entities and data | Backbone pieces | Still to build |
+| --- | --- | --- | --- |
+| Raster painting and photo editing (Photoshop, Krita, Clip Studio) | a picture is a `sue.image` folder of layer entities (`CHILD`, ordered), each a `RasterTile2D` with blend and opacity properties | `CHILD` order, `style.*` properties, `Color` (managed), JPEG XL pipeline, tile undo | brushes as operators, masks, adjustment layers as `NodeGraph`s, PSD and KRA handlers |
+| Vector design and UI design (Illustrator, Figma, CorelDraw) | `sue.vector` entities: `Geometry` with Bezier prims, fill and stroke properties, `Transform`; artboards as `PageLayout` pages | `Geometry`, `Transform`, `PropertySchema`, `REF` (components and instances) | boolean path ops, text on path, constraints and auto layout, SVG, AI and PDF handlers |
+| Photo and RAW development (Lightroom, Topaz) | photos as `sue.image` with `Encoded` RAW bytes; develop settings as properties; a catalogue `Table` | `Encoded` (lossless original), `Color` (ACES and wide gamut), `Preset`s for looks, `JobPool` | RAW decoders, a develop pipeline as `NodeGraph`, AI enhance through `sue-ai` |
+| Video editing (Premiere, Resolve, Final Cut) | `sue.sequence` with `Sequence` tracks; clips point at `sue.video` entities (`Encoded` today) | `Sequence`, `Clip` trims and splits, `Rate`, `Timecode`, `Time` | video decoding and encoding (behind a codec package), proxy media on the `JobPool`, export handlers |
+| Motion graphics (After Effects) | compositions as sequences of layer entities with `Transform` and `Animation` | `Animation` on any property key, `Transform`, `NodeGraph` (effects) | expression language, rendering |
+| Color grading and finishing | grade settings as `NodeGraph`s per clip; LUTs as entities | `Color` (ACEScg, Rec. 2100 PQ and HLG), `Animation` (keyframed grades), `Preset`s | scopes, a GPU grade evaluator, LUT and CDL handlers |
+| Screen recording, streaming and transcoding (HandBrake, ffmpeg) | recordings arrive as `sue.video`; transcodes are export jobs | `FormatRegistry` (one export path for every format), `JobPool`, `Preset`s per format | capture in `sue-platform`, encoder packages |
+
+### 8.5 Audio and music
+
+| Area (for example) | Entities and data | Backbone pieces | Still to build |
+| --- | --- | --- | --- |
+| Playback (VLC) | any audio or video entity | `PCMFloat1D`, the shared transport (§3.5), every audio `FormatHandler` (done for MP3, FLAC, WAV, Ogg, AAC) | video playback |
+| DAWs (Ableton, Reaper) | a song is a `sue.sequence`: audio clips point at `sue.audio` entities, MIDI clips at `sue.notes` entities; mixer settings as track properties; automation as `Animation` | `Sequence`, `Notes`, `Animation`, `REF` relations for sends and sidechains, `Time` sample-exact | the real-time audio graph (§3.5), plugin hosting through `sue-platform` |
+| Mastering, restoration and analysis (WaveLab) | audio entities; processing chains as `NodeGraph`s | `NodeGraph`, `Preset`s, `JobPool` for offline renders, `ZeroCopyTensorTask` for AI denoise (§6) | DSP node types, loudness meters |
+| Sound design and patching (Pure Data, Reaktor) | patches as `sue.graph` entities | `NodeGraph`, `NodeRegistry` (typed ports: `audio`, `control`, `float`), `GraphEdit` | a real-time graph evaluator, DSP node library |
+| Voice synthesis and singing (Vocaloid, OpenUtau, Synthesizer V, CeVIO) | a vocal track is `Notes` with `lyric` per note and phonemes, vibrato and expression in note properties; voicebanks as entities | `Notes`, `Sequence`, `Animation` (pitch and dynamics curves), `sue-ai` models | phonemizers, voicebank formats, a synthesis engine (offline AI through `sue-ai`) |
+
+### 8.6 3D, animation and the Noelle engine
+
+| Area (for example) | Entities and data | Backbone pieces | Still to build |
+| --- | --- | --- | --- |
+| 3D modeling (Blender) | `sue.model` entities: `Geometry` (attributes for normals, UVs, materials), `Transform`; scenes are `sue.scene` `CHILD` trees | `Geometry`, `Transform`, relations, OBJ handler (done), `MeshBuffer3D` for display | editing operators, glTF and FBX handlers, a viewport renderer |
+| Sculpting and texturing (ZBrush, Substance) | dense meshes as `Geometry`; texture sets as `CHILD` image entities; material graphs as `NodeGraph` | `Geometry` attributes, `RasterTile2D`, JPEG XL pipeline, `NodeGraph` | multires and dynamic topology data, brush operators, bakers on the `JobPool` |
+| 2D animation and rigging (Spine, DragonBones, Toon Boom, Moho, Synfig) | a character is a `sue.scene` tree of parts with `Transform`s; bones as entities; skins as `REF`s; poses and timing as `Animation` | `CHILD` trees, `Transform`, `Animation`, `Geometry` (meshes with weight attributes) | rig model (`ComponentType`), inverse kinematics, onion skin views |
+| Compositing and VFX (Nuke, Houdini) | comps and procedural networks as `sue.graph` entities; outputs written to image or geometry entities | `NodeGraph` with typed ports (`image`, `geometry`), `Geometry` attribute domains, `Color`, `JobPool` | node libraries, a cooking engine with caches keyed by `Entity::revision` |
+| **Noelle engine** (game engine inside Sue, based on Godot's ideas) | a game is a `sue.folder` of `noelle.scene` entities; a scene is a `CHILD` tree of node entities (class `noelle.node.*`) with `Transform`s and properties; scripts are `sue.code` entities `REF`ed by nodes; assets are ordinary Sue entities (images, audio, models, animations) referenced by id | `CHILD` order (the scene tree), `REF` (scripts, resources, signals as relation kinds), `Transform`, `Animation`, `NodeGraph` (visual scripting, shaders), `Properties` with a `PropertySchema` per node type (the inspector), `Time` and `JobPool` | the runtime (game loop, physics, input, rendering), its node types and operators, export of a playable build; nothing in the backbone needs to change for it |
+
+### 8.7 Engineering, architecture and manufacturing
+
+| Area (for example) | Entities and data | Backbone pieces | Still to build |
+| --- | --- | --- | --- |
+| CAD drafting (AutoCAD, MicroStation) | drawings as `sue.vector` entities in double precision; layers as a `cad.layer` property and folder trees; dimensions and blocks as entities (`REF` for block instances) | `Geometry` (f64), `Quantity` (mm, in, ft, angles), `PageLayout` for sheets and title blocks, `Table` for schedules | constraint solver, DWG and DXF handlers, snapping |
+| Mechanical CAD (Fusion 360, SolidWorks) | parts as `cad.part` with a feature history as an ordered `CHILD` tree of feature entities; assemblies as trees with mates as relations | `CHILD` order (feature history), relations with properties (mates), `Quantity`, `Geometry`, operators with parameter schemas | a B-rep kernel as a `ComponentType`, STEP and STL handlers |
+| Architecture, civil and BIM (ArchiCAD, Vectorworks) | buildings as `CHILD` trees (site, building, storey, space, element); elements carry typed properties (fire rating, U-value) and `Geometry` | relations (`bim.contains` registered as a tree kind), `PropertySchema`, `Quantity` (area, volume), `Table` (schedules derived from properties) | IFC handler, parametric wall and slab types, plan and section views on `PageLayout` |
+| HVAC, MEP and engineering drafting | systems as graphs: equipment, ducts and pipes as entities, connections as relations with flow data | relations with `Properties`, `Quantity` (cfm, L/s, Pa, inH2O, BTU/h, tons of refrigeration, kW), `Table` (equipment schedules) | sizing calculators as operators, routing, standard symbol libraries |
+| Electrical, plumbing and piping | circuits and pipe runs as relation graphs; panels and fixtures as entities | relations, `Quantity` (V, A, ohm, W, gpm, psi), `Table` (panel schedules) | load and pressure calculations as operators, schematic and isometric views |
+| Industrial design and manufacturing | products as assemblies; manufacturing data (material, tolerance, process) as properties; BOMs as `Table`s derived from the tree | `CHILD` trees, `PropertySchema` (`cad.material`), `Table`, `Quantity`, `Geometry` | CAM toolpaths as `Geometry` polylines, G-code export handler, render and simulation jobs |
+
+### 8.8 What the backbone deliberately leaves to features
+
+The backbone does not draw, decode video, evaluate formulas, solve
+constraints, cook node graphs or run game loops. It gives every feature the
+same entities, ids, relations, values, units, color, time, undo, files, formats,
+operators, presets, jobs and models, and it guarantees that data made by one
+feature stays intact, linkable and undoable in all the others. When a feature
+needs something the backbone lacks, the change goes into the backbone (with
+the rules in [`AGENTS.md`](AGENTS.md)), not around it.

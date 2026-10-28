@@ -19,7 +19,7 @@ mapped onto it in §8). What people should experience:
 | Part | Where |
 | --- | --- |
 | The kernel: arena, entity ids, components (built-in and registered), relations, values and properties, units, color, time, transactions and undo, the codec and the `.sue` container, registries, shared buffers, background jobs | `crates/sue-core` |
-| The shared data models features build on: text marks, tables, curves and animation, sequences, node graphs, geometry | `crates/sue-model` |
+| The shared data models features build on: text marks, tables, curves and animation, sequences and note events, node graphs, geometry and transforms, page layout, kept encoded files | `crates/sue-model` |
 | Format handlers (import, export) and the `.sue` project format | `crates/sue-io`, `crates/sue-core/src/file.rs` |
 | Operating-system isolation | `crates/sue-platform` |
 | How changes reach the repository | Git, below |
@@ -31,17 +31,19 @@ code.
 
 ## Rule 1: One data model
 
-- All user data lives in the `Arena` as entities: a stable `EntityId`, a base
-  component, optional extra components, properties and relations. Features
-  read and write that data. They never keep a private copy of a document.
+- All user data lives in the `Arena` as entities: a stable `EntityId`, a
+  class, an optional base buffer, extra components, properties and relations.
+  Features read and write that data. They never keep a private copy of a
+  document.
 - Features link to each other's data by `EntityId` and relations (`sue.child`,
   `sue.ref` and registered kinds), never by pointers, file paths or private
   ids. A song on a timeline, a picture in a layout and a mesh in a game scene
   are the very same entities.
-- A new kind of data is a new component type registered in the `Registry`,
-  built on a shared model from `sue-model` whenever one fits: a spreadsheet is
-  a `Table`, a shader or compositing network is a `Graph`, a CAD part is
-  `Geometry` with `Properties` in real units.
+- A new kind of data is a new `ComponentType` registered in the
+  `ComponentRegistry`, built on a shared model from `sue-model` whenever one
+  fits: a spreadsheet is a `Table`, a shader or compositing network is a
+  `NodeGraph`, a CAD part is `Geometry` with properties in real units
+  (`Quantity`).
 
 ## Rule 2: Every change is a transaction
 
@@ -55,9 +57,10 @@ code.
 ## Rule 3: Open and forward compatible
 
 - The backbone never hardcodes a list of features, file formats, operators or
-  node types. They register at runtime: component types in the `Registry`,
-  formats in the `FormatRegistry`, operators in an `OperatorRegistry`, node
-  types in a `NodeRegistry`.
+  node types. They register at runtime: component types in the
+  `ComponentRegistry`, formats in the `FormatRegistry`, operators in an
+  `OperatorRegistry`, node types in a `NodeRegistry`, and classes and property
+  keys under the feature's own namespace.
 - Data a build does not understand survives untouched: unknown component types
   and unknown file chunks round-trip as opaque bytes.
 

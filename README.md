@@ -24,7 +24,7 @@ Putting a document on the timeline, or a song next to a sketch, attaches a new
 
 ## Where things stand
 
-v1.0 "Faustian Enigma" contains the seven kernel crates below and the `sue`
+v1.0 "Faustian Enigma" contains the eight crates below and the `sue`
 executable. It opens a native GPU window drawn with egui in a pure monochrome
 theme (black to white, nothing else), straight onto an **infinite canvas**:
 
@@ -52,20 +52,32 @@ theme (black to white, nothing else), straight onto an **infinite canvas**:
 
 Every text field selects with the mouse, double-clicks words, copies, cuts and
 pastes, and `Ctrl+Z` and `Ctrl+Y` undo through the one global undo tree. Drop
-any file on the window and Sue puts it on the canvas by its content.
+any file on the window and Sue puts it on the canvas by its content. `Ctrl+S`
+saves the whole canvas as a `.sue` project; opening a project brings it back.
 
-The large studios (DAW, video, 3D and CAD, IDE, game engine) and the AI model
-runtimes come in later releases. `HUMANZ.md` §7 lists, part by part, what is
-implemented today and what is only specified.
+Under the shell sits the **backbone** every future feature will share
+(`HUMANZ.md` §1): stable entity ids, typed and ordered relations, open and
+versioned component types that survive round trips through builds that do not
+know them, one value, unit, color and time vocabulary, generic undoable edits,
+the `.sue` container, one registry each for file formats and operators,
+presets, a background job pool, and shared data models for rich text, tables,
+animation curves, timelines, note events, node graphs, geometry and page
+layout.
+
+The large studios (DAW, video, 3D and CAD, IDE, the Noelle game engine) and
+the AI model runtimes come in later releases. `HUMANZ.md` §7 lists, part by
+part, what is implemented today and what is only specified, and §8 maps every
+feature Sue may grow into onto the backbone.
 
 ## Crate map
 
 | Crate | Role | Key types |
 | --- | --- | --- |
-| [`sue-core`](crates/sue-core) | The substrate: arena, entities, projections, undo tree | `Arena`, `AssetHandle`, `ComponentData`, `ProjectionMask`, `ReversibleTransaction`, `UndoStack` |
+| [`sue-core`](crates/sue-core) | The backbone: arena, stable ids, entities, open components, relations, values, units, color, time, undo tree, `.sue` file, format and operator registries, presets, jobs | `Arena`, `Entity`, `EntityId`, `ComponentRegistry`, `RelationStore`, `Value`, `Quantity`, `Color`, `Time`, `UndoStack`, `SueFile`, `FormatRegistry`, `OperatorRegistry`, `JobPool` |
+| [`sue-model`](crates/sue-model) | Shared data models every feature can read | `TextMarks`, `Table`, `Animation`, `Sequence`, `Notes`, `NodeGraph`, `Geometry`, `Transform`, `PageLayout`, `Encoded` |
 | [`sue-platform`](crates/sue-platform) | The only place OS-specific code may live: hosts, the egui window and frame pacing, GPU choice, painting, audio output, clipboard, dialogs | `PlatformHost`, `DesktopHost`, `run_desktop`, `FramePacing`, `EguiPainter`, `TextureUpload`, `AudioOutput` |
 | [`sue-rice`](crates/sue-rice) | `.suerice` parser, Settings descriptors, monochrome presets, migration, hardware profiles | `RiceSchema`, `RiceParameter`, `SetRiceValues`, `ThemePreset`, `migrate`, `HardwareProfile` |
-| [`sue-io`](crates/sue-io) | Magic-byte sniffer, JPEG XL, PNG, JPEG and audio codecs, ingest, tile cache, byte map | `sniff_stream`, `ingest_bytes`, `NativeJxlPipeline`, `decode_audio`, `encode_jpeg`, `TileCache` |
+| [`sue-io`](crates/sue-io) | Magic-byte sniffer, JPEG XL, PNG, JPEG and audio codecs, every format handler, ingest, tile cache, byte map | `sniff_stream`, `formats`, `ingest_bytes`, `NativeJxlPipeline`, `decode_audio`, `encode_jpeg`, `TileCache` |
 | [`sue-pkg`](crates/sue-pkg) | Content-addressed packages, Ed25519 trust, resolver, atomic generations | `PackageManifest`, `ContentHash`, `TrustStore`, `PackageIndex`, `resolve`, `AtomicUpdater` |
 | [`sue-ai`](crates/sue-ai) | Offline, zero-copy AI substrate | `LocalModelRegistry`, `ComputeBackend`, `ZeroCopyTensorTask` |
 | [`sue-wm`](crates/sue-wm) | The shell: infinite canvas, spring camera, pills, marking menu, palette, timeline, drawers, theme | `SueApplet`, `Launchpad`, `Shell`, `Camera`, `Scene`, `SpringDamper`, `Typing`, `Transport` |
@@ -76,7 +88,8 @@ bins/sue      ──► every crate below                   + egui
 sue-wm        ──► sue-rice, sue-platform, sue-core   + egui
 sue-ai        ──► sue-platform, sue-core
 sue-rice      ──► sue-platform, sue-core
-sue-io        ──► sue-core                            + jxl-oxide, zune-jpegxl, zune-png, zune-jpeg, jpeg-encoder, symphonia
+sue-io        ──► sue-model, sue-core                 + jxl-oxide, zune-jpegxl, zune-png, zune-jpeg, jpeg-encoder, symphonia
+sue-model     ──► sue-core
 sue-pkg       ──► sha2, ed25519-dalek, semver         (no engine crates)
 sue-core      ──► nothing                              (leaf)
 sue-platform  ──► winit, wgpu, egui, egui-winit, egui-wgpu, arboard, pollster, cpal, audio_thread_priority, rfd, open   (no engine crates)
@@ -119,8 +132,10 @@ the Arena, the rice introspection, the sniffer, the package manager, the AI
 registry and the shell working together through real egui frames (a drawer that
 glides on its spring, a mode switch that glides the camera, typing undone with
 `Ctrl+Z`, a paint stroke undone tile by tile, the timeline, the marking menu and
-the palette, then 0 FPS). When a GPU is available it also renders a frame and
-checks that not one pixel is tinted. The process exits non-zero if any check
+the palette, then 0 FPS), and the backbone (the live canvas saved as a project
+and opened again, pictures and tables through the format registry, an operator
+run with a preset and undone, a background job). When a GPU is available it
+also renders a frame and checks that not one pixel is tinted. The process exits non-zero if any check
 fails. `--snapshot <dir>` renders ten scenes into PNG files in `<dir>`, from a
 fresh temporary profile: the canvas, a selection pill, Document mode, the
 timeline, the marking menu, the palette, two Settings pages, the drawers with a

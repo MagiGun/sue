@@ -11,9 +11,10 @@ needs explaining, it is explained the first time it appears.
 > canvas described below, with a document, a paint layer and a piece of audio
 > on it. You can write, draw, listen, split and level audio, view pictures and
 > raw bytes, line things up on the timeline, browse files, play music, convert
-> files and keep notes. Everything you change can be undone and is saved as you
-> go. The big studios (music, video, 3D) and a web browser built into the window
-> are added in the releases that follow. Sue reads your `.suerice` file when it
+> files and keep notes. Everything you change can be undone. Your quick note is
+> saved as you go, and `Ctrl+S` saves everything on the canvas as one project
+> file. The big studios (music, video, 3D) and a web browser built into the
+> window are added in the releases that follow. Sue reads your `.suerice` file when it
 > starts (or when you press Reload in Settings), so close Sue or reload after you
 > edit the file by hand.
 
@@ -165,6 +166,46 @@ floating window. A list of categories runs down the left (General, Appearance &
 Rice, Display & Graphics, Audio & DSP, Files & Codecs, Local AI, Packages &
 Updates, Keymaps), and the right side shows only that category. Type in "Filter
 settings..." to search all of them.
+
+---
+
+## Projects: one file for everything
+
+Press `Ctrl+S` to save your work as a **project**, a single `.sue` file. It
+holds everything on the canvas: your documents, pictures, sounds and whatever
+else you made, how they are linked, and where each card sits. The first time,
+Sue asks where to save; after that `Ctrl+S` just saves. "Save Project As" in the
+command palette picks a new file. Open a project like any other file (the Files
+drawer, `Ctrl+O`, or drop it on the window) and the canvas comes back exactly as
+you left it. Your quick note is yours alone and never goes into projects.
+
+A few things make projects safe to keep for years:
+
+- **Nothing is lost.** If a project holds something this copy of Sue cannot
+  show yet (made by a newer Sue, or by a feature you have not installed), Sue
+  keeps it untouched and saves it back as it was. The same goes for files Sue
+  cannot open yet, such as videos and PDFs: they sit on the canvas as cards
+  that keep the original file inside and can be saved back out unchanged.
+- **Links survive.** Everything has a permanent name inside the project, so a
+  clip on the timeline, a picture on a page or a link in a note still points at
+  the right thing after you save, reopen, copy or paste.
+- **Damage is caught.** Each part of the file carries a checksum, so a damaged
+  file says so instead of opening wrong.
+
+---
+
+## Where Sue is heading
+
+Sue is meant to grow into the one app for nearly every kind of creative and
+technical work: writing, spreadsheets, slides, books, PDFs and notes; design,
+photos and video; music, sound and singing voices; 3D, animation and a game
+engine called **Noelle**; and engineering drawings for buildings, machines,
+heating, plumbing and electrics. Many of these are only ideas today, and some
+may never ship. What is already in place is the shared foundation they will
+all stand on, so that whatever arrives works with everything else: one kind of
+project file, one undo history, one way to open and save every format, one set
+of presets, and units, colors and timing that every part of Sue agrees on. The
+engineers' map of how each idea fits is in `HUMANZ.md` §8.
 
 ---
 
