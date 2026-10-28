@@ -4,7 +4,7 @@
 //! The UI thread pushes interleaved `f32` frames; the device callback only
 //! pops them. The callback never locks, allocates or blocks: the ring slots
 //! are atomics, so the whole path is safe Rust. A paused stream is stopped
-//! at the device, so an idle player costs no CPU (LAW 4).
+//! at the device, so an idle player costs no CPU.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};

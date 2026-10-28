@@ -1,4 +1,4 @@
-//! The visual theme: every color, size and font comes from the rice (LAW 3)
+//! The visual theme: every color, size and font comes from the rice
 //! and is bound straight into `egui::Style` and `egui::Visuals`. The shipped
 //! palette is pure monochrome, from `#000000` to `#ffffff`.
 

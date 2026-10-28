@@ -1,6 +1,6 @@
 //! The undoable world: the data arena, the live rice and the canvas scene,
 //! under one history. Every change to any of them is a
-//! [`ReversibleTransaction`] that stores its inverse delta (LAW 6).
+//! [`ReversibleTransaction`] that stores its inverse delta (backbone rule 2).
 
 use egui::Rect;
 use sue_core::{Arena, AssetHandle, ComponentData, Entity, ReversibleTransaction, TxnError};

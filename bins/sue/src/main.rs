@@ -12,8 +12,6 @@ mod hex;
 mod history;
 mod image;
 mod inspector;
-#[cfg(test)]
-mod laws;
 mod notes;
 mod paint;
 mod player;
@@ -21,6 +19,8 @@ mod runtime;
 mod selfcheck;
 mod settings;
 mod snapshot;
+#[cfg(test)]
+mod style;
 mod util;
 
 use std::path::PathBuf;

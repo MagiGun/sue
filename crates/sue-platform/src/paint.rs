@@ -8,7 +8,7 @@ use crate::GpuContext;
 
 /// Hands borrowed pixels to the GPU so egui can draw them, without copying
 /// media buffers between modules: the arena's bytes go straight into a
-/// texture upload (LAW 2).
+/// texture upload (backbone rule 5).
 pub trait TextureUpload {
     /// A texture showing `pixels`: `size[0]` by `size[1]` pixels of
     /// `channels` bytes each (1 for gray, 4 for sRGB RGBA), row-major. `key`

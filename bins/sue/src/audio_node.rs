@@ -2,7 +2,7 @@
 //! `PCMFloat1D`; a node shows a clip of them (`clip_start` to `clip_end`, in
 //! frames) at a gain. Splitting places a second node over the same samples,
 //! and gain and normalize change only node properties: every audio edit is
-//! non-destructive and zero-copy (LAW 2).
+//! non-destructive and zero-copy (backbone rule 5).
 
 use std::f32::consts::TAU;
 

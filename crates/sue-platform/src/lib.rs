@@ -1,6 +1,6 @@
 //! # sue-platform: desktop and mobile OS abstraction
 //!
-//! The **only** crate allowed to contain OS-specific code (LAW 5). Everything
+//! The **only** crate allowed to contain OS-specific code (backbone rule 6). Everything
 //! above it talks to the [`PlatformHost`] trait and the portable types here:
 //! [`OsFamily`], [`FormFactor`], [`HardwareCapabilities`], [`PlatformPaths`]
 //! and the unified [`InputEvent`].

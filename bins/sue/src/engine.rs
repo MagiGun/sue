@@ -90,7 +90,7 @@ impl fmt::Display for RiceSource {
     }
 }
 
-/// Riceables the shell itself reads, beyond the window manager's (LAW 3).
+/// Riceables the shell itself reads, beyond the window manager's.
 pub fn shell_declarations() -> Vec<RiceDeclaration> {
     let int = |value, min, max| RiceParameter::IntRange {
         value,

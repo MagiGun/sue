@@ -11,7 +11,7 @@ use sue_rice::{DEFAULT_RICE, RiceSchema};
 use crate::engine::{BootOptions, Engine, RICE_FILE};
 use crate::runtime::Runtime;
 
-/// The window title (LAW 8: exactly `Sue`).
+/// The window title (house style: exactly `Sue`).
 pub const TITLE: &str = "Sue";
 
 #[derive(Default)]

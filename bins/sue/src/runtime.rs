@@ -1,7 +1,7 @@
 //! The runtime shared by the live window and offscreen snapshots: one egui
 //! frame of the shell, timers, engine commands, file opening and saving.
 //!
-//! Pacing (LAW 4): frames keep coming while a spring moves (the shell asks
+//! Pacing: frames keep coming while a spring moves (the shell asks
 //! egui for them with `request_repaint`) and for a short riced grace period
 //! after any change. Then the window sleeps at 0 FPS, waking only for timed
 //! work: the audio queue while something plays, a status message to clear,
@@ -332,7 +332,7 @@ impl Runtime {
         }
     }
 
-    /// What the loop should do next (LAW 4).
+    /// What the loop should do next.
     pub fn pacing(&self, now: Instant) -> FramePacing {
         if self.quit {
             return FramePacing::Sleep;

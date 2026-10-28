@@ -1,4 +1,4 @@
-//! The window manager's riceables (LAW 3) and the typed config read from them.
+//! The window manager's riceables and the typed config read from them.
 
 use std::time::Duration;
 
@@ -360,7 +360,7 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
     ]
 }
 
-/// Registers [`rice_declarations`] (LAW 3).
+/// Registers [`rice_declarations`].
 ///
 /// # Errors
 /// If a user value cannot be reconciled with its declaration.

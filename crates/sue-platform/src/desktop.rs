@@ -2,7 +2,7 @@
 //! (`egui-winit` for input, IME and the clipboard; [`EguiPainter`] for
 //! drawing).
 //!
-//! Rendering is event-driven (LAW 4). After every frame the loop asks two
+//! Rendering is event-driven. After every frame the loop asks two
 //! questions: does the application still animate (a spring in motion, which
 //! also calls `request_repaint`), and when does egui want its next frame
 //! (a hover fade, a caret blink)? With neither, it blocks in

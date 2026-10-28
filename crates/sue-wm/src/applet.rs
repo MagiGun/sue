@@ -1,4 +1,4 @@
-//! The applet contract every tool, utility and studio implements (LAW 1).
+//! The applet contract every tool, utility and studio implements.
 //!
 //! Nothing in the shell names an applet. Canvas entity kinds (documents,
 //! paint layers, audio, images, hex views), drawer utilities and the
@@ -398,12 +398,12 @@ impl AppletContext<'_> {
     }
 }
 
-/// The trait every tool, utility and studio implements (LAW 1).
+/// The trait every tool, utility and studio implements.
 pub trait SueApplet: Send {
     /// Static facts about the applet.
     fn manifest(&self) -> AppletManifest;
 
-    /// Riceable parameters the applet declares (LAW 3).
+    /// Riceable parameters the applet declares.
     fn rice_declarations(&self) -> Vec<RiceDeclaration> {
         Vec::new()
     }

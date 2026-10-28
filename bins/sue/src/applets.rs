@@ -1,4 +1,4 @@
-//! The built-in applets, installed into the Launchpad at runtime (LAW 1).
+//! The built-in applets, installed into the Launchpad at runtime.
 //! Packages add more through the same `Launchpad::register` call; each
 //! applet's manifest decides where it shows up (canvas modes, spawn buttons,
 //! timeline lanes, rails) and in which order.

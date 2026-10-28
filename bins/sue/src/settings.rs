@@ -2,7 +2,7 @@
 //! `Ctrl+,`). A category sidebar on the left; on the right only the chosen
 //! category's controls, under a live filter. Pages are registered data from
 //! the engine's catalog; a rice section no page claims lands on a final
-//! "Other" page, so every parameter stays reachable (LAW 3). Every edit is
+//! "Other" page, so every parameter stays reachable. Every edit is
 //! an undoable rice transaction; a slider previews live while dragged and
 //! records one undo step when released.
 

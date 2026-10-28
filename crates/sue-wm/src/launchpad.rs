@@ -1,4 +1,4 @@
-//! The Launchpad: the runtime registry of applets (LAW 1), and [`Applets`],
+//! The Launchpad: the runtime registry of applets, and [`Applets`],
 //! the live instances the shell drives.
 
 use sue_core::Entity;

@@ -132,7 +132,7 @@ picture, and Code / Hex.
 | --- | --- |
 | [`HUMANS.md`](HUMANS.md) | Everyday users and creators: what Sue is and how the screen works, in plain English |
 | [`HUMANZ.md`](HUMANZ.md) | Systems engineers: the full architectural specification |
-| [`AGENTS.md`](AGENTS.md) | AI coding agents: the eight unbreakable laws |
-| [`CLAUDE.md`](CLAUDE.md) | The same eight laws, mirrored for Claude-based agents |
+| [`AGENTS.md`](AGENTS.md) | Contributors and AI agents: the backbone rules (they bind only the shared foundations) |
+| [`CLAUDE.md`](CLAUDE.md) | The same rules, mirrored for Claude-based agents |
 
-Commits and pushes are made **by humans only** (see LAW 7 in `AGENTS.md`).
+Agents commit only when asked and never push unless asked (rule 8 in `AGENTS.md`).

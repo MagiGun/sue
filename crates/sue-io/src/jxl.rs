@@ -165,7 +165,7 @@ pub struct DecodedJxl {
 }
 
 /// The codec-facing JPEG XL interface. Every image and texture cache in Sue
-/// goes through it (LAW 6).
+/// goes through it.
 pub trait JxlPipeline: Send + Sync {
     /// Implementation name, for diagnostics.
     fn name(&self) -> &'static str;

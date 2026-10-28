@@ -8,7 +8,7 @@
 //! spawn buttons), the floating selection pill above the selected entity,
 //! the radial marking menu, the command palette and the Settings window.
 //!
-//! Motion (LAW 4): every moving part is a [`SpringDamper`] stepped with the
+//! Motion: every moving part is a [`SpringDamper`] stepped with the
 //! real, clamped frame time. While any spring moves the shell calls
 //! `request_repaint`, so frames come at the display rate with no input; once
 //! all settle (plus a short grace period) the loop sleeps at 0 FPS.
@@ -425,7 +425,7 @@ impl Shell {
             .map(|(text, error, _)| (text.as_str(), *error))
     }
 
-    /// What the loop should do next (LAW 4).
+    /// What the loop should do next.
     #[must_use]
     pub fn pacing(&self, now: Instant) -> FramePacing {
         let target_hz = self.scheduler.target_hz();

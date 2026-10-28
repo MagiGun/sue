@@ -4,13 +4,14 @@
 
 This is the architectural specification of **Sue: Singular Unified Engine**, v1.0
 "Faustian Enigma". It is written for systems engineers. The plain-English
-companion is [`HUMANS.md`](HUMANS.md); the rules every AI coding agent must follow
-are in [`AGENTS.md`](AGENTS.md).
+companion is [`HUMANS.md`](HUMANS.md); the backbone rules every contributor,
+human or AI, follows are in [`AGENTS.md`](AGENTS.md).
 
 The words **MUST**, **MUST NOT**, **SHOULD** and **MAY** are used as in RFC 2119.
 Type names in `code` refer to real items in the workspace. §7 maps every part of
 this specification to its implementation status. Like every file in the
-repository, this one contains no em dashes, en dashes or middle dots (LAW 8).
+repository, this one contains no em dashes, en dashes or middle dots (house
+style).
 
 ---
 
@@ -18,14 +19,14 @@ repository, this one contains no em dashes, en dashes or middle dots (LAW 8).
 
 | # | Tenet | Enforced by |
 | --- | --- | --- |
-| T1 | **One data model.** Every asset is an entity in one arena, made of typed buffer components. | `sue-core` |
-| T2 | **Zero-copy.** Subsystems exchange 64-bit `AssetHandle`s, never buffers. | `sue-core`, LAW 2 |
-| T3 | **Everything is reversible.** Every state mutation is a `ReversibleTransaction` storing a delta. | `sue-core`, LAW 6 |
-| T4 | **Everything is riceable.** Every visual constant, keybind and curve is a `.suerice` parameter. | `sue-rice`, LAW 3 |
-| T5 | **Platform isolation.** OS-specific code exists only in `sue-platform`. | LAW 5 |
-| T6 | **Hardware empathy.** Static scenes cost 0 frames. Budgets follow `HardwareProfile`. | `sue-wm`, `sue-rice`, LAW 4 |
+| T1 | **One data model.** Every asset is an entity in one arena, with a stable id, typed components, properties and relations. | `sue-core`, rule 1 |
+| T2 | **Zero-copy.** Subsystems exchange handles, ids and shared buffers, never copies. | `sue-core`, rule 5 |
+| T3 | **Everything is reversible.** Every data change is a `ReversibleTransaction` storing a delta. | `sue-core`, rule 2 |
+| T4 | **Everything is riceable.** Tunable look and feel lives in `.suerice` parameters. | `sue-rice` (guideline) |
+| T5 | **Platform isolation.** OS-specific code exists only in `sue-platform`. | rule 6 |
+| T6 | **Hardware empathy.** Static scenes cost 0 frames. Budgets follow `HardwareProfile`. | `sue-wm`, `sue-rice` (guideline) |
 | T7 | **Offline first.** AI, codecs and updates work with no network. | `sue-ai`, `sue-pkg` |
-| T8 | **Infinite modularity.** Tools are `SueApplet`s registered at runtime; nothing lists apps statically. | `sue-wm`, LAW 1 |
+| T8 | **Open by registration.** Component types, formats, operators, node types and applets register at runtime; unknown data round-trips untouched. | `sue-core`, `sue-wm`, rule 3 |
 
 ### 0.1 Crate graph
 
@@ -252,8 +253,8 @@ An empty stream is an empty plain-text document.
 
 ### 2.2 JPEG XL everywhere
 
-JPEG XL is Sue's **default internal image format**. LAW 6 requires every internal
-image or texture cache to default to `.jxl`.
+JPEG XL is Sue's **default internal image format**: internal image and texture
+caches default to `.jxl`.
 
 | Use | Feature relied on |
 | --- | --- |
@@ -325,7 +326,7 @@ Eviction is least-recently-used, ordered by a monotonic tick in a `BTreeMap`, so
 `get`, `insert` and eviction cost $O(\log n)$. A tile larger than the whole
 budget is refused rather than flushing the cache. `invalidate_layer` drops every
 tile of an edited layer. Hits, misses and evictions are counted for the
-diagnostics overlay. The cache stores opaque bytes, and by LAW 6 those bytes are
+diagnostics overlay. The cache stores opaque bytes; by default those bytes are
 `.jxl`-encoded tiles.
 
 ---
@@ -351,7 +352,7 @@ the `PlatformHost` trait and the portable services next to it:
 | `AudioOutput` / `AudioSink` | A `cpal` output stream fed from a lock-free ring (§3.5); `NullAudio` is a device-free clock for tests |
 | `list_dir`, `hidden_by_os`, `write_atomic` | Sorted folder listings for the Files drawer, without dot files or, on Windows, the legacy junctions (`NetHood`, `PrintHood`, `Cookies`, `SendTo`, `Recent`, `Start Menu`, `Templates`, `Application Data`, `Local Settings`, `My Documents`); crash-safe writes (temporary file, sync, rename) |
 | `copy_text` | The system clipboard (`arboard`) for buttons such as Copy All; text fields copy and paste through `egui-winit` |
-| `EguiPainter`, `TextureUpload` | Paints egui frames with `egui-wgpu` into the window or an offscreen texture; uploads image pixels the caller borrows from the arena straight into GPU textures (LAW 2) |
+| `EguiPainter`, `TextureUpload` | Paints egui frames with `egui-wgpu` into the window or an offscreen texture; uploads image pixels the caller borrows from the arena straight into GPU textures (rule 5) |
 | `open_url`, `reveal_folder` | The system browser (only `http` and `https`, validated by `web_url`) and file manager |
 | `pick_open_file`, `pick_save_file` | Native open and save dialogs (`rfd`) |
 
@@ -576,7 +577,7 @@ will run on the same ring discipline.
 
 ### 3.6 Applets, the Launchpad, the canvas and its chrome
 
-Every tool, utility and studio implements `SueApplet` (LAW 1):
+Every tool, utility and studio implements `SueApplet`:
 
 ```rust
 pub trait SueApplet: Send {
@@ -766,7 +767,7 @@ packages can add their own:
 | Keymaps | Every shortcut as an action and a key cap |
 
 Any rice section no page claims is listed on a final "Other" page, so every
-parameter stays reachable (LAW 3, tested).
+parameter stays reachable (tested).
 
 | Parameter | Control |
 | --- | --- |
@@ -801,7 +802,7 @@ edit made in a text editor while Sue runs is overwritten by the next change made
 in Settings; Reload from Disk applies the file's differences as one undoable
 step first.
 
-### 4.4 Registration (LAW 3) and migration
+### 4.4 Registration and migration
 
 Subsystems and applets declare their riceables as `RiceDeclaration { path,
 default, description }`. `RiceSchema::register` inserts a missing key, or keeps the
@@ -998,4 +999,4 @@ separators are measured against, and it exercises the full zero-copy path.
 | §5 Package download, binary deltas, WASM plugin loading | Planned (the signature policy is riced and shown; nothing installs packages yet) | n/a |
 | §6 Formats, backends, registry, zero-copy tasks | **Implemented** (reference kernel on `CpuSimd`) | `sue-ai` |
 | §6 GGUF/ONNX inference runtimes | Planned (the Local AI page lists model files and the backend a task would use) | n/a |
-| LAW 8: no em dashes, en dashes or middle dots | **Enforced** by a test that scans every text file | `bins/sue/src/laws.rs` |
+| House style: no em dashes, en dashes or middle dots | **Checked** by a test that scans every text file | `bins/sue/src/style.rs` |

@@ -359,7 +359,7 @@ fn set_float(
     Ok(())
 }
 
-/// A riceable a subsystem or applet declares, with its default (LAW 3).
+/// A riceable a subsystem or applet declares, with its default.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RiceDeclaration {
     /// Dotted path, e.g. `layout.gap`.

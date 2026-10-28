@@ -2,7 +2,7 @@
 //! The pixels live in the arena (`RasterTile2D`, RGBA); strokes write into
 //! them in place, and before a 64-pixel tile changes for the first time in
 //! a stroke its old pixels are kept, so each stroke becomes one undo step
-//! that stores only the tiles it touched (LAW 6), never a snapshot.
+//! that stores only the tiles it touched (backbone rule 2), never a snapshot.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;

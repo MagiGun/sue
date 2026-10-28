@@ -2,9 +2,9 @@
 //! pages, live choices for text parameters (audio devices, applets), read-only
 //! tables (models, packages, codecs) and theme presets.
 //!
-//! Pages are data registered at runtime, like applets (LAW 1). The Settings
+//! Pages are data registered at runtime, like applets. The Settings
 //! applet renders whatever is registered, and lists any rice section no page
-//! claims on a final page, so every parameter stays reachable (LAW 3).
+//! claims on a final page, so every parameter stays reachable.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

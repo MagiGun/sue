@@ -1,4 +1,4 @@
-//! The layout solver (LAW 4): where the activity rails, the spring-driven
+//! The layout solver: where the activity rails, the spring-driven
 //! drawers, the infinite canvas, the bottom timeline and the status bar go,
 //! for every form factor. Reveal values come from springs, so every drawer
 //! glides instead of popping.
@@ -26,7 +26,7 @@ impl Topology {
     }
 }
 
-/// Sizes from the rice (LAW 3).
+/// Sizes from the rice.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LayoutMetrics {
     /// Width of each activity rail.

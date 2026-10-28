@@ -1,5 +1,5 @@
 //! The canvas scene: where each entity sits on the infinite canvas. A node
-//! holds an [`AssetHandle`] into the arena, never the media itself (LAW 2),
+//! holds an [`AssetHandle`] into the arena, never the media itself (backbone rule 5),
 //! plus the applet that draws it and a few numeric properties (a document's
 //! text size, an audio clip's range and gain, its place on the timeline).
 //! Several nodes may show one entity (a split audio clip).

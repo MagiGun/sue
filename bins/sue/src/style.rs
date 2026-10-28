@@ -1,8 +1,8 @@
-//! Tests that enforce the agent laws over the whole repository.
+//! The house style check over the whole repository.
 
 use std::path::{Path, PathBuf};
 
-/// LAW 8: no em dashes, en dashes or middle dots anywhere.
+/// House style: no em dashes, en dashes or middle dots anywhere.
 const FORBIDDEN: [char; 3] = ['\u{2014}', '\u{2013}', '\u{00B7}'];
 
 fn repository() -> PathBuf {
@@ -33,7 +33,7 @@ fn text_files(dir: &Path, found: &mut Vec<(PathBuf, String)>) {
 }
 
 #[test]
-fn law_8_no_em_dashes_en_dashes_or_middle_dots() {
+fn no_em_dashes_en_dashes_or_middle_dots() {
     let mut files = Vec::new();
     text_files(&repository(), &mut files);
     assert!(
@@ -51,7 +51,7 @@ fn law_8_no_em_dashes_en_dashes_or_middle_dots() {
         .collect();
     assert!(
         offenders.is_empty(),
-        "LAW 8 forbids em dashes, en dashes and middle dots:\n{}",
+        "The house style forbids em dashes, en dashes and middle dots:\n{}",
         offenders.join("\n")
     );
 }

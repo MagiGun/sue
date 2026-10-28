@@ -1,7 +1,7 @@
 //! # sue-wm: the infinite canvas shell
 //!
 //! Every tool is a [`SueApplet`] registered at runtime with the
-//! [`Launchpad`] (LAW 1): canvas entity kinds, drawer utilities and the
+//! [`Launchpad`]: canvas entity kinds, drawer utilities and the
 //! Settings window. The [`Shell`] draws Sue's window with egui: an infinite
 //! spatial canvas whose [`Camera`] zooms from 10% to 3200%, entity nodes
 //! drawn by their applets inside a camera-transformed layer, a floating top
@@ -15,7 +15,7 @@
 //! touch overlays, and [`FrameScheduler`] keeps the frame cap of the
 //! hardware profile. The [`Theme`] binds the rice palette into egui's style.
 //! Text fields edit the arena in place through [`ArenaText`] and become
-//! undo steps through [`Typing`] (LAW 6).
+//! undo steps through [`Typing`] (backbone rule 2).
 //!
 //! Specification: `HUMANZ.md` §3.2 to §3.6.
 

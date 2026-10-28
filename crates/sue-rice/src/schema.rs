@@ -413,7 +413,7 @@ impl RiceSchema {
         Ok(old)
     }
 
-    /// Registers a declared parameter (LAW 3). A missing key gets the default.
+    /// Registers a declared parameter. A missing key gets the default.
     /// A present key keeps the user's value if its type is compatible
     /// (re-clamped to the declared range). An incompatible value is replaced
     /// and reported.

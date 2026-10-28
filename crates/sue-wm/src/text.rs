@@ -1,8 +1,8 @@
 //! Text editing over the arena. [`ArenaText`] lets an `egui::TextEdit` edit
-//! an entity's `StringBuffer` in place (no copy of the text, LAW 2) while it
+//! an entity's `StringBuffer` in place (no copy of the text, backbone rule 5) while it
 //! records every insert and delete. [`Typing`] groups those deltas into one
 //! undo step per burst of typing and records it in the global `UndoStack`,
-//! so `Ctrl+Z` and `Ctrl+Y` work the same in every text field (LAW 6).
+//! so `Ctrl+Z` and `Ctrl+Y` work the same in every text field (backbone rule 2).
 
 use std::any::TypeId;
 use std::ops::Range;
