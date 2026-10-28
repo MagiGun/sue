@@ -38,6 +38,9 @@ pub const NOTE_FILE: &str = "quick-note.txt";
 /// The entity Notes edits.
 pub const NOTE_NAME: &str = "Quick Note";
 
+/// The class of the quick note: an app entity, never saved into projects.
+pub const NOTE_CLASS: &str = "sue.app.note";
+
 /// Where the live rice came from.
 #[derive(Debug)]
 pub enum RiceSource {
@@ -360,6 +363,8 @@ impl Engine {
         let handle = world.arena.spawn(NOTE_NAME, StringBuffer::from(note));
         if let Ok(entity) = world.arena.get_mut(handle) {
             entity.set_meta(meta::SOURCE, note_path.display().to_string());
+            // Kept out of projects: it is the app's own note.
+            entity.set_class(NOTE_CLASS);
         }
 
         // The three live entities Sue opens with.

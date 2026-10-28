@@ -2988,6 +2988,7 @@ dependencies = [
  "sue-ai",
  "sue-core",
  "sue-io",
+ "sue-model",
  "sue-pkg",
  "sue-platform",
  "sue-rice",

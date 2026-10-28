@@ -258,6 +258,11 @@ impl RelationStore {
         self.tree_kinds.insert(kind.into());
     }
 
+    /// Every tree kind.
+    pub fn tree_kinds(&self) -> impl Iterator<Item = &str> {
+        self.tree_kinds.iter().map(String::as_str)
+    }
+
     /// `true` if `kind` is a tree kind.
     #[must_use]
     pub fn is_tree(&self, kind: &str) -> bool {

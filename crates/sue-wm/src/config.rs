@@ -338,6 +338,7 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
         ),
         declare("keys.open_settings", chord("Ctrl+,"), "Open Settings"),
         declare("keys.open_file", chord("Ctrl+O"), "Open a file"),
+        declare("keys.save", chord("Ctrl+S"), "Save the project"),
         declare("keys.quit", chord("Ctrl+Q"), "Quit Sue"),
         declare("keys.undo", chord("Ctrl+Z"), "Undo the last change"),
         declare("keys.redo", chord("Ctrl+Shift+Z"), "Redo"),
@@ -385,6 +386,8 @@ pub struct Keymap {
     pub open_settings: Keybind,
     /// Open a file.
     pub open_file: Keybind,
+    /// Save the project.
+    pub save: Keybind,
     /// Quit.
     pub quit: Keybind,
     /// Undo.
@@ -541,6 +544,7 @@ impl WmConfig {
                 command_palette_alt: key("keys.command_palette_alt")?,
                 open_settings: key("keys.open_settings")?,
                 open_file: key("keys.open_file")?,
+                save: key("keys.save")?,
                 quit: key("keys.quit")?,
                 undo: key("keys.undo")?,
                 redo: key("keys.redo")?,

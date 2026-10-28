@@ -101,8 +101,14 @@ impl SueFile {
 
     /// Stores `arena` in the [`ARENA`] chunk.
     pub fn set_arena(&mut self, arena: &Arena) {
+        self.set_arena_where(arena, &|_| true);
+    }
+
+    /// Stores the entities of `arena` that `keep` accepts, with the
+    /// relations between them.
+    pub fn set_arena_where(&mut self, arena: &Arena, keep: &dyn Fn(&crate::Entity) -> bool) {
         let mut out = Writer::new();
-        arena.encode(&mut out);
+        arena.encode_where(&mut out, keep);
         self.set(Chunk {
             tag: ARENA,
             version: ARENA_VERSION,
@@ -285,6 +291,13 @@ mod tests {
         assert_eq!(back.presets().unwrap(), presets);
         assert_eq!(back.chunk(*b"FUTR").unwrap().payload, [1, 2, 3]);
         assert_eq!(back.to_bytes(), bytes, "saving again is byte for byte");
+
+        // Leaving an entity out drops its relations too.
+        let mut subset = SueFile::new();
+        subset.set_arena_where(&arena, &|entity| entity.id() != page);
+        let partial = subset.arena(&ComponentRegistry::new()).unwrap();
+        assert_eq!(partial.len(), 1);
+        assert!(partial.relations().is_empty());
     }
 
     #[test]

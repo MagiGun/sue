@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use egui::{Align2, Id, Order, RichText, Sense};
+use sue_core::{SueFile, UndoStack};
 use sue_io::{IngestOptions, IngestView, NativeJxlPipeline, ingest_bytes, meta};
 use sue_platform::{
     AudioConfig, AudioOutput, AudioSink, FileFilter, FramePacing, TextureUpload, write_atomic,
@@ -141,6 +142,10 @@ pub struct Runtime {
     booted: bool,
     note_saved: Option<u64>,
     next_autosave: Option<Instant>,
+    /// Where the open project lives, once saved or opened.
+    project: Option<PathBuf>,
+    /// The open project file, so chunks this build does not know survive.
+    project_file: SueFile,
 }
 
 impl Runtime {
@@ -187,6 +192,8 @@ impl Runtime {
             booted: false,
             note_saved: note,
             next_autosave: None,
+            project: None,
+            project_file: SueFile::new(),
         })
     }
 
@@ -524,6 +531,8 @@ impl Runtime {
     fn run_command(&mut self, command: &str) {
         match command {
             "file.open" => self.pick_and_open(),
+            "file.save" => self.save_project(false),
+            "file.save_as" => self.save_project(true),
             "app.quit" => {
                 if self.close_requested() {
                     self.quit = true;
@@ -587,8 +596,86 @@ impl Runtime {
         }
     }
 
+    /// The open project's path, if it has one.
+    #[must_use]
+    pub fn project(&self) -> Option<&Path> {
+        self.project.as_deref()
+    }
+
+    /// Saves the project to its file, asking where first if it has none
+    /// (or when `choose` is set).
+    pub fn save_project(&mut self, choose: bool) {
+        let path = match (&self.project, choose) {
+            (Some(path), false) => path.clone(),
+            _ if !self.interactive => {
+                self.shell
+                    .notify("Choosing where to save needs the desktop window", false);
+                return;
+            }
+            _ => {
+                let filters = [FileFilter {
+                    name: "Sue project".to_owned(),
+                    extensions: vec!["sue".to_owned()],
+                }];
+                let start = self.engine.paths.home_dir.clone();
+                match sue_platform::pick_save_file(
+                    "Save Project",
+                    Some(&start),
+                    "Untitled.sue",
+                    &filters,
+                ) {
+                    Some(path) => path,
+                    None => return,
+                }
+            }
+        };
+        if let Err(error) = self.save_project_to(&path) {
+            self.shell
+                .notify(format!("Cannot save {}: {error}", file_name(&path)), true);
+        }
+    }
+
+    /// Writes the project to `path` (atomically) and remembers the path.
+    ///
+    /// # Errors
+    /// The file system's message.
+    pub fn save_project_to(&mut self, path: &Path) -> Result<(), String> {
+        self.typing.flush(&mut self.engine.history);
+        self.engine.world.write_into(&mut self.project_file);
+        write_atomic(path, &self.project_file.to_bytes()).map_err(|error| error.to_string())?;
+        self.project = Some(path.to_path_buf());
+        self.shell
+            .notify(format!("Saved {}", file_name(path)), false);
+        Ok(())
+    }
+
+    /// Replaces the open document with the project in `bytes`.
+    ///
+    /// # Errors
+    /// Why the project could not be read; nothing changes then.
+    pub fn open_project(&mut self, path: &Path, bytes: &[u8]) -> Result<(), String> {
+        let file = SueFile::from_bytes(bytes).map_err(|error| error.to_string())?;
+        self.typing.flush(&mut self.engine.history);
+        self.transport
+            .set_playing(false, self.engine.audio.as_deref_mut());
+        self.engine
+            .world
+            .load_file(&file, &sue_model::registry())
+            .map_err(|error| error.to_string())?;
+        // Old steps name entities that are gone.
+        self.engine.history = UndoStack::new();
+        self.typing = Typing::default();
+        self.shell.select(None, &mut self.engine.world);
+        self.shell.frame_all(&self.engine.world);
+        self.project = Some(path.to_path_buf());
+        self.project_file = file;
+        self.shell
+            .notify(format!("Opened {}", file_name(path)), false);
+        Ok(())
+    }
+
     /// Reads a file, puts it in the arena and places it on the canvas in the
-    /// applet that shows its content.
+    /// applet that shows its content. A `.sue` project replaces the document.
     pub fn open_path(&mut self, path: &Path, textures: &mut dyn TextureUpload, now: Instant) {
         let name = file_name(path);
         let limit_mib = self
@@ -618,6 +705,14 @@ impl Runtime {
                 return;
             }
         };
+        if SueFile::sniff(&bytes) {
+            if let Err(reason) = self.open_project(path, &bytes) {
+                self.shell
+                    .notify(format!("Cannot open {name}: {reason}"), true);
+            }
+            self.serve_requests(textures, now);
+            return;
+        }
         let width = self
             .engine
             .world

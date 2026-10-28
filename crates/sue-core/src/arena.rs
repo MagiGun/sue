@@ -811,11 +811,38 @@ impl Arena {
 
     /// Writes every live entity (in slot order) and every relation.
     pub fn encode(&self, out: &mut Writer) {
-        out.len(self.live);
-        for (_, entity) in self.iter() {
+        self.encode_where(out, &|_| true);
+    }
+
+    /// Writes the entities `keep` accepts and the relations between them
+    /// (an app's own scratch entities stay out of documents).
+    pub fn encode_where(&self, out: &mut Writer, keep: &dyn Fn(&Entity) -> bool) {
+        let kept: Vec<&Entity> = self
+            .iter()
+            .map(|(_, entity)| entity)
+            .filter(|entity| keep(entity))
+            .collect();
+        out.len(kept.len());
+        for entity in &kept {
             out.nested(|out| entity.encode(out));
         }
-        self.relations.encode(out);
+        if kept.len() == self.live {
+            self.relations.encode(out);
+            return;
+        }
+        let ids: std::collections::BTreeSet<EntityId> =
+            kept.iter().map(|entity| entity.id).collect();
+        let mut relations = RelationStore::new();
+        for kind in self.relations.tree_kinds() {
+            relations.add_tree_kind(kind);
+        }
+        for relation in self.relations.iter() {
+            if ids.contains(&relation.from) && ids.contains(&relation.to) {
+                // Valid in the full store, so valid in a subset of it.
+                let _ = relations.insert(relation);
+            }
+        }
+        relations.encode(out);
     }
 
     /// Reads an arena written by [`Self::encode`]. Handles are new; ids are

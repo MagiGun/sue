@@ -55,7 +55,7 @@ pub use launchpad::{AppletFactory, Applets, Launchpad};
 pub use layout::{LayoutMetrics, LayoutRequest, LayoutSolution, Topology, solve_layout};
 pub use palette::{Palette, PaletteOutcome, fuzzy_score};
 pub use radial::{Radial, RadialOutcome, wedge_at, wedge_point};
-pub use scene::{NodeId, Scene, SceneNode};
+pub use scene::{NodeId, SCENE_CHUNK, Scene, SceneNode};
 pub use scheduler::{Damage, FrameScheduler, FrameTicket, RenderDemand};
 pub use shell::{
     CANVAS_MODE, NODE_TITLE, Shell, ShellIo, TIMELINE_MODE, profile_label, project_to_timeline,
@@ -66,6 +66,6 @@ pub use theme::Theme;
 pub use timeline::{Block, TimelineEvent, TimelineState, timecode};
 pub use transport::{Clip, Transport, pcm_of};
 pub use world::{
-    ArenaEdit, Batch, NewEntity, PlaceNode, RemoveNode, RiceEdit, SetNodeProp, SetNodeRect,
-    SpawnNode, World,
+    APP_CLASS_PREFIX, ArenaEdit, Batch, NewEntity, PlaceNode, RemoveNode, RiceEdit, SetNodeProp,
+    SetNodeRect, SpawnNode, World,
 };

@@ -92,7 +92,7 @@ type CheckFn = fn(&mut Subject) -> Result<String, String>;
 
 /// Runs every check against `subject`, in dependency order.
 pub fn run(subject: &mut Subject) -> Report {
-    let checks: [(&'static str, CheckFn); 7] = [
+    let checks: [(&'static str, CheckFn); 8] = [
         ("platform", check_platform),
         ("rice", check_rice),
         ("arena", check_arena),
@@ -100,6 +100,7 @@ pub fn run(subject: &mut Subject) -> Report {
         ("packages", check_packages),
         ("ai", check_ai),
         ("window manager", check_window_manager),
+        ("backbone", check_backbone),
     ];
     Report {
         checks: checks
@@ -929,6 +930,159 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
     Ok(detail)
 }
 
+/// The shared backbone: the project file, the format registry, operators,
+/// presets and background jobs, run against the live engine.
+fn check_backbone(subject: &mut Subject) -> Result<String, String> {
+    use sue_core::txn::SetProperty;
+    use sue_core::{
+        Entity, EntityId, FnOperator, JobPool, OperatorRegistry, Plan, Preset, PresetLibrary,
+        Properties, PropertyDef, Shared, SueFile, TxnError,
+    };
+
+    let runtime = &mut subject.runtime;
+    let document = |runtime: &Runtime| {
+        runtime
+            .engine
+            .world
+            .arena
+            .iter()
+            .filter(|(_, entity)| !entity.class().starts_with(sue_wm::APP_CLASS_PREFIX))
+            .map(|(_, entity)| (entity.id(), entity.name().to_owned()))
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let before = document(runtime);
+    let nodes = runtime.engine.world.scene.len();
+    let dir = runtime.engine.paths.cache_dir.join("self-check");
+    std::fs::create_dir_all(&dir).map_err(text)?;
+    let path = dir.join("backbone.sue");
+    runtime.save_project_to(&path)?;
+    let bytes = std::fs::read(&path).map_err(text)?;
+    ensure(SueFile::sniff(&bytes), "the project file has no Sue header")?;
+    runtime.open_project(&path, &bytes)?;
+    let _ = std::fs::remove_dir_all(&dir);
+    ensure(
+        document(runtime) == before,
+        "the project lost or renamed entities",
+    )?;
+    ensure(
+        runtime.engine.world.scene.len() == nodes,
+        "the canvas layout did not survive",
+    )?;
+    ensure(
+        runtime.project() == Some(path.as_path()),
+        "the project path was not kept",
+    )?;
+    ensure(
+        runtime
+            .engine
+            .world
+            .arena
+            .iter()
+            .any(|(_, entity)| entity.name() == crate::engine::NOTE_NAME),
+        "opening a project dropped the quick note",
+    )?;
+
+    // Every format through one registry: export the sketch, read it back.
+    let formats = sue_io::formats(sue_model::registry());
+    let arena = &runtime.engine.world.arena;
+    let sketch = arena
+        .iter()
+        .find(|(_, entity)| entity.component(ComponentKind::RasterTile2D).is_some())
+        .map(|(_, entity)| entity.id())
+        .ok_or("no picture to export")?;
+    let png = formats
+        .get("png")
+        .ok_or("no PNG handler")?
+        .export(arena, &[sketch], &Properties::new())
+        .map_err(text)?;
+    let back = formats
+        .import(&png, "sketch.png", &Properties::new())
+        .map_err(text)?;
+    ensure(
+        back.entities.len() == 1,
+        "the PNG did not come back as one entity",
+    )?;
+    let csv = formats
+        .import(b"a,b\n1,2\n", "t.csv", &Properties::new())
+        .map_err(text)?;
+    ensure(
+        csv.entities[0].ext::<sue_model::Table>().is_some(),
+        "a CSV did not become a table",
+    )?;
+
+    // One operator, run with a preset, undone through the history.
+    let mut operators: OperatorRegistry<Arena> = OperatorRegistry::new();
+    operators.register(
+        FnOperator::new(
+            "check.tag",
+            "Tag",
+            |_: &Arena, selection: &[EntityId], params: &Properties| {
+                let id = *selection
+                    .first()
+                    .ok_or_else(|| TxnError::new("nothing selected"))?;
+                let tag = params.str("tag").unwrap_or_default().to_owned();
+                Ok(Box::new(SetProperty::new(id, "check.tag", tag)) as Plan<Arena>)
+            },
+        )
+        .param(PropertyDef::new("tag", "Tag", "draft")),
+    );
+    let mut presets = PresetLibrary::new();
+    presets.add(Preset::new(
+        "Final",
+        "check.tag",
+        Properties::new().with("tag", "final"),
+    ));
+    let mut arena = Arena::new();
+    let handle = arena.insert(Entity::empty("probe", "check.probe"));
+    let id = arena.get(handle).map_err(text)?.id();
+    let mut history = UndoStack::new();
+    let preset = presets.get("check.tag", "Final").ok_or("preset missing")?;
+    operators
+        .run("check.tag", &mut arena, &mut history, &[id], &preset.values)
+        .map_err(text)?;
+    ensure(
+        arena
+            .get(handle)
+            .map_err(text)?
+            .properties()
+            .str("check.tag")
+            == Some("final"),
+        "the operator did not apply the preset",
+    )?;
+    history.undo(&mut arena).map_err(text)?;
+    ensure(
+        arena
+            .get(handle)
+            .map_err(text)?
+            .property("check.tag")
+            .is_none(),
+        "undo kept the operator's change",
+    )?;
+
+    // A background job reads a shared buffer without copying it.
+    let pool = JobPool::new(1);
+    let samples = Shared::new(vec![0.5_f32; 48_000]);
+    let input = samples.clone();
+    let peak = pool
+        .spawn("peak", move |_| {
+            Ok(input.iter().copied().fold(0.0_f32, f32::max))
+        })
+        .wait()
+        .map_err(text)?;
+    ensure(
+        peak == 0.5 && samples.holders() == 1,
+        "the job did not run cleanly",
+    )?;
+
+    Ok(format!(
+        "project saved and reopened ({}, {}, {} KiB); {} formats; PNG and CSV through the registry; operator with preset undone; background job",
+        count(before.len(), "entity", "entities"),
+        count(nodes, "node", "nodes"),
+        bytes.len().div_ceil(1024),
+        formats.iter().count(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -942,7 +1096,7 @@ mod tests {
         let mut subject = Subject { host, runtime };
         let report = run(&mut subject);
         assert!(report.passed(), "{report}");
-        assert_eq!(report.checks.len(), 7);
+        assert_eq!(report.checks.len(), 8);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

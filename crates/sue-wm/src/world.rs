@@ -3,10 +3,23 @@
 //! [`ReversibleTransaction`] that stores its inverse delta (backbone rule 2).
 
 use egui::Rect;
-use sue_core::{Arena, AssetHandle, ComponentData, Entity, ReversibleTransaction, TxnError};
+use sue_core::codec::{CodecError, Reader, Writer};
+use sue_core::{
+    Arena, AssetHandle, Chunk, ComponentData, ComponentRegistry, Entity, ReversibleTransaction,
+    SueFile, TxnError,
+};
 use sue_rice::RiceSchema;
 
+use crate::scene::SCENE_CHUNK;
 use crate::{AppletId, NodeId, Scene, SceneNode};
+
+/// Entities whose class starts with this belong to the app itself (the quick
+/// note), not to the document: saving leaves them out, opening keeps them.
+pub const APP_CLASS_PREFIX: &str = "sue.app.";
+
+fn is_app(entity: &Entity) -> bool {
+    entity.class().starts_with(APP_CLASS_PREFIX)
+}
 
 /// Everything the global undo tree can change.
 /// One `UndoStack<World>` makes `Ctrl+Z` undo typing, a moved entity and a
@@ -19,6 +32,69 @@ pub struct World {
     pub rice: RiceSchema,
     /// Where entities sit on the canvas.
     pub scene: Scene,
+}
+
+impl World {
+    /// Writes the document (entities, relations and the canvas layout) into
+    /// `file`, keeping every other chunk it already has.
+    pub fn write_into(&self, file: &mut SueFile) {
+        file.set_arena_where(&self.arena, &|entity| !is_app(entity));
+        let mut out = Writer::new();
+        self.scene.encode(&self.arena, &mut out);
+        file.set(Chunk {
+            tag: SCENE_CHUNK,
+            version: 1,
+            payload: out.into_bytes(),
+        });
+    }
+
+    /// Replaces the document with the one in `file`. App entities stay;
+    /// the rice is untouched. Old handles go stale (never reused for the new
+    /// entities), so the caller must start a new undo history.
+    ///
+    /// # Errors
+    /// If the file is malformed; the world is unchanged then.
+    pub fn load_file(
+        &mut self,
+        file: &SueFile,
+        registry: &ComponentRegistry,
+    ) -> Result<(), CodecError> {
+        let mut loaded = file.arena(registry)?;
+        let layout = file
+            .chunk(SCENE_CHUNK)
+            .map(|chunk| chunk.payload.as_slice());
+        if let Some(layout) = layout {
+            Scene::decode(&mut Reader::new(layout), &loaded)?;
+        }
+        let current: Vec<AssetHandle> = self
+            .arena
+            .iter()
+            .filter(|(_, entity)| !is_app(entity))
+            .map(|(handle, _)| handle)
+            .collect();
+        for handle in current {
+            let _ = self.arena.despawn(handle);
+        }
+        let kinds: Vec<String> = loaded.relations().tree_kinds().map(str::to_owned).collect();
+        for kind in kinds {
+            self.arena.add_tree_kind(kind);
+        }
+        let relations: Vec<_> = loaded.relations().iter().collect();
+        let handles: Vec<AssetHandle> = loaded.iter().map(|(handle, _)| handle).collect();
+        for handle in handles {
+            if let Ok(entity) = loaded.despawn(handle) {
+                self.arena.insert(entity);
+            }
+        }
+        for relation in relations {
+            let _ = self.arena.relate(relation);
+        }
+        self.scene = match layout {
+            Some(layout) => Scene::decode(&mut Reader::new(layout), &self.arena)?,
+            None => Scene::default(),
+        };
+        Ok(())
+    }
 }
 
 /// Lifts an arena transaction onto the [`World`].
@@ -358,6 +434,61 @@ mod tests {
     use sue_core::txn::InsertText;
     use sue_core::{StringBuffer, UndoStack};
     use sue_rice::{RiceValue, SetRiceValue};
+
+    #[test]
+    fn documents_save_and_open_without_the_app_entities() {
+        let place = |world: &mut World, handle| {
+            let id = world.scene.allocate();
+            let node = SceneNode::new(
+                handle,
+                AppletId::new("document").unwrap(),
+                Rect::from_min_size(pos2(0.0, 0.0), vec2(10.0, 10.0)),
+            );
+            world.scene.insert(id, node);
+        };
+        let mut world = World::default();
+        let note = world.arena.spawn("note", StringBuffer::from("mine"));
+        world.arena.get_mut(note).unwrap().set_class("sue.app.note");
+        let doc = world.arena.spawn("doc", StringBuffer::from("shared"));
+        let doc_id = world.arena.get(doc).unwrap().id();
+        place(&mut world, doc);
+        let mut file = SueFile::new();
+        file.set(Chunk {
+            tag: *b"XTRA",
+            version: 1,
+            payload: vec![7],
+        });
+        world.write_into(&mut file);
+        let bytes = file.to_bytes();
+
+        let mut other = World::default();
+        let their_note = other.arena.spawn("note", StringBuffer::from("theirs"));
+        other
+            .arena
+            .get_mut(their_note)
+            .unwrap()
+            .set_class("sue.app.note");
+        let scratch = other.arena.spawn("scratch", StringBuffer::new());
+        place(&mut other, scratch);
+        let reopened = SueFile::from_bytes(&bytes).unwrap();
+        other
+            .load_file(&reopened, &ComponentRegistry::new())
+            .unwrap();
+        assert_eq!(other.arena.len(), 2, "their note and the document");
+        assert!(other.arena.get(their_note).is_ok(), "app entities stay");
+        assert!(!other.arena.contains(scratch));
+        let loaded = other.arena.handle_of(doc_id).unwrap();
+        assert_ne!(loaded, doc, "new handles never alias old ones");
+        assert_eq!(other.scene.len(), 1);
+        assert_eq!(other.scene.iter().next().unwrap().1.entity, loaded);
+        assert_eq!(reopened.chunk(*b"XTRA").unwrap().payload, [7]);
+        // An empty project leaves only the app's own entities.
+        other
+            .load_file(&SueFile::new(), &ComponentRegistry::new())
+            .unwrap();
+        assert_eq!(other.arena.len(), 1);
+        assert!(other.scene.is_empty());
+    }
 
     #[test]
     fn one_history_undoes_data_theme_and_canvas_edits_in_order() {

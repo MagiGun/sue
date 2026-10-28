@@ -1106,7 +1106,7 @@ impl Shell {
         }
         let keymap = self.config.keymap;
         let typing = ctx.text_edit_focused();
-        let (undo, redo, settings, left, right, timeline, reset, open, quit) =
+        let (undo, redo, settings, left, right, timeline, reset, open, save, quit) =
             ctx.input_mut(|input| {
                 let redo =
                     keys::consume(input, &keymap.redo) || keys::consume(input, &keymap.redo_alt);
@@ -1119,6 +1119,7 @@ impl Shell {
                     keys::consume(input, &keymap.toggle_timeline),
                     keys::consume(input, &keymap.reset_camera),
                     keys::consume(input, &keymap.open_file),
+                    keys::consume(input, &keymap.save),
                     keys::consume(input, &keymap.quit),
                 )
             });
@@ -1147,6 +1148,10 @@ impl Shell {
         if open {
             io.requests
                 .push(ShellRequest::Command("file.open".to_owned()));
+        }
+        if save {
+            io.requests
+                .push(ShellRequest::Command("file.save".to_owned()));
         }
         if quit {
             io.requests
@@ -2109,6 +2114,14 @@ impl Shell {
             (
                 entry("Open File", keymap.open_file.to_string()),
                 PaletteAction::Request(ShellRequest::Command("file.open".to_owned())),
+            ),
+            (
+                entry("Save Project", keymap.save.to_string()),
+                PaletteAction::Request(ShellRequest::Command("file.save".to_owned())),
+            ),
+            (
+                entry("Save Project As", String::new()),
+                PaletteAction::Request(ShellRequest::Command("file.save_as".to_owned())),
             ),
             (
                 entry("Quit Sue", keymap.quit.to_string()),

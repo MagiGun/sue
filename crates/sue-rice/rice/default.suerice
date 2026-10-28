@@ -131,6 +131,7 @@ command_palette = "Tab"        # @keybind Open the command palette
 command_palette_alt = "/"      # @keybind Open the command palette (alternative)
 open_settings = "Ctrl+,"       # @keybind Open Settings
 open_file = "Ctrl+O"           # @keybind Open a file
+save = "Ctrl+S"                # @keybind Save the project
 quit = "Ctrl+Q"                # @keybind Quit Sue
 undo = "Ctrl+Z"                # @keybind Undo the last change
 redo = "Ctrl+Shift+Z"          # @keybind Redo
