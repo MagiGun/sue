@@ -736,6 +736,7 @@ impl Engine {
                             AppletRole::LeftDrawer => "Left drawer",
                             AppletRole::RightDrawer => "Right drawer",
                             AppletRole::Window => "Window",
+                            AppletRole::Studio => "Studio",
                         };
                         vec![
                             manifest.name.clone(),

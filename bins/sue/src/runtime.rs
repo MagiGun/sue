@@ -201,6 +201,7 @@ impl Runtime {
     #[must_use]
     pub fn interactive(mut self, interactive: bool) -> Self {
         self.interactive = interactive;
+        self.shell.set_interactive(interactive);
         self
     }
 

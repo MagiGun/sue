@@ -1,8 +1,8 @@
 //! # sue-wm: the infinite canvas shell
 //!
 //! Every tool is a [`SueApplet`] registered at runtime with the
-//! [`Launchpad`]: canvas entity kinds, drawer utilities and the
-//! Settings window. The [`Shell`] draws Sue's window with egui: an infinite
+//! [`Launchpad`]: canvas entity kinds, drawer utilities, the Settings window
+//! and full-window studios, whose menus are data drawn by [`MenuBar`]. The [`Shell`] draws Sue's window with egui: an infinite
 //! spatial canvas whose [`Camera`] zooms from 10% to 3200%, entity nodes
 //! drawn by their applets inside a camera-transformed layer, a floating top
 //! pill of modes and spawn buttons, a floating selection pill above the
@@ -27,6 +27,7 @@ mod error;
 pub mod keys;
 mod launchpad;
 mod layout;
+mod menubar;
 mod palette;
 mod radial;
 mod scene;
@@ -53,6 +54,7 @@ pub use config::{CanvasConfig, GridStyle, Keymap, WmConfig, register_rice, rice_
 pub use error::WmError;
 pub use launchpad::{AppletFactory, Applets, Launchpad};
 pub use layout::{LayoutMetrics, LayoutRequest, LayoutSolution, Topology, solve_layout};
+pub use menubar::{ItemState, Menu, MenuBar, MenuItem};
 pub use palette::{Palette, PaletteOutcome, fuzzy_score};
 pub use radial::{Radial, RadialOutcome, wedge_at, wedge_point};
 pub use scene::{NodeId, SCENE_CHUNK, Scene, SceneNode};

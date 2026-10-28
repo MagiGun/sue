@@ -7,6 +7,8 @@
 //! timeline and a status bar. Over it: the floating top pill (modes and
 //! spawn buttons), the floating selection pill above the selected entity,
 //! the radial marking menu, the command palette and the Settings window.
+//! A studio applet (Sue Paint) can take the whole window instead of the
+//! canvas; the status bar, the palette and Settings stay.
 //!
 //! Motion: every moving part is a [`SpringDamper`] stepped with the
 //! real, clamped frame time. While any spring moves the shell calls
@@ -168,6 +170,8 @@ pub struct Shell {
     palette: Option<Palette>,
     window: Option<AppletId>,
     window_appear: SpringDamper,
+    studio: Option<AppletId>,
+    interactive: bool,
     space_down: bool,
     space_panned: bool,
     middle_pan: bool,
@@ -241,6 +245,8 @@ impl Shell {
             palette: None,
             window: None,
             window_appear: spring(0.0),
+            studio: None,
+            interactive: false,
             space_down: false,
             space_panned: false,
             middle_pan: false,
@@ -331,6 +337,18 @@ impl Shell {
     #[must_use]
     pub fn right_drawer(&self) -> Option<&AppletId> {
         self.right.shown.as_ref().filter(|_| self.right.open)
+    }
+
+    /// The studio filling the window, if any.
+    #[must_use]
+    pub fn studio(&self) -> Option<&AppletId> {
+        self.studio.as_ref()
+    }
+
+    /// Marks the shell as running in the desktop window, where applets may
+    /// open native dialogs.
+    pub fn set_interactive(&mut self, interactive: bool) {
+        self.interactive = interactive;
     }
 
     /// The open window applet, if any.
@@ -469,6 +487,8 @@ impl Shell {
             profile: self.profile,
             now,
             dt,
+            studio: self.studio.clone(),
+            interactive: self.interactive,
         }
     }
 
@@ -695,9 +715,44 @@ impl Shell {
         modes
     }
 
-    /// Switches mode: the canvas shows everything, the timeline opens, and a
-    /// node mode frames (or creates) an entity of its applet.
+    /// Fills the window with studio `id`.
+    pub fn open_studio(&mut self, id: AppletId) {
+        self.dismiss_overlays();
+        self.select_none_quietly();
+        self.mode = id.as_str().to_owned();
+        self.studio = Some(id);
+        self.touch();
+    }
+
+    /// Leaves the studio for the canvas.
+    pub fn close_studio(&mut self, world: &World) {
+        if self.studio.take().is_some() {
+            self.mode = CANVAS_MODE.to_owned();
+            self.frame_all(world);
+        }
+        self.touch();
+    }
+
+    fn select_none_quietly(&mut self) {
+        self.selected = None;
+        self.pill.node = None;
+        self.pill.appear.snap_to(0.0);
+    }
+
+    /// Switches mode: the canvas shows everything, the timeline opens, a
+    /// node mode frames (or creates) an entity of its applet, and a studio
+    /// mode fills the window with the studio.
     pub fn set_mode(&mut self, mode: &str, io: &mut ShellIo<'_>, now: Instant) {
+        if let Ok(id) = AppletId::new(mode)
+            && io
+                .applets
+                .manifest(&id)
+                .is_some_and(|manifest| manifest.role == AppletRole::Studio)
+        {
+            self.open_studio(id);
+            return;
+        }
+        self.studio = None;
         match mode {
             CANVAS_MODE => {
                 self.mode = CANVAS_MODE.to_owned();
@@ -863,8 +918,11 @@ impl Shell {
             }
             ShellRequest::ShowDrawer(id) => self.show_drawer(&id, io.applets),
             ShellRequest::Place { entity, focus } => {
+                self.studio = None;
                 self.place(entity, focus, io);
             }
+            ShellRequest::OpenStudio(id) => self.open_studio(id),
+            ShellRequest::CloseStudio => self.close_studio(io.world),
             other => return Some(other),
         }
         self.touch();
@@ -1018,6 +1076,19 @@ impl Shell {
         });
         self.canvas = layout.canvas;
 
+        if let Some(studio) = self.studio.clone() {
+            self.studio_frame(root, &studio, layout.status, io, &theme, now, dt);
+            self.animating = moving;
+            self.scheduler.set_animating(self.animating);
+            if self.animating {
+                ctx.request_repaint();
+            }
+            if io.typing.flush_if_paused(io.history, now) {
+                self.touch();
+            }
+            return;
+        }
+
         self.canvas_ui(root, io, &theme, now, dt);
 
         // Structural panels around the canvas.
@@ -1100,6 +1171,48 @@ impl Shell {
         }
     }
 
+    /// One frame of a studio: the studio over the whole window, then the
+    /// status bar, the palette and the Settings window.
+    #[allow(clippy::too_many_arguments, reason = "one frame of a studio")]
+    fn studio_frame(
+        &mut self,
+        root: &mut Ui,
+        studio: &AppletId,
+        status: Rect,
+        io: &mut ShellIo<'_>,
+        theme: &Theme,
+        now: Instant,
+        dt: f32,
+    ) {
+        let ctx = root.ctx().clone();
+        let screen = root.max_rect();
+        let area = Rect::from_min_max(screen.min, pos2(screen.right(), status.top()));
+        let view = self.view(now, dt);
+        {
+            let mut studio_ui = root.new_child(
+                UiBuilder::new()
+                    .max_rect(area)
+                    .id_salt(("sue-studio", studio.as_str()))
+                    .layout(Layout::top_down(Align::Min)),
+            );
+            studio_ui.set_clip_rect(area);
+            let (applets, mut cx) = split(io, theme, view);
+            match applets.get_mut(studio) {
+                Some(applet) => applet.studio_ui(&mut studio_ui, &mut cx),
+                None => {
+                    self.studio = None;
+                    self.mode = CANVAS_MODE.to_owned();
+                }
+            }
+        }
+        let painter = root.painter().clone();
+        painter.rect_filled(status, 0.0, theme.panel);
+        painter.hline(status.x_range(), status.top(), theme.hairline());
+        self.status_ui(root, status, io, theme);
+        self.palette_ui(&ctx, io, theme, now);
+        self.window_ui(&ctx, screen, io, theme, now, dt);
+    }
+
     fn global_keys(&mut self, ctx: &egui::Context, io: &mut ShellIo<'_>, now: Instant) {
         if io.applets.captures_keys() {
             return;
@@ -1131,6 +1244,51 @@ impl Shell {
         }
         if settings {
             self.handle(ShellRequest::OpenSettings(None), io, now);
+        }
+        if let Some(studio) = self.studio.clone() {
+            // A studio keeps the window; canvas keys wait until it closes,
+            // and Open asks the studio first.
+            if open {
+                let view = self.view(now, 0.0);
+                let theme = self.theme.clone();
+                let (applets, mut cx) = split(io, &theme, view);
+                let handled = applets
+                    .get_mut(&studio)
+                    .is_some_and(|applet| applet.command("file.open", &mut cx));
+                if !handled {
+                    io.requests
+                        .push(ShellRequest::Command("file.open".to_owned()));
+                }
+            }
+            if save {
+                io.requests
+                    .push(ShellRequest::Command("file.save".to_owned()));
+            }
+            if quit {
+                io.requests
+                    .push(ShellRequest::Command("app.quit".to_owned()));
+            }
+            self.space_down = false;
+            if typing || self.palette.is_some() {
+                return;
+            }
+            let (palette, escape) = ctx.input_mut(|input| {
+                (
+                    keys::consume(input, &keymap.command_palette)
+                        || keys::consume(input, &keymap.command_palette_alt),
+                    self.window.is_some()
+                        && self.window_appear.target() > 0.0
+                        && input.key_pressed(egui::Key::Escape),
+                )
+            });
+            if palette {
+                self.open_palette();
+            }
+            if escape {
+                self.close_window();
+            }
+            let _ = (left, right, timeline, reset);
+            return;
         }
         if left {
             self.toggle_drawer(true, io.applets);

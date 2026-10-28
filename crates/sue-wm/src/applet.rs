@@ -1,11 +1,11 @@
 //! The applet contract every tool, utility and studio implements.
 //!
 //! Nothing in the shell names an applet. Canvas entity kinds (documents,
-//! paint layers, audio, images, hex views), drawer utilities and the
-//! Settings window all register at runtime and describe themselves through
-//! an [`AppletManifest`]: the modes in the top pill, the spawn buttons, the
-//! wedges of the marking menu, the timeline lanes and the rail icons are
-//! all read from manifests.
+//! paint layers, audio, images, hex views), drawer utilities, the Settings
+//! window and full-window studios (Sue Paint) all register at runtime and
+//! describe themselves through an [`AppletManifest`]: the modes in the top
+//! pill, the spawn buttons, the wedges of the marking menu, the timeline
+//! lanes and the rail icons are all read from manifests.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -81,6 +81,9 @@ pub enum AppletRole {
     RightDrawer,
     /// A floating window over the canvas (Settings).
     Window,
+    /// A workspace that fills the window with its own menus and panels
+    /// (Sue Paint), opened from its mode and left for the canvas again.
+    Studio,
 }
 
 /// A mode in the top pill: switching to it frames an entity of the applet.
@@ -226,6 +229,10 @@ pub enum ShellRequest {
         /// Switch to its mode and frame it.
         focus: bool,
     },
+    /// Fill the window with a studio applet.
+    OpenStudio(AppletId),
+    /// Leave the studio for the canvas.
+    CloseStudio,
 }
 
 /// What an applet's tick asks for.
@@ -277,6 +284,11 @@ pub struct ShellView {
     pub now: Instant,
     /// Seconds since the last frame (clamped).
     pub dt: f32,
+    /// The studio filling the window, if any.
+    pub studio: Option<AppletId>,
+    /// `true` in the desktop window, where native dialogs can open;
+    /// `false` in headless runs.
+    pub interactive: bool,
 }
 
 /// One entry of the command palette.
@@ -449,6 +461,11 @@ pub trait SueApplet: Send {
 
     /// Draws the window content.
     fn window_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        let _ = (ui, cx);
+    }
+
+    /// Draws a studio: `ui` covers the whole window above the status bar.
+    fn studio_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
         let _ = (ui, cx);
     }
 
