@@ -103,6 +103,20 @@ impl SuePaint {
         self.draw_picture(ui, viewport, size, cx, theme);
         self.overlays(ui, viewport, size, &response, cx, theme);
         self.warp_ui(ui, viewport, size, cx, theme);
+        if !self.curve_points.is_empty() {
+            // Enter lays the curve ruler, Esc drops it.
+            let (enter, escape) = ui.input(|input| {
+                (
+                    input.key_pressed(Key::Enter),
+                    input.key_pressed(Key::Escape),
+                )
+            });
+            if enter {
+                self.finish_curve(cx);
+            } else if escape || self.toolbox.tool() != Tool::Ruler {
+                self.curve_points.clear();
+            }
+        }
         if self.transform.is_some() {
             self.transform_ui(ui, viewport, size, cx, theme);
         }
@@ -657,6 +671,26 @@ impl SuePaint {
                     label: sub.name.clone(),
                 });
             }
+            Tool::Ruler if sub.mode == 6 => {
+                // Curve Ruler: each click places a point; clicking the
+                // last one again (or Enter) lays the ruler.
+                let near_last = self.curve_points.last().is_some_and(|last| {
+                    doc.view
+                        .to_screen(viewport, size, pos2(last[0], last[1]))
+                        .distance(pos)
+                        <= 8.0
+                });
+                if near_last {
+                    self.finish_curve(cx);
+                } else {
+                    self.curve_points.push([p.x, p.y]);
+                }
+            }
+            Tool::Ruler if sub.mode == 8 => {
+                self.gesture = Some(Gesture::RulerPen {
+                    points: vec![[p.x, p.y]],
+                });
+            }
             Tool::Ruler => {
                 let picture = doc.picture;
                 let rulers = crate::rulers::Rulers::of(&cx.world.arena, picture);
@@ -771,6 +805,65 @@ impl SuePaint {
                     origin: info.style.offset,
                     old,
                 });
+            }
+            Tool::Operation if sub.mode == 1 => self.pick_layer_at(&cx.world.arena, p),
+            Tool::Operation => {
+                // Object: click a vector line to pick it (Shift adds or
+                // takes away), drag to move what is picked.
+                let Some(info) = self.layer_info(&cx.world.arena) else {
+                    return;
+                };
+                if !crate::vector::is_vector(&cx.world.arena, info.id) {
+                    self.picked_lines = None;
+                    cx.notify("Object picks vector lines: pick a vector layer");
+                    return;
+                }
+                let offset = info.style.offset;
+                let local = [p.x - offset[0] as f32, p.y - offset[1] as f32];
+                let geometry = crate::vector::geometry(&cx.world.arena, info.id);
+                let lines = crate::vector::lines(&geometry);
+                let reach = 8.0 / doc.view.zoom.max(0.01);
+                let hit = crate::correct::line_at(&lines, local, reach).map(|(line, _)| line);
+                let mut picked = match self.picked_lines.take() {
+                    Some((layer, picked)) if layer == info.id => picked,
+                    _ => Vec::new(),
+                };
+                match hit {
+                    None => {
+                        if !modifiers.shift {
+                            picked.clear();
+                        }
+                    }
+                    Some(line) if modifiers.shift => {
+                        if let Some(at) = picked.iter().position(|index| *index == line) {
+                            picked.remove(at);
+                        } else {
+                            picked.push(line);
+                        }
+                    }
+                    Some(line) => {
+                        if !picked.contains(&line) {
+                            picked = vec![line];
+                        }
+                    }
+                }
+                let moving = hit.is_some() && !picked.is_empty();
+                self.picked_lines = Some((info.id, picked));
+                if moving
+                    && let Some(before) = doc::raster(&cx.world.arena, info.id)
+                        .and_then(|raster| raster.bytes())
+                        .map(<[u8]>::to_vec)
+                {
+                    self.gesture = Some(Gesture::MoveLines {
+                        layer: info.id,
+                        before,
+                        geometry,
+                        base: lines,
+                        start: local,
+                        by: [0.0; 2],
+                        offset,
+                    });
+                }
             }
             Tool::CorrectLine if sub.mode == 7 => {
                 // Remove dust: drag a box, or click for the whole layer.
@@ -1120,6 +1213,19 @@ impl SuePaint {
         };
         let end = [from.x + angle.cos() * length, from.y + angle.sin() * length];
         let (key, text, label) = match sub.mode {
+            7 => {
+                if !dragged {
+                    return;
+                }
+                let path = rulers::Path::figure([from.x, from.y], [to.x, to.y], sub.kind == 1);
+                let mut all = Rulers::of(&cx.world.arena, picture);
+                all.paths.push(path);
+                (
+                    rulers::PATHS,
+                    all.text(rulers::PATHS),
+                    "Create Figure Ruler",
+                )
+            }
             5 => {
                 if !dragged {
                     return;
@@ -1190,7 +1296,7 @@ impl SuePaint {
             && let Some(doc) = self.doc_mut()
         {
             doc.show_rulers = true;
-            if sub.mode == 5 {
+            if matches!(sub.mode, 5..=8) {
                 doc.snap_ruler = true;
             } else {
                 doc.ruler_on = true;
@@ -1284,6 +1390,43 @@ impl SuePaint {
         }
         if matches!(self.gesture, Some(Gesture::VectorErase { .. })) {
             self.vector_erase_drag(pos, viewport, size, cx);
+            return;
+        }
+        if let Some(Gesture::MoveLines {
+            layer,
+            base,
+            start,
+            by,
+            offset,
+            ..
+        }) = self.gesture.as_mut()
+        {
+            let Some(view) = self.docs.get(self.active).map(|doc| doc.view) else {
+                return;
+            };
+            let p = view.to_picture(viewport, size, pos);
+            *by = [
+                p.x - offset[0] as f32 - start[0],
+                p.y - offset[1] as f32 - start[1],
+            ];
+            let picked = self
+                .picked_lines
+                .as_ref()
+                .map(|(_, picked)| picked.clone())
+                .unwrap_or_default();
+            let lines = crate::vector::moved(base, &picked, *by);
+            let layer = *layer;
+            if let Some(raster) = doc::raster_mut(&mut cx.world.arena, layer)
+                && let Some(painted) =
+                    crate::vector::render(&lines, raster.width(), raster.height())
+                && let (Some(into), Some(from)) = (raster.bytes_mut(), painted.bytes())
+            {
+                into.copy_from_slice(from);
+            }
+            if let Some(doc) = self.docs.get_mut(self.active) {
+                doc.compositor
+                    .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+            }
             return;
         }
         if let Some(Gesture::Correct { offset, .. }) = &self.gesture {
@@ -1411,6 +1554,13 @@ impl SuePaint {
                     .set_rotation(viewport, size, *rotation + (now - *start));
             }
             Gesture::Shape { to, .. } => *to = p,
+            Gesture::RulerPen { points } => {
+                if points.last().is_none_or(|last| {
+                    (last[0] - p.x).hypot(last[1] - p.y) > 2.0 / doc.view.zoom.max(0.01)
+                }) {
+                    points.push([p.x, p.y]);
+                }
+            }
             Gesture::Lasso { points, .. } => {
                 if points.last().is_none_or(|last| {
                     (last[0] - p.x).hypot(last[1] - p.y) > 1.5 / doc.view.zoom.max(0.01)
@@ -1439,7 +1589,8 @@ impl SuePaint {
             | Gesture::Blend { .. }
             | Gesture::RulerHandle { .. }
             | Gesture::VectorErase { .. }
-            | Gesture::Correct { .. } => {}
+            | Gesture::Correct { .. }
+            | Gesture::MoveLines { .. } => {}
         }
     }
 
@@ -1695,6 +1846,51 @@ impl SuePaint {
                     &label,
                 );
                 cx.record(ArenaEdit(edit));
+            }
+            Gesture::MoveLines {
+                layer,
+                before,
+                geometry,
+                base,
+                by,
+                ..
+            } => {
+                if by == [0.0; 2] {
+                    return;
+                }
+                let picked = self
+                    .picked_lines
+                    .as_ref()
+                    .map(|(_, picked)| picked.clone())
+                    .unwrap_or_default();
+                let lines = crate::vector::moved(&base, &picked, by);
+                let pixels = doc::raster(&cx.world.arena, layer).and_then(|raster| {
+                    let patch =
+                        doc::diff_patch(&before, raster.bytes()?, raster.width(), raster.height())?;
+                    Some(sue_core::txn::RasterEdit::new(
+                        layer,
+                        "Move Lines",
+                        vec![patch],
+                    ))
+                });
+                let edit = crate::vector::keep(
+                    &mut cx.world.arena,
+                    layer,
+                    geometry,
+                    &lines,
+                    pixels,
+                    "Move Lines",
+                );
+                cx.record(ArenaEdit(edit));
+            }
+            Gesture::RulerPen { points } => {
+                if points.len() >= 2 {
+                    // Smoothed a little, as a pen line would be.
+                    let path = crate::rulers::Path::curve(&crate::correct::simplified_points(
+                        &points, 1.0,
+                    ));
+                    self.add_ruler_path(cx, path, "Create Ruler");
+                }
             }
             Gesture::RulerHandle { handle, before } => {
                 let Some(picture) = self.picture() else {
@@ -2473,6 +2669,25 @@ impl SuePaint {
                 &screen,
             );
         }
+        // A curve ruler being placed, or a ruler being drawn with the pen.
+        let violet = Color32::from_rgb(170, 120, 255);
+        if !self.curve_points.is_empty() {
+            let mut points = self.curve_points.clone();
+            if let Some(pointer) = self.pointer {
+                let at = view.to_picture(viewport, size, pointer);
+                points.push([at.x, at.y]);
+            }
+            let path = crate::rulers::Path::curve(&points);
+            let line: Vec<Pos2> = path.points.iter().map(|point| screen(*point)).collect();
+            painter.add(Shape::line(line, Stroke::new(1.5, violet)));
+            for point in &self.curve_points {
+                painter.circle_stroke(screen(*point), 4.0, Stroke::new(1.5, violet));
+            }
+        }
+        if let Some(Gesture::RulerPen { points }) = &self.gesture {
+            let line: Vec<Pos2> = points.iter().map(|point| screen(*point)).collect();
+            painter.add(Shape::line(line, Stroke::new(1.5, violet)));
+        }
         // The brush outline under the pointer.
         let tool = self.toolbox.tool();
         let mode = self.toolbox.current().mode;
@@ -2515,6 +2730,53 @@ impl SuePaint {
             {
                 let points: Vec<Pos2> = path.iter().map(|(at, _)| shift(*at)).collect();
                 painter.add(Shape::line(points, Stroke::new(1.5, violet)));
+            }
+        }
+        if tool == Tool::Operation
+            && let Some((layer, picked)) = &self.picked_lines
+            && doc.layer == Some(*layer)
+            && !picked.is_empty()
+        {
+            // The picked lines, outlined, in their box.
+            let offset = doc::layers(&cx.world.arena, doc.picture)
+                .into_iter()
+                .find(|info| info.id == *layer)
+                .map_or([0, 0], |info| info.style.offset);
+            let base = crate::vector::lines(&crate::vector::geometry(&cx.world.arena, *layer));
+            let lines = match &self.gesture {
+                Some(Gesture::MoveLines { base, by, .. }) => {
+                    crate::vector::moved(base, picked, *by)
+                }
+                _ => base,
+            };
+            let blue = Color32::from_rgb(70, 130, 255);
+            let (mut min, mut max) = ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]);
+            for line in picked.iter().filter_map(|index| lines.get(*index)) {
+                let points: Vec<Pos2> = line
+                    .samples
+                    .iter()
+                    .map(|sample| {
+                        for axis in 0..2 {
+                            min[axis] = min[axis].min(sample.at[axis]);
+                            max[axis] = max[axis].max(sample.at[axis]);
+                        }
+                        screen([
+                            sample.at[0] + offset[0] as f32,
+                            sample.at[1] + offset[1] as f32,
+                        ])
+                    })
+                    .collect();
+                painter.add(Shape::line(points, Stroke::new(1.5, blue)));
+            }
+            if min[0].is_finite() {
+                let corners = [
+                    [min[0], min[1]],
+                    [max[0], min[1]],
+                    [max[0], max[1]],
+                    [min[0], max[1]],
+                ]
+                .map(|[x, y]| screen([x + offset[0] as f32, y + offset[1] as f32]));
+                painter.add(Shape::closed_line(corners.to_vec(), Stroke::new(1.0, blue)));
             }
         }
         if response.hovered()
@@ -2808,6 +3070,15 @@ fn ruler_overlay(
             painter.circle_stroke(screen(center), 5.0, Stroke::new(1.5, special));
         }
         None => {}
+    }
+    for path in &rulers.paths {
+        let mut points: Vec<Pos2> = path.points.iter().map(|point| screen(*point)).collect();
+        if path.closed
+            && let Some(first) = points.first().copied()
+        {
+            points.push(first);
+        }
+        painter.add(Shape::line(points, Stroke::new(1.5, linear)));
     }
     if let Some([a, b]) = rulers.linear {
         painter.line_segment([screen(a), screen(b)], Stroke::new(2.0, linear));

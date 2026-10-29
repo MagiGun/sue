@@ -156,6 +156,20 @@ pub(crate) enum Gesture {
         changed: bool,
         label: String,
     },
+    /// The Object tool moving vector lines: the layer's pixels and lines
+    /// from before, the lines as the drag began, where it began and how far
+    /// it has moved them (layer pixels).
+    MoveLines {
+        layer: EntityId,
+        before: Vec<u8>,
+        geometry: sue_model::Geometry,
+        base: Vec<crate::vector::Line>,
+        start: [f32; 2],
+        by: [f32; 2],
+        offset: [i64; 2],
+    },
+    /// Drawing a ruler with the Ruler Pen (picture pixels).
+    RulerPen { points: Vec<[f32; 2]> },
     /// Dragging a ruler's handle: the ruler's text from before.
     RulerHandle {
         handle: crate::rulers::Handle,
@@ -299,6 +313,11 @@ pub struct SuePaint {
     /// The first of the two lines that make a vanishing point (Perspective
     /// Ruler, Add vanishing point), in picture pixels.
     pub(crate) vanishing_line: Option<[[f32; 2]; 2]>,
+    /// The vector lines the Object tool has picked: their layer and
+    /// indices.
+    pub(crate) picked_lines: Option<(EntityId, Vec<usize>)>,
+    /// The points of a curve ruler being placed (picture pixels).
+    pub(crate) curve_points: Vec<[f32; 2]>,
     /// Scale/Rotate or Free Transform, while it is on.
     pub(crate) transform: Option<crate::transform_ui::TransformSession>,
     /// The keys held this frame (Shift frees a transform's aspect).
@@ -372,6 +391,8 @@ impl Default for SuePaint {
             gesture: None,
             warp: None,
             vanishing_line: None,
+            picked_lines: None,
+            curve_points: Vec::new(),
             transform: None,
             modifiers: egui::Modifiers::NONE,
             onion: false,
@@ -731,6 +752,92 @@ impl SuePaint {
 
     pub(crate) fn doc_mut(&mut self) -> Option<&mut Doc> {
         self.docs.get_mut(self.active)
+    }
+
+    /// Deletes the vector lines the Object tool picked, as one step.
+    pub(crate) fn delete_picked_lines(&mut self, cx: &mut AppletContext<'_>) {
+        let Some((layer, picked)) = self.picked_lines.take() else {
+            return;
+        };
+        let Some(before) = doc::raster(&cx.world.arena, layer)
+            .and_then(|raster| raster.bytes())
+            .map(<[u8]>::to_vec)
+        else {
+            return;
+        };
+        let geometry = crate::vector::geometry(&cx.world.arena, layer);
+        let lines: Vec<crate::vector::Line> = crate::vector::lines(&geometry)
+            .into_iter()
+            .enumerate()
+            .filter(|(index, _)| !picked.contains(index))
+            .map(|(_, line)| line)
+            .collect();
+        let Some(raster) = doc::raster_mut(&mut cx.world.arena, layer) else {
+            return;
+        };
+        let (width, height) = (raster.width(), raster.height());
+        if let Some(painted) = crate::vector::render(&lines, width, height)
+            && let (Some(into), Some(from)) = (raster.bytes_mut(), painted.bytes())
+        {
+            into.copy_from_slice(from);
+        }
+        let pixels = doc::raster(&cx.world.arena, layer).and_then(|raster| {
+            let patch = doc::diff_patch(&before, raster.bytes()?, width, height)?;
+            Some(sue_core::txn::RasterEdit::new(
+                layer,
+                "Delete Lines",
+                vec![patch],
+            ))
+        });
+        let edit = crate::vector::keep(
+            &mut cx.world.arena,
+            layer,
+            geometry,
+            &lines,
+            pixels,
+            "Delete Lines",
+        );
+        cx.record(ArenaEdit(edit));
+        if let Some(doc) = self.doc_mut() {
+            doc.compositor
+                .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+        }
+    }
+
+    /// Adds `path` to the picture's curve, figure and pen rulers, as one
+    /// step named `label`, and turns Snap to Ruler on.
+    pub(crate) fn add_ruler_path(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        path: crate::rulers::Path,
+        label: &str,
+    ) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let mut rulers = crate::rulers::Rulers::of(&cx.world.arena, picture);
+        rulers.paths.push(path);
+        let text = rulers.text(crate::rulers::PATHS);
+        if Self::apply(
+            cx,
+            crate::rulers::edit(picture, crate::rulers::PATHS, text, label),
+        ) && let Some(doc) = self.doc_mut()
+        {
+            doc.snap_ruler = true;
+            doc.show_rulers = true;
+        }
+    }
+
+    /// Lays the curve ruler through the points placed so far.
+    pub(crate) fn finish_curve(&mut self, cx: &mut AppletContext<'_>) {
+        let points = std::mem::take(&mut self.curve_points);
+        if points.len() >= 2 {
+            self.add_ruler_path(
+                cx,
+                crate::rulers::Path::curve(&points),
+                "Create Curve Ruler",
+            );
+        }
     }
 
     /// Picks the Ruler tool's sub tool of `mode`.
@@ -1895,6 +2002,15 @@ impl SuePaint {
                     self.paste(cx, "From Selection");
                 }
                 self.clipboard = kept;
+            }
+            "edit.clear"
+                if self.toolbox.tool() == crate::tools::Tool::Operation
+                    && self
+                        .picked_lines
+                        .as_ref()
+                        .is_some_and(|(_, picked)| !picked.is_empty()) =>
+            {
+                self.delete_picked_lines(cx);
             }
             "edit.clear" => self.run_clear(cx, false, "Clear"),
             "edit.clear_outside" => self.run_clear(cx, true, "Clear Outside Selection"),

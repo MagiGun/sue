@@ -1239,7 +1239,9 @@ the line where the eraser meets it, Erase up to intersection cuts it at the
 nearest crossings with other lines either side, Whole line takes it all),
 paints the layer again from the lines left, and records one step on
 release. Raster-only tools (fill, gradient, blend, filters, transform) say
-so on a vector layer.
+so on a vector layer. The Operation tool's Object picks vector lines (Shift
+adds or takes away), drags them and deletes them, each one step; Select
+layer picks the layer under the pointer.
 
 **Correct Line.** Every brush sample carries a width and an opacity share
 (`Sample::width`, `Sample::alpha`, 1 as drawn) that scale its dab, so a
@@ -1264,16 +1266,19 @@ layer, in a dragged box or all of it.
 (`sue_paint::rulers`): `ruler.linear` (two ends), `ruler.special` (parallel
 lines at an angle, radial lines or concentric circles about a center),
 `ruler.perspective` (one to three vanishing points, the first two on the eye
-level) and `ruler.symmetry`, so each is undone, saved and opened with the
-picture. The Ruler tool has Clip Studio Paint's sub tools: Linear Ruler,
-Special Ruler, Perspective Ruler (Add vanishing point: two dragged lines
+level), `ruler.symmetry` and `ruler.paths` (curve, figure and pen rulers: open
+or closed paths sampled every 2 pixels), so each is undone, saved and opened
+with the picture. The Ruler tool has Clip Studio Paint's sub tools: Linear
+Ruler, Curve Ruler (clicked points joined by a Catmull-Rom curve, laid with
+Enter or a click on the last point), Figure Ruler (a rectangle or ellipse),
+Ruler Pen (drawn freehand), Special Ruler, Perspective Ruler (Add vanishing point: two dragged lines
 cross at the new point; Delete vanishing point; Fix eye level) and
 Symmetrical Ruler; dragging a vanishing point, the eye level or a linear
 ruler's end moves it, shown live and recorded as one `SetProperty` on
 release. Create Perspective Ruler lays one, two or three points as Clip
 Studio Paint does (the middle, the left and right edges at mid height, and
 one far below). A stroke follows them through `rulers::Snap`: one near the
-linear ruler goes onto it at once (Snap to Ruler); otherwise the guides
+linear ruler or a path ruler goes onto the nearest at once (Snap to Ruler); otherwise the guides
 through its first point (toward each vanishing point, level and upright
 for one point, upright for two, the special ruler's line or circle) wait
 until the pen has moved 4 screen pixels, the one running most like the pen
@@ -1823,7 +1828,8 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: Onion Skin Settings and the light table | **Implemented**; a unit test for as many cels as asked fading a step each, color modes and light table layers, and the animation end-to-end run keeps the settings and registers, refuses and undoes a light table layer | `sue-paint/src/anim.rs`, `anim_ui.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: vector layers with the Vector eraser (touched area, up to intersection, whole line) | **Implemented**; unit tests for a brush and lines read back, a line painted again to the same pixels, and each eraser mode; an end-to-end run that draws two crossing lines, undoes and redoes one, erases up to the crossing and undoes it | `sue-paint/src/vector.rs`, `brush.rs`, `canvas.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: Correct Line (control points, pinch, simplify, connect, adjust line width, redraw, redraw width) and Remove dust | **Implemented**; unit tests for every operation and dust removal, and the vector end-to-end run pinches a line and undoes it | `sue-paint/src/correct.rs`, `vector.rs`, `brush.rs`, `canvas.rs` |
-| §3.7 Sue Paint: moving vector lines with the Object tool, curve rulers, materials, the camera folder and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
+| §3.7 Sue Paint: the Operation tool (Object for vector lines, Select layer), curve, figure and pen rulers | **Implemented**; a unit test for path rulers read back and holding strokes on a curve and round a rectangle's corner; the vector end-to-end run moves a line with Object, deletes and undoes it | `sue-paint/src/rulers.rs`, `canvas.rs`, `bins/sue/src/runtime.rs` |
+| §3.7 Sue Paint: materials, the camera folder and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |

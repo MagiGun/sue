@@ -376,6 +376,9 @@ familiar:
   **Vector** setting decides what it takes: only where it touches, the
   piece of a line up to where it crosses other lines (the Vector eraser
   does this, so cleaning up crossing lines is one tap), or whole lines.
+- **Object** (O): click a vector line to pick it (Shift picks more), drag
+  to move it, Delete to remove it. **Select layer** picks the layer under
+  the pointer.
 - **Correct Line** (Y), on vector layers: drag a line's control points to
   reshape it, or add, delete, corner, widen, fade them and split the line
   there; pinch a stretch of line into shape; brush over lines to smooth
@@ -394,8 +397,10 @@ familiar:
   appears on the other side too, or turned around its middle as many times
   as you set. Ctrl+2 turns it off and on.
 - **Rulers** (the Ruler tool, and Layer, Ruler/Frame): a **Linear Ruler**
-  keeps lines that start near it straight along it (Ctrl+1 turns it off and
-  on); a **Special Ruler** makes every line parallel, run toward a middle,
+  keeps lines that start near it straight along it, and **Curve**,
+  **Figure** (rectangle or ellipse) and **Ruler Pen** rulers keep them on a
+  curve you click out, a shape you drag or a line you draw (Ctrl+1 turns
+  them off and on); a **Special Ruler** makes every line parallel, run toward a middle,
   or go round it in circles; a **Perspective Ruler** makes lines run toward
   its vanishing points. Create Perspective Ruler lays one with 1, 2 or 3
   points; or drag along two edges of your drawing that meet in the distance

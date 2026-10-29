@@ -1189,6 +1189,27 @@ impl SuePaint {
             }
             Tool::Ruler => {
                 match sub.mode {
+                    6 => {
+                        ui.label(small(
+                            "Click to place points; click the last one again or press Enter to lay the curve. Esc drops it",
+                        ));
+                        ui.label(small("Ctrl+1 (Snap to Ruler) turns rulers on and off"));
+                    }
+                    7 => {
+                        ui.horizontal(|ui| {
+                            ui.label(small("Figure"));
+                            ui.selectable_value(&mut sub.kind, 0, "Rectangle");
+                            ui.selectable_value(&mut sub.kind, 1, "Ellipse");
+                        });
+                        ui.label(small(
+                            "Drag to lay the ruler; strokes that start on it follow it",
+                        ));
+                    }
+                    8 => {
+                        ui.label(small(
+                            "Draw a ruler freehand; strokes that start on it follow it",
+                        ));
+                    }
                     5 => {
                         ui.label(small(
                             "Drag to lay a straight ruler. Strokes that start near it follow it; Shift keeps it to 45 degrees",

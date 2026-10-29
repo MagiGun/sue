@@ -2449,6 +2449,26 @@ pub(crate) mod tests {
         assert_eq!(pulled[1], drawn[1], "the other line stays");
         command(&mut runtime, "edit.undo");
         assert_eq!(lines(&runtime), drawn);
+
+        // The Operation tool's Object (O): drag the upright to move it,
+        // Delete takes it away, undo brings it back.
+        step(&mut runtime, vec![key(egui::Key::O, plain)]);
+        drag(
+            &mut runtime,
+            &mut step,
+            middle + vec2(0.0, 80.0),
+            middle + vec2(40.0, 80.0),
+        );
+        let moved = lines(&runtime);
+        assert!(
+            moved[1].samples[0].at[0] > drawn[1].samples[0].at[0] + 10.0,
+            "moved right"
+        );
+        assert_eq!(moved[0], drawn[0], "the other line stays");
+        command(&mut runtime, "edit.clear");
+        assert_eq!(lines(&runtime).len(), 1);
+        command(&mut runtime, "edit.undo");
+        assert_eq!(lines(&runtime), moved);
         let _ = std::fs::remove_dir_all(&root);
     }
 

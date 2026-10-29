@@ -79,6 +79,25 @@ pub fn simplified(samples: &[Sample], tolerance: f32) -> Vec<usize> {
     (0..samples.len()).filter(|index| keep[*index]).collect()
 }
 
+/// `points` simplified within `tolerance` pixels.
+#[must_use]
+pub fn simplified_points(points: &[[f32; 2]], tolerance: f32) -> Vec<[f32; 2]> {
+    let samples: Vec<Sample> = points
+        .iter()
+        .map(|at| Sample {
+            at: *at,
+            pressure: 1.0,
+            speed: 0.0,
+            width: 1.0,
+            alpha: 1.0,
+        })
+        .collect();
+    simplified(&samples, tolerance)
+        .into_iter()
+        .map(|index| points[index])
+        .collect()
+}
+
 impl Line {
     /// The line's control points, as sample indices in order.
     #[must_use]

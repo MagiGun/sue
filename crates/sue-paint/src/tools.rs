@@ -139,7 +139,7 @@ impl Tool {
     /// `true` if it works in this build.
     #[must_use]
     pub const fn available(self) -> bool {
-        !matches!(self, Self::Decoration | Self::Operation)
+        !matches!(self, Self::Decoration)
     }
 
     /// `true` for tools that paint with a [`Tip`].
@@ -444,6 +444,9 @@ impl Tool {
             // Clip Studio Paint's Create ruler group, in its order.
             Self::Ruler => vec![
                 plain("Linear Ruler", 5),
+                plain("Curve Ruler", 6),
+                plain("Figure Ruler", 7),
+                plain("Ruler Pen", 8),
                 plain("Special Ruler", 2),
                 plain("Perspective Ruler", 1),
                 SubTool {
@@ -497,7 +500,9 @@ impl Tool {
                     },
                 ]
             }
-            Self::Decoration | Self::Operation => {
+            // Clip Studio Paint's Operation group.
+            Self::Operation => vec![plain("Object", 0), plain("Select layer", 1)],
+            Self::Decoration => {
                 vec![plain(self.label(), 0)]
             }
         }

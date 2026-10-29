@@ -333,6 +333,21 @@ pub fn to_geometry(lines: &[Line]) -> Geometry {
     geometry
 }
 
+/// `lines` with the ones at `picked` moved by `by`.
+#[must_use]
+pub fn moved(lines: &[Line], picked: &[usize], by: [f32; 2]) -> Vec<Line> {
+    let mut out = lines.to_vec();
+    for index in picked {
+        if let Some(line) = out.get_mut(*index) {
+            for sample in &mut line.samples {
+                sample.at[0] += by[0];
+                sample.at[1] += by[1];
+            }
+        }
+    }
+    out
+}
+
 /// `lines` painted onto a clear `width` by `height` layer.
 #[must_use]
 pub fn render(lines: &[Line], width: u32, height: u32) -> Option<RasterTile2D> {

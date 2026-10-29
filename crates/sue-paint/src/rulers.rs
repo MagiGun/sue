@@ -22,8 +22,140 @@ pub const SPECIAL: &str = "ruler.special";
 pub const PERSPECTIVE: &str = "ruler.perspective";
 /// The symmetrical ruler: its center and angle (radians), `x,y,angle`.
 pub const SYMMETRY: &str = "ruler.symmetry";
+/// Curve, figure and pen rulers: paths joined by `|`, each `o:` (open) or
+/// `c:` (closed) and its points `x,y x,y ...`.
+pub const PATHS: &str = "ruler.paths";
 /// Every ruler a picture keeps.
-pub const ALL: [&str; 4] = [LINEAR, SPECIAL, PERSPECTIVE, SYMMETRY];
+pub const ALL: [&str; 5] = [LINEAR, SPECIAL, PERSPECTIVE, SYMMETRY, PATHS];
+
+/// A ruler along a path: a curve ruler, a figure ruler or one drawn with
+/// the ruler pen (picture pixels).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Path {
+    /// Its points, close enough together to follow.
+    pub points: Vec<[f32; 2]>,
+    /// The last point joins the first.
+    pub closed: bool,
+}
+
+impl Path {
+    /// A curve ruler through `points`: a smooth curve (Catmull-Rom) sampled
+    /// every 2 pixels.
+    #[must_use]
+    pub fn curve(points: &[[f32; 2]]) -> Self {
+        let mut out = Vec::new();
+        for index in 0..points.len().saturating_sub(1) {
+            let p1 = points[index];
+            let p2 = points[index + 1];
+            let p0 = if index == 0 { p1 } else { points[index - 1] };
+            let p3 = points.get(index + 2).copied().unwrap_or(p2);
+            let steps = (distance(p1, p2) / 2.0).ceil().max(1.0) as usize;
+            for step in 0..steps {
+                let u = step as f32 / steps as f32;
+                let (u2, u3) = (u * u, u * u * u);
+                out.push([0, 1].map(|axis| {
+                    0.5 * (2.0 * p1[axis]
+                        + (p2[axis] - p0[axis]) * u
+                        + (2.0 * p0[axis] - 5.0 * p1[axis] + 4.0 * p2[axis] - p3[axis]) * u2
+                        + (3.0 * p1[axis] - p0[axis] - 3.0 * p2[axis] + p3[axis]) * u3)
+                }));
+            }
+        }
+        out.extend(points.last());
+        Self {
+            points: out,
+            closed: false,
+        }
+    }
+
+    /// A figure ruler: the rectangle or (with `ellipse`) the ellipse in the
+    /// box from `a` to `b`.
+    #[must_use]
+    pub fn figure(a: [f32; 2], b: [f32; 2], ellipse: bool) -> Self {
+        let (min, max) = (
+            [a[0].min(b[0]), a[1].min(b[1])],
+            [a[0].max(b[0]), a[1].max(b[1])],
+        );
+        let points = if ellipse {
+            let center = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
+            let radius = [(max[0] - min[0]) / 2.0, (max[1] - min[1]) / 2.0];
+            (0..96)
+                .map(|step| {
+                    let theta = step as f32 * std::f32::consts::TAU / 96.0;
+                    [
+                        center[0] + radius[0] * theta.cos(),
+                        center[1] + radius[1] * theta.sin(),
+                    ]
+                })
+                .collect()
+        } else {
+            vec![min, [max[0], min[1]], max, [min[0], max[1]]]
+        };
+        Self {
+            points,
+            closed: true,
+        }
+    }
+
+    fn text(&self) -> String {
+        let points: Vec<String> = self
+            .points
+            .iter()
+            .map(|[x, y]| format!("{x},{y}"))
+            .collect();
+        format!(
+            "{}:{}",
+            if self.closed { "c" } else { "o" },
+            points.join(" ")
+        )
+    }
+
+    fn from_text(text: &str) -> Option<Self> {
+        let (kind, points) = text.split_once(':')?;
+        let points: Vec<[f32; 2]> = points
+            .split_whitespace()
+            .map(|point| match numbers(point).as_slice() {
+                &[x, y] => Some([x, y]),
+                _ => None,
+            })
+            .collect::<Option<_>>()?;
+        (points.len() >= 2).then_some(Self {
+            points,
+            closed: kind == "c",
+        })
+    }
+
+    /// The segments to follow, the closing one too.
+    fn segments(&self) -> impl Iterator<Item = ([f32; 2], [f32; 2])> + '_ {
+        let closing = self
+            .closed
+            .then(|| (self.points[self.points.len() - 1], self.points[0]));
+        self.points
+            .windows(2)
+            .map(|pair| (pair[0], pair[1]))
+            .chain(closing)
+    }
+
+    /// The point of the path nearest `p`, and the direction there.
+    fn nearest(&self, p: [f32; 2]) -> ([f32; 2], [f32; 2]) {
+        let mut best = (self.points[0], [1.0, 0.0], f32::INFINITY);
+        for (a, b) in self.segments() {
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let length = dx * dx + dy * dy;
+            let t = if length > 0.0 {
+                (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let at = [a[0] + dx * t, a[1] + dy * t];
+            let away = distance(at, p);
+            if away < best.2 {
+                best = (at, unit([dx, dy]).unwrap_or([1.0, 0.0]), away);
+            }
+        }
+        (best.0, best.1)
+    }
+}
 
 fn numbers(text: &str) -> Vec<f32> {
     text.split(',')
@@ -197,8 +329,8 @@ pub fn crossing([a, b]: [[f32; 2]; 2], [c, d]: [[f32; 2]; 2]) -> Option<[f32; 2]
     Some([a[0] + r[0] * t, a[1] + r[1] * t])
 }
 
-/// A line or circle a stroke follows.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// A line, circle or path a stroke follows.
+#[derive(Clone, Debug, PartialEq)]
 pub enum Guide {
     /// The line through `origin` along `direction` (length 1).
     Line {
@@ -214,6 +346,8 @@ pub enum Guide {
         /// Its radius.
         radius: f32,
     },
+    /// A curve, figure or pen ruler.
+    Path(Path),
 }
 
 impl Guide {
@@ -229,6 +363,7 @@ impl Guide {
                 let out = unit([p[0] - center[0], p[1] - center[1]]).unwrap_or([1.0, 0.0]);
                 [center[0] + out[0] * radius, center[1] + out[1] * radius]
             }
+            Self::Path(ref path) => path.nearest(p).0,
         }
     }
 
@@ -239,6 +374,7 @@ impl Guide {
             Self::Circle { center, .. } => {
                 unit([at[0] - center[0], at[1] - center[1]]).map(|out| [-out[1], out[0]])
             }
+            Self::Path(ref path) => Some(path.nearest(at).1),
         };
         tangent.map_or(0.0, |[x, y]| (x * toward[0] + y * toward[1]).abs())
     }
@@ -255,6 +391,8 @@ pub struct Rulers {
     pub perspective: Option<Perspective>,
     /// The symmetrical ruler's center and angle.
     pub symmetry: Option<([f32; 2], f32)>,
+    /// Curve, figure and pen rulers.
+    pub paths: Vec<Path>,
 }
 
 impl Rulers {
@@ -276,6 +414,9 @@ impl Rulers {
                 &[x, y, angle] => Some(([x, y], angle)),
                 _ => None,
             }),
+            paths: text(PATHS)
+                .map(|text| text.split('|').filter_map(Path::from_text).collect())
+                .unwrap_or_default(),
         }
     }
 
@@ -298,6 +439,14 @@ impl Rulers {
             symmetry: self
                 .symmetry
                 .map(|(center, angle)| (move_point(center), angle)),
+            paths: self
+                .paths
+                .iter()
+                .map(|path| Path {
+                    points: path.points.iter().copied().map(move_point).collect(),
+                    closed: path.closed,
+                })
+                .collect(),
         }
     }
 
@@ -388,6 +537,13 @@ impl Rulers {
             SYMMETRY => self
                 .symmetry
                 .map(|([x, y], angle)| format!("{x},{y},{angle}")),
+            PATHS => (!self.paths.is_empty()).then(|| {
+                self.paths
+                    .iter()
+                    .map(Path::text)
+                    .collect::<Vec<_>>()
+                    .join("|")
+            }),
             _ => None,
         }
     }
@@ -463,6 +619,18 @@ impl Snap {
                 return Some(Self::On(line));
             }
         }
+        if ruler {
+            // The nearest curve, figure or pen ruler the stroke starts on.
+            let near = rulers
+                .paths
+                .iter()
+                .map(|path| (path, distance(path.nearest(start).0, start)))
+                .filter(|(_, away)| *away <= reach)
+                .min_by(|a, b| a.1.total_cmp(&b.1));
+            if let Some((path, _)) = near {
+                return Some(Self::On(Guide::Path(path.clone())));
+            }
+        }
         if !special {
             return None;
         }
@@ -498,7 +666,7 @@ impl Snap {
         }
         match guides.len() {
             0 => None,
-            1 => Some(Self::On(guides[0])),
+            1 => guides.pop().map(Self::On),
             _ => Some(Self::Choosing { start, guides }),
         }
     }
@@ -512,11 +680,13 @@ impl Snap {
                 let toward = unit([p[0] - start[0], p[1] - start[1]])
                     .filter(|_| distance(p, *start) >= reach)?;
                 let at = *start;
-                let guide = *guides
+                let guide = guides
                     .iter()
-                    .max_by(|a, b| a.along(at, toward).total_cmp(&b.along(at, toward)))?;
+                    .max_by(|a, b| a.along(at, toward).total_cmp(&b.along(at, toward)))?
+                    .clone();
+                let on = guide.project(p);
                 *self = Self::On(guide);
-                Some(guide.project(p))
+                Some(on)
             }
         }
     }
@@ -648,6 +818,39 @@ mod tests {
             "too far from it"
         );
         assert_eq!(Snap::begin(&linear, [30.0, 6.0], false, true, 8.0), None);
+    }
+
+    #[test]
+    fn curve_figure_and_pen_rulers_hold_strokes_that_start_on_them() {
+        let curve = Path::curve(&[[0.0, 0.0], [50.0, 30.0], [100.0, 0.0]]);
+        assert!(curve.points.len() > 20);
+        assert!(near(*curve.points.last().unwrap(), [100.0, 0.0]));
+        let rulers = Rulers {
+            paths: vec![curve, Path::figure([200.0, 200.0], [300.0, 260.0], false)],
+            ..Rulers::default()
+        };
+        let mut arena = Arena::new();
+        let picture = sue_core::Entity::empty("Picture", "sue.image");
+        let id = picture.id();
+        arena.insert_keep_id(picture).unwrap();
+        let mut set = edit(id, PATHS, rulers.text(PATHS), "Ruler");
+        sue_core::ReversibleTransaction::apply(&mut set, &mut arena).unwrap();
+        let back = Rulers::of(&arena, id);
+        assert_eq!(back.paths.len(), 2);
+        assert!(back.paths[1].closed);
+        // A stroke starting on the curve stays on it.
+        let mut snap = Snap::begin(&back, [50.0, 31.0], true, true, 5.0).unwrap();
+        let p = snap.follow([52.0, 60.0], 2.0).unwrap();
+        assert!((p[1] - 30.0).abs() < 2.0, "{p:?}");
+        // One on the rectangle's edge follows the edge round the corner.
+        let mut snap = Snap::begin(&back, [250.0, 201.0], true, true, 5.0).unwrap();
+        assert!(near(
+            snap.follow([320.0, 230.0], 2.0).unwrap(),
+            [300.0, 230.0]
+        ));
+        // Far from every ruler, or with Snap to Ruler off: free.
+        assert_eq!(Snap::begin(&back, [150.0, 150.0], true, true, 5.0), None);
+        assert_eq!(Snap::begin(&back, [50.0, 31.0], false, true, 5.0), None);
     }
 
     #[test]
