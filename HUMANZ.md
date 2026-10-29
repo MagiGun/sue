@@ -1234,6 +1234,22 @@ through a table per channel), Level Correction, Color Balance (shadows,
 midtones and highlights weighted by brightness) and Gradient Map join the
 filters, each previewed in place and recorded as one step.
 
+**Correction layers.** A correction layer (`sue.paint.correction`) keeps a
+correction as text (`Filter::to_text`, in `correction.filter`) and changes
+everything composited under it without touching those pixels: the
+compositor runs corrections that treat channels apart through a table of
+256 values a channel, others pixel by pixel, and mixes the result in by the
+layer's opacity. Its dialog writes the setting in place while it is open;
+OK records it as one `SetProperty`, Cancel puts it back (and undoes a layer
+just made).
+
+**Blend.** The Blend tool reworks the pixels already on the layer
+(`sue_paint::blend`): Blur averages around each pixel, Finger Tip drags color
+along the stroke, and Liquify moves the picture (Push along the stroke,
+Expand, Pinch and Twirl about the brush's middle). Dabs land every fifth of
+the brush, each reading a copy of its patch from before it, weighted by a
+smooth falloff and the strength; the drag is one `RasterEdit`.
+
 **Puppet warp.** Edit, Transform, Puppet Warp puts pins on the current
 layer: dragging one bends the layer around the others by rigid moving least
 squares (`sue_paint::warp`, after Schaefer, McPhail and Warren, 2006), so
@@ -1273,7 +1289,10 @@ its cel the current layer. Animations export as an animated GIF
 (`sue_io::encode_gif_animation`) or a numbered picture sequence.
 
 **Other edits.** Fill floods the current layer or all layers within a
-tolerance and grows one pixel under anti-aliased lines; gradients run linear or
+tolerance and grows one pixel under anti-aliased lines; Close gap floods as
+if the lines were a few pixels thicker, so small breaks hold the fill in,
+then grows back out to the lines (`fill::flood_closing`), and Area scaling
+spreads it further under them; gradients run linear or
 radial, drawing color to transparent or main to sub; figures draw lines,
 outlines and filled shapes; selections are coverage masks (rectangle, ellipse,
 lasso, auto select; new, add, subtract, intersect) that every edit stays inside,
@@ -1733,7 +1752,8 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: layout, every menu, tools and sub tools, brush engine with pressure and stabilization, fills, gradients, figures, selections, layers, 26 blend modes, edits and filters, open and export, canvas cards | **Implemented**; an end-to-end test drives it with egui events (New, a pressure stroke, a layer, undo, save and reopen), the self-check paints, undoes, saves and exports, and three snapshots show it | `sue-paint`, `bins/sue/src/runtime.rs`, `selfcheck.rs`, `snapshot.rs` |
 | §3.7 Sue Paint: pen pressure curves and dynamics, starting and ending modes, color jitter, puppet warp, stories and the Page Manager, frame borders, balloons, focus and speed lines, screentone, animation timelines with onion skin and GIF export | **Implemented**; end-to-end tests drive puppet warp, stories, manga and animation with egui events, and snapshots show the pressure dialog, the Page Manager and the Timeline | `sue-paint`, `bins/sue/src/runtime.rs`, `snapshot.rs` |
 | §3.7 Sue Paint: scale and free transform, layer folders, layer masks, canvas size, crop and resolution, the symmetrical ruler, text layers and balloon text, tone curve, levels, color balance and gradient maps | **Implemented**; end-to-end tests drive each with egui events (Ctrl+T, Ctrl+G and the folder moves, crop, a mirrored stroke, a mask erased, words written and edited) | `sue-paint`, `sue-type/src/raster.rs`, `bins/sue/src/runtime.rs` |
-| §3.7 Sue Paint: vector layers, correction layers, perspective rulers, materials, the camera folder, light table and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
+| §3.7 Sue Paint: Close gap and Area scaling, the Blend tool (Blur, Finger Tip, Liquify) and correction layers | **Implemented**; unit tests for a fill held in a broken ring, every dab kind and every correction read back from its text; end-to-end runs that liquify a stroke and add, undo and cancel correction layers | `sue-paint/src/fill.rs`, `blend.rs`, `composite.rs`, `bins/sue/src/runtime.rs` |
+| §3.7 Sue Paint: vector layers, perspective rulers, materials, the camera folder, light table and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |

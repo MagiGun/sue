@@ -298,8 +298,8 @@ familiar:
 
 - **Menus along the top:** File, Edit, Story, Animation, Layer, Select, View,
   Filter, Window and Help. Everything Sue Paint can do is in them. Items shown
-  in gray are planned but not built yet (comic pages, animation, vector and text
-  layers, rulers and a few more), so you can see what is coming.
+  in gray are planned but not built yet (vector layers, perspective rulers,
+  materials and a few more), so you can see what is coming.
 - **Tools on the left:** pen, pencil, brush, airbrush, eraser, fill bucket,
   gradient, shapes, selections, eyedropper, hand and zoom. Each tool has
   ready-made **sub tools** (a G-pen, a mapping pen, a watercolor brush, a soft
@@ -387,6 +387,16 @@ familiar:
   Click the words again to change them.
 - **Tone Curve, Levels, Color Balance, Gradient Map** (Edit, Tonal
   Correction): shape the curve by dragging its points, with a live preview.
+- **Correction layers** (Layer, New Correction Layer): the same corrections
+  as a layer that changes everything under it while leaving those layers
+  alone. Hide it or lower its opacity to weaken it, and double-click it to
+  change its settings.
+- **Fill that stays inside:** the fill bucket's **Close gap** keeps the paint
+  inside lines with small breaks, and **Area scaling** spreads it a little
+  under the lines so no white edge is left.
+- **Blend** (J): Blur softens, Finger Tip smudges the colors along your
+  stroke, and Liquify pushes the drawing along, swells it, pinches it or
+  twirls it under the brush.
 - **Puppet warp** (Edit, Transform): click to put pins on a layer, drag one
   and the drawing bends around the others while keeping its shape; Alt and
   click takes a pin away. OK (or Enter) keeps it, Cancel (or Esc) does not.

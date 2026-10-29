@@ -206,7 +206,12 @@ mod tests {
         worker.read(vec![dir.clone()]);
         let mut done = Vec::new();
         let start = std::time::Instant::now();
-        while !done.iter().any(|done| matches!(done, Done::Finished))
+        // The decode and the read run on threads of their own, so either
+        // may finish first.
+        while !(done.iter().any(|done| matches!(done, Done::Finished))
+            && done
+                .iter()
+                .any(|done| matches!(done, Done::Decoded { .. } | Done::Failed { .. })))
             && start.elapsed().as_secs() < 20
         {
             done.extend(worker.collect());
