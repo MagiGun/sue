@@ -155,6 +155,118 @@ impl fmt::Display for Keybind {
     }
 }
 
+/// Every chord that runs one action: none, one or as many as people want,
+/// written `Ctrl+Z or Alt+Backspace` in a rice file (empty for none).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Keybinds(Vec<Keybind>);
+
+impl Keybinds {
+    /// These chords, each once, in order.
+    #[must_use]
+    pub fn new(chords: impl IntoIterator<Item = Keybind>) -> Self {
+        let mut out = Self::default();
+        for chord in chords {
+            out.push(chord);
+        }
+        out
+    }
+
+    /// One chord.
+    #[must_use]
+    pub fn one(chord: Keybind) -> Self {
+        Self(vec![chord])
+    }
+
+    /// The chords, in order.
+    #[must_use]
+    pub fn chords(&self) -> &[Keybind] {
+        &self.0
+    }
+
+    /// The first chord, the one menus show.
+    #[must_use]
+    pub fn first(&self) -> Option<Keybind> {
+        self.0.first().copied()
+    }
+
+    /// `true` if `chord` is one of them.
+    #[must_use]
+    pub fn contains(&self, chord: &Keybind) -> bool {
+        self.0.contains(chord)
+    }
+
+    /// Adds `chord` at the end, unless it is there already.
+    pub fn push(&mut self, chord: Keybind) {
+        if !self.0.contains(&chord) {
+            self.0.push(chord);
+        }
+    }
+
+    /// Takes chord `index` away.
+    pub fn remove(&mut self, index: usize) {
+        if index < self.0.len() {
+            self.0.remove(index);
+        }
+    }
+
+    /// Puts `chord` in place of chord `index` (at the end past it).
+    pub fn replace(&mut self, index: usize, chord: Keybind) {
+        if self.0.contains(&chord) {
+            return;
+        }
+        match self.0.get_mut(index) {
+            Some(slot) => *slot = chord,
+            None => self.0.push(chord),
+        }
+    }
+
+    /// `true` with no chord at all.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// `true` if `event` presses one of the chords.
+    #[must_use]
+    pub fn matches(&self, event: &KeyEvent) -> bool {
+        self.0.iter().any(|chord| chord.matches(event))
+    }
+}
+
+impl From<Keybind> for Keybinds {
+    fn from(chord: Keybind) -> Self {
+        Self::one(chord)
+    }
+}
+
+impl FromStr for Keybinds {
+    type Err = RiceError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let text = text.trim();
+        if text.is_empty() || text.eq_ignore_ascii_case("none") {
+            return Ok(Self::default());
+        }
+        let mut out = Self::default();
+        for part in text.split(" or ") {
+            out.push(part.parse()?);
+        }
+        Ok(out)
+    }
+}
+
+impl fmt::Display for Keybinds {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (index, chord) in self.0.iter().enumerate() {
+            if index > 0 {
+                f.write_str(" or ")?;
+            }
+            write!(f, "{chord}")?;
+        }
+        Ok(())
+    }
+}
+
 /// A dynamically typed rice value, as produced by a Settings widget.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RiceValue {
@@ -166,8 +278,8 @@ pub enum RiceValue {
     Float(f64),
     /// A color.
     Color(Rgba),
-    /// A key chord.
-    Keybind(Keybind),
+    /// Key chords.
+    Keybind(Keybinds),
     /// Text: free text, a choice, or a shader path.
     Text(String),
 }

@@ -34,6 +34,7 @@ use std::collections::BTreeMap;
 
 use sue_core::txn::{RasterEdit, RasterPatch};
 use sue_core::{EntityId, RasterTile2D};
+use sue_model::Response;
 
 use crate::select::Selection;
 
@@ -81,6 +82,88 @@ impl AntiAlias {
     }
 }
 
+/// How the pen changes one setting along a stroke, as Clip Studio Paint's
+/// dynamics do: each input that is on scales the setting between its
+/// minimum and full through its curve, and the inputs multiply.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Dynamics {
+    /// Pen pressure changes it.
+    pub pressure: bool,
+    /// The share left at the lightest pressure, 0 to 1.
+    pub pressure_min: f32,
+    /// How pressure becomes the amount.
+    pub pressure_curve: Response,
+    /// The pen's speed changes it.
+    pub velocity: bool,
+    /// The share left when the pen is still, 0 to 1.
+    pub velocity_min: f32,
+    /// How speed (still to fast) becomes the amount.
+    pub velocity_curve: Response,
+    /// Chance changes it along the stroke.
+    pub random: bool,
+    /// The least share chance leaves, 0 to 1.
+    pub random_min: f32,
+}
+
+impl Default for Dynamics {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+impl Dynamics {
+    /// Nothing changes the setting.
+    pub const NONE: Self = Self {
+        pressure: false,
+        pressure_min: 0.0,
+        pressure_curve: Response::LINEAR,
+        velocity: false,
+        velocity_min: 0.0,
+        velocity_curve: Response::LINEAR,
+        random: false,
+        random_min: 0.0,
+    };
+
+    /// Pen pressure changes the setting, down to `min` of it.
+    #[must_use]
+    pub const fn pressure(min: f32) -> Self {
+        Self {
+            pressure: true,
+            pressure_min: min,
+            ..Self::NONE
+        }
+    }
+
+    /// `true` if any input is on.
+    #[must_use]
+    pub const fn any(&self) -> bool {
+        self.pressure || self.velocity || self.random
+    }
+
+    /// The share of the setting at `pressure`, `speed` and `chance` (each
+    /// 0 to 1).
+    #[must_use]
+    pub fn factor(&self, pressure: f32, speed: f32, chance: f32) -> f32 {
+        let scale = |on: bool, min: f32, amount: f32| {
+            if on {
+                let min = min.clamp(0.0, 1.0);
+                min + (1.0 - min) * amount.clamp(0.0, 1.0)
+            } else {
+                1.0
+            }
+        };
+        scale(
+            self.pressure,
+            self.pressure_min,
+            self.pressure_curve.eval(pressure),
+        ) * scale(
+            self.velocity,
+            self.velocity_min,
+            self.velocity_curve.eval(speed),
+        ) * scale(self.random, self.random_min, chance)
+    }
+}
+
 /// The shape and behavior of a brush.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tip {
@@ -100,12 +183,16 @@ pub struct Tip {
     pub flow: f32,
     /// Paper grain that breaks up the stroke (pencils), 0 to 1.
     pub grain: f32,
-    /// Pen pressure changes the size.
-    pub pressure_size: bool,
-    /// Pen pressure changes the opacity.
-    pub pressure_opacity: bool,
-    /// Size at the lightest pressure, as a fraction of the size.
-    pub min_size: f32,
+    /// What changes the size along a stroke (Brush Size Dynamics).
+    pub size_by: Dynamics,
+    /// What changes the opacity along a stroke (Opacity Dynamics).
+    pub opacity_by: Dynamics,
+    /// The size is measured on the screen, so the brush looks the same at
+    /// any zoom (Specify by size on screen).
+    pub screen_size: bool,
+    /// The line never gets thinner than a pixel, even at the lightest
+    /// pressure (At least 1 pixel).
+    pub at_least_one: bool,
     /// Removes pixels instead of painting them.
     pub eraser: bool,
     /// Length over which a stroke grows from a point to full size, in
@@ -129,9 +216,10 @@ impl Default for Tip {
             build_up: false,
             flow: 1.0,
             grain: 0.0,
-            pressure_size: true,
-            pressure_opacity: false,
-            min_size: 0.15,
+            size_by: Dynamics::pressure(0.15),
+            opacity_by: Dynamics::NONE,
+            screen_size: false,
+            at_least_one: false,
             eraser: false,
             taper_start: 0.0,
             taper_end: 0.0,
@@ -141,20 +229,19 @@ impl Default for Tip {
 }
 
 impl Tip {
-    /// Radius and strength of the brush at `pressure` (0 to 1).
+    /// Radius and strength of the brush at `pressure` (0 to 1), the pen
+    /// still and chance at its fullest.
     #[must_use]
     pub fn dab(&self, pressure: f32) -> (f32, f32) {
-        let pressure = pressure.clamp(0.0, 1.0);
-        let scale = if self.pressure_size {
-            self.min_size + (1.0 - self.min_size) * pressure
-        } else {
-            1.0
-        };
-        let strength = if self.pressure_opacity {
-            self.opacity * pressure
-        } else {
-            self.opacity
-        };
+        self.dab_at(pressure, 0.0, 1.0)
+    }
+
+    /// Radius and strength of the brush at `pressure`, `speed` and
+    /// `chance` (each 0 to 1), through its dynamics.
+    #[must_use]
+    pub fn dab_at(&self, pressure: f32, speed: f32, chance: f32) -> (f32, f32) {
+        let scale = self.size_by.factor(pressure, speed, chance);
+        let strength = self.opacity * self.opacity_by.factor(pressure, speed, chance);
         ((self.size * 0.5 * scale).max(0.0), strength.clamp(0.0, 1.0))
     }
 
@@ -208,6 +295,8 @@ pub struct Sample {
     pub at: [f32; 2],
     /// Pen pressure, 0 to 1.
     pub pressure: f32,
+    /// How fast the pen moved there, 0 (still) to 1 (fast).
+    pub speed: f32,
 }
 
 /// How a stroke is finished when the pen lifts.
@@ -257,6 +346,8 @@ pub struct Stroke {
     total: Option<f32>,
     flicked: f32,
     dirty: Option<[u32; 4]>,
+    speed: f32,
+    seed: u32,
 }
 
 impl Stroke {
@@ -278,7 +369,26 @@ impl Stroke {
             total: None,
             flicked: 0.0,
             dirty: None,
+            speed: 0.0,
+            seed: 0,
         }
+    }
+
+    /// How fast the pen moves now, 0 (still) to 1 (fast), for the samples
+    /// that follow (velocity dynamics).
+    pub fn set_speed(&mut self, speed: f32) {
+        self.speed = speed.clamp(0.0, 1.0);
+    }
+
+    /// A steady chance from 0 to 1 for the point `s` along the stroke: the
+    /// same each time the stroke is painted again (random dynamics).
+    fn chance(&self, s: f32) -> f32 {
+        let step = (s * 0.5).floor() as i32 as u32;
+        let mut h = step.wrapping_mul(0x9E37_79B1) ^ self.seed;
+        h ^= h >> 15;
+        h = h.wrapping_mul(0x2C1B_3C6D);
+        h ^= h >> 12;
+        (h & 0xFFFF) as f32 / 65_535.0
     }
 
     /// The layer it paints on.
@@ -307,7 +417,14 @@ impl Stroke {
         pressure: f32,
         selection: Option<&Selection>,
     ) {
-        let sample = Sample { at, pressure };
+        let sample = Sample {
+            at,
+            pressure,
+            speed: self.speed,
+        };
+        if self.seed == 0 {
+            self.seed = (at[0].to_bits() ^ at[1].to_bits().rotate_left(16)) | 1;
+        }
         match self.samples.last().copied() {
             None => {
                 if self.tip.dabbed() {
@@ -364,6 +481,7 @@ impl Stroke {
         self.total = Some(length(&path));
         self.flicked = self.total.unwrap_or(0.0) - before;
         for sample in path {
+            self.speed = sample.speed;
             self.to(raster, sample.at, sample.pressure, selection);
         }
         self.total = None;
@@ -434,8 +552,8 @@ impl Stroke {
         s1: f32,
         selection: Option<&Selection>,
     ) {
-        let (ra, sa) = self.tip.dab(a.pressure);
-        let (rb, sb) = self.tip.dab(b.pressure);
+        let (ra, sa) = self.tip.dab_at(a.pressure, a.speed, self.chance(s0));
+        let (rb, sb) = self.tip.dab_at(b.pressure, b.speed, self.chance(s1));
         let (ra, rb) = (ra * self.taper(s0), rb * self.taper(s1));
         let reach = ra.max(rb).max(0.7) + self.tip.aa.edge() + 1.0;
         let rect = [
@@ -458,8 +576,11 @@ impl Stroke {
             let d = ((px - cx) * (px - cx) + (py - cy) * (py - cy)).sqrt();
             let mut radius = ra + (rb - ra) * t;
             let mut strength = sa + (sb - sa) * t;
-            // A line thinner than a pixel keeps its weight as lighter ink.
-            if radius < 0.7 {
+            // A line thinner than a pixel keeps its weight as lighter ink,
+            // unless it is never to get thinner than a pixel.
+            if tip.at_least_one {
+                radius = radius.max(0.5);
+            } else if radius < 0.7 {
                 strength *= radius / 0.7;
                 radius = 0.7;
             }
@@ -477,7 +598,9 @@ impl Stroke {
         length: f32,
         selection: Option<&Selection>,
     ) {
-        let (radius, _) = self.tip.dab(a.pressure.max(b.pressure));
+        let (radius, _) = self
+            .tip
+            .dab_at(a.pressure.max(b.pressure), a.speed.max(b.speed), 1.0);
         let step = (radius * 2.0 * self.tip.spacing).max(0.25);
         let mut along = step - self.since_dab;
         while along <= length {
@@ -488,6 +611,7 @@ impl Stroke {
                     a.at[1] + (b.at[1] - a.at[1]) * t,
                 ],
                 pressure: a.pressure + (b.pressure - a.pressure) * t,
+                speed: a.speed + (b.speed - a.speed) * t,
             };
             self.dab(raster, sample, start + along, selection);
             along += step;
@@ -503,10 +627,14 @@ impl Stroke {
         s: f32,
         selection: Option<&Selection>,
     ) {
-        let (mut radius, mut strength) = self.tip.dab(sample.pressure);
+        let (mut radius, mut strength) =
+            self.tip
+                .dab_at(sample.pressure, sample.speed, self.chance(s));
         radius *= self.taper(s);
         // Tiny dabs keep their area instead of vanishing between pixels.
-        if radius < 0.7 {
+        if self.tip.at_least_one {
+            radius = radius.max(0.5);
+        } else if radius < 0.7 {
             strength *= (radius / 0.7).powi(2);
             radius = 0.7;
         }
@@ -751,7 +879,10 @@ fn trim_hooks(samples: &[Sample], size: f32) -> Vec<Sample> {
     let mut path: Vec<Sample> = Vec::with_capacity(samples.len());
     for sample in samples {
         match path.last_mut() {
-            Some(last) if distance(last.at, sample.at) < 0.35 => last.pressure = sample.pressure,
+            Some(last) if distance(last.at, sample.at) < 0.35 => {
+                last.pressure = sample.pressure;
+                last.speed = sample.speed;
+            }
             _ => path.push(*sample),
         }
     }
@@ -818,6 +949,7 @@ fn resample(path: &[Sample], step: f32) -> Vec<Sample> {
                     a.at[1] + (b.at[1] - a.at[1]) * t,
                 ],
                 pressure: a.pressure + (b.pressure - a.pressure) * t,
+                speed: a.speed + (b.speed - a.speed) * t,
             });
             along += step;
         }
@@ -954,6 +1086,7 @@ fn flick(path: &mut Vec<Sample>, velocity: [f32; 2], size: f32) {
                 last.at[1] + direction[1] * reach * t,
             ],
             pressure: last.pressure * (1.0 - 0.5 * t),
+            speed: last.speed,
         });
     }
 }
@@ -995,6 +1128,7 @@ fn spline(path: &[Sample], step: f32) -> Vec<Sample> {
             out.push(Sample {
                 at: catmull_rom([p0, p1, p2, p3], u),
                 pressure: path[i].pressure + (path[i + 1].pressure - path[i].pressure) * u,
+                speed: path[i].speed + (path[i + 1].speed - path[i].speed) * u,
             });
         }
     }
@@ -1125,7 +1259,7 @@ mod tests {
     fn flat_pen(size: f32) -> Tip {
         Tip {
             size,
-            pressure_size: false,
+            size_by: Dynamics::NONE,
             ..Tip::default()
         }
     }
@@ -1223,6 +1357,7 @@ mod tests {
             .map(|x| Sample {
                 at: [x as f32, 50.0 + if x % 2 == 0 { 1.5 } else { -1.5 }],
                 pressure: 1.0,
+                speed: 0.0,
             })
             .collect();
         let calm = correct(&shaky, 5, 6.0);
@@ -1238,11 +1373,13 @@ mod tests {
             .map(|y| Sample {
                 at: [20.0, y as f32],
                 pressure: 1.0,
+                speed: 0.0,
             })
             .collect();
         l.extend((1..=60).map(|x| Sample {
             at: [20.0 + x as f32, 60.0],
             pressure: 1.0,
+            speed: 0.0,
         }));
         let kept = correct(&l, 8, 6.0);
         let nearest = kept
@@ -1257,7 +1394,11 @@ mod tests {
     fn splines_pass_through_sparse_samples_smoothly_and_keep_corners() {
         // Four samples of a fast mouse stroke over a hill.
         let sparse: Vec<Sample> = [[0.0, 50.0], [40.0, 10.0], [80.0, 10.0], [120.0, 50.0]]
-            .map(|at| Sample { at, pressure: 1.0 })
+            .map(|at| Sample {
+                at,
+                pressure: 1.0,
+                speed: 0.0,
+            })
             .to_vec();
         let curve = spline(&sparse, 0.75);
         assert!(curve.len() > 150, "densely sampled: {}", curve.len());
@@ -1277,7 +1418,11 @@ mod tests {
         assert!(top < 10.0, "{top}");
         // A V stays a V.
         let v: Vec<Sample> = [[0.0, 0.0], [20.0, 40.0], [40.0, 0.0]]
-            .map(|at| Sample { at, pressure: 1.0 })
+            .map(|at| Sample {
+                at,
+                pressure: 1.0,
+                speed: 0.0,
+            })
             .to_vec();
         let sharp = spline(&v, 0.75);
         let lowest = sharp.iter().map(|point| point.at[1]).fold(0.0, f32::max);
@@ -1294,16 +1439,19 @@ mod tests {
             .map(|x| Sample {
                 at: [x as f32, 10.0],
                 pressure: 1.0,
+                speed: 0.0,
             })
             .collect();
         // The pen slips back as it lifts.
         path.push(Sample {
             at: [48.0, 11.5],
             pressure: 0.4,
+            speed: 0.0,
         });
         path.push(Sample {
             at: [47.0, 12.0],
             pressure: 0.2,
+            speed: 0.0,
         });
         let trimmed = trim_hooks(&path, 4.0);
         assert!(
@@ -1405,7 +1553,7 @@ mod tests {
             hardness: 0.0,
             build_up: true,
             flow: 0.2,
-            pressure_size: false,
+            size_by: Dynamics::NONE,
             ..Tip::default()
         };
         let mut once = Stroke::new(EntityId::new(), tip, [1.0, 0.0, 0.0], false);
@@ -1425,7 +1573,7 @@ mod tests {
         let mixing = Tip {
             size: 8.0,
             mix: 0.6,
-            pressure_size: false,
+            size_by: Dynamics::NONE,
             ..Tip::default()
         };
         let mut drag = Stroke::new(EntityId::new(), mixing, [1.0, 0.0, 0.0], false);
@@ -1438,7 +1586,7 @@ mod tests {
         let eraser = Tip {
             size: 40.0,
             eraser: true,
-            pressure_size: false,
+            size_by: Dynamics::NONE,
             ..Tip::default()
         };
         let mut rub = Stroke::new(EntityId::new(), eraser, [0.0; 3], false);
@@ -1457,10 +1605,78 @@ mod tests {
     }
 
     #[test]
+    fn dynamics_follow_their_curves_speed_and_chance() {
+        // A soft pressure curve keeps light presses thin.
+        let soft = Response::new(&[[0.0, 0.0], [0.8, 0.3], [1.0, 1.0]]);
+        let tip = Tip {
+            size: 20.0,
+            size_by: Dynamics {
+                pressure_curve: soft,
+                ..Dynamics::pressure(0.0)
+            },
+            ..Tip::default()
+        };
+        let linear = Tip {
+            size_by: Dynamics::pressure(0.0),
+            ..tip
+        };
+        assert!(tip.dab(0.5).0 < linear.dab(0.5).0);
+        assert!((tip.dab(1.0).0 - 10.0).abs() < 1e-3);
+        // Velocity: a still pen keeps its minimum, a fast one the full size.
+        let by_speed = Tip {
+            size_by: Dynamics {
+                velocity: true,
+                velocity_min: 0.4,
+                ..Dynamics::NONE
+            },
+            ..tip
+        };
+        assert!((by_speed.dab_at(1.0, 0.0, 1.0).0 - 4.0).abs() < 1e-3);
+        assert!((by_speed.dab_at(1.0, 1.0, 1.0).0 - 10.0).abs() < 1e-3);
+        // Opacity dynamics and inputs that multiply.
+        let both = Tip {
+            opacity_by: Dynamics::pressure(0.5),
+            ..by_speed
+        };
+        assert!((both.dab_at(0.0, 0.0, 1.0).1 - 0.5).abs() < 1e-3);
+        // Chance is steady along a stroke, so painting it again from its
+        // corrected path gives the same sizes.
+        let mut stroke = Stroke::new(EntityId::new(), tip, [0.0; 3], false);
+        stroke.seed = 7;
+        assert_eq!(stroke.chance(12.0), stroke.chance(12.4));
+        let spread: Vec<f32> = (0..32)
+            .map(|step| stroke.chance(step as f32 * 2.0))
+            .collect();
+        assert!(spread.iter().any(|value| *value < 0.3) && spread.iter().any(|value| *value > 0.7));
+    }
+
+    #[test]
+    fn a_line_set_to_at_least_one_pixel_keeps_full_ink() {
+        let thin = Tip {
+            size: 0.4,
+            size_by: Dynamics::NONE,
+            ..Tip::default()
+        };
+        let solid = Tip {
+            at_least_one: true,
+            ..thin
+        };
+        let ink = |tip: Tip| {
+            let mut raster = layer(20, 20);
+            let mut stroke = Stroke::new(EntityId::new(), tip, [0.0; 3], false);
+            stroke.to(&mut raster, [2.5, 10.5], 1.0, None);
+            stroke.to(&mut raster, [17.5, 10.5], 1.0, None);
+            alpha(&raster, 10, 10)
+        };
+        assert!(ink(solid) > ink(thin), "{} > {}", ink(solid), ink(thin));
+        assert!(ink(solid) > 200);
+    }
+
+    #[test]
     fn pressure_scales_size_and_selections_clip() {
         let tip = Tip {
             size: 20.0,
-            min_size: 0.5,
+            size_by: Dynamics::pressure(0.5),
             ..Tip::default()
         };
         assert_eq!(tip.dab(1.0).0, 10.0);
@@ -1705,7 +1921,7 @@ mod sheet {
             &mut raster,
             Tip {
                 size: 22.0,
-                min_size: 0.02,
+                size_by: Dynamics::pressure(0.02),
                 taper_start: 20.0,
                 taper_end: 40.0,
                 aa: AntiAlias::Medium,
@@ -1739,7 +1955,7 @@ mod sheet {
             EntityId::NIL,
             Tip {
                 size: 40.0,
-                pressure_size: false,
+                size_by: Dynamics::NONE,
                 ..Tip::default()
             },
             [0.9, 0.2, 0.2],
@@ -1751,7 +1967,7 @@ mod sheet {
             EntityId::NIL,
             Tip {
                 size: 40.0,
-                pressure_size: false,
+                size_by: Dynamics::NONE,
                 ..Tip::default()
             },
             [0.2, 0.3, 0.9],
@@ -1765,7 +1981,7 @@ mod sheet {
             build_up: true,
             flow: 0.4,
             mix: 0.5,
-            pressure_size: false,
+            size_by: Dynamics::NONE,
             ..Tip::default()
         };
         let mut drag = Stroke::new(EntityId::NIL, water, [1.0, 0.95, 0.3], false);

@@ -31,7 +31,7 @@ pub use parameter::{RiceDeclaration, RiceParameter};
 pub use preset::{ThemePreset, builtin_presets};
 pub use profile::{FrameBudget, HardwareProfile};
 pub use schema::{RegisterOutcome, RiceEntry, RiceSchema, SetRiceValue, SetRiceValues};
-pub use value::{Keybind, Rgba, RiceValue};
+pub use value::{Keybind, Keybinds, Rgba, RiceValue};
 
 /// The rice Sue ships with. Its keys match the declarations of the engine
 /// crates (tested in `sue-wm`).

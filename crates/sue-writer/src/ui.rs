@@ -35,6 +35,12 @@ fn smooth(t: f32) -> f32 {
 impl SueWriter {
     /// Draws the studio.
     pub(crate) fn frame(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        self.bound.refresh(
+            &mut self.menus,
+            cx.rice(),
+            crate::studio::KEYS_SECTION,
+            crate::studio::shortcut_table(),
+        );
         let present = cx.view.studio.as_ref().map(AppletId::as_str) == Some(ID);
         let reveal = cx.view.studio_reveal.clamp(0.0, 1.0);
         self.present = present;
@@ -89,15 +95,31 @@ impl SueWriter {
         }
         let theme = cx.theme.clone();
         let full = ui.max_rect();
-        ui.set_opacity(smooth(reveal / 0.6).max(0.02));
-        ui.painter().rect_filled(full, 0.0, theme.void);
+        // Coming in, the page lands where the card was (see `card_frame`)
+        // and turns opaque first; the bars and panels slide in from the
+        // edges around it. Going out, the other way.
+        let hide = 1.0 - smooth(reveal);
+        let cover = smooth(reveal / 0.35);
+        ui.painter()
+            .rect_filled(full, 0.0, theme.void.gamma_multiply(cover));
         if self.composition {
+            ui.set_opacity(cover.max(0.02));
             self.composition_ui(ui, full, cx, &theme);
             self.dialog_ui(&ctx, cx, &theme);
             return;
         }
+        let simple = self.simple(cx);
+        let places = self.places(full, simple, self.project.is_some(), self.open.is_some());
+        // The text first, so the panels sliding in pass over it.
+        {
+            let mut center = ui.new_child(UiBuilder::new().max_rect(places.center));
+            center.set_clip_rect(places.center.intersect(ui.clip_rect()));
+            center.set_opacity(cover.max(0.02));
+            self.center_ui(&mut center, places.center, cx, &theme);
+        }
+        let lift = hide * (places.body.top() - full.top());
         // The menu bar, with the way back to the canvas at its right.
-        let bar = Rect::from_min_size(full.min, vec2(full.width(), MENU_HEIGHT));
+        let bar = Rect::from_min_size(full.min - vec2(0.0, lift), vec2(full.width(), MENU_HEIGHT));
         ui.painter().rect_filled(bar, 0.0, theme.panel);
         let back = if bar.width() < 820.0 { 40.0 } else { 140.0 };
         let menus_rect = Rect::from_min_max(bar.min, pos2(bar.right() - back, bar.bottom()));
@@ -118,54 +140,126 @@ impl SueWriter {
             vec2(full.width(), self.toolbar_height),
         );
         self.toolbar(ui, toolbar, cx, &theme);
-        let mut top = toolbar.bottom();
         if self.find.is_some() {
-            let find = Rect::from_min_size(pos2(full.left(), top), vec2(full.width(), FIND_HEIGHT));
+            let find = Rect::from_min_size(
+                pos2(full.left(), toolbar.bottom()),
+                vec2(full.width(), FIND_HEIGHT),
+            );
             self.find_bar(ui, find, cx, &theme);
-            top = find.bottom();
         }
-        let status = Rect::from_min_max(pos2(full.left(), full.bottom() - STATUS_HEIGHT), full.max);
-        let body = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), status.top()));
-        let simple = self.simple(cx);
-        let mut center = body;
-        if self.binder && !simple && self.project.is_some() && body.width() > 520.0 {
-            let width = self.binder_width.clamp(150.0, body.width() * 0.4);
-            let rect = Rect::from_min_max(body.min, pos2(body.left() + width, body.bottom()));
-            self.binder_ui(ui, rect, cx, &theme);
-            if let Some(width) = splitter(
-                ui,
-                "writer-binder-edge",
-                rect.right(),
-                body.y_range(),
-                &theme,
-            ) {
+        let body = places.body;
+        if let Some(rect) = places.binder {
+            let slid = rect.translate(vec2(-hide * (rect.width() + 2.0), 0.0));
+            self.binder_ui(ui, slid, cx, &theme);
+            if hide < 0.01
+                && let Some(width) = splitter(
+                    ui,
+                    "writer-binder-edge",
+                    rect.right(),
+                    body.y_range(),
+                    &theme,
+                )
+            {
                 self.binder_width = (width - body.left()).clamp(150.0, 480.0);
             }
-            center.min.x = rect.right() + 1.0;
         }
-        // The inspector folds away before the text gets too narrow to write in.
-        let room = center.width() - self.inspector_width.clamp(190.0, body.width() * 0.35);
-        if self.inspector && room >= 520.0 && (self.project.is_some() || self.open.is_some()) {
-            let width = self.inspector_width.clamp(190.0, body.width() * 0.35);
-            let rect = Rect::from_min_max(pos2(body.right() - width, body.top()), body.max);
-            self.inspector_ui(ui, rect, cx, &theme);
-            if let Some(x) = splitter(
-                ui,
-                "writer-inspector-edge",
-                rect.left(),
-                body.y_range(),
-                &theme,
-            ) {
+        if let Some(rect) = places.inspector {
+            let slid = rect.translate(vec2(hide * (rect.width() + 2.0), 0.0));
+            self.inspector_ui(ui, slid, cx, &theme);
+            if hide < 0.01
+                && let Some(x) = splitter(
+                    ui,
+                    "writer-inspector-edge",
+                    rect.left(),
+                    body.y_range(),
+                    &theme,
+                )
+            {
                 self.inspector_width = (body.right() - x).clamp(190.0, 520.0);
             }
-            center.max.x = rect.left() - 1.0;
         }
-        self.center_ui(ui, center, cx, &theme);
+        let status = places.status.translate(vec2(0.0, hide * STATUS_HEIGHT));
         self.status_ui(ui, status, cx, &theme);
         if let Some(command) = picked {
             self.run(&command, cx);
         }
         self.dialog_ui(&ctx, cx, &theme);
+    }
+
+    /// Where everything goes in `full`: the bars, the binder and inspector
+    /// (when they fit), and the text between them.
+    pub(crate) fn places(
+        &self,
+        full: Rect,
+        simple: bool,
+        has_project: bool,
+        has_open: bool,
+    ) -> Places {
+        let top = full.top()
+            + MENU_HEIGHT
+            + self.toolbar_height
+            + if self.find.is_some() {
+                FIND_HEIGHT
+            } else {
+                0.0
+            };
+        let status = Rect::from_min_max(pos2(full.left(), full.bottom() - STATUS_HEIGHT), full.max);
+        let body = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), status.top()));
+        let mut center = body;
+        let mut binder = None;
+        if self.binder && !simple && has_project && body.width() > 520.0 {
+            let width = self.binder_width.clamp(150.0, body.width() * 0.4);
+            let rect = Rect::from_min_max(body.min, pos2(body.left() + width, body.bottom()));
+            center.min.x = rect.right() + 1.0;
+            binder = Some(rect);
+        }
+        // The inspector folds away before the text gets too narrow to write in.
+        let width = self.inspector_width.clamp(190.0, body.width() * 0.35);
+        let mut inspector = None;
+        if self.inspector && center.width() - width >= 520.0 && (has_project || has_open) {
+            let rect = Rect::from_min_max(pos2(body.right() - width, body.top()), body.max);
+            center.max.x = rect.left() - 1.0;
+            inspector = Some(rect);
+        }
+        Places {
+            body,
+            status,
+            binder,
+            inspector,
+            center,
+        }
+    }
+
+    /// Where the first page shows in `area` when Sue Writer opens on
+    /// `entity` (its manuscript, or a document), for the shell's zoom.
+    pub(crate) fn first_page(&self, area: Rect, entity: &Entity) -> Option<Rect> {
+        if self.view != View::Document || !self.paged || self.composition {
+            return None;
+        }
+        let simple = !manuscript::is_manuscript(entity)
+            || entity
+                .property(project::SIMPLE)
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+        let places = self.places(area, simple, manuscript::is_manuscript(entity), true);
+        let center = places.center;
+        let name = entity
+            .property(project::PAGE)
+            .and_then(Value::as_str)
+            .unwrap_or("Letter");
+        let size = sue_model::page_size(name).unwrap_or([612.0, 792.0]);
+        let across = size[0] as f32 * sue_type::PX_PER_PT;
+        let zoom = if self.fit {
+            ((center.width() - 56.0) / across).clamp(0.6, 3.0).min(1.0)
+        } else {
+            self.zoom
+        };
+        let page = vec2(across, size[1] as f32 * sue_type::PX_PER_PT) * zoom;
+        let left = ((center.width() - page.x) / 2.0).max(24.0);
+        Some(Rect::from_min_size(
+            pos2(center.left() + left, center.top() + 24.0),
+            page,
+        ))
     }
 
     /// Whether a menu item works, and its check mark.
@@ -1036,20 +1130,27 @@ impl SueWriter {
                 && let Some((pixels, [width, height])) =
                     crate::compile::picture_pixels(cx.arena(), id, 1200)
             {
-                let key = texture_key(id);
-                let texture = cx
-                    .textures
-                    .texture(key, seen, [width, height], 4, &pixels, false);
                 self.figures.insert(
                     id,
                     Figure {
-                        texture,
+                        texture: None,
                         size: vec2(width as f32, height as f32) * 0.75,
                         seen,
+                        pixels,
+                        pixel_size: [width, height],
                     },
                 );
             }
-            if let Some(figure) = self.figures.get(&id) {
+            if let Some(figure) = self.figures.get_mut(&id) {
+                // Every frame: an unused texture is let go.
+                figure.texture = cx.textures.texture(
+                    texture_key(id),
+                    figure.seen,
+                    figure.pixel_size,
+                    4,
+                    &figure.pixels,
+                    false,
+                );
                 table.insert(id, (figure.texture, figure.size));
             }
         }
@@ -1186,8 +1287,6 @@ impl SueWriter {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        let figures = self.figure_table(&[], cx);
-        let _ = figures;
         let seen = cx.arena().get_by_id(id).map_or(0, Entity::revision);
         if self
             .figures
@@ -1196,16 +1295,25 @@ impl SueWriter {
             && let Some((pixels, [width, height])) =
                 crate::compile::picture_pixels(cx.arena(), id, 1600)
         {
-            let texture =
-                cx.textures
-                    .texture(texture_key(id), seen, [width, height], 4, &pixels, false);
             self.figures.insert(
                 id,
                 Figure {
-                    texture,
+                    texture: None,
                     size: vec2(width as f32, height as f32),
                     seen,
+                    pixels,
+                    pixel_size: [width, height],
                 },
+            );
+        }
+        if let Some(figure) = self.figures.get_mut(&id) {
+            figure.texture = cx.textures.texture(
+                texture_key(id),
+                figure.seen,
+                figure.pixel_size,
+                4,
+                &figure.pixels,
+                false,
             );
         }
         ui.painter().rect_filled(rect, 0.0, theme.void);
@@ -2058,6 +2166,13 @@ impl SueWriter {
         };
         let mut keep = true;
         let mut after: Option<After> = None;
+        let keys = matches!(dialog, Dialog::Shortcuts).then(|| {
+            sue_wm::shortcuts::rows(
+                cx.rice(),
+                crate::studio::KEYS_SECTION,
+                crate::studio::shortcut_table(),
+            )
+        });
         let title = match &dialog {
             Dialog::NewProject { .. } => "New Project",
             Dialog::Compile(_) => "Compile",
@@ -2255,20 +2370,26 @@ impl SueWriter {
                         egui::ScrollArea::vertical()
                             .max_height(460.0)
                             .show(ui, |ui| {
-                                egui::Grid::new("writer-shortcuts")
-                                    .num_columns(2)
-                                    .striped(true)
-                                    .show(ui, |ui| {
-                                        for (label, keys) in shortcut_list(&self.menus) {
-                                            ui.label(label);
-                                            ui.label(RichText::new(keys).color(theme.muted));
-                                            ui.end_row();
-                                        }
-                                    });
+                                let keys = keys.as_deref().unwrap_or_default();
+                                sue_wm::shortcuts::grid_ui(ui, "writer-shortcuts", keys, theme);
                             });
-                        if ui.button("Close").clicked() {
-                            keep = false;
-                        }
+                        ui.horizontal(|ui| {
+                            if ui.button("Close").clicked() {
+                                keep = false;
+                            }
+                            if ui
+                                .button("Change Shortcuts...")
+                                .on_hover_text("Settings, Keymaps: any number of keys for each")
+                                .clicked()
+                            {
+                                keep = false;
+                                after = Some(Box::new(|_: &mut Self, cx| {
+                                    cx.request(ShellRequest::OpenSettings(Some(
+                                        "keymaps".to_owned(),
+                                    )));
+                                }));
+                            }
+                        });
                     }
                 }
             });
@@ -2531,6 +2652,20 @@ impl SueWriter {
     }
 }
 
+/// Where the studio's parts go.
+pub(crate) struct Places {
+    /// Between the bars.
+    pub body: Rect,
+    /// The status bar.
+    pub status: Rect,
+    /// The binder, when it shows.
+    pub binder: Option<Rect>,
+    /// The inspector, when it shows.
+    pub inspector: Option<Rect>,
+    /// The text, or the corkboard or outliner.
+    pub center: Rect,
+}
+
 /// What a dialog's button does once the dialog is drawn.
 type After = Box<dyn FnOnce(&mut SueWriter, &mut AppletContext<'_>)>;
 
@@ -2787,26 +2922,6 @@ fn font_picker(ui: &mut Ui, salt: &str, font: &mut String, filter: &mut String) 
                 }
             }
         });
-}
-
-/// Every menu item with a shortcut, for the shortcuts list.
-fn shortcut_list(menus: &[sue_wm::Menu]) -> Vec<(String, String)> {
-    fn walk(items: &[sue_wm::MenuItem], out: &mut Vec<(String, String)>) {
-        for item in items {
-            match item {
-                sue_wm::MenuItem::Action {
-                    label, shortcut, ..
-                } if !shortcut.is_empty() => out.push((label.clone(), shortcut.clone())),
-                sue_wm::MenuItem::Sub { items, .. } => walk(items, out),
-                _ => {}
-            }
-        }
-    }
-    let mut out = Vec::new();
-    for menu in menus {
-        walk(&menu.items, &mut out);
-    }
-    out
 }
 
 /// Opens Sue Writer on `id` (for the card's button).

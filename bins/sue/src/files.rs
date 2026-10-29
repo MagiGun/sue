@@ -137,8 +137,92 @@ fn matches(name: &str, query: &str) -> bool {
 /// How the File Manager shows a folder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum View {
+    /// Rows: icon, name, when, size.
     List,
+    /// Rows with columns that sort when clicked.
+    Details,
+    /// Small thumbnails with their names.
+    Icons,
+    /// Large thumbnails with their names and sizes.
     Cards,
+}
+
+impl View {
+    const ALL: [(Self, &'static str, &'static str); 4] = [
+        (Self::List, "list", "List"),
+        (Self::Details, "details", "Details"),
+        (Self::Icons, "icons", "Icons"),
+        (Self::Cards, "cards", "Cards"),
+    ];
+}
+
+/// The filters a pick gives the system's dialog: each kind of file it
+/// offers, else its extensions.
+pub(crate) fn filters_of(pick: &FilePick) -> Vec<sue_platform::FileFilter> {
+    if !pick.types.is_empty() {
+        return pick
+            .types
+            .iter()
+            .map(|kind| sue_platform::FileFilter {
+                name: kind.name.clone(),
+                extensions: kind.extensions.clone(),
+            })
+            .collect();
+    }
+    if pick.extensions.is_empty() {
+        Vec::new()
+    } else {
+        vec![sue_platform::FileFilter {
+            name: "Files".to_owned(),
+            extensions: pick.extensions.clone(),
+        }]
+    }
+}
+
+/// Draws a five-pointed star, filled or as an outline.
+fn star(painter: &egui::Painter, center: egui::Pos2, radius: f32, filled: bool, color: Color32) {
+    let points: Vec<egui::Pos2> = (0..10)
+        .map(|index| {
+            let r = if index % 2 == 0 {
+                radius
+            } else {
+                radius * 0.42
+            };
+            let angle = -std::f32::consts::FRAC_PI_2 + index as f32 * std::f32::consts::PI / 5.0;
+            center + vec2(angle.cos(), angle.sin()) * r
+        })
+        .collect();
+    if filled {
+        let mut mesh = egui::Mesh::default();
+        mesh.colored_vertex(center, color);
+        for point in &points {
+            mesh.colored_vertex(*point, color);
+        }
+        for index in 0..10_u32 {
+            mesh.add_triangle(0, 1 + index, 1 + (index + 1) % 10);
+        }
+        painter.add(egui::Shape::mesh(mesh));
+    } else {
+        painter.add(egui::Shape::closed_line(points, Stroke::new(1.3, color)));
+    }
+}
+
+/// A button showing a star: filled when the folder is a favorite.
+fn star_button(ui: &mut Ui, on: bool, theme: &Theme) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(28.0, 24.0), Sense::click());
+    if response.hovered() {
+        ui.painter()
+            .rect_filled(rect, theme.control_radius, theme.hover);
+    }
+    let color = if on {
+        Color32::from_rgb(0xf2, 0xc0, 0x3a)
+    } else if response.hovered() {
+        theme.text
+    } else {
+        theme.muted
+    };
+    star(ui.painter(), rect.center(), 8.0, on, color);
+    response
 }
 
 /// What the File Manager sorts by (folders always come first).
@@ -365,6 +449,8 @@ pub struct Files {
     root_setting: Option<String>,
     show_hidden: bool,
     places_open: bool,
+    /// The settings hand file picks to the system's own dialog.
+    system_picks: bool,
 }
 
 impl Files {
@@ -458,10 +544,11 @@ impl Files {
     }
 
     fn view(cx: &AppletContext<'_>) -> View {
-        match cx.rice().get_str("files.view") {
-            Some("cards") => View::Cards,
-            _ => View::List,
-        }
+        let key = cx.rice().get_str("files.view").unwrap_or("list");
+        View::ALL
+            .iter()
+            .find(|(_, known, _)| *known == key)
+            .map_or(View::List, |(view, _, _)| *view)
     }
 
     fn set_rice(cx: &mut AppletContext<'_>, path: &str, value: RiceValue) {
@@ -705,11 +792,26 @@ impl Files {
             {
                 self.deep = !self.deep;
             }
-            let options = ["List".to_owned(), "Cards".to_owned()];
-            let chosen = Some(usize::from(view == View::Cards));
+            let options: Vec<String> = View::ALL
+                .iter()
+                .map(|(_, _, label)| (*label).to_owned())
+                .collect();
+            let chosen = View::ALL.iter().position(|(known, _, _)| *known == view);
             if let Some(index) = widgets::segmented(ui, &options, chosen, theme) {
-                let value = if index == 1 { "cards" } else { "list" };
-                Self::set_rice(cx, "files.view", RiceValue::Text(value.to_owned()));
+                Self::set_rice(
+                    cx,
+                    "files.view",
+                    RiceValue::Text(View::ALL[index].1.to_owned()),
+                );
+            }
+            if matches!(view, View::Icons | View::Cards) {
+                let mut side = cx.rice().get_i64("files.card_size").unwrap_or(112) as f32;
+                let response = ui
+                    .add(egui::Slider::new(&mut side, 48.0..=320.0).show_value(false))
+                    .on_hover_text("Thumbnail size");
+                if response.changed() {
+                    Self::set_rice(cx, "files.card_size", RiceValue::Int(side.round() as i64));
+                }
             }
             egui::ComboBox::from_id_salt("sue-files-sort")
                 .selected_text(sort.label())
@@ -724,9 +826,24 @@ impl Files {
                         }
                     }
                 });
-            let star = if is_saved { "Saved" } else { "Save Folder" };
-            if widgets::pill_button(ui, star, is_saved, theme)
-                .on_hover_text("Keep this folder under Saved")
+            let reverse = cx.rice().get_bool("files.sort_reverse").unwrap_or(false);
+            if ui
+                .add(egui::Button::new(if reverse { "\u{2191}" } else { "\u{2193}" }).frame(false))
+                .on_hover_text(if reverse {
+                    "Reversed: tap for the usual order"
+                } else {
+                    "Tap to reverse the order"
+                })
+                .clicked()
+            {
+                Self::set_rice(cx, "files.sort_reverse", RiceValue::Bool(!reverse));
+            }
+            if star_button(ui, is_saved, theme)
+                .on_hover_text(if is_saved {
+                    "A favorite: tap to take it out of Favorites"
+                } else {
+                    "Add this folder to Favorites"
+                })
                 .clicked()
                 && let Some(dir) = here.clone()
             {
@@ -746,7 +863,24 @@ impl Files {
             if widgets::pill_button(ui, "New Folder", self.new_folder.is_some(), theme).clicked() {
                 self.new_folder = Some(String::new());
             }
-            if widgets::pill_button(ui, "Open in Explorer", false, theme)
+            if let Some(pick) = self.pick.clone() {
+                // While choosing a file, the system's own dialog chooses it.
+                let label = if pick.save_as.is_some() {
+                    "System Save Dialog"
+                } else {
+                    "System Open Dialog"
+                };
+                if widgets::pill_button(ui, label, false, theme)
+                    .on_hover_text("Choose with the system's own file dialog instead")
+                    .clicked()
+                {
+                    let dir = here.clone().unwrap_or_default();
+                    if let Some(path) = self.system_dialog(&pick, &dir, cx) {
+                        self.pick = None;
+                        cx.request(ShellRequest::Picked { pick, path });
+                    }
+                }
+            } else if widgets::pill_button(ui, "Open in Explorer", false, theme)
                 .on_hover_text("Show this folder in the system's file manager")
                 .clicked()
                 && let Some(dir) = here.clone()
@@ -811,13 +945,8 @@ impl Files {
                     go = Some(path.to_path_buf());
                 }
                 if removable
-                    && ui
-                        .add(
-                            egui::Button::new(RichText::new("\u{00D7}").color(theme.muted))
-                                .frame(false)
-                                .small(),
-                        )
-                        .on_hover_text("Forget this saved folder")
+                    && star_button(ui, true, theme)
+                        .on_hover_text("Take it out of Favorites")
                         .clicked()
                 {
                     forget = Some(path.to_path_buf());
@@ -830,10 +959,10 @@ impl Files {
                 row(ui, name, path, false);
             }
             ui.add_space(theme.padding);
-            widgets::heading(ui, "Saved", theme);
+            widgets::heading(ui, "Favorites", theme);
             if saved.is_empty() {
                 ui.label(
-                    RichText::new("Save Folder keeps one here.")
+                    RichText::new("The star by the search keeps the folder you are in here.")
                         .size(theme.small_size)
                         .color(theme.muted),
                 );
@@ -844,9 +973,9 @@ impl Files {
         } else {
             let open = self.places_open;
             let label = if open {
-                "Places and saved  \u{2212}"
+                "Places and favorites  \u{2212}"
             } else {
-                "Places and saved  +"
+                "Places and favorites  +"
             };
             if ui
                 .add(
@@ -879,7 +1008,7 @@ impl Files {
                     }
                 });
                 if !saved.is_empty() {
-                    widgets::heading(ui, "Saved", theme);
+                    widgets::heading(ui, "Favorites", theme);
                     for path in &saved {
                         row(ui, &file_name(path), path, true);
                     }
@@ -975,6 +1104,112 @@ impl Files {
 
     /// The folder's entries as cards: a thumbnail or icon, the name and
     /// the size.
+    /// The folder's entries in columns: name, kind, size and date, sorted
+    /// by a click on a column's title.
+    fn details_ui(
+        &mut self,
+        ui: &mut Ui,
+        cx: &mut AppletContext<'_>,
+        entries: &[DirEntryInfo],
+        theme: &Theme,
+        now: SystemTime,
+        sort: Sort,
+    ) -> Option<Action> {
+        let width = ui.available_width();
+        let columns = [
+            (Sort::Name, "Name", 0.46),
+            (Sort::Kind, "Kind", 0.18),
+            (Sort::Size, "Size", 0.14),
+            (Sort::Modified, "Modified", 0.22),
+        ];
+        let reverse = cx.rice().get_bool("files.sort_reverse").unwrap_or(false);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            for (column, title, share) in columns {
+                let label = if column == sort {
+                    format!("{title} {}", if reverse { "\u{2191}" } else { "\u{2193}" })
+                } else {
+                    title.to_owned()
+                };
+                let button = egui::Button::new(
+                    RichText::new(label)
+                        .size(theme.small_size)
+                        .color(theme.muted),
+                )
+                .frame(false);
+                if ui.add_sized(vec2(width * share, 20.0), button).clicked() {
+                    if column == sort {
+                        Self::set_rice(cx, "files.sort_reverse", RiceValue::Bool(!reverse));
+                    } else {
+                        let key = Sort::ALL
+                            .iter()
+                            .find(|(known, _, _)| *known == column)
+                            .map_or("name", |(_, key, _)| key);
+                        Self::set_rice(cx, "files.sort", RiceValue::Text(key.to_owned()));
+                    }
+                }
+            }
+        });
+        let row_height = theme.ui_size * 1.8;
+        let mut action = None;
+        for entry in entries {
+            let (rect, response) = ui.allocate_exact_size(vec2(width, row_height), Sense::click());
+            if !ui.is_rect_visible(rect) {
+                continue;
+            }
+            let chosen = self.selected.as_deref() == Some(entry.path.as_path());
+            if chosen {
+                ui.painter().rect_filled(rect, 3.0, theme.active);
+            } else if response.hovered() {
+                ui.painter().rect_filled(rect, 3.0, theme.hover);
+            }
+            let y = rect.center().y;
+            let mut x = rect.left();
+            let cells = [
+                format!("{}  {}", icon_for(entry), entry.name),
+                if entry.is_dir {
+                    "Folder".to_owned()
+                } else {
+                    kind_of(entry).to_owned()
+                },
+                if entry.is_dir {
+                    String::new()
+                } else {
+                    human_bytes(entry.size)
+                },
+                when(entry.modified, now),
+            ];
+            for ((_, _, share), text) in columns.iter().zip(cells) {
+                let cell = Rect::from_min_max(
+                    pos2(x + 6.0, rect.top()),
+                    pos2(x + width * share - 6.0, rect.bottom()),
+                );
+                let color = if x == rect.left() {
+                    theme.text
+                } else {
+                    theme.muted
+                };
+                ui.painter().with_clip_rect(cell).text(
+                    pos2(cell.left(), y),
+                    Align2::LEFT_CENTER,
+                    text,
+                    theme.font(theme.small_size + 0.5),
+                    color,
+                );
+                x += width * share;
+            }
+            let response = response.on_hover_text(entry.path.display().to_string());
+            if response.double_clicked() {
+                action = Some(Action::Open(entry.clone()));
+            } else if response.clicked() {
+                action = Some(Action::Select(entry.path.clone()));
+            }
+        }
+        action
+    }
+
+    /// The folder's entries as cards: a thumbnail or icon, the name and
+    /// (unless `compact`) the size.
     #[allow(clippy::too_many_arguments, reason = "one grid of cards")]
     fn cards_ui(
         &mut self,
@@ -983,13 +1218,15 @@ impl Files {
         entries: &[DirEntryInfo],
         theme: &Theme,
         side: f32,
+        compact: bool,
     ) -> Option<Action> {
         let mut action = None;
         let gap = 6.0;
         let width = ui.available_width();
         let columns = (((width + gap) / (side + gap)).floor() as usize).max(1);
-        let side = ((width + gap) / columns as f32 - gap).max(48.0);
-        let card = vec2(side, side + theme.small_size * 2.6 + 10.0);
+        let side = ((width + gap) / columns as f32 - gap).max(40.0);
+        let lines = if compact { 1.4 } else { 2.6 };
+        let card = vec2(side, side + theme.small_size * lines + 10.0);
         for row in entries.chunks(columns) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
@@ -1077,18 +1314,20 @@ impl Files {
                             pos2(text.right(), rect.bottom() - theme.small_size - 4.0),
                         ))
                         .galley(name_at, galley, theme.text);
-                    let detail = if entry.is_dir {
-                        "Folder".to_owned()
-                    } else {
-                        human_bytes(entry.size)
-                    };
-                    ui.painter().text(
-                        pos2(text.left(), rect.bottom() - 4.0),
-                        Align2::LEFT_BOTTOM,
-                        detail,
-                        theme.font(theme.small_size - 1.0),
-                        theme.muted,
-                    );
+                    if !compact {
+                        let detail = if entry.is_dir {
+                            "Folder".to_owned()
+                        } else {
+                            human_bytes(entry.size)
+                        };
+                        ui.painter().text(
+                            pos2(text.left(), rect.bottom() - 4.0),
+                            Align2::LEFT_BOTTOM,
+                            detail,
+                            theme.font(theme.small_size - 1.0),
+                            theme.muted,
+                        );
+                    }
                     let response = response.on_hover_text(entry.path.display().to_string());
                     if response.double_clicked() {
                         action = Some(Action::Open(entry.clone()));
@@ -1214,6 +1453,34 @@ impl Files {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             if pick.save_as.is_some() {
+                if !pick.types.is_empty() {
+                    let current = pick
+                        .type_of(Path::new(&self.save_name))
+                        .map_or_else(|| pick.types[0].name.clone(), |kind| kind.name.clone());
+                    egui::ComboBox::from_id_salt("sue-files-save-type")
+                        .selected_text(current.clone())
+                        .width(170.0)
+                        .show_ui(ui, |ui| {
+                            for kind in &pick.types {
+                                let label =
+                                    format!("{} (.{})", kind.name, kind.extensions.join(", ."));
+                                if ui
+                                    .add(egui::Button::selectable(kind.name == current, label))
+                                    .clicked()
+                                    && let Some(ext) = kind.extensions.first()
+                                {
+                                    let stem = Path::new(&self.save_name)
+                                        .file_stem()
+                                        .map_or_else(String::new, |stem| {
+                                            stem.to_string_lossy().into_owned()
+                                        });
+                                    self.save_name = format!("{stem}.{ext}");
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_text("Save as type");
+                }
                 ui.label(RichText::new("File name").color(theme.muted));
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut self.save_name)
@@ -1286,14 +1553,7 @@ impl Files {
             cx.notify("The system dialog needs the desktop window");
             return None;
         }
-        let filters = if pick.extensions.is_empty() {
-            Vec::new()
-        } else {
-            vec![sue_platform::FileFilter {
-                name: "Files".to_owned(),
-                extensions: pick.extensions.clone(),
-            }]
-        };
+        let filters = filters_of(pick);
         match &pick.save_as {
             Some(name) => sue_platform::pick_save_file(&pick.title, Some(dir), name, &filters),
             None => sue_platform::pick_open_file(&pick.title, Some(dir), &filters),
@@ -1319,6 +1579,12 @@ impl Files {
         let mut entries = self.shown();
         let sort = Sort::from_rice(cx.rice().get_str("files.sort").unwrap_or("name"));
         sort_entries(&mut entries, sort);
+        if cx.rice().get_bool("files.sort_reverse").unwrap_or(false) {
+            // Folders stay first; the rest turn around.
+            let folders = entries.iter().take_while(|entry| entry.is_dir).count();
+            entries[..folders].reverse();
+            entries[folders..].reverse();
+        }
         if let Some(search) = self.deep_search.as_ref().filter(|_| self.deep) {
             let status = if search.done {
                 format!(
@@ -1344,12 +1610,12 @@ impl Files {
             ui.label(RichText::new(text).color(theme.muted));
             return None;
         }
+        let side = cx.rice().get_i64("files.card_size").unwrap_or(112) as f32;
         match Self::view(cx) {
             View::List => self.list_ui(ui, &entries, theme, SystemTime::now()),
-            View::Cards => {
-                let side = cx.rice().get_i64("files.card_size").unwrap_or(112) as f32;
-                self.cards_ui(ui, cx, &entries, theme, side)
-            }
+            View::Details => self.details_ui(ui, cx, &entries, theme, SystemTime::now(), sort),
+            View::Icons => self.cards_ui(ui, cx, &entries, theme, (side * 0.6).max(48.0), true),
+            View::Cards => self.cards_ui(ui, cx, &entries, theme, side, false),
         }
     }
 
@@ -1435,8 +1701,18 @@ impl SueApplet for Files {
         vec![
             RiceDeclaration::new(
                 "files.view",
-                choice("list", &["list", "cards"]),
+                choice("list", &["list", "details", "icons", "cards"]),
                 "How the File Manager shows a folder",
+            ),
+            RiceDeclaration::new(
+                "files.sort_reverse",
+                RiceParameter::Bool { value: false },
+                "Reverse the File Manager's order (folders stay first)",
+            ),
+            RiceDeclaration::new(
+                "files.dialog",
+                choice("sue", &["sue", "system"]),
+                "Choose files to open and places to save with Sue's File Manager or the system's own dialog",
             ),
             RiceDeclaration::new(
                 "files.sort",
@@ -1447,8 +1723,8 @@ impl SueApplet for Files {
                 "files.card_size",
                 RiceParameter::IntRange {
                     value: 112,
-                    min: Some(64),
-                    max: Some(256),
+                    min: Some(48),
+                    max: Some(320),
                 },
                 "Width of the File Manager's cards (px)",
             ),
@@ -1457,7 +1733,7 @@ impl SueApplet for Files {
                 RiceParameter::Text {
                     value: String::new(),
                 },
-                "Saved folders, separated by |",
+                "Favorite folders, separated by |",
             ),
         ]
     }
@@ -1542,7 +1818,9 @@ impl SueApplet for Files {
         self.keys(ui, cx);
     }
 
-    fn tick(&mut self, _cx: &mut AppletContext<'_>) -> Tick {
+    fn tick(&mut self, cx: &mut AppletContext<'_>) -> Tick {
+        self.system_picks =
+            cx.view.interactive && cx.rice().get_str("files.dialog") == Some("system");
         let arrived = self.thumbs.collect();
         let searching = self.deep_search.as_ref().is_some_and(|search| !search.done);
         let waiting = self.thumbs.pending() || searching;
@@ -1554,6 +1832,10 @@ impl SueApplet for Files {
     }
 
     fn begin_pick(&mut self, pick: &FilePick) -> bool {
+        // The settings may hand every pick to the system's own dialog.
+        if self.system_picks {
+            return false;
+        }
         self.pick = Some(pick.clone());
         self.save_name = pick.save_as.clone().unwrap_or_default();
         self.selected = None;

@@ -130,8 +130,13 @@ tools that card needs:
 - **Audio:** Play or Pause, Gain down and up, Split (at the playhead, or in the
   middle), Normalize and Open in Timeline. None of these change the recording
   itself: the two halves of a split share the very same sound.
-- **Pictures:** 1:1 Zoom (one picture pixel per screen pixel), Pixel Grid,
-  Re-encode .jxl and Inspect Hex.
+- **Pictures:** Image Viewer (or double-click the picture), Pixel Grid,
+  Re-encode .jxl (it asks where to save first) and Inspect Hex. The **Image
+  Viewer** fills the window with the picture: zoom, pan, and step to the
+  other pictures with the arrow keys. It does the quick fixes (turn, mirror,
+  crop, resize, brightness and contrast, saturation and hue, grayscale,
+  invert), each one `Ctrl+Z` step, saves the picture as any picture type, and
+  sends it to the Converter, Sue Paint or Sue Writer.
 
 Click empty canvas and the pill fades away. Drag a card by its title to move
 it, or by its bottom right corner to resize it. Double-click a title to switch
@@ -141,7 +146,8 @@ to that card's mode.
 
 **Right-click** anywhere on the canvas: a round menu grows around the pointer
 with New File, Open File, Sue Paint, Hub, Command Palette and Reset Camera. Click a slice, or hold the right button, drag toward a slice and let
-go.
+go. Right-click a card and the wheel also offers **Delete**, which takes the
+card off the canvas (`Ctrl+Z` brings it back).
 
 **New File** opens a second wheel with the kinds of files Sue makes:
 Document, Picture, Audio and Code. Each of those opens a third wheel with the
@@ -171,17 +177,21 @@ one to slide its drawer open; click it again to tuck it away.
 
 - **File Manager** (left): your folders, in tabs (`+` opens another tab on the
   same folder, `×` closes one), each with its own Back and Forward. Show a
-  folder as a **list** (name, how long ago it changed, size) or as **cards**,
-  where pictures show a small preview. Sort by name, date, size or kind.
+  folder as a **list**, **details** (name, kind, when it changed, size),
+  **icons** or **cards**, and make them bigger or smaller with the slider;
+  pictures show a preview, and previews arrive quickly. Sort by name, date,
+  size or kind, and flip the order with the arrow.
   Search the folder as you type, or turn on **Subfolders** to search
   everything under it. The path bar shows the folder you are in: copy it,
   or type any folder and press Enter to go there. Click a file to select it
   (its full path appears, with Copy Path, Rename, Show in Explorer and
-  Open); double-click to open it on the canvas. **Save Folder** keeps a
-  folder under Saved, next to your project, home folder, Desktop,
-  Documents, Downloads, Pictures, Music, Videos and drives. **New Folder**
-  makes one, and **Open in Explorer** shows the folder in your system's file
-  manager. "Open the large File Manager" shows it all in a big window.
+  Open); double-click to open it on the canvas. The **star** makes the folder
+  a favorite, kept under Favorites next to your project, home folder,
+  Desktop, Documents, Downloads, Pictures, Music, Videos and drives. **New
+  Folder** makes one, and **Open in Explorer** shows the folder in your
+  system's file manager. When you save, **Save as type** picks the kind of
+  file, and when something asks for a file, **System Dialog** opens your
+  system's own Open or Save window instead (or always, in Settings). "Open the large File Manager" shows it all in a big window.
   Hidden system clutter stays hidden.
 - **Player** (left): your music library (MP3, FLAC, WAV, Ogg, M4A and more),
   playing while you work anywhere in Sue. It works like the music apps you
@@ -292,7 +302,17 @@ familiar:
   gradient, shapes, selections, eyedropper, hand and zoom. Each tool has
   ready-made **sub tools** (a G-pen, a mapping pen, a watercolor brush, a soft
   airbrush) whose size, opacity, hardness, smoothing and pen pressure you can
-  tune. Your changes stick to that sub tool.
+  tune. Your changes stick to that sub tool. The small graph button beside
+  **Brush Size** and **Opacity** opens their dynamics, as in Clip Studio
+  Paint: pen pressure, the pen's speed and chance can each change them, down
+  to a minimum you choose, along a curve you shape by dragging points (press
+  an empty spot to add one, drag one out or double-click it to take it
+  away). Brush Size also offers **Specify by size on screen** and **At least
+  1 pixel**.
+- **Pen Pressure Settings** (File menu): draw on the pad the way you
+  normally draw, choose **Check adjusted settings**, and Sue fits the
+  pressure to your hand; **Stronger** and **Lighter** fine-tune it, or shape
+  the graph yourself. **Done** keeps it for every tool.
 - **Clean lines without lag:** pens smooth out the shake of your hand, and
   smooth less the faster you move, so quick strokes never trail behind
   ("Adjust by speed"). When you lift the pen, Sue tidies the line: it removes
@@ -345,11 +365,15 @@ familiar:
 
 `Ctrl+N` makes a new canvas: pick a preset or a paper size, a unit, a
 resolution and a paper color. `Ctrl+O` opens a PNG, JPEG or JPEG XL picture,
-and File, then Export Single Layer, saves your picture as one again. Both
+and File, then Export Single Layer, saves your picture as one again. **Save
+As** (`Ctrl+Shift+S`) asks for a type too: a Sue project keeps every layer,
+and PNG, JPEG XL, JPEG, WebP, TIFF, BMP, TGA, GIF or QOI saves the picture
+flattened. Both
 open the Sue File Manager, showing only the pictures it can read; type a file
 name to save, or click System Dialog to use your system's own window
 instead. `Alt+I`
-lists every shortcut.
+lists every shortcut as you have set it, and **Change Shortcuts** takes you
+to Settings to set them.
 
 Your pictures are part of your project: `Ctrl+S` saves them with everything
 else, and every stroke can be undone with `Ctrl+Z`. When you click **Back to
@@ -512,7 +536,11 @@ controls for it in **Settings**:
   never type a color code. Letting go of a drag is one `Ctrl+Z` step,
 - short lists of choices become **side-by-side buttons**, longer ones
   **drop-downs**,
-- shortcuts become **key caps**: click one and press the new keys.
+- shortcuts become **key caps**, one for each set of keys: click one and
+  press the new keys, `×` takes one away and `+` adds another, as many as
+  you like. Sue's own shortcuts and every studio's (Sue Paint's, tools and
+  brush keys included, Sue Writer's and the Image Viewer's) are all under
+  Keymaps, and the menus show what you chose.
 
 **Appearance & Rice** also offers ready-made themes (Void, Graphite, Paper and
 Gray) that change every color at once, and one `Ctrl+Z` brings yours back.

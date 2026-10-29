@@ -1,11 +1,15 @@
-//! Picture thumbnails for the File Manager's cards. A background thread
-//! reads and decodes each picture (PNG, JPEG, JPEG XL from its 1:8 preview)
-//! and shrinks it to fit a small square, so the interface never waits for a
-//! decode. Results are kept by path and modification time.
+//! Picture thumbnails for the File Manager's cards. A few background
+//! threads read and decode each picture (PNG, JPEG, JPEG XL from its 1:8
+//! preview, GIF, BMP, WebP, TGA, TIFF) and shrink it to fit a small square,
+//! newest request first, so the interface never waits for a decode and the
+//! folder just opened comes before one scrolled past. Shrinking samples a
+//! fixed grid of source pixels per thumbnail pixel, so a large photo costs
+//! the same as a small one. Results are kept by path and modification time.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::SystemTime;
 
 use sue_core::PixelFormat;
@@ -38,12 +42,39 @@ enum State {
 type Job = (PathBuf, u64);
 type Done = (PathBuf, u64, Option<Thumb>);
 
-/// The thumbnail cache and its worker.
+/// Jobs waiting for a worker, newest at the back, and whether to stop.
+#[derive(Debug, Default)]
+struct Queue {
+    jobs: Mutex<(VecDeque<Job>, bool)>,
+    ready: Condvar,
+}
+
+/// The thumbnail cache and its workers.
 #[derive(Debug, Default)]
 pub struct Thumbs {
-    jobs: Option<Sender<Job>>,
+    queue: Option<Arc<Queue>>,
     done: Option<Receiver<Done>>,
+    sender: Option<Sender<Done>>,
     cache: HashMap<PathBuf, (u64, State)>,
+}
+
+impl Drop for Thumbs {
+    fn drop(&mut self) {
+        if let Some(queue) = &self.queue
+            && let Ok(mut jobs) = queue.jobs.lock()
+        {
+            jobs.1 = true;
+            queue.ready.notify_all();
+        }
+    }
+}
+
+/// How many threads make thumbnails: half the cores, at least one, at most
+/// four.
+fn workers() -> usize {
+    std::thread::available_parallelism()
+        .map_or(2, |cores| cores.get() / 2)
+        .clamp(1, 4)
 }
 
 /// `true` for files the worker can make a thumbnail of.
@@ -53,7 +84,10 @@ pub fn is_picture(path: &Path) -> bool {
         .extension()
         .map(|extension| extension.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
-    matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "jxl")
+    matches!(
+        extension.as_str(),
+        "png" | "jpg" | "jpeg" | "jxl" | "gif" | "bmp" | "webp" | "tga" | "tif" | "tiff"
+    )
 }
 
 /// A version number for a modification time.
@@ -112,35 +146,62 @@ impl Thumbs {
     }
 
     fn send(&mut self, job: Job) -> bool {
-        if self.jobs.is_none() {
-            let (jobs, inbox) = channel::<Job>();
+        if self.queue.is_none() {
+            let queue = Arc::new(Queue::default());
             let (outbox, done) = channel::<Done>();
-            let started = std::thread::Builder::new()
-                .name("sue-thumbnails".to_owned())
-                .spawn(move || {
-                    // Newest requests first: the folder just opened matters
-                    // more than one scrolled past.
-                    while let Ok(first) = inbox.recv() {
-                        let mut queue = vec![first];
-                        queue.extend(inbox.try_iter());
-                        while let Some((path, version)) = queue.pop() {
-                            let thumb = make(&path);
-                            if outbox.send((path, version, thumb)).is_err() {
-                                return;
-                            }
-                            queue.extend(inbox.try_iter());
-                        }
-                    }
-                });
-            if started.is_err() {
+            let mut started = 0;
+            for index in 0..workers() {
+                let queue = queue.clone();
+                let outbox = outbox.clone();
+                let spawned = std::thread::Builder::new()
+                    .name(format!("sue-thumbnails-{index}"))
+                    .spawn(move || work(&queue, &outbox));
+                started += usize::from(spawned.is_ok());
+            }
+            if started == 0 {
                 return false;
             }
-            self.jobs = Some(jobs);
+            self.queue = Some(queue);
+            self.sender = Some(outbox);
             self.done = Some(done);
         }
-        self.jobs
-            .as_ref()
-            .is_some_and(|jobs| jobs.send(job).is_ok())
+        let Some(queue) = &self.queue else {
+            return false;
+        };
+        let Ok(mut jobs) = queue.jobs.lock() else {
+            return false;
+        };
+        jobs.0.push_back(job);
+        queue.ready.notify_one();
+        true
+    }
+}
+
+/// One worker: takes the newest job, makes its thumbnail, sends it back.
+fn work(queue: &Queue, outbox: &Sender<Done>) {
+    loop {
+        let job = {
+            let Ok(mut jobs) = queue.jobs.lock() else {
+                return;
+            };
+            loop {
+                if jobs.1 {
+                    return;
+                }
+                if let Some(job) = jobs.0.pop_back() {
+                    break job;
+                }
+                jobs = match queue.ready.wait(jobs) {
+                    Ok(jobs) => jobs,
+                    Err(_) => return,
+                };
+            }
+        };
+        let (path, version) = job;
+        let thumb = make(&path);
+        if outbox.send((path, version, thumb)).is_err() {
+            return;
+        }
     }
 }
 
@@ -160,6 +221,13 @@ fn make(path: &Path) -> Option<Thumb> {
                 .ok()?
                 .tile
         }
+        "gif" | "bmp" | "webp" | "tga" | "tif" | "tiff" => {
+            let hint = sue_io::PictureFormat::ALL.into_iter().find(|format| {
+                format.extension() == extension
+                    || (extension == "tif" && format.extension() == "tiff")
+            });
+            sue_io::decode_picture(&bytes, hint).ok()?
+        }
         _ => return None,
     };
     let (width, height) = (tile.width(), tile.height());
@@ -175,7 +243,11 @@ fn make(path: &Path) -> Option<Thumb> {
     Some(shrink(&rgba, [width, height], SIDE))
 }
 
-/// Box-filters RGBA8 `pixels` of `size` to fit in `side` by `side`.
+/// The most source pixels averaged per thumbnail pixel, across and down.
+const TAPS: u32 = 4;
+
+/// Shrinks RGBA8 `pixels` of `size` to fit in `side` by `side`, averaging
+/// up to [`TAPS`] by [`TAPS`] evenly spread source pixels for each one.
 #[must_use]
 pub fn shrink(pixels: &[u8], [width, height]: [u32; 2], side: u32) -> Thumb {
     let scale = (side as f32 / width.max(height).max(1) as f32).min(1.0);
@@ -186,18 +258,21 @@ pub fn shrink(pixels: &[u8], [width, height]: [u32; 2], side: u32) -> Thumb {
     let mut result = Vec::with_capacity(out[0] as usize * out[1] as usize * 4);
     for y in 0..out[1] {
         let (y0, y1) = span(y, out[1], height);
+        let rows = taps(y0, y1);
         for x in 0..out[0] {
             let (x0, x1) = span(x, out[0], width);
-            let mut sum = [0_u64; 4];
-            for row in y0..y1 {
-                for column in x0..x1 {
-                    let at = (row as usize * width as usize + column as usize) * 4;
+            let columns = taps(x0, x1);
+            let mut sum = [0_u32; 4];
+            for &row in &rows {
+                let line = row as usize * width as usize;
+                for &column in &columns {
+                    let at = (line + column as usize) * 4;
                     for (total, &value) in sum.iter_mut().zip(&pixels[at..at + 4]) {
-                        *total += u64::from(value);
+                        *total += u32::from(value);
                     }
                 }
             }
-            let count = u64::from((y1 - y0) * (x1 - x0)).max(1);
+            let count = (rows.len() * columns.len()).max(1) as u32;
             result.extend(sum.map(|total| (total / count) as u8));
         }
     }
@@ -206,6 +281,19 @@ pub fn shrink(pixels: &[u8], [width, height]: [u32; 2], side: u32) -> Thumb {
         pixels: result,
         version: 0,
     }
+}
+
+/// Up to [`TAPS`] evenly spread positions in `start..end`.
+fn taps(start: u32, end: u32) -> Vec<u32> {
+    let len = end - start;
+    if len <= TAPS {
+        return (start..end).collect();
+    }
+    (0..TAPS)
+        .map(|tap| {
+            start + (u64::from(tap) * u64::from(len) / u64::from(TAPS)) as u32 + len / (TAPS * 2)
+        })
+        .collect()
 }
 
 /// The source pixels `index` of `count` output pixels covers.

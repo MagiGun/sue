@@ -64,6 +64,8 @@ enum RadialAction {
     Request(ShellRequest),
     Open(RadialPage),
     Template(AppletId, String),
+    /// Takes a card off the canvas.
+    Remove(NodeId),
 }
 
 /// Height of a node's title bar, in canvas units.
@@ -213,6 +215,8 @@ pub struct Shell {
     radial_page: RadialPage,
     /// The wheels the marking menu came through, to go back.
     radial_back: Vec<RadialPage>,
+    /// The card the marking menu opened on, if any (right-clicked).
+    radial_node: Option<NodeId>,
     /// The Sue menu, built for the context it opened in: its first wheel
     /// and its named wheels.
     sue_wheels: Vec<(String, Vec<(String, RadialAction)>)>,
@@ -304,6 +308,7 @@ impl Shell {
             presets: sue_rice::builtin_presets(),
             radial_page: RadialPage::Root,
             radial_back: Vec::new(),
+            radial_node: None,
             sue_wheels: Vec::new(),
             spawn_point: None,
             interactive: false,
@@ -729,6 +734,7 @@ impl Shell {
 
     /// Opens the marking menu at a screen point.
     pub fn open_radial(&mut self, at: Pos2) {
+        self.radial_node = None;
         self.radial_page = RadialPage::Root;
         self.radial_back.clear();
         let canvas_point = self.camera.to_canvas(self.canvas, at);
@@ -1088,7 +1094,7 @@ impl Shell {
             None
         } else {
             self.studio_card(&id, io)
-                .and_then(|node| self.studio_shot(node, io.world))
+                .and_then(|node| self.studio_shot(node, &id, io))
         };
         match shot {
             Some((center, zoom)) => {
@@ -1121,7 +1127,7 @@ impl Shell {
             .and_then(|focus| Self::card_of(focus, io.world));
         // Under the studio the camera jumps to that card, so the panels
         // slide away from the very picture on the canvas.
-        if let Some((center, zoom)) = card.and_then(|node| self.studio_shot(node, io.world))
+        if let Some((center, zoom)) = card.and_then(|node| self.studio_shot(node, &id, io))
             && self.studio_reveal.position() > 0.5
         {
             self.camera.snap(center, zoom);
@@ -1161,13 +1167,29 @@ impl Shell {
 
     /// Where the camera must be for a card's content to fill the studio's
     /// area the way the studio shows its picture (24 points of margin).
-    fn studio_shot(&self, node: NodeId, world: &World) -> Option<(Pos2, f32)> {
-        let rect = world.scene.get(node)?.rect;
+    fn studio_shot(
+        &self,
+        node: NodeId,
+        studio: &AppletId,
+        io: &ShellIo<'_>,
+    ) -> Option<(Pos2, f32)> {
+        let world = &*io.world;
+        let scene_node = world.scene.get(node)?;
+        let rect = scene_node.rect;
         let content = Rect::from_min_max(pos2(rect.left(), rect.top() + NODE_TITLE), rect.max);
         let area = self.studio_area;
-        let room = (area.size() - vec2(48.0, 48.0)).max(vec2(16.0, 16.0));
+        // Where the studio will show it, if it says; else filling the
+        // window, 24 points in.
+        let target = world
+            .arena
+            .get(scene_node.entity)
+            .ok()
+            .and_then(|entity| io.applets.get(studio)?.card_frame(area, entity))
+            .filter(|target| target.width() > 1.0 && target.height() > 1.0)
+            .unwrap_or_else(|| area.shrink(24.0));
+        let room = target.size().max(vec2(16.0, 16.0));
         let zoom = (room.x / content.width().max(1.0)).min(room.y / content.height().max(1.0));
-        let center = content.center() - (area.center() - self.canvas.center()) / zoom;
+        let center = content.center() - (target.center() - self.canvas.center()) / zoom;
         Some((center, zoom))
     }
 
@@ -1890,7 +1912,7 @@ impl Shell {
         if io.applets.captures_keys() {
             return;
         }
-        let keymap = self.config.keymap;
+        let keymap = self.config.keymap.clone();
         let typing = ctx.text_edit_focused();
         // Chords the open studio uses itself stay with it.
         let reserved: Vec<sue_rice::Keybind> = self
@@ -1899,8 +1921,8 @@ impl Shell {
             .and_then(|studio| io.applets.get(studio))
             .map(|applet| applet.reserved_keys())
             .unwrap_or_default();
-        let take = |input: &mut egui::InputState, bind: &sue_rice::Keybind| {
-            !reserved.contains(bind) && keys::consume(input, bind)
+        let take = |input: &mut egui::InputState, bind: &sue_rice::Keybinds| {
+            keys::consume_except(input, bind, &reserved)
         };
         let (undo, redo, settings, left, right, timeline, reset, open, save, quit) =
             ctx.input_mut(|input| {
@@ -2034,7 +2056,11 @@ impl Shell {
             }
         }
         // Space: hold and drag pans; a tap plays or pauses the timeline.
-        if let Some(space) = keys::egui_key(keymap.play_pause.key) {
+        if let Some(space) = keymap
+            .play_pause
+            .first()
+            .and_then(|chord| keys::egui_key(chord.key))
+        {
             let (pressed, released, down) = ctx.input(|input| {
                 (
                     input.key_pressed(space),
@@ -2266,13 +2292,25 @@ impl Shell {
             self.camera.pan_by(delta);
             self.touch();
         }
-        // Right-click opens the marking menu.
+        // Right-click opens the marking menu; on a card, it selects the card
+        // and the menu offers what can be done to it first.
         if secondary
             && over_canvas
             && !modal
             && let Some(at) = pointer
         {
+            let point = self.camera.to_canvas(canvas, at);
+            let under = io.world.scene.stacked().into_iter().rev().find(|id| {
+                io.world
+                    .scene
+                    .get(*id)
+                    .is_some_and(|node| node.rect.contains(point))
+            });
             self.open_radial(at);
+            if let Some(node) = under {
+                self.select(Some(node), io.world);
+                self.radial_node = Some(node);
+            }
         }
 
         // The scene, in a layer the camera transforms.
@@ -3228,7 +3266,11 @@ impl Shell {
     fn radial_items(&self, applets: &Applets) -> Vec<(String, RadialAction)> {
         match &self.radial_page {
             RadialPage::Root => {
-                let mut items = vec![
+                let mut items = Vec::new();
+                if let Some(node) = self.radial_node {
+                    items.push(("Delete".to_owned(), RadialAction::Remove(node)));
+                }
+                items.extend([
                     (
                         "New File \u{203a}".to_owned(),
                         RadialAction::Open(RadialPage::Kinds),
@@ -3237,7 +3279,7 @@ impl Shell {
                         "Open File".to_owned(),
                         RadialAction::Request(ShellRequest::Command("file.open".to_owned())),
                     ),
-                ];
+                ]);
                 for manifest in applets.with_role(AppletRole::Studio) {
                     if let Some(mode) = &manifest.mode {
                         items.push((
@@ -3322,6 +3364,18 @@ impl Shell {
                         ));
                         self.radial_back.push(self.radial_page.clone());
                         self.radial_page = page;
+                    }
+                    RadialAction::Remove(node) => {
+                        radial.close();
+                        self.radial_page = RadialPage::Root;
+                        io.typing.flush(io.history);
+                        match io.history.apply(io.world, RemoveNode::new(node)) {
+                            Ok(_) => self.notify("Deleted (Ctrl+Z brings it back)", false),
+                            Err(error) => {
+                                self.notify(format!("Could not delete it: {error}"), true)
+                            }
+                        }
+                        self.select(None, io.world);
                     }
                     RadialAction::Template(id, key) => {
                         radial.close();

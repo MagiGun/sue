@@ -43,5 +43,6 @@ pub fn launchpad() -> Result<Launchpad, WmError> {
     // Studios.
     launchpad.register(|| Box::new(sue_paint::SuePaint::default()))?;
     launchpad.register(|| Box::new(sue_writer::SueWriter::default()))?;
+    launchpad.register(|| Box::new(crate::viewer::Viewer::default()))?;
     Ok(launchpad)
 }

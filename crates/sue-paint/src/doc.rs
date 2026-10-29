@@ -91,6 +91,39 @@ pub fn create(spec: &NewPicture) -> Result<(Edit, EntityId), String> {
     Ok((edit, id))
 }
 
+/// Makes a picture of `layer`'s size whose one layer is `layer` itself (a
+/// photo on the canvas): the same entity, never a copy, so painting on it
+/// changes the photo, and undo takes it back.
+///
+/// # Errors
+/// If `layer` has no 8-bit color pixels, or already is a layer.
+pub fn adopt(arena: &Arena, layer: EntityId, name: &str) -> Result<(Edit, EntityId), String> {
+    let raster = raster(arena, layer).ok_or("this has no pixels to paint on")?;
+    if raster.format() != PixelFormat::Rgba8 {
+        return Err("only 8-bit color pictures can be painted on; convert it first".to_owned());
+    }
+    if arena.relations().parent(layer, CHILD).is_some() {
+        return Err("this is already a layer of a picture".to_owned());
+    }
+    let (width, height) = (raster.width(), raster.height());
+    if width > MAX_SIDE || height > MAX_SIDE {
+        return Err(format!(
+            "A picture must be at most {MAX_SIDE} pixels a side"
+        ));
+    }
+    let image = Entity::empty(name, class::IMAGE)
+        .with_property(picture::WIDTH, i64::from(width))
+        .with_property(picture::HEIGHT, i64::from(height))
+        .with_property(picture::DPI, 72.0);
+    let id = image.id();
+    let edit = Edit::new(format!("Open {name} in Sue Paint"))
+        .then(SpawnEntity::new(image))
+        .then(Relate::new(
+            Relation::new(id, CHILD, layer).ordered(OrderKey::default()),
+        ));
+    Ok((edit, id))
+}
+
 /// One layer as the panels show it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LayerInfo {
@@ -541,6 +574,34 @@ pub fn diff_patch(before: &[u8], after: &[u8], width: u32, height: u32) -> Optio
 mod tests {
     use super::*;
     use sue_core::{ReversibleTransaction, UndoStack};
+
+    #[test]
+    fn a_photo_becomes_a_picture_of_itself() {
+        let mut arena = Arena::new();
+        let photo = RasterTile2D::new(6, 4, PixelFormat::Rgba8).unwrap();
+        let handle = arena.spawn("photo.png", photo);
+        let layer = arena.get(handle).unwrap().id();
+        let (mut edit, picture) = adopt(&arena, layer, "photo").unwrap();
+        edit.apply(&mut arena).unwrap();
+        assert_eq!(
+            layers(&arena, picture)
+                .iter()
+                .map(|info| info.id)
+                .collect::<Vec<_>>(),
+            vec![layer]
+        );
+        assert_eq!(
+            picture::size(arena.get_by_id(picture).unwrap()),
+            Some([6, 4])
+        );
+        assert!(
+            adopt(&arena, layer, "again").is_err(),
+            "one picture at a time"
+        );
+        edit.revert(&mut arena).unwrap();
+        assert!(arena.get_by_id(picture).is_err());
+        assert!(arena.get_by_id(layer).is_ok(), "the photo stays");
+    }
 
     fn fresh() -> (Arena, EntityId) {
         let mut arena = Arena::new();

@@ -12,7 +12,7 @@ use sue_model::BlendMode;
 use sue_model::picture::{self, LayerKind};
 use sue_wm::{AppletContext, ShellRequest, Theme};
 
-use crate::brush::{AntiAlias, Stroke as BrushStroke};
+use crate::brush::{AntiAlias, Dynamics, Stroke as BrushStroke};
 use crate::color::{self, Hsv};
 use crate::doc;
 use crate::icons::{self, Icon};
@@ -196,6 +196,162 @@ fn slider_row(
         .changed()
     })
     .inner
+}
+
+/// A slider row with a dynamics button at its end (Brush Size and Opacity,
+/// as in Clip Studio Paint): the button shows whether the pen changes the
+/// setting and opens its dynamics. `extra` adds the setting's own options
+/// under them. Returns `true` when the value changed.
+#[allow(clippy::too_many_arguments, reason = "a slider row and its dynamics")]
+fn dynamic_row(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    suffix: &str,
+    log: bool,
+    dynamics: &mut Dynamics,
+    extra: impl FnOnce(&mut Ui),
+    theme: &Theme,
+) -> bool {
+    ui.horizontal(|ui| {
+        ui.add_sized(
+            vec2(78.0, 18.0),
+            egui::Label::new(
+                RichText::new(label)
+                    .size(theme.small_size + 0.5)
+                    .color(theme.muted),
+            ),
+        );
+        ui.spacing_mut().slider_width = (ui.available_width() - 86.0).max(36.0);
+        let changed = ui
+            .add(
+                egui::Slider::new(value, range)
+                    .logarithmic(log)
+                    .max_decimals(if log { 1 } else { 0 })
+                    .suffix(suffix),
+            )
+            .changed();
+        let (rect, button) = ui.allocate_exact_size(vec2(20.0, 18.0), Sense::click());
+        let on = dynamics.any();
+        let painter = ui.painter();
+        painter.rect_filled(
+            rect,
+            3.0,
+            if on {
+                theme.active
+            } else if button.hovered() {
+                theme.hover
+            } else {
+                theme.pill
+            },
+        );
+        // A little pressure graph.
+        let inner = rect.shrink2(vec2(5.0, 4.0));
+        let curve: Vec<Pos2> = (0..=8)
+            .map(|step| {
+                let t = step as f32 / 8.0;
+                pos2(
+                    inner.left() + t * inner.width(),
+                    inner.bottom() - t * t * inner.height(),
+                )
+            })
+            .collect();
+        painter.add(egui::Shape::line(
+            curve,
+            Stroke::new(1.2, if on { theme.text } else { theme.muted }),
+        ));
+        let button = button.on_hover_text(format!("{label} Dynamics: what the pen changes"));
+        egui::Popup::from_toggle_button_response(&button)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| {
+                ui.set_width(300.0);
+                dynamics_ui(ui, label, dynamics, theme);
+                extra(ui);
+            });
+        changed
+    })
+    .inner
+}
+
+/// The dynamics of one setting: which inputs change it, down to what, and
+/// their curves (Clip Studio Paint's Brush Size Dynamics).
+fn dynamics_ui(ui: &mut Ui, label: &str, dynamics: &mut Dynamics, theme: &Theme) {
+    let small = |text: &str| {
+        RichText::new(text)
+            .size(theme.small_size + 0.5)
+            .color(theme.muted)
+    };
+    ui.label(
+        RichText::new(format!("{label} Dynamics"))
+            .size(theme.ui_size)
+            .color(theme.text),
+    );
+    ui.label(small(&format!("Input affecting {label}")));
+    let input = |ui: &mut Ui, name: &str, on: &mut bool, min: &mut f32| {
+        ui.horizontal(|ui| {
+            ui.add_sized(vec2(96.0, 18.0), egui::Checkbox::new(on, small(name)));
+            let mut percent = *min * 100.0;
+            ui.spacing_mut().slider_width = (ui.available_width() - 56.0).max(36.0);
+            let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
+                .max_decimals(0)
+                .suffix(" %");
+            if ui
+                .add_enabled(*on, slider)
+                .on_hover_text("Minimum value: how much is left at the least")
+                .changed()
+            {
+                *min = percent / 100.0;
+            }
+        });
+    };
+    input(
+        ui,
+        "Pen pressure",
+        &mut dynamics.pressure,
+        &mut dynamics.pressure_min,
+    );
+    input(
+        ui,
+        "Velocity",
+        &mut dynamics.velocity,
+        &mut dynamics.velocity_min,
+    );
+    input(ui, "Random", &mut dynamics.random, &mut dynamics.random_min);
+    ui.add_space(4.0);
+    ui.horizontal_top(|ui| {
+        ui.vertical(|ui| {
+            ui.label(small("Pen pressure settings"));
+            ui.add_enabled_ui(dynamics.pressure, |ui| {
+                sue_wm::widgets::response_curve(
+                    ui,
+                    (label, "pressure"),
+                    &mut dynamics.pressure_curve,
+                    92.0,
+                    sue_wm::widgets::CurveLabels::PRESSURE,
+                    theme,
+                );
+            });
+        });
+        ui.vertical(|ui| {
+            ui.label(small("Velocity settings"));
+            ui.add_enabled_ui(dynamics.velocity, |ui| {
+                sue_wm::widgets::response_curve(
+                    ui,
+                    (label, "velocity"),
+                    &mut dynamics.velocity_curve,
+                    92.0,
+                    sue_wm::widgets::CurveLabels {
+                        input: "Velocity",
+                        low: "Still",
+                        high: "Fast",
+                        output: "Output",
+                    },
+                    theme,
+                );
+            });
+        });
+    });
 }
 
 impl SuePaint {
@@ -652,17 +808,38 @@ impl SuePaint {
         match tool {
             tool if tool.paints() => {
                 let tip = &mut sub.tip;
-                slider_row(
+                let (mut screen_size, mut at_least_one) = (tip.screen_size, tip.at_least_one);
+                dynamic_row(
                     ui,
                     "Brush Size",
                     &mut tip.size,
                     0.5..=1000.0,
                     " px",
                     true,
+                    &mut tip.size_by,
+                    |ui| {
+                        ui.separator();
+                        ui.checkbox(&mut screen_size, small("Specify by size on screen"))
+                            .on_hover_text("The brush looks the same size at any zoom");
+                        ui.checkbox(&mut at_least_one, small("At least 1 pixel"))
+                            .on_hover_text("Light pressure never thins the line below a pixel");
+                    },
                     theme,
                 );
+                tip.screen_size = screen_size;
+                tip.at_least_one = at_least_one;
                 let mut opacity = tip.opacity * 100.0;
-                if slider_row(ui, "Opacity", &mut opacity, 0.0..=100.0, " %", false, theme) {
+                if dynamic_row(
+                    ui,
+                    "Opacity",
+                    &mut opacity,
+                    0.0..=100.0,
+                    " %",
+                    false,
+                    &mut tip.opacity_by,
+                    |_| {},
+                    theme,
+                ) {
                     tip.opacity = opacity / 100.0;
                 }
                 let mut hardness = tip.hardness * 100.0;
@@ -761,14 +938,6 @@ impl SuePaint {
                         tip.spacing = spacing / 100.0;
                     }
                 }
-                ui.checkbox(&mut tip.pressure_size, small("Size by pen pressure"));
-                if tip.pressure_size {
-                    let mut min = tip.min_size * 100.0;
-                    if slider_row(ui, "Min size", &mut min, 0.0..=100.0, " %", false, theme) {
-                        tip.min_size = min / 100.0;
-                    }
-                }
-                ui.checkbox(&mut tip.pressure_opacity, small("Opacity by pen pressure"));
                 ui.checkbox(&mut tip.build_up, small("Build up (airbrush)"));
                 if tip.build_up {
                     let mut flow = tip.flow * 100.0;

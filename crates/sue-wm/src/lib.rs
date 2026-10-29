@@ -36,6 +36,7 @@ mod radial;
 mod scene;
 mod scheduler;
 mod shell;
+pub mod shortcuts;
 mod spring;
 mod text;
 mod theme;
@@ -46,7 +47,8 @@ mod world;
 
 pub use applet::{
     AppletContext, AppletError, AppletId, AppletManifest, AppletRole, FilePick, FileTemplate,
-    MediaClass, ModeSpec, PaletteEntry, ShellRequest, ShellView, SueAction, SueApplet, Tick, wheel,
+    FileType, MediaClass, ModeSpec, PaletteEntry, ShellRequest, ShellView, SueAction, SueApplet,
+    Tick, wheel,
 };
 pub use camera::Camera;
 pub use catalog::{

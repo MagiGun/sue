@@ -102,6 +102,10 @@ pub(crate) struct Figure {
     pub texture: Option<egui::TextureId>,
     pub size: Vec2,
     pub seen: u64,
+    /// Its pixels and their size, asked for again every frame: the painter
+    /// lets go of a texture a frame did not use.
+    pub pixels: Vec<u8>,
+    pub pixel_size: [u32; 2],
 }
 
 /// The writing studio.
@@ -118,6 +122,8 @@ pub struct SueWriter {
     pub(crate) editor: Editor,
     pub(crate) menubar: MenuBar,
     pub(crate) menus: Vec<Menu>,
+    /// The shortcuts as Settings has them, for the menus and the shell.
+    pub(crate) bound: sue_wm::shortcuts::Bound,
     pub(crate) binder: bool,
     pub(crate) inspector: bool,
     pub(crate) binder_width: f32,
@@ -162,6 +168,7 @@ impl Default for SueWriter {
             editor: Editor::new("sue-writer"),
             menubar: MenuBar::new(),
             menus: crate::menus::menus(),
+            bound: sue_wm::shortcuts::Bound::default(),
             binder: true,
             inspector: true,
             binder_width: 230.0,
@@ -1275,15 +1282,24 @@ impl SueWriter {
         if self.dialog.is_some() || self.menubar.is_open() || self.renaming.is_some() {
             return;
         }
-        // Shortcuts work while typing; other text fields keep theirs.
+        // Shortcuts work while typing; other text fields keep theirs. The
+        // chords are the settings' (Settings, Keymaps), any number each.
         let other_field = ctx.text_edit_focused() && !self.editor.has_focus(ctx);
-        for (modifiers, key, name) in Self::shortcuts() {
-            if other_field && !matches!(name, "edit.find" | "edit.replace" | "view.composition") {
-                continue;
-            }
-            if ctx.input_mut(|input| input.consume_key(modifiers, key)) {
-                self.run(name, cx);
-            }
+        let table: Vec<sue_wm::shortcuts::Shortcut> = shortcut_table()
+            .iter()
+            .filter(|shortcut| {
+                !other_field
+                    || matches!(
+                        shortcut.command,
+                        "edit.find" | "edit.replace" | "view.composition"
+                    )
+            })
+            .cloned()
+            .collect();
+        let taken =
+            ctx.input_mut(|input| sue_wm::shortcuts::take(input, cx.rice(), KEYS_SECTION, &table));
+        for name in taken {
+            self.run(name, cx);
         }
         if self.composition
             && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape))
@@ -1309,6 +1325,45 @@ fn read_picture(bytes: &[u8]) -> Result<sue_core::RasterTile2D, String> {
         return Ok(jpeg.tile);
     }
     sue_io::decode_picture(bytes, None)
+}
+
+/// The settings section Sue Writer's shortcuts live in.
+pub(crate) const KEYS_SECTION: &str = "sue_writer_keys";
+
+/// Sue Writer's shortcuts with their default chords, each command once,
+/// labeled as its menu item.
+pub(crate) fn shortcut_table() -> &'static [sue_wm::shortcuts::Shortcut] {
+    static TABLE: std::sync::OnceLock<Vec<sue_wm::shortcuts::Shortcut>> =
+        std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let menus = crate::menus::menus();
+        fn find(items: &[sue_wm::MenuItem], command: &str) -> Option<String> {
+            items.iter().find_map(|item| match item {
+                sue_wm::MenuItem::Action {
+                    label,
+                    command: found,
+                    ..
+                } if found == command => Some(label.trim_end_matches("...").to_owned()),
+                sue_wm::MenuItem::Sub { items, .. } => find(items, command),
+                _ => None,
+            })
+        }
+        sue_wm::shortcuts::table(SueWriter::shortcuts(), |command| {
+            menus
+                .iter()
+                .find_map(|menu| find(&menu.items, command))
+                .unwrap_or_else(|| {
+                    match command {
+                        "style.heading1" => "Heading 1",
+                        "style.heading2" => "Heading 2",
+                        "style.heading3" => "Heading 3",
+                        "style.body" => "Body Text",
+                        other => other,
+                    }
+                    .to_owned()
+                })
+        })
+    })
 }
 
 /// A file name made of `title`.
@@ -1372,6 +1427,12 @@ impl SueApplet for SueWriter {
                 "Show the page in the theme's dark colors instead of white paper",
             ),
         ]
+        .into_iter()
+        .chain(sue_wm::shortcuts::declarations(
+            KEYS_SECTION,
+            shortcut_table(),
+        ))
+        .collect()
     }
 
     fn accepts(&self, entity: &Entity) -> bool {
@@ -1382,16 +1443,19 @@ impl SueApplet for SueWriter {
         self.project.or(self.open)
     }
 
+    fn card_frame(&self, area: egui::Rect, entity: &Entity) -> Option<egui::Rect> {
+        // The card lands on the first page, which then turns into it.
+        self.first_page(area, entity)
+    }
+
     fn studio_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
         self.frame(ui, cx);
     }
 
     fn reserved_keys(&self) -> Vec<sue_rice::Keybind> {
-        // Bold and Justify, as in every word processor.
-        ["Ctrl+B", "Ctrl+J"]
-            .iter()
-            .filter_map(|chord| chord.parse().ok())
-            .collect()
+        // Every chord of the studio's shortcuts wins while it is open (Bold
+        // and Justify, as in every word processor).
+        self.bound.chords(shortcut_table())
     }
 
     fn captures_keys(&self) -> bool {

@@ -336,6 +336,37 @@ pub struct FilePick {
     pub start: Option<PathBuf>,
     /// `true` when a whole folder may be chosen too.
     pub folders: bool,
+    /// The kinds of file to choose between ("save as type"), first the
+    /// default. The chosen file's extension says which was picked.
+    pub types: Vec<FileType>,
+}
+
+/// One kind of file a pick offers, e.g. `PNG picture` with `png`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FileType {
+    /// What people read.
+    pub name: String,
+    /// Its extensions, without the dot, the usual one first.
+    pub extensions: Vec<String>,
+}
+
+impl FileType {
+    /// A kind of file.
+    #[must_use]
+    pub fn new(name: &str, extensions: &[&str]) -> Self {
+        Self {
+            name: name.to_owned(),
+            extensions: extensions.iter().map(|&ext| ext.to_owned()).collect(),
+        }
+    }
+
+    /// `true` if `path` has one of its extensions.
+    #[must_use]
+    pub fn takes(&self, path: &Path) -> bool {
+        path.extension()
+            .map(|ext| ext.to_string_lossy().to_ascii_lowercase())
+            .is_some_and(|ext| self.extensions.contains(&ext))
+    }
 }
 
 impl FilePick {
@@ -378,6 +409,27 @@ impl FilePick {
     pub fn starting_in(mut self, folder: Option<PathBuf>) -> Self {
         self.start = folder;
         self
+    }
+
+    /// The same request, offering these kinds of file (the first is the
+    /// default). Their extensions are what it takes.
+    #[must_use]
+    pub fn types(mut self, types: Vec<FileType>) -> Self {
+        for kind in &types {
+            for ext in &kind.extensions {
+                if !self.extensions.contains(ext) {
+                    self.extensions.push(ext.clone());
+                }
+            }
+        }
+        self.types = types;
+        self
+    }
+
+    /// The kind of file `path` is among the offered ones.
+    #[must_use]
+    pub fn type_of(&self, path: &Path) -> Option<&FileType> {
+        self.types.iter().find(|kind| kind.takes(path))
     }
 
     /// `true` when `path` has one of the extensions (or any are taken).
@@ -682,6 +734,15 @@ pub trait SueApplet: Send {
     /// places it with [`ShellRequest::Place`] and returns `None`.
     fn create(&mut self, key: &str, cx: &mut AppletContext<'_>) -> Option<NewEntity> {
         let _ = (key, cx);
+        None
+    }
+
+    /// Where in `area` (the studio's whole window) this studio shows
+    /// `entity` when it opens, so the shell's zoom lands the entity's card
+    /// exactly there and the studio's panels come in around it. `None`
+    /// fills the window with the card, 24 points in from its edges.
+    fn card_frame(&self, area: egui::Rect, entity: &Entity) -> Option<egui::Rect> {
+        let _ = (area, entity);
         None
     }
 

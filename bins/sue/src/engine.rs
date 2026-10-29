@@ -571,7 +571,21 @@ impl Engine {
             SettingsPage::new(
                 "keymaps",
                 "Keymaps",
-                vec![group("Shortcuts", vec![section("keys")])],
+                vec![
+                    group(
+                        "Shortcuts",
+                        vec![
+                            SettingsItem::Note(
+                                "Every action can have as many shortcuts as you like: + adds one, x takes one away, and clicking one changes it."
+                                    .to_owned(),
+                            ),
+                            section("keys"),
+                        ],
+                    ),
+                    group("Sue Paint", vec![section("sue_paint_keys")]),
+                    group("Sue Writer", vec![section("sue_writer_keys")]),
+                    group("Image Viewer", vec![section("image_viewer_keys")]),
+                ],
             ),
             SettingsPage::new(
                 "mcp",

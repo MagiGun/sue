@@ -46,7 +46,7 @@ pub mod view;
 
 pub use card::{CARD_ID, PictureCard};
 pub use menus::menus;
-pub use studio::{ID, SuePaint};
+pub use studio::{ID, SuePaint, mirror};
 
 use sue_core::EntityId;
 use sue_wm::{AppletContext, ArenaEdit};
@@ -110,7 +110,7 @@ pub fn sample_picture(cx: &mut AppletContext<'_>, width: u32, height: u32) -> Op
         hardness: 0.0,
         build_up: true,
         flow: 0.12,
-        pressure_size: false,
+        size_by: crate::brush::Dynamics::NONE,
         ..Tip::default()
     };
     for (center, rgb) in [

@@ -16,20 +16,20 @@ use sue_core::{
     Arena, CHILD, ComponentKind, Entity, EntityId, PixelFormat, Properties, RasterTile2D, Relation,
     ReversibleTransaction, UndoStack, Value,
 };
-use sue_io::{JxlPipeline, NativeJxlPipeline};
+
 use sue_model::class;
 use sue_model::picture::{self, LayerKind};
 use sue_platform::write_atomic;
 use sue_rice::{RiceDeclaration, RiceParameter};
 use sue_wm::{
-    AppletContext, AppletId, AppletManifest, AppletRole, ArenaEdit, FilePick, ItemState, Menu,
-    MenuBar, ModeSpec, PaletteEntry, ShellRequest, SueApplet, World,
+    AppletContext, AppletId, AppletManifest, AppletRole, ArenaEdit, FilePick, FileType, ItemState,
+    Menu, MenuBar, ModeSpec, PaletteEntry, ShellRequest, SueApplet, World,
 };
 
 use crate::brush::{Stabilizer, Stroke};
 use crate::color::{self, History};
 use crate::composite::{self, Compositor, RenderOptions};
-use crate::dialogs::{Dialog, FilterDialog, NewDialog};
+use crate::dialogs::{Dialog, FilterDialog, NewDialog, PressureDialog};
 use crate::doc::{self, NewPicture};
 use crate::filters::Filter;
 use crate::select::{Op, Selection};
@@ -83,7 +83,8 @@ pub(crate) enum Gesture {
     /// pixels when the layer is offset; `trail` the recent raw samples with
     /// their times, for the pen's speed as it lifts).
     Stroke {
-        stroke: Stroke,
+        /// Boxed: a tip with its dynamics curves is large.
+        stroke: Box<Stroke>,
         stabilizer: Stabilizer,
         offset: [i64; 2],
         raw: [f32; 2],
@@ -105,7 +106,7 @@ pub(crate) enum Gesture {
     /// pixels).
     Shape {
         tool: crate::tools::Tool,
-        sub: crate::tools::SubTool,
+        sub: Box<crate::tools::SubTool>,
         op: Op,
         from: Pos2,
         to: Pos2,
@@ -201,10 +202,14 @@ pub struct SuePaint {
     pub(crate) active: usize,
     pub(crate) closed: HashSet<EntityId>,
     pub(crate) menus: Vec<Menu>,
+    /// The shortcuts as Settings has them, for the menus and the shell.
+    pub(crate) bound: sue_wm::shortcuts::Bound,
     pub(crate) menubar: MenuBar,
     pub(crate) dialog: Option<Dialog>,
     pub(crate) gesture: Option<Gesture>,
     pub(crate) pressure: Option<f32>,
+    /// The pen pressure curve every tool uses (Pen Pressure Settings).
+    pub(crate) pen_curve: sue_model::Response,
     pub(crate) panels: Panels,
     pub(crate) color_tab: u8,
     pub(crate) set_tab: u8,
@@ -255,10 +260,12 @@ impl Default for SuePaint {
             active: 0,
             closed: HashSet::new(),
             menus: crate::menus::menus(),
+            bound: sue_wm::shortcuts::Bound::default(),
             menubar: MenuBar::new(),
             dialog: None,
             gesture: None,
             pressure: None,
+            pen_curve: sue_model::Response::LINEAR,
             panels: Panels::default(),
             color_tab: 0,
             set_tab: 0,
@@ -416,7 +423,9 @@ fn implemented(command: &str) -> bool {
             | "window.hide_menus"
             | "window.workspace.reset"
             | "help.about"
-    )
+            | "file.shortcuts"
+            | "file.pressure"
+    ) || TOOL_KEYS.iter().any(|(known, _, _)| *known == command)
 }
 
 impl SuePaint {
@@ -783,42 +792,11 @@ impl SuePaint {
             paper: true,
             drafts: false,
         };
-        let Some(mut flat) = composite::flatten(arena, picture, options) else {
+        let Some(flat) = composite::flatten(arena, picture, options) else {
             cx.fail("This picture has no size");
             return;
         };
-        let bytes = match ext {
-            "png" => sue_io::encode_png(&flat),
-            "jpg" => {
-                // JPEG has no alpha: lay the picture over white.
-                if let Some(pixels) = flat.bytes_mut() {
-                    for pixel in pixels.as_chunks_mut::<4>().0 {
-                        let alpha = f32::from(pixel[3]) / 255.0;
-                        for channel in &mut pixel[..3] {
-                            *channel =
-                                (f32::from(*channel) * alpha + 255.0 * (1.0 - alpha)).round() as u8;
-                        }
-                        pixel[3] = 255;
-                    }
-                }
-                let quality = cx
-                    .rice()
-                    .get_i64("io.jpeg_quality")
-                    .and_then(|quality| u8::try_from(quality).ok())
-                    .unwrap_or(90);
-                sue_io::encode_jpeg(&flat, quality)
-            }
-            _ => {
-                let effort = cx
-                    .rice()
-                    .get_i64("io.jxl_effort")
-                    .and_then(|effort| u8::try_from(effort).ok())
-                    .unwrap_or(7);
-                NativeJxlPipeline
-                    .encode_layers(&[&flat], effort)
-                    .map_err(|error| error.to_string())
-            }
-        };
+        let bytes = sue_io::encode_as(&flat, ext, jpeg_quality(cx), jxl_effort(cx));
         let bytes = match bytes {
             Ok(bytes) => bytes,
             Err(error) => {
@@ -844,6 +822,76 @@ impl SuePaint {
         } else {
             let path = free_path(&export_dir(cx).join(&file));
             self.write_export(cx, &path, &bytes);
+        }
+    }
+
+    /// Save As: the File Manager asks where and as what, a Sue project or
+    /// any picture format (the picture flattened, as Export does).
+    fn save_as(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(picture) = self.picture() else {
+            cx.request(ShellRequest::Command("file.save_as".to_owned()));
+            return;
+        };
+        if !cx.view.interactive {
+            cx.request(ShellRequest::Command("file.save_as".to_owned()));
+            return;
+        }
+        let name = cx
+            .world
+            .arena
+            .get_by_id(picture)
+            .map_or_else(|_| "Picture".to_owned(), |entity| entity.name().to_owned());
+        let mut types = vec![FileType::new("Sue project", &["sue"])];
+        types.extend(
+            sue_io::PICTURE_SAVE_TYPES
+                .iter()
+                .map(|(what, extensions)| FileType::new(what, extensions)),
+        );
+        let start = self.last_dir.clone().unwrap_or_else(|| export_dir(cx));
+        cx.request(ShellRequest::PickFile(
+            FilePick::save(Some(me_id()), "save-as", "Save As", &format!("{name}.sue"))
+                .types(types)
+                .starting_in(Some(start)),
+        ));
+    }
+
+    /// Writes what Save As picked: the project, or the flattened picture in
+    /// the format of `path`'s extension.
+    fn save_as_to(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let extension = path
+            .extension()
+            .map(|ext| ext.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        if extension == "sue" || extension.is_empty() {
+            let path = if extension.is_empty() {
+                path.with_extension("sue")
+            } else {
+                path.to_path_buf()
+            };
+            // The project is the shell's to write.
+            cx.request(ShellRequest::Picked {
+                pick: FilePick::save(None, "save-project", "Save Project", ""),
+                path,
+            });
+            return;
+        }
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let options = RenderOptions {
+            paper: true,
+            drafts: false,
+        };
+        let Some(flat) = composite::flatten(&cx.world.arena, picture, options) else {
+            cx.fail("This picture has no size");
+            return;
+        };
+        match sue_io::encode_as(&flat, &extension, jpeg_quality(cx), jxl_effort(cx)) {
+            Ok(bytes) => self.write_export(cx, path, &bytes),
+            Err(error) => cx.fail(format!("Cannot save as .{extension}: {error}")),
         }
     }
 
@@ -1188,7 +1236,8 @@ impl SuePaint {
         };
         match command {
             "file.new" | "file.open" | "file.save" | "file.save_as" | "file.preferences"
-            | "file.leave" | "app.quit" | "help.shortcuts" | "help.about" => ItemState::on(),
+            | "file.shortcuts" | "file.pressure" | "file.leave" | "app.quit" | "help.shortcuts"
+            | "help.about" => ItemState::on(),
             "edit.undo" => when(history.can_undo()),
             "edit.redo" => when(history.can_redo()),
             "edit.paste" => when(has_doc && self.clipboard.is_some()),
@@ -1294,11 +1343,15 @@ impl SuePaint {
                 cx.request(ShellRequest::Command("file.save".to_owned()));
                 self.mark_clean();
             }
-            "file.save_as" => cx.request(ShellRequest::Command("file.save_as".to_owned())),
+            "file.save_as" => self.save_as(cx),
             "file.export.png" => self.export(cx, "png"),
             "file.export.jpg" => self.export(cx, "jpg"),
             "file.export.jxl" => self.export(cx, "jxl"),
             "file.preferences" => cx.request(ShellRequest::OpenSettings(None)),
+            "file.shortcuts" => cx.request(ShellRequest::OpenSettings(Some("keymaps".to_owned()))),
+            "file.pressure" => {
+                self.dialog = Some(Dialog::Pressure(PressureDialog::new(self.pen_curve)));
+            }
             "file.leave" => cx.request(ShellRequest::CloseStudio),
             "app.quit" => cx.request(ShellRequest::Command("app.quit".to_owned())),
             "edit.undo" | "edit.redo" => {
@@ -1739,75 +1792,87 @@ impl SuePaint {
         if ctx.text_edit_focused() || self.dialog.is_some() || self.menubar.is_open() {
             return;
         }
-        let none = Modifiers::NONE;
-        for (modifiers, key, name) in shortcuts() {
-            if ctx.input_mut(|input| input.consume_key(modifiers, key)) {
-                if implemented(name) {
-                    self.run(name, cx);
-                } else {
-                    let label = crate::menus::label_of(&self.menus, name).unwrap_or(name);
-                    cx.notify(format!("{label} is not in Sue Paint yet"));
-                }
+        // The shortcuts as Settings has them (Clip Studio Paint's unless
+        // changed), any number of chords each, tools and brush keys too.
+        let taken = ctx.input_mut(|input| {
+            sue_wm::shortcuts::take(input, cx.rice(), KEYS_SECTION, shortcut_table())
+        });
+        for name in taken {
+            if self.tool_key(name) {
+                continue;
+            }
+            if implemented(name) {
+                self.run(name, cx);
+            } else {
+                let label = crate::menus::label_of(&self.menus, name).unwrap_or(name);
+                cx.notify(format!("{label} is not in Sue Paint yet"));
             }
         }
+    }
 
-        // Tools, by Clip Studio Paint's letters.
-        for (key, letter) in [
-            (Key::Slash, '/'),
-            (Key::H, 'H'),
-            (Key::O, 'O'),
-            (Key::K, 'K'),
-            (Key::M, 'M'),
-            (Key::W, 'W'),
-            (Key::I, 'I'),
-            (Key::P, 'P'),
-            (Key::B, 'B'),
-            (Key::E, 'E'),
-            (Key::J, 'J'),
-            (Key::G, 'G'),
-            (Key::U, 'U'),
-            (Key::T, 'T'),
-            (Key::Y, 'Y'),
-        ] {
-            if ctx.input_mut(|input| input.consume_key(none, key)) {
-                self.toolbox.cycle(letter);
+    /// Runs a tool or brush key's command; `false` if `command` is not one.
+    fn tool_key(&mut self, command: &str) -> bool {
+        let letter = match command {
+            "tool.zoom" => '/',
+            "tool.hand" => 'H',
+            "tool.operation" => 'O',
+            "tool.move_layer" => 'K',
+            "tool.selection" => 'M',
+            "tool.auto_select" => 'W',
+            "tool.eyedropper" => 'I',
+            "tool.pen" => 'P',
+            "tool.brush" => 'B',
+            "tool.eraser" => 'E',
+            "tool.blend" => 'J',
+            "tool.fill" => 'G',
+            "tool.figure" => 'U',
+            "tool.text" => 'T',
+            "tool.correct_line" => 'Y',
+            _ => '\0',
+        };
+        if letter != '\0' {
+            self.toolbox.cycle(letter);
+            return true;
+        }
+        match command {
+            // The hand's Rotate sub tool.
+            "tool.rotate" => {
+                self.toolbox.pick(crate::tools::Tool::Hand);
+                self.toolbox.pick_sub(crate::tools::Tool::Hand, 1);
             }
-        }
-        // R: the hand's Rotate sub tool.
-        if ctx.input_mut(|input| input.consume_key(none, Key::R)) {
-            self.toolbox.pick(crate::tools::Tool::Hand);
-            self.toolbox.pick_sub(crate::tools::Tool::Hand, 1);
-        }
-        for (key, forward) in [(Key::Comma, false), (Key::Period, true)] {
-            if ctx.input_mut(|input| input.consume_key(none, key)) {
-                self.toolbox.step_sub(forward);
+            "tool.previous_sub" => self.toolbox.step_sub(false),
+            "tool.next_sub" => self.toolbox.step_sub(true),
+            "color.swap" => {
+                std::mem::swap(&mut self.main, &mut self.sub);
+                self.transparent = false;
+                self.hex = color::hex(self.drawing_color());
             }
-        }
-        if ctx.input_mut(|input| input.consume_key(none, Key::X)) {
-            std::mem::swap(&mut self.main, &mut self.sub);
-            self.transparent = false;
-            self.hex = color::hex(self.drawing_color());
-        }
-        // C: between the drawing color and the transparent color.
-        if ctx.input_mut(|input| input.consume_key(none, Key::C)) {
-            self.transparent = !self.transparent;
-        }
-        for (key, grow) in [(Key::OpenBracket, false), (Key::CloseBracket, true)] {
-            if ctx.input_mut(|input| input.consume_key(none, key)) {
+            // Between the drawing color and the transparent color.
+            "color.transparent" => self.transparent = !self.transparent,
+            "brush.smaller" | "brush.bigger" => {
                 let tip = &mut self.toolbox.current_mut().tip;
-                tip.size = if grow {
+                tip.size = if command == "brush.bigger" {
                     (tip.size * 1.2).max(tip.size + 1.0)
                 } else {
                     (tip.size / 1.2).min(tip.size - 1.0)
                 }
                 .clamp(0.5, 2000.0);
             }
+            _ => return false,
         }
+        true
     }
 
     // ----- The frame ----------------------------------------------------------
 
     fn frame(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        self.bound
+            .refresh(&mut self.menus, cx.rice(), KEYS_SECTION, shortcut_table());
+        self.pen_curve = cx
+            .rice()
+            .get_str(crate::dialogs::PEN_PRESSURE)
+            .and_then(|text| text.parse().ok())
+            .unwrap_or_default();
         let present = cx.view.studio.as_ref().map(AppletId::as_str) == Some(ID);
         let reveal = cx.view.studio_reveal.clamp(0.0, 1.0);
         self.hide = 1.0 - reveal;
@@ -1913,9 +1978,57 @@ impl SuePaint {
     }
 }
 
-/// The studio's chords, Clip Studio Paint's defaults. egui ignores extra
-/// Shift and Alt when matching, so each chord comes before the plainer
-/// chords on the same key.
+/// The settings section Sue Paint's shortcuts live in.
+pub(crate) const KEYS_SECTION: &str = "sue_paint_keys";
+
+/// Sue Paint's shortcuts with their default chords (Clip Studio Paint's),
+/// each command once with every chord it has, labeled as its menu item.
+pub(crate) fn shortcut_table() -> &'static [sue_wm::shortcuts::Shortcut] {
+    static TABLE: std::sync::OnceLock<Vec<sue_wm::shortcuts::Shortcut>> =
+        std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let menus = crate::menus::menus();
+        let mut table = sue_wm::shortcuts::table(shortcuts(), |command| {
+            crate::menus::label_of(&menus, command)
+                .unwrap_or(command)
+                .trim_end_matches("...")
+                .to_owned()
+        });
+        table.extend(TOOL_KEYS.iter().map(|(command, label, chords)| {
+            sue_wm::shortcuts::Shortcut::new(command, *label, chords)
+        }));
+        table
+    })
+}
+
+/// Tool and brush keys, Clip Studio Paint's letters: command, what
+/// Settings calls it, default chords.
+const TOOL_KEYS: [(&str, &str, &str); 22] = [
+    ("tool.zoom", "Zoom Tool", "/"),
+    ("tool.hand", "Hand Tool", "H"),
+    ("tool.rotate", "Rotate Tool", "R"),
+    ("tool.operation", "Operation Tool", "O"),
+    ("tool.move_layer", "Move Layer Tool", "K"),
+    ("tool.selection", "Selection Tool", "M"),
+    ("tool.auto_select", "Auto Select Tool", "W"),
+    ("tool.eyedropper", "Eyedropper Tool", "I"),
+    ("tool.pen", "Pen and Pencil Tools", "P"),
+    ("tool.brush", "Brush, Airbrush and Decoration Tools", "B"),
+    ("tool.eraser", "Eraser Tool", "E"),
+    ("tool.blend", "Blend Tool", "J"),
+    ("tool.fill", "Fill and Gradient Tools", "G"),
+    ("tool.figure", "Figure, Frame Border and Ruler Tools", "U"),
+    ("tool.text", "Text and Balloon Tools", "T"),
+    ("tool.correct_line", "Correct Line Tool", "Y"),
+    ("tool.previous_sub", "Previous Sub Tool", ","),
+    ("tool.next_sub", "Next Sub Tool", "."),
+    ("color.swap", "Swap Main and Sub Color", "X"),
+    ("color.transparent", "Drawing or Transparent Color", "C"),
+    ("brush.smaller", "Smaller Brush", "["),
+    ("brush.bigger", "Bigger Brush", "]"),
+];
+
+/// The studio's default chords, Clip Studio Paint's.
 fn shortcuts() -> Vec<(Modifiers, Key, &'static str)> {
     let command = Modifiers::COMMAND;
     let shifted = Modifiers::COMMAND | Modifiers::SHIFT;
@@ -1999,7 +2112,7 @@ fn me_id() -> AppletId {
 }
 
 /// Mirrors RGBA pixels left to right and/or top to bottom.
-pub(crate) fn mirror(pixels: &mut [u8], width: u32, height: u32, flip_h: bool, flip_v: bool) {
+pub fn mirror(pixels: &mut [u8], width: u32, height: u32, flip_h: bool, flip_v: bool) {
     let source = pixels.to_vec();
     for y in 0..height {
         for x in 0..width {
@@ -2032,6 +2145,22 @@ fn to_rgba(raster: &RasterTile2D) -> RasterTile2D {
 }
 
 /// Where exports go without a dialog: `io.convert_dir`, or the home folder.
+/// The JPEG quality Settings has for conversions.
+fn jpeg_quality(cx: &AppletContext<'_>) -> u8 {
+    cx.rice()
+        .get_i64("io.jpeg_quality")
+        .and_then(|quality| u8::try_from(quality).ok())
+        .unwrap_or(90)
+}
+
+/// The JPEG XL effort Settings has for conversions.
+fn jxl_effort(cx: &AppletContext<'_>) -> u8 {
+    cx.rice()
+        .get_i64("io.jxl_effort")
+        .and_then(|effort| u8::try_from(effort).ok())
+        .unwrap_or(7)
+}
+
 fn export_dir(cx: &AppletContext<'_>) -> PathBuf {
     let riced = cx.rice().get_str("io.convert_dir").unwrap_or("").trim();
     if riced.is_empty() {
@@ -2112,8 +2241,19 @@ impl SueApplet for SuePaint {
                 },
                 "Sue Paint's colors: Gray, Sue's own theme (follows it), a preset, or Custom (below)",
             ),
+            RiceDeclaration::new(
+                crate::dialogs::PEN_PRESSURE,
+                RiceParameter::Text {
+                    value: sue_model::Response::LINEAR.to_string(),
+                },
+                "Pen pressure curve for every tool, as pressure,output points (File, Pen Pressure Settings draws it)",
+            ),
         ];
         declarations.extend(Self::custom_colors());
+        declarations.extend(sue_wm::shortcuts::declarations(
+            KEYS_SECTION,
+            shortcut_table(),
+        ));
         declarations
     }
 
@@ -2130,12 +2270,9 @@ impl SueApplet for SuePaint {
     }
 
     fn reserved_keys(&self) -> Vec<sue_rice::Keybind> {
-        // Clip Studio Paint's: Tab and Shift+Tab hide the palettes and the
-        // menus, / is the Zoom tool and Ctrl+0 fits the picture.
-        ["Tab", "Shift+Tab", "/", "Ctrl+0"]
-            .iter()
-            .filter_map(|chord| chord.parse().ok())
-            .collect()
+        // Every chord of the studio's shortcuts wins while it is open (Tab
+        // hides the palettes, / is the Zoom tool, Ctrl+0 fits the picture).
+        self.bound.chords(shortcut_table())
     }
 
     fn sue_actions(&self, focus: Option<&Entity>, current: bool) -> Vec<sue_wm::SueAction> {
@@ -2185,6 +2322,33 @@ impl SueApplet for SuePaint {
         }
     }
 
+    fn take_entity(&mut self, purpose: &str, entity: EntityId, cx: &mut AppletContext<'_>) {
+        if purpose != "adopt" {
+            return;
+        }
+        // A picture from the canvas becomes a layered picture whose layer is
+        // that very entity, and Sue Paint opens on it.
+        let name = cx.arena().get_by_id(entity).map_or_else(
+            |_| "Picture".to_owned(),
+            |found| {
+                Path::new(found.name()).file_stem().map_or_else(
+                    || found.name().to_owned(),
+                    |stem| stem.to_string_lossy().into_owned(),
+                )
+            },
+        );
+        match doc::adopt(cx.arena(), entity, &name) {
+            Ok((edit, picture)) => {
+                if Self::apply(cx, edit) {
+                    Self::place(cx, picture);
+                    self.activate(&cx.world.arena, picture);
+                    cx.request(ShellRequest::OpenStudio(me_id()));
+                }
+            }
+            Err(error) => cx.fail(error),
+        }
+    }
+
     fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
         if matches!(pick.purpose.as_str(), "open" | "layer")
             && cx.view.studio.as_ref().map(AppletId::as_str) != Some(ID)
@@ -2199,6 +2363,7 @@ impl SueApplet for SuePaint {
                     self.write_export(cx, path, &bytes);
                 }
             }
+            "save-as" => self.save_as_to(cx, path),
             "subview" => self.add_reference(path, cx),
             "colorset-import" => match std::fs::read_to_string(path) {
                 Ok(text) => {
@@ -2325,6 +2490,21 @@ impl SueApplet for SuePaint {
                 self.dialog = Some(Dialog::New(NewDialog::new(&NewPicture::default())));
                 true
             }
+            "dialog/pressure" => {
+                // A sample of someone's drawing, so the pad shows lines.
+                let mut pressure = PressureDialog::new(self.pen_curve);
+                let line: Vec<(egui::Vec2, f32)> = (0..120)
+                    .map(|step| {
+                        let t = step as f32 / 119.0;
+                        let force = (t * std::f32::consts::PI).sin() * 0.55 + 0.05;
+                        (vec2(20.0 + t * 480.0, 75.0 + (t * 9.0).sin() * 40.0), force)
+                    })
+                    .collect();
+                pressure.raw = line.iter().map(|(_, force)| *force).collect();
+                pressure.lines.push(line);
+                self.dialog = Some(Dialog::Pressure(pressure));
+                true
+            }
             "dialog/close" => {
                 self.dialog = None;
                 self.menubar.close();
@@ -2340,24 +2520,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chords_come_before_the_plainer_chords_on_their_key() {
-        let table = shortcuts();
-        for (index, (early, key, name)) in table.iter().enumerate() {
-            for (late, other, later) in &table[index + 1..] {
-                if key != other {
-                    continue;
-                }
-                let swallows = early.command == late.command
-                    && (!early.shift || late.shift)
-                    && (!early.alt || late.alt);
-                assert!(!swallows, "{name} would swallow {later}");
-            }
-            let menus = crate::menus::menus();
+    fn every_default_chord_becomes_a_setting() {
+        let table = shortcut_table();
+        // Every chord of the old table made it in, grouped by command.
+        let chords: usize = table
+            .iter()
+            .map(|shortcut| shortcut.chords.chords().len())
+            .sum();
+        assert_eq!(chords, shortcuts().len() + TOOL_KEYS.len());
+        let save_as = table
+            .iter()
+            .find(|shortcut| shortcut.command == "file.save_as")
+            .unwrap();
+        assert_eq!(save_as.chords.chords().len(), 3);
+        let menus = crate::menus::menus();
+        for shortcut in table {
             assert!(
-                implemented(name) || crate::menus::label_of(&menus, name).is_some(),
-                "{name} is bound but neither built nor in a menu"
+                implemented(shortcut.command)
+                    || crate::menus::label_of(&menus, shortcut.command).is_some(),
+                "{} is bound but neither built nor in a menu",
+                shortcut.command
             );
         }
+        let declarations = sue_wm::shortcuts::declarations(KEYS_SECTION, table);
+        let mut keys: Vec<&str> = declarations
+            .iter()
+            .map(|declaration| declaration.path.as_str())
+            .collect();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), table.len(), "one setting per command");
     }
 
     #[test]
@@ -2367,7 +2559,11 @@ mod tests {
             .flat_map(|menu| menu.items.iter().flat_map(|item| item.commands()))
             .map(str::to_owned)
             .collect();
-        named.extend(shortcuts().iter().map(|(_, _, name)| (*name).to_owned()));
+        named.extend(
+            shortcut_table()
+                .iter()
+                .map(|shortcut| shortcut.command.to_owned()),
+        );
         for command in named.iter().filter(|command| implemented(command)) {
             assert!(command.contains('.'));
         }

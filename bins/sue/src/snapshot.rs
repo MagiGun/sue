@@ -523,6 +523,7 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     for (target, name) in [
         ("menu/Layer", "12-sue-paint-menu"),
         ("dialog/new", "13-sue-paint-new"),
+        ("dialog/pressure", "13b-sue-paint-pressure"),
     ] {
         if let Some(applet) = runtime.applets.get_mut(&studio) {
             applet.navigate("dialog/close");
@@ -618,6 +619,27 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     runtime.request(ShellRequest::CloseStudio, &mut camera.painter, camera.now);
     camera.settle(&mut runtime);
     shoot(&mut runtime, &mut camera, "23-manuscript-card")?;
+    // 24 to 27. Into Sue Writer from its card, frame by frame.
+    runtime.request(
+        ShellRequest::OpenIn {
+            entity: novel,
+            applet: writer.clone(),
+        },
+        &mut camera.painter,
+        camera.now,
+    );
+    for (frames, name) in [
+        (10, "24-writer-entering-a"),
+        (14, "25-writer-entering-b"),
+        (8, "26-writer-entering-c"),
+        (8, "27-writer-entering-d"),
+        (8, "28-writer-entering-e"),
+        (30, "29-writer-entering-f"),
+    ] {
+        let path = dir.join(format!("{name}.png"));
+        camera.shoot_after(&mut runtime, &path, frames)?;
+        entering.push(path);
+    }
     written.extend(entering);
     let _ = std::fs::remove_dir_all(&root);
     Ok(written)

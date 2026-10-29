@@ -21,6 +21,7 @@ mod snapshot;
 #[cfg(test)]
 mod style;
 mod util;
+mod viewer;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

@@ -1,8 +1,9 @@
-//! Riced keybinds (`sue_rice::Keybind`) matched against egui key events.
+//! Riced keybinds (`sue_rice::Keybinds`: any number of chords per action)
+//! matched against egui key events.
 
 use egui::{Event, InputState, Key};
 use sue_platform::{Key as PortableKey, NamedKey};
-use sue_rice::Keybind;
+use sue_rice::{Keybind, Keybinds};
 
 /// The egui key for a portable key.
 #[must_use]
@@ -37,9 +38,27 @@ fn same_modifiers(bind: &Keybind, modifiers: egui::Modifiers) -> bool {
         && wants.shift == modifiers.shift
 }
 
+/// Consumes a press of exactly one of `binds`' chords from this frame's
+/// input. Returns `true` if one was pressed.
+pub fn consume(input: &mut InputState, binds: &Keybinds) -> bool {
+    consume_except(input, binds, &[])
+}
+
+/// As [`consume`], leaving the chords in `reserved` alone (those an open
+/// studio uses itself).
+pub fn consume_except(input: &mut InputState, binds: &Keybinds, reserved: &[Keybind]) -> bool {
+    let mut found = false;
+    for chord in binds.chords() {
+        if !reserved.contains(chord) {
+            found |= consume_chord(input, chord);
+        }
+    }
+    found
+}
+
 /// Consumes a press of exactly `bind` from this frame's input. Returns
 /// `true` if it was pressed.
-pub fn consume(input: &mut InputState, bind: &Keybind) -> bool {
+pub fn consume_chord(input: &mut InputState, bind: &Keybind) -> bool {
     let Some(wanted) = egui_key(bind.key) else {
         return false;
     };
@@ -56,10 +75,14 @@ pub fn consume(input: &mut InputState, bind: &Keybind) -> bool {
     found
 }
 
-/// `true` if `bind` is held down now (for chords like Space while dragging).
+/// `true` if one of `binds`' keys is held down now (for chords like Space
+/// while dragging).
 #[must_use]
-pub fn held(input: &InputState, bind: &Keybind) -> bool {
-    egui_key(bind.key).is_some_and(|key| input.key_down(key))
+pub fn held(input: &InputState, binds: &Keybinds) -> bool {
+    binds
+        .chords()
+        .iter()
+        .any(|bind| egui_key(bind.key).is_some_and(|key| input.key_down(key)))
 }
 
 #[cfg(test)]
@@ -78,8 +101,8 @@ mod tests {
 
     #[test]
     fn chords_match_exactly_and_are_consumed_once() {
-        let undo: Keybind = "Ctrl+Z".parse().unwrap();
-        let redo: Keybind = "Ctrl+Shift+Z".parse().unwrap();
+        let undo: Keybinds = "Ctrl+Z".parse().unwrap();
+        let redo: Keybinds = "Ctrl+Shift+Z".parse().unwrap();
         let mut input = InputState::default();
         input.events.push(press(Key::Z, egui::Modifiers::COMMAND));
         assert!(!consume(&mut input, &redo));
@@ -91,13 +114,35 @@ mod tests {
         ));
         assert!(!consume(&mut input, &undo));
         assert!(consume(&mut input, &redo));
-        let palette: Keybind = "/".parse().unwrap();
+        let palette: Keybinds = "/".parse().unwrap();
         input.events.push(press(Key::Slash, egui::Modifiers::NONE));
         assert!(consume(&mut input, &palette));
-        let settings: Keybind = "Ctrl+,".parse().unwrap();
+        let settings: Keybinds = "Ctrl+,".parse().unwrap();
         input
             .events
             .push(press(Key::Comma, egui::Modifiers::COMMAND));
         assert!(consume(&mut input, &settings));
+    }
+
+    #[test]
+    fn an_action_takes_every_one_of_its_chords() {
+        let undo: Keybinds = "Ctrl+Z or Alt+Backspace".parse().unwrap();
+        assert_eq!(undo.chords().len(), 2);
+        assert_eq!(undo.to_string(), "Ctrl+Z or Alt+Backspace");
+        let mut input = InputState::default();
+        input
+            .events
+            .push(press(Key::Backspace, egui::Modifiers::ALT));
+        assert!(consume(&mut input, &undo));
+        input.events.push(press(Key::Z, egui::Modifiers::COMMAND));
+        let reserved: Keybind = "Ctrl+Z".parse().unwrap();
+        assert!(
+            !consume_except(&mut input, &undo, &[reserved]),
+            "a studio keeps its own"
+        );
+        assert!(consume(&mut input, &undo));
+        let none: Keybinds = "".parse().unwrap();
+        assert!(none.is_empty());
+        assert!(!consume(&mut input, &none));
     }
 }

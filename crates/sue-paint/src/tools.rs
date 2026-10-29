@@ -208,7 +208,7 @@ impl Tool {
                     "Mapping Pen",
                     0,
                     tip(4.0, |t| {
-                        t.min_size = 0.05;
+                        t.size_by.pressure_min = 0.05;
                         t.taper_start = 10.0;
                         t.taper_end = 20.0;
                     }),
@@ -221,7 +221,7 @@ impl Tool {
                     "Turnip Pen",
                     0,
                     tip(14.0, |t| {
-                        t.min_size = 0.3;
+                        t.size_by.pressure_min = 0.3;
                         t.aa = AntiAlias::Medium;
                         t.taper_start = 10.0;
                         t.taper_end = 18.0;
@@ -235,7 +235,7 @@ impl Tool {
                     "Marker",
                     0,
                     tip(10.0, |t| {
-                        t.pressure_size = false;
+                        t.size_by.pressure = false;
                         t.aa = AntiAlias::Strong;
                     }),
                 )
@@ -250,8 +250,8 @@ impl Tool {
                     tip(6.0, |t| {
                         t.grain = 0.45;
                         t.hardness = 0.85;
-                        t.min_size = 0.4;
-                        t.pressure_opacity = true;
+                        t.size_by.pressure_min = 0.4;
+                        t.opacity_by.pressure = true;
                         t.taper_end = 6.0;
                     }),
                 )
@@ -262,8 +262,8 @@ impl Tool {
                     0,
                     tip(3.0, |t| {
                         t.grain = 0.3;
-                        t.pressure_size = false;
-                        t.pressure_opacity = true;
+                        t.size_by.pressure = false;
+                        t.opacity_by.pressure = true;
                     }),
                 )
                 .stabilization(3),
@@ -274,7 +274,7 @@ impl Tool {
                     tip(12.0, |t| {
                         t.grain = 0.7;
                         t.hardness = 0.6;
-                        t.pressure_opacity = true;
+                        t.opacity_by.pressure = true;
                         t.taper_end = 10.0;
                     }),
                 )
@@ -311,7 +311,7 @@ impl Tool {
                     "Gouache",
                     0,
                     tip(30.0, |t| {
-                        t.min_size = 0.6;
+                        t.size_by.pressure_min = 0.6;
                         t.aa = AntiAlias::Medium;
                         t.flow = 0.9;
                         t.mix = 0.2;
@@ -323,7 +323,7 @@ impl Tool {
                     "Ink Brush",
                     0,
                     tip(20.0, |t| {
-                        t.min_size = 0.02;
+                        t.size_by.pressure_min = 0.02;
                         t.aa = AntiAlias::Medium;
                         t.taper_start = 20.0;
                         t.taper_end = 40.0;
@@ -342,8 +342,8 @@ impl Tool {
                         t.hardness = 0.0;
                         t.build_up = true;
                         t.flow = 0.06;
-                        t.pressure_size = false;
-                        t.pressure_opacity = true;
+                        t.size_by.pressure = false;
+                        t.opacity_by.pressure = true;
                     }),
                 ),
                 SubTool::new(
@@ -354,7 +354,7 @@ impl Tool {
                         t.hardness = 0.3;
                         t.build_up = true;
                         t.flow = 0.2;
-                        t.pressure_size = false;
+                        t.size_by.pressure = false;
                     }),
                 ),
                 SubTool::new(
@@ -375,7 +375,7 @@ impl Tool {
                     0,
                     tip(20.0, |t| {
                         t.eraser = true;
-                        t.pressure_size = false;
+                        t.size_by.pressure = false;
                     }),
                 )
                 .stabilization(2),
@@ -388,7 +388,7 @@ impl Tool {
                         t.hardness = 0.2;
                         t.build_up = true;
                         t.flow = 0.3;
-                        t.pressure_size = false;
+                        t.size_by.pressure = false;
                     }),
                 )
                 .stabilization(2),
@@ -414,7 +414,7 @@ impl Tool {
             ],
             Self::Figure => {
                 let line = tip(6.0, |t| {
-                    t.pressure_size = false;
+                    t.size_by.pressure = false;
                 });
                 vec![
                     SubTool::new(self, "Straight Line", 0, line),

@@ -1,7 +1,7 @@
 //! Typed rice parameters and their inference from literals and metadata.
 
 use crate::parser::{Bound, Literal, Metadata, Tag};
-use crate::{Keybind, Rgba, RiceError, RiceValue, SHADER_EXTENSIONS};
+use crate::{Keybind, Keybinds, Rgba, RiceError, RiceValue, SHADER_EXTENSIONS};
 
 /// One riceable setting, with its current value and the metadata that decides
 /// its widget.
@@ -42,10 +42,10 @@ pub enum RiceParameter {
         /// Allowed choices, in display order.
         options: Vec<String>,
     },
-    /// Keybind recorder.
+    /// Keybind recorder: every chord that runs the action.
     Keybind {
         /// Current chord.
-        value: Keybind,
+        value: Keybinds,
     },
     /// Shader file picker. Empty means "no shader".
     ShaderPath {
@@ -83,7 +83,7 @@ impl RiceParameter {
             Self::IntRange { value, .. } => RiceValue::Int(*value),
             Self::FloatRange { value, .. } => RiceValue::Float(*value),
             Self::ColorHex { value } => RiceValue::Color(*value),
-            Self::Keybind { value } => RiceValue::Keybind(*value),
+            Self::Keybind { value } => RiceValue::Keybind(value.clone()),
             Self::EnumChoice { value, .. } | Self::ShaderPath { value } | Self::Text { value } => {
                 RiceValue::Text(value.clone())
             }
@@ -338,7 +338,9 @@ impl RiceParameter {
         if let Ok(value) = text.parse::<Keybind>()
             && !value.modifiers.is_empty()
         {
-            return Self::Keybind { value };
+            return Self::Keybind {
+                value: Keybinds::one(value),
+            };
         }
         Self::Text { value: text }
     }

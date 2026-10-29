@@ -1,7 +1,8 @@
 //! Image: a decoded picture (`RasterTile2D` from JPEG XL, PNG or JPEG) on
 //! the canvas. Its pixels go straight from the arena to the GPU. The pill
-//! zooms to 1:1, overlays a pixel grid, re-encodes to lossless JPEG XL and
-//! opens the file's bytes in Code / Hex.
+//! opens it in the Image Viewer (as a double-click does), overlays a pixel
+//! grid, re-encodes it to lossless JPEG XL where you choose, and opens the
+//! file's bytes in Code / Hex.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -11,11 +12,11 @@ use sue_core::{ComponentKind, Entity, PixelFormat};
 use sue_io::{JxlError, JxlPipeline, NativeJxlPipeline, byte_map_tile, meta};
 use sue_platform::write_atomic;
 use sue_wm::{
-    AppletContext, AppletId, AppletManifest, AppletRole, MediaClass, ModeSpec, NewEntity, NodeId,
-    SceneNode, ShellRequest, SpawnNode, SueApplet, World, widgets,
+    AppletContext, AppletId, AppletManifest, AppletRole, FilePick, FileType, MediaClass, ModeSpec,
+    NewEntity, NodeId, SceneNode, ShellRequest, SpawnNode, SueApplet, World, widgets,
 };
 
-use crate::util::{free_path, human_bytes};
+use crate::util::human_bytes;
 
 /// The applet id.
 pub const ID: &str = "image";
@@ -46,8 +47,33 @@ fn fitted(area: Rect, width: u32, height: u32) -> Rect {
 }
 
 impl Image {
-    fn reencode(cx: &mut AppletContext<'_>, node: NodeId) {
+    /// Asks where to save the picture as JPEG XL; `picked` writes it.
+    fn ask_reencode(cx: &mut AppletContext<'_>, node: NodeId) {
         let Some(entity) = cx.entity(node) else {
+            return;
+        };
+        let stem = Path::new(entity.name()).file_stem().map_or_else(
+            || "image".to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        );
+        let start = entity
+            .meta(meta::SOURCE)
+            .and_then(|path| Path::new(path).parent().map(Path::to_path_buf))
+            .unwrap_or_else(|| crate::util::export_dir(cx));
+        let pick = FilePick::save(
+            Some(AppletId::new(ID).expect("a valid id")),
+            &format!("reencode:{}", entity.id()),
+            "Re-encode as JPEG XL",
+            &format!("{stem}.jxl"),
+        )
+        .types(vec![FileType::new("JPEG XL picture", &["jxl"])])
+        .starting_in(Some(start));
+        cx.request(ShellRequest::PickFile(pick));
+    }
+
+    /// Writes the picture of `node` as JPEG XL to `path`.
+    fn reencode(cx: &mut AppletContext<'_>, id: sue_core::EntityId, path: &Path) {
+        let Ok(entity) = cx.arena().get_by_id(id) else {
             return;
         };
         let name = entity.name().to_owned();
@@ -84,21 +110,26 @@ impl Image {
                 return;
             }
         };
-        let dir = source
-            .as_deref()
-            .and_then(|path| Path::new(path).parent().map(Path::to_path_buf))
-            .unwrap_or_else(|| crate::util::export_dir(cx));
-        let stem = Path::new(&name).file_stem().map_or_else(
-            || "image".to_owned(),
-            |stem| stem.to_string_lossy().into_owned(),
-        );
-        let path = free_path(&dir.join(format!("{stem}.jxl")));
-        match write_atomic(&path, &bytes) {
+        let _ = name;
+        match write_atomic(path, &bytes) {
             Ok(()) => cx.saved(
-                &path,
+                path,
                 format!("JPEG XL, {how}, {}", human_bytes(bytes.len() as u64)),
             ),
             Err(error) => cx.fail(format!("Cannot write {}: {error}", path.display())),
+        }
+    }
+
+    /// Opens the picture in the Image Viewer.
+    fn open_viewer(cx: &mut AppletContext<'_>, node: NodeId) {
+        if let (Some(entity), Ok(viewer)) = (
+            cx.entity(node).map(Entity::id),
+            AppletId::new(crate::viewer::ID),
+        ) {
+            cx.request(ShellRequest::OpenIn {
+                entity,
+                applet: viewer,
+            });
         }
     }
 
@@ -220,10 +251,13 @@ impl SueApplet for Image {
             PixelFormat::Rgba8 => 4,
             PixelFormat::RgbaF32 => 0,
         };
+        // The entity's revision, so an edit (the Image Viewer turning it)
+        // shows at once.
+        let revision = entity.revision();
         let texture = tile.bytes().filter(|_| channels > 0).and_then(|bytes| {
             cx.textures.texture(
                 handle.to_bits(),
-                0,
+                revision,
                 [width, height],
                 channels,
                 bytes,
@@ -250,6 +284,16 @@ impl SueApplet for Image {
                 );
             }
         }
+        if ui
+            .interact(
+                area,
+                egui::Id::unique(("sue-image-card", node.0)),
+                egui::Sense::click(),
+            )
+            .double_clicked()
+        {
+            Self::open_viewer(cx, node);
+        }
         if self.grid.contains(&node) && screen_pixel >= 6.0 {
             let visible = ui.clip_rect().intersect(image);
             let stroke = Stroke::new(
@@ -273,31 +317,13 @@ impl SueApplet for Image {
 
     fn pill_ui(&mut self, ui: &mut Ui, node: NodeId, cx: &mut AppletContext<'_>) {
         let theme = cx.theme.clone();
-        if widgets::pill_button(ui, "1:1 Zoom", false, &theme)
-            .on_hover_text("One picture pixel per screen pixel")
+        if widgets::pill_button(ui, "Image Viewer", false, &theme)
+            .on_hover_text(
+                "Look at it large, edit it, save or send it (double-click the card does the same)",
+            )
             .clicked()
-            && let Some(scene_node) = cx.node(node)
-            && let Some(width) = cx
-                .entity(node)
-                .and_then(|entity| entity.component(ComponentKind::RasterTile2D))
-                .and_then(|data| data.as_raster())
-                .map(sue_core::RasterTile2D::width)
         {
-            let content = Rect::from_min_max(
-                scene_node.rect.min + vec2(0.0, sue_wm::NODE_TITLE),
-                scene_node.rect.max,
-            );
-            let height = cx
-                .entity(node)
-                .and_then(|entity| entity.component(ComponentKind::RasterTile2D))
-                .and_then(|data| data.as_raster())
-                .map_or(1, sue_core::RasterTile2D::height);
-            let shown = fitted(content, width, height);
-            let percent = (width as f32 / shown.width().max(1.0) * 100.0).round() as u32;
-            cx.request(ShellRequest::Frame {
-                node,
-                zoom_percent: Some(percent.max(1)),
-            });
+            Self::open_viewer(cx, node);
         }
         let on = self.grid.contains(&node);
         if widgets::pill_button(ui, "Pixel Grid", on, &theme)
@@ -308,8 +334,11 @@ impl SueApplet for Image {
             self.grid.remove(&node);
         }
         widgets::pill_divider(ui, &theme);
-        if widgets::pill_button(ui, "Re-encode .jxl", false, &theme).clicked() {
-            Self::reencode(cx, node);
+        if widgets::pill_button(ui, "Re-encode .jxl", false, &theme)
+            .on_hover_text("Save a lossless JPEG XL copy where you choose")
+            .clicked()
+        {
+            Self::ask_reencode(cx, node);
         }
         if widgets::pill_button(ui, "Inspect Hex", false, &theme).clicked() {
             Self::inspect_hex(cx, node);
@@ -318,6 +347,16 @@ impl SueApplet for Image {
 
     fn duration(&self, node: &SceneNode, _world: &World) -> f64 {
         node.prop("dur", 4.0)
+    }
+
+    fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
+        if let Some(id) = pick
+            .purpose
+            .strip_prefix("reencode:")
+            .and_then(|id| id.parse::<sue_core::EntityId>().ok())
+        {
+            Self::reencode(cx, id, path);
+        }
     }
 }
 

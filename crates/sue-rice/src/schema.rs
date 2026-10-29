@@ -7,7 +7,7 @@ use std::ops::Range;
 use sue_core::{ReversibleTransaction, TxnError};
 
 use crate::parser::{self, Line};
-use crate::{Keybind, Rgba, RiceDeclaration, RiceDiagnostic, RiceError, RiceParameter, RiceValue};
+use crate::{Keybinds, Rgba, RiceDeclaration, RiceDiagnostic, RiceError, RiceParameter, RiceValue};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LineState {
@@ -381,11 +381,11 @@ impl RiceSchema {
         }
     }
 
-    /// A key chord.
+    /// Every chord bound at `path`.
     #[must_use]
-    pub fn get_keybind(&self, path: &str) -> Option<Keybind> {
+    pub fn get_keybind(&self, path: &str) -> Option<Keybinds> {
         match self.parameter(path)? {
-            RiceParameter::Keybind { value } => Some(*value),
+            RiceParameter::Keybind { value } => Some(value.clone()),
             _ => None,
         }
     }

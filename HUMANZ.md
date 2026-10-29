@@ -376,7 +376,8 @@ valid however often an entity is removed and brought back: `SpawnEntity`
 (optionally with relations), `DespawnEntity` (restores relations), `SetProperty`,
 `SetMeta`, `Rename`, `Relate`, `Unrelate`, `SetExtension` (swap a whole extension
 component; fine-grained edits like `sue_model::SetCell` and `GraphEdit` store
-smaller deltas), `RasterEdit` (the rectangles of a raster an in-place pixel edit
+smaller deltas), `ReplaceComponent` (swap the component of a kind, a raster
+for an edited one, under the same id), `RasterEdit` (the rectangles of a raster an in-place pixel edit
 changed, before and after: a brush stroke stores only the 64-pixel tiles it
 touched), `InsertBundle` (§1.10) and `Batch<T>`, which applies several
 transactions as one step and takes back the done ones if a later one fails.
@@ -495,6 +496,7 @@ extension components (`sue_model::register`):
 | `TextMarks` | `sue.text.marks` | Formatting ranges over the entity's text (bold, link, heading, list, font, size, color, inline math, comment, footnote, embedded entity); paragraph marks ride on each paragraph's newline and follow edits through `insert_text` and `delete_text` (§3.8) | word processing, notes, Markdown, novels, LaTeX, layout |
 | `Table` | `sue.table` | Sparse cells (`Value` plus optional formula text), typed columns, A1 references, row insert and remove; `SetCell` edits | spreadsheets, databases, CSV, schedules, bills of materials, cue lists |
 | `Animation`, `Curve` | `sue.animation` | Keyframes (constant, linear, Bezier) per property key | motion graphics, animation, rigging, automation, grading keyframes |
+| `Response` | (a plain value, kept in settings and tool presets) | A curve from 0 to 1 in to 0 to 1 out: up to eight control points, the first at input 0 and the last at input 1, evaluated as a clamped B-spline (degree up to 3) that passes through the ends and bends toward the rest without overshoot; written as text, `0,0 0.5,0.35 1,1` | pen pressure, brush dynamics, tone and level curves, audio transfer curves |
 | `Sequence`, `Track`, `Clip` | `sue.sequence` | Tracks of clips pointing at any entity, with trims, speed and split | video editing, DAWs, slideshows, podcasts, subtitles |
 | `Notes`, `Note` | `sue.notes` | Note events with pitch, velocity, channel, lyric and expression | MIDI, piano roll, notation, singing synthesis |
 | `NodeGraph`, `NodeRegistry` | `sue.graph` | Nodes with typed ports and parameters, links, evaluation order; `GraphEdit` edits | compositing, shaders, audio patches, procedural geometry, game logic |
@@ -620,6 +622,10 @@ compressed PNG; `encode_wav_as`, `encode_aiff` and `encode_flac` (with
 `flacenc`) write WAV (16, 24 or 32-bit float), AIFF and FLAC; and
 `decode_picture` and `encode_picture` read and write BMP, GIF, ICO, PNM, QOI,
 TGA, TIFF and WebP through the `image` crate (`PictureFormat`).
+`PICTURE_SAVE_TYPES` lists every picture format Sue writes (PNG, JPEG XL,
+JPEG, WebP, TIFF, BMP, TGA, GIF, QOI) for a Save As type list, and
+`encode_as` writes a raster as the one an extension names (JPEG over white,
+JPEG XL losslessly).
 
 ### 2.3 Tile cache
 
@@ -966,6 +972,19 @@ are data (`Menu`, `MenuItem` with a command and a shortcut), and each frame the
 studio says per command whether it works and whether it is checked
 (`ItemState`), so items whose feature is not built yet are grayed out.
 
+**Shortcuts.** Every applet assigns keys the same way, through
+`sue_wm::shortcuts`: it lists its commands with their default chords
+(`Shortcut::new("file.save_as", "Save As", "Ctrl+Shift+S or Ctrl+Alt+S")`),
+`declarations` turns each into a key setting in the applet's own section
+(`<section>.<command>`, dots as underscores, such as `sue_paint_keys`,
+`sue_writer_keys` and `image_viewer_keys`), and `take` consumes this frame's
+presses of the chords as they are set now. A `Keybinds` value holds any
+number of chords, written `A or B`; `keys::consume` matches exact modifiers,
+so `Ctrl+S` never fires for `Ctrl+Shift+S`. `shortcuts::Bound` keeps a
+studio's menus showing its current first chords and gives the shell the
+chords the open studio keeps for itself (`SueApplet::reserved_keys`). The
+shell's own keys (`[keys]`) work the same way.
+
 **Going in and out of a studio.** Opening a studio, the shell finds the card
 it will work on (the selected node, if the studio `accepts` its entity, else
 the node of its `studio_focus`), closes the timeline (the side panels stay),
@@ -1074,9 +1093,10 @@ register its own:
 | --- | --- | --- | --- |
 | Document | Node | Document; Document: Blank, Notes, To-Do List, Letter, Report; Document Track | Markdown-like text (`#`, `##`, `**`, backticks styled, never hidden) in a `TextEdit`; pill: H1, H2, Bold, Monospace, text size, Project to Timeline |
 | Audio | Node | Audio (palette only); Audio: Tone (A 440), Silence (10 s); Audio Track | Waveform of a clip of a `PCMFloat1D`; Play or Pause, Gain, Split (zero-copy), Normalize, Open in Timeline |
-| Image | Node | Image (palette only); Paint/Visual Track | Decoded JPEG XL, PNG or JPEG; 1:1 Zoom, Pixel Grid, Re-encode .jxl (bit-exact for JPEG when a codec allows), Inspect Hex |
+| Image | Node | Image (palette only); Paint/Visual Track | Decoded JPEG XL, PNG or JPEG; Image Viewer (also a double-click), Pixel Grid, Re-encode .jxl (asks where through the File Manager; bit-exact for JPEG when a codec allows), Inspect Hex |
+| Image Viewer | Studio | n/a | One picture of the canvas filling the window: fit, 100% and wheel zoom, panning, the next and previous pictures; simple edits (turn, mirror, crop, resize, brightness and contrast, saturation and hue, grayscale, invert), each one undo step on the same entity (`ReplaceComponent`); Save As in any picture format, a lossless JPEG XL re-encode, the Converter, and Send To Sue Paint or Sue Writer by `EntityId` |
 | Code / Hex | Node | Code / Hex (palette only); Code: Rust, Python, JavaScript, HTML, CSS, JSON, Shell Script | Code in a monospace `TextEdit`, or a selectable hex dump of any file's bytes; Copy All |
-| File Manager | Left drawer and window | n/a | Folder tabs with back and forward; a typed or copied path bar; list or card view (`files.view`), sort (`files.sort`), card size; picture thumbnails decoded and shrunk on a background thread; search of the folder or, on a background thread, everything under it (2,000 results, 200,000 entries at most); places (project, home and its usual folders, `sue_platform::roots`) and saved folders (`files.saved`, undoable rice edits); new folder, rename, copy path, show in Explorer; the large window answers every `FilePick` |
+| File Manager | Left drawer and window | n/a | Folder tabs with back and forward; a typed or copied path bar; list, details, icons or cards (`files.view`), sort (`files.sort`, reversed with `files.sort_reverse`), a size slider; picture thumbnails (PNG, JPEG, JPEG XL, GIF, BMP, WebP, TGA, TIFF) decoded and shrunk by a small pool of background workers, newest request first; a star that makes the folder a favorite (`files.saved`) and a Favorites section; when saving, a Save as type list from `FilePick::types` that changes the extension; the system's own Open and Save dialogs instead, from a button or always (`files.dialog = "system"`); search of the folder or, on a background thread, everything under it (2,000 results, 200,000 entries at most); places (project, home and its usual folders, `sue_platform::roots`) and saved folders (`files.saved`, undoable rice edits); new folder, rename, copy path, show in Explorer; the large window answers every `FilePick` |
 | Player | Left drawer and window | n/a | A music library in the data folder (a versioned tab-separated text file: songs with tags and length from `sue_io::probe_audio`, playlists, hand-made albums, likes); albums from the tags, artists, search; a queue with shuffle, repeat off, all or one, and autoplay; songs decoded on a background thread into `Shared` buffers, the next one ahead of time, with loudness evening; shuffle, previous, play, next, repeat, seek, volume and mute; covers from a collection's picture or `cover.jpg` and the like beside the songs; `player.*` settings; palette commands |
 | Convert | Left drawer and window | n/a | Any file in (picked through the File Manager, a folder at a time, sent by its Convert button, or from the canvas); a target per kind (pictures: PNG, JPEG, JPEG XL, WebP, TIFF, BMP, GIF, TGA, QOI, ICO, PPM; sounds: FLAC, WAV, AIFF; text: tidied, Markdown to HTML, CSV, TSV, JSON; anything: Base64, hex dump, byte map, copy); picture resizing with Lanczos, bicubic, bilinear or nearest in premultiplied alpha, turns, mirrors, brightness, contrast, saturation, grays, flattening; sound trimming, channels, Lanczos resampling, speed, reverse, gain or normalizing, fades, depth; text tidying; output folder, name pattern and keep or replace (never the source); files convert on a background thread |
 | Notes | Left drawer | n/a | One shared note in a `TextEdit`, autosaved every `general.autosave_seconds` and on exit; a toolbar with Undo and Redo (`AppletContext::undo`), Save As and Open through the File Manager (Open replaces the text as one typing step), Copy All, Clear and text size; word and character counts; a drag past the note's edges scrolls it (`edge_scroll`) so a selection can grow |
@@ -1140,7 +1160,8 @@ clean without the brush feeling slow. A stroke passes through these stages:
 
 | Stage | What it does |
 | --- | --- |
-| Input | egui's raw event stream, in order, so a fast stroke keeps every sample between frames; each frame's samples are spread over its time, so speeds are real. Pen pressure comes from egui touch events with force and scales size (down to the tip's minimum size) and opacity. |
+| Input | egui's raw event stream, in order, so a fast stroke keeps every sample between frames; each frame's samples are spread over its time, so speeds are real. Pen pressure comes from egui touch events with force, through the pen pressure curve every tool shares (`sue_paint.pen_pressure`, a `Response`). |
+| Dynamics | Brush Size and Opacity each have a `Dynamics`, as in Clip Studio Paint: pen pressure, velocity (the pen's speed, still to 2,000 points per second) and random, each on or off with a minimum value and, for pressure and velocity, its own curve; the inputs multiply. Random is steady along the path, so the stroke painted again from its corrected path keeps its sizes. *Specify by size on screen* keeps the brush the same size at any zoom; *At least 1 pixel* keeps a light line from thinning below a pixel. |
 | Stabilization | A time-based filter (lag of about 4 ms per level, the same at any sample rate) that the brush follows. *Adjust by speed* loosens it as the pen speeds up (from 150 to 1500 points per second the lag drops to a tenth), so slow lines lose their tremor while quick hatching stays snappy. On lift the brush catches up with the pen. |
 | Painting live | Pen-like tips paint a continuous tapered capsule between consecutive samples: each pixel's coverage comes from its exact distance to the segment (four anti-aliasing widths, hardness falloff), so there are no gaps, ridges or beads at any speed, and lines thinner than a pixel stay unbroken as lighter ink. Airbrushes and mixing brushes stamp dabs at a tight spacing instead, because their dabs add up. The start taper grows the line from a point. |
 | Finishing on lift | The hooks a pen leaves when it touches down and lifts are trimmed; the samples become a centripetal Catmull-Rom spline (no loops or overshoot), so even a fast mouse that reported a few points ends as a curve; *post correction* (0 to 10) resamples the path evenly, finds deliberate corners (a turn of more than about 65 degrees over arms a brush wide, on a lightly smoothed copy) and smooths everything between them with a gaussian along the path that grows with the level and the brush; a quick *flick* (over 700 points per second) carries the line on along the pen's momentum. The stroke is then painted again from the finished path with its end tapered, the flick thinning to a point. |
@@ -1363,7 +1384,7 @@ packages can add their own:
 | Files & Codecs | JPEG XL effort, bit-exact JPEG recompression, the conversion folder and JPEG quality, the open-file size limit, byte-map width, the built-in codecs |
 | Studios | Each studio's own settings and theme: for Sue Paint the new picture size and resolution, `sue_paint.theme` (Gray by default, the Sue theme, a preset, or Custom) and the Custom colors (`sue_paint_colors`) |
 | Packages & Updates | The signature policy, the installed applets, installed packages, the active generation and rollback state |
-| Keymaps | Every shortcut as an action and a key cap |
+| Keymaps | Every shortcut as an action with all its chords: Sue's own, then Sue Paint's (Clip Studio Paint's defaults, tools and brush keys too), Sue Writer's and the Image Viewer's |
 | MCP | "Not yet available." (a `SettingsItem::Note`) |
 
 Any rice section no page claims is listed on a final "Other" page, so every
@@ -1376,7 +1397,7 @@ parameter stays reachable (tested).
 | `ColorHex` | A swatch that opens the shared color wheel (`sue_wm::color_button`: a hue ring around a saturation and value square, an opacity bar, HSV numbers and a row of grays) in a layer over every window; dragging previews, release commits |
 | `EnumChoice` | A segmented control for up to five short options, else a compact drop-down |
 | A text parameter with live choices (output device, boot mode) | A drop-down |
-| `Keybind` | A key cap; click it and press the new chord (`Esc` cancels; global shortcuts are held back while recording) |
+| `Keybind` | One key cap per chord: click one and press its new chord, x takes one away, + adds another, as many as wanted (`Esc` cancels; global shortcuts are held back while recording) |
 | `ShaderPath` / `Text` | Text field |
 
 Text fields commit when they lose focus. A slider or color wheel drag

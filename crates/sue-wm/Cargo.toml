@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 egui.workspace = true
 sue-core.workspace = true
+sue-model.workspace = true
 sue-platform.workspace = true
 sue-rice.workspace = true
 ttf-parser.workspace = true

@@ -282,7 +282,8 @@ impl SuePaint {
                 Event::Touch { phase, force, .. } => match phase {
                     TouchPhase::Start | TouchPhase::Move => {
                         if let Some(force) = force {
-                            self.pressure = Some(force.clamp(0.0, 1.0));
+                            // Through the pen pressure curve every tool shares.
+                            self.pressure = Some(self.pen_curve.eval(force.clamp(0.0, 1.0)));
                         }
                     }
                     TouchPhase::End | TouchPhase::Cancel => self.pressure = None,
@@ -486,6 +487,11 @@ impl SuePaint {
                 if self.transparent {
                     tip.eraser = true;
                 }
+                if tip.screen_size {
+                    // The size is the screen's: as many layer pixels as it
+                    // covers at this zoom.
+                    tip.size /= doc.view.zoom.max(0.01);
+                }
                 let mut stroke =
                     BrushStroke::new(info.id, tip, rgb, info.alpha_locked && !tip.eraser);
                 let shifted = doc
@@ -502,7 +508,7 @@ impl SuePaint {
                     stroke.to(raster, start, pressure, selection);
                 }
                 self.gesture = Some(Gesture::Stroke {
-                    stroke,
+                    stroke: Box::new(stroke),
                     stabilizer,
                     offset,
                     raw: local,
@@ -521,7 +527,7 @@ impl SuePaint {
                 }
                 self.gesture = Some(Gesture::Shape {
                     tool,
-                    sub,
+                    sub: Box::new(sub),
                     op,
                     from: p,
                     to: p,
@@ -536,7 +542,7 @@ impl SuePaint {
                 } else {
                     Gesture::Shape {
                         tool,
-                        sub,
+                        sub: Box::new(sub),
                         op,
                         from: p,
                         to: p,
@@ -609,6 +615,8 @@ impl SuePaint {
                     trail.drain(..trail.len() - 64);
                 }
                 let smooth = stabilizer.sample(local, doc.view.zoom, step);
+                // Fast is 2000 screen points a second (velocity dynamics).
+                stroke.set_speed(stabilizer.speed() / 2000.0);
                 let selection = shifted.as_ref().or(doc.selection.as_ref());
                 if let Some(raster) = doc::raster_mut(&mut cx.world.arena, stroke.layer()) {
                     stroke.to(raster, smooth, pressure, selection);

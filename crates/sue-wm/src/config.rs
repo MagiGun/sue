@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use sue_rice::{Keybind, RiceDeclaration, RiceError, RiceParameter, RiceSchema};
+use sue_rice::{Keybinds, RiceDeclaration, RiceError, RiceParameter, RiceSchema};
 
 use crate::{LayoutMetrics, SpringParams, WmError};
 
@@ -370,39 +370,40 @@ pub fn register_rice(schema: &mut RiceSchema) -> Result<(), RiceError> {
     schema.register_all(&rice_declarations())
 }
 
-/// The global shortcuts the shell handles before applets see input.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The global shortcuts the shell handles before applets see input. Each
+/// action may have any number of chords.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Keymap {
     /// Show or hide the left drawer.
-    pub toggle_left_drawer: Keybind,
+    pub toggle_left_drawer: Keybinds,
     /// Show or hide the right drawer.
-    pub toggle_right_drawer: Keybind,
+    pub toggle_right_drawer: Keybinds,
     /// Show or hide the timeline.
-    pub toggle_timeline: Keybind,
+    pub toggle_timeline: Keybinds,
     /// Open the command palette.
-    pub command_palette: Keybind,
+    pub command_palette: Keybinds,
     /// Open the command palette (alternative).
-    pub command_palette_alt: Keybind,
+    pub command_palette_alt: Keybinds,
     /// Open Settings.
-    pub open_settings: Keybind,
+    pub open_settings: Keybinds,
     /// Open a file.
-    pub open_file: Keybind,
+    pub open_file: Keybinds,
     /// Save the project.
-    pub save: Keybind,
+    pub save: Keybinds,
     /// Quit.
-    pub quit: Keybind,
+    pub quit: Keybinds,
     /// Undo.
-    pub undo: Keybind,
+    pub undo: Keybinds,
     /// Redo.
-    pub redo: Keybind,
+    pub redo: Keybinds,
     /// Redo (alternative).
-    pub redo_alt: Keybind,
+    pub redo_alt: Keybinds,
     /// Play or pause the timeline.
-    pub play_pause: Keybind,
+    pub play_pause: Keybinds,
     /// Frame everything.
-    pub reset_camera: Keybind,
+    pub reset_camera: Keybinds,
     /// Remove the selected entity from the canvas.
-    pub delete: Keybind,
+    pub delete: Keybinds,
 }
 
 /// Canvas behavior.

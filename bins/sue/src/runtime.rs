@@ -16,9 +16,7 @@ use std::time::{Duration, Instant};
 use egui::{Align2, Id, Order, RichText, Sense};
 use sue_core::{SueFile, UndoStack};
 use sue_io::{IngestOptions, IngestView, NativeJxlPipeline, ingest_bytes, meta};
-use sue_platform::{
-    AudioConfig, AudioOutput, AudioSink, FileFilter, FramePacing, TextureUpload, write_atomic,
-};
+use sue_platform::{AudioConfig, AudioOutput, AudioSink, FramePacing, TextureUpload, write_atomic};
 use sue_rice::{RiceSchema, SetRiceValues};
 use sue_wm::{
     Applets, FilePick, RiceEdit, Shell, ShellIo, ShellRequest, Theme, Transport, Typing, widgets,
@@ -651,14 +649,7 @@ impl Runtime {
                 .notify("Choosing files needs the desktop window", false);
             return;
         }
-        let filters = if pick.extensions.is_empty() {
-            Vec::new()
-        } else {
-            vec![FileFilter {
-                name: "Files".to_owned(),
-                extensions: pick.extensions.clone(),
-            }]
-        };
+        let filters = crate::files::filters_of(&pick);
         let start = pick
             .start
             .clone()
@@ -694,7 +685,7 @@ impl Runtime {
                     .unwrap_or_else(|| self.engine.paths.home_dir.clone());
                 self.engine.requests.push(ShellRequest::PickFile(
                     FilePick::save(None, "save-project", "Save Project", "Untitled.sue")
-                        .extensions(&["sue"])
+                        .types(vec![sue_wm::FileType::new("Sue project", &["sue"])])
                         .starting_in(Some(start)),
                 ));
                 return;
@@ -1235,6 +1226,73 @@ pub(crate) mod tests {
             2
         );
         step(&mut runtime, Vec::new());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn sue_paint_saves_as_a_project_or_any_picture_type() {
+        let (mut runtime, root) = runtime("paint-save-as");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        step(&mut runtime, Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let pick = FilePick::save(Some(paint), "save-as", "Save As", "Picture.sue");
+        std::fs::create_dir_all(&root).unwrap();
+
+        // A picture type writes the flattened picture in that format.
+        for (name, format) in [
+            ("Picture.qoi", sue_io::PictureFormat::Qoi),
+            ("Picture.webp", sue_io::PictureFormat::WebP),
+        ] {
+            let path = root.join(name);
+            runtime.request(
+                ShellRequest::Picked {
+                    pick: pick.clone(),
+                    path: path.clone(),
+                },
+                &mut NoTextures,
+                start,
+            );
+            step(&mut runtime, Vec::new());
+            let bytes = std::fs::read(&path).unwrap_or_else(|_| panic!("{name} was written"));
+            let decoded = sue_io::decode_picture(&bytes, Some(format)).unwrap();
+            assert_eq!([decoded.width(), decoded.height()], [1600, 1200]);
+        }
+        assert_eq!(runtime.project(), None, "a picture type is not the project");
+
+        // The Sue project type saves the whole project there.
+        let project = root.join("Picture.sue");
+        runtime.request(
+            ShellRequest::Picked {
+                pick,
+                path: project.clone(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        step(&mut runtime, Vec::new());
+        step(&mut runtime, Vec::new());
+        assert_eq!(runtime.project(), Some(project.as_path()));
+        assert!(sue_core::SueFile::from_bytes(&std::fs::read(&project).unwrap()).is_ok());
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -91,10 +91,12 @@ wheel_line_px = 48             # [8..200] Pixels scrolled per mouse-wheel notch 
 
 [files]
 show_hidden = false            # List files and folders whose names start with a dot
-view = "list"                  # {list|cards} How the File Manager shows a folder
+view = "list"                  # {list|details|icons|cards} How the File Manager shows a folder
+sort_reverse = false           # Reverse the File Manager's order (folders stay first)
+dialog = "sue"                 # {sue|system} Choose files to open and places to save with Sue's File Manager or the system's own dialog
 sort = "name"                  # {name|modified|size|kind} What the File Manager sorts by (folders come first)
-card_size = 112                # [64..256] Width of the File Manager's cards (px)
-saved = ""                     # @text Saved folders, separated by |
+card_size = 112                # [48..320] Width of the File Manager's cards (px)
+saved = ""                     # @text Favorite folders, separated by |
 
 [player]
 shuffle = false                # Play songs in a random order
@@ -127,6 +129,7 @@ width = 1600                   # [1..10000] Width of new illustrations (px)
 height = 1200                  # [1..10000] Height of new illustrations (px)
 dpi = 72                       # [1..2400] Resolution of new illustrations (dpi)
 theme = "gray"                 # {gray|sue-theme|void|graphite|paper|custom} Sue Paint's colors: Gray, Sue's own theme (follows it), a preset, or Custom (below)
+pen_pressure = "0,0 1,1"       # @text Pen pressure curve for every tool, as pressure,output points (File, Pen Pressure Settings draws it)
 
 [sue_paint_colors]
 void = "#2b2b2b"               # Around the picture
@@ -167,3 +170,118 @@ redo_alt = "Ctrl+Y"            # @keybind Redo (alternative)
 play_pause = "Space"           # @keybind Play or pause the timeline (tap; hold and drag pans)
 reset_camera = "Ctrl+0"        # @keybind Frame everything on the canvas
 delete = "Delete"              # @keybind Remove the selected entity from the canvas
+
+[sue_paint_keys]
+help_shortcuts = "Ctrl+Alt+Shift+K or F1 or Alt+I" # @keybind Keyboard Shortcuts
+file_preferences = "Ctrl+K"    # @keybind Preferences
+file_save_as = "Ctrl+Shift+S or Ctrl+Alt+S or Alt+Shift+S" # @keybind Save Project As
+file_print = "Ctrl+P"          # @keybind Print
+layer_new = "Ctrl+Shift+N"     # @keybind Raster Layer
+file_new = "Ctrl+N"            # @keybind New
+file_close = "Ctrl+W"          # @keybind Close
+edit_transform_free = "Ctrl+Shift+T" # @keybind Free Transform
+edit_transform_scale = "Ctrl+T" # @keybind Scale/Rotate
+filter_hue = "Ctrl+U"          # @keybind Hue/Saturation/Luminosity
+select_invert = "Ctrl+Shift+I or Shift+F7" # @keybind Invert Selected Area
+filter_invert = "Ctrl+I"       # @keybind Reverse Gradient
+edit_cut = "Ctrl+X or F2"      # @keybind Cut
+edit_copy = "Ctrl+C or F3"     # @keybind Copy
+edit_paste = "Ctrl+V or F4"    # @keybind Paste
+edit_clear = "Ctrl+Delete or Ctrl+Backspace or Delete or Backspace" # @keybind Clear
+edit_fill = "Shift+Delete or Shift+Backspace or Alt+Delete or Alt+Backspace" # @keybind Fill
+layer_toggle_clip = "Ctrl+Alt+G" # @keybind Clip to Layer Below
+layer_new_folder = "Ctrl+G"    # @keybind New Layer Folder
+layer_merge_visible = "Ctrl+Shift+E" # @keybind Merge Visible to New Layer
+layer_merge_selected = "Alt+Shift+E" # @keybind Merge Selected Layers
+layer_merge_down = "Ctrl+E"    # @keybind Merge with Layer Below
+layer_select_above = "Alt+]"   # @keybind Select Layer Above
+layer_select_below = "Alt+["   # @keybind Select Layer Below
+layer_order_up = "Ctrl+]"      # @keybind Move Up
+layer_order_down = "Ctrl+["    # @keybind Move Down
+select_again = "Ctrl+Shift+D"  # @keybind Reselect
+select_all = "Ctrl+A"          # @keybind All
+select_none = "Ctrl+D"         # @keybind Deselect
+view_actual = "Ctrl+Alt+0"     # @keybind 100%
+view_fit = "Ctrl+0"            # @keybind Fit to Screen
+view_rotate_reset = "Ctrl+Shift+2" # @keybind Reset Rotation
+view_zoom_in = "Ctrl++ or Ctrl+= or Ctrl+;" # @keybind Zoom In
+view_zoom_out = "Ctrl+-"       # @keybind Zoom Out
+view_ruler_bar = "Ctrl+R"      # @keybind Ruler Bar
+view_snap_ruler = "Ctrl+1"     # @keybind Snap to Ruler
+view_snap_special = "Ctrl+2"   # @keybind Snap to Special Ruler
+view_snap_grid = "Ctrl+3"      # @keybind Snap to Grid
+view_rotate_left = "-"         # @keybind Rotate Left
+view_rotate_right = "="        # @keybind Rotate Right
+window_prev_tab = "Ctrl+Shift+Tab" # @keybind Previous Canvas
+window_next_tab = "Ctrl+Tab"   # @keybind Next Canvas
+window_hide_menus = "Shift+Tab" # @keybind Hide Menu Bar
+window_hide_all = "Tab"        # @keybind Hide All Palettes
+tool_zoom = "/"                # @keybind Zoom Tool
+tool_hand = "H"                # @keybind Hand Tool
+tool_rotate = "R"              # @keybind Rotate Tool
+tool_operation = "O"           # @keybind Operation Tool
+tool_move_layer = "K"          # @keybind Move Layer Tool
+tool_selection = "M"           # @keybind Selection Tool
+tool_auto_select = "W"         # @keybind Auto Select Tool
+tool_eyedropper = "I"          # @keybind Eyedropper Tool
+tool_pen = "P"                 # @keybind Pen and Pencil Tools
+tool_brush = "B"               # @keybind Brush, Airbrush and Decoration Tools
+tool_eraser = "E"              # @keybind Eraser Tool
+tool_blend = "J"               # @keybind Blend Tool
+tool_fill = "G"                # @keybind Fill and Gradient Tools
+tool_figure = "U"              # @keybind Figure, Frame Border and Ruler Tools
+tool_text = "T"                # @keybind Text and Balloon Tools
+tool_correct_line = "Y"        # @keybind Correct Line Tool
+tool_previous_sub = ","        # @keybind Previous Sub Tool
+tool_next_sub = "."            # @keybind Next Sub Tool
+color_swap = "X"               # @keybind Swap Main and Sub Color
+color_transparent = "C"        # @keybind Drawing or Transparent Color
+brush_smaller = "["            # @keybind Smaller Brush
+brush_bigger = "]"             # @keybind Bigger Brush
+
+[sue_writer_keys]
+binder_new_folder = "Ctrl+Shift+N" # @keybind New Folder
+binder_new_doc = "Ctrl+N"      # @keybind New Document
+compile_open = "Ctrl+Shift+E"  # @keybind Compile
+compile_pdf = "Ctrl+P"         # @keybind PDF
+format_bold = "Ctrl+B"         # @keybind Bold
+format_italic = "Ctrl+I"       # @keybind Italic
+format_underline = "Ctrl+U"    # @keybind Underline
+format_strike = "Ctrl+Shift+X" # @keybind Strikethrough
+project_split = "Ctrl+Shift+K" # @keybind Split at Selection
+format_superscript = "Ctrl+Shift++ or Ctrl+Shift+=" # @keybind Superscript
+format_subscript = "Ctrl+="    # @keybind Subscript
+format_clear = "Ctrl+Space"    # @keybind Clear Formatting
+align_center = "Ctrl+E"        # @keybind Center
+align_left = "Ctrl+L"          # @keybind Left
+align_right = "Ctrl+R"         # @keybind Right
+align_justify = "Ctrl+J"       # @keybind Justify
+style_heading1 = "Ctrl+Alt+1"  # @keybind Heading 1
+style_heading2 = "Ctrl+Alt+2"  # @keybind Heading 2
+style_heading3 = "Ctrl+Alt+3"  # @keybind Heading 3
+style_body = "Ctrl+Alt+0"      # @keybind Body Text
+insert_footnote = "Ctrl+Alt+F" # @keybind Footnote
+insert_page_break = "Ctrl+Enter" # @keybind Page Break
+insert_link = "Ctrl+K"         # @keybind Link
+edit_find = "Ctrl+F"           # @keybind Find
+edit_replace = "Ctrl+H"        # @keybind Replace
+edit_find_previous = "Shift+F3" # @keybind Find Previous
+edit_find_next = "F3"          # @keybind Find Next
+view_composition = "F11"       # @keybind Composition Mode
+view_document = "Ctrl+1"       # @keybind Text
+view_corkboard = "Ctrl+2"      # @keybind Corkboard
+view_outliner = "Ctrl+3"       # @keybind Outliner
+project_snapshot = "Ctrl+5"    # @keybind Take Snapshot
+list_bullet = "Ctrl+Shift+L"   # @keybind Bulleted List
+
+[image_viewer_keys]
+viewer_next = "Right or Space" # @keybind Next Picture
+viewer_previous = "Left"       # @keybind Previous Picture
+viewer_fit = "0"               # @keybind Fit to the Window
+viewer_actual = "1"            # @keybind Actual Size
+viewer_zoom_in = "+ or ="      # @keybind Zoom In
+viewer_zoom_out = "-"          # @keybind Zoom Out
+viewer_rotate_right = "R"      # @keybind Turn Right
+viewer_rotate_left = "Shift+R" # @keybind Turn Left
+viewer_crop = "C"              # @keybind Crop
+viewer_save_as = "Ctrl+Shift+S" # @keybind Save As

@@ -118,7 +118,9 @@ pub struct Settings {
     pending: Option<String>,
     filter: String,
     drag: Option<(String, RiceValue)>,
-    recording: Option<String>,
+    /// The shortcut being recorded: its setting, and which chord (`None`
+    /// adds one).
+    recording: Option<(String, Option<usize>)>,
     texts: HashMap<String, String>,
     error: Option<String>,
 }
@@ -268,32 +270,77 @@ impl Settings {
                 }
             }
             RiceParameter::Keybind { value } => {
-                let recording = self.recording.as_deref() == Some(entry.path());
-                let text = if recording {
-                    "Press keys...".to_owned()
-                } else {
-                    value.to_string()
+                // Every chord as a chip: click one to change it, x to take
+                // it away, + to add another.
+                let recording = self
+                    .recording
+                    .as_ref()
+                    .filter(|(known, _)| known == entry.path())
+                    .map(|(_, index)| *index);
+                let chip = |ui: &mut Ui, text: String, on: bool| {
+                    ui.add(
+                        egui::Button::new(
+                            RichText::new(text)
+                                .font(theme.mono(theme.ui_size))
+                                .color(theme.text),
+                        )
+                        .fill(if on { theme.active } else { theme.pill })
+                        .stroke(if on {
+                            theme.hairline_active()
+                        } else {
+                            theme.hairline()
+                        }),
+                    )
                 };
-                let button = egui::Button::new(
-                    RichText::new(text)
-                        .font(theme.mono(theme.ui_size))
-                        .color(theme.text),
-                )
-                .fill(if recording { theme.active } else { theme.pill })
-                .stroke(if recording {
-                    theme.hairline_active()
-                } else {
-                    theme.hairline()
+                let mut edit = None;
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    for (index, chord) in value.chords().iter().enumerate() {
+                        let on = recording == Some(Some(index));
+                        let text = if on {
+                            "Press keys...".to_owned()
+                        } else {
+                            chord.to_string()
+                        };
+                        if chip(ui, text, on)
+                            .on_hover_text("Click, then press the shortcut to put here")
+                            .clicked()
+                        {
+                            self.recording = Some((path.clone(), Some(index)));
+                        }
+                        if ui
+                            .add(
+                                egui::Button::new(RichText::new("\u{00D7}").color(theme.muted))
+                                    .frame(false)
+                                    .small(),
+                            )
+                            .on_hover_text("Take this shortcut away")
+                            .clicked()
+                        {
+                            let mut next = value.clone();
+                            next.remove(index);
+                            edit = Some(Edit::Set(path.clone(), RiceValue::Keybind(next)));
+                        }
+                    }
+                    if value.is_empty() && recording.is_none() {
+                        ui.label(RichText::new("None").color(theme.muted));
+                    }
+                    let adding = recording == Some(None);
+                    if adding {
+                        chip(ui, "Press keys...".to_owned(), true);
+                    } else if ui
+                        .add(egui::Button::new(RichText::new("+").color(theme.text)).small())
+                        .on_hover_text("Add another shortcut for this (as many as you like)")
+                        .clicked()
+                    {
+                        self.recording = Some((path.clone(), None));
+                    }
                 });
-                if ui
-                    .add(button)
-                    .on_hover_text("Click, then press the new shortcut")
-                    .clicked()
-                {
-                    self.recording = Some(path.clone());
+                if edit.is_some() {
+                    return edit;
                 }
-                if recording {
-                    return self.record_chord(ui, path);
+                if let Some(index) = recording {
+                    return self.record_chord(ui, path, value, index);
                 }
                 None
             }
@@ -315,8 +362,15 @@ impl Settings {
         }
     }
 
-    /// The next key press with its modifiers, as a chord.
-    fn record_chord(&mut self, ui: &Ui, path: String) -> Option<Edit> {
+    /// The next key press with its modifiers, as a chord put in place of
+    /// chord `index` of `current` (or added when `None`).
+    fn record_chord(
+        &mut self,
+        ui: &Ui,
+        path: String,
+        current: &sue_rice::Keybinds,
+        index: Option<usize>,
+    ) -> Option<Edit> {
         let pressed = ui.input_mut(|input| {
             let mut found = None;
             input.events.retain(|event| match event {
@@ -338,19 +392,16 @@ impl Settings {
         if key == egui::Key::Escape && modifiers.is_none() {
             return None;
         }
-        let mut chord = String::new();
-        for (on, name) in [
-            (modifiers.command, "Ctrl+"),
-            (modifiers.alt, "Alt+"),
-            (modifiers.shift, "Shift+"),
-        ] {
-            if on {
-                chord.push_str(name);
-            }
-        }
-        chord.push_str(key.symbol_or_name());
+        let chord = sue_wm::shortcuts::chord_text(modifiers, key);
         match chord.parse::<Keybind>() {
-            Ok(keybind) => Some(Edit::Set(path, RiceValue::Keybind(keybind))),
+            Ok(keybind) => {
+                let mut next = current.clone();
+                match index {
+                    Some(index) => next.replace(index, keybind),
+                    None => next.push(keybind),
+                }
+                Some(Edit::Set(path, RiceValue::Keybind(next)))
+            }
             Err(error) => {
                 self.error = Some(error.to_string());
                 None
