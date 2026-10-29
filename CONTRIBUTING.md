@@ -93,7 +93,13 @@ cargo test --workspace
 cargo run -p sue -- --self-check
 ```
 
-The CI workflow runs the same four on Windows, macOS and Linux.
+The CI workflow runs the same four on Windows, macOS and Linux. It also
+checks every dependency with [cargo-deny](https://github.com/EmbarkStudios/cargo-deny)
+by the rules in `deny.toml`: no known security problem, a license Sue can
+ship, and crates.io as the only source. Run it yourself with
+`cargo install cargo-deny` and then `cargo deny check`. A new dependency
+with a license `deny.toml` does not list needs a look at what that
+license asks before it joins the list.
 
 ## Building packages
 
