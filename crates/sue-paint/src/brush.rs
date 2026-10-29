@@ -350,6 +350,148 @@ pub struct Tip {
     /// How much of the color under the brush it picks up and drags along,
     /// 0 to 1 (painting brushes).
     pub mix: f32,
+    /// A picture's shape for each dab (see [`register_shape`]), or 0 for
+    /// the round tip.
+    pub shape: u32,
+}
+
+/// A brush tip's shape made from a picture: how much each spot of a
+/// square covers, 0 to 1 (Edit, Create Brush Tip from Image).
+#[derive(Debug, PartialEq)]
+pub struct TipShape {
+    /// What people read.
+    pub name: String,
+    /// The square's side in samples.
+    pub side: u32,
+    /// `side * side` coverages, row by row.
+    pub cover: Vec<f32>,
+}
+
+impl TipShape {
+    /// The shape from straight RGBA8 `pixels`: dark paint on an opaque
+    /// picture, or the alpha of one with transparency, centered in a
+    /// square at most 128 samples a side.
+    #[must_use]
+    pub fn from_rgba(name: &str, pixels: &[u8], width: u32, height: u32) -> Option<Self> {
+        if width == 0 || height == 0 || pixels.len() != (width * height * 4) as usize {
+            return None;
+        }
+        let clear = pixels.chunks(4).any(|pixel| pixel[3] < 250);
+        let value = |pixel: &[u8]| {
+            let alpha = f32::from(pixel[3]) / 255.0;
+            if clear {
+                alpha
+            } else {
+                let luma = (0.299 * f32::from(pixel[0])
+                    + 0.587 * f32::from(pixel[1])
+                    + 0.114 * f32::from(pixel[2]))
+                    / 255.0;
+                1.0 - luma
+            }
+        };
+        let longest = width.max(height);
+        let side = longest.min(128);
+        let scale = longest as f32 / side as f32;
+        let (left, top) = (
+            (longest - width) as f32 / 2.0,
+            (longest - height) as f32 / 2.0,
+        );
+        let mut cover = vec![0.0; (side * side) as usize];
+        for y in 0..side {
+            for x in 0..side {
+                // The average over the square each sample stands for.
+                let (x0, y0) = (x as f32 * scale - left, y as f32 * scale - top);
+                let (mut sum, mut count) = (0.0, 0.0);
+                let steps = scale.ceil().max(1.0) as u32;
+                for sy in 0..steps {
+                    for sx in 0..steps {
+                        let px = (x0 + (sx as f32 + 0.5) * scale / steps as f32).floor();
+                        let py = (y0 + (sy as f32 + 0.5) * scale / steps as f32).floor();
+                        count += 1.0;
+                        if px >= 0.0 && py >= 0.0 && (px as u32) < width && (py as u32) < height {
+                            let at = ((py as u32 * width + px as u32) * 4) as usize;
+                            sum += value(&pixels[at..at + 4]);
+                        }
+                    }
+                }
+                cover[(y * side + x) as usize] = sum / count;
+            }
+        }
+        Some(Self {
+            name: name.to_owned(),
+            side,
+            cover,
+        })
+    }
+
+    /// Its coverage at `(u, v)`, each -1 to 1 across the tip, bilinear.
+    #[must_use]
+    pub fn at(&self, u: f32, v: f32) -> f32 {
+        if u.abs() > 1.0 || v.abs() > 1.0 {
+            return 0.0;
+        }
+        let side = self.side as f32;
+        let x = ((u + 1.0) * 0.5 * side - 0.5).clamp(0.0, side - 1.0);
+        let y = ((v + 1.0) * 0.5 * side - 0.5).clamp(0.0, side - 1.0);
+        let (x0, y0) = (x.floor() as u32, y.floor() as u32);
+        let (x1, y1) = ((x0 + 1).min(self.side - 1), (y0 + 1).min(self.side - 1));
+        let (fx, fy) = (x - x0 as f32, y - y0 as f32);
+        let get = |x: u32, y: u32| self.cover[(y * self.side + x) as usize];
+        let top = get(x0, y0) + (get(x1, y0) - get(x0, y0)) * fx;
+        let bottom = get(x0, y1) + (get(x1, y1) - get(x0, y1)) * fx;
+        top + (bottom - top) * fy
+    }
+}
+
+fn shapes_lock() -> &'static std::sync::RwLock<Vec<std::sync::Arc<TipShape>>> {
+    static SHAPES: std::sync::OnceLock<std::sync::RwLock<Vec<std::sync::Arc<TipShape>>>> =
+        std::sync::OnceLock::new();
+    SHAPES.get_or_init(|| std::sync::RwLock::new(Vec::new()))
+}
+
+/// Makes `shape` a brush tip shape (a same-named one is replaced) and
+/// returns its number for [`Tip::shape`].
+pub fn register_shape(shape: TipShape) -> u32 {
+    let mut shapes = shapes_lock()
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let shape = std::sync::Arc::new(shape);
+    if let Some(index) = shapes.iter().position(|known| known.name == shape.name) {
+        shapes[index] = shape;
+        return index as u32 + 1;
+    }
+    shapes.push(shape);
+    shapes.len() as u32
+}
+
+/// The brush tip shape numbered `id`.
+#[must_use]
+pub fn shape(id: u32) -> Option<std::sync::Arc<TipShape>> {
+    let index = id.checked_sub(1)? as usize;
+    shapes_lock()
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(index)
+        .cloned()
+}
+
+/// Every brush tip shape: its number and name.
+#[must_use]
+pub fn shapes() -> Vec<(u32, String)> {
+    shapes_lock()
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .enumerate()
+        .map(|(index, shape)| (index as u32 + 1, shape.name.clone()))
+        .collect()
+}
+
+fn shape_named(name: &str) -> Option<u32> {
+    shapes()
+        .into_iter()
+        .find(|(_, known)| known == name)
+        .map(|(id, _)| id)
 }
 
 impl Tip {
@@ -418,6 +560,9 @@ impl Tip {
                 (format!("{name}.random_min"), by.random_min.to_string()),
             ]);
         }
+        if let Some(shape) = shape(self.shape) {
+            out.push(("shape".to_owned(), shape.name.replace([';', '='], " ")));
+        }
         out.iter()
             .map(|(key, value)| format!("{key}={value}"))
             .collect::<Vec<_>>()
@@ -451,6 +596,9 @@ impl Tip {
         number("size", &mut tip.size);
         number("opacity", &mut tip.opacity);
         number("hardness", &mut tip.hardness);
+        if let Some(id) = values.get("shape").and_then(|name| shape_named(name)) {
+            tip.shape = id;
+        }
         if let Some(aa) = index("aa") {
             tip.aa = match aa {
                 0 => AntiAlias::None,
@@ -532,6 +680,7 @@ impl Default for Tip {
             taper_by_speed: false,
             jitter: Jitter::default(),
             mix: 0.0,
+            shape: 0,
         }
     }
 }
@@ -583,7 +732,7 @@ impl Tip {
     /// brushes) rather than painting one continuous line.
     #[must_use]
     pub fn dabbed(&self) -> bool {
-        self.build_up || self.mix > 0.0
+        self.build_up || self.mix > 0.0 || self.shape != 0
     }
 }
 
@@ -1145,12 +1294,17 @@ impl Stroke {
         };
         let reach = radius + self.tip.aa.edge() + 1.0;
         let tip = self.tip;
+        let shaped = shape(tip.shape);
         self.apply(
             raster,
             [x - reach, y - reach, x + reach, y + reach],
             selection,
             mode,
             |px, py| {
+                if let Some(shaped) = &shaped {
+                    return shaped.at((px - x) / radius.max(0.5), (py - y) / radius.max(0.5))
+                        * strength;
+                }
                 let d = ((px - x) * (px - x) + (py - y) * (py - y)).sqrt();
                 tip.coverage(d, radius) * strength
             },
@@ -1780,6 +1934,47 @@ mod tests {
                     .sum()
             })
             .collect()
+    }
+
+    #[test]
+    fn a_picture_shaped_tip_stamps_its_shape() {
+        // A plus sign, dark on white.
+        let mut pixels = [255_u8, 255, 255, 255].repeat(9 * 9);
+        for i in 0..9 {
+            for (x, y) in [(4, i), (i, 4)] {
+                pixels[((y * 9 + x) * 4) as usize..][..3].copy_from_slice(&[0, 0, 0]);
+            }
+        }
+        let shape = TipShape::from_rgba("Plus test", &pixels, 9, 9).unwrap();
+        assert!(
+            shape.at(0.0, 0.0) > 0.9 && shape.at(0.8, 0.8) < 0.1,
+            "the middle covers, the corners do not"
+        );
+        let id = register_shape(shape);
+        assert_eq!(
+            super::shape(id).map(|shape| shape.name.clone()).as_deref(),
+            Some("Plus test")
+        );
+        let tip = Tip {
+            size: 18.0,
+            shape: id,
+            spacing: 2.0,
+            size_by: Dynamics::NONE,
+            ..Tip::default()
+        };
+        assert!(tip.dabbed());
+        assert_eq!(
+            Tip::from_text(&tip.to_text()).shape,
+            id,
+            "the shape is kept by name"
+        );
+        let mut raster = RasterTile2D::new(40, 40, PixelFormat::Rgba8).unwrap();
+        let mut stroke = Stroke::new(EntityId::NIL, tip, [0.0, 0.0, 0.0], false);
+        stroke.to(&mut raster, [20.0, 20.0], 1.0, None);
+        stroke.end(&mut raster, Finish::default(), None);
+        let alpha = |x: u32, y: u32| raster.bytes().unwrap()[((y * 40 + x) * 4 + 3) as usize];
+        assert!(alpha(20, 14) > 100, "the plus reaches up");
+        assert!(alpha(14, 14) < 30, "but not into the corner");
     }
 
     #[test]

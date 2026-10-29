@@ -63,6 +63,9 @@ pub(crate) struct Doc {
     pub mask_edit: bool,
     /// The Quick Mask layer while Quick Mask is on.
     pub quick_mask: Option<EntityId>,
+    /// Layers picked with the current one (Ctrl+click), for Merge
+    /// Selected Layers.
+    pub picked: Vec<EntityId>,
     pub selection: Option<Selection>,
     pub last_selection: Option<Selection>,
     pub edges: Option<Vec<[[f32; 2]; 2]>>,
@@ -83,6 +86,7 @@ impl Doc {
             show_rulers: true,
             mask_edit: false,
             quick_mask: None,
+            picked: Vec::new(),
             selection: None,
             last_selection: None,
             edges: None,
@@ -343,6 +347,27 @@ pub struct SuePaint {
     pub(crate) bar_hidden: HashSet<String>,
     /// Commands people added to the command bar.
     pub(crate) bar_extra: Vec<String>,
+    /// Rulers along the canvas's top and left (View, Ruler Bar).
+    pub(crate) ruler_bar: bool,
+    /// Strokes near a grid line follow it (View, Snap to Grid).
+    pub(crate) snap_grid: bool,
+    /// A page's crop marks and inner border show (View, Crop Frame).
+    pub(crate) crop_frame: bool,
+    /// The bleed beyond the finished page shows (View, Bleed).
+    pub(crate) bleed: bool,
+    /// The page shows as it will be cut, the bleed dimmed (View, Show
+    /// Page Image).
+    pub(crate) page_image: bool,
+    /// Screen tone layers are tinted (View, Tone Area).
+    pub(crate) tone_area: bool,
+    /// The picture shows as printed (View, Color Profile, Preview).
+    pub(crate) proof_on: bool,
+    /// Which of [`crate::proof::PROFILES`].
+    pub(crate) proof_profile: usize,
+    /// The proofed picture and the version and profile it was made for.
+    pub(crate) proof_cache: Option<(u64, usize, Vec<u8>)>,
+    /// The tone area mask and the version it was made for.
+    pub(crate) tone_cache: Option<(u64, [u32; 2], Vec<u8>)>,
     pub(crate) hue: f32,
     pub(crate) recent: History,
     pub(crate) docs: Vec<Doc>,
@@ -481,6 +506,16 @@ impl Default for SuePaint {
             print: crate::print::PrintSettings::default(),
             bar_hidden: HashSet::new(),
             bar_extra: Vec::new(),
+            ruler_bar: false,
+            snap_grid: false,
+            crop_frame: true,
+            bleed: true,
+            page_image: false,
+            tone_area: false,
+            proof_on: false,
+            proof_profile: 0,
+            proof_cache: None,
+            tone_cache: None,
             docs: Vec::new(),
             active: 0,
             closed: HashSet::new(),
@@ -576,6 +611,9 @@ impl std::fmt::Debug for SuePaint {
 }
 
 /// A texture key for an entity, so each picture and thumbnail has its own.
+/// A layer made from a selection (Convert to Selection Layer), `Bool`.
+pub(crate) const SELECTION_LAYER: &str = "layer.selection";
+
 pub(crate) fn texture_key(id: EntityId, salt: u64) -> u64 {
     let bits = id.to_u128();
     (bits as u64) ^ ((bits >> 64) as u64) ^ salt
@@ -826,6 +864,33 @@ fn implemented(command: &str) -> bool {
             | "file.import.pattern"
             | "file.recent.clear"
             | "file.revert"
+            | "view.fit_navigator"
+            | "view.print_size"
+            | "view.ruler_bar"
+            | "view.snap_grid"
+            | "view.crop_frame"
+            | "view.bleed"
+            | "view.page_image"
+            | "view.tone_area"
+            | "view.profile_preview"
+            | "view.profile_settings"
+            | "story.combine"
+            | "story.separate"
+            | "story.page_settings"
+            | "story.info"
+            | "story.editor"
+            | "story.import_text"
+            | "edit.transform.mesh"
+            | "canvas.rotate_left"
+            | "canvas.rotate_right"
+            | "edit.paste_here"
+            | "edit.canvas_properties"
+            | "edit.brush_tip"
+            | "edit.material.tip"
+            | "layer.new.gradient"
+            | "layer.merge_selected"
+            | "layer.convert"
+            | "select.from_selection_layer"
             | "file.print_settings"
             | "file.print"
             | "file.export.batch"
@@ -2729,6 +2794,83 @@ impl SuePaint {
         }
     }
 
+    /// Edit, Create Brush Tip from Image: the current layer (inside the
+    /// selection) becomes a brush tip shape, kept in Sue Paint's data
+    /// folder, and a new Brush sub tool paints with it.
+    fn make_brush_tip(&mut self, cx: &mut AppletContext<'_>) {
+        let arena = &cx.world.arena;
+        let (Some(layer), Some(selection)) = (self.layer(), self.selection_or_all(arena)) else {
+            return;
+        };
+        let Some(raster) = doc::raster(arena, layer) else {
+            return;
+        };
+        let Some(bytes) = raster.bytes() else {
+            return;
+        };
+        let (w, h) = (raster.width(), raster.height());
+        let mask = selection.mask();
+        let (mut min, mut max) = ([u32::MAX; 2], [0_u32; 2]);
+        for y in 0..h {
+            for x in 0..w {
+                let index = (y * w + x) as usize;
+                if bytes[index * 4 + 3] > 0 && mask.get(index).is_some_and(|cover| *cover > 0) {
+                    min = [min[0].min(x), min[1].min(y)];
+                    max = [max[0].max(x + 1), max[1].max(y + 1)];
+                }
+            }
+        }
+        if max[0] <= min[0] || max[1] <= min[1] {
+            cx.fail("Draw the tip's shape on the layer first");
+            return;
+        }
+        let (cw, ch) = (max[0] - min[0], max[1] - min[1]);
+        let mut cut = Vec::with_capacity((cw * ch * 4) as usize);
+        for y in min[1]..max[1] {
+            for x in min[0]..max[0] {
+                let index = (y * w + x) as usize;
+                let mut pixel = [
+                    bytes[index * 4],
+                    bytes[index * 4 + 1],
+                    bytes[index * 4 + 2],
+                    bytes[index * 4 + 3],
+                ];
+                pixel[3] = ((u32::from(pixel[3]) * u32::from(mask[index])) / 255) as u8;
+                cut.extend_from_slice(&pixel);
+            }
+        }
+        // Coverage comes from the alpha: dark paint on clear.
+        for pixel in cut.chunks_mut(4) {
+            if pixel[3] == 255 {
+                pixel[3] = 254;
+            }
+        }
+        let name = format!("Tip {}", crate::brush::shapes().len() + 1);
+        let Some(shape) = crate::brush::TipShape::from_rgba(&name, &cut, cw, ch) else {
+            return;
+        };
+        if let Some(folder) = crate::colorsets::folder(cx).map(|folder| folder.join("tips"))
+            && let Ok(png) = sue_io::encode_png_rgba(cw, ch, &cut)
+        {
+            let _ = std::fs::create_dir_all(&folder)
+                .and_then(|()| std::fs::write(folder.join(format!("{name}.png")), png));
+        }
+        let id = crate::brush::register_shape(shape);
+        let tip = crate::brush::Tip {
+            size: (cw.max(ch) as f32).clamp(8.0, 200.0),
+            shape: id,
+            spacing: 0.25,
+            ..crate::brush::Tip::default()
+        };
+        self.toolbox.add_sub(crate::tools::SubTool::new(
+            crate::tools::Tool::Brush,
+            &name,
+            0,
+            tip,
+        ));
+        cx.notify(format!("{name} is a new Brush sub tool"));
+    }
+
     /// File, Print: the pages (every page of a story, or the canvas) laid
     /// on paper as Print Settings says, written as a PDF and opened in the
     /// system's viewer to print.
@@ -3192,7 +3334,18 @@ impl SuePaint {
             | "help.about" => ItemState::on(),
             "edit.undo" => when(history.can_undo()),
             "edit.redo" => when(history.can_redo()),
-            "edit.paste" => when(has_doc && self.clipboard.is_some()),
+            "edit.paste" | "edit.paste_here" => when(has_doc && self.clipboard.is_some()),
+            "layer.merge_selected" => {
+                when(self.doc().is_some_and(|doc| !doc.picked.is_empty()) && raster)
+            }
+            "layer.convert" | "edit.brush_tip" | "edit.material.tip" => when(raster),
+            "select.from_selection_layer" => when(
+                info.as_ref()
+                    .and_then(|info| arena.get_by_id(info.id).ok())
+                    .is_some_and(|entity| {
+                        entity.property(SELECTION_LAYER).and_then(Value::as_bool) == Some(true)
+                    }),
+            ),
             "edit.clear_outside" | "select.none" | "select.invert" => when(selection),
             "select.again" => when(self.doc().is_some_and(|doc| doc.last_selection.is_some())),
             "select.expand" | "select.shrink" | "select.feather" | "select.to_layer" => {
@@ -3325,6 +3478,13 @@ impl SuePaint {
             "window.item_bank" => flag(self.panels.navigator && self.nav_tab == 4),
             "window.cels" => flag(self.panels.layer && self.layer_tab == 3),
             "window.tile" => flag(self.tiled),
+            "view.ruler_bar" => flag(self.ruler_bar),
+            "view.snap_grid" => flag(self.snap_grid),
+            "view.crop_frame" => flag(self.crop_frame),
+            "view.bleed" => flag(self.bleed),
+            "view.page_image" => flag(self.page_image),
+            "view.tone_area" => flag(self.tone_area),
+            "view.profile_preview" => flag(self.proof_on),
             "window.cascade" => when(self.tiled),
             "window.new" => when(has_doc),
             "window.layer" => flag(self.panels.layer && self.layer_tab == 0),
@@ -3517,6 +3677,28 @@ impl SuePaint {
             "file.preferences" => cx.request(ShellRequest::OpenSettings(None)),
             "file.shortcuts" => cx.request(ShellRequest::OpenSettings(Some("keymaps".to_owned()))),
             "edit.transform.puppet" => self.start_warp(cx),
+            "edit.transform.mesh" => {
+                self.start_warp(cx);
+                // Mesh Transformation: a 4 by 4 grid of points over the
+                // layer's pixels, each dragged to bend what is near it.
+                if let Some(warp) = self.warp.as_mut()
+                    && warp.pins.is_empty()
+                    && let Some([x0, y0, x1, y1]) = warp.bounds
+                {
+                    for row in 0..4 {
+                        for column in 0..4 {
+                            let at = [
+                                x0 as f32 + (x1 - x0) as f32 * column as f32 / 3.0,
+                                y0 as f32 + (y1 - y0) as f32 * row as f32 / 3.0,
+                            ];
+                            warp.pins.push(crate::warp::Pin::at(at));
+                        }
+                    }
+                    cx.notify(
+                        "Mesh Transformation: drag the points to bend the layer, Enter to finish",
+                    );
+                }
+            }
             "edit.transform.scale" => self.start_transform(cx, false),
             "edit.transform.free" | "edit.transform.distort" | "edit.transform.perspective" => {
                 self.start_transform(cx, true);
@@ -4436,6 +4618,7 @@ impl SuePaint {
                     Ok((spawn, id)) => {
                         let edit = doc::Edit::new("Convert to Selection Layer")
                             .then(spawn)
+                            .then(SetProperty::new(id, SELECTION_LAYER, true))
                             .then(SetProperty::new(id, picture::DRAFT, true))
                             .then(SetProperty::new(id, picture::OPACITY, 0.5));
                         if Self::apply(cx, edit)
@@ -4448,6 +4631,176 @@ impl SuePaint {
                 }
             }
             "select.quick_mask" => self.toggle_quick_mask(cx),
+            "select.from_selection_layer" => {
+                if let Some(raster) = self
+                    .layer()
+                    .and_then(|layer| doc::raster(&cx.world.arena, layer))
+                {
+                    let selection = Selection::from_alpha(raster);
+                    if let Some(doc) = self.doc_mut() {
+                        doc.set_selection(Some(selection));
+                    }
+                }
+            }
+            "canvas.rotate_left" | "canvas.rotate_right" => {
+                if let Some(picture) = self.picture() {
+                    match doc::rotate_canvas(
+                        &cx.world.arena,
+                        picture,
+                        command == "canvas.rotate_right",
+                    ) {
+                        Ok(edit) => {
+                            if Self::apply(cx, edit)
+                                && let Some(doc) = self.doc_mut()
+                            {
+                                doc.set_selection(None);
+                                doc.view.fitted = false;
+                            }
+                        }
+                        Err(error) => cx.fail(error),
+                    }
+                }
+            }
+            "edit.paste_here" => {
+                let (Some(doc), Some(clip)) = (self.doc(), self.clipboard.as_ref()) else {
+                    return;
+                };
+                let size = cx
+                    .world
+                    .arena
+                    .get_by_id(doc.picture)
+                    .ok()
+                    .and_then(picture::size)
+                    .unwrap_or([1, 1]);
+                let center = doc
+                    .view
+                    .to_picture(self.viewport, size, self.viewport.center());
+                let origin = [
+                    (center.x - clip.raster.width() as f32 / 2.0)
+                        .round()
+                        .max(0.0) as u32,
+                    (center.y - clip.raster.height() as f32 / 2.0)
+                        .round()
+                        .max(0.0) as u32,
+                ];
+                let saved = clip.origin;
+                if let Some(clip) = self.clipboard.as_mut() {
+                    clip.origin = origin;
+                }
+                self.paste(cx, "Pasted");
+                if let Some(clip) = self.clipboard.as_mut() {
+                    clip.origin = saved;
+                }
+            }
+            "edit.canvas_properties" => {
+                if let Some(picture) = self.picture() {
+                    let arena = &cx.world.arena;
+                    let entity = arena.get_by_id(picture).ok();
+                    let paper = doc::layers(arena, picture)
+                        .into_iter()
+                        .find(|info| info.kind == LayerKind::Paper);
+                    let paper_color = paper
+                        .as_ref()
+                        .and_then(|info| arena.get_by_id(info.id).ok())
+                        .map(|entity| {
+                            let rgb = picture::paper_color(entity)
+                                .to_space(sue_core::ColorSpace::Srgb)
+                                .rgb;
+                            rgb.map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8)
+                        });
+                    self.dialog =
+                        Some(Dialog::CanvasProperties(crate::dialogs::CanvasProperties {
+                            picture,
+                            name: entity
+                                .map(|entity| entity.name().to_owned())
+                                .unwrap_or_default(),
+                            dpi: entity
+                                .and_then(|entity| entity.property(picture::DPI))
+                                .and_then(Value::as_f64)
+                                .unwrap_or(72.0),
+                            paper: paper.as_ref().map(|info| info.id),
+                            paper_color: paper_color.unwrap_or([255, 255, 255]),
+                            paper_shown: paper.as_ref().is_some_and(|info| info.style.visible),
+                        }));
+                }
+            }
+            "edit.brush_tip" | "edit.material.tip" => self.make_brush_tip(cx),
+            "layer.new.gradient" => {
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                let arena = &cx.world.arena;
+                let Some([width, height]) = arena.get_by_id(picture).ok().and_then(picture::size)
+                else {
+                    return;
+                };
+                let (from, to) = (self.main, self.sub);
+                let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+                for y in 0..height {
+                    let t = if height > 1 {
+                        y as f32 / (height - 1) as f32
+                    } else {
+                        0.0
+                    };
+                    let mix = |a: u8, b: u8| {
+                        (f32::from(a) + (f32::from(b) - f32::from(a)) * t).round() as u8
+                    };
+                    let row = [
+                        mix(from[0], to[0]),
+                        mix(from[1], to[1]),
+                        mix(from[2], to[2]),
+                        255,
+                    ];
+                    for _ in 0..width {
+                        pixels.extend_from_slice(&row);
+                    }
+                }
+                let Ok(raster) =
+                    RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels)
+                else {
+                    return;
+                };
+                match doc::add_layer_pixels(
+                    arena,
+                    picture,
+                    self.layer(),
+                    "Gradient".to_owned(),
+                    raster,
+                ) {
+                    Ok((spawn, id)) => {
+                        if Self::apply(cx, doc::Edit::new("New Gradient Layer").then(spawn))
+                            && let Some(doc) = self.doc_mut()
+                        {
+                            doc.layer = Some(id);
+                        }
+                    }
+                    Err(error) => cx.fail(error),
+                }
+            }
+            "layer.merge_selected" => {
+                let (Some(picture), Some(doc)) = (self.picture(), self.doc()) else {
+                    return;
+                };
+                let mut ids = doc.picked.clone();
+                ids.extend(doc.layer);
+                match doc::merge_layers(&cx.world.arena, picture, &ids) {
+                    Ok((edit, into)) => {
+                        if Self::apply(cx, edit)
+                            && let Some(doc) = self.doc_mut()
+                        {
+                            doc.layer = Some(into);
+                            doc.picked.clear();
+                        }
+                    }
+                    Err(error) => cx.fail(error),
+                }
+            }
+            "layer.convert" => {
+                if let Some(info) = self.layer_info(&cx.world.arena) {
+                    let vector = crate::vector::is_vector(&cx.world.arena, info.id);
+                    self.dialog = Some(Dialog::Convert(info.id, u8::from(!vector), info.name));
+                }
+            }
             "select.launcher" => self.launcher = !self.launcher,
             "select.from_layer" => {
                 let arena = &cx.world.arena;
@@ -4509,6 +4862,36 @@ impl SuePaint {
             }),
             "view.fit" => self.with_view(cx, |view, rect, size| view.fit(rect, size)),
             "view.grid" => self.grid = !self.grid,
+            "view.ruler_bar" => self.ruler_bar = !self.ruler_bar,
+            "view.snap_grid" => self.snap_grid = !self.snap_grid,
+            "view.crop_frame" => self.crop_frame = !self.crop_frame,
+            "view.bleed" => self.bleed = !self.bleed,
+            "view.page_image" => self.page_image = !self.page_image,
+            "view.tone_area" => self.tone_area = !self.tone_area,
+            "view.profile_preview" => self.proof_on = !self.proof_on,
+            "view.profile_settings" => self.dialog = Some(Dialog::Proof(self.proof_profile)),
+            "view.fit_navigator" => self.with_view(cx, |view, rect, size| {
+                // The canvas fills the window, as the navigator shows it.
+                let zoom = (rect.width() / size[0].max(1) as f32)
+                    .max(rect.height() / size[1].max(1) as f32);
+                view.set_rotation(rect, size, 0.0);
+                view.set_zoom_at(rect, size, rect.center(), zoom);
+                let middle = egui::pos2(size[0] as f32 / 2.0, size[1] as f32 / 2.0);
+                view.center_on(rect, size, middle);
+            }),
+            "view.print_size" => {
+                let dpi = self
+                    .picture()
+                    .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
+                    .and_then(|entity| entity.property(picture::DPI))
+                    .and_then(Value::as_f64)
+                    .unwrap_or(72.0) as f32;
+                // A screen shows about 96 points an inch.
+                let zoom = 96.0 / dpi.max(1.0);
+                self.with_view(cx, |view, rect, size| {
+                    view.set_zoom_at(rect, size, rect.center(), zoom)
+                });
+            }
             "view.pixel_grid" => self.pixel_grid = !self.pixel_grid,
             "view.selection" => self.show_selection = !self.show_selection,
             "window.next_tab" | "window.prev_tab" => {
@@ -5257,6 +5640,7 @@ impl SueApplet for SuePaint {
             "open" => self.open_picked(cx, path, false),
             "layer" => self.open_picked(cx, path, true),
             "import-layers" => self.open_picked(cx, path, true),
+            "story-text" => self.import_text(cx, path),
             "batch" => self.export_canvases(cx, path),
             "import-vector" | "import-movie" | "import-pattern" => {
                 self.import_file(cx, pick.purpose.as_str(), path)
@@ -5487,10 +5871,15 @@ mod tests {
         }
         assert!(named.iter().filter(|command| implemented(command)).count() > 60);
         assert!(implemented("story.add"), "pages are built");
-        assert!(
-            !implemented("story.combine"),
-            "spreads as one page are not built yet"
-        );
+        // Every menu item does something.
+        let missing: Vec<String> = crate::menus::commands(&crate::menus::menus())
+            .into_iter()
+            .map(|(_, command)| command)
+            .filter(|command| {
+                !implemented(command) && !command.starts_with("window.workspace.preset")
+            })
+            .collect();
+        assert!(missing.is_empty(), "grayed menu items: {missing:?}");
     }
 
     #[test]

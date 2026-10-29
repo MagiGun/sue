@@ -104,9 +104,14 @@ impl SuePaint {
         );
         self.canvas_input(ui, viewport, &response, size, cx);
         self.draw_picture(ui, viewport, size, cx, theme);
+        self.tone_overlay(ui, viewport, size, cx);
+        self.page_frames(ui, viewport, size, cx, theme);
         self.overlays(ui, viewport, size, &response, cx, theme);
         self.warp_ui(ui, viewport, size, cx, theme);
         self.selection_launcher(ui, viewport, size, cx, theme);
+        if self.ruler_bar {
+            self.ruler_bars(ui, viewport, size, theme);
+        }
         if !self.polyline.is_empty() {
             let (enter, escape) = ui.input(|input| {
                 (
@@ -138,6 +143,288 @@ impl SuePaint {
             self.transform_ui(ui, viewport, size, cx, theme);
         }
         self.status_strip(ui, status, Some(size), cx, theme);
+    }
+
+    /// View, Tone Area: screen tone layers tinted blue over the picture.
+    fn tone_overlay(
+        &mut self,
+        ui: &mut Ui,
+        viewport: Rect,
+        size: [u32; 2],
+        cx: &mut AppletContext<'_>,
+    ) {
+        if !self.tone_area {
+            return;
+        }
+        let Some(doc) = self.docs.get(self.active) else {
+            return;
+        };
+        let arena = &cx.world.arena;
+        let tones: Vec<doc::LayerInfo> = doc::layers(arena, doc.picture)
+            .into_iter()
+            .filter(|info| {
+                info.style.visible
+                    && arena
+                        .get_by_id(info.id)
+                        .ok()
+                        .and_then(|entity| entity.property(crate::effects::TONE))
+                        .and_then(sue_core::Value::as_bool)
+                        == Some(true)
+            })
+            .collect();
+        if tones.is_empty() {
+            return;
+        }
+        let version = tones.iter().fold(0_u64, |sum, info| {
+            sum.wrapping_mul(31).wrapping_add(info.revision)
+        });
+        let (_, _, shown) = doc.compositor.display();
+        let version = version ^ shown;
+        // A mask at most 1024 pixels a side.
+        let scale = (size[0].max(size[1]) as f32 / 1024.0).max(1.0);
+        let small = [
+            ((size[0] as f32 / scale) as u32).max(1),
+            ((size[1] as f32 / scale) as u32).max(1),
+        ];
+        if self
+            .tone_cache
+            .as_ref()
+            .is_none_or(|(seen, _, _)| *seen != version)
+        {
+            let mut mask = vec![0_u8; (small[0] * small[1] * 4) as usize];
+            for info in &tones {
+                let Some(raster) = doc::raster(arena, info.id) else {
+                    continue;
+                };
+                let Some(bytes) = raster.bytes() else {
+                    continue;
+                };
+                for y in 0..small[1] {
+                    for x in 0..small[0] {
+                        let px = (x as f32 * scale) as i64 - info.style.offset[0];
+                        let py = (y as f32 * scale) as i64 - info.style.offset[1];
+                        if px < 0
+                            || py < 0
+                            || px >= i64::from(raster.width())
+                            || py >= i64::from(raster.height())
+                        {
+                            continue;
+                        }
+                        let alpha =
+                            bytes[((py as u32 * raster.width() + px as u32) * 4 + 3) as usize];
+                        let at = ((y * small[0] + x) * 4) as usize;
+                        if alpha > 0 {
+                            mask[at..at + 4].copy_from_slice(&[40, 120, 255, 110]);
+                        }
+                    }
+                }
+            }
+            self.tone_cache = Some((version, small, mask));
+        }
+        let Some((version, small, mask)) = &self.tone_cache else {
+            return;
+        };
+        let Some(doc) = self.docs.get(self.active) else {
+            return;
+        };
+        if let Some(texture) = cx.textures.texture(
+            texture_key(doc.picture, 0x544F_4E45),
+            *version,
+            *small,
+            4,
+            mask,
+            false,
+        ) {
+            let mut mesh = Mesh::with_texture(texture);
+            for (corner, uv) in doc.view.corners(viewport, size).iter().zip([
+                pos2(0.0, 0.0),
+                pos2(1.0, 0.0),
+                pos2(1.0, 1.0),
+                pos2(0.0, 1.0),
+            ]) {
+                mesh.vertices.push(Vertex {
+                    pos: *corner,
+                    uv,
+                    color: Color32::WHITE,
+                });
+            }
+            mesh.indices = vec![0, 1, 2, 0, 2, 3];
+            ui.painter().with_clip_rect(viewport).add(Shape::mesh(mesh));
+        }
+    }
+
+    /// A comic page's frames: the finished size (the crop frame and its
+    /// marks), the bleed beyond it and the inner border inside it, from
+    /// the page's settings or Clip Studio Paint's defaults (3 mm of bleed,
+    /// a 10 mm inner border).
+    fn page_frames(
+        &mut self,
+        ui: &mut Ui,
+        viewport: Rect,
+        size: [u32; 2],
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        let Some(doc) = self.docs.get(self.active) else {
+            return;
+        };
+        let arena = &cx.world.arena;
+        if crate::story::story_of(arena, doc.picture).is_none()
+            || !(self.crop_frame || self.bleed || self.page_image)
+        {
+            return;
+        }
+        let entity = arena.get_by_id(doc.picture).ok();
+        let number = |key: &str| {
+            entity
+                .and_then(|entity| entity.property(key))
+                .and_then(sue_core::Value::as_f64)
+        };
+        let dpi = number(picture::DPI).unwrap_or(72.0) as f32;
+        let mm = dpi / 25.4;
+        let bleed = number(crate::story::PAGE_BLEED).map_or(3.0 * mm, |value| value as f32 * mm);
+        let inner = number(crate::story::PAGE_INNER).map_or(10.0 * mm, |value| value as f32 * mm);
+        let (w, h) = (size[0] as f32, size[1] as f32);
+        let view = doc.view;
+        let screen = |x: f32, y: f32| view.to_screen(viewport, size, pos2(x, y));
+        let painter = ui.painter().with_clip_rect(viewport);
+        let quad = |x0: f32, y0: f32, x1: f32, y1: f32| {
+            vec![
+                screen(x0, y0),
+                screen(x1, y0),
+                screen(x1, y1),
+                screen(x0, y1),
+            ]
+        };
+        if self.page_image && bleed > 0.0 {
+            // The bleed dimmed, as the page will be cut.
+            let dim = Color32::from_black_alpha(110);
+            for (x0, y0, x1, y1) in [
+                (0.0, 0.0, w, bleed),
+                (0.0, h - bleed, w, h),
+                (0.0, bleed, bleed, h - bleed),
+                (w - bleed, bleed, w, h - bleed),
+            ] {
+                painter.add(Shape::convex_polygon(
+                    quad(x0, y0, x1, y1),
+                    dim,
+                    Stroke::NONE,
+                ));
+            }
+        }
+        let outline = |points: Vec<Pos2>, stroke: Stroke| {
+            painter.add(Shape::closed_line(points, stroke));
+        };
+        if self.bleed && bleed > 0.0 {
+            outline(
+                quad(0.5, 0.5, w - 0.5, h - 0.5),
+                Stroke::new(1.0, Color32::from_rgb(230, 60, 60)),
+            );
+        }
+        if self.crop_frame {
+            outline(
+                quad(bleed, bleed, w - bleed, h - bleed),
+                Stroke::new(1.0, Color32::from_rgb(40, 110, 230)),
+            );
+            if inner > 0.0 {
+                outline(
+                    quad(
+                        bleed + inner,
+                        bleed + inner,
+                        w - bleed - inner,
+                        h - bleed - inner,
+                    ),
+                    Stroke::new(1.0, Color32::from_rgb(40, 110, 230).gamma_multiply(0.6)),
+                );
+            }
+            // Crop marks at each corner, outside the finished page.
+            let mark = Stroke::new(1.0, theme.text.gamma_multiply(0.8));
+            for (cx_, cy_, sx, sy) in [
+                (bleed, bleed, -1.0, -1.0),
+                (w - bleed, bleed, 1.0, -1.0),
+                (bleed, h - bleed, -1.0, 1.0),
+                (w - bleed, h - bleed, 1.0, 1.0),
+            ] {
+                let reach = bleed.max(4.0 * mm);
+                painter.line_segment(
+                    [screen(cx_ + sx * 1.0, cy_), screen(cx_ + sx * reach, cy_)],
+                    mark,
+                );
+                painter.line_segment(
+                    [screen(cx_, cy_ + sy * 1.0), screen(cx_, cy_ + sy * reach)],
+                    mark,
+                );
+            }
+        }
+    }
+
+    /// View, Ruler Bar: pixel rulers along the top and left of the view.
+    fn ruler_bars(&self, ui: &mut Ui, viewport: Rect, size: [u32; 2], theme: &Theme) {
+        let Some(doc) = self.docs.get(self.active) else {
+            return;
+        };
+        let view = doc.view;
+        let painter = ui.painter().with_clip_rect(viewport);
+        let thick = 18.0;
+        let top = Rect::from_min_size(viewport.min, vec2(viewport.width(), thick));
+        let left = Rect::from_min_size(viewport.min, vec2(thick, viewport.height()));
+        painter.rect_filled(top, 0.0, theme.panel);
+        painter.rect_filled(left, 0.0, theme.panel);
+        // A step of 1, 2 or 5 times a power of ten, about 60 points apart.
+        let points_per_pixel = view.zoom.max(1e-3);
+        let raw = 60.0 / points_per_pixel;
+        let power = 10_f32.powf(raw.log10().floor());
+        let step = [1.0, 2.0, 5.0, 10.0]
+            .into_iter()
+            .map(|m| m * power)
+            .find(|s| *s >= raw)
+            .unwrap_or(raw);
+        let font = theme.font(theme.small_size - 1.0);
+        let ticks = |along: Rect, horizontal: bool| {
+            let count = if horizontal {
+                along.width()
+            } else {
+                along.height()
+            } as i32;
+            let mut last: Option<i64> = None;
+            for offset in 0..count {
+                let at = if horizontal {
+                    pos2(along.left() + offset as f32, along.bottom())
+                } else {
+                    pos2(along.right(), along.top() + offset as f32)
+                };
+                let p = view.to_picture(viewport, size, at);
+                let value = if horizontal { p.x } else { p.y };
+                let index = (value / (step / 5.0)).floor() as i64;
+                if last.is_some_and(|last| last != index) {
+                    let major = index.rem_euclid(5) == 0;
+                    let length = if major { thick * 0.6 } else { thick * 0.25 };
+                    let (a, b) = if horizontal {
+                        (at, at - vec2(0.0, length))
+                    } else {
+                        (at, at - vec2(length, 0.0))
+                    };
+                    painter.line_segment([a, b], Stroke::new(1.0, theme.muted));
+                    if major {
+                        let label = format!("{}", (index as f32 * step / 5.0).round() as i64);
+                        let text_at = if horizontal {
+                            at + vec2(2.0, -thick + 1.0)
+                        } else {
+                            at + vec2(-thick + 1.0, 2.0)
+                        };
+                        painter.text(text_at, Align2::LEFT_TOP, label, font.clone(), theme.muted);
+                    }
+                }
+                last = Some(index);
+            }
+        };
+        ticks(top, true);
+        ticks(left, false);
+        painter.rect_filled(
+            Rect::from_min_size(viewport.min, vec2(thick, thick)),
+            0.0,
+            theme.panel,
+        );
     }
 
     /// Window, Canvas, Tile: every open canvas in a grid cell of `area`,
@@ -756,6 +1043,18 @@ impl SuePaint {
                     doc.ruler_on,
                     24.0 / doc.view.zoom.max(0.01),
                 );
+                let snap = snap.or_else(|| {
+                    self.snap_grid
+                        .then(|| {
+                            crate::rulers::Snap::grid(
+                                local,
+                                [offset[0] as f32, offset[1] as f32],
+                                64.0,
+                                12.0 / doc.view.zoom.max(0.01),
+                            )
+                        })
+                        .flatten()
+                });
                 let local = snap.as_ref().map_or(local, |snap| snap.project(local));
                 let mut stabilizer = Stabilizer::new(sub.stabilization, sub.adjust_by_speed);
                 let start = stabilizer.sample(local, doc.view.zoom, self.clock.1);
@@ -2791,11 +3090,28 @@ impl SuePaint {
         };
         let painter = ui.painter().with_clip_rect(viewport);
         let corners = doc.view.corners(viewport, size);
-        let (pixels, display_size, version) = doc.compositor.display();
+        let (mut pixels, display_size, mut version) = doc.compositor.display();
+        let mut salt = 0;
+        if self.proof_on && display_size == size {
+            // View, Color Profile, Preview: the picture as printed.
+            let profile = self.proof_profile;
+            if self
+                .proof_cache
+                .as_ref()
+                .is_none_or(|(seen, kind, _)| *seen != version || *kind != profile)
+            {
+                self.proof_cache = Some((version, profile, crate::proof::proof(pixels, profile)));
+            }
+            if let Some((_, _, proofed)) = &self.proof_cache {
+                pixels = proofed;
+                salt = 0x5052_4F4F;
+                version = version.wrapping_mul(8).wrapping_add(profile as u64);
+            }
+        }
         let texture = (display_size == size)
             .then(|| {
                 cx.textures.texture(
-                    texture_key(doc.picture, 0),
+                    texture_key(doc.picture, salt),
                     version,
                     size,
                     4,

@@ -164,11 +164,239 @@ impl SuePaint {
                     self.activate(&cx.world.arena, next);
                 }
             }
+            "story.combine" => {
+                let Some((story, pages, index)) = self.story_here(&cx.world.arena) else {
+                    cx.fail("Combine Pages works on a story's pages");
+                    return true;
+                };
+                let arena = &cx.world.arena;
+                let right_bound = story::bound_right(arena, story);
+                // The page it faces in the spread.
+                let partner = story::spreads(pages.len(), right_bound)
+                    .into_iter()
+                    .find(|pair| pair.contains(&Some(index)))
+                    .and_then(|pair| pair.into_iter().flatten().find(|other| *other != index));
+                let Some(partner) = partner else {
+                    cx.fail("This page faces no other page; add one beside it first");
+                    return true;
+                };
+                let (first, second) = (index.min(partner), index.max(partner));
+                // Read right to left, the later page is on the left.
+                let (left, right) = if right_bound {
+                    (pages[second], pages[first])
+                } else {
+                    (pages[first], pages[second])
+                };
+                match story::combine(arena, story, left, right) {
+                    Ok(edit) => {
+                        if Self::apply(cx, edit) {
+                            self.closed.remove(&left);
+                            self.go_to_page(cx, left);
+                        }
+                    }
+                    Err(error) => cx.fail(error),
+                }
+            }
+            "story.separate" => {
+                let Some((story, pages, index)) = self.story_here(&cx.world.arena) else {
+                    cx.fail("Separate Pages works on a story's spread");
+                    return true;
+                };
+                let page = pages[index];
+                let spread = cx
+                    .world
+                    .arena
+                    .get_by_id(page)
+                    .ok()
+                    .and_then(|entity| entity.property(story::SPREAD))
+                    .and_then(sue_core::Value::as_bool)
+                    == Some(true);
+                if !spread {
+                    cx.fail("This page is not a spread: Combine Pages makes one");
+                    return true;
+                }
+                match story::separate(&cx.world.arena, story, page) {
+                    Ok((edit, new_page)) => {
+                        self.closed.insert(new_page);
+                        Self::apply(cx, edit);
+                    }
+                    Err(error) => cx.fail(error),
+                }
+            }
+            "story.page_settings" => {
+                let Some((story, _, _)) = self.story_here(&cx.world.arena) else {
+                    cx.fail("Change Page Settings works on a story");
+                    return true;
+                };
+                let Some(picture) = self.picture() else {
+                    return true;
+                };
+                let entity = cx.world.arena.get_by_id(picture).ok();
+                let number = |key: &str, default: f64| {
+                    entity
+                        .and_then(|entity| entity.property(key))
+                        .and_then(sue_core::Value::as_f64)
+                        .unwrap_or(default)
+                };
+                let [width, height] = entity.and_then(sue_model::picture::size).unwrap_or([1, 1]);
+                self.dialog = Some(crate::dialogs::Dialog::PageSettings(
+                    crate::dialogs::PageSettings {
+                        story,
+                        width,
+                        height,
+                        dpi: number(sue_model::picture::DPI, 72.0),
+                        bleed: number(story::PAGE_BLEED, 3.0),
+                        inner: number(story::PAGE_INNER, 10.0),
+                    },
+                ));
+            }
+            "story.info" => {
+                let Some(story) = self.ensure_story(cx) else {
+                    return true;
+                };
+                let entity = cx.world.arena.get_by_id(story).ok();
+                self.dialog = Some(crate::dialogs::Dialog::StoryInfo(
+                    crate::dialogs::StoryInfo {
+                        story,
+                        title: entity
+                            .map(|entity| entity.name().to_owned())
+                            .unwrap_or_default(),
+                        author: entity
+                            .and_then(|entity| entity.property(story::AUTHOR))
+                            .and_then(sue_core::Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned(),
+                        first: entity
+                            .and_then(|entity| entity.property(story::FIRST_NUMBER))
+                            .and_then(sue_core::Value::as_i64)
+                            .unwrap_or(1),
+                        right_bound: story::bound_right(&cx.world.arena, story),
+                    },
+                ));
+            }
+            "story.editor" => {
+                let arena = &cx.world.arena;
+                let pages = self.story_here(arena).map_or_else(
+                    || self.picture().into_iter().collect(),
+                    |(_, pages, _)| pages,
+                );
+                let mut texts = Vec::new();
+                for (number, page) in pages.iter().enumerate() {
+                    for info in doc::layers(arena, *page) {
+                        if let Some(lettering) = arena
+                            .get_by_id(info.id)
+                            .ok()
+                            .and_then(crate::lettering::Lettering::of)
+                        {
+                            texts.push((number + 1, *page, info.id, lettering.content));
+                        }
+                    }
+                }
+                if texts.is_empty() {
+                    cx.notify("No text yet: the Text tool, or Story, Batch Import Text, letters the pages");
+                    return true;
+                }
+                self.dialog = Some(crate::dialogs::Dialog::StoryEditor(texts));
+            }
+            "story.import_text" => {
+                if self.picture().is_none() {
+                    cx.fail("Open or make a page first");
+                    return true;
+                }
+                let start = self
+                    .last_dir
+                    .clone()
+                    .or_else(|| cx.catalog.folders.get("home").cloned());
+                cx.request(sue_wm::ShellRequest::PickFile(
+                    sue_wm::FilePick::open(
+                        Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
+                        "story-text",
+                        "Batch Import Text",
+                    )
+                    .extensions(&["txt", "md"])
+                    .starting_in(start),
+                ));
+            }
             "story.export_page" => self.run("file.export.png", cx),
             "story.export_pages" => self.ask_export_pages(cx),
             _ => return false,
         }
         true
+    }
+
+    /// Story, Batch Import Text: each block of the text file at `path`
+    /// becomes a text layer, from the page shown on, a line of `---`
+    /// moving on to the next page.
+    pub(crate) fn import_text(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(error) => {
+                cx.fail(format!("Cannot read {}: {error}", path.display()));
+                return;
+            }
+        };
+        let arena = &cx.world.arena;
+        let (pages, index, right_bound) = match self.story_here(arena) {
+            Some((story, pages, index)) => (pages, index, story::bound_right(arena, story)),
+            None => (vec![picture], 0, false),
+        };
+        let blocks = story::text_blocks(&text);
+        let rgb = self.main;
+        let mut edit = doc::Edit::new("Batch Import Text");
+        let (mut placed, mut left_over) = (0, 0);
+        for (offset, page_blocks) in blocks.iter().enumerate() {
+            let Some(page) = pages.get(index + offset).copied() else {
+                left_over += page_blocks.len();
+                continue;
+            };
+            let Some([width, height]) = arena
+                .get_by_id(page)
+                .ok()
+                .and_then(sue_model::picture::size)
+            else {
+                continue;
+            };
+            let size = (height as f32 / 40.0).clamp(12.0, 96.0);
+            let mut order = arena.relations().next_order(page, sue_core::CHILD);
+            for (row, block) in page_blocks.iter().enumerate() {
+                // Down the page, in from the edge reading starts at.
+                let mut lettering = crate::lettering::Lettering::new([0.0, 0.0], rgb);
+                lettering.content = block.clone();
+                lettering.size = size;
+                let lines = block.lines().count().max(1) as f32;
+                let y = size * 2.0 + row as f32 * (size * 1.4 * lines + size);
+                lettering.at = if right_bound {
+                    [width as f32 * 0.6, y]
+                } else {
+                    [size * 2.0, y]
+                };
+                let Some(layer) = crate::lettering::text_layer(&lettering, width, height) else {
+                    continue;
+                };
+                let id = layer.id();
+                edit = edit.then(sue_core::txn::SpawnEntity::new(layer).with_relation(
+                    sue_core::Relation::new(page, sue_core::CHILD, id).ordered(order.clone()),
+                ));
+                order = sue_core::OrderKey::between(Some(&order), None);
+                placed += 1;
+            }
+        }
+        if placed > 0 {
+            Self::apply(cx, edit);
+        }
+        if left_over > 0 {
+            cx.notify(format!(
+                "Lettered {placed} blocks; {left_over} more need more pages"
+            ));
+        } else {
+            cx.notify(format!("Lettered {placed} blocks"));
+        }
     }
 
     /// Asks where to export every page, and as what.

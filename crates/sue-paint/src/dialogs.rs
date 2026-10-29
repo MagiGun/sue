@@ -405,6 +405,51 @@ pub(crate) enum Dialog {
     Modifiers([usize; 3]),
     /// Command Bar Settings.
     CommandBar(String),
+    /// Canvas Properties.
+    CanvasProperties(CanvasProperties),
+    /// Color Profile Preview Settings: which profile.
+    Proof(usize),
+    /// Change Page Settings.
+    PageSettings(PageSettings),
+    /// Change Story Information.
+    StoryInfo(StoryInfo),
+    /// The Story Editor: each text layer's page number, page, layer and
+    /// words.
+    StoryEditor(Vec<(usize, sue_core::EntityId, sue_core::EntityId, String)>),
+    /// Convert Layer: the layer, to raster (0) or vector (1), and its name.
+    Convert(sue_core::EntityId, u8, String),
+}
+
+/// Canvas Properties: the canvas's name, resolution and paper.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CanvasProperties {
+    pub picture: sue_core::EntityId,
+    pub name: String,
+    pub dpi: f64,
+    pub paper: Option<sue_core::EntityId>,
+    pub paper_color: [u8; 3],
+    pub paper_shown: bool,
+}
+
+/// Change Page Settings: every page's size, resolution and borders.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PageSettings {
+    pub story: sue_core::EntityId,
+    pub width: u32,
+    pub height: u32,
+    pub dpi: f64,
+    pub bleed: f64,
+    pub inner: f64,
+}
+
+/// Change Story Information.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct StoryInfo {
+    pub story: sue_core::EntityId,
+    pub title: String,
+    pub author: String,
+    pub first: i64,
+    pub right_bound: bool,
 }
 
 /// What each modifier can do: its rice key, label and choices.
@@ -514,6 +559,12 @@ impl SuePaint {
             Dialog::Print(_, false) => ("Print Settings", vec2(380.0, 330.0)),
             Dialog::Modifiers(_) => ("Modifier Key Settings", vec2(400.0, 230.0)),
             Dialog::CommandBar(_) => ("Command Bar Settings", vec2(420.0, 460.0)),
+            Dialog::CanvasProperties(_) => ("Canvas Properties", vec2(380.0, 230.0)),
+            Dialog::Proof(_) => ("Color Profile Preview Settings", vec2(400.0, 230.0)),
+            Dialog::PageSettings(_) => ("Change Page Settings", vec2(380.0, 270.0)),
+            Dialog::StoryInfo(_) => ("Change Story Information", vec2(380.0, 240.0)),
+            Dialog::StoryEditor(_) => ("Story Editor", vec2(520.0, 520.0)),
+            Dialog::Convert(..) => ("Convert Layer", vec2(360.0, 190.0)),
             Dialog::Correction(_, filter, ..) => (
                 filter.label(),
                 vec2(
@@ -726,6 +777,111 @@ impl SuePaint {
                                 if ui.button("Close").clicked() {
                                     outcome = Outcome::Ok;
                                 }
+                            }
+                            Dialog::PageSettings(settings) => {
+                                ui.horizontal(|ui| {
+                                    label(ui, "Size:", theme);
+                                    ui.add(egui::DragValue::new(&mut settings.width).range(1..=10_000).suffix(" px"));
+                                    ui.label("by");
+                                    ui.add(egui::DragValue::new(&mut settings.height).range(1..=10_000).suffix(" px"));
+                                });
+                                ui.horizontal(|ui| {
+                                    label(ui, "Resolution:", theme);
+                                    ui.add(egui::DragValue::new(&mut settings.dpi).range(1.0..=2400.0).suffix(" dpi"));
+                                });
+                                ui.horizontal(|ui| {
+                                    label(ui, "Bleed:", theme);
+                                    ui.add(egui::DragValue::new(&mut settings.bleed).range(0.0..=50.0).suffix(" mm"));
+                                });
+                                ui.horizontal(|ui| {
+                                    label(ui, "Inner border:", theme);
+                                    ui.add(egui::DragValue::new(&mut settings.inner).range(0.0..=100.0).suffix(" mm"));
+                                });
+                                ui.label(
+                                    RichText::new("Every page of the story changes; each keeps its drawing in the middle")
+                                        .size(theme.small_size)
+                                        .color(theme.muted),
+                                );
+                                ok_cancel(ui, &mut outcome);
+                            }
+                            Dialog::StoryInfo(info) => {
+                                ui.horizontal(|ui| {
+                                    label(ui, "Title:", theme);
+                                    ui.text_edit_singleline(&mut info.title);
+                                });
+                                ui.horizontal(|ui| {
+                                    label(ui, "Author:", theme);
+                                    ui.text_edit_singleline(&mut info.author);
+                                });
+                                ui.horizontal(|ui| {
+                                    label(ui, "First page number:", theme);
+                                    ui.add(egui::DragValue::new(&mut info.first).range(0..=9_999));
+                                });
+                                ui.horizontal(|ui| {
+                                    label(ui, "Binding:", theme);
+                                    ui.radio_value(&mut info.right_bound, false, "Left (left to right)");
+                                    ui.radio_value(&mut info.right_bound, true, "Right (manga)");
+                                });
+                                ok_cancel(ui, &mut outcome);
+                            }
+                            Dialog::StoryEditor(texts) => {
+                                egui::ScrollArea::vertical().max_height(size.y - 120.0).show(ui, |ui| {
+                                    let mut last_page = 0;
+                                    for (number, _, _, words) in texts.iter_mut() {
+                                        if *number != last_page {
+                                            last_page = *number;
+                                            ui.add_space(4.0);
+                                            ui.label(RichText::new(format!("Page {number}")).color(theme.text).strong());
+                                        }
+                                        ui.add(egui::TextEdit::multiline(words).desired_rows(2).desired_width(f32::INFINITY));
+                                    }
+                                });
+                                ok_cancel(ui, &mut outcome);
+                            }
+                            Dialog::Proof(profile) => {
+                                ui.label(
+                                    RichText::new("How the picture would print: shown while View, Color Profile, Preview is on")
+                                        .size(theme.small_size)
+                                        .color(theme.muted),
+                                );
+                                for (index, (name, ..)) in crate::proof::PROFILES.iter().enumerate() {
+                                    ui.radio_value(profile, index, *name);
+                                }
+                                ok_cancel(ui, &mut outcome);
+                            }
+                            Dialog::CanvasProperties(props) => {
+                                ui.horizontal(|ui| {
+                                    label(ui, "Name:", theme);
+                                    ui.text_edit_singleline(&mut props.name);
+                                });
+                                ui.horizontal(|ui| {
+                                    label(ui, "Resolution:", theme);
+                                    ui.add(egui::DragValue::new(&mut props.dpi).range(1.0..=2400.0).suffix(" dpi"));
+                                });
+                                if props.paper.is_some() {
+                                    ui.horizontal(|ui| {
+                                        ui.checkbox(&mut props.paper_shown, "Paper");
+                                        ui.color_edit_button_srgb(&mut props.paper_color);
+                                    });
+                                }
+                                ok_cancel(ui, &mut outcome);
+                            }
+                            Dialog::Convert(_, kind, name) => {
+                                ui.horizontal(|ui| {
+                                    label(ui, "Name:", theme);
+                                    ui.text_edit_singleline(name);
+                                });
+                                ui.horizontal(|ui| {
+                                    label(ui, "Type:", theme);
+                                    ui.radio_value(kind, 0, "Raster layer");
+                                    ui.radio_value(kind, 1, "Vector layer");
+                                });
+                                ui.label(
+                                    RichText::new("To vector, the pixels are traced to lines down the middle of each stroke")
+                                        .size(theme.small_size)
+                                        .color(theme.muted),
+                                );
+                                ok_cancel(ui, &mut outcome);
                             }
                             Dialog::Message(_, paragraphs) => {
                                 egui::ScrollArea::vertical().max_height(size.y - 110.0).show(ui, |ui| {
@@ -1078,6 +1234,152 @@ impl SuePaint {
                 }
             }
             (Dialog::CommandBar(_), _) => self.save_extras(cx),
+            (
+                Dialog::CanvasProperties(_)
+                | Dialog::Convert(..)
+                | Dialog::Proof(_)
+                | Dialog::PageSettings(_)
+                | Dialog::StoryInfo(_)
+                | Dialog::StoryEditor(_),
+                Outcome::Cancel,
+            ) => {}
+            (Dialog::PageSettings(settings), _) => {
+                match crate::story::page_settings(
+                    &cx.world.arena,
+                    settings.story,
+                    [settings.width.max(1), settings.height.max(1)],
+                    settings.dpi,
+                    settings.bleed,
+                    settings.inner,
+                ) {
+                    Ok(edit) => {
+                        Self::apply(cx, edit);
+                        for doc in &mut self.docs {
+                            doc.view.fitted = false;
+                        }
+                    }
+                    Err(error) => cx.fail(error),
+                }
+            }
+            (Dialog::StoryInfo(info), _) => {
+                let mut edit = crate::doc::Edit::new("Change Story Information")
+                    .then(sue_core::txn::SetProperty::new(
+                        info.story,
+                        crate::story::AUTHOR,
+                        info.author.clone(),
+                    ))
+                    .then(sue_core::txn::SetProperty::new(
+                        info.story,
+                        crate::story::FIRST_NUMBER,
+                        info.first,
+                    ))
+                    .then(sue_core::txn::SetProperty::new(
+                        info.story,
+                        crate::story::BINDING,
+                        if info.right_bound { "right" } else { "left" },
+                    ));
+                if !info.title.trim().is_empty() {
+                    edit = edit.then(sue_core::txn::Rename::new(info.story, info.title.trim()));
+                }
+                Self::apply(cx, edit);
+            }
+            (Dialog::StoryEditor(texts), _) => {
+                let mut edit = crate::doc::Edit::new("Story Editor");
+                let mut changed = false;
+                for (_, page, layer, words) in texts {
+                    let arena = &cx.world.arena;
+                    let same = arena
+                        .get_by_id(layer)
+                        .ok()
+                        .and_then(crate::lettering::Lettering::of)
+                        .is_some_and(|lettering| lettering.content == words);
+                    if same {
+                        continue;
+                    }
+                    let Some([width, height]) = arena
+                        .get_by_id(page)
+                        .ok()
+                        .and_then(sue_model::picture::size)
+                    else {
+                        continue;
+                    };
+                    if let Some(step) =
+                        crate::lettering::retext(arena, layer, &words, width, height)
+                    {
+                        edit = edit.then(step);
+                        changed = true;
+                    }
+                }
+                if changed {
+                    Self::apply(cx, edit);
+                }
+            }
+            (Dialog::Proof(profile), _) => {
+                self.proof_profile = profile;
+                self.proof_on = true;
+            }
+            (Dialog::CanvasProperties(props), _) => {
+                let mut edit = crate::doc::Edit::new("Canvas Properties").then(
+                    sue_core::txn::SetProperty::new(
+                        props.picture,
+                        sue_model::picture::DPI,
+                        props.dpi,
+                    ),
+                );
+                let name = props.name.trim();
+                if !name.is_empty() {
+                    edit = edit.then(sue_core::txn::Rename::new(props.picture, name));
+                }
+                if let Some(paper) = props.paper {
+                    let [r, g, b] = props.paper_color;
+                    edit = edit
+                        .then(sue_core::txn::SetProperty::new(
+                            paper,
+                            sue_model::picture::COLOR,
+                            sue_core::Color::srgb8(r, g, b),
+                        ))
+                        .then(sue_core::txn::SetProperty::new(
+                            paper,
+                            sue_model::picture::VISIBLE,
+                            props.paper_shown,
+                        ));
+                }
+                Self::apply(cx, edit);
+            }
+            (Dialog::Convert(layer, kind, name), _) => {
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                let arena = &cx.world.arena;
+                let vector = crate::vector::is_vector(arena, layer);
+                let made = match (kind, vector) {
+                    (1, false) => crate::doc::vectorize(arena, picture, layer).map(Some),
+                    (0, true) => crate::doc::rasterize(arena, picture, layer).map(Some),
+                    _ => Ok(None),
+                };
+                match made {
+                    Ok(Some((mut edit, id))) => {
+                        if !name.trim().is_empty() {
+                            edit = edit.then(sue_core::txn::Rename::new(id, name.trim()));
+                        }
+                        if Self::apply(cx, edit)
+                            && let Some(doc) = self.doc_mut()
+                        {
+                            doc.layer = Some(id);
+                        }
+                    }
+                    Ok(None) => {
+                        if !name.trim().is_empty() {
+                            Self::apply(
+                                cx,
+                                crate::doc::Edit::new("Rename Layer")
+                                    .then(sue_core::txn::Rename::new(layer, name.trim())),
+                            );
+                        }
+                    }
+                    Err(error) => cx.fail(error),
+                }
+            }
             (Dialog::Webtoon(height, width), Outcome::Ok) => {
                 self.ask_export_webtoon(cx, height, width)
             }

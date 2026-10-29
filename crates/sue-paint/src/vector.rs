@@ -205,6 +205,254 @@ pub fn from_svg(drawing: &sue_io::svg::SvgDrawing, size: [u32; 2]) -> Vec<Line> 
         .collect()
 }
 
+/// Lines traced along the middle of what straight RGBA8 `pixels` cover
+/// (Convert Layer to a vector layer): the covered area thinned to its
+/// center lines, each line as wide as the stroke it follows, in the
+/// average color of the pixels.
+#[must_use]
+pub fn trace(pixels: &[u8], width: u32, height: u32) -> Vec<Line> {
+    let (w, h) = (width as usize, height as usize);
+    if pixels.len() != w * h * 4 || w == 0 || h == 0 {
+        return Vec::new();
+    }
+    let ink: Vec<bool> = pixels.chunks(4).map(|pixel| pixel[3] > 127).collect();
+    let (mut sum, mut count) = ([0.0_f32; 3], 0.0_f32);
+    for (pixel, inked) in pixels.chunks(4).zip(&ink) {
+        if *inked {
+            for channel in 0..3 {
+                sum[channel] += f32::from(pixel[channel]) / 255.0;
+            }
+            count += 1.0;
+        }
+    }
+    if count == 0.0 {
+        return Vec::new();
+    }
+    let color = sum.map(|value| value / count);
+    // How far each inked pixel is from the nearest clear one (chamfer).
+    let mut far = vec![f32::MAX; w * h];
+    for (index, inked) in ink.iter().enumerate() {
+        if !inked {
+            far[index] = 0.0;
+        }
+    }
+    let step = |far: &mut Vec<f32>, x: usize, y: usize, dx: isize, dy: isize, cost: f32| {
+        let (nx, ny) = (x as isize + dx, y as isize + dy);
+        let from = if nx < 0 || ny < 0 || nx >= w as isize || ny >= h as isize {
+            0.0
+        } else {
+            far[ny as usize * w + nx as usize]
+        };
+        let here = &mut far[y * w + x];
+        *here = here.min(from + cost);
+    };
+    for y in 0..h {
+        for x in 0..w {
+            for (dx, dy, cost) in [(-1, 0, 1.0), (0, -1, 1.0), (-1, -1, 1.414), (1, -1, 1.414)] {
+                step(&mut far, x, y, dx, dy, cost);
+            }
+        }
+    }
+    for y in (0..h).rev() {
+        for x in (0..w).rev() {
+            for (dx, dy, cost) in [(1, 0, 1.0), (0, 1, 1.0), (1, 1, 1.414), (-1, 1, 1.414)] {
+                step(&mut far, x, y, dx, dy, cost);
+            }
+        }
+    }
+    // Zhang and Suen's thinning.
+    let mut on = ink.clone();
+    let at = |on: &Vec<bool>, x: isize, y: isize| {
+        x >= 0 && y >= 0 && x < w as isize && y < h as isize && on[y as usize * w + x as usize]
+    };
+    loop {
+        let mut changed = false;
+        for pass in 0..2 {
+            let mut gone = Vec::new();
+            for y in 0..h as isize {
+                for x in 0..w as isize {
+                    if !at(&on, x, y) {
+                        continue;
+                    }
+                    let p = [
+                        at(&on, x, y - 1),
+                        at(&on, x + 1, y - 1),
+                        at(&on, x + 1, y),
+                        at(&on, x + 1, y + 1),
+                        at(&on, x, y + 1),
+                        at(&on, x - 1, y + 1),
+                        at(&on, x - 1, y),
+                        at(&on, x - 1, y - 1),
+                    ];
+                    let neighbors = p.iter().filter(|on| **on).count();
+                    let turns = (0..8).filter(|i| !p[*i] && p[(*i + 1) % 8]).count();
+                    let (a, b) = if pass == 0 {
+                        (p[0] && p[2] && p[4], p[2] && p[4] && p[6])
+                    } else {
+                        (p[0] && p[2] && p[6], p[0] && p[4] && p[6])
+                    };
+                    if (2..=6).contains(&neighbors) && turns == 1 && !a && !b {
+                        gone.push(y as usize * w + x as usize);
+                    }
+                }
+            }
+            changed |= !gone.is_empty();
+            for index in gone {
+                on[index] = false;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    // Walk the center lines from their ends and joins, then the loops.
+    let around = |index: usize| -> Vec<usize> {
+        let (x, y) = ((index % w) as isize, (index / w) as isize);
+        let mut out = Vec::new();
+        for (dx, dy) in [
+            (0, -1),
+            (1, 0),
+            (0, 1),
+            (-1, 0),
+            (1, -1),
+            (1, 1),
+            (-1, 1),
+            (-1, -1),
+        ] {
+            if at(&on, x + dx, y + dy) {
+                out.push((y + dy) as usize * w + (x + dx) as usize);
+            }
+        }
+        out
+    };
+    let mut used = std::collections::HashSet::new();
+    let mut seen = vec![false; w * h];
+    let mut chains: Vec<Vec<usize>> = Vec::new();
+    let walk = |start: usize,
+                next: usize,
+                used: &mut std::collections::HashSet<(usize, usize)>,
+                seen: &mut Vec<bool>| {
+        let mut chain = vec![start, next];
+        used.insert((start.min(next), start.max(next)));
+        seen[start] = true;
+        let mut here = next;
+        loop {
+            seen[here] = true;
+            let ways = around(here);
+            if ways.len() != 2 {
+                break;
+            }
+            let Some(onward) = ways
+                .into_iter()
+                .find(|way| !used.contains(&((*way).min(here), (*way).max(here))))
+            else {
+                break;
+            };
+            used.insert((here.min(onward), here.max(onward)));
+            chain.push(onward);
+            here = onward;
+        }
+        chain
+    };
+    for index in 0..w * h {
+        if !on[index] {
+            continue;
+        }
+        let ways = around(index);
+        if ways.len() == 2 {
+            continue;
+        }
+        if ways.is_empty() {
+            chains.push(vec![index]);
+            seen[index] = true;
+            continue;
+        }
+        for way in ways {
+            if !used.contains(&(index.min(way), index.max(way))) {
+                chains.push(walk(index, way, &mut used, &mut seen));
+            }
+        }
+    }
+    for index in 0..w * h {
+        if on[index]
+            && !seen[index]
+            && let Some(way) = around(index).into_iter().next()
+        {
+            chains.push(walk(index, way, &mut used, &mut seen));
+        }
+    }
+    chains
+        .into_iter()
+        .filter_map(|chain| {
+            let points: Vec<([f32; 2], f32)> = chain
+                .iter()
+                .map(|index| {
+                    let (x, y) = ((index % w) as f32 + 0.5, (index / w) as f32 + 0.5);
+                    ([x, y], (far[*index] * 2.0 - 1.0).max(1.0))
+                })
+                .collect();
+            let kept = simplify(&points, 0.75);
+            let size = kept.iter().map(|(_, width)| *width).fold(1.0_f32, f32::max);
+            let mut samples: Vec<Sample> = kept
+                .iter()
+                .map(|(at, width)| Sample {
+                    at: *at,
+                    pressure: 1.0,
+                    speed: 0.0,
+                    width: width / size,
+                    alpha: 1.0,
+                })
+                .collect();
+            if samples.len() == 1 {
+                samples.push(samples[0]);
+            }
+            (!samples.is_empty()).then(|| Line {
+                samples,
+                tip: Tip {
+                    size,
+                    size_by: crate::brush::Dynamics::NONE,
+                    ..Tip::default()
+                },
+                colors: [color, color],
+                finish: Finish::default(),
+                copies: Vec::new(),
+                marks: Vec::new(),
+            })
+        })
+        .collect()
+}
+
+/// `points` with those closer than `tolerance` to the line between their
+/// neighbors left out (Ramer, Douglas and Peucker).
+fn simplify(points: &[([f32; 2], f32)], tolerance: f32) -> Vec<([f32; 2], f32)> {
+    if points.len() <= 2 {
+        return points.to_vec();
+    }
+    let (first, last) = (points[0].0, points[points.len() - 1].0);
+    let (dx, dy) = (last[0] - first[0], last[1] - first[1]);
+    let length = dx.hypot(dy);
+    let (mut far, mut index) = (0.0, 0);
+    for (at, (point, _)) in points.iter().enumerate().skip(1).take(points.len() - 2) {
+        let distance = if length < 1e-6 {
+            (point[0] - first[0]).hypot(point[1] - first[1])
+        } else {
+            ((point[0] - first[0]) * dy - (point[1] - first[1]) * dx).abs() / length
+        };
+        if distance > far {
+            far = distance;
+            index = at;
+        }
+    }
+    if far <= tolerance {
+        return vec![points[0], points[points.len() - 1]];
+    }
+    let mut left = simplify(&points[..=index], tolerance);
+    let right = simplify(&points[index..], tolerance);
+    left.pop();
+    left.extend(right);
+    left
+}
+
 /// The lines kept in `geometry`.
 #[must_use]
 pub fn lines(geometry: &Geometry) -> Vec<Line> {
@@ -657,6 +905,40 @@ mod tests {
             copies: vec![SAME],
             marks: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_painted_stroke_traces_to_one_line_down_its_middle() {
+        let (w, h) = (60_u32, 30_u32);
+        let mut pixels = vec![0_u8; (w * h * 4) as usize];
+        // A bar 5 pixels thick from x 10 to 50.
+        for y in 13..18 {
+            for x in 10..50 {
+                pixels[((y * w + x) * 4) as usize..][..4].copy_from_slice(&[200, 0, 0, 255]);
+            }
+        }
+        let lines = trace(&pixels, w, h);
+        assert_eq!(lines.len(), 1, "one center line");
+        let line = &lines[0];
+        let xs: Vec<f32> = line.samples.iter().map(|sample| sample.at[0]).collect();
+        let (low, high) = (
+            xs.iter().copied().fold(f32::MAX, f32::min),
+            xs.iter().copied().fold(0.0, f32::max),
+        );
+        assert!(low < 15.0 && high > 45.0, "it runs the bar's length");
+        assert!(
+            line.samples
+                .iter()
+                .all(|sample| (sample.at[1] - 15.5).abs() < 1.5),
+            "down the middle"
+        );
+        assert!(
+            line.tip.size >= 3.0 && line.tip.size <= 7.0,
+            "about as wide as the bar"
+        );
+        assert!((line.colors[0][0] - 200.0 / 255.0).abs() < 1e-3);
+        assert!(line.samples.len() <= 4, "a straight bar needs few points");
+        assert!(trace(&vec![0; (w * h * 4) as usize], w, h).is_empty());
     }
 
     #[test]

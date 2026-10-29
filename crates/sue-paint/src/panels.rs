@@ -1151,6 +1151,25 @@ impl SuePaint {
                         "A quick stroke carries on along the pen's momentum into a fine point",
                     );
                 let tip = &mut sub.tip;
+                let shapes = crate::brush::shapes();
+                if !shapes.is_empty() || tip.shape != 0 {
+                    ui.horizontal(|ui| {
+                        ui.label(small("Brush tip"));
+                        let now = shapes
+                            .iter()
+                            .find(|(id, _)| *id == tip.shape)
+                            .map_or("Round", |(_, name)| name.as_str())
+                            .to_owned();
+                        egui::ComboBox::from_id_salt("sue-paint-tip-shape")
+                            .selected_text(now)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut tip.shape, 0, "Round");
+                                for (id, name) in &shapes {
+                                    ui.selectable_value(&mut tip.shape, *id, name);
+                                }
+                            });
+                    });
+                }
                 starting_and_ending_ui(ui, tip, theme);
                 let stamps = tip.dabbed();
                 color_jitter_ui(ui, &mut tip.jitter, stamps, theme);
@@ -3112,6 +3131,7 @@ impl SuePaint {
             .hline(list.x_range(), list.top(), theme.hairline());
         let mut list_ui = child(ui, list, "layer-list");
         let mut pick = None;
+        let mut also_pick = None;
         // Right-click on a layer: Clip Studio Paint's layer menu.
         let layer_menu: Vec<sue_wm::MenuItem> = crate::menus::menus()
             .into_iter()
@@ -3145,6 +3165,11 @@ impl SuePaint {
                         full.max,
                     );
                     let chosen = Some(info.id) == self.layer();
+                    let also = self.doc().is_some_and(|doc| doc.picked.contains(&info.id));
+                    if also {
+                        ui.painter()
+                            .rect_filled(full, 0.0, theme.active.gamma_multiply(0.6));
+                    }
                     if chosen {
                         ui.painter().rect_filled(full, 0.0, theme.active);
                     } else if response.hovered() {
@@ -3360,6 +3385,9 @@ impl SuePaint {
                         reopen = Some((info.id, filter, text));
                     } else if response.double_clicked() {
                         self.renaming = Some((info.id, info.name.clone()));
+                    } else if response.clicked() && ui.input(|input| input.modifiers.command) {
+                        // Ctrl+click picks more layers (Merge Selected Layers).
+                        also_pick = Some(info.id);
                     } else if response.clicked() || response.secondary_clicked() {
                         pick = Some(info.id);
                     }
@@ -3376,8 +3404,19 @@ impl SuePaint {
         {
             if doc.layer != Some(id) {
                 doc.mask_edit = false;
+                doc.picked.clear();
             }
             doc.layer = Some(id);
+        }
+        if let Some(id) = also_pick
+            && let Some(doc) = self.doc_mut()
+            && doc.layer != Some(id)
+        {
+            if let Some(at) = doc.picked.iter().position(|known| *known == id) {
+                doc.picked.remove(at);
+            } else {
+                doc.picked.push(id);
+            }
         }
         if let Some((id, visible)) = toggle {
             Self::apply(cx, doc::set(id, picture::VISIBLE, visible));

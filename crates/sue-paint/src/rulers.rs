@@ -596,6 +596,38 @@ pub enum Snap {
 }
 
 impl Snap {
+    /// A stroke beginning at `start` (layer pixels, the layer at
+    /// `offset`) within `reach` of a line of the grid every `step`
+    /// picture pixels follows that line (View, Snap to Grid); near a
+    /// crossing it goes along whichever line the pen heads down.
+    #[must_use]
+    pub fn grid(start: [f32; 2], offset: [f32; 2], step: f32, reach: f32) -> Option<Self> {
+        if step <= 0.0 {
+            return None;
+        }
+        let picture = [start[0] + offset[0], start[1] + offset[1]];
+        let near = |value: f32| (value / step).round() * step;
+        let (x, y) = (near(picture[0]), near(picture[1]));
+        let mut guides = Vec::new();
+        if (picture[0] - x).abs() <= reach {
+            guides.push(Guide::Line {
+                origin: [x - offset[0], start[1]],
+                direction: [0.0, 1.0],
+            });
+        }
+        if (picture[1] - y).abs() <= reach {
+            guides.push(Guide::Line {
+                origin: [start[0], y - offset[1]],
+                direction: [1.0, 0.0],
+            });
+        }
+        match guides.len() {
+            0 => None,
+            1 => guides.pop().map(Self::On),
+            _ => Some(Self::Choosing { start, guides }),
+        }
+    }
+
     /// A stroke beginning at `start` following `rulers`: the linear ruler
     /// with `ruler` on when it starts within `reach` of it, the others with
     /// `special` on. `None` when there is nothing to follow.
@@ -713,6 +745,23 @@ mod tests {
 
     fn near(a: [f32; 2], b: [f32; 2]) -> bool {
         distance(a, b) < 1e-2
+    }
+
+    #[test]
+    fn strokes_near_a_grid_line_follow_it() {
+        let mut snap = Snap::grid([62.0, 10.0], [0.0, 0.0], 64.0, 4.0).unwrap();
+        assert_eq!(
+            snap.follow([70.0, 40.0], 2.0),
+            Some([64.0, 40.0]),
+            "down the line at x 64"
+        );
+        assert!(
+            Snap::grid([30.0, 30.0], [0.0, 0.0], 64.0, 4.0).is_none(),
+            "far from every line"
+        );
+        // Near a crossing, the way the pen goes picks the line.
+        let mut snap = Snap::grid([63.0, 65.0], [0.0, 0.0], 64.0, 4.0).unwrap();
+        assert_eq!(snap.follow([90.0, 66.0], 2.0), Some([90.0, 64.0]));
     }
 
     #[test]

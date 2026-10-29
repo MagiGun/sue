@@ -265,6 +265,34 @@ impl SuePaint {
         self.item_bank = read(folder.as_deref(), "item_bank.txt")
             .map(|text| text.lines().filter_map(Item::from_line).collect())
             .unwrap_or_default();
+        // The brush tips made from pictures.
+        if let Some(entries) = folder
+            .as_ref()
+            .and_then(|folder| std::fs::read_dir(folder.join("tips")).ok())
+        {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = path
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if let Some(shape) = std::fs::read(&path)
+                    .ok()
+                    .and_then(|bytes| sue_io::decode_png(&bytes).ok())
+                    .and_then(|decoded| {
+                        let tile = decoded.tile;
+                        crate::brush::TipShape::from_rgba(
+                            &name,
+                            tile.bytes()?,
+                            tile.width(),
+                            tile.height(),
+                        )
+                    })
+                {
+                    crate::brush::register_shape(shape);
+                }
+            }
+        }
         if let Some(text) = read(folder.as_deref(), "command_bar.txt") {
             for line in text.lines() {
                 if let Some(command) = line.strip_prefix("hide ") {

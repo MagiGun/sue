@@ -51,6 +51,7 @@ mod menus;
 mod pages;
 mod panels;
 pub mod print;
+pub mod proof;
 pub mod psd_io;
 pub mod rulers;
 pub mod select;

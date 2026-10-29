@@ -899,6 +899,211 @@ pub fn add_vector_layer(
     ))
 }
 
+/// The edit that turns `picture` a quarter turn (Rotate 90 Degrees Right
+/// when `clockwise`, else Left): the canvas's sides swap, and every
+/// layer's pixels, mask and vector lines turn with it.
+///
+/// # Errors
+/// If the picture has no size or a layer will not turn.
+pub fn rotate_canvas(arena: &Arena, picture: EntityId, clockwise: bool) -> Result<Edit, String> {
+    let [width, height] = size_of(arena, picture)?;
+    let label = if clockwise {
+        "Rotate 90 Degrees Right"
+    } else {
+        "Rotate 90 Degrees Left"
+    };
+    let mut edit = Edit::new(label)
+        .then(SetProperty::new(picture, picture::WIDTH, i64::from(height)))
+        .then(SetProperty::new(picture, picture::HEIGHT, i64::from(width)));
+    let turn = |id: EntityId, offset: [i64; 2], edit: Edit| -> Result<Edit, String> {
+        let Some(raster) = raster(arena, id) else {
+            return Ok(edit);
+        };
+        let (Some(bytes), PixelFormat::Rgba8) = (raster.bytes(), raster.format()) else {
+            return Ok(edit);
+        };
+        let (w, h) = (raster.width(), raster.height());
+        let mut out = vec![0_u8; bytes.len()];
+        for ny in 0..w {
+            for nx in 0..h {
+                let (ox, oy) = if clockwise {
+                    (ny, h - 1 - nx)
+                } else {
+                    (w - 1 - ny, nx)
+                };
+                let from = ((oy * w + ox) * 4) as usize;
+                let to = ((ny * h + nx) * 4) as usize;
+                out[to..to + 4].copy_from_slice(&bytes[from..from + 4]);
+            }
+        }
+        let tile = RasterTile2D::from_bytes(h, w, PixelFormat::Rgba8, out)
+            .map_err(|error| error.to_string())?;
+        let [x, y] = offset;
+        let moved = if clockwise {
+            [i64::from(height) - (y + i64::from(h)), x]
+        } else {
+            [y, i64::from(width) - (x + i64::from(w))]
+        };
+        let mut edit = edit.then(sue_core::txn::ReplaceComponent::new(id, tile, label));
+        if moved != [0, 0] || offset != [0, 0] {
+            edit = edit
+                .then(SetProperty::new(id, picture::X, moved[0]))
+                .then(SetProperty::new(id, picture::Y, moved[1]));
+        }
+        Ok(edit)
+    };
+    for info in layers(arena, picture) {
+        edit = turn(info.id, info.style.offset, edit)?;
+        if let Some(mask) = mask_of(arena, info.id) {
+            edit = turn(mask, info.style.offset, edit)?;
+        }
+        if crate::vector::is_vector(arena, info.id) {
+            let mut lines = crate::vector::lines(&crate::vector::geometry(arena, info.id));
+            for line in &mut lines {
+                for sample in &mut line.samples {
+                    let [x, y] = sample.at;
+                    sample.at = if clockwise {
+                        [height as f32 - y, x]
+                    } else {
+                        [y, width as f32 - x]
+                    };
+                }
+            }
+            edit = edit.then(sue_core::txn::SetExtension::set(
+                info.id,
+                crate::vector::to_geometry(&lines),
+            ));
+        }
+    }
+    Ok(edit)
+}
+
+/// The edit that merges raster `ids` of `picture` into the lowest of them
+/// (Merge Selected Layers): each laid over the one below as its blend
+/// mode and opacity say, hidden ones left out. Returns the merged layer.
+///
+/// # Errors
+/// If fewer than two of them are raster layers, or one is locked.
+pub fn merge_layers(
+    arena: &Arena,
+    picture: EntityId,
+    ids: &[EntityId],
+) -> Result<(Edit, EntityId), String> {
+    let [width, height] = size_of(arena, picture)?;
+    let chosen: Vec<LayerInfo> = layers(arena, picture)
+        .into_iter()
+        .filter(|info| {
+            ids.contains(&info.id) && info.kind == LayerKind::Raster && !is_folder(arena, info.id)
+        })
+        .collect();
+    if chosen.len() < 2 {
+        return Err(
+            "Pick two or more raster layers to merge (Ctrl+click in the Layer palette)".to_owned(),
+        );
+    }
+    if let Some(locked) = chosen.iter().find(|info| info.locked) {
+        return Err(format!("{} is locked", locked.name));
+    }
+    let mut color = vec![[0.0_f32; 4]; (width * height) as usize];
+    for info in chosen.iter().filter(|info| info.style.visible) {
+        let Some(raster) = raster(arena, info.id) else {
+            continue;
+        };
+        let (Some(bytes), PixelFormat::Rgba8) = (raster.bytes(), raster.format()) else {
+            continue;
+        };
+        let [ox, oy] = info.style.offset;
+        for y in 0..raster.height() {
+            let ty = i64::from(y) + oy;
+            if ty < 0 || ty >= i64::from(height) {
+                continue;
+            }
+            for x in 0..raster.width() {
+                let tx = i64::from(x) + ox;
+                if tx < 0 || tx >= i64::from(width) {
+                    continue;
+                }
+                let mut source = unit(&bytes[((y * raster.width() + x) * 4) as usize..][..4]);
+                source[3] *= info.style.opacity;
+                let at = (ty as u32 * width + tx as u32) as usize;
+                color[at] = info.style.blend.composite(color[at], source);
+            }
+        }
+    }
+    let pixels: Vec<u8> = color.iter().flat_map(|pixel| self::bytes(*pixel)).collect();
+    let tile = RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels)
+        .map_err(|error| error.to_string())?;
+    let into = chosen[0].id;
+    let mut edit = Edit::new("Merge Selected Layers")
+        .then(sue_core::txn::ReplaceComponent::new(
+            into,
+            tile,
+            "Merge Selected Layers",
+        ))
+        .then(SetProperty::new(into, picture::X, 0_i64))
+        .then(SetProperty::new(into, picture::Y, 0_i64))
+        .then(SetProperty::new(into, picture::OPACITY, 1.0))
+        .then(SetProperty::new(
+            into,
+            picture::BLEND,
+            sue_model::BlendMode::Normal.name(),
+        ))
+        .then(SetProperty::new(into, picture::VISIBLE, true));
+    for info in &chosen[1..] {
+        edit = edit.then(delete(info.id));
+    }
+    Ok((edit, into))
+}
+
+/// The edit that turns raster `layer` into a vector layer in its place
+/// (Convert Layer): its pixels traced to center lines, its name,
+/// properties and folder kept. Returns the new layer.
+///
+/// # Errors
+/// If `layer` is not a raster layer with something on it.
+pub fn vectorize(
+    arena: &Arena,
+    picture: EntityId,
+    layer: EntityId,
+) -> Result<(Edit, EntityId), String> {
+    if crate::vector::is_vector(arena, layer) {
+        return Err("The layer is a vector layer already".to_owned());
+    }
+    let entity = arena.get_by_id(layer).map_err(|error| error.to_string())?;
+    let source = raster(arena, layer).ok_or("Only raster layers convert to vector")?;
+    let bytes = source.bytes().ok_or("Only RGBA layers convert to vector")?;
+    let [ox, oy] = LayerStyle::of(entity).offset;
+    let mut lines = crate::vector::trace(bytes, source.width(), source.height());
+    if lines.is_empty() {
+        return Err("There is nothing on the layer to trace".to_owned());
+    }
+    for line in &mut lines {
+        for sample in &mut line.samples {
+            sample.at[0] += ox as f32;
+            sample.at[1] += oy as f32;
+        }
+    }
+    let [width, height] = size_of(arena, picture)?;
+    let drawn = crate::vector::render(&lines, width, height).ok_or("The lines cannot be drawn")?;
+    let mut fresh = Entity::new(entity.name(), drawn)
+        .with_class(crate::vector::CLASS)
+        .with_ext(crate::vector::to_geometry(&lines));
+    for (key, value) in entity.properties().iter() {
+        if key != picture::X && key != picture::Y {
+            fresh = fresh.with_property(key, value.clone());
+        }
+    }
+    let id = fresh.id();
+    let order = key_above(arena, picture, Some(layer));
+    let mut edit = Edit::new("Convert Layer").then(
+        SpawnEntity::new(fresh).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
+    );
+    if let Some(folder) = folder_of(arena, layer) {
+        edit = edit.then(Relate::new(Relation::new(folder, MEMBER, id)));
+    }
+    Ok((edit.then(delete(layer)), id))
+}
+
 /// A new vector layer right above `below` (or at the top) holding
 /// `lines`, drawn (File, Import, Vector).
 ///
@@ -1253,6 +1458,88 @@ pub fn diff_patch(before: &[u8], after: &[u8], width: u32, height: u32) -> Optio
 mod tests {
     use super::*;
     use sue_core::{ReversibleTransaction, UndoStack};
+
+    #[test]
+    fn a_quarter_turn_swaps_the_sides_and_four_come_back() {
+        let mut arena = Arena::new();
+        let (mut edit, picture) = create(&NewPicture {
+            name: "Turn".to_owned(),
+            width: 4,
+            height: 2,
+            ..NewPicture::default()
+        })
+        .unwrap();
+        edit.apply(&mut arena).unwrap();
+        let mut pixels = vec![0_u8; 4 * 2 * 4];
+        pixels[..4].copy_from_slice(&[9, 9, 9, 255]);
+        let raster = RasterTile2D::from_bytes(4, 2, PixelFormat::Rgba8, pixels).unwrap();
+        let (mut spawn, layer) =
+            add_layer_pixels(&arena, picture, None, "Dot".to_owned(), raster).unwrap();
+        spawn.apply(&mut arena).unwrap();
+        let before = raster_of(&arena, layer);
+        let mut turn = rotate_canvas(&arena, picture, true).unwrap();
+        turn.apply(&mut arena).unwrap();
+        assert_eq!(size_of(&arena, picture).unwrap(), [2, 4]);
+        // The top left corner lands top right.
+        assert_eq!(&raster_of(&arena, layer)[4..8], &[9, 9, 9, 255]);
+        for _ in 0..3 {
+            rotate_canvas(&arena, picture, true)
+                .unwrap()
+                .apply(&mut arena)
+                .unwrap();
+        }
+        assert_eq!(raster_of(&arena, layer), before, "four turns are none");
+        let mut back = rotate_canvas(&arena, picture, false).unwrap();
+        back.apply(&mut arena).unwrap();
+        back.revert(&mut arena).unwrap();
+        assert_eq!(size_of(&arena, picture).unwrap(), [4, 2]);
+    }
+
+    fn raster_of(arena: &Arena, layer: EntityId) -> Vec<u8> {
+        raster(arena, layer).unwrap().bytes().unwrap().to_vec()
+    }
+
+    #[test]
+    fn merging_selected_layers_keeps_the_lowest_and_its_look() {
+        let mut arena = Arena::new();
+        let (mut edit, picture) = create(&NewPicture {
+            name: "Merge".to_owned(),
+            width: 2,
+            height: 1,
+            ..NewPicture::default()
+        })
+        .unwrap();
+        edit.apply(&mut arena).unwrap();
+        let layer = |arena: &mut Arena, rgba: [u8; 4], name: &str| {
+            let raster =
+                RasterTile2D::from_bytes(2, 1, PixelFormat::Rgba8, rgba.repeat(2)).unwrap();
+            let top = layers(arena, picture).last().map(|info| info.id);
+            let (mut spawn, id) =
+                add_layer_pixels(arena, picture, top, name.to_owned(), raster).unwrap();
+            spawn.apply(arena).unwrap();
+            id
+        };
+        let low = layer(&mut arena, [255, 0, 0, 255], "Red");
+        let high = layer(&mut arena, [0, 0, 255, 255], "Blue");
+        SetProperty::new(high, picture::OPACITY, 0.5)
+            .apply(&mut arena)
+            .unwrap();
+        assert!(
+            merge_layers(&arena, picture, &[low]).is_err(),
+            "two at least"
+        );
+        let (mut edit, into) = merge_layers(&arena, picture, &[low, high]).unwrap();
+        edit.apply(&mut arena).unwrap();
+        assert_eq!(into, low);
+        assert!(arena.get_by_id(high).is_err());
+        let merged = raster_of(&arena, low);
+        assert!(
+            merged[0] > 100 && merged[2] > 100 && merged[3] == 255,
+            "half blue over red"
+        );
+        edit.revert(&mut arena).unwrap();
+        assert!(arena.get_by_id(high).is_ok());
+    }
 
     #[test]
     fn a_photo_becomes_a_picture_of_itself() {

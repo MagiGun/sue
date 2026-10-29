@@ -131,6 +131,52 @@ impl Lettering {
     }
 }
 
+/// A new text layer entity holding `lettering` drawn on a `width` by
+/// `height` page (Batch Import Text).
+#[must_use]
+pub(crate) fn text_layer(
+    lettering: &Lettering,
+    width: u32,
+    height: u32,
+) -> Option<sue_core::Entity> {
+    let (pixels, covered) = lettering.draw(width, height);
+    let raster = RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels).ok()?;
+    let name: String = lettering
+        .content
+        .lines()
+        .next()
+        .unwrap_or("Text")
+        .chars()
+        .take(24)
+        .collect();
+    let mut entity = sue_core::Entity::new(name, raster).with_class(TEXT);
+    for (key, value) in lettering.properties(covered) {
+        entity.properties_mut().set(key, value);
+    }
+    Some(entity)
+}
+
+/// The edit that changes text layer `layer` (on a `width` by `height`
+/// page) to say `content` (the Story Editor).
+#[must_use]
+pub(crate) fn retext(
+    arena: &sue_core::Arena,
+    layer: EntityId,
+    content: &str,
+    width: u32,
+    height: u32,
+) -> Option<Edit> {
+    let mut lettering = Lettering::of(arena.get_by_id(layer).ok()?)?;
+    lettering.content = content.to_owned();
+    let (pixels, covered) = lettering.draw(width, height);
+    let raster = RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels).ok()?;
+    let mut edit = Edit::new("Edit Text");
+    for (key, value) in lettering.properties(covered) {
+        edit = edit.then(SetProperty::new(layer, key, value));
+    }
+    Some(edit.then(ReplaceComponent::new(layer, raster, "Edit Text")))
+}
+
 /// Where a text layer's text is.
 fn area_of(entity: &sue_core::Entity) -> Option<[f32; 4]> {
     let text = entity.property(BOX).and_then(Value::as_str)?;

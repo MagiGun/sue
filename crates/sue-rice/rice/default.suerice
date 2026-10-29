@@ -130,6 +130,9 @@ height = 1200                  # [1..10000] Height of new illustrations (px)
 dpi = 72                       # [1..2400] Resolution of new illustrations (dpi)
 theme = "gray"                 # {gray|sue-theme|void|graphite|paper|custom} Sue Paint's colors: Gray, Sue's own theme (follows it), a preset, or Custom (below)
 pen_pressure = "0,0 1,1"       # @text Pen pressure curve for every tool, as pressure,output points (File, Pen Pressure Settings draws it)
+alt_tool = "eyedropper"        # {eyedropper|eraser|none} What Alt while drawing does on the canvas (File, Modifier Key Settings)
+space_tool = "hand"            # {hand|none} What Space does on the canvas (File, Modifier Key Settings)
+ctrl_shift = "pick_layer"      # {pick_layer|none} What Ctrl+Shift click does on the canvas (File, Modifier Key Settings)
 
 [sue_paint_colors]
 void = "#2b2b2b"               # Around the picture

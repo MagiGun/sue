@@ -15,6 +15,17 @@ pub const STORY: &str = "sue.paint.story";
 /// Which edge the pages are bound on: `right` (manga, read right to left)
 /// or `left` (`Text`).
 pub const BINDING: &str = "story.binding";
+/// A page's bleed beyond its finished size, in millimeters (`Float`).
+pub const PAGE_BLEED: &str = "page.bleed";
+/// A page's inner border inside its finished size, in millimeters
+/// (`Float`).
+pub const PAGE_INNER: &str = "page.inner";
+/// A page that is two facing pages combined (`Bool`, Combine Pages).
+pub const SPREAD: &str = "page.spread";
+/// The story's author (`Text`, Change Story Information).
+pub const AUTHOR: &str = "story.author";
+/// The number the first page has (`Int`).
+pub const FIRST_NUMBER: &str = "story.first_number";
 
 type Edit = Batch<sue_core::Arena>;
 
@@ -216,6 +227,247 @@ pub fn duplicate_page(
     Ok((edit, id))
 }
 
+/// The edit that combines `left` and `right`, two pages of `story`, into
+/// one spread (Combine Pages): `left` widens to hold both, `right`'s
+/// layers move onto it beside its own (its paper is let go) and `right`
+/// leaves the story.
+///
+/// # Errors
+/// If either is not a page, or they are the same page.
+pub fn combine(
+    arena: &Arena,
+    story: EntityId,
+    left: EntityId,
+    right: EntityId,
+) -> Result<Edit, String> {
+    if left == right {
+        return Err("Pick two pages to combine".to_owned());
+    }
+    let size = |page: EntityId| {
+        arena
+            .get_by_id(page)
+            .ok()
+            .and_then(picture::size)
+            .ok_or("That is not a page")
+    };
+    let ([lw, lh], [rw, rh]) = (size(left)?, size(right)?);
+    let mut edit = doc::resize_canvas(arena, left, [lw + rw, lh.max(rh)], [0, 0])?;
+    edit = Edit::new("Combine Pages").then(edit);
+    let mut order = arena.relations().next_order(left, CHILD);
+    for info in doc::layers(arena, right) {
+        if info.kind == picture::LayerKind::Paper {
+            edit = edit.then(DespawnEntity::new(info.id));
+            continue;
+        }
+        edit = edit
+            .then(sue_core::txn::Unrelate::new(right, CHILD, info.id))
+            .then(Relate::new(
+                Relation::new(left, CHILD, info.id).ordered(order.clone()),
+            ))
+            .then(sue_core::txn::SetProperty::new(
+                info.id,
+                picture::X,
+                info.style.offset[0] + i64::from(lw),
+            ));
+        order = OrderKey::between(Some(&order), None);
+    }
+    Ok(edit
+        .then(sue_core::txn::SetProperty::new(left, SPREAD, true))
+        .then(sue_core::txn::Unrelate::new(story, CHILD, right))
+        .then(DespawnEntity::new(right)))
+}
+
+/// The edit that separates spread `page` of `story` into two pages at its
+/// middle (Separate Pages): its left half stays, its right half becomes a
+/// new page right after it with the same layers, folders and paper.
+/// Returns the new page.
+///
+/// # Errors
+/// If `page` is not a page at least two pixels wide.
+pub fn separate(
+    arena: &Arena,
+    story: EntityId,
+    page: EntityId,
+) -> Result<(Edit, EntityId), String> {
+    let entity = arena.get_by_id(page).map_err(|error| error.to_string())?;
+    let [width, height] = picture::size(entity).ok_or("That is not a page")?;
+    if width < 2 {
+        return Err("The page is too narrow to separate".to_owned());
+    }
+    let half = width / 2;
+    let mut fresh = Entity::empty(format!("{} right", entity.name()), entity.class());
+    for (key, value) in entity.properties().iter() {
+        fresh = fresh.with_property(key, value.clone());
+    }
+    let fresh = fresh
+        .with_property(picture::WIDTH, i64::from(width - half))
+        .with_property(SPREAD, false);
+    let new_page = fresh.id();
+    let index = pages(arena, story)
+        .iter()
+        .position(|known| *known == page)
+        .map_or(usize::MAX, |at| at + 1);
+    let mut edit = Edit::new("Separate Pages")
+        .then(SpawnEntity::new(fresh))
+        .then(Relate::new(
+            Relation::new(story, CHILD, new_page).ordered(order_at(arena, story, index, None)),
+        ))
+        .then(sue_core::txn::SetProperty::new(
+            page,
+            picture::WIDTH,
+            i64::from(half),
+        ))
+        .then(sue_core::txn::SetProperty::new(page, SPREAD, false));
+    let mut copies: std::collections::HashMap<EntityId, EntityId> =
+        std::collections::HashMap::new();
+    let stack = doc::layers(arena, page);
+    // The part of a layer's pixels between picture columns `from` and `to`.
+    let cut = |info: &doc::LayerInfo, from: u32, to: u32| -> Option<sue_core::RasterTile2D> {
+        let raster = doc::raster(arena, info.id)?;
+        let bytes = raster.bytes()?;
+        let w = to - from;
+        let mut out = vec![0_u8; (w * height * 4) as usize];
+        let [ox, oy] = info.style.offset;
+        for y in 0..raster.height() {
+            let ty = i64::from(y) + oy;
+            if ty < 0 || ty >= i64::from(height) {
+                continue;
+            }
+            for x in 0..raster.width() {
+                let tx = i64::from(x) + ox;
+                if tx < i64::from(from) || tx >= i64::from(to) {
+                    continue;
+                }
+                let at = ((ty as u32 * w + (tx as u32 - from)) * 4) as usize;
+                out[at..at + 4]
+                    .copy_from_slice(&bytes[((y * raster.width() + x) * 4) as usize..][..4]);
+            }
+        }
+        sue_core::RasterTile2D::from_bytes(w, height, sue_core::PixelFormat::Rgba8, out).ok()
+    };
+    for info in &stack {
+        let layer = arena
+            .get_by_id(info.id)
+            .map_err(|error| error.to_string())?;
+        let mut copy = match (info.kind, cut(info, half, width)) {
+            (picture::LayerKind::Raster, Some(right_part)) => {
+                let left_part = cut(info, 0, half).ok_or("A layer will not separate")?;
+                edit = edit.then(sue_core::txn::ReplaceComponent::new(
+                    info.id,
+                    left_part,
+                    "Separate Pages",
+                ));
+                if info.style.offset != [0, 0] {
+                    edit = edit
+                        .then(sue_core::txn::SetProperty::new(info.id, picture::X, 0_i64))
+                        .then(sue_core::txn::SetProperty::new(info.id, picture::Y, 0_i64));
+                }
+                // The right half is plain pixels: vector lines and text
+                // stay with the left page.
+                let class = if layer.class() == crate::vector::CLASS
+                    || layer.class() == crate::lettering::TEXT
+                {
+                    sue_model::class::LAYER
+                } else {
+                    layer.class()
+                };
+                Entity::new(layer.name(), right_part).with_class(class)
+            }
+            _ => Entity::empty(layer.name(), layer.class()),
+        };
+        for (key, value) in layer.properties().iter() {
+            if key != picture::X && key != picture::Y {
+                copy = copy.with_property(key, value.clone());
+            }
+        }
+        let id = copy.id();
+        copies.insert(info.id, id);
+        edit = edit.then(
+            SpawnEntity::new(copy)
+                .with_relation(Relation::new(new_page, CHILD, id).ordered(info.order.clone())),
+        );
+    }
+    for info in &stack {
+        if let (Some(folder), Some(copy)) = (doc::folder_of(arena, info.id), copies.get(&info.id))
+            && let Some(folder_copy) = copies.get(&folder)
+        {
+            edit = edit.then(Relate::new(Relation::new(*folder_copy, doc::MEMBER, *copy)));
+        }
+    }
+    Ok((edit, new_page))
+}
+
+/// The edit that changes every page of `story` to `size` at `dpi` (each
+/// page's pixels kept in the middle) with `bleed` and `inner` borders in
+/// millimeters (Change Page Settings).
+///
+/// # Errors
+/// If the size is out of range.
+pub fn page_settings(
+    arena: &Arena,
+    story: EntityId,
+    size: [u32; 2],
+    dpi: f64,
+    bleed: f64,
+    inner: f64,
+) -> Result<Edit, String> {
+    let mut edit = Edit::new("Change Page Settings");
+    for page in pages(arena, story) {
+        let Some([w, h]) = arena.get_by_id(page).ok().and_then(picture::size) else {
+            continue;
+        };
+        if [w, h] != size {
+            let shift = [
+                (i64::from(size[0]) - i64::from(w)) / 2,
+                (i64::from(size[1]) - i64::from(h)) / 2,
+            ];
+            edit = edit.then(doc::resize_canvas(arena, page, size, shift)?);
+        }
+        edit = edit
+            .then(sue_core::txn::SetProperty::new(page, picture::DPI, dpi))
+            .then(sue_core::txn::SetProperty::new(page, PAGE_BLEED, bleed))
+            .then(sue_core::txn::SetProperty::new(page, PAGE_INNER, inner));
+    }
+    Ok(edit)
+}
+
+/// Text to letter onto pages (Batch Import Text): blocks parted by blank
+/// lines, each page's blocks parted from the next page's by a line of
+/// `---` or a form feed.
+#[must_use]
+pub fn text_blocks(text: &str) -> Vec<Vec<String>> {
+    let mut pages = vec![Vec::new()];
+    let mut block: Vec<&str> = Vec::new();
+    let finish = |block: &mut Vec<&str>, page: &mut Vec<String>| {
+        if !block.is_empty() {
+            page.push(block.join("\n"));
+            block.clear();
+        }
+    };
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed == "---" || trimmed == "\u{c}" {
+            if let Some(page) = pages.last_mut() {
+                finish(&mut block, page);
+            }
+            pages.push(Vec::new());
+        } else if trimmed.is_empty() {
+            if let Some(page) = pages.last_mut() {
+                finish(&mut block, page);
+            }
+        } else {
+            block.push(line.trim_end());
+        }
+    }
+    if let Some(page) = pages.last_mut() {
+        finish(&mut block, page);
+    }
+    while pages.last().is_some_and(Vec::is_empty) && pages.len() > 1 {
+        pages.pop();
+    }
+    pages
+}
+
 /// The edit that takes `page` and its layers away (undo brings them back).
 #[must_use]
 pub fn delete_page(arena: &Arena, page: EntityId) -> Edit {
@@ -252,6 +504,72 @@ mod tests {
             height: 60,
             ..NewPicture::default()
         }
+    }
+
+    #[test]
+    fn two_pages_combine_into_a_spread_and_separate_again() {
+        let mut arena = Arena::new();
+        let (mut edit, story, ids) = create(&spec(), 2, "Spread", false).unwrap();
+        edit.apply(&mut arena).unwrap();
+        // A dot on each page's ink layer.
+        let ink = |arena: &Arena, page: EntityId| {
+            doc::layers(arena, page)
+                .into_iter()
+                .find(|info| info.kind == picture::LayerKind::Raster)
+                .unwrap()
+                .id
+        };
+        for (page, shade) in [(ids[0], 10_u8), (ids[1], 20_u8)] {
+            let layer = ink(&arena, page);
+            doc::raster_mut(&mut arena, layer)
+                .unwrap()
+                .bytes_mut()
+                .unwrap()[..4]
+                .copy_from_slice(&[shade, 0, 0, 255]);
+        }
+        let mut combined = combine(&arena, story, ids[0], ids[1]).unwrap();
+        combined.apply(&mut arena).unwrap();
+        assert_eq!(pages(&arena, story), vec![ids[0]]);
+        assert_eq!(
+            arena.get_by_id(ids[0]).ok().and_then(picture::size),
+            Some([80, 60])
+        );
+        let flat =
+            crate::composite::flatten(&arena, ids[0], crate::composite::RenderOptions::default())
+                .unwrap();
+        let bytes = flat.bytes().unwrap();
+        assert_eq!(bytes[0], 10, "the left page's dot");
+        assert_eq!(bytes[40 * 4], 20, "the right page's dot beside it");
+        let (mut apart, right) = separate(&arena, story, ids[0]).unwrap();
+        apart.apply(&mut arena).unwrap();
+        assert_eq!(pages(&arena, story), vec![ids[0], right]);
+        assert_eq!(
+            arena.get_by_id(right).ok().and_then(picture::size),
+            Some([40, 60])
+        );
+        let flat =
+            crate::composite::flatten(&arena, right, crate::composite::RenderOptions::default())
+                .unwrap();
+        assert_eq!(
+            flat.bytes().unwrap()[0],
+            20,
+            "the dot is back on its own page"
+        );
+        apart.revert(&mut arena).unwrap();
+        combined.revert(&mut arena).unwrap();
+        assert_eq!(pages(&arena, story), ids);
+    }
+
+    #[test]
+    fn text_splits_into_blocks_and_pages() {
+        let pages = text_blocks("Hello\nthere\n\nSecond\n---\nNext page\n\n\n");
+        assert_eq!(
+            pages,
+            vec![
+                vec!["Hello\nthere".to_owned(), "Second".to_owned()],
+                vec!["Next page".to_owned()]
+            ]
+        );
     }
 
     #[test]
