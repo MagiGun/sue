@@ -78,6 +78,9 @@ pub struct TableBlock {
     pub header_rows: usize,
     /// The room between a cell's edge and its text.
     pub pad: f32,
+    /// A table of contents' entries, when it is one (no rules, no cells to
+    /// type in).
+    pub listing: Option<crate::contents::Listing>,
 }
 
 impl TableBlock {
@@ -216,6 +219,7 @@ pub fn lay_table(
         texts: source.cells.clone(),
         header_rows: source.header_rows,
         pad,
+        listing: None,
     }
 }
 

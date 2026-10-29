@@ -18,6 +18,7 @@ use crate::style::{
     Align, ListKind, ParagraphLook, StyleSheet, marks_by_paragraph, paragraph_look, runs,
 };
 use crate::tables::TableSource;
+use sue_model::contents::Contents;
 
 /// One document to print.
 pub struct PrintDoc<'a> {
@@ -168,6 +169,16 @@ enum Block {
         size: [f32; 2],
         look: ParagraphLook,
     },
+    /// A table of contents, until its entries are set.
+    Contents {
+        look: ParagraphLook,
+        contents: Contents,
+    },
+    /// A table of contents, set.
+    Listing {
+        look: ParagraphLook,
+        rows: Vec<ListingRow>,
+    },
     Table {
         look: ParagraphLook,
         /// Column edges across, from the table's left.
@@ -176,6 +187,144 @@ enum Block {
         rows: Vec<SetRow>,
         header_rows: usize,
     },
+}
+
+/// A table of contents' row, set: its title's lines, set in, and its page
+/// number.
+struct ListingRow {
+    indent: f32,
+    lines: Vec<Line>,
+    page: Vec<(Glyph, f32)>,
+    height: f32,
+}
+
+/// Sets a table of contents' title and `entries` (level, title, page)
+/// across `width` points.
+fn set_listing(
+    faces: &mut Faces,
+    contents: &Contents,
+    entries: &[(u8, String, Option<usize>)],
+    look: &ParagraphLook,
+    width: f32,
+) -> Vec<ListingRow> {
+    let plain = Arc::new(Look {
+        color: INK,
+        slant: false,
+        embolden: false,
+        underline: false,
+        strike: false,
+        highlight: None,
+        link: None,
+    });
+    let page_room = 36.0_f32.min(width / 3.0);
+    let mut rows = Vec::new();
+    let mut row =
+        |faces: &mut Faces, text: &str, page: &str, size: f32, bold: bool, indent: f32| {
+            let format = CharFormat {
+                bold,
+                ..CharFormat::default()
+            };
+            let (_, fake_bold, _) = faces
+                .get(&look.font, look.bold || bold, look.italic)
+                .unwrap_or((0, false, false));
+            let run = Arc::new(Look {
+                embolden: fake_bold,
+                ..(*plain).clone()
+            });
+            let glyphs = shaped(faces, text, &look.font, size, &format, look, 0.0, &run);
+            let lines = break_lines(
+                faces,
+                glyphs,
+                (width - indent - page_room).max(24.0),
+                0.0,
+                look.line_spacing.min(crate::tables::CELL_SPACING),
+            );
+            let mut x = 0.0;
+            let page = shaped(
+                faces,
+                page,
+                &look.font,
+                look.size,
+                &CharFormat::default(),
+                look,
+                0.0,
+                &plain,
+            )
+            .into_iter()
+            .map(|glyph| {
+                let at = x;
+                x += glyph.advance;
+                (glyph, at)
+            })
+            .collect();
+            let height = lines.iter().map(|line| line.height).sum::<f32>() + 2.0;
+            rows.push(ListingRow {
+                indent,
+                lines,
+                page,
+                height,
+            });
+        };
+    if !contents.title.trim().is_empty() {
+        row(faces, contents.title.trim(), "", look.size * 1.3, true, 0.0);
+    }
+    for (level, title, page) in entries {
+        let page = page.map(|page| page.to_string()).unwrap_or_default();
+        let indent = f32::from(level.saturating_sub(1)) * 18.0;
+        row(faces, title, &page, look.size, *level == 1, indent);
+    }
+    rows
+}
+
+/// Draws a table of contents' row with its left at `x`, its top at `y`
+/// and `width` points across: the title, a dotted leader, the page at the
+/// right.
+fn draw_listing_row(
+    items: &mut Vec<PdfItem>,
+    faces: &Faces,
+    row: &ListingRow,
+    x: f32,
+    y: f32,
+    width: f32,
+) {
+    let mut top = y + 1.0;
+    let mut end = x + row.indent;
+    let mut baseline = top;
+    for line in &row.lines {
+        baseline = top + line.ascent;
+        let placed: Vec<(Glyph, f32)> = line
+            .glyphs
+            .iter()
+            .map(|(glyph, offset)| (glyph.clone(), x + row.indent + offset))
+            .collect();
+        end = x + row.indent + line.width;
+        decorate(items, &placed, baseline, faces);
+        push_runs(items, placed.into_iter(), baseline);
+        top += line.height;
+    }
+    let page_width = row
+        .page
+        .last()
+        .map_or(0.0, |(glyph, at)| at + glyph.advance);
+    if page_width <= 0.0 {
+        return;
+    }
+    let page_x = x + width - page_width;
+    let mut dot = end + 4.0;
+    while dot < page_x - 3.0 {
+        items.push(PdfItem::Rect {
+            rect: [dot, baseline - 0.8, 0.8, 0.8],
+            color: [0x66, 0x66, 0x66],
+        });
+        dot += 3.5;
+    }
+    push_runs(
+        items,
+        row.page
+            .iter()
+            .map(|(glyph, at)| (glyph.clone(), page_x + at)),
+        baseline,
+    );
 }
 
 /// A table row set: its height and each cell's lines.
@@ -426,18 +575,64 @@ fn break_lines(
     lines
 }
 
-/// Sets `docs` on pages with `sheet`, as a PDF document.
+/// What the text shows in place of its object characters (`embed` marks).
+pub struct Embeds<'a> {
+    /// Pictures.
+    pub figures: &'a dyn Fn(EntityId) -> Option<PdfImage>,
+    /// Tables.
+    pub tables: &'a dyn Fn(EntityId) -> Option<TableSource>,
+    /// Tables of contents.
+    pub contents: &'a dyn Fn(EntityId) -> Option<Contents>,
+}
+
+impl Embeds<'_> {
+    /// Nothing shown: object characters print as nothing.
+    pub const NONE: Embeds<'static> = Embeds {
+        figures: &|_| None,
+        tables: &|_| None,
+        contents: &|_| None,
+    };
+}
+
+/// Sets `docs` on pages with `sheet`, as a PDF document. A table of
+/// contents is set twice: once to find each heading's page, then with
+/// them.
 #[must_use]
-#[allow(clippy::too_many_lines, reason = "one pass over the book")]
 pub fn typeset(
     docs: &[PrintDoc<'_>],
     sheet: &StyleSheet,
     page: &PageSetup,
-    figures: &dyn Fn(EntityId) -> Option<PdfImage>,
-    tables: &dyn Fn(EntityId) -> Option<TableSource>,
+    embeds: &Embeds<'_>,
     title: &str,
     author: &str,
 ) -> PdfDocument {
+    let (pdf, pages, listed) = set_pass(docs, sheet, page, embeds, None, title, author);
+    if listed {
+        set_pass(docs, sheet, page, embeds, Some(&pages), title, author).0
+    } else {
+        pdf
+    }
+}
+
+/// One setting of `docs`: the document, each block's page, and whether
+/// there was a table of contents. `known` gives each block's page from an
+/// earlier pass, for the contents.
+#[allow(
+    clippy::too_many_lines,
+    clippy::too_many_arguments,
+    reason = "one pass over the book"
+)]
+fn set_pass(
+    docs: &[PrintDoc<'_>],
+    sheet: &StyleSheet,
+    page: &PageSetup,
+    embeds: &Embeds<'_>,
+    known: Option<&[usize]>,
+    title: &str,
+    author: &str,
+) -> (PdfDocument, Vec<usize>, bool) {
+    let figures = embeds.figures;
+    let tables = embeds.tables;
     let mut faces = Faces::default();
     let mut images = Vec::new();
     let mut blocks: Vec<(usize, Block)> = Vec::new();
@@ -462,6 +657,10 @@ pub fn typeset(
                         })
                 })
                 .flatten();
+            if let Some(contents) = embed.and_then(embeds.contents) {
+                blocks.push((doc_index, Block::Contents { look, contents }));
+                continue;
+            }
             if let Some(source) = embed.and_then(tables) {
                 let room = (width - look.indent - look.indent_right).max(36.0);
                 let (edges, rows) = set_table(&mut faces, &source, &look, room);
@@ -651,6 +850,41 @@ pub fn typeset(
             ));
         }
     }
+    // Tables of contents: the headings they list, with their pages.
+    let listed = blocks
+        .iter()
+        .any(|(_, block)| matches!(block, Block::Contents { .. }));
+    if listed {
+        let headings: Vec<(usize, u8, String)> = blocks
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (_, block))| match block {
+                Block::Text { look, title, .. } if !title.is_empty() => {
+                    Some((index, look.outline?, title.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        for (_, block) in &mut blocks {
+            let Block::Contents { look, contents } = &*block else {
+                continue;
+            };
+            let (look, contents) = (look.clone(), contents.clone());
+            let room = (width - look.indent - look.indent_right).max(72.0);
+            let entries: Vec<(u8, String, Option<usize>)> = headings
+                .iter()
+                .filter(|(_, level, _)| contents.lists(*level))
+                .map(|(block, level, title)| {
+                    let page = known
+                        .and_then(|known| known.get(*block))
+                        .map(|page| page + 1);
+                    (*level, title.clone(), page)
+                })
+                .collect();
+            let rows = set_listing(&mut faces, &contents, &entries, &look, room);
+            *block = Block::Listing { look, rows };
+        }
+    }
     // Notes at the end, under their own heading.
     if !notes.is_empty() {
         let heading = paragraph_look_of(
@@ -732,6 +966,7 @@ pub fn typeset(
     let mut bookmarks = Vec::new();
     let mut y = 0.0_f32;
     let mut last_doc = usize::MAX;
+    let mut block_pages = vec![0; blocks.len()];
     let new_page = |pages: &mut Vec<PdfPage>, y: &mut f32| {
         pages.push(PdfPage {
             size: page.size,
@@ -746,7 +981,25 @@ pub fn typeset(
         if starts_doc && docs.get(doc_index).is_some_and(|doc| doc.new_page) && y > 0.0 {
             new_page(&mut pages, &mut y);
         }
+        block_pages[index] = pages.len() - 1;
         match &blocks[index].1 {
+            Block::Contents { .. } => {}
+            Block::Listing { look, rows } => {
+                if y > 0.0 {
+                    y += look.space_before;
+                }
+                let room = (width - look.indent - look.indent_right).max(72.0);
+                let x = left + look.indent;
+                for row in rows {
+                    if y + row.height > height + 0.5 && y > 0.0 {
+                        new_page(&mut pages, &mut y);
+                    }
+                    let page_index = pages.len() - 1;
+                    draw_listing_row(&mut pages[page_index].items, &faces, row, x, top + y, room);
+                    y += row.height;
+                }
+                y += look.space_after;
+            }
             Block::Table {
                 look,
                 edges,
@@ -830,6 +1083,10 @@ pub fn typeset(
                         }
                         Some(Block::Picture { size, .. }) => size[1],
                         Some(Block::Table { rows, .. }) => rows.first().map_or(0.0, |row| row.0),
+                        Some(Block::Listing { rows, .. }) => {
+                            rows.first().map_or(0.0, |row| row.height)
+                        }
+                        Some(Block::Contents { .. }) => 0.0,
                         None => 0.0,
                     };
                     if y + total + next > height && total + next <= height {
@@ -851,6 +1108,7 @@ pub fn typeset(
                         y: top + y,
                     });
                 }
+                block_pages[index] = pages.len() - 1;
                 if let Some(level) = look.outline
                     && !title.is_empty()
                 {
@@ -982,7 +1240,7 @@ pub fn typeset(
             push_runs(&mut pdf_page.items, placed.into_iter(), baseline);
         }
     }
-    PdfDocument {
+    let pdf = PdfDocument {
         title: title.to_owned(),
         author: author.to_owned(),
         fonts: faces
@@ -996,7 +1254,8 @@ pub fn typeset(
         images,
         pages,
         bookmarks,
-    }
+    };
+    (pdf, block_pages, listed)
 }
 
 fn paragraph_look_of(sheet: &StyleSheet, key: &str) -> ParagraphLook {
@@ -1134,7 +1393,7 @@ mod tests {
             marks: &marks,
             new_page: false,
         }];
-        let pdf = typeset(&docs, &sheet, &page, &|_| None, &|_| None, "Book", "Me");
+        let pdf = typeset(&docs, &sheet, &page, &Embeds::NONE, "Book", "Me");
         assert!(pdf.pages.len() >= 2, "{} pages", pdf.pages.len());
         assert_eq!(pdf.bookmarks[0].title, "Chapter One");
         assert!(!pdf.fonts.is_empty());
@@ -1166,5 +1425,70 @@ mod tests {
         assert!(words.contains("Notes"), "{words}");
         let bytes = sue_io::pdf::write_pdf(&pdf).unwrap();
         assert!(bytes.starts_with(b"%PDF-1.7"));
+    }
+
+    #[test]
+    fn contents_print_the_headings_with_the_pages_they_land_on() {
+        let filler = "Words to fill the page out to its foot. ".repeat(60);
+        let text = format!(
+            "{}\nChapter One\n{filler}\nChapter Two\n{filler}\n",
+            sue_model::OBJECT
+        );
+        let mut marks = TextMarks::new();
+        let id = EntityId::new();
+        marks.set(
+            0..sue_model::OBJECT.len_utf8(),
+            kind::EMBED,
+            Some(Value::Entity(id)),
+        );
+        for heading in ["Chapter One", "Chapter Two"] {
+            let at = text.find(heading).unwrap();
+            marks.set_paragraphs(&text, at..at, kind::STYLE, Some("heading1".into()));
+        }
+        let sheet = StyleSheet::standard(&Fonts::default());
+        let page = PageSetup {
+            size: [300.0, 400.0],
+            margins: [36.0; 4],
+            ..PageSetup::default()
+        };
+        let docs = [PrintDoc {
+            title: "",
+            text: &text,
+            marks: &marks,
+            new_page: false,
+        }];
+        let contents = |known: EntityId| (known == id).then(Contents::default);
+        let embeds = Embeds {
+            contents: &contents,
+            ..Embeds::NONE
+        };
+        let pdf = typeset(&docs, &sheet, &page, &embeds, "Book", "Me");
+        let words = |page: &PdfPage| -> String {
+            page.items
+                .iter()
+                .filter_map(|item| match item {
+                    PdfItem::Text { glyphs, .. } => Some(
+                        glyphs
+                            .iter()
+                            .map(|glyph| glyph.text.as_str())
+                            .collect::<String>(),
+                    ),
+                    _ => None,
+                })
+                .collect()
+        };
+        let first = words(&pdf.pages[0]);
+        let two = pdf
+            .bookmarks
+            .iter()
+            .find(|mark| mark.title == "Chapter Two")
+            .unwrap();
+        assert!(two.page > 0, "chapter two is further on");
+        assert!(first.contains("Contents"), "{first}");
+        assert!(
+            first.contains(&format!("ChapterTwo{}", two.page + 1))
+                || first.contains(&format!("Chapter Two{}", two.page + 1)),
+            "{first}"
+        );
     }
 }

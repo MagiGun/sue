@@ -482,6 +482,49 @@ impl Editor {
         self.replace_selection(cx, text, None);
     }
 
+    /// Changes the case of the selection (or of the word at the caret),
+    /// keeping its formatting and selecting what it changed. Returns
+    /// `false` if nothing changed.
+    pub fn change_case(&mut self, cx: &mut AppletContext<'_>, case: crate::case::Case) -> bool {
+        let Some(doc) = self.current() else {
+            return false;
+        };
+        let mut range = self.selection();
+        if range.is_empty() {
+            let (start, end) = word_around(self.text(), range.start);
+            range = start..end;
+        }
+        let text = self.text();
+        let before = &text[range.clone()];
+        let sentence_start = text[..range.start]
+            .trim_end_matches([' ', '"', '\'', '\u{201C}', '\u{2018}', '('])
+            .chars()
+            .next_back()
+            .is_none_or(|ch| matches!(ch, '.' | '!' | '?' | '\n'));
+        let after = crate::case::change(before, case, sentence_start);
+        if after == before {
+            return false;
+        }
+        let marks = self.marks[self.caret.doc].slice(range.clone());
+        self.commit(cx);
+        cx.typing.flush(cx.history);
+        let Some(end) = edit::replace(cx, doc, range.clone(), &after, Some(&marks), &[]) else {
+            return false;
+        };
+        cx.typing.flush(cx.history);
+        self.sync_text(cx);
+        self.anchor = Caret {
+            doc: self.caret.doc,
+            offset: range.start,
+        };
+        self.caret = Caret {
+            doc: self.caret.doc,
+            offset: end,
+        };
+        self.follow = true;
+        true
+    }
+
     /// Puts an embedded entity (a picture) in a paragraph of its own at the
     /// caret.
     pub fn insert_embed(&mut self, cx: &mut AppletContext<'_>, entity: EntityId) {
@@ -500,6 +543,23 @@ impl Editor {
     ) -> Option<EntityId> {
         let entity = crate::tables::new_table(rows.max(1), columns.max(1), header_rows);
         self.place_table(cx, entity, self.selection())
+    }
+
+    /// Puts a table of contents with `contents`' settings in a paragraph of
+    /// its own at the caret. Returns its entity.
+    pub fn insert_contents(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        contents: &sue_model::contents::Contents,
+    ) -> Option<EntityId> {
+        self.commit(cx);
+        self.current()?;
+        let entity = contents.entity();
+        let id = entity.id();
+        cx.apply(ArenaEdit(sue_core::txn::SpawnEntity::new(entity)))
+            .ok()?;
+        self.embed(cx, id, "Insert Table of Contents");
+        Some(id)
     }
 
     /// Spawns table `entity` and sets it over `range` of the current
@@ -844,6 +904,12 @@ impl Editor {
         let figure_size = |id: EntityId| (view.figures)(id).map(|(_, size)| size);
         let arena = cx.arena();
         let tables = |id: EntityId| TableSource::read(arena, id);
+        let contents = |id: EntityId| {
+            arena
+                .get_by_id(id)
+                .ok()
+                .and_then(sue_model::contents::Contents::read)
+        };
         for (index, id) in docs.iter().enumerate() {
             let revision = arena.get_by_id(*id).map_or(0, sue_core::Entity::revision);
             let embeds = self.marks[index]
@@ -880,6 +946,7 @@ impl Editor {
                     marks: &self.marks[index],
                     figure_size: &figure_size,
                     tables: &tables,
+                    contents: &contents,
                 };
                 let laid = lay_document(ctx, index, &source, &setting);
                 self.cache.insert(*id, Cached { key, blocks: laid });
@@ -901,6 +968,38 @@ impl Editor {
             0.0
         };
         paginate(&mut self.laid, view.mode, view.page, scale, gap);
+        if self
+            .laid
+            .blocks
+            .iter()
+            .any(|block| block.contents.is_some())
+        {
+            // Tables of contents list the headings with their pages: laid
+            // out once to find the pages, then again with them.
+            let setting = Setting {
+                sheet: view.sheet,
+                scale,
+                width,
+                ink: view.ink,
+            };
+            for pass in 0..2 {
+                let pages = (pass > 0).then(|| {
+                    let mut pages = vec![0; self.laid.blocks.len()];
+                    for piece in self.laid.pieces.iter().rev() {
+                        pages[piece.block] = piece.page;
+                    }
+                    pages
+                });
+                crate::contents::fill(
+                    ctx,
+                    &mut self.laid.blocks,
+                    &self.texts,
+                    &setting,
+                    pages.as_deref(),
+                );
+                paginate(&mut self.laid, view.mode, view.page, scale, gap);
+            }
+        }
         self.pieces_of = vec![0..0; self.laid.blocks.len()];
         for (index, piece) in self.laid.pieces.iter().enumerate() {
             let range = &mut self.pieces_of[piece.block];
@@ -988,11 +1087,43 @@ impl Editor {
         }
     }
 
+    /// The heading a table of contents' entry under a point on screen
+    /// leads to, if there is one.
+    fn hit_entry(&self, pos: Pos2) -> Option<Caret> {
+        for (index, piece) in self.laid.pieces.iter().enumerate() {
+            let block = &self.laid.blocks[piece.block];
+            let Some(listing) = block
+                .table
+                .as_ref()
+                .and_then(|table| table.listing.as_ref().map(|listing| (table, listing)))
+            else {
+                continue;
+            };
+            let (table, listing) = listing;
+            let (galley, clip) = self.piece_place(index);
+            if !clip.contains(pos) {
+                continue;
+            }
+            let y = pos.y - galley.y;
+            let row = table
+                .rows
+                .iter()
+                .position(|(top, bottom)| y >= *top && y < *bottom)?;
+            let target = (*listing.targets.get(row)?)?;
+            let heading = self.laid.blocks.get(target)?;
+            return Some(Caret {
+                doc: heading.doc,
+                offset: heading.range.start,
+            });
+        }
+        None
+    }
+
     /// The table cell under a point on screen, if any.
     fn hit_cell(&self, pos: Pos2) -> Option<CellCaret> {
         for (index, piece) in self.laid.pieces.iter().enumerate() {
             let block = &self.laid.blocks[piece.block];
-            let Some(table) = &block.table else {
+            let Some(table) = block.table.as_ref().filter(|table| table.listing.is_none()) else {
                 continue;
             };
             let (galley, clip) = self.piece_place(index);
@@ -1665,6 +1796,12 @@ impl Editor {
                 self.left_cell = self.cell.take();
             }
             self.cell = None;
+            if let Some(heading) = self.hit_entry(pos) {
+                // A press on a table of contents' entry goes to its heading.
+                self.set_caret(heading, false);
+                self.pending.clear();
+                return;
+            }
             let caret = self.hit(pos);
             self.h_pos = None;
             match count {
@@ -2213,6 +2350,17 @@ impl Editor {
             // The selection behind the text.
             if selecting && self.caret.doc == block.doc {
                 self.paint_selection(painter, block, piece, galley_at, &selection, select_color);
+            }
+            if let Some(table) = block.table.as_ref().filter(|table| table.listing.is_some()) {
+                let origin = pos2(text_left + block.indent, galley_at.y);
+                crate::contents::paint_contents(
+                    painter,
+                    table,
+                    piece.rows.clone(),
+                    origin,
+                    view.ink.text,
+                );
+                continue;
             }
             if let Some(table) = &block.table {
                 let origin = pos2(text_left + block.indent, galley_at.y);

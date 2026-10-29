@@ -81,6 +81,7 @@ pub fn menus() -> Vec<Menu> {
                 item("Scene Break", "insert.scene_break"),
                 item("Footnote...", "insert.footnote").key("Ctrl+Alt+F"),
                 item("Header and Footer...", "insert.header_footer"),
+                item("Table of Contents...", "insert.contents"),
                 item("Link...", "insert.link").key("Ctrl+K"),
                 item("Picture...", "insert.picture"),
                 item("Today's Date", "insert.date"),
@@ -100,6 +101,14 @@ pub fn menus() -> Vec<Menu> {
                         item("Subscript", "format.subscript").key("Ctrl+="),
                         item("Small Capitals", "format.small_caps"),
                         item("Code", "format.code"),
+                        MenuItem::Separator,
+                        MenuItem::sub(
+                            "Change Case",
+                            sue_type::case::Case::ALL
+                                .iter()
+                                .map(|(_, key, name)| item(*name, format!("format.case.{key}")))
+                                .collect(),
+                        ),
                     ],
                 ),
                 MenuItem::sub(

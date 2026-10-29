@@ -32,7 +32,7 @@ use crate::palette::{Palette, PaletteOutcome};
 use crate::{
     AppletContext, AppletId, AppletRole, Applets, Catalog, FilePick, FrameScheduler, ItemState,
     LayoutRequest, LayoutSolution, MenuBar, MenuItem, PaletteEntry, RiceEdit, ShellRequest,
-    ShellView, SpringDamper, SpringMode, Theme, Transport, Typing, WmConfig, World, keys,
+    ShellView, SpringDamper, SpringMode, Theme, Transport, Typing, WmConfig, WorkList, World, keys,
     solve_layout, sue_menu, widgets,
 };
 
@@ -86,6 +86,8 @@ pub struct ShellIo<'a> {
     pub transport: &'a mut Transport,
     /// Requests for the engine.
     pub requests: &'a mut Vec<ShellRequest>,
+    /// The files of late and the work Sue kept, for the Hub's lists.
+    pub work: &'a WorkList,
     /// Frames per second while animating; `None` when idle.
     pub fps: Option<u32>,
 }
@@ -105,6 +107,7 @@ fn split<'b>(
         textures: &mut *io.textures,
         audio: io.audio.as_deref_mut(),
         transport: &mut *io.transport,
+        work: io.work,
         view,
     };
     (&mut *io.applets, cx)
@@ -117,6 +120,42 @@ enum HubClick {
     Open,
     /// Pin it, or take its pin away.
     Pin,
+}
+
+/// What a row of the Hub's lists does when clicked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HubRow {
+    /// Open a recent file or a saved project in its studio or tool.
+    Open(PathBuf),
+    /// Bring back work Sue kept and open it in its studio.
+    Recover(String),
+    /// Throw kept work away (a first click asks, a second one does it).
+    Discard(String),
+}
+
+/// A row of one of the Hub's lists, ready to draw.
+struct ListRow {
+    title: String,
+    /// What it is, at the right of the title: `Project`, `PNG`.
+    kind: String,
+    detail: String,
+    /// The full path, on hover.
+    hover: String,
+    open: HubRow,
+    /// Kept work can be recovered or discarded with its own buttons.
+    kept: Option<String>,
+}
+
+/// The folder `path` is in, by its name.
+fn folder_name(path: &std::path::Path) -> String {
+    path.parent()
+        .map(|parent| {
+            parent.file_name().map_or_else(
+                || parent.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            )
+        })
+        .unwrap_or_default()
 }
 
 /// What a palette entry does.
@@ -164,6 +203,10 @@ pub struct Shell {
     sue_button: Rect,
     /// Where the last frame drew the Hub's boxes and their pins.
     hub_boxes: Vec<(AppletId, Rect, Rect)>,
+    /// Where the last frame drew the rows (and buttons) of the Hub's lists.
+    hub_rows: Vec<(HubRow, Rect)>,
+    /// The kept work whose Discard was clicked once and asks again.
+    discard_armed: Option<String>,
     booted: bool,
 }
 
@@ -262,6 +305,8 @@ impl Shell {
             page_rect: Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 720.0)),
             sue_button: Rect::NOTHING,
             hub_boxes: Vec::new(),
+            hub_rows: Vec::new(),
+            discard_armed: None,
             booted: false,
             config,
             theme,
@@ -314,6 +359,13 @@ impl Shell {
     #[must_use]
     pub fn hub_boxes(&self) -> &[(AppletId, Rect, Rect)] {
         &self.hub_boxes
+    }
+
+    /// Where the last frame drew the rows of the Hub's lists and the
+    /// buttons of kept work (empty when a page covered the Hub).
+    #[must_use]
+    pub fn hub_rows(&self) -> &[(HubRow, Rect)] {
+        &self.hub_rows
     }
 
     /// The studio or tool filling the page (`None` on the Hub, and as soon
@@ -572,6 +624,7 @@ impl Shell {
     /// Goes back to the Hub: the page slides away over it.
     pub fn hub(&mut self) {
         self.dismiss_overlays();
+        self.discard_armed = None;
         self.page = None;
         self.reveal.set_target(0.0);
         self.touch();
@@ -676,9 +729,8 @@ impl Shell {
         }
         // The named submenus, Sue's own first.
         let mut named: Vec<(String, Vec<MenuItem>)> = vec![
-            (
-                sue_menu::FILE.to_owned(),
-                vec![
+            (sue_menu::FILE.to_owned(), {
+                let mut file = vec![
                     sue_item(
                         run,
                         "Open File...",
@@ -686,8 +738,29 @@ impl Shell {
                         false,
                     )
                     .key(keymap.open_file.to_string()),
-                ],
-            ),
+                ];
+                let recent: Vec<MenuItem> = io
+                    .work
+                    .recent()
+                    .take(10)
+                    .map(|recent| {
+                        let name = recent.path.file_name().map_or_else(
+                            || recent.path.display().to_string(),
+                            |name| name.to_string_lossy().into_owned(),
+                        );
+                        sue_item(
+                            run,
+                            name,
+                            ShellRequest::OpenFile(recent.path.clone()),
+                            false,
+                        )
+                    })
+                    .collect();
+                if !recent.is_empty() {
+                    file.push(MenuItem::sub("Open Recent", recent));
+                }
+                file
+            }),
             (
                 sue_menu::PROJECT.to_owned(),
                 vec![
@@ -1089,6 +1162,7 @@ impl Shell {
         self.page_rect = layout.page;
         self.sue_button = layout.sue_button;
         self.hub_boxes.clear();
+        self.hub_rows.clear();
         let settled = self.shown.is_some() && self.reveal.position() >= 0.999;
         // The Hub, unless a page covers it whole.
         if !settled {
@@ -1170,9 +1244,12 @@ impl Shell {
         dt: f32,
     ) {
         let view = self.view(now, dt);
+        // A child takes its parent's style, not the context's: the page
+        // wears its own theme only when handed the style `with_theme` set.
         let mut builder = UiBuilder::new()
             .max_rect(area)
             .id_salt(("sue-page", id.as_str()))
+            .style(root.ctx().global_style())
             .layout(Layout::top_down(Align::Min));
         if lifted {
             builder = builder.layer_id(LayerId::new(Order::Middle, Id::unique("sue-page-lifted")));
@@ -1292,6 +1369,7 @@ impl Shell {
                     UiBuilder::new()
                         .max_rect(layout.menus)
                         .id_salt(("sue-bar", id.as_str()))
+                        .style(root.ctx().global_style())
                         .layout(Layout::left_to_right(Align::Center)),
                 );
                 bar.set_clip_rect(layout.menus);
@@ -1339,6 +1417,7 @@ impl Shell {
             .max(1.0) as usize;
         let pinned = pinned(&io.world.rice, io.applets);
         let mut clicked = None;
+        let mut row_click = None;
         let mut ui = root.new_child(
             UiBuilder::new()
                 .max_rect(area)
@@ -1395,7 +1474,29 @@ impl Shell {
                     }
                     ui.add_space(margin * 0.5);
                 }
+                row_click = self.hub_lists(ui, io, theme, (margin, gap), live, touch);
+                ui.add_space(margin);
             });
+        match row_click {
+            Some(HubRow::Open(path)) => {
+                self.discard_armed = None;
+                io.requests.push(ShellRequest::OpenFile(path));
+            }
+            Some(HubRow::Recover(id)) => {
+                self.discard_armed = None;
+                io.requests.push(ShellRequest::Recover(id));
+            }
+            Some(HubRow::Discard(id)) => {
+                if self.discard_armed.as_ref() == Some(&id) {
+                    self.discard_armed = None;
+                    io.requests.push(ShellRequest::Discard(id));
+                } else {
+                    self.discard_armed = Some(id);
+                }
+                self.touch();
+            }
+            None => {}
+        }
         match clicked {
             Some((id, HubClick::Open)) => self.open(id, io.applets),
             Some((id, HubClick::Pin)) => {
@@ -1404,6 +1505,324 @@ impl Shell {
             }
             None => {}
         }
+    }
+
+    /// The Hub's lists under the boxes: the files and projects of late,
+    /// the saved projects, and the work Sue kept that nobody saved. Three
+    /// columns side by side when there is room, one under the other when
+    /// not. Returns the row or button clicked.
+    fn hub_lists(
+        &mut self,
+        ui: &mut Ui,
+        io: &ShellIo<'_>,
+        theme: &Theme,
+        (margin, gap): (f32, f32),
+        live: bool,
+        touch: bool,
+    ) -> Option<HubRow> {
+        let now = crate::unix_now();
+        let mut lists = Vec::new();
+        if self.config.recent_count > 0 {
+            lists.push((
+                "Recent",
+                "Files and projects you open or save show up here.",
+                Self::recent_rows(io, now, self.config.recent_count),
+            ));
+        }
+        lists.push((
+            "Saved Projects",
+            "Projects you save (Sue menu, Project, Save Project) show up here.",
+            Self::project_rows(io, now),
+        ));
+        lists.push((
+            "Unsaved Work",
+            "Work Sue keeps for you before it is saved shows up here, to recover or discard.",
+            Self::unsaved_rows(io, now),
+        ));
+        let room = (ui.available_width() - margin * 2.0).max(120.0);
+        let side_by_side = room >= 3.0 * 300.0 + 2.0 * gap;
+        let width = if side_by_side {
+            ((room - 2.0 * gap) / 3.0).min(440.0)
+        } else {
+            room.min(560.0)
+        };
+        let mut clicked = None;
+        let mut draw = |shell: &mut Self, ui: &mut Ui, list: (&str, &str, Vec<ListRow>)| {
+            let (title, empty, rows) = list;
+            ui.vertical(|ui| {
+                ui.set_width(width);
+                ui.label(
+                    RichText::new(title)
+                        .size(theme.heading_size)
+                        .color(theme.text),
+                );
+                ui.add_space(gap * 0.75);
+                if rows.is_empty() {
+                    ui.label(
+                        RichText::new(empty)
+                            .size(theme.small_size)
+                            .color(theme.muted),
+                    );
+                }
+                ui.spacing_mut().item_spacing.y = 6.0;
+                for row in rows {
+                    if let Some(click) = shell.hub_list_row(ui, width, &row, live, touch, theme) {
+                        clicked = Some(click);
+                    }
+                }
+            });
+        };
+        if side_by_side {
+            ui.horizontal_top(|ui| {
+                ui.add_space(margin);
+                ui.spacing_mut().item_spacing.x = gap;
+                for list in lists {
+                    draw(self, ui, list);
+                }
+            });
+        } else {
+            for list in lists {
+                ui.horizontal_top(|ui| {
+                    ui.add_space(margin);
+                    draw(self, ui, list);
+                });
+                ui.add_space(gap * 1.5);
+            }
+        }
+        clicked
+    }
+
+    /// The files and projects of late, newest first.
+    fn recent_rows(io: &ShellIo<'_>, now: u64, count: usize) -> Vec<ListRow> {
+        io.work
+            .recent()
+            .take(count)
+            .map(|file| {
+                let verb = if file.saved >= file.opened {
+                    "Saved"
+                } else {
+                    "Opened"
+                };
+                ListRow {
+                    title: file.title(),
+                    kind: if file.is_project() {
+                        "Project".to_owned()
+                    } else {
+                        file.path
+                            .extension()
+                            .map(|extension| extension.to_string_lossy().to_uppercase())
+                            .unwrap_or_default()
+                    },
+                    detail: format!(
+                        "{verb} {} in {}",
+                        crate::ago(file.last(), now),
+                        folder_name(&file.path)
+                    ),
+                    hover: file.path.display().to_string(),
+                    open: HubRow::Open(file.path.clone()),
+                    kept: None,
+                }
+            })
+            .collect()
+    }
+
+    /// The Sue projects saved or opened, by name.
+    fn project_rows(io: &ShellIo<'_>, now: u64) -> Vec<ListRow> {
+        io.work
+            .projects()
+            .into_iter()
+            .take(50)
+            .map(|file| {
+                let (verb, when) = if file.saved > 0 {
+                    ("Saved", file.saved)
+                } else {
+                    ("Opened", file.opened)
+                };
+                ListRow {
+                    title: file.title(),
+                    kind: Self::studio_name(io, file.page.as_ref()),
+                    detail: format!(
+                        "{verb} {} in {}",
+                        crate::ago(when, now),
+                        folder_name(&file.path)
+                    ),
+                    hover: file.path.display().to_string(),
+                    open: HubRow::Open(file.path.clone()),
+                    kept: None,
+                }
+            })
+            .collect()
+    }
+
+    /// The work Sue kept that nobody saved, newest first.
+    fn unsaved_rows(io: &ShellIo<'_>, now: u64) -> Vec<ListRow> {
+        io.work
+            .unsaved()
+            .map(|kept| {
+                let detail = match &kept.project {
+                    Some(project) => format!(
+                        "Kept {}, newer than {}",
+                        crate::ago(kept.at, now),
+                        project.file_name().map_or_else(
+                            || project.display().to_string(),
+                            |name| name.to_string_lossy().into_owned(),
+                        )
+                    ),
+                    None => format!("Kept {}, never saved", crate::ago(kept.at, now)),
+                };
+                ListRow {
+                    title: kept.title(),
+                    kind: Self::studio_name(io, kept.page.as_ref()),
+                    detail,
+                    hover: kept
+                        .project
+                        .as_ref()
+                        .map(|project| project.display().to_string())
+                        .unwrap_or_default(),
+                    open: HubRow::Recover(kept.id.clone()),
+                    kept: Some(kept.id.clone()),
+                }
+            })
+            .collect()
+    }
+
+    /// The name of the studio or tool `page`, if it is installed.
+    fn studio_name(io: &ShellIo<'_>, page: Option<&AppletId>) -> String {
+        page.and_then(|page| io.applets.manifest(page))
+            .map(|manifest| manifest.name.clone())
+            .unwrap_or_default()
+    }
+
+    /// One row of a list: a sharp box with the title, what it is and a line
+    /// of detail; kept work has Recover and Discard buttons at its right.
+    fn hub_list_row(
+        &mut self,
+        ui: &mut Ui,
+        width: f32,
+        row: &ListRow,
+        live: bool,
+        touch: bool,
+        theme: &Theme,
+    ) -> Option<HubRow> {
+        let height = if touch { 56.0 } else { 46.0 };
+        let sense = if live { Sense::click() } else { Sense::hover() };
+        let (rect, mut response) = ui.allocate_exact_size(vec2(width, height), sense);
+        if !row.hover.is_empty() {
+            response = response.on_hover_text(&row.hover);
+        }
+        self.hub_rows.push((row.open.clone(), rect));
+        // Kept work's buttons, from the right; checked after the row, so
+        // they win its clicks.
+        let mut buttons = Vec::new();
+        if let Some(id) = &row.kept {
+            let armed = self.discard_armed.as_ref() == Some(id);
+            let mut right = rect.right() - 6.0;
+            let discard = if armed { "Really Discard" } else { "Discard" };
+            for (label, action) in [
+                (discard, HubRow::Discard(id.clone())),
+                ("Recover", HubRow::Recover(id.clone())),
+            ] {
+                let text = ui.painter().layout_no_wrap(
+                    label.to_owned(),
+                    theme.font(theme.small_size + 1.0),
+                    theme.text,
+                );
+                let button = Rect::from_min_max(
+                    pos2(right - text.size().x - 20.0, rect.top() + 6.0),
+                    pos2(right, rect.bottom() - 6.0),
+                );
+                right = button.left() - 6.0;
+                let hit = ui.interact(
+                    button,
+                    ui.scope_id().with(("sue-hub-kept", label, id.as_str())),
+                    sense,
+                );
+                self.hub_rows.push((action.clone(), button));
+                let lit = armed && matches!(action, HubRow::Discard(_));
+                buttons.push((button, text, hit, action, lit));
+            }
+        }
+        let over_button = buttons.iter().any(|(_, _, hit, _, _)| hit.hovered());
+        let hovered = live && (response.hovered() || over_button);
+        let painter = ui.painter();
+        painter.rect(
+            rect,
+            0.0,
+            if hovered { theme.hover } else { theme.pill },
+            Stroke::new(
+                theme.border_width.max(1.0),
+                if hovered {
+                    theme.border_active
+                } else {
+                    theme.border
+                },
+            ),
+            StrokeKind::Inside,
+        );
+        let text_right = buttons
+            .iter()
+            .map(|(button, ..)| button.left())
+            .fold(rect.right(), f32::min)
+            - 10.0;
+        let clip = Rect::from_min_max(rect.min, pos2(text_right, rect.bottom())).shrink(1.0);
+        let painter = painter.with_clip_rect(clip.intersect(painter.clip_rect()));
+        let line = (height - theme.ui_size - theme.small_size - 4.0) / 2.0;
+        let kind =
+            painter.layout_no_wrap(row.kind.clone(), theme.font(theme.small_size), theme.muted);
+        let kind_width = kind.size().x;
+        painter.galley(
+            pos2(text_right - kind_width, rect.top() + line + 1.0),
+            kind,
+            theme.muted,
+        );
+        let title =
+            painter.layout_no_wrap(row.title.clone(), theme.font(theme.ui_size), theme.text);
+        painter
+            .with_clip_rect(Rect::from_min_max(
+                clip.min,
+                pos2(text_right - kind_width - 8.0, clip.bottom()),
+            ))
+            .galley(
+                pos2(rect.left() + 12.0, rect.top() + line),
+                title,
+                theme.text,
+            );
+        painter.text(
+            pos2(rect.left() + 12.0, rect.top() + line + theme.ui_size + 4.0),
+            Align2::LEFT_TOP,
+            &row.detail,
+            theme.font(theme.small_size),
+            theme.muted,
+        );
+        let mut clicked = (live && response.clicked()).then(|| row.open.clone());
+        for (button, text, hit, action, lit) in buttons {
+            let hot = live && hit.hovered();
+            let painter = ui.painter();
+            // A fill of its own, so it shows on a hovered row too.
+            let fill = if lit {
+                theme.active
+            } else if hot {
+                theme.hover
+            } else {
+                theme.pill
+            };
+            painter.rect_filled(button, 0.0, fill);
+            painter.rect_stroke(
+                button,
+                0.0,
+                if lit || hot {
+                    theme.hairline_active()
+                } else {
+                    theme.hairline()
+                },
+                StrokeKind::Inside,
+            );
+            painter.galley(button.center() - text.size() / 2.0, text, theme.text);
+            if live && hit.clicked() {
+                clicked = Some(action);
+            }
+        }
+        clicked
     }
 
     /// One box of the Hub, with sharp corners and a pin at its bottom
@@ -1965,5 +2384,120 @@ fn entry(label: &str, hint: String) -> PaletteEntry {
         label: label.to_owned(),
         command: label.to_owned(),
         hint,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use sue_core::Arena;
+    use sue_platform::NoTextures;
+    use sue_rice::{RiceDeclaration, RiceParameter};
+
+    use super::*;
+    use crate::{AppletManifest, Launchpad, SueApplet};
+
+    /// A studio that wears Paper and notes the widget fill its page and its
+    /// menus are drawn with.
+    struct Probe(Arc<Mutex<Vec<egui::Color32>>>);
+
+    impl SueApplet for Probe {
+        fn manifest(&self) -> AppletManifest {
+            AppletManifest::new("probe", "Probe", AppletRole::Studio, "*")
+        }
+
+        fn rice_declarations(&self) -> Vec<RiceDeclaration> {
+            vec![RiceDeclaration::new(
+                "probe.theme",
+                RiceParameter::Text {
+                    value: "paper".to_owned(),
+                },
+                "The probe's colors",
+            )]
+        }
+
+        fn page_ui(&mut self, ui: &mut Ui, _cx: &mut AppletContext<'_>) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(ui.visuals().widgets.inactive.bg_fill);
+        }
+
+        fn bar_ui(&mut self, ui: &mut Ui, _cx: &mut AppletContext<'_>) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(ui.visuals().widgets.inactive.bg_fill);
+        }
+    }
+
+    #[test]
+    fn a_page_and_its_menus_wear_their_own_theme() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mut launchpad = Launchpad::new();
+        let probe = Arc::clone(&seen);
+        launchpad
+            .register(move || Box::new(Probe(Arc::clone(&probe))))
+            .unwrap();
+        let mut rice = RiceSchema::new();
+        crate::register_rice(&mut rice).unwrap();
+        rice.register_all(&launchpad.rice_declarations()).unwrap();
+        let mut world = World {
+            arena: Arena::new(),
+            rice,
+        };
+        let mut history = UndoStack::new();
+        let mut typing = Typing::default();
+        let mut applets = launchpad.instantiate();
+        let catalog = Catalog::default();
+        let mut transport = Transport::default();
+        let mut requests = Vec::new();
+        let work = WorkList::default();
+        let theme = Theme::from_rice(&world.rice);
+        let mut shell = Shell::new(
+            WmConfig::from_rice(&world.rice).unwrap(),
+            theme.clone(),
+            HardwareProfile::Balanced,
+            60,
+            FormFactor::Desktop,
+        );
+        shell.open(AppletId::new("probe").unwrap(), &applets);
+        let ctx = egui::Context::default();
+        for _ in 0..3 {
+            let mut io = ShellIo {
+                world: &mut world,
+                history: &mut history,
+                typing: &mut typing,
+                applets: &mut applets,
+                catalog: &catalog,
+                textures: &mut NoTextures,
+                audio: None,
+                transport: &mut transport,
+                requests: &mut requests,
+                work: &work,
+                fps: None,
+            };
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                shell.ui(ui, &mut io, Instant::now());
+            })
+            .drop_without_applying_deltas();
+        }
+        // Sue wears its dark default; the page and its menus wear Paper,
+        // whose fields are white.
+        let paper = sue_rice::builtin_presets()
+            .into_iter()
+            .find(|preset| preset.id == "paper")
+            .map(|preset| theme.with_preset(&preset))
+            .unwrap();
+        assert_ne!(paper.pill, theme.pill);
+        let seen = seen.lock().unwrap();
+        assert!(seen.len() >= 4, "{seen:?}");
+        assert!(seen.iter().all(|fill| *fill == paper.pill), "{seen:?}");
+        // Sue's own style is back for the Hub, the status bar and windows.
+        assert_eq!(
+            ctx.global_style().visuals.widgets.inactive.bg_fill,
+            theme.pill
+        );
     }
 }

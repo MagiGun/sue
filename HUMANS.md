@@ -66,6 +66,10 @@ see (you can color it yourself in Settings).
 │  │ Image Viewer │ │ Converter    │                                │
 │  │          [⚲] │ │          [⚲] │                                │
 │  └──────────────┘ └──────────────┘                                │
+│  Recent            Saved Projects     Unsaved Work                │
+│  ┌──────────────┐  ┌──────────────┐   ┌──────────────────────┐    │
+│  │ album  Proj. │  │ album        │   │ Novel   [Recover]    │    │
+│  └──────────────┘  └──────────────┘   └──────────────────────┘    │
 ├───────────────────────────────────────────────────────────────────┤
 │ Hub                                    0 entities  Undo 0  Idle   │
 └───────────────────────────────────────────────────────────────────┘
@@ -85,6 +89,27 @@ Hub. Only one can be pinned: pinning another moves the pin, and clicking the
 pinned one again takes it away. `Ctrl+Z` undoes a pin like any other change,
 and you can also choose it under Settings, General, Startup.
 
+Under the boxes are three lists, side by side when the window is wide and
+one under the other when it is not:
+
+- **Recent**: the files and projects you opened or saved lately, newest
+  first, each with when, the folder it is in, and what it is (a project, a
+  PNG). Settings, General, Startup says how many it shows.
+- **Saved Projects**: every Sue project (`.sue`) you saved or opened, by
+  name, with the studio it was saved from.
+- **Unsaved Work**: work Sue kept for you by itself. Sue keeps whatever you
+  have not saved a minute after you change it, and again when you quit, so
+  a crash or a quick Quit loses nothing. Each piece says when it was kept
+  and whether it was never saved or is newer than its project file.
+  **Recover** (or a click on it) brings it back in the studio it was made
+  in; save it to keep it. **Discard** asks once more (Really Discard) and
+  then throws it away.
+
+Click a recent file or a saved project to open it where it belongs: a
+project opens in the studio it was saved from. Opening a project while you
+have unsaved work does not lose that work: it goes to Unsaved Work. Files
+that are gone drop off the lists by themselves.
+
 ### The Sue button and its menu
 
 At the very top left of the window, always in the same place, is the **Sue**
@@ -100,7 +125,7 @@ The Sue button opens the **Sue menu**, for Sue as a whole:
   Sprite or a custom size) or a new writing project (a blank document, a
   novel, a short story, a screenplay and more), opened right where it
   belongs;
-- **File**: Open File (`Ctrl+O`);
+- **File**: Open File (`Ctrl+O`) and Open Recent, the Hub's recent files;
 - **Project**: open, save and save as;
 - **Send To**: the thing you are working on, into another studio or tool,
   with no exporting and importing. A picture in Sue Paint goes into the
@@ -164,6 +189,11 @@ re-encoded JPEG XL, an exported rice), the status bar says the file's name and
 the folder it went to. Click that message to see the file, selected, in your
 system's file manager.
 
+Every file you open and every project or picture you save goes first in
+Sue's one list of recent files: the Hub's Recent, the Sue menu's File, Open
+Recent, and Sue Paint's File, Open Recent (its pictures) all show the same
+list.
+
 **On a phone or tablet** the system's own picker slides over Sue: on Android
 the Files picker, which also reaches Google Drive and other apps' storage,
 and on iPhone and iPad the Files browser. Sue works on a copy of a file you
@@ -209,7 +239,9 @@ Keymaps, MCP), and the right side shows only that category. Type in "Filter
 settings..." to search all of them.
 
 Under General, **Open At Launch** is the Hub's pin: the Hub, or the studio or
-tool Sue opens straight into. Under Display & Graphics, **Performance
+tool Sue opens straight into. **Recent Files on the Hub** says how many the
+Hub's Recent list shows (0 hides it), and **Autosave Every** how soon after a
+change Sue keeps unsaved work for the Hub's Unsaved Work (0 turns it off). Under Display & Graphics, **Performance
 Preference** sets how smooth and how frugal Sue is (Auto picks for your
 machine). **GPU preference** chooses which graphics card draws the window:
 Auto uses the one your screen is plugged into, Integrated the power-saving
@@ -508,7 +540,14 @@ For long work it is also a writing studio:
   words you wrote each day.
 - **Composition mode** (`F11`) leaves nothing but your words on a dark page,
   the line you are on kept in the middle. `Esc` comes back.
-- **Find and replace** across one scene or the whole project.
+- **Find and replace** across one scene or the whole project, matching
+  case or whole words, or with **regular expressions**: `\d+` finds numbers,
+  `^Chapter` finds lines that start with it, and in the replacement `$1`
+  puts back what the first group in brackets caught (`(\w+), (\w+)` with
+  `$2 $1` turns "Smith, John" into "John Smith").
+- **Change Case** (Format, Text, Change Case): Sentence case, lowercase,
+  UPPERCASE, Capitalize Every Word and tOGGLE cASE, for the selection or the
+  word you are in, keeping its formatting.
 
 **Tables** come from Table, Insert Table (`Ctrl+F12`): choose the columns
 and rows, and whether the first row is a heading. Click in a cell and type;
@@ -519,6 +558,14 @@ the heading row on and off, and converts text with tabs or commas into a
 table and back. A table that runs onto the next page breaks between rows and
 repeats its heading row at the top. Tables go into every format you compile
 to, PDF and Word included.
+
+A **table of contents** comes from Insert, Table of Contents: give it a
+title and how many heading levels it lists. It shows every heading with its
+page and a dotted leader, set in by level, and it keeps up by itself as you
+write, so there is nothing to update. Click an entry to go to its heading. It
+prints in PDFs with the right page numbers, and goes into Word (as Word's
+own table of contents, which Word fills in when it opens), OpenDocument, web
+pages, e-books, RTF, Markdown and plain text.
 
 **Headers and footers** come from Insert, Header and Footer: each has a
 left, a middle and a right part, and the buttons below put in the page
@@ -542,8 +589,9 @@ buttons at the bottom (style, bold, italic, underline, alignment, lists,
 indents, font, size and colors; swipe it sideways for the rest), so it sits
 right above the keyboard while you type, and tapping one keeps the keyboard
 up. When the keyboard comes up, the line you are writing moves into sight
-above it. The binder covers the page when you open it and closes when you
-pick a scene. **On a tablet** the toolbar's buttons are larger, for fingers.
+above it, on Android phones and on iPhones alike. The binder covers the
+page when you open it and closes when you pick a scene. **On a tablet** the
+toolbar's buttons are larger, for fingers.
 
 Sue Writer works with the rest of Sue. Pictures from Sue Paint go straight
 into your text with the Sue menu's Send To. Open a Word, Markdown, HTML or
@@ -607,6 +655,11 @@ status bar at the bottom.
   a pen gets pressure-sensitive strokes.
 - **On a phone**, the top bar is taller still, for your thumb, and the Hub
   shows its boxes two by two with big pins.
+
+On phones and tablets the on-screen keyboard never covers Sue: when it comes
+up, Sue fits itself into the space above it, and takes the whole screen back
+when it goes away. On an iPad, a floating or split keyboard leaves Sue as it
+is.
 
 **Sue Paint on a tablet** keeps the menus, the tool strip and the Layer
 palette, and folds the other palettes into icons at the right edge: tap one to

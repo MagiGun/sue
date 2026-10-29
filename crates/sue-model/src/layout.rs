@@ -433,7 +433,7 @@ mod tests {
 
     #[test]
     fn running_heads_fill_their_fields_by_page() {
-        let footer = Running::parse("{title}	Page {page} of {pages}	{date}");
+        let footer = Running::parse("{title}\tPage {page} of {pages}\t{date}");
         assert_eq!(footer.left, "{title}");
         assert_eq!(Running::parse(&footer.store()), footer);
         let fields = PageFields {
@@ -460,6 +460,6 @@ mod tests {
                 RunningPiece::Field("pages"),
             ]
         );
-        assert!(Running::parse("	 	").is_empty());
+        assert!(Running::parse("\t \t").is_empty());
     }
 }

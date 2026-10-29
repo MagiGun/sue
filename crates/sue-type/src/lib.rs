@@ -17,6 +17,9 @@
 //!   jumping, and blinks only at rest.
 //! - [`tables`]: tables in running text, on the shared `Table` model:
 //!   laid out, broken across pages, painted and typed in.
+//! - [`contents`]: tables of contents made from the headings, with pages.
+//! - [`case`]: changing text to capitals, small letters or sentence case.
+//! - [`find`]: finding and replacing, by plain text or regular expression.
 //! - [`edit`]: the edits it makes, in place in the arena with their undo.
 //! - [`typeset`]: the same text set on pages for print, from the font files
 //!   themselves, which the PDF writer in `sue-io` draws.
@@ -25,8 +28,11 @@
 //! with [`sue_model::TextMarks`] on an entity of the arena.
 
 pub mod caret;
+pub mod case;
+pub mod contents;
 pub mod edit;
 pub mod editor;
+pub mod find;
 pub mod layout;
 pub mod raster;
 pub mod style;

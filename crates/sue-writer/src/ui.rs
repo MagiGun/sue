@@ -2280,6 +2280,8 @@ impl SueWriter {
         }
         ui.checkbox(&mut find.case, "Match case");
         ui.checkbox(&mut find.words, "Whole words");
+        ui.checkbox(&mut find.regex, "Regular expressions")
+            .on_hover_text("Patterns such as \\d+ or ^Chapter; $1 in the replacement puts back what a group caught");
         if self.project.is_some() {
             ui.checkbox(&mut find.project, "Whole project");
         }
@@ -2356,6 +2358,7 @@ impl SueWriter {
             Dialog::Footnote(_) => "Footnote",
             Dialog::Table { .. } => "Insert Table",
             Dialog::Furniture(_) => "Header and Footer",
+            Dialog::Contents(_) => "Table of Contents",
             Dialog::Statistics => "Writing Statistics",
             Dialog::Shortcuts => "Keyboard Shortcuts",
         };
@@ -2561,6 +2564,40 @@ impl SueWriter {
                                 after = Some(Box::new(move |me: &mut Self, cx| {
                                     me.editor
                                         .insert_table(cx, rows, columns, u32::from(heading));
+                                    me.editor.focus();
+                                }));
+                                keep = false;
+                            }
+                            if ui.button("Cancel").clicked() {
+                                keep = false;
+                            }
+                        });
+                    }
+                    Dialog::Contents(contents) => {
+                        egui::Grid::new("writer-contents")
+                            .num_columns(2)
+                            .spacing(vec2(12.0, 8.0))
+                            .show(ui, |ui| {
+                                ui.label("Title");
+                                ui.text_edit_singleline(&mut contents.title);
+                                ui.end_row();
+                                ui.label("Heading levels");
+                                ui.add(egui::DragValue::new(&mut contents.levels).range(1..=6));
+                                ui.end_row();
+                            });
+                        ui.label(
+                            RichText::new(
+                                "It lists the headings with their pages and keeps up by itself.",
+                            )
+                            .size(theme.small_size)
+                            .color(theme.muted),
+                        );
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            if ui.button("Insert").clicked() {
+                                let contents = contents.clone();
+                                after = Some(Box::new(move |me: &mut Self, cx| {
+                                    me.editor.insert_contents(cx, &contents);
                                     me.editor.focus();
                                 }));
                                 keep = false;

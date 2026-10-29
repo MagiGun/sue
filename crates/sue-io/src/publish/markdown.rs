@@ -41,6 +41,17 @@ pub fn to_markdown(book: &Book) -> String {
                 out.push_str("```\n\n");
                 in_code = false;
             }
+            if let Some(contents) = book.contents_of(&para) {
+                if !contents.title.is_empty() {
+                    out.push_str(&format!("**{}**\n\n", escape(&contents.title)));
+                }
+                for (level, title) in book.headings(contents) {
+                    let indent = "  ".repeat(usize::from(level.saturating_sub(1)));
+                    out.push_str(&format!("{indent}- {}\n", escape(&title)));
+                }
+                out.push('\n');
+                continue;
+            }
             if let Some(table) = book.table(&para) {
                 out.push_str(&table_markdown(table));
                 out.push('\n');

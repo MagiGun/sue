@@ -200,6 +200,13 @@ impl Theme {
         }
     }
 
+    /// `true` when the page is light (dark text on it), as in Paper.
+    #[must_use]
+    pub fn is_light(&self) -> bool {
+        let [r, g, b, _] = self.void.to_array();
+        0.2126 * f32::from(r) + 0.7152 * f32::from(g) + 0.0722 * f32::from(b) > 127.5
+    }
+
     /// A hairline in the border color.
     #[must_use]
     pub fn hairline(&self) -> Stroke {
@@ -252,8 +259,13 @@ impl Theme {
             fg_stroke: Stroke::new(1.0, text),
             expansion: 0.0,
         };
-        let mut visuals = Visuals::dark();
-        visuals.dark_mode = true;
+        // A light theme (Paper) starts from egui's light visuals, so what
+        // egui picks by itself (hints, scroll bars) reads on light pages.
+        let mut visuals = if self.is_light() {
+            Visuals::light()
+        } else {
+            Visuals::dark()
+        };
         visuals.override_text_color = None;
         visuals.weak_text_color = Some(self.muted);
         visuals.widgets = Widgets {
@@ -414,5 +426,21 @@ mod tests {
             );
         }
         assert!(!visuals.text_cursor.blink);
+    }
+
+    #[test]
+    fn light_presets_make_light_visuals() {
+        let mut rice = RiceSchema::new();
+        crate::register_rice(&mut rice).unwrap();
+        let sue = Theme::from_rice(&rice);
+        assert!(!sue.is_light() && sue.visuals(None).dark_mode);
+        let presets = sue_rice::builtin_presets();
+        let paper = presets.iter().find(|preset| preset.id == "paper").unwrap();
+        let paper = sue.with_preset(paper);
+        let visuals = paper.visuals(None);
+        assert!(paper.is_light() && !visuals.dark_mode);
+        // Its own colors still win over egui's light ones.
+        assert_eq!(visuals.widgets.inactive.fg_stroke.color, paper.text);
+        assert_eq!(visuals.window_fill, paper.panel);
     }
 }

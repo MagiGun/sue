@@ -338,6 +338,11 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
                 body.push_str(&table_xml(table, width));
                 continue;
             }
+            if let Some(contents) = book.contents_of(&para) {
+                let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+                body.push_str(&contents_xml(book, contents, width));
+                continue;
+            }
             let _ = write!(body, "<w:p><w:pPr>{props}</w:pPr>");
             if let Some(id) = para.embed
                 && let Some(figure) = book.figures.get(&id)
@@ -469,8 +474,14 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
     }
     footnotes.push_str("</w:footnotes>");
 
+    // Word fills in a table of contents' page numbers when it opens.
+    let update = if book.contents.is_empty() {
+        ""
+    } else {
+        "<w:updateFields w:val=\"true\"/>"
+    };
     let settings = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:settings xmlns:w=\"{W}\"><w:defaultTabStop w:val=\"720\"/><w:compat><w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"15\"/></w:compat></w:settings>"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:settings xmlns:w=\"{W}\">{update}<w:defaultTabStop w:val=\"720\"/><w:compat><w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"15\"/></w:compat></w:settings>"
     );
     let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
     let header = running_xml(book, &book.header, "w:hdr", width);
@@ -897,6 +908,49 @@ fn running_xml(book: &Book, running: &sue_model::Running, tag: &str, width: f32)
     out
 }
 
+/// A table of contents as Word's own `TOC` field over the headings, its
+/// entries the book's headings (Word fills in the pages when it opens).
+fn contents_xml(book: &Book, contents: &sue_model::contents::Contents, width: f32) -> String {
+    let mut out = String::new();
+    if !contents.title.is_empty() {
+        let _ = write!(
+            out,
+            "<w:p><w:pPr><w:pStyle w:val=\"TOCHeading\"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val=\"32\"/></w:rPr>{}</w:r></w:p>",
+            run_text(&contents.title)
+        );
+    }
+    let headings = book.headings(contents);
+    let tabs = format!(
+        "<w:tabs><w:tab w:val=\"right\" w:leader=\"dot\" w:pos=\"{}\"/></w:tabs>",
+        twips(width)
+    );
+    let field = format!(
+        "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> TOC \\o \"1-{}\" \\h \\z \\u </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>",
+        contents.levels
+    );
+    let end = "<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>";
+    if headings.is_empty() {
+        let _ = write!(out, "<w:p>{field}{end}</w:p>");
+        return out;
+    }
+    for (index, (level, title)) in headings.iter().enumerate() {
+        let _ = write!(
+            out,
+            "<w:p><w:pPr><w:pStyle w:val=\"TOC{level}\"/>{tabs}<w:ind w:left=\"{}\"/></w:pPr>",
+            twips(f32::from(level.saturating_sub(1)) * 18.0)
+        );
+        if index == 0 {
+            out.push_str(&field);
+        }
+        let _ = write!(out, "<w:r>{}</w:r>", run_text(title));
+        if index + 1 == headings.len() {
+            out.push_str(end);
+        }
+        out.push_str("</w:p>");
+    }
+    out
+}
+
 /// A table as WordprocessingML, `width` points across: a grid of the
 /// column widths, single borders, the heading rows marked to repeat.
 fn table_xml(table: &crate::publish::PublishTable, width: f32) -> String {
@@ -947,6 +1001,19 @@ fn table_xml(table: &crate::publish::PublishTable, width: f32) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn word_contents_are_a_toc_field_word_updates() {
+        let bytes = to_docx(&super::super::tests::with_contents());
+        let files: HashMap<String, Vec<u8>> = read_zip(&bytes).unwrap().into_iter().collect();
+        let xml = String::from_utf8(files["word/document.xml"].clone()).unwrap();
+        assert!(xml.contains("TOC \\o \"1-2\""), "{xml}");
+        assert_eq!(xml.matches("w:fldCharType=\"begin\"").count(), 1);
+        assert_eq!(xml.matches("w:fldCharType=\"end\"").count(), 1);
+        assert!(xml.contains("<w:pStyle w:val=\"TOC2\"/>"));
+        let settings = String::from_utf8(files["word/settings.xml"].clone()).unwrap();
+        assert!(settings.contains("<w:updateFields w:val=\"true\"/>"));
+    }
+
     #[test]
     fn word_headers_and_footers_carry_live_page_fields() {
         let mut book = sample();

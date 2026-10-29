@@ -73,6 +73,18 @@ pub(crate) fn para_html(
     if let Some(table) = book.table(para) {
         return table_html(table);
     }
+    if let Some(contents) = book.contents_of(para) {
+        let mut out = String::from("<nav class=\"contents\">");
+        if !contents.title.is_empty() {
+            let _ = write!(out, "<h2>{}</h2>", escape(&contents.title));
+        }
+        out.push_str("<ul>");
+        for (level, title) in book.headings(contents) {
+            let _ = write!(out, "<li class=\"level-{level}\">{}</li>", escape(&title));
+        }
+        out.push_str("</ul></nav>");
+        return out;
+    }
     let mut inner = String::new();
     if let Some(id) = para.embed
         && let Some(src) = figure(id)
@@ -531,6 +543,12 @@ pub fn from_html(html: &str) -> (String, TextMarks) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn html_contents_are_a_list_of_the_headings() {
+        let html = to_html(&super::super::tests::with_contents());
+        assert!(html.contains("<nav class=\"contents\"><h2>Contents</h2><ul><li class=\"level-1\">One</li><li class=\"level-2\">Two</li></ul></nav>"), "{html}");
+    }
+
     use super::super::tests::sample;
     use super::super::tests::with_table;
     use super::*;
