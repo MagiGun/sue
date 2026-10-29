@@ -350,6 +350,14 @@ pub struct SuePaint {
     pub(crate) webtoon: (u32, u32),
     /// The timeline drives what shows (Enable Timeline).
     pub(crate) timeline_on: bool,
+    /// The timeline's sound mixed, and what it was mixed from.
+    pub(crate) audio_mix: Option<(u64, sue_core::Shared<sue_core::PCMFloat1D>)>,
+    /// The lap of playback the sound was started for (`None` while
+    /// stopped).
+    pub(crate) audio_lap: Option<i64>,
+    /// An audio clip being dragged in the timeline: its track, where the
+    /// drag began (frame) and the clip's start then.
+    pub(crate) audio_drag: Option<(usize, i64, i64)>,
     /// A 3D layer's view being changed in Tool Property, and its view and
     /// pixels from before.
     pub(crate) view3d_before: Option<(EntityId, crate::three::View3D, Vec<u8>)>,
@@ -457,6 +465,9 @@ impl Default for SuePaint {
             launcher: true,
             webtoon: (1280, 800),
             timeline_on: true,
+            audio_mix: None,
+            audio_lap: None,
+            audio_drag: None,
             camera_pending: None,
             view3d_before: None,
             pending_view3d: None,
@@ -733,6 +744,7 @@ fn implemented(command: &str) -> bool {
             | "anim.last"
             | "anim.timeline.edit"
             | "anim.timeline.enable"
+            | "file.import.audio"
             | "layer.new.3d"
             | "file.import.3d"
             | "filter.line_extraction"
@@ -1358,6 +1370,40 @@ impl SuePaint {
                 self.toolbox.pick_sub(crate::tools::Tool::Operation, 0);
             }
             Err(error) => cx.fail(error),
+        }
+    }
+
+    /// Puts the sound file at `path` on a new audio track of the timeline,
+    /// from the frame shown.
+    fn import_audio(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let Some(sequence) = crate::anim::timeline(&cx.world.arena, picture).cloned() else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        let name = path.file_stem().map_or_else(
+            || "Audio".to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        );
+        let extension = path
+            .extension()
+            .map(|ext| ext.to_string_lossy().to_ascii_lowercase());
+        let decoded = std::fs::read(path)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| {
+                sue_io::decode_audio(bytes, extension.as_deref()).map_err(|(error, _)| error)
+            });
+        match decoded {
+            Ok((audio, _)) => {
+                let frame = self.doc().map_or(0, |doc| doc.frame);
+                let (edit, _) = crate::anim::add_audio(picture, &sequence, &name, audio.pcm, frame);
+                Self::apply(cx, edit);
+            }
+            Err(error) => cx.fail(format!("Cannot import {name}: {error}")),
         }
     }
 
@@ -3464,6 +3510,25 @@ impl SuePaint {
                     self.dialog = Some(Dialog::Shape3D(0));
                 }
             }
+            "file.import.audio" => {
+                if self
+                    .picture()
+                    .and_then(|picture| crate::anim::timeline(&cx.world.arena, picture))
+                    .is_none()
+                {
+                    cx.fail("Make a timeline first: Animation, Timeline, New Timeline");
+                    return;
+                }
+                let start = self
+                    .last_dir
+                    .clone()
+                    .or_else(|| cx.catalog.folders.get("home").cloned());
+                cx.request(ShellRequest::PickFile(
+                    FilePick::open(Some(me_id()), "anim-audio", "Import Audio")
+                        .extensions(&["wav", "flac", "mp3", "ogg", "aif", "aiff", "m4a"])
+                        .starting_in(start),
+                ));
+            }
             "file.import.3d" => {
                 let start = self
                     .last_dir
@@ -4544,6 +4609,7 @@ impl SueApplet for SuePaint {
             "anim-sequence" => self.export_animation(cx, path, false),
             "subview" => self.add_reference(path, cx),
             "model3d" => self.import_3d(cx, path),
+            "anim-audio" => self.import_audio(cx, path),
             "colorset-import" => match std::fs::read_to_string(path) {
                 Ok(text) => {
                     let colors = crate::colorsets::import(&text);

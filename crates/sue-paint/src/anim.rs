@@ -25,6 +25,11 @@ pub const CELS: &str = "sue.paint.cels";
 pub const LENGTH: &str = "anim.length";
 /// A key that shows nothing (a clip property).
 const BLANK: &str = "anim.blank";
+/// The kind of track that holds sound: each clip plays an audio entity
+/// from its start.
+pub const AUDIO: &str = "sue.paint.audio";
+/// The rate the timeline's sound is mixed at.
+pub const MIX_RATE: u32 = 48_000;
 /// A picture's onion skin settings ([`Onion::to_text`]).
 pub const ONION: &str = "anim.onion";
 /// The relation from a cel to a layer on its light table, shown to trace
@@ -450,6 +455,133 @@ pub fn edit_timeline(arena: &Arena, picture: EntityId, fps: u32, length: u32) ->
     )
 }
 
+/// The audio tracks of `sequence`, by index.
+#[must_use]
+pub fn audio_tracks(sequence: &Sequence) -> Vec<usize> {
+    sequence
+        .tracks
+        .iter()
+        .enumerate()
+        .filter(|(_, track)| track.kind == AUDIO)
+        .map(|(index, _)| index)
+        .collect()
+}
+
+/// The edit that puts the sound `pcm` named `name` on a new audio track
+/// of `picture`'s timeline `sequence`, starting at `frame` (File, Import,
+/// Audio). The sound is an audio entity of its own; its id is returned too.
+#[must_use]
+pub fn add_audio(
+    picture: EntityId,
+    sequence: &Sequence,
+    name: &str,
+    pcm: sue_core::PCMFloat1D,
+    frame: u32,
+) -> (Edit, EntityId) {
+    let duration = Time::from_samples(pcm.frames() as i64, pcm.sample_rate());
+    let sound = sue_core::Entity::new(name, pcm).with_class(sue_model::class::AUDIO);
+    let id = sound.id();
+    let mut out = sequence.clone();
+    let mut track = Track::new(name, AUDIO);
+    track.insert(Clip::new(
+        id,
+        Time::from_frames(i64::from(frame), sequence.rate),
+        duration,
+    ));
+    out.tracks.push(track);
+    let edit = Edit::new(format!("Import Audio {name}"))
+        .then(sue_core::txn::SpawnEntity::new(sound))
+        .then(SetExtension::set(picture, out));
+    (edit, id)
+}
+
+/// `sequence` with the sound of audio track `track` starting at `frame`.
+#[must_use]
+pub fn audio_moved(sequence: &Sequence, track: usize, frame: i64) -> Sequence {
+    let mut out = sequence.clone();
+    if let Some(old) = sequence.tracks.get(track) {
+        let mut moved = Track::new(old.name.clone(), old.kind.clone());
+        moved.properties = old.properties.clone();
+        moved.muted = old.muted;
+        moved.locked = old.locked;
+        for clip in old.clips() {
+            let mut clip = clip.clone();
+            clip.start = Time::from_frames(frame.max(0), sequence.rate);
+            moved.insert(clip);
+        }
+        out.tracks[track] = moved;
+    }
+    out
+}
+
+/// `sequence` without track `track`.
+#[must_use]
+pub fn without_track(sequence: &Sequence, track: usize) -> Sequence {
+    let mut out = sequence.clone();
+    if track < out.tracks.len() {
+        out.tracks.remove(track);
+    }
+    out
+}
+
+/// Every unmuted audio track of `sequence` mixed into one stereo sound at
+/// [`MIX_RATE`] from the timeline's start, each clip from its start, or
+/// `None` when there is nothing to hear.
+#[must_use]
+pub fn mix(arena: &Arena, sequence: &Sequence) -> Option<sue_core::PCMFloat1D> {
+    let mut placed = Vec::new();
+    for index in audio_tracks(sequence) {
+        let track = &sequence.tracks[index];
+        if track.muted {
+            continue;
+        }
+        for clip in track.clips() {
+            let Some(pcm) = arena
+                .get_by_id(clip.source)
+                .ok()
+                .and_then(|entity| entity.component(sue_core::ComponentKind::PCMFloat1D))
+                .and_then(|component| component.as_pcm())
+            else {
+                continue;
+            };
+            let start = clip.start.seconds().max(0.0);
+            placed.push((pcm, start));
+        }
+    }
+    let frames = placed
+        .iter()
+        .map(|(pcm, start)| {
+            (start * f64::from(MIX_RATE)) as usize
+                + (pcm.frames() as f64 * f64::from(MIX_RATE) / f64::from(pcm.sample_rate().max(1)))
+                    as usize
+        })
+        .max()?;
+    let mut out = vec![0.0_f32; frames * 2];
+    for (pcm, start) in placed {
+        let ratio = f64::from(pcm.sample_rate().max(1)) / f64::from(MIX_RATE);
+        let offset = (start * f64::from(MIX_RATE)) as usize;
+        let channels = usize::from(pcm.channels().max(1));
+        let samples = pcm.samples();
+        let last = pcm.frames().saturating_sub(1);
+        for frame in 0..frames.saturating_sub(offset) {
+            let t = frame as f64 * ratio;
+            if t >= last as f64 {
+                break;
+            }
+            let (i0, mixing) = (t.floor() as usize, (t - t.floor()) as f32);
+            let at = |i: usize, channel: usize| samples[i * channels + channel.min(channels - 1)];
+            for channel in 0..2 {
+                let value = at(i0, channel) + (at(i0 + 1, channel) - at(i0, channel)) * mixing;
+                out[(offset + frame) * 2 + channel] += value;
+            }
+        }
+    }
+    for value in &mut out {
+        *value = value.clamp(-1.0, 1.0);
+    }
+    sue_core::PCMFloat1D::new(MIX_RATE, 2, out).ok()
+}
+
 /// `sequence` with a new animation folder named `name`.
 #[must_use]
 pub fn with_folder(sequence: &Sequence, name: &str) -> Sequence {
@@ -481,6 +613,43 @@ pub fn set(picture: EntityId, sequence: Sequence, label: &str) -> Edit {
 mod tests {
     use super::*;
     use sue_core::{Entity, ReversibleTransaction};
+
+    #[test]
+    fn audio_tracks_import_move_mix_and_go() {
+        let mut arena = Arena::new();
+        let entity = Entity::empty("Walk", sue_model::class::IMAGE);
+        let id = entity.id();
+        arena.insert(entity);
+        let mut edit = new_timeline(id, 24, 48);
+        edit.apply(&mut arena).unwrap();
+        let sequence = timeline(&arena, id).unwrap().clone();
+        // Half a second of a steady tone at 24 kHz, from frame 12.
+        let tone = sue_core::PCMFloat1D::new(24_000, 1, vec![0.25; 12_000]).unwrap();
+        let (mut edit, sound) = add_audio(id, &sequence, "Tone", tone, 12);
+        edit.apply(&mut arena).unwrap();
+        let sequence = timeline(&arena, id).unwrap().clone();
+        assert_eq!(audio_tracks(&sequence).len(), 1);
+        assert_eq!(folders(&sequence).len(), 1, "the folders stay");
+        assert!(arena.get_by_id(sound).is_ok(), "the sound is an entity");
+        let mixed = mix(&arena, &sequence).unwrap();
+        assert_eq!((mixed.sample_rate(), mixed.channels()), (MIX_RATE, 2));
+        let at = |pcm: &sue_core::PCMFloat1D, seconds: f64| {
+            pcm.samples()[(seconds * f64::from(MIX_RATE)) as usize * 2]
+        };
+        assert_eq!(at(&mixed, 0.25), 0.0, "silent before frame 12");
+        assert!(
+            (at(&mixed, 0.75) - 0.25).abs() < 1e-3,
+            "the tone from half a second"
+        );
+        // Moved to frame 0 it starts at once; muted or gone, silence.
+        let track = audio_tracks(&sequence)[0];
+        let moved = audio_moved(&sequence, track, 0);
+        assert!((at(&mix(&arena, &moved).unwrap(), 0.25) - 0.25).abs() < 1e-3);
+        let gone = without_track(&sequence, track);
+        assert!(mix(&arena, &gone).is_none());
+        edit.revert(&mut arena).unwrap();
+        assert!(arena.get_by_id(sound).is_err(), "undo takes it away");
+    }
 
     #[test]
     fn edit_timeline_keeps_keys_on_their_frames() {

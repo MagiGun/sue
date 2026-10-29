@@ -132,6 +132,7 @@ impl SuePaint {
         if let Some(frame) = moved {
             self.go_to_frame(&cx.world.arena, frame);
         }
+        self.sync_audio(cx, &sequence, length, moved);
         let settings = self
             .picture()
             .map(|picture| anim::Onion::of(&cx.world.arena, picture))
@@ -182,6 +183,76 @@ impl SuePaint {
             }
             doc.compositor.set_view(Some(view));
         }
+    }
+
+    /// Keeps the timeline's sound in step with playback: started from the
+    /// frame shown when playback starts and at each loop, stopped with it.
+    fn sync_audio(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        sequence: &sue_model::Sequence,
+        length: u32,
+        playing_at: Option<i64>,
+    ) {
+        const OWNER: &str = "sue-paint";
+        let Some(at) = playing_at.filter(|_| self.doc().is_some_and(|doc| doc.playing.is_some()))
+        else {
+            if self.audio_lap.take().is_some() && cx.transport.is_playing_for(OWNER) {
+                cx.transport.stop(cx.audio.as_deref_mut());
+            }
+            return;
+        };
+        let length = i64::from(length.max(1));
+        let lap = at.div_euclid(length);
+        if self.audio_lap == Some(lap) {
+            return;
+        }
+        self.audio_lap = Some(lap);
+        // Mixed again only when the sound changed.
+        let signature = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            for index in anim::audio_tracks(sequence) {
+                let track = &sequence.tracks[index];
+                track.muted.hash(&mut hasher);
+                for clip in track.clips() {
+                    clip.source.hash(&mut hasher);
+                    clip.start.flicks().hash(&mut hasher);
+                }
+            }
+            hasher.finish()
+        };
+        if self
+            .audio_mix
+            .as_ref()
+            .is_none_or(|(seen, _)| *seen != signature)
+        {
+            self.audio_mix = anim::mix(&cx.world.arena, sequence)
+                .map(|pcm| (signature, sue_core::Shared::new(pcm)));
+        }
+        let Some((_, mixed)) = self.audio_mix.clone() else {
+            return;
+        };
+        let seconds = at.rem_euclid(length) as f64 / anim::fps(sequence).max(1.0);
+        let start = (seconds * f64::from(anim::MIX_RATE)) as usize;
+        let end = mixed.frames();
+        if start >= end {
+            if cx.transport.is_playing_for(OWNER) {
+                cx.transport.stop(cx.audio.as_deref_mut());
+            }
+            return;
+        }
+        cx.transport.load(
+            sue_wm::Clip {
+                source: sue_wm::ClipSource::Stream(mixed),
+                start,
+                end,
+                gain: 1.0,
+                owner: OWNER.to_owned(),
+            },
+            cx.audio.as_deref_mut(),
+        );
+        cx.transport.set_playing(true, cx.audio.as_deref_mut());
     }
 
     /// Runs an Animation menu command; `false` if `command` is not one.
@@ -859,6 +930,110 @@ impl SuePaint {
                     ui.close();
                 }
             });
+        }
+        // One row per audio track: its clip as a bar to drag, and a menu.
+        let rows = anim::folders(&sequence).len();
+        let mut audio_edit: Option<(sue_model::Sequence, &str)> = None;
+        for (row, index) in anim::audio_tracks(&sequence).into_iter().enumerate() {
+            let top = tracks.top() + ruler + (rows + row) as f32 * row_height;
+            let track_ref = &sequence.tracks[index];
+            let name_rect =
+                Rect::from_min_size(pos2(names.left(), top), vec2(names.width(), row_height));
+            painter.text(
+                name_rect.left_center() + vec2(10.0, 0.0),
+                Align2::LEFT_CENTER,
+                format!(
+                    "{}{}",
+                    track_ref.name,
+                    if track_ref.muted { " (muted)" } else { "" }
+                ),
+                theme.font(theme.small_size + 0.5),
+                theme.muted,
+            );
+            let Some(clip) = track_ref.clips().first() else {
+                continue;
+            };
+            let begin = clip.start.frame(sequence.rate);
+            let span = ((clip.duration.seconds() * anim::fps(&sequence)).ceil() as i64).max(1);
+            let dragged_by = match self.audio_drag {
+                Some((dragging, from, _)) if dragging == index => {
+                    ui.ctx().pointer_latest_pos().map_or(0, |pos| {
+                        (first as i64 + ((pos.x - frames_area.left()) / step) as i64) - from
+                    })
+                }
+                _ => 0,
+            };
+            let shown_at = (begin + dragged_by).max(0);
+            let x0 = frames_area.left() + (shown_at - first as i64) as f32 * step;
+            let bar = Rect::from_min_max(
+                pos2(x0, top + 4.0),
+                pos2(x0 + span as f32 * step, top + row_height - 4.0),
+            );
+            painter.rect_filled(
+                bar,
+                3.0,
+                theme
+                    .active
+                    .gamma_multiply(if track_ref.muted { 0.4 } else { 1.0 }),
+            );
+            painter.text(
+                bar.left_center() + vec2(6.0, 0.0),
+                Align2::LEFT_CENTER,
+                "audio",
+                theme.font(theme.small_size - 1.0),
+                theme.text,
+            );
+            let row_rect = Rect::from_min_size(
+                pos2(frames_area.left(), top),
+                vec2(frames_area.width(), row_height),
+            );
+            let response = ui.interact(
+                row_rect,
+                ui.scope_id().with(("timeline-audio", index)),
+                Sense::click_and_drag(),
+            );
+            let at_pointer =
+                |pos: egui::Pos2| first as i64 + ((pos.x - frames_area.left()) / step) as i64;
+            if response.drag_started()
+                && let Some(pos) = response.interact_pointer_pos()
+            {
+                self.audio_drag = Some((index, at_pointer(pos), begin));
+            }
+            if response.drag_stopped()
+                && let Some((dragging, from, was)) = self.audio_drag.take()
+                && dragging == index
+            {
+                let to = response
+                    .interact_pointer_pos()
+                    .map_or(was, |pos| was + at_pointer(pos) - from);
+                if to != was {
+                    audio_edit = Some((anim::audio_moved(&sequence, index, to), "Move Audio"));
+                }
+            }
+            response.context_menu(|ui| {
+                let label = if track_ref.muted { "Unmute" } else { "Mute" };
+                if ui.button(label).clicked() {
+                    let mut toggled = sequence.clone();
+                    toggled.tracks[index].muted = !track_ref.muted;
+                    audio_edit = Some((
+                        toggled,
+                        if track_ref.muted {
+                            "Unmute Audio"
+                        } else {
+                            "Mute Audio"
+                        },
+                    ));
+                    ui.close();
+                }
+                if ui.button("Delete Audio Track").clicked() {
+                    audio_edit =
+                        Some((anim::without_track(&sequence, index), "Delete Audio Track"));
+                    ui.close();
+                }
+            });
+        }
+        if let Some((changed, label)) = audio_edit {
+            Self::apply(cx, anim::set(picture, changed, label));
         }
         if let Some((index, at, assign)) = action {
             if let Some(doc) = self.doc_mut() {

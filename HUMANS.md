@@ -457,6 +457,10 @@ familiar:
 - **Webtoons:** File, New has a tall Webtoon canvas, and File, Export
   Webtoon cuts it into numbered pictures at the height and width you
   choose, ready to upload.
+- **Sound for animations:** File, Import, Audio puts a sound on the
+  timeline from the frame you are on. It plays along when you play the
+  animation; drag its bar to move it, and right-click it to mute or delete
+  it.
 - **Timeline:** Animation, Timeline, Edit Timeline changes the frame rate
   and length without moving your keys; Export Animation, Animation Cels
   saves every cel as its own picture.

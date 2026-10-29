@@ -1276,6 +1276,15 @@ back into the selection. The Selection Launcher, under any selection, holds
 Deselect, Invert, Expand, Shrink, Clear, Clear Outside, Fill, Scale/Rotate
 and Crop.
 
+**Timeline audio.** File, Import, Audio decodes a sound file into an audio
+entity (`sue.audio`) and puts it on a track of kind `sue.paint.audio` in the
+picture's shared `Sequence`, a clip from the frame shown. The timeline
+draws each audio track as a bar to drag (one step on release) with Mute and
+Delete Audio Track in its menu. When the animation plays, every unmuted
+audio clip is mixed into one stereo `Shared` buffer at 48 kHz (mixed again
+only when the clips change) and the shared Transport plays it from the
+frame shown, again at each loop, and stops with playback.
+
 **3D layers.** A 3D layer (`sue.paint.layer3d`, Layer, New Layer, 3D Layer
 with a cube, sphere, cylinder, cone or plane, or File, Import, 3D Data for an
 OBJ model through `sue_io::ObjFormat`) links by `sue.ref` to a model entity
@@ -1947,6 +1956,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: Layer Property effects (border, tone, layer color, expression color) and right-click menus | **Implemented**; unit tests for the border's reach, rim and roundness, each effect's color, a tone's coverage, a border rendered round a dot with the pixels kept, and sub tools duplicated, reset and deleted | `sue-paint/src/effects.rs`, `composite.rs`, `panels.rs`, `tools.rs`, `sue-wm/src/menubar.rs` |
 | §3.7 Sue Paint: Polyline, Selection pen and Erase selection; expand, shrink and blur selections; Select Color Gamut; selection layers; Quick Mask; the Selection Launcher | **Implemented**; a unit test for growing, shrinking, blurring, painting and picking colors, and an end-to-end run that shrinks a full selection, keeps it as a layer and turns Quick Mask on and off | `sue-paint/src/select.rs`, `canvas.rs`, `studio.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: 3D layers (shapes and OBJ models), their camera and look, and lines and tones from them | **Implemented**; unit tests for the renderer's coverage, outlines and folds (a sphere smooth inside), each look, and a layer turned and undone; an end-to-end run makes a cube, turns it with the Object tool, undoes, converts it to lines and tones and imports an OBJ model | `sue-paint/src/three.rs`, `canvas.rs`, `panels.rs`, `bins/sue/src/runtime.rs` |
+| §3.7 Sue Paint: audio tracks on the animation timeline, played in step | **Implemented**; a unit test for a sound imported, mixed from its frame, moved, removed and undone; the animation end-to-end run imports a WAV and plays and stops it with the animation | `sue-paint/src/anim.rs`, `anim_ui.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: brush tip materials | Planned; the menu item is present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |

@@ -1708,6 +1708,44 @@ pub(crate) mod tests {
         );
         assert_eq!(runtime.engine.history.depth(), depth);
 
+        // File, Import, Audio: a sound on an audio track, from the frame
+        // shown; playing the animation plays it, stopping stops it.
+        std::fs::create_dir_all(&root).unwrap();
+        let tone = sue_core::PCMFloat1D::new(8_000, 1, vec![0.2; 8_000]).unwrap();
+        std::fs::write(root.join("Tone.wav"), sue_io::encode_wav(&tone)).unwrap();
+        runtime.request(
+            ShellRequest::Picked {
+                pick: FilePick::open(Some(paint.clone()), "anim-audio", "Import Audio"),
+                path: root.join("Tone.wav"),
+            },
+            &mut NoTextures,
+            start,
+        );
+        let sequence = sue_paint::anim::timeline(&runtime.engine.world.arena, picture).unwrap();
+        assert_eq!(
+            sue_paint::anim::audio_tracks(sequence).len(),
+            1,
+            "an audio track"
+        );
+        command(&mut runtime, "anim.first");
+        command(&mut runtime, "anim.play");
+        step(&mut runtime, Vec::new());
+        assert!(
+            runtime.transport.is_playing_for("sue-paint"),
+            "the sound plays with it"
+        );
+        command(&mut runtime, "anim.play");
+        step(&mut runtime, Vec::new());
+        assert!(
+            !runtime.transport.is_playing_for("sue-paint"),
+            "and stops with it"
+        );
+        // Back to the second cel's frame for what follows.
+        command(&mut runtime, "anim.first");
+        for _ in 0..3 {
+            command(&mut runtime, "anim.next");
+        }
+
         // Onion Skin Settings keeps its settings on the picture.
         command(&mut runtime, "anim.onion_settings");
         step(&mut runtime, Vec::new());
