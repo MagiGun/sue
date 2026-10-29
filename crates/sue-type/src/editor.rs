@@ -449,7 +449,7 @@ impl Editor {
         if range.is_empty() {
             return;
         }
-        edit::reformat(cx, doc, "Clear Formatting", |_, marks| {
+        edit::reformat(cx, doc, &tr!("clear-formatting"), |_, marks| {
             let kinds: Vec<String> = marks
                 .marks()
                 .iter()
@@ -535,7 +535,7 @@ impl Editor {
     /// Puts an embedded entity (a picture) in a paragraph of its own at the
     /// caret.
     pub fn insert_embed(&mut self, cx: &mut AppletContext<'_>, entity: EntityId) {
-        self.embed(cx, entity, "Insert Picture");
+        self.embed(cx, entity, &tr!("insert-picture"));
     }
 
     /// Puts a new table of `rows` by `columns` in a paragraph of its own at
@@ -603,7 +603,7 @@ impl Editor {
         let id = entity.id();
         let mut marks = self.marks[self.caret.doc].clone();
         marks.set(range.clone(), kind::COMMENT, Some(Value::Entity(id)));
-        let batch = sue_core::txn::Batch::new("New Comment")
+        let batch = sue_core::txn::Batch::new(tr!("new-comment"))
             .then(sue_core::txn::SpawnEntity::new(entity))
             .then(sue_core::txn::SetExtension::set(doc, marks));
         if cx.apply(ArenaEdit(batch)).is_err() {
@@ -618,7 +618,7 @@ impl Editor {
     /// one undo step.
     pub fn remove_comment(&mut self, cx: &mut AppletContext<'_>, id: EntityId) -> bool {
         self.commit(cx);
-        let mut batch = sue_core::txn::Batch::new("Delete Comment");
+        let mut batch = sue_core::txn::Batch::new(tr!("delete-comment"));
         let mut found = false;
         for (index, doc) in self.docs.iter().enumerate() {
             let mut marks = self.marks[index].clone();
@@ -669,7 +669,7 @@ impl Editor {
         let id = entity.id();
         cx.apply(ArenaEdit(sue_core::txn::SpawnEntity::new(entity)))
             .ok()?;
-        self.embed(cx, id, "Insert Table of Contents");
+        self.embed(cx, id, &tr!("insert-table-of-contents"));
         Some(id)
     }
 
@@ -694,7 +694,7 @@ impl Editor {
             doc: self.caret.doc,
             offset: range.end,
         };
-        self.embed(cx, id, "Insert Table");
+        self.embed(cx, id, &tr!("insert-table"));
         self.enter_cell(id, 0, 0);
         Some(id)
     }
@@ -760,12 +760,13 @@ impl Editor {
                     .and_then(|entity| entity.property(sue_model::HEADER_ROWS))
                     .and_then(Value::as_i64)
                     .unwrap_or(0);
-                let step =
-                    sue_core::txn::Batch::new("Heading Row").then(sue_core::txn::SetProperty::new(
+                let step = sue_core::txn::Batch::new(tr!("heading-row")).then(
+                    sue_core::txn::SetProperty::new(
                         id,
                         sue_model::HEADER_ROWS,
                         Value::Int(i64::from(now == 0)),
-                    ));
+                    ),
+                );
                 (step, (row, column))
             }
             TableEdit::DeleteRow | TableEdit::DeleteColumn | TableEdit::DeleteTable => {
@@ -2343,8 +2344,8 @@ impl Editor {
                 let at = self.caret.offset;
                 // Backspace at the start of a list item ends the list first.
                 if !forward && self.at_paragraph_start() && self.in_list() {
-                    self.set_paragraph(cx, kind::LIST, None, "End List");
-                    self.set_paragraph(cx, kind::LEVEL, None, "End List");
+                    self.set_paragraph(cx, kind::LIST, None, &tr!("end-list"));
+                    self.set_paragraph(cx, kind::LEVEL, None, &tr!("end-list"));
                     return true;
                 }
                 let range = if forward {
@@ -2379,8 +2380,8 @@ impl Editor {
             Key::Enter => {
                 // Enter on an empty list item ends the list.
                 if selection.is_empty() && self.in_list() && self.paragraph_empty() {
-                    self.set_paragraph(cx, kind::LIST, None, "End List");
-                    self.set_paragraph(cx, kind::LEVEL, None, "End List");
+                    self.set_paragraph(cx, kind::LIST, None, &tr!("end-list"));
+                    self.set_paragraph(cx, kind::LEVEL, None, &tr!("end-list"));
                     return true;
                 }
                 let (look, _) = self.look_here(view.sheet);
@@ -2391,7 +2392,7 @@ impl Editor {
                     && at_end
                     && let Some(next) = view.sheet.get(&look.style).next.clone()
                 {
-                    self.set_style(cx, &next, "Next Style");
+                    self.set_style(cx, &next, &tr!("next-style"));
                 }
                 changed
             }
@@ -2407,14 +2408,14 @@ impl Editor {
                         cx,
                         kind::LEVEL,
                         Some(Value::Int(level as i64)),
-                        "List Level",
+                        &tr!("list-level"),
                     );
                     return true;
                 }
                 if let Some(tab) = view.sheet.get(&look.style).tab.clone()
                     && self.paragraph_empty()
                 {
-                    self.set_style(cx, &tab, "Change Element");
+                    self.set_style(cx, &tab, &tr!("change-element"));
                     return true;
                 }
                 if shift {

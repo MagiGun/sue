@@ -8,6 +8,11 @@
 //! same entity becomes a layer) and Sue Writer (into the text). Its menus
 //! sit in Sue's top bar after the Sue button; its toolbar under them.
 
+/// Text from the language database's `viewer` namespace (the Image Viewer).
+macro_rules! tr {
+    ($($arg:tt)*) => { sue_lang::tr!("viewer", $($arg)*) };
+}
+
 use std::path::Path;
 
 use egui::{
@@ -44,56 +49,59 @@ pub fn is_picture(entity: &Entity) -> bool {
 fn menus() -> Vec<Menu> {
     let act = MenuItem::action;
     let mut file = vec![
-        act("Open Picture...", "viewer.open").key("Ctrl+O"),
+        act(tr!("open-picture-ellipsis"), "viewer.open").key("Ctrl+O"),
         MenuItem::Separator,
-        act("Save As...", "viewer.save_as"),
-        act("Save Over the File...", "viewer.save"),
-        act("Re-encode as JPEG XL...", "viewer.reencode"),
+        act(tr!("save-as-ellipsis"), "viewer.save_as"),
+        act(tr!("save-over-the-file-ellipsis"), "viewer.save"),
+        act(tr!("re-encode-as-jpeg-xl-ellipsis"), "viewer.reencode"),
     ];
     // Phones and tablets have no file manager to show the file in.
     if sue_platform::file_manager().is_some() {
-        file.extend([MenuItem::Separator, act("Show in Folder", "viewer.show")]);
+        file.extend([
+            MenuItem::Separator,
+            act(tr!("show-in-folder"), "viewer.show"),
+        ]);
     }
     file.extend([
         MenuItem::Separator,
-        act("Back to the Hub", "viewer.leave").key("Esc"),
+        act(tr!("back-to-the-hub"), "viewer.leave").key("Esc"),
     ]);
     vec![
-        Menu::new("File", file),
+        Menu::new(tr!("file"), file),
         Menu::new(
-            "Image",
+            tr!("image"),
             vec![
-                act("Turn Left", "viewer.rotate_left"),
-                act("Turn Right", "viewer.rotate_right"),
-                act("Flip Horizontal", "viewer.flip_h"),
-                act("Flip Vertical", "viewer.flip_v"),
+                act(tr!("turn-left"), "viewer.rotate_left"),
+                act(tr!("turn-right"), "viewer.rotate_right"),
+                act(tr!("flip-horizontal"), "viewer.flip_h"),
+                act(tr!("flip-vertical"), "viewer.flip_v"),
                 MenuItem::Separator,
-                act("Crop", "viewer.crop"),
-                act("Adjust...", "viewer.adjust"),
-                act("Resize...", "viewer.resize"),
+                act(tr!("crop"), "viewer.crop"),
+                act(tr!("adjust-ellipsis"), "viewer.adjust"),
+                act(tr!("resize-ellipsis"), "viewer.resize"),
                 MenuItem::Separator,
-                act("Grayscale", "viewer.grayscale"),
-                act("Invert", "viewer.invert"),
+                act(tr!("grayscale"), "viewer.grayscale"),
+                act(tr!("invert"), "viewer.invert"),
             ],
         ),
         Menu::new(
-            "View",
+            tr!("view"),
             vec![
-                act("Fit to the Window", "viewer.fit"),
-                act("Actual Size", "viewer.actual"),
-                act("Zoom In", "viewer.zoom_in"),
-                act("Zoom Out", "viewer.zoom_out"),
+                act(tr!("fit-to-the-window"), "viewer.fit"),
+                act(tr!("actual-size"), "viewer.actual"),
+                act(tr!("zoom-in"), "viewer.zoom_in"),
+                act(tr!("zoom-out"), "viewer.zoom_out"),
                 MenuItem::Separator,
-                act("Previous Picture", "viewer.previous"),
-                act("Next Picture", "viewer.next"),
+                act(tr!("previous-picture"), "viewer.previous"),
+                act(tr!("next-picture"), "viewer.next"),
             ],
         ),
         Menu::new(
-            "Send",
+            tr!("send"),
             vec![
-                act("Convert...", "viewer.convert"),
-                act("Open in Sue Paint", "viewer.paint"),
-                act("Put in Sue Writer", "viewer.writer"),
+                act(tr!("convert-ellipsis"), "viewer.convert"),
+                act(tr!("open-in-sue-paint"), "viewer.paint"),
+                act(tr!("put-in-sue-writer"), "viewer.writer"),
             ],
         ),
     ]
@@ -182,6 +190,8 @@ pub struct Viewer {
     menus: Vec<Menu>,
     menubar: MenuBar,
     bound: sue_wm::shortcuts::Bound,
+    /// When to build the menus again, in another language.
+    language: sue_lang::Watch,
 }
 
 impl Default for Viewer {
@@ -203,6 +213,7 @@ impl Default for Viewer {
             menus: menus(),
             menubar: MenuBar::new(),
             bound: sue_wm::shortcuts::Bound::default(),
+            language: sue_lang::Watch::default(),
         }
     }
 }
@@ -362,7 +373,7 @@ impl Viewer {
         };
         let size = [raster.width(), raster.height()];
         let Some(pixels) = rgba(raster) else {
-            cx.fail("This picture's pixels cannot be edited here");
+            cx.fail(tr!("pictures-pixels-cannot-edited-here"));
             return;
         };
         let (pixels, size) = change(pixels, size);
@@ -379,13 +390,14 @@ impl Viewer {
             "viewer.open" | "file.open" => {
                 // The engine reads it into the project, and a picture comes
                 // back here.
-                let pick = FilePick::open(None, "open", "Open Picture").types(vec![FileType::new(
-                    "Pictures",
-                    &[
-                        "png", "jpg", "jpeg", "jxl", "webp", "gif", "bmp", "tif", "tiff", "tga",
-                        "qoi", "ico", "ppm",
-                    ],
-                )]);
+                let pick =
+                    FilePick::open(None, "open", &tr!("open-picture")).types(vec![FileType::new(
+                        &tr!("pictures"),
+                        &[
+                            "png", "jpg", "jpeg", "jxl", "webp", "gif", "bmp", "tif", "tiff",
+                            "tga", "qoi", "ico", "ppm",
+                        ],
+                    )]);
                 cx.request(ShellRequest::PickFile(pick));
             }
             "viewer.fit" => self.fit = true,
@@ -403,10 +415,10 @@ impl Viewer {
                 let clockwise = command.ends_with("right");
                 self.edit(
                     cx,
-                    if clockwise {
-                        "Rotate Right"
+                    &if clockwise {
+                        tr!("rotate-right")
                     } else {
-                        "Rotate Left"
+                        tr!("rotate-left")
                     },
                     |pixels, [w, h]| (rotate(&pixels, w, h, clockwise), [h, w]),
                 );
@@ -415,10 +427,10 @@ impl Viewer {
                 let horizontal = command.ends_with('h');
                 self.edit(
                     cx,
-                    if horizontal {
-                        "Flip Horizontal"
+                    &if horizontal {
+                        tr!("flip-horizontal")
                     } else {
-                        "Flip Vertical"
+                        tr!("flip-vertical")
                     },
                     |mut pixels, size| {
                         sue_paint::mirror(&mut pixels, size[0], size[1], horizontal, !horizontal);
@@ -427,7 +439,7 @@ impl Viewer {
                 );
             }
             "viewer.grayscale" => {
-                self.edit(cx, "Grayscale", |mut pixels, size| {
+                self.edit(cx, &tr!("grayscale"), |mut pixels, size| {
                     for pixel in pixels.as_chunks_mut::<4>().0 {
                         let y = (0.2126 * f32::from(pixel[0])
                             + 0.7152 * f32::from(pixel[1])
@@ -439,7 +451,7 @@ impl Viewer {
                 });
             }
             "viewer.invert" => {
-                self.edit(cx, "Invert", |mut pixels, size| {
+                self.edit(cx, &tr!("invert"), |mut pixels, size| {
                     Filter::Invert.apply(&mut pixels, size[0], size[1], None, [0, 0]);
                     (pixels, size)
                 });
@@ -454,7 +466,7 @@ impl Viewer {
             }
             "viewer.crop_apply" => {
                 if let Some([x, y, w, h]) = self.crop {
-                    self.edit(cx, "Crop", |pixels, [width, height]| {
+                    self.edit(cx, &tr!("crop"), |pixels, [width, height]| {
                         let (x0, y0) = (x.max(0.0) as u32, y.max(0.0) as u32);
                         let x1 = ((x + w) as u32).min(width).max(x0 + 1);
                         let y1 = ((y + h) as u32).min(height).max(y0 + 1);
@@ -486,7 +498,7 @@ impl Viewer {
                     return true;
                 };
                 let stem = Path::new(entity.name()).file_stem().map_or_else(
-                    || "Picture".to_owned(),
+                    || tr!("picture"),
                     |stem| stem.to_string_lossy().into_owned(),
                 );
                 let source = entity.meta(meta::SOURCE).map(std::path::PathBuf::from);
@@ -517,11 +529,11 @@ impl Viewer {
                     .map(Path::to_path_buf)
                     .or_else(|| cx.catalog.folders.get("home").cloned());
                 let title = if command == "viewer.reencode" {
-                    "Re-encode as JPEG XL"
+                    tr!("re-encode-as-jpeg-xl")
                 } else {
-                    "Save Picture As"
+                    tr!("save-picture-as")
                 };
-                let pick = FilePick::save(Some(me()), "save_as", title, &format!("{stem}.{ext}"))
+                let pick = FilePick::save(Some(me()), "save_as", &title, &format!("{stem}.{ext}"))
                     .types(types)
                     .starting_in(start);
                 cx.request(ShellRequest::PickFile(pick));
@@ -629,10 +641,20 @@ impl Viewer {
         }
     }
 
-    #[allow(clippy::too_many_lines, reason = "the viewer's whole window")]
-    fn frame(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+    /// Builds the menus again when the language changed, and keeps their
+    /// keys in step with the settings.
+    fn follow_language(&mut self, cx: &AppletContext<'_>) {
+        if self.language.changed() {
+            self.menus = menus();
+            self.bound.invalidate();
+        }
         self.bound
             .refresh(&mut self.menus, cx.rice(), KEYS_SECTION, shortcut_table());
+    }
+
+    #[allow(clippy::too_many_lines, reason = "the viewer's whole window")]
+    fn frame(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        self.follow_language(cx);
         let present = cx.view.page.as_ref().map(AppletId::as_str) == Some(ID);
         let reveal = cx.view.reveal.clamp(0.0, 1.0);
         if present && !self.shown {
@@ -922,7 +944,11 @@ impl Viewer {
             painter.text(
                 rect.left_top() - vec2(0.0, 4.0),
                 Align2::LEFT_BOTTOM,
-                format!("{w:.0} x {h:.0}  (Enter crops)"),
+                tr!(
+                    "x-enter-crops",
+                    w = sue_lang::number(f64::from(w), 0),
+                    h = sue_lang::number(f64::from(h), 0)
+                ),
                 theme.font(theme.small_size),
                 Color32::WHITE,
             );
@@ -956,95 +982,101 @@ impl Viewer {
         };
         button(
             ui,
-            "Fit",
+            &tr!("fit"),
             "viewer.fit",
-            "Fit the picture to the window (0)",
+            &tr!("fit-picture-window-0"),
             self.fit,
         );
         button(
             ui,
             "100%",
             "viewer.actual",
-            "One picture pixel per screen pixel (1)",
+            &tr!("one-picture-pixel-per-screen-pixel"),
             !self.fit && (self.zoom - 1.0).abs() < 0.01,
         );
-        button(ui, "\u{2212}", "viewer.zoom_out", "Zoom out (-)", false);
-        button(ui, "+", "viewer.zoom_in", "Zoom in (+)", false);
+        button(ui, "\u{2212}", "viewer.zoom_out", &tr!("zoom-out-2"), false);
+        button(ui, "+", "viewer.zoom_in", &tr!("zoom-in-2"), false);
         widgets::pill_divider(ui, theme);
         button(
             ui,
             "\u{27F2}",
             "viewer.rotate_left",
-            "Turn left (Shift+R)",
+            &tr!("turn-left-shift-r"),
             false,
         );
         button(
             ui,
             "\u{27F3}",
             "viewer.rotate_right",
-            "Turn right (R)",
+            &tr!("turn-right-r"),
             false,
         );
         button(
             ui,
-            "Flip \u{2194}",
+            &tr!("flip"),
             "viewer.flip_h",
-            "Mirror left to right",
+            &tr!("mirror-left-to-right"),
             false,
         );
         button(
             ui,
-            "Flip \u{2195}",
+            &tr!("flip-2"),
             "viewer.flip_v",
-            "Mirror top to bottom",
+            &tr!("mirror-top-to-bottom"),
             false,
         );
         button(
             ui,
-            "Crop",
+            &tr!("crop"),
             "viewer.crop",
-            "Drag a rectangle, then Enter (C)",
+            &tr!("drag-rectangle-then-enter-c"),
             self.tool == Tool::Crop,
         );
         button(
             ui,
-            "Adjust",
+            &tr!("adjust"),
             "viewer.adjust",
-            "Brightness, contrast, saturation and hue",
+            &tr!("brightness-contrast-saturation-and-hue"),
             self.adjust.is_some(),
         );
         button(
             ui,
-            "Resize",
+            &tr!("resize"),
             "viewer.resize",
-            "Change the picture's size",
+            &tr!("change-the-pictures-size"),
             self.resize.is_some(),
         );
-        button(ui, "Grayscale", "viewer.grayscale", "Turn it gray", false);
         button(
             ui,
-            "Invert",
+            &tr!("grayscale"),
+            "viewer.grayscale",
+            &tr!("turn-it-gray"),
+            false,
+        );
+        button(
+            ui,
+            &tr!("invert"),
             "viewer.invert",
-            "Turn every color into its opposite",
+            &tr!("turn-every-color-into-opposite"),
             false,
         );
         widgets::pill_divider(ui, theme);
         button(
             ui,
-            "Save As...",
+            &tr!("save-as-ellipsis"),
             "viewer.save_as",
-            "Save as any picture format (Ctrl+Shift+S)",
+            &tr!("save-as-any-picture-format-ctrl"),
             false,
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if widgets::pill_button(ui, "\u{203A}", false, theme)
-                .on_hover_text("Next picture of the project (Right)")
+                .on_hover_text(tr!("next-picture-project-right"))
                 .clicked()
             {
                 run = Some("viewer.next");
             }
             if widgets::pill_button(ui, "\u{2039}", false, theme)
-                .on_hover_text("Previous picture of the project (Left)")
+                .on_hover_text(tr!("previous-picture-project-left"))
                 .clicked()
             {
                 run = Some("viewer.previous");
@@ -1067,7 +1099,11 @@ impl Viewer {
             .and_then(|data| data.as_raster());
         let mut parts = vec![entity.name().to_owned()];
         if let Some(raster) = raster {
-            parts.push(format!("{} x {} px", raster.width(), raster.height()));
+            parts.push(tr!(
+                "x-px",
+                width = raster.width(),
+                height = raster.height()
+            ));
         }
         if let Some(format) = entity.meta(meta::FORMAT) {
             parts.push(format.to_owned());
@@ -1083,7 +1119,7 @@ impl Viewer {
         }
         let pictures = Self::pictures(cx);
         if let Some(at) = pictures.iter().position(|id| Some(*id) == self.current) {
-            parts.push(format!("{} of {}", at + 1, pictures.len()));
+            parts.push(tr!("of", value = at + 1, count = pictures.len()));
         }
         let text = parts.join("    |    ");
         ui.painter().with_clip_rect(info).text(
@@ -1106,22 +1142,22 @@ impl Viewer {
         let mut apply_adjust = false;
         let mut apply_resize = None;
         if let Some(adjust) = &mut self.adjust {
-            widgets::heading(ui, "Adjust", theme);
+            widgets::heading(ui, &tr!("adjust"), theme);
             for (label, value, range) in [
-                ("Brightness", &mut adjust.brightness, -1.0..=1.0),
-                ("Contrast", &mut adjust.contrast, -1.0..=1.0),
-                ("Saturation", &mut adjust.saturation, -1.0..=1.0),
-                ("Hue", &mut adjust.hue, -180.0..=180.0),
+                (tr!("brightness"), &mut adjust.brightness, -1.0..=1.0),
+                (tr!("contrast"), &mut adjust.contrast, -1.0..=1.0),
+                (tr!("saturation"), &mut adjust.saturation, -1.0..=1.0),
+                (tr!("hue"), &mut adjust.hue, -180.0..=180.0),
             ] {
                 ui.label(RichText::new(label).color(theme.muted));
                 ui.add(egui::Slider::new(value, range).show_value(true));
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button("Apply").clicked() {
+                if ui.button(tr!("apply")).clicked() {
                     apply_adjust = true;
                 }
-                if ui.button("Reset").clicked() {
+                if ui.button(tr!("reset")).clicked() {
                     *adjust = Adjust::NONE;
                 }
             });
@@ -1133,12 +1169,16 @@ impl Viewer {
                 .and_then(|entity| entity.component(ComponentKind::RasterTile2D))
                 .and_then(|data| data.as_raster())
                 .map(|raster| [raster.width(), raster.height()]);
-            widgets::heading(ui, "Resize", theme);
+            widgets::heading(ui, &tr!("resize"), theme);
             let aspect = original.map_or(1.0, |[w, h]| w as f32 / h.max(1) as f32);
             ui.horizontal(|ui| {
-                ui.label("Width");
+                ui.label(tr!("width"));
                 if ui
-                    .add(egui::DragValue::new(width).range(1..=32_768).suffix(" px"))
+                    .add(
+                        egui::DragValue::new(width)
+                            .range(1..=32_768)
+                            .suffix(tr!("px")),
+                    )
                     .changed()
                     && *keep
                 {
@@ -1146,16 +1186,20 @@ impl Viewer {
                 }
             });
             ui.horizontal(|ui| {
-                ui.label("Height");
+                ui.label(tr!("height"));
                 if ui
-                    .add(egui::DragValue::new(height).range(1..=32_768).suffix(" px"))
+                    .add(
+                        egui::DragValue::new(height)
+                            .range(1..=32_768)
+                            .suffix(tr!("px")),
+                    )
                     .changed()
                     && *keep
                 {
                     *width = ((*height as f32 * aspect).round() as u32).max(1);
                 }
             });
-            ui.checkbox(keep, "Keep the proportions");
+            ui.checkbox(keep, tr!("keep-the-proportions"));
             ui.horizontal(|ui| {
                 for percent in [25_u32, 50, 200] {
                     if ui.small_button(format!("{percent}%")).clicked()
@@ -1166,20 +1210,20 @@ impl Viewer {
                     }
                 }
             });
-            if ui.button("Resize").clicked() {
+            if ui.button(tr!("resize")).clicked() {
                 apply_resize = Some([*width, *height]);
             }
         }
         if apply_adjust && let Some(adjust) = self.adjust.take() {
             self.preview = None;
-            self.edit(cx, "Adjust", |mut pixels, size| {
+            self.edit(cx, &tr!("adjust"), |mut pixels, size| {
                 adjust.apply(&mut pixels, size[0], size[1]);
                 (pixels, size)
             });
         }
         if let Some(to) = apply_resize {
             self.resize = None;
-            self.edit(cx, "Resize", |pixels, size| {
+            self.edit(cx, &tr!("resize"), |pixels, size| {
                 (resample(&pixels, size, to), to)
             });
         }
@@ -1198,22 +1242,22 @@ impl Viewer {
             .show(ctx, |ui| match &source {
                 Some(path) => {
                     ui.label(
-                        RichText::new("Save over the original file?").size(theme.heading_size),
+                        RichText::new(tr!("save-over-the-original-file")).size(theme.heading_size),
                     );
                     ui.label(RichText::new(sue_platform::shown_path(path)).color(theme.muted));
-                    ui.label("The file is replaced with the picture as it is now.");
+                    ui.label(tr!("file-replaced-picture-as-now"));
                     ui.horizontal(|ui| {
-                        if ui.button("Save Over It").clicked() {
+                        if ui.button(tr!("save-over-it")).clicked() {
                             self.write_to(cx, path);
                             close = true;
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr!("cancel")).clicked() {
                             close = true;
                         }
                     });
                 }
                 None => {
-                    ui.label("This picture has no file of its own yet. Use Save As.");
+                    ui.label(tr!("picture-has-no-file-own-yet"));
                     if ui.button("OK").clicked() {
                         close = true;
                     }
@@ -1253,9 +1297,10 @@ impl Viewer {
                         human_bytes(bytes.len() as u64)
                     ),
                 ),
-                Err(error) => cx.fail(format!(
-                    "Cannot write {}: {error}",
-                    sue_platform::shown_path(path)
+                Err(error) => cx.fail(tr!(
+                    "cannot-write-2",
+                    value = sue_platform::shown_path(path),
+                    error = error
                 )),
             },
             Err(error) => cx.fail(error),
@@ -1295,7 +1340,8 @@ fn texture_key(id: EntityId) -> u64 {
 
 impl SueApplet for Viewer {
     fn manifest(&self) -> AppletManifest {
-        let mut manifest = AppletManifest::new(ID, "Image Viewer", AppletRole::Tool, "\u{1F5BC}");
+        let mut manifest = AppletManifest::new(ID, "Image Viewer", AppletRole::Tool, "\u{1F5BC}")
+            .localized("viewer");
         manifest.summary =
             "Look at pictures large, turn, crop and adjust them, and save or send them anywhere."
                 .to_owned();
@@ -1316,6 +1362,7 @@ impl SueApplet for Viewer {
     }
 
     fn bar_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        self.follow_language(cx);
         let theme = cx.theme.clone();
         let rect = ui.max_rect();
         let mut menubar = std::mem::take(&mut self.menubar);
@@ -1361,10 +1408,13 @@ impl SueApplet for Viewer {
 
     fn commands(&self) -> Vec<PaletteEntry> {
         [
-            ("Image Viewer: Save As...", "viewer.save_as"),
-            ("Image Viewer: Re-encode as JPEG XL...", "viewer.reencode"),
-            ("Image Viewer: Rotate Right", "viewer.rotate_right"),
-            ("Image Viewer: Crop", "viewer.crop"),
+            (tr!("image-viewer-save-as-ellipsis"), "viewer.save_as"),
+            (
+                tr!("image-viewer-re-encode-as-jpeg-ellipsis"),
+                "viewer.reencode",
+            ),
+            (tr!("image-viewer-rotate-right"), "viewer.rotate_right"),
+            (tr!("image-viewer-crop"), "viewer.crop"),
         ]
         .into_iter()
         .map(|(label, command)| PaletteEntry {

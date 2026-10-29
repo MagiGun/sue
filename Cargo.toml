@@ -22,10 +22,19 @@ sue-model = { path = "crates/sue-model" }
 sue-paint = { path = "crates/sue-paint" }
 sue-type = { path = "crates/sue-type" }
 sue-writer = { path = "crates/sue-writer" }
+sue-lang = { path = "crates/sue-lang" }
 
 ed25519-dalek = "3"
 semver = "1"
 sha2 = "0.11"
+
+# The language database: Project Fluent messages, and the system's
+# language on first start.
+fluent-bundle = "0.16"
+fluent-syntax = "0.12"
+intl-memoizer = "0.5"
+sys-locale = "0.3"
+unic-langid = "0.9"
 
 # Phase 3: native window, GPU and JPEG XL.
 jxl-oxide = "0.12"

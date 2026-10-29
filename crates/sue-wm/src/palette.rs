@@ -157,7 +157,7 @@ impl Palette {
                         .inner_margin(egui::Margin::same((theme.padding).clamp(0.0, 127.0) as i8))
                         .show(ui, |ui| {
                             let edit = TextEdit::singleline(&mut self.query)
-                                .hint_text("Type a command, mode or entity action")
+                                .hint_text(tr!("type-command-mode-entity-action"))
                                 .desired_width(f32::INFINITY)
                                 .frame(egui::Frame::NONE)
                                 .font(theme.font(theme.ui_size * 1.15));
@@ -209,7 +209,7 @@ impl Palette {
                         ui.add_space(theme.padding);
                         ui.horizontal(|ui| {
                             ui.add_space(theme.padding * 1.5);
-                            ui.label(RichText::new("Nothing matches").color(theme.muted));
+                            ui.label(RichText::new(tr!("nothing-matches")).color(theme.muted));
                         });
                     }
                     ui.add_space(theme.padding * 0.5);

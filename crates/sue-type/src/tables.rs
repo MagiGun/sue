@@ -408,7 +408,7 @@ pub fn size_of(arena: &Arena, id: EntityId) -> (usize, usize) {
 /// `header_rows` heading rows.
 #[must_use]
 pub fn new_table(rows: u32, columns: u32, header_rows: u32) -> sue_core::Entity {
-    let entity = sue_core::Entity::empty("Table", sue_model::TEXT_TABLE)
+    let entity = sue_core::Entity::empty(tr!("table"), sue_model::TEXT_TABLE)
         .with_ext(Table::grid(rows, columns));
     if header_rows > 0 {
         entity.with_property(sue_model::HEADER_ROWS, Value::Int(i64::from(header_rows)))

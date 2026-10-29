@@ -55,12 +55,12 @@ impl Align {
 
     /// What people read.
     #[must_use]
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Left => "Align Left",
-            Self::Center => "Center",
-            Self::Right => "Align Right",
-            Self::Justify => "Justify",
+            Self::Left => tr!("align-left"),
+            Self::Center => tr!("center"),
+            Self::Right => tr!("align-right"),
+            Self::Justify => tr!("justify"),
         }
     }
 }
@@ -217,6 +217,17 @@ pub const SHEETS: &[(&str, &str)] = &[
     ("screenplay", "Screenplay"),
 ];
 
+/// The name of style sheet `key` (one of [`SHEETS`]) in the language in
+/// use.
+#[must_use]
+pub fn sheet_name(key: &str) -> String {
+    match key {
+        "manuscript" => tr!("sheet-manuscript"),
+        "screenplay" => tr!("sheet-screenplay"),
+        _ => tr!("sheet-standard"),
+    }
+}
+
 impl StyleSheet {
     /// The sheet `key` (else the standard one), with these fonts.
     #[must_use]
@@ -234,7 +245,7 @@ impl StyleSheet {
         let body = ParagraphStyle {
             space_after: 8.0,
             line_spacing: 1.15,
-            ..ParagraphStyle::new(BODY, "Body Text", fonts.size)
+            ..ParagraphStyle::new(BODY, &tr!("body-text"), fonts.size)
         };
         let heading_font = Some(fonts.heading.clone());
         let mut styles = vec![
@@ -242,7 +253,7 @@ impl StyleSheet {
             ParagraphStyle {
                 font: heading_font.clone(),
                 space_after: 6.0,
-                ..ParagraphStyle::heading("title", "Title", fonts.size * 2.3, 1)
+                ..ParagraphStyle::heading("title", &tr!("title"), fonts.size * 2.3, 1)
             },
             ParagraphStyle {
                 font: heading_font.clone(),
@@ -250,7 +261,7 @@ impl StyleSheet {
                 space_after: 12.0,
                 outline: None,
                 keep_with_next: false,
-                ..ParagraphStyle::heading("subtitle", "Subtitle", fonts.size * 1.3, 1)
+                ..ParagraphStyle::heading("subtitle", &tr!("subtitle"), fonts.size * 1.3, 1)
             },
         ];
         for (level, scale) in [(1, 1.65), (2, 1.35), (3, 1.15), (4, 1.0)] {
@@ -262,7 +273,7 @@ impl StyleSheet {
                 space_after: 6.0,
                 ..ParagraphStyle::heading(
                     &format!("heading{level}"),
-                    &format!("Heading {level}"),
+                    &tr!("heading", level = level),
                     fonts.size * scale,
                     level,
                 )
@@ -276,30 +287,30 @@ impl StyleSheet {
                 space_after: 8.0,
                 line_spacing: 1.15,
                 rule: true,
-                ..ParagraphStyle::new("quote", "Quote", fonts.size)
+                ..ParagraphStyle::new("quote", &tr!("quote"), fonts.size)
             },
             ParagraphStyle {
                 font: Some(fonts.mono.clone()),
                 shaded: true,
                 space_after: 8.0,
-                ..ParagraphStyle::new("code", "Code", fonts.size * 0.85)
+                ..ParagraphStyle::new("code", &tr!("code"), fonts.size * 0.85)
             },
             ParagraphStyle {
                 align: Align::Center,
                 space_before: 12.0,
                 space_after: 12.0,
-                ..ParagraphStyle::new("break", "Scene Break", fonts.size)
+                ..ParagraphStyle::new("break", &tr!("scene-break"), fonts.size)
             },
             ParagraphStyle {
                 soft: true,
                 align: Align::Center,
                 space_after: 8.0,
-                ..ParagraphStyle::new("caption", "Caption", fonts.size * 0.85)
+                ..ParagraphStyle::new("caption", &tr!("caption"), fonts.size * 0.85)
             },
         ]);
         Self {
             key: "standard".to_owned(),
-            name: "Standard".to_owned(),
+            name: tr!("standard"),
             body_font: fonts.body.clone(),
             heading_font: fonts.heading.clone(),
             mono_font: fonts.mono.clone(),
@@ -313,7 +324,7 @@ impl StyleSheet {
     pub fn manuscript(fonts: &Fonts) -> Self {
         let mut sheet = Self::standard(fonts);
         sheet.key = "manuscript".to_owned();
-        sheet.name = "Manuscript".to_owned();
+        sheet.name = tr!("manuscript");
         sheet.heading_font = fonts.body.clone();
         for style in &mut sheet.styles {
             if style.key == BODY {
@@ -333,7 +344,7 @@ impl StyleSheet {
                 space_before: 144.0,
                 space_after: 36.0,
                 font: Some(fonts.body.clone()),
-                ..ParagraphStyle::heading("chapter", "Chapter Title", fonts.size * 1.5, 1)
+                ..ParagraphStyle::heading("chapter", &tr!("chapter-title"), fonts.size * 1.5, 1)
             },
         );
         sheet
@@ -352,7 +363,7 @@ impl StyleSheet {
                 space_before: 12.0,
                 next: Some("character".to_owned()),
                 tab: Some("character".to_owned()),
-                ..element(BODY, "Action")
+                ..element(BODY, &tr!("action"))
             },
             ParagraphStyle {
                 caps: true,
@@ -361,7 +372,7 @@ impl StyleSheet {
                 outline: Some(1),
                 next: Some(BODY.to_owned()),
                 tab: Some(BODY.to_owned()),
-                ..element("scene", "Scene Heading")
+                ..element("scene", &tr!("scene-heading"))
             },
             ParagraphStyle {
                 caps: true,
@@ -370,7 +381,7 @@ impl StyleSheet {
                 keep_with_next: true,
                 next: Some("dialogue".to_owned()),
                 tab: Some("parenthetical".to_owned()),
-                ..element("character", "Character")
+                ..element("character", &tr!("character"))
             },
             ParagraphStyle {
                 indent: 115.2,
@@ -378,14 +389,14 @@ impl StyleSheet {
                 keep_with_next: true,
                 next: Some("dialogue".to_owned()),
                 tab: Some("dialogue".to_owned()),
-                ..element("parenthetical", "Parenthetical")
+                ..element("parenthetical", &tr!("parenthetical"))
             },
             ParagraphStyle {
                 indent: 72.0,
                 indent_right: 108.0,
                 next: Some("character".to_owned()),
                 tab: Some("parenthetical".to_owned()),
-                ..element("dialogue", "Dialogue")
+                ..element("dialogue", &tr!("dialogue"))
             },
             ParagraphStyle {
                 caps: true,
@@ -393,18 +404,18 @@ impl StyleSheet {
                 space_before: 12.0,
                 next: Some("scene".to_owned()),
                 tab: Some("scene".to_owned()),
-                ..element("transition", "Transition")
+                ..element("transition", &tr!("transition"))
             },
             ParagraphStyle {
                 caps: true,
                 align: Align::Center,
                 space_after: 24.0,
-                ..element("title", "Title")
+                ..element("title", &tr!("title"))
             },
         ];
         Self {
             key: "screenplay".to_owned(),
-            name: "Screenplay".to_owned(),
+            name: tr!("screenplay"),
             body_font: fonts.mono.clone(),
             heading_font: fonts.mono.clone(),
             mono_font: fonts.mono.clone(),

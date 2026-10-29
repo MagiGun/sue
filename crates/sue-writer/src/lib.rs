@@ -19,6 +19,11 @@
 //! - Pictures from Sue Paint go straight into the text (the Sue menu's
 //!   Send To), drawn with Sue Paint's own compositing.
 
+/// Text from the language database's `writer` namespace (Sue Writer).
+macro_rules! tr {
+    ($($arg:tt)*) => { sue_lang::tr!("writer", $($arg)*) };
+}
+
 mod compile;
 mod menus;
 mod project;

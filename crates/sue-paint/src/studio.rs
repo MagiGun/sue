@@ -399,6 +399,8 @@ pub struct SuePaint {
     pub(crate) active: usize,
     pub(crate) closed: HashSet<EntityId>,
     pub(crate) menus: Vec<Menu>,
+    /// When to build the menus again, in another language.
+    pub(crate) language: sue_lang::Watch,
     /// The shortcuts as Settings has them, for the menus and the shell.
     pub(crate) bound: sue_wm::shortcuts::Bound,
     pub(crate) menubar: MenuBar,
@@ -548,6 +550,7 @@ impl Default for SuePaint {
             active: 0,
             closed: HashSet::new(),
             menus: crate::menus::menus(),
+            language: sue_lang::Watch::default(),
             bound: sue_wm::shortcuts::Bound::default(),
             menubar: MenuBar::new(),
             dialog: None,
@@ -630,7 +633,7 @@ impl Default for SuePaint {
 
 impl std::fmt::Debug for SuePaint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SuePaint")
+        f.debug_struct(&tr!("suepaint"))
             .field("tool", &self.toolbox.tool())
             .field("docs", &self.docs.len())
             .finish_non_exhaustive()
@@ -990,9 +993,7 @@ impl SuePaint {
             shown: Vec::new(),
             offset: info.style.offset,
         });
-        cx.notify(
-            "Puppet warp: click to put pins, drag one to bend, Alt+click one to take it away",
-        );
+        cx.notify(tr!("puppet-warp-click-put-pins-drag"));
     }
 
     /// Shows the layer bent by the pins as they are now.
@@ -1036,7 +1037,7 @@ impl SuePaint {
         {
             cx.record(ArenaEdit(sue_core::txn::RasterEdit::new(
                 warp.layer,
-                "Puppet Warp",
+                tr!("puppet-warp-2"),
                 vec![patch],
             )));
         }
@@ -1088,7 +1089,7 @@ impl SuePaint {
             let patch = doc::diff_patch(&before, raster.bytes()?, width, height)?;
             Some(sue_core::txn::RasterEdit::new(
                 layer,
-                "Delete Lines",
+                tr!("delete-lines"),
                 vec![patch],
             ))
         });
@@ -1098,7 +1099,7 @@ impl SuePaint {
             geometry,
             &lines,
             pixels,
-            "Delete Lines",
+            &tr!("delete-lines"),
         );
         cx.record(ArenaEdit(edit));
         if let Some(doc) = self.doc_mut() {
@@ -1138,7 +1139,7 @@ impl SuePaint {
             self.add_ruler_path(
                 cx,
                 crate::rulers::Path::curve(&points),
-                "Create Curve Ruler",
+                &tr!("create-curve-ruler"),
             );
         }
     }
@@ -1197,7 +1198,7 @@ impl SuePaint {
             Err(error) => {
                 // Stop trying this picture until it changes again.
                 self.timelapse.insert(picture, (version, version, next));
-                cx.fail(format!("Cannot record the timelapse: {error}"));
+                cx.fail(tr!("cannot-record-the-timelapse", error = error));
             }
         }
     }
@@ -1212,17 +1213,17 @@ impl SuePaint {
         let name = self
             .picture()
             .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
-            .map_or_else(|| "Timelapse".to_owned(), |entity| entity.name().to_owned());
+            .map_or_else(|| tr!("timelapse"), |entity| entity.name().to_owned());
         cx.request(ShellRequest::PickFile(
             FilePick::save(
                 Some(me_id()),
                 "timelapse",
-                "Export Timelapse",
-                &format!("{name} timelapse.avi"),
+                &tr!("export-timelapse"),
+                &tr!("timelapse-avi", name = name),
             )
             .types(vec![
-                sue_wm::FileType::new("Motion JPEG AVI video", &["avi"]),
-                sue_wm::FileType::new("Animated GIF", &["gif"]),
+                sue_wm::FileType::new(&tr!("motion-jpeg-avi-video"), &["avi"]),
+                sue_wm::FileType::new(&tr!("animated-gif"), &["gif"]),
             ])
             .starting_in(self.last_dir.clone()),
         ));
@@ -1254,10 +1255,11 @@ impl SuePaint {
                 .map_err(|error| error.to_string())
                 .map(|()| (bytes.len(), count))
         }) {
-            Ok((size, count)) => {
-                cx.saved(path, format!("{count} frames, {} KiB", size.div_ceil(1024)))
-            }
-            Err(error) => cx.fail(format!("Cannot export the timelapse: {error}")),
+            Ok((size, count)) => cx.saved(
+                path,
+                tr!("frames-kib", value = size.div_ceil(1024), count = count),
+            ),
+            Err(error) => cx.fail(tr!("cannot-export-the-timelapse", error = error)),
         }
     }
 
@@ -1304,7 +1306,7 @@ impl SuePaint {
         };
         match crate::materials::register(&folder, name, raster) {
             Ok(_) => {
-                cx.notify(format!("{name} is in the Material palette"));
+                cx.notify(tr!("is-in-the-material-palette", name = name));
                 self.panels.color_set = true;
                 self.set_tab = 2;
                 self.material_kind = 3;
@@ -1334,7 +1336,7 @@ impl SuePaint {
             return;
         };
         let Some(raster) = crate::materials::layer(material, size, self.drawing_color()) else {
-            cx.fail(format!("Cannot read the material {}", material.name));
+            cx.fail(tr!("cannot-read-the-material", name = material.name));
             return;
         };
         match doc::add_layer_pixels(
@@ -1347,7 +1349,7 @@ impl SuePaint {
             Ok((spawn, id)) => {
                 if Self::apply(
                     cx,
-                    doc::Edit::new(format!("Paste {}", material.name)).then(spawn),
+                    doc::Edit::new(tr!("paste-2", name = material.name)).then(spawn),
                 ) && let Some(doc) = self.doc_mut()
                 {
                     doc.layer = Some(id);
@@ -1369,12 +1371,12 @@ impl SuePaint {
         let name = self
             .picture()
             .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
-            .map_or_else(|| "Webtoon".to_owned(), |entity| entity.name().to_owned());
+            .map_or_else(|| tr!("webtoon"), |entity| entity.name().to_owned());
         cx.request(ShellRequest::PickFile(
             FilePick::save(
                 Some(me_id()),
                 "webtoon",
-                "Export Webtoon",
+                &tr!("export-webtoon"),
                 &format!("{name}.png"),
             )
             .types(
@@ -1426,7 +1428,7 @@ impl SuePaint {
             |ext| ext.to_string_lossy().to_ascii_lowercase(),
         );
         let stem = path.file_stem().map_or_else(
-            || "Webtoon".to_owned(),
+            || tr!("webtoon"),
             |stem| stem.to_string_lossy().into_owned(),
         );
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -1449,14 +1451,15 @@ impl SuePaint {
             if let Err(error) = sue_io::encode_as(&tile, &extension, 92, 7)
                 .and_then(|bytes| write_atomic(&target, &bytes).map_err(|error| error.to_string()))
             {
-                cx.fail(format!("Cannot export piece {written}: {error}"));
+                cx.fail(tr!("cannot-export-piece", written = written, error = error));
                 return;
             }
             top += rows;
         }
-        cx.notify(format!(
-            "Exported the webtoon as {written} pictures, {} px wide",
-            to[0]
+        cx.notify(tr!(
+            "exported-webtoon-as-pictures-px-wide",
+            value = to[0],
+            written = written
         ));
     }
 
@@ -1467,7 +1470,7 @@ impl SuePaint {
             return;
         };
         let Some(sequence) = crate::anim::timeline(&cx.world.arena, picture) else {
-            cx.fail("Make a timeline first: Animation, Timeline, New Timeline");
+            cx.fail(tr!("make-timeline-first-animation-timeline-new"));
             return;
         };
         let mut cels: Vec<EntityId> = crate::anim::folders(sequence)
@@ -1484,10 +1487,9 @@ impl SuePaint {
             || "png".to_owned(),
             |ext| ext.to_string_lossy().to_ascii_lowercase(),
         );
-        let stem = path.file_stem().map_or_else(
-            || "Cel".to_owned(),
-            |stem| stem.to_string_lossy().into_owned(),
-        );
+        let stem = path
+            .file_stem()
+            .map_or_else(|| tr!("cel"), |stem| stem.to_string_lossy().into_owned());
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
         let mut written = 0;
         for cel in cels {
@@ -1514,12 +1516,12 @@ impl SuePaint {
             {
                 Ok(()) => written += 1,
                 Err(error) => {
-                    cx.fail(format!("Cannot export {name}: {error}"));
+                    cx.fail(tr!("cannot-export-2", name = name, error = error));
                     return;
                 }
             }
         }
-        cx.notify(format!("Exported {written} cels"));
+        cx.notify(tr!("exported-cels", written = written));
     }
 
     /// Adds a 3D layer showing `model` (a new model entity) above the
@@ -1559,10 +1561,9 @@ impl SuePaint {
         if let Some(dir) = path.parent() {
             self.last_dir = Some(dir.to_path_buf());
         }
-        let name = path.file_stem().map_or_else(
-            || "Audio".to_owned(),
-            |stem| stem.to_string_lossy().into_owned(),
-        );
+        let name = path
+            .file_stem()
+            .map_or_else(|| tr!("audio"), |stem| stem.to_string_lossy().into_owned());
         let extension = path
             .extension()
             .map(|ext| ext.to_string_lossy().to_ascii_lowercase());
@@ -1577,7 +1578,7 @@ impl SuePaint {
                 let (edit, _) = crate::anim::add_audio(picture, &sequence, &name, audio.pcm, frame);
                 Self::apply(cx, edit);
             }
-            Err(error) => cx.fail(format!("Cannot import {name}: {error}")),
+            Err(error) => cx.fail(tr!("cannot-import", name = name, error = error)),
         }
     }
 
@@ -1587,10 +1588,9 @@ impl SuePaint {
         if let Some(dir) = path.parent() {
             self.last_dir = Some(dir.to_path_buf());
         }
-        let name = path.file_stem().map_or_else(
-            || "Model".to_owned(),
-            |stem| stem.to_string_lossy().into_owned(),
-        );
+        let name = path
+            .file_stem()
+            .map_or_else(|| tr!("model"), |stem| stem.to_string_lossy().into_owned());
         let bundle = std::fs::read(path)
             .map_err(|error| error.to_string())
             .and_then(|bytes| {
@@ -1600,8 +1600,8 @@ impl SuePaint {
             });
         match bundle.map(|bundle| bundle.entities.into_iter().next()) {
             Ok(Some(model)) => self.add_3d_layer(cx, &name, model),
-            Ok(None) => cx.fail("The file has no model in it"),
-            Err(error) => cx.fail(format!("Cannot import {name}: {error}")),
+            Ok(None) => cx.fail(tr!("file-has-no-model")),
+            Err(error) => cx.fail(tr!("cannot-import", name = name, error = error)),
         }
     }
 
@@ -1679,7 +1679,9 @@ impl SuePaint {
         {
             into.copy_from_slice(before);
         }
-        if let Some(edit) = crate::three::set_view(&cx.world.arena, layer, &now, "Move Camera") {
+        if let Some(edit) =
+            crate::three::set_view(&cx.world.arena, layer, &now, &tr!("move-camera"))
+        {
             Self::apply(cx, edit);
         }
     }
@@ -1697,7 +1699,7 @@ impl SuePaint {
         }
         let (Some(picture), Some(info)) = (self.picture(), self.paintable(&cx.world.arena).ok())
         else {
-            cx.fail("Pick a raster layer to convert to lines and tones");
+            cx.fail(tr!("pick-raster-layer-convert-lines-tones"));
             return;
         };
         let Some(raster) = doc::raster(&cx.world.arena, info.id) else {
@@ -1713,7 +1715,7 @@ impl SuePaint {
             return;
         };
         if [raster.width(), raster.height()] != size || info.style.offset != [0, 0] {
-            cx.fail("Move the layer back into place (or merge it) before converting it");
+            cx.fail(tr!("move-layer-back-into-place-merge"));
             return;
         }
         let Some(bytes) = raster.bytes() else {
@@ -1758,11 +1760,11 @@ impl SuePaint {
             &cx.world.arena,
             picture,
             Some(info.id),
-            vec![("Tones".to_owned(), tones), ("Lines".to_owned(), lines)],
+            vec![(tr!("tones"), tones), (tr!("lines"), lines)],
         ) else {
             return;
         };
-        let mut edit = doc::Edit::new("Convert to Lines and Tones");
+        let mut edit = doc::Edit::new(tr!("convert-to-lines-and-tones"));
         for spawn in spawns {
             edit = edit.then(spawn);
         }
@@ -1797,7 +1799,7 @@ impl SuePaint {
             return;
         };
         let Some(buffers) = crate::three::buffers_of(&cx.world.arena, layer, &view, size) else {
-            cx.fail("The 3D layer has no model");
+            cx.fail(tr!("n-3d-layer-has-no-model"));
             return;
         };
         let line = crate::three::lines(&buffers, view.line_width.max(1.0), view.crease);
@@ -1830,11 +1832,11 @@ impl SuePaint {
             &cx.world.arena,
             picture,
             Some(layer),
-            vec![("Tones".to_owned(), tones), ("Lines".to_owned(), lines)],
+            vec![(tr!("tones"), tones), (tr!("lines"), lines)],
         ) else {
             return;
         };
-        let mut edit = doc::Edit::new("Convert to Lines and Tones");
+        let mut edit = doc::Edit::new(tr!("convert-to-lines-and-tones"));
         for spawn in spawns {
             edit = edit.then(spawn);
         }
@@ -1890,7 +1892,7 @@ impl SuePaint {
                     doc.set_selection(Some(selection));
                 }
             }
-            None => cx.notify("No pixels of that color there"),
+            None => cx.notify(tr!("no-pixels-color-there")),
         }
     }
 
@@ -1901,8 +1903,10 @@ impl SuePaint {
         };
         if let Some(layer) = self.doc().and_then(|doc| doc.quick_mask) {
             let selection = doc::raster(&cx.world.arena, layer).map(Selection::from_alpha);
-            if Self::apply(cx, doc::Edit::new("Quick Mask").then(doc::delete(layer)))
-                && let Some(doc) = self.doc_mut()
+            if Self::apply(
+                cx,
+                doc::Edit::new(tr!("quick-mask")).then(doc::delete(layer)),
+            ) && let Some(doc) = self.doc_mut()
             {
                 doc.quick_mask = None;
                 doc.set_selection(selection);
@@ -1943,15 +1947,9 @@ impl SuePaint {
         let top = doc::layers(&cx.world.arena, picture)
             .last()
             .map(|info| info.id);
-        match doc::add_layer_pixels(
-            &cx.world.arena,
-            picture,
-            top,
-            "Quick Mask".to_owned(),
-            raster,
-        ) {
+        match doc::add_layer_pixels(&cx.world.arena, picture, top, tr!("quick-mask"), raster) {
             Ok((spawn, id)) => {
-                let edit = doc::Edit::new("Quick Mask")
+                let edit = doc::Edit::new(tr!("quick-mask"))
                     .then(spawn)
                     .then(SetProperty::new(id, picture::DRAFT, true))
                     .then(SetProperty::new(id, picture::OPACITY, 0.5));
@@ -2001,7 +1999,7 @@ impl SuePaint {
             picture,
             crate::rulers::PERSPECTIVE,
             Some(ruler.to_text()),
-            "Create Perspective Ruler",
+            &tr!("create-perspective-ruler"),
         );
         if Self::apply(cx, edit) {
             self.pick_ruler(1);
@@ -2053,10 +2051,7 @@ impl SuePaint {
     pub(crate) fn paintable(&self, arena: &Arena) -> Result<doc::LayerInfo, String> {
         let info = self.drawable(arena)?;
         if crate::vector::is_vector(arena, info.id) {
-            return Err(format!(
-                "{} is a vector layer: draw on it with pens and brushes, or pick a raster layer",
-                info.name
-            ));
+            return Err(tr!("vector-layer-draw-pens-brushes-pick", name = info.name));
         }
         Ok(info)
     }
@@ -2066,33 +2061,25 @@ impl SuePaint {
         if let Some(info) = self.layer_info(arena)
             && crate::three::is_3d(arena, info.id)
         {
-            return Err(format!(
-                "{} is a 3D layer: draw on a layer above it, or use the Object tool to move the camera",
-                info.name
-            ));
+            return Err(tr!("n-3d-layer-draw-layer-above-use", name = info.name));
         }
-        let info = self
-            .layer_info(arena)
-            .ok_or("Pick a layer to draw on first")?;
+        let info = self.layer_info(arena).ok_or(tr!("pick-layer-draw-first"))?;
         match info.kind {
             LayerKind::Raster => {}
-            LayerKind::Paper => return Err("The paper layer cannot be drawn on".to_owned()),
+            LayerKind::Paper => return Err(tr!("paper-layer-cannot-drawn")),
             LayerKind::Other if doc::is_folder(arena, info.id) => {
-                return Err(format!(
-                    "{} is a folder: pick a layer in it to draw on",
-                    info.name
-                ));
+                return Err(tr!("folder-pick-layer-draw", name = info.name));
             }
-            LayerKind::Other => return Err(format!("{} cannot be drawn on yet", info.name)),
+            LayerKind::Other => return Err(tr!("cannot-be-drawn-on-yet", name = info.name)),
         }
         if info.locked {
-            return Err(format!("{} is locked", info.name));
+            return Err(tr!("is-locked", name = info.name));
         }
         if !info.style.visible {
-            return Err(format!("{} is hidden", info.name));
+            return Err(tr!("is-hidden", name = info.name));
         }
         if doc::raster(arena, info.id).is_none_or(|raster| raster.format() != PixelFormat::Rgba8) {
-            return Err(format!("{} is not an RGBA layer", info.name));
+            return Err(tr!("is-not-an-rgba-layer", name = info.name));
         }
         Ok(info)
     }
@@ -2160,7 +2147,7 @@ impl SuePaint {
         match cx.apply(ArenaEdit(edit)) {
             Ok(_) => true,
             Err(error) => {
-                cx.fail(format!("Sue Paint: {error}"));
+                cx.fail(tr!("sue-paint", error = error));
                 false
             }
         }
@@ -2184,7 +2171,7 @@ impl SuePaint {
             Ok(Some(edit)) => {
                 Self::apply(cx, edit);
             }
-            Ok(None) => cx.notify(format!("{label}: nothing changed")),
+            Ok(None) => cx.notify(tr!("nothing-changed", label = label)),
             Err(error) => cx.fail(error),
         }
     }
@@ -2195,7 +2182,7 @@ impl SuePaint {
         let offset = self
             .layer_info(&cx.world.arena)
             .map_or([0, 0], |info| info.style.offset);
-        self.rewrite(cx, filter.label(), |pixels, width, height| {
+        self.rewrite(cx, &filter.label(), |pixels, width, height| {
             filter.apply(pixels, width, height, selection.as_ref(), offset);
         });
     }
@@ -2287,7 +2274,7 @@ impl SuePaint {
             return false;
         };
         let Some(raster) = doc::raster(arena, info.id) else {
-            cx.fail("Only raster layers can be copied");
+            cx.fail(tr!("only-raster-layers-can-copied"));
             return false;
         };
         let Some(selection) = self.selection_or_all(arena) else {
@@ -2390,14 +2377,14 @@ impl SuePaint {
             drafts: false,
         };
         let Some(flat) = composite::flatten(arena, picture, options) else {
-            cx.fail("This picture has no size");
+            cx.fail(tr!("this-picture-has-no-size"));
             return;
         };
         let bytes = sue_io::encode_as(&flat, ext, jpeg_quality(cx), jxl_effort(cx));
         let bytes = match bytes {
             Ok(bytes) => bytes,
             Err(error) => {
-                cx.fail(format!("Export failed: {error}"));
+                cx.fail(tr!("export-failed", error = error));
                 return;
             }
         };
@@ -2410,12 +2397,12 @@ impl SuePaint {
             return;
         };
         let Some(psd) = crate::psd_io::to_psd(&cx.world.arena, picture) else {
-            cx.fail("This picture has no size");
+            cx.fail(tr!("this-picture-has-no-size"));
             return;
         };
         match sue_io::psd::encode_psd(&psd, big) {
             Ok(bytes) => self.export_bytes(cx, bytes, if big { "psb" } else { "psd" }),
-            Err(error) => cx.fail(format!("Export failed: {error}")),
+            Err(error) => cx.fail(tr!("export-failed", error = error)),
         }
     }
 
@@ -2429,7 +2416,7 @@ impl SuePaint {
             .world
             .arena
             .get_by_id(picture)
-            .map_or_else(|_| "Picture".to_owned(), |entity| entity.name().to_owned());
+            .map_or_else(|_| tr!("picture"), |entity| entity.name().to_owned());
         let file = format!("{name}.{ext}");
         if cx.view.interactive {
             // The save dialog asks where; `picked` writes it.
@@ -2439,7 +2426,7 @@ impl SuePaint {
                 FilePick::save(
                     Some(AppletId::new(ID).expect("a valid id")),
                     "export",
-                    "Export",
+                    &tr!("export"),
                     &file,
                 )
                 .extensions(&[ext])
@@ -2466,8 +2453,8 @@ impl SuePaint {
             .world
             .arena
             .get_by_id(picture)
-            .map_or_else(|_| "Picture".to_owned(), |entity| entity.name().to_owned());
-        let mut types = vec![FileType::new("Sue project", &["sue"])];
+            .map_or_else(|_| tr!("picture"), |entity| entity.name().to_owned());
+        let mut types = vec![FileType::new(&tr!("sue-project"), &["sue"])];
         types.extend(
             sue_io::PICTURE_SAVE_TYPES
                 .iter()
@@ -2475,9 +2462,14 @@ impl SuePaint {
         );
         let start = self.last_dir.clone().unwrap_or_else(|| export_dir(cx));
         cx.request(ShellRequest::PickFile(
-            FilePick::save(Some(me_id()), "save-as", "Save As", &format!("{name}.sue"))
-                .types(types)
-                .starting_in(Some(start)),
+            FilePick::save(
+                Some(me_id()),
+                "save-as",
+                &tr!("save-as"),
+                &format!("{name}.sue"),
+            )
+            .types(types)
+            .starting_in(Some(start)),
         ));
     }
 
@@ -2499,7 +2491,7 @@ impl SuePaint {
             };
             // The project is the shell's to write.
             cx.request(ShellRequest::Picked {
-                pick: FilePick::save(None, "save-project", "Save Project", ""),
+                pick: FilePick::save(None, "save-project", &tr!("save-project"), ""),
                 path,
             });
             return;
@@ -2512,7 +2504,7 @@ impl SuePaint {
             drafts: false,
         };
         let Some(flat) = composite::flatten(&cx.world.arena, picture, options) else {
-            cx.fail("This picture has no size");
+            cx.fail(tr!("this-picture-has-no-size"));
             return;
         };
         match sue_io::encode_as(&flat, &extension, jpeg_quality(cx), jxl_effort(cx)) {
@@ -2524,7 +2516,7 @@ impl SuePaint {
                     });
                 }
             }
-            Err(error) => cx.fail(format!("Cannot save as .{extension}: {error}")),
+            Err(error) => cx.fail(tr!("cannot-save-as", extension = extension, error = error)),
         }
     }
 
@@ -2536,11 +2528,11 @@ impl SuePaint {
         }
         match write_atomic(path, bytes) {
             Ok(()) => {
-                cx.saved(path, format!("{} KiB", bytes.len().div_ceil(1024)));
+                cx.saved(path, tr!("kib", value = bytes.len().div_ceil(1024)));
                 true
             }
             Err(error) => {
-                cx.fail(format!("Cannot write {}: {error}", path.display()));
+                cx.fail(tr!("cannot-write", path = path.display(), error = error));
                 false
             }
         }
@@ -2595,7 +2587,7 @@ impl SuePaint {
             .color_sets
             .save(crate::colorsets::folder(cx).as_deref())
         {
-            cx.fail(format!("Cannot save the color sets: {error}"));
+            cx.fail(tr!("cannot-save-the-color-sets", error = error));
         }
     }
 
@@ -2607,14 +2599,18 @@ impl SuePaint {
             .clone()
             .or_else(|| cx.catalog.folders.get("home").cloned());
         let (purpose, title) = if as_layer {
-            ("layer", "Import Picture as a Layer")
+            ("layer", tr!("import-picture-as-a-layer"))
         } else {
-            ("open", "Open Picture")
+            ("open", tr!("open-picture"))
         };
         cx.request(ShellRequest::PickFile(
-            FilePick::open(Some(AppletId::new(ID).expect("a valid id")), purpose, title)
-                .extensions(OPENS)
-                .starting_in(start),
+            FilePick::open(
+                Some(AppletId::new(ID).expect("a valid id")),
+                purpose,
+                &title,
+            )
+            .extensions(OPENS)
+            .starting_in(start),
         ));
     }
 
@@ -2632,7 +2628,7 @@ impl SuePaint {
                 }
                 Err(error) => cx.fail(error),
             },
-            Err(error) => cx.fail(format!("Cannot read {}: {error}", path.display())),
+            Err(error) => cx.fail(tr!("cannot-read", path = path.display(), error = error)),
         }
     }
 
@@ -2649,7 +2645,7 @@ impl SuePaint {
         as_layer: bool,
     ) -> Result<(), String> {
         let name = path.file_stem().map_or_else(
-            || "Picture".to_owned(),
+            || tr!("picture"),
             |stem| stem.to_string_lossy().into_owned(),
         );
         let file = path
@@ -2661,12 +2657,12 @@ impl SuePaint {
         let formats = sue_io::formats(sue_model::registry());
         let bundle = formats
             .import(bytes, &file, &Properties::new())
-            .map_err(|error| format!("Cannot open {file}: {error}"))?;
+            .map_err(|error| tr!("cannot-open", file = file, error = error))?;
         let raster = bundle
             .entities
             .iter()
             .find_map(|entity| entity.component(ComponentKind::RasterTile2D)?.as_raster())
-            .ok_or_else(|| format!("{file} has no pixels Sue Paint can show"))?;
+            .ok_or_else(|| tr!("has-no-pixels-sue-paint-can", file = file))?;
         let rgba = to_rgba(raster);
         let target = self.picture().filter(|_| as_layer);
         match target {
@@ -2691,7 +2687,7 @@ impl SuePaint {
                 let picture_id = image.id();
                 let layer = Entity::new(name.clone(), rgba).with_class(class::LAYER);
                 let layer_id = layer.id();
-                let edit = Batch::new(format!("Open {file}"))
+                let edit = Batch::new(tr!("open-3", file = file))
                     .then(SpawnEntity::new(image))
                     .then(
                         SpawnEntity::new(layer).with_relation(
@@ -2719,7 +2715,7 @@ impl SuePaint {
         as_layer: bool,
     ) -> Result<(), String> {
         let psd = sue_io::psd::decode_psd(bytes)
-            .map_err(|error| format!("Cannot open {file}: {error}"))?;
+            .map_err(|error| tr!("cannot-open", file = file, error = error))?;
         if let Some(picture) = self.picture().filter(|_| as_layer) {
             let below = self.doc().and_then(|doc| doc.layer);
             let edit = crate::psd_io::import(&cx.world.arena, picture, below, &psd)?;
@@ -2732,7 +2728,7 @@ impl SuePaint {
             .with_property(picture::DPI, 72.0);
         let picture = image.id();
         let layers = crate::psd_io::import(&cx.world.arena, picture, None, &psd)?;
-        let edit = Batch::new(format!("Open {file}"))
+        let edit = Batch::new(tr!("open-3", file = file))
             .then(SpawnEntity::new(image))
             .then(layers);
         if Self::apply(cx, edit) {
@@ -2762,13 +2758,13 @@ impl SuePaint {
             self.last_dir = Some(dir.to_path_buf());
         }
         let name = path.file_stem().map_or_else(
-            || "Imported".to_owned(),
+            || tr!("imported"),
             |stem| stem.to_string_lossy().into_owned(),
         );
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) => {
-                cx.fail(format!("Cannot read {}: {error}", path.display()));
+                cx.fail(tr!("cannot-read", path = path.display(), error = error));
                 return;
             }
         };
@@ -2781,17 +2777,17 @@ impl SuePaint {
             .unwrap_or([1, 1]);
         let made: Result<(doc::Edit, Option<EntityId>), String> = match purpose {
             "import-vector" => String::from_utf8(bytes)
-                .map_err(|_| "The file is not text".to_owned())
+                .map_err(|_| tr!("the-file-is-not-text"))
                 .and_then(|text| sue_io::svg::parse_svg(&text))
                 .and_then(|drawing| {
                     let lines = crate::vector::from_svg(&drawing, size);
                     if lines.is_empty() {
-                        return Err("The drawing has no lines".to_owned());
+                        return Err(tr!("the-drawing-has-no-lines"));
                     }
                     let (spawn, id) =
                         doc::add_vector_lines(arena, picture, below, name.clone(), &lines)?;
                     Ok((
-                        doc::Edit::new(format!("Import Vector {name}")).then(spawn),
+                        doc::Edit::new(tr!("import-vector", name = name)).then(spawn),
                         Some(id),
                     ))
                 }),
@@ -2807,13 +2803,13 @@ impl SuePaint {
                 .map(|tile| to_rgba(&tile))
                 .and_then(|tile| {
                     crate::materials::tiled(&tile, size)
-                        .ok_or_else(|| "The picture has no pixels".to_owned())
+                        .ok_or_else(|| tr!("the-picture-has-no-pixels"))
                 })
                 .and_then(|raster| {
                     let (spawn, id) =
                         doc::add_layer_pixels(arena, picture, below, name.clone(), raster)?;
                     Ok((
-                        doc::Edit::new(format!("Pattern from {name}")).then(spawn),
+                        doc::Edit::new(tr!("pattern-from", name = name)).then(spawn),
                         Some(id),
                     ))
                 }),
@@ -2831,7 +2827,7 @@ impl SuePaint {
                     }
                 }
             }
-            Err(error) => cx.fail(format!("Cannot import {name}: {error}")),
+            Err(error) => cx.fail(tr!("cannot-import", name = name, error = error)),
         }
     }
 
@@ -2862,7 +2858,7 @@ impl SuePaint {
             }
         }
         if max[0] <= min[0] || max[1] <= min[1] {
-            cx.fail("Draw the tip's shape on the layer first");
+            cx.fail(tr!("draw-tips-shape-layer-first"));
             return;
         }
         let (cw, ch) = (max[0] - min[0], max[1] - min[1]);
@@ -2886,7 +2882,7 @@ impl SuePaint {
                 pixel[3] = 254;
             }
         }
-        let name = format!("Tip {}", crate::brush::shapes().len() + 1);
+        let name = tr!("tip", value = crate::brush::shapes().len() + 1);
         let Some(shape) = crate::brush::TipShape::from_rgba(&name, &cut, cw, ch) else {
             return;
         };
@@ -2909,7 +2905,7 @@ impl SuePaint {
             0,
             tip,
         ));
-        cx.notify(format!("{name} is a new Brush sub tool"));
+        cx.notify(tr!("new-brush-sub-tool", name = name));
     }
 
     /// File, Print: the pages (every page of a story, or the canvas) laid
@@ -2937,7 +2933,7 @@ impl SuePaint {
             .and_then(|entity| entity.property(picture::DPI))
             .and_then(Value::as_f64)
             .unwrap_or(72.0) as f32;
-        let name = entity.map_or_else(|| "Print".to_owned(), |entity| entity.name().to_owned());
+        let name = entity.map_or_else(|| tr!("print"), |entity| entity.name().to_owned());
         let folder = crate::colorsets::folder(cx)
             .map_or_else(std::env::temp_dir, |folder| folder.join("print"));
         let path = folder.join(format!("{}.pdf", name.replace(['/', '\\', ':'], "_")));
@@ -2948,11 +2944,11 @@ impl SuePaint {
             sue_platform::open_document(&path).map_err(|error| error.to_string())
         });
         match printed {
-            Ok(()) => cx.notify(format!(
-                "{} pages ready to print in your PDF viewer",
-                pages.len()
+            Ok(()) => cx.notify(tr!(
+                "pages-ready-print-your-pdf-viewer",
+                count = pages.len()
             )),
-            Err(error) => cx.fail(format!("Cannot print: {error}")),
+            Err(error) => cx.fail(tr!("cannot-print", error = error)),
         }
     }
 
@@ -2963,10 +2959,9 @@ impl SuePaint {
             || "png".to_owned(),
             |ext| ext.to_string_lossy().to_ascii_lowercase(),
         );
-        let stem = path.file_stem().map_or_else(
-            || "Canvas".to_owned(),
-            |stem| stem.to_string_lossy().into_owned(),
-        );
+        let stem = path
+            .file_stem()
+            .map_or_else(|| tr!("canvas"), |stem| stem.to_string_lossy().into_owned());
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
         self.last_dir = Some(dir.clone());
         let options = RenderOptions {
@@ -2990,19 +2985,23 @@ impl SuePaint {
             };
             let name = arena
                 .get_by_id(picture)
-                .map_or_else(|_| "Picture".to_owned(), |entity| entity.name().to_owned());
+                .map_or_else(|_| tr!("picture"), |entity| entity.name().to_owned());
             let target = free_path(&dir.join(format!("{stem}-{name}.{extension}")));
             match sue_io::encode_as(&flat, &extension, jpeg_quality(cx), jxl_effort(cx))
                 .and_then(|bytes| std::fs::write(&target, bytes).map_err(|error| error.to_string()))
             {
                 Ok(()) => written += 1,
                 Err(error) => {
-                    cx.fail(format!("Cannot export {name}: {error}"));
+                    cx.fail(tr!("cannot-export-2", name = name, error = error));
                     return;
                 }
             }
         }
-        cx.notify(format!("Exported {written} canvases to {}", dir.display()));
+        cx.notify(tr!(
+            "exported-canvases-to",
+            dir = dir.display(),
+            written = written
+        ));
     }
 
     /// Goes back to where the picture was last saved or opened (File,
@@ -3013,31 +3012,31 @@ impl SuePaint {
             return;
         };
         let Some(saved) = self.saved_at.get(&picture).copied() else {
-            cx.fail("Save the picture first: Revert goes back to the last save");
+            cx.fail(tr!("save-picture-first-revert-goes-back"));
             return;
         };
         let mut steps = 0;
         let mut at = cx.history.cursor();
         while at != saved {
             let Some(parent) = cx.history.parent(at) else {
-                cx.fail("The last save is on another branch of the history; pick it in the History palette");
+                cx.fail(tr!("last-save-another-branch-history-pick"));
                 return;
             };
             at = parent;
             steps += 1;
         }
         if steps == 0 {
-            cx.notify("Nothing changed since the last save");
+            cx.notify(tr!("nothing-changed-since-last-save"));
             return;
         }
         for _ in 0..steps {
             if let Err(error) = cx.undo(false) {
-                cx.fail(format!("Cannot revert: {error}"));
+                cx.fail(tr!("cannot-revert", error = error));
                 return;
             }
         }
         self.sync_docs(&cx.world.arena);
-        cx.notify(format!("Reverted {steps} changes; Redo brings them back"));
+        cx.notify(tr!("reverted-changes-redo-brings-them-back", steps = steps));
     }
 
     /// Reads the recent pictures from the work Sue remembers (shared with
@@ -3125,7 +3124,7 @@ impl SuePaint {
                 }
             }
             Some(Gesture::Move { layer, old, .. }) => {
-                let mut steps = Batch::new("Move Layer");
+                let mut steps = Batch::new(tr!("move-layer"));
                 for (key, before) in [(picture::X, old[0].clone()), (picture::Y, old[1].clone())] {
                     steps = steps.then(match before {
                         Some(value) => SetProperty::new(layer, key, value),
@@ -3144,7 +3143,7 @@ impl SuePaint {
                 .ok()
                 .and_then(|entity| entity.property(&live.key).cloned())
                 .map_or_else(
-                    || format!("Set {}", live.key),
+                    || tr!("set-2", key = live.key),
                     |value| doc::label(&live.key, &value),
                 );
             let step = match live.old {
@@ -3567,26 +3566,26 @@ impl SuePaint {
                     if path.exists() {
                         self.open_picked(cx, &path, false);
                     } else {
-                        cx.fail(format!("{} is gone", path.display()));
+                        cx.fail(tr!("is-gone", path = path.display()));
                         cx.request(ShellRequest::Forget(path));
                     }
                 }
             }
             "file.import.vector" | "file.import.movie" | "file.import.pattern" => {
                 if self.picture().is_none() {
-                    cx.fail("Open or make a canvas first");
+                    cx.fail(tr!("open-make-canvas-first"));
                     return;
                 }
                 let (purpose, title, extensions): (&str, &str, &[&str]) = match command {
-                    "file.import.vector" => ("import-vector", "Import Vector", &["svg"]),
+                    "file.import.vector" => ("import-vector", &tr!("import-vector-2"), &["svg"]),
                     "file.import.movie" => (
                         "import-movie",
-                        "Import Movie",
+                        &tr!("import-movie-2"),
                         &["gif", "png", "apng", "webp", "avi"],
                     ),
                     _ => (
                         "import-pattern",
-                        "Pattern from Image",
+                        &tr!("pattern-from-image"),
                         &["png", "jpg", "jpeg", "jxl", "webp", "bmp", "tif", "tiff"],
                     ),
                 };
@@ -3611,8 +3610,8 @@ impl SuePaint {
                         FilePick::save(
                             Some(me_id()),
                             "batch",
-                            "Batch Export: every open canvas",
-                            "Canvas.png",
+                            &tr!("batch-export-every-open-canvas"),
+                            &tr!("canvas-png"),
                         )
                         .types(
                             sue_io::PICTURE_SAVE_TYPES
@@ -3641,13 +3640,13 @@ impl SuePaint {
             }
             "help.guide" => {
                 self.dialog = Some(Dialog::Message(
-                    "Sue Paint Guide".to_owned(),
+                    tr!("sue-paint-guide"),
                     crate::extras::guide(),
                 ))
             }
             "help.updates" => {
                 self.dialog = Some(Dialog::Message(
-                    "Check for Updates".to_owned(),
+                    tr!("check-for-updates"),
                     crate::extras::updates(),
                 ))
             }
@@ -3665,7 +3664,7 @@ impl SuePaint {
                     FilePick::open(
                         Some(me_id()),
                         "import-layers",
-                        "Import Image as Separate Layers",
+                        &tr!("import-image-as-separate-layers"),
                     )
                     .extensions(&[
                         "psd", "psb", "png", "jpg", "jpeg", "jxl", "webp", "tif", "tiff", "bmp",
@@ -3677,7 +3676,9 @@ impl SuePaint {
             "file.export.png" => self.export(cx, "png"),
             "file.export.jpg" => self.export(cx, "jpg"),
             "file.export.jxl" => self.export(cx, "jxl"),
-            "file.preferences" => cx.request(ShellRequest::OpenSettings(None)),
+            "file.preferences" => {
+                cx.request(ShellRequest::OpenSettings(Some("studios".to_owned())))
+            }
             "file.shortcuts" => cx.request(ShellRequest::OpenSettings(Some("keymaps".to_owned()))),
             "edit.transform.puppet" => self.start_warp(cx),
             "edit.transform.mesh" => {
@@ -3697,9 +3698,7 @@ impl SuePaint {
                             warp.pins.push(crate::warp::Pin::at(at));
                         }
                     }
-                    cx.notify(
-                        "Mesh Transformation: drag the points to bend the layer, Enter to finish",
-                    );
+                    cx.notify(tr!("mesh-transformation-drag-points-bend-layer"));
                 }
             }
             "edit.transform.scale" => self.start_transform(cx, false),
@@ -3719,24 +3718,24 @@ impl SuePaint {
                     cx.history.redo(cx.world)
                 };
                 if let Err(error) = result {
-                    cx.fail(format!("Undo failed: {error}"));
+                    cx.fail(tr!("undo-failed", error = error));
                 }
             }
             "edit.copy" => {
                 if self.copy(cx) {
-                    cx.notify("Copied");
+                    cx.notify(tr!("copied"));
                 }
             }
             "edit.cut" => {
                 if self.copy(cx) {
-                    self.run_clear(cx, false, "Cut");
+                    self.run_clear(cx, false, &tr!("cut"));
                 }
             }
-            "edit.paste" => self.paste(cx, "Pasted"),
+            "edit.paste" => self.paste(cx, &tr!("pasted")),
             "layer.from_selection" => {
                 let kept = self.clipboard.take();
                 if self.copy(cx) {
-                    self.paste(cx, "From Selection");
+                    self.paste(cx, &tr!("from-selection"));
                 }
                 self.clipboard = kept;
             }
@@ -3749,8 +3748,8 @@ impl SuePaint {
             {
                 self.delete_picked_lines(cx);
             }
-            "edit.clear" => self.run_clear(cx, false, "Clear"),
-            "edit.clear_outside" => self.run_clear(cx, true, "Clear Outside Selection"),
+            "edit.clear" => self.run_clear(cx, false, &tr!("clear")),
+            "edit.clear_outside" => self.run_clear(cx, true, &tr!("clear-outside-selection-2")),
             "edit.fill" => {
                 let Some(selection) = self.selection_or_all(&cx.world.arena) else {
                     return;
@@ -3766,7 +3765,7 @@ impl SuePaint {
                     .flat_map(|y| (0..size[0]).map(move |x| (x, y)))
                     .map(|(x, y)| (selection.at(x, y) * 255.0).round() as u8)
                     .collect();
-                self.rewrite(cx, "Fill", |pixels, width, height| {
+                self.rewrite(cx, &tr!("fill"), |pixels, width, height| {
                     crate::fill::paint_mask(
                         pixels,
                         [width, height],
@@ -3791,14 +3790,20 @@ impl SuePaint {
                     rgb: self.drawing_color(),
                 },
             ),
-            "edit.flip_h" => self.rewrite(cx, "Flip Layer", |p, w, h| mirror(p, w, h, true, false)),
-            "edit.flip_v" => self.rewrite(cx, "Flip Layer", |p, w, h| mirror(p, w, h, false, true)),
+            "edit.flip_h" => self.rewrite(cx, &tr!("flip-layer"), |p, w, h| {
+                mirror(p, w, h, true, false)
+            }),
+            "edit.flip_v" => self.rewrite(cx, &tr!("flip-layer"), |p, w, h| {
+                mirror(p, w, h, false, true)
+            }),
             "edit.rotate180" => {
-                self.rewrite(cx, "Rotate Layer", |p, w, h| mirror(p, w, h, true, true));
+                self.rewrite(cx, &tr!("rotate-layer"), |p, w, h| {
+                    mirror(p, w, h, true, true)
+                });
             }
-            "canvas.flip_h" => self.transform_canvas(cx, true, false, "Flip Canvas"),
-            "canvas.flip_v" => self.transform_canvas(cx, false, true, "Flip Canvas"),
-            "canvas.rotate180" => self.transform_canvas(cx, true, true, "Rotate Canvas"),
+            "canvas.flip_h" => self.transform_canvas(cx, true, false, &tr!("flip-canvas")),
+            "canvas.flip_v" => self.transform_canvas(cx, false, true, &tr!("flip-canvas")),
+            "canvas.rotate180" => self.transform_canvas(cx, true, true, &tr!("rotate-canvas")),
             "filter.invert" => self.filter_now(cx, Filter::Invert),
             "filter.blur" => self.filter_now(cx, Filter::GaussianBlur { radius: 1.0 }),
             "filter.blur_strong" => self.filter_now(cx, Filter::GaussianBlur { radius: 3.0 }),
@@ -4003,7 +4008,7 @@ impl SuePaint {
                         to: self.sub,
                     },
                     _ => {
-                        cx.notify("That correction is not in Sue Paint yet");
+                        cx.notify(tr!("correction-not-sue-paint-yet"));
                         return;
                     }
                 };
@@ -4015,7 +4020,7 @@ impl SuePaint {
                     &cx.world.arena,
                     picture,
                     self.layer(),
-                    filter.label(),
+                    &filter.label(),
                     &text,
                 );
                 if Self::apply(cx, edit) {
@@ -4053,9 +4058,9 @@ impl SuePaint {
                 };
                 let on = self.recording(&cx.world.arena, picture);
                 let edit = doc::Edit::new(if on {
-                    "Stop Recording Timelapse"
+                    tr!("stop-recording-timelapse")
                 } else {
-                    "Record Timelapse"
+                    tr!("record-timelapse-2")
                 })
                 .then(SetProperty::new(picture, crate::timelapse::RECORD, !on));
                 Self::apply(cx, edit);
@@ -4097,7 +4102,7 @@ impl SuePaint {
                     (
                         crate::rulers::SYMMETRY,
                         rulers.text(crate::rulers::SYMMETRY),
-                        "Create Symmetrical Ruler",
+                        tr!("create-symmetrical-ruler"),
                         0,
                     )
                 } else {
@@ -4105,11 +4110,11 @@ impl SuePaint {
                     (
                         crate::rulers::SPECIAL,
                         Some(special.to_text()),
-                        "Create Concentric Circle Ruler",
+                        tr!("create-concentric-circle-ruler"),
                         2,
                     )
                 };
-                if Self::apply(cx, crate::rulers::edit(picture, key, text, label)) {
+                if Self::apply(cx, crate::rulers::edit(picture, key, text, &label)) {
                     self.pick_ruler(mode);
                     if mode == 2 {
                         self.toolbox.current_mut().kind = 2;
@@ -4125,7 +4130,7 @@ impl SuePaint {
                     return;
                 };
                 let rulers = crate::rulers::Rulers::of(&cx.world.arena, picture);
-                let mut edit = doc::Edit::new("Delete Ruler");
+                let mut edit = doc::Edit::new(tr!("delete-ruler"));
                 for key in crate::rulers::ALL {
                     if rulers.text(key).is_some() {
                         edit = edit.then(SetProperty::remove(picture, key));
@@ -4144,17 +4149,17 @@ impl SuePaint {
                 {
                     self.paste_material(cx, &material);
                 } else {
-                    cx.notify("Pick a material in the Material palette first");
+                    cx.notify(tr!("pick-material-material-palette-first"));
                 }
             }
             "edit.material.image" => {
                 let name = self
                     .layer_info(&cx.world.arena)
-                    .map_or_else(|| "Material".to_owned(), |info| info.name);
+                    .map_or_else(|| tr!("material"), |info| info.name);
                 if self.paintable(&cx.world.arena).is_ok() {
                     self.dialog = Some(Dialog::Material(name));
                 } else {
-                    cx.fail("Pick a raster layer to register as a material");
+                    cx.fail(tr!("pick-raster-layer-register-as-material"));
                 }
             }
             "edit.canvas_size" | "edit.resolution" => {
@@ -4194,7 +4199,7 @@ impl SuePaint {
                         .and_then(|doc| doc.selection.as_ref())
                         .and_then(Selection::bounds),
                 ) else {
-                    cx.fail("Select the area to keep first");
+                    cx.fail(tr!("select-area-keep-first"));
                     return;
                 };
                 let [x0, y0, x1, y1] = bounds;
@@ -4205,7 +4210,7 @@ impl SuePaint {
                     [-i64::from(x0), -i64::from(y0)],
                 ) {
                     Ok(edit) => {
-                        let edit = sue_core::txn::Batch::new("Crop").then(edit);
+                        let edit = sue_core::txn::Batch::new(tr!("crop")).then(edit);
                         Self::apply(cx, edit);
                         if let Some(doc) = self.doc_mut() {
                             doc.set_selection(None);
@@ -4220,7 +4225,7 @@ impl SuePaint {
                 };
                 let arena = &cx.world.arena;
                 let name = if command == "layer.new.fill" {
-                    "Fill".to_owned()
+                    tr!("fill")
                 } else {
                     doc::new_layer_name(arena, picture)
                 };
@@ -4287,7 +4292,7 @@ impl SuePaint {
                         return;
                     }
                     if doc::layers(&cx.world.arena, picture).len() <= 1 {
-                        cx.fail("A picture keeps at least one layer");
+                        cx.fail(tr!("picture-keeps-least-one-layer"));
                         return;
                     }
                     Self::apply(cx, doc::delete(layer));
@@ -4314,7 +4319,7 @@ impl SuePaint {
                     .and_then(|picture| crate::anim::timeline(&cx.world.arena, picture))
                     .is_none()
                 {
-                    cx.fail("Make a timeline first: Animation, Timeline, New Timeline");
+                    cx.fail(tr!("make-timeline-first-animation-timeline-new"));
                     return;
                 }
                 let start = self
@@ -4322,7 +4327,7 @@ impl SuePaint {
                     .clone()
                     .or_else(|| cx.catalog.folders.get("home").cloned());
                 cx.request(ShellRequest::PickFile(
-                    FilePick::open(Some(me_id()), "anim-audio", "Import Audio")
+                    FilePick::open(Some(me_id()), "anim-audio", &tr!("import-audio-2"))
                         .extensions(&["wav", "flac", "mp3", "ogg", "aif", "aiff", "m4a"])
                         .starting_in(start),
                 ));
@@ -4333,7 +4338,7 @@ impl SuePaint {
                     .clone()
                     .or_else(|| cx.catalog.folders.get("home").cloned());
                 cx.request(ShellRequest::PickFile(
-                    FilePick::open(Some(me_id()), "model3d", "Import 3D Data")
+                    FilePick::open(Some(me_id()), "model3d", &tr!("import-3d-data"))
                         .extensions(&["obj"])
                         .starting_in(start),
                 ));
@@ -4366,7 +4371,7 @@ impl SuePaint {
                 };
                 let selection = self.doc().and_then(|doc| doc.selection.clone());
                 if command == "layer.mask.inside" && selection.is_none() {
-                    cx.fail("Select what to hide first");
+                    cx.fail(tr!("select-what-to-hide-first"));
                     return;
                 }
                 let inside = command == "layer.mask.inside";
@@ -4615,11 +4620,11 @@ impl SuePaint {
                     &cx.world.arena,
                     picture,
                     self.layer(),
-                    "Selection".to_owned(),
+                    tr!("selection"),
                     raster,
                 ) {
                     Ok((spawn, id)) => {
-                        let edit = doc::Edit::new("Convert to Selection Layer")
+                        let edit = doc::Edit::new(tr!("convert-to-selection-layer"))
                             .then(spawn)
                             .then(SetProperty::new(id, SELECTION_LAYER, true))
                             .then(SetProperty::new(id, picture::DRAFT, true))
@@ -4690,7 +4695,7 @@ impl SuePaint {
                 if let Some(clip) = self.clipboard.as_mut() {
                     clip.origin = origin;
                 }
-                self.paste(cx, "Pasted");
+                self.paste(cx, &tr!("pasted"));
                 if let Some(clip) = self.clipboard.as_mut() {
                     clip.origin = saved;
                 }
@@ -4763,15 +4768,9 @@ impl SuePaint {
                 else {
                     return;
                 };
-                match doc::add_layer_pixels(
-                    arena,
-                    picture,
-                    self.layer(),
-                    "Gradient".to_owned(),
-                    raster,
-                ) {
+                match doc::add_layer_pixels(arena, picture, self.layer(), tr!("gradient"), raster) {
                     Ok((spawn, id)) => {
-                        if Self::apply(cx, doc::Edit::new("New Gradient Layer").then(spawn))
+                        if Self::apply(cx, doc::Edit::new(tr!("new-gradient-layer")).then(spawn))
                             && let Some(doc) = self.doc_mut()
                         {
                             doc.layer = Some(id);
@@ -4872,10 +4871,8 @@ impl SuePaint {
                     "display.interface",
                     sue_rice::RiceValue::Text(chosen),
                 )) {
-                    Ok(_) => {
-                        cx.notify("The interface changes now; Window, Interface changes it back")
-                    }
-                    Err(error) => cx.fail(format!("Cannot change the interface: {error}")),
+                    Ok(_) => cx.notify(tr!("interface-changes-now-window-interface-changes")),
+                    Err(error) => cx.fail(tr!("cannot-change-the-interface", error = error)),
                 }
             }
             "view.snap_grid" => self.snap_grid = !self.snap_grid,
@@ -4936,9 +4933,9 @@ impl SuePaint {
             "window.command_bar" => self.panels.command_bar = !self.panels.command_bar,
             "window.hide_menus" => self.menus_hidden = !self.menus_hidden,
             "window.workspace.save" => {
-                self.dialog = Some(Dialog::Workspace(format!(
-                    "Workspace {}",
-                    self.workspaces.len() + 1
+                self.dialog = Some(Dialog::Workspace(tr!(
+                    "workspace-2",
+                    value = self.workspaces.len() + 1
                 )))
             }
             "window.workspace.manage" => self.dialog = Some(Dialog::Workspaces),
@@ -5024,10 +5021,7 @@ impl SuePaint {
             }
             "window.timeline" => self.panels.timeline = !self.panels.timeline,
             "help.shortcuts" => self.dialog = Some(Dialog::Shortcuts),
-            "help.about" => cx.notify(
-                "Sue Paint: layered painting inside Sue. Pictures live in your project, \
-                 next to everything else, and save with Ctrl+S.",
-            ),
+            "help.about" => cx.notify(tr!("sue-paint-layered-painting-inside-sue")),
             _ => {}
         }
     }
@@ -5087,7 +5081,7 @@ impl SuePaint {
                 self.run(name, cx);
             } else {
                 let label = crate::menus::label_of(&self.menus, name).unwrap_or(name);
-                cx.notify(format!("{label} is not in Sue Paint yet"));
+                cx.notify(tr!("not-sue-paint-yet", label = label));
             }
         }
     }
@@ -5147,9 +5141,25 @@ impl SuePaint {
 
     // ----- The frame ----------------------------------------------------------
 
-    fn frame(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+    /// Builds the menus again when the language changed (with the recent
+    /// files and workspaces in them), and keeps their keys in step with the
+    /// settings.
+    fn follow_language(&mut self, cx: &AppletContext<'_>) {
+        if self.language.changed() {
+            self.menus = crate::menus::menus();
+            crate::menus::set_recent(
+                &mut self.menus,
+                crate::menus::recent_items(&self.recent_files),
+            );
+            self.refresh_workspace_menu();
+            self.bound.invalidate();
+        }
         self.bound
             .refresh(&mut self.menus, cx.rice(), KEYS_SECTION, shortcut_table());
+    }
+
+    fn frame(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        self.follow_language(cx);
         self.pen_curve = cx
             .rice()
             .get_str(crate::dialogs::PEN_PRESSURE)
@@ -5281,6 +5291,10 @@ pub(crate) fn shortcut_table() -> &'static [sue_wm::shortcuts::Shortcut] {
     static TABLE: std::sync::OnceLock<Vec<sue_wm::shortcuts::Shortcut>> =
         std::sync::OnceLock::new();
     TABLE.get_or_init(|| {
+        // The labels are the settings' English descriptions; Settings and
+        // the Keyboard Shortcuts list read them in other languages from
+        // the language database.
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
         let menus = crate::menus::menus();
         let mut table = sue_wm::shortcuts::table(shortcuts(), |command| {
             crate::menus::label_of(&menus, command)
@@ -5484,10 +5498,9 @@ fn free_path(path: &Path) -> PathBuf {
 
 impl SueApplet for SuePaint {
     fn manifest(&self) -> AppletManifest {
-        let mut manifest = AppletManifest::new(ID, "Sue Paint", AppletRole::Studio, "\u{1F3A8}");
-        manifest.summary =
-            "Paint and draw illustrations in layers with pens, brushes, fills, selections and filters."
-                .to_owned();
+        let mut manifest = AppletManifest::new(ID, "Sue Paint", AppletRole::Studio, "\u{1F3A8}")
+            .localized("paint");
+        manifest.summary = tr!("applet-summary").to_owned();
         manifest.order = 25;
         manifest
     }
@@ -5546,7 +5559,7 @@ impl SueApplet for SuePaint {
                     value: choices[0].to_owned(),
                     options: choices.iter().map(|choice| (*choice).to_owned()).collect(),
                 },
-                format!("What {name} does on the canvas (File, Modifier Key Settings)"),
+                tr!("what-does-canvas-file-modifier-key", name = name),
             ));
         }
         declarations.extend(Self::custom_colors());
@@ -5564,6 +5577,7 @@ impl SueApplet for SuePaint {
     }
 
     fn bar_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        self.follow_language(cx);
         let theme = cx.theme.clone();
         let rect = ui.max_rect();
         if cx.view.form_factor == sue_platform::FormFactor::Mobile {
@@ -5648,7 +5662,7 @@ impl SueApplet for SuePaint {
         // Any other picture becomes a layered picture whose layer is that
         // very entity, and Sue Paint opens on it.
         let name = cx.arena().get_by_id(entity).map_or_else(
-            |_| "Picture".to_owned(),
+            |_| tr!("picture"),
             |found| {
                 Path::new(found.name()).file_stem().map_or_else(
                     || found.name().to_owned(),
@@ -5704,17 +5718,17 @@ impl SueApplet for SuePaint {
                 Ok(text) => {
                     let colors = crate::colorsets::import(&text);
                     if colors.is_empty() {
-                        cx.fail("No colors in that file");
+                        cx.fail(tr!("no-colors-in-that-file"));
                     } else {
                         let name = path.file_stem().map_or_else(
-                            || "Imported".to_owned(),
+                            || tr!("imported"),
                             |stem| stem.to_string_lossy().into_owned(),
                         );
                         self.color_sets.add_set(&name, colors);
                         self.save_color_sets(cx);
                     }
                 }
-                Err(error) => cx.fail(format!("Cannot read it: {error}")),
+                Err(error) => cx.fail(tr!("cannot-read-it", error = error)),
             },
             "colorset-export" => {
                 let (name, colors) = self
@@ -5727,8 +5741,8 @@ impl SueApplet for SuePaint {
                     path,
                     crate::colorsets::export_gpl(&name, &colors).as_bytes(),
                 ) {
-                    Ok(()) => cx.saved(path, "GIMP palette"),
-                    Err(error) => cx.fail(format!("Cannot write it: {error}")),
+                    Ok(()) => cx.saved(path, tr!("gimp-palette")),
+                    Err(error) => cx.fail(tr!("cannot-write-it", error = error)),
                 }
             }
             _ => {}
@@ -5741,15 +5755,19 @@ impl SueApplet for SuePaint {
             .map(|preset| {
                 // Short labels fit the wheel's wedges.
                 let label = match preset.name.as_str() {
-                    "Print (A4, 350 dpi)" => "Print A4",
-                    "Screen (Full HD)" => "Full HD",
-                    "Transparent Sprite" => "Sprite",
-                    name => name,
+                    "Print (A4, 350 dpi)" => tr!("print-a4"),
+                    "Screen (Full HD)" => tr!("full-hd"),
+                    "Transparent Sprite" => tr!("sprite"),
+                    name => name.to_owned(),
                 };
-                sue_wm::FileTemplate::new("Picture", label, &preset.name)
+                sue_wm::FileTemplate::new(tr!("picture"), label, &preset.name)
             })
             .collect();
-        templates.push(sue_wm::FileTemplate::new("Picture", "Custom...", "custom"));
+        templates.push(sue_wm::FileTemplate::new(
+            tr!("picture"),
+            tr!("custom-ellipsis"),
+            "custom",
+        ));
         templates
     }
 
@@ -5787,10 +5805,10 @@ impl SueApplet for SuePaint {
 
     fn commands(&self) -> Vec<PaletteEntry> {
         [
-            ("New Illustration...", "file.new", "Ctrl+N"),
-            ("Open Picture...", "file.open", ""),
-            ("Export as PNG...", "file.export.png", ""),
-            ("Keyboard Shortcuts", "help.shortcuts", ""),
+            (tr!("new-illustration-ellipsis"), "file.new", "Ctrl+N"),
+            (tr!("open-picture-ellipsis"), "file.open", ""),
+            (tr!("export-as-png-ellipsis"), "file.export.png", ""),
+            (tr!("keyboard-shortcuts"), "help.shortcuts", ""),
         ]
         .into_iter()
         .map(|(label, command, hint)| PaletteEntry {

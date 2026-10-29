@@ -121,12 +121,12 @@ pub fn create(
     let story = Entity::empty(name, STORY)
         .with_property(BINDING, if right_bound { "right" } else { "left" });
     let story_id = story.id();
-    let mut edit = Edit::new(format!("New {name}")).then(SpawnEntity::new(story));
+    let mut edit = Edit::new(tr!("new", name = name)).then(SpawnEntity::new(story));
     let mut keys = OrderKey::sequence(None, count.max(1)).into_iter();
     let mut ids = Vec::new();
     for number in 1..=count.max(1) {
         let page = NewPicture {
-            name: format!("Page {number}"),
+            name: tr!("page", number = number),
             ..spec.clone()
         };
         let (spawn, id) = doc::create(&page)?;
@@ -144,10 +144,10 @@ pub fn create(
 pub fn begin(arena: &Arena, picture: EntityId) -> (Edit, EntityId) {
     let name = arena
         .get_by_id(picture)
-        .map_or_else(|_| "Story".to_owned(), |entity| entity.name().to_owned());
+        .map_or_else(|_| tr!("story"), |entity| entity.name().to_owned());
     let story = Entity::empty(name, STORY).with_property(BINDING, "left");
     let id = story.id();
-    let edit = Edit::new("New Story")
+    let edit = Edit::new(tr!("new-story"))
         .then(SpawnEntity::new(story))
         .then(Relate::new(
             Relation::new(id, CHILD, picture).ordered(OrderKey::between(None, None)),
@@ -167,14 +167,14 @@ pub fn add_page(
     index: usize,
 ) -> Result<(Edit, EntityId), String> {
     let entity = arena.get_by_id(like).map_err(|error| error.to_string())?;
-    let [width, height] = picture::size(entity).ok_or("That is not a page")?;
+    let [width, height] = picture::size(entity).ok_or(tr!("that-is-not-a-page"))?;
     let paper = doc::layers(arena, like)
         .into_iter()
         .find(|info| info.kind == picture::LayerKind::Paper)
         .and_then(|info| arena.get_by_id(info.id).ok())
         .map(picture::paper_color);
     let spec = NewPicture {
-        name: format!("Page {}", pages(arena, story).len() + 1),
+        name: tr!("page-3", value = pages(arena, story).len() + 1),
         width,
         height,
         dpi: entity
@@ -185,7 +185,7 @@ pub fn add_page(
         timelapse: false,
     };
     let (spawn, id) = doc::create(&spec)?;
-    let edit = Edit::new("Add Page").then(spawn).then(Relate::new(
+    let edit = Edit::new(tr!("add-page")).then(spawn).then(Relate::new(
         Relation::new(story, CHILD, id).ordered(order_at(arena, story, index, None)),
     ));
     Ok((edit, id))
@@ -203,13 +203,13 @@ pub fn duplicate_page(
 ) -> Result<(Edit, EntityId), String> {
     let source = arena.get_by_id(page).map_err(|error| error.to_string())?;
     let mut copy = source.clone().with_id(EntityId::new());
-    copy.set_name(format!("{} copy", source.name()));
+    copy.set_name(tr!("copy", source = source.name()));
     let id = copy.id();
     let index = pages(arena, story)
         .iter()
         .position(|known| *known == page)
         .map_or(usize::MAX, |at| at + 1);
-    let mut edit = Edit::new("Duplicate Page").then(SpawnEntity::new(copy));
+    let mut edit = Edit::new(tr!("duplicate-page")).then(SpawnEntity::new(copy));
     for info in doc::layers(arena, page) {
         let layer = arena
             .get_by_id(info.id)
@@ -241,18 +241,18 @@ pub fn combine(
     right: EntityId,
 ) -> Result<Edit, String> {
     if left == right {
-        return Err("Pick two pages to combine".to_owned());
+        return Err(tr!("pick-two-pages-to-combine"));
     }
     let size = |page: EntityId| {
         arena
             .get_by_id(page)
             .ok()
             .and_then(picture::size)
-            .ok_or("That is not a page")
+            .ok_or(tr!("that-is-not-a-page"))
     };
     let ([lw, lh], [rw, rh]) = (size(left)?, size(right)?);
     let mut edit = doc::resize_canvas(arena, left, [lw + rw, lh.max(rh)], [0, 0])?;
-    edit = Edit::new("Combine Pages").then(edit);
+    edit = Edit::new(tr!("combine-pages")).then(edit);
     let mut order = arena.relations().next_order(left, CHILD);
     for info in doc::layers(arena, right) {
         if info.kind == picture::LayerKind::Paper {
@@ -290,12 +290,12 @@ pub fn separate(
     page: EntityId,
 ) -> Result<(Edit, EntityId), String> {
     let entity = arena.get_by_id(page).map_err(|error| error.to_string())?;
-    let [width, height] = picture::size(entity).ok_or("That is not a page")?;
+    let [width, height] = picture::size(entity).ok_or(tr!("that-is-not-a-page"))?;
     if width < 2 {
-        return Err("The page is too narrow to separate".to_owned());
+        return Err(tr!("page-too-narrow-separate"));
     }
     let half = width / 2;
-    let mut fresh = Entity::empty(format!("{} right", entity.name()), entity.class());
+    let mut fresh = Entity::empty(tr!("right", entity = entity.name()), entity.class());
     for (key, value) in entity.properties().iter() {
         fresh = fresh.with_property(key, value.clone());
     }
@@ -307,7 +307,7 @@ pub fn separate(
         .iter()
         .position(|known| *known == page)
         .map_or(usize::MAX, |at| at + 1);
-    let mut edit = Edit::new("Separate Pages")
+    let mut edit = Edit::new(tr!("separate-pages"))
         .then(SpawnEntity::new(fresh))
         .then(Relate::new(
             Relation::new(story, CHILD, new_page).ordered(order_at(arena, story, index, None)),
@@ -351,11 +351,11 @@ pub fn separate(
             .map_err(|error| error.to_string())?;
         let mut copy = match (info.kind, cut(info, half, width)) {
             (picture::LayerKind::Raster, Some(right_part)) => {
-                let left_part = cut(info, 0, half).ok_or("A layer will not separate")?;
+                let left_part = cut(info, 0, half).ok_or(tr!("a-layer-will-not-separate"))?;
                 edit = edit.then(sue_core::txn::ReplaceComponent::new(
                     info.id,
                     left_part,
-                    "Separate Pages",
+                    tr!("separate-pages"),
                 ));
                 if info.style.offset != [0, 0] {
                     edit = edit
@@ -411,7 +411,7 @@ pub fn page_settings(
     bleed: f64,
     inner: f64,
 ) -> Result<Edit, String> {
-    let mut edit = Edit::new("Change Page Settings");
+    let mut edit = Edit::new(tr!("change-page-settings"));
     for page in pages(arena, story) {
         let Some([w, h]) = arena.get_by_id(page).ok().and_then(picture::size) else {
             continue;
@@ -471,7 +471,7 @@ pub fn text_blocks(text: &str) -> Vec<Vec<String>> {
 /// The edit that takes `page` and its layers away (undo brings them back).
 #[must_use]
 pub fn delete_page(arena: &Arena, page: EntityId) -> Edit {
-    let mut edit = Edit::new("Delete Page");
+    let mut edit = Edit::new(tr!("delete-page"));
     for info in doc::layers(arena, page) {
         edit = edit.then(DespawnEntity::new(info.id));
     }
@@ -487,7 +487,7 @@ pub fn move_page(arena: &Arena, story: EntityId, page: EntityId, index: usize) -
     if now == index {
         return None;
     }
-    Some(Edit::new("Move Page").then(Relate::new(
+    Some(Edit::new(tr!("move-page")).then(Relate::new(
         Relation::new(story, CHILD, page).ordered(order_at(arena, story, index, Some(page))),
     )))
 }

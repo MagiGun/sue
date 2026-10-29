@@ -16,6 +16,11 @@ follow [Semantic Versioning](https://semver.org/).
 - Track changes in Sue Writer (Review, Track Changes): typed text is
   underlined, deleted text struck through, until each change is accepted
   or rejected. Word files keep the changes with their authors.
+- Sue speaks your language. It starts in your system's language when Sue
+  has it; the Sue menu's Language changes it for every studio and tool at
+  once, and Settings, Language lets any studio or tool keep a language of
+  its own. Spanish and Japanese ship as drafts waiting for a native
+  speaker's review; anything not yet translated shows in English.
 - Comments in Sue Writer (Review, New Comment, `Ctrl+Alt+C`): shown beside
   the text with their replies, to reply to, resolve or delete. They go into
   Word and OpenDocument files as comments.

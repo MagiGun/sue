@@ -6,6 +6,11 @@
 //! an undoable rice transaction; a slider previews live while dragged and
 //! records one undo step when released.
 
+/// Text from the language database's `settings` namespace (the Settings window).
+macro_rules! tr {
+    ($($arg:tt)*) => { sue_lang::tr!("settings", $($arg)*) };
+}
+
 use std::collections::HashMap;
 
 use egui::{Align, Layout, RichText, ScrollArea, Sense, Stroke, Ui, vec2};
@@ -25,6 +30,49 @@ fn choice_label(value: &str) -> String {
     chars.next().map_or_else(String::new, |first| {
         first.to_uppercase().chain(chars).collect()
     })
+}
+
+/// The `rice` message of a setting: its path with a dash for the dot, e.g.
+/// `display-ui_scale`. Its value is the setting's name in Settings, its
+/// `.description` the line under it, and an attribute per choice
+/// (`.high-refresh`) the choice's name.
+#[must_use]
+pub fn rice_message(path: &str) -> String {
+    path.replace('.', "-")
+}
+
+/// What Settings calls `entry`, in the language in use.
+fn label_of(entry: &RiceEntry) -> String {
+    sue_lang::text_or("rice", &rice_message(entry.path()), &entry.label())
+}
+
+/// The line under `entry` in Settings, in the language in use.
+fn description_of(entry: &RiceEntry) -> Option<String> {
+    entry.description().map(|english| {
+        let key = format!("{}.description", rice_message(entry.path()));
+        sue_lang::text_or("rice", &key, english)
+    })
+}
+
+/// `true` if choice `value` can be named in the language database (an
+/// attribute: a small letter, then letters, digits, `-` and `_`). Numbers and
+/// font names stay as they are.
+fn named_choice(value: &str) -> bool {
+    value.starts_with(|first: char| first.is_ascii_lowercase())
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+}
+
+/// The name of choice `value` of the setting at `path`, in the language in
+/// use.
+fn choice_of(path: &str, value: &str) -> String {
+    if named_choice(value) {
+        let key = format!("{}.{value}", rice_message(path));
+        sue_lang::text_or("rice", &key, &choice_label(value))
+    } else {
+        choice_label(value)
+    }
 }
 
 /// The registered pages plus "Other" for unclaimed sections.
@@ -51,7 +99,7 @@ pub fn all_pages(catalog: &Catalog, rice: &RiceSchema) -> Vec<SettingsPage> {
     if !other.is_empty() {
         pages.push(SettingsPage::new(
             "other",
-            "Other",
+            tr!("other"),
             other
                 .into_iter()
                 .map(|section| {
@@ -81,6 +129,8 @@ fn entries_of<'r>(rice: &'r RiceSchema, item: &SettingsItem) -> Vec<&'r RiceEntr
 fn matches(entry: &RiceEntry, needle: &str) -> bool {
     needle.is_empty()
         || entry.label().to_lowercase().contains(needle)
+        || label_of(entry).to_lowercase().contains(needle)
+        || description_of(entry).is_some_and(|text| text.to_lowercase().contains(needle))
         || entry.path().to_lowercase().contains(needle)
         || entry
             .description()
@@ -242,8 +292,10 @@ impl Settings {
                 })
             }
             RiceParameter::EnumChoice { value, options } => {
-                let labels: Vec<String> =
-                    options.iter().map(|option| choice_label(option)).collect();
+                let labels: Vec<String> = options
+                    .iter()
+                    .map(|option| choice_of(entry.path(), option))
+                    .collect();
                 let selected = options.iter().position(|option| option == value);
                 let short = labels.len() <= 5 && labels.iter().map(String::len).sum::<usize>() < 48;
                 if short {
@@ -298,12 +350,12 @@ impl Settings {
                     for (index, chord) in value.chords().iter().enumerate() {
                         let on = recording == Some(Some(index));
                         let text = if on {
-                            "Press keys...".to_owned()
+                            tr!("press-keys-ellipsis")
                         } else {
                             chord.to_string()
                         };
                         if chip(ui, text, on)
-                            .on_hover_text("Click, then press the shortcut to put here")
+                            .on_hover_text(tr!("click-then-press-shortcut-put-here"))
                             .clicked()
                         {
                             self.recording = Some((path.clone(), Some(index)));
@@ -314,7 +366,7 @@ impl Settings {
                                     .frame(false)
                                     .small(),
                             )
-                            .on_hover_text("Take this shortcut away")
+                            .on_hover_text(tr!("take-this-shortcut-away"))
                             .clicked()
                         {
                             let mut next = value.clone();
@@ -323,14 +375,14 @@ impl Settings {
                         }
                     }
                     if value.is_empty() && recording.is_none() {
-                        ui.label(RichText::new("None").color(theme.muted));
+                        ui.label(RichText::new(tr!("none")).color(theme.muted));
                     }
                     let adding = recording == Some(None);
                     if adding {
-                        chip(ui, "Press keys...".to_owned(), true);
+                        chip(ui, tr!("press-keys-ellipsis"), true);
                     } else if ui
                         .add(egui::Button::new(RichText::new("+").color(theme.text)).small())
-                        .on_hover_text("Add another shortcut for this (as many as you like)")
+                        .on_hover_text(tr!("add-another-shortcut-as-many-as"))
                         .clicked()
                     {
                         self.recording = Some((path.clone(), None));
@@ -418,11 +470,11 @@ impl Settings {
             ui.vertical(|ui| {
                 ui.set_width((width * 0.5).max(160.0));
                 ui.label(
-                    RichText::new(entry.label())
+                    RichText::new(label_of(entry))
                         .size(theme.ui_size)
                         .color(theme.text),
                 );
-                if let Some(description) = entry.description() {
+                if let Some(description) = description_of(entry) {
                     ui.add(
                         egui::Label::new(
                             RichText::new(description)
@@ -559,7 +611,8 @@ fn slider_edit(
 
 impl SueApplet for Settings {
     fn manifest(&self) -> AppletManifest {
-        let mut manifest = AppletManifest::new(ID, "Settings", AppletRole::Window, "\u{2699}");
+        let mut manifest = AppletManifest::new(ID, "Settings", AppletRole::Window, "\u{2699}")
+            .localized("settings");
         manifest.summary = "Every setting and every rice parameter.".to_owned();
         manifest
     }
@@ -625,7 +678,7 @@ impl SueApplet for Settings {
         right.add(
             egui::TextEdit::singleline(&mut self.filter)
                 .id(egui::Id::unique("sue-settings-filter"))
-                .hint_text("Filter settings...")
+                .hint_text(tr!("filter-settings-ellipsis"))
                 .desired_width(f32::INFINITY),
         );
         right.add_space(theme.padding);
@@ -635,7 +688,7 @@ impl SueApplet for Settings {
                 .get(self.page)
                 .map_or_else(String::new, |page| page.title.clone())
         } else {
-            format!("Results for \"{}\"", self.filter.trim())
+            tr!("results-for", filter = self.filter.trim())
         };
         right.label(
             RichText::new(title)
@@ -683,7 +736,90 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_codec_table_reads_from_the_language_database() {
+        for codec in sue_io::builtin_codecs() {
+            assert!(
+                sue_lang::has_english("io", codec.abilities),
+                "io.ftl lacks {}",
+                codec.abilities
+            );
+        }
+    }
+
+    #[test]
     fn choices_read_like_words() {
         assert_eq!(choice_label("high-refresh"), "High refresh");
+    }
+
+    /// Every setting Sue declares, with its English name, description and
+    /// choices.
+    fn every_setting() -> RiceSchema {
+        let mut rice = RiceSchema::parse(sue_rice::DEFAULT_RICE).expect("the shipped rice parses");
+        sue_wm::register_rice(&mut rice).expect("the shell's settings register");
+        rice.register_all(&crate::engine::shell_declarations())
+            .expect("the engine's settings register");
+        rice.register_all(
+            &crate::applets::launchpad()
+                .expect("the built-in applets install")
+                .rice_declarations(),
+        )
+        .expect("the applets' settings register");
+        rice
+    }
+
+    /// The `rice.ftl` lines of `entry` in English.
+    fn english_of(entry: &RiceEntry) -> String {
+        let mut out = format!("{} = {}\n", rice_message(entry.path()), entry.label());
+        if let Some(description) = entry.description() {
+            out.push_str(&format!("    .description = {description}\n"));
+        }
+        if let RiceParameter::EnumChoice { options, .. } = entry.parameter() {
+            for option in options {
+                if named_choice(option) {
+                    out.push_str(&format!("    .{option} = {}\n", choice_label(option)));
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn every_setting_reads_its_english_from_the_language_database() {
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        let rice = every_setting();
+        let mut wrong = Vec::new();
+        let mut file = String::new();
+        let mut section = "";
+        for entry in rice.entries() {
+            if entry.section() != section {
+                section = entry.section();
+                file.push_str(&format!("\n## [{section}]\n\n"));
+            }
+            file.push_str(&english_of(entry));
+            let mut fine = label_of(entry) == entry.label()
+                && sue_lang::has("rice", &rice_message(entry.path()))
+                && description_of(entry).as_deref() == entry.description();
+            if let Some(description) = entry.description() {
+                let key = format!("{}.description", rice_message(entry.path()));
+                fine &= sue_lang::has("rice", &key) && sue_lang::text("rice", &key) == description;
+            }
+            if let RiceParameter::EnumChoice { options, .. } = entry.parameter() {
+                for option in options {
+                    if named_choice(option) {
+                        let key = format!("{}.{option}", rice_message(entry.path()));
+                        fine &= sue_lang::has("rice", &key);
+                    }
+                }
+            }
+            if !fine {
+                wrong.push(english_of(entry));
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "crates/sue-lang/locales/en/rice.ftl lacks or differs from these settings; \
+             the lines they need:\n\n{}\nThe whole file reads:\n{file}",
+            wrong.join("")
+        );
     }
 }

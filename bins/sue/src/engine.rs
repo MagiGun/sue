@@ -2,6 +2,11 @@
 //! tinted), the undoable world, the installed applets and the catalog
 //! Settings reads.
 
+/// Text from the language database's `settings` namespace (the Settings pages).
+macro_rules! tr {
+    ($($arg:tt)*) => { sue_lang::tr!("settings", $($arg)*) };
+}
+
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -324,6 +329,7 @@ impl Engine {
     #[allow(clippy::too_many_lines, reason = "the Settings pages, as data")]
     fn build_catalog(&self) -> Catalog {
         let rice = &self.world.rice;
+        let _language = sue_lang::scope(&sue_wm::sue_language(rice));
         let param = |path: &str| SettingsItem::Param(path.to_owned());
         let section = |name: &str| SettingsItem::Section(name.to_owned());
         let fact = |id: &str| SettingsItem::Fact(id.to_owned());
@@ -338,48 +344,67 @@ impl Engine {
         catalog.pages = vec![
             SettingsPage::new(
                 "general",
-                "General",
+                tr!("general"),
                 vec![
                     group(
-                        "Startup",
+                        tr!("startup"),
                         vec![
                             SettingsItem::Note(
-                                "Sue opens on the Hub, or straight into the studio or tool whose pin you set there."
-                                    .to_owned(),
+                                tr!("sue-opens-hub-straight-into-studio").to_owned(),
                             ),
                             param("launchpad.pinned"),
                             param("launchpad.recent_count"),
                         ],
                     ),
                     group(
-                        "Unsaved Work",
+                        tr!("unsaved-work"),
                         vec![
-                            SettingsItem::Note(
-                                "Sue keeps work you have not saved by itself. The Hub lists it under Unsaved Work, to recover or discard."
-                                    .to_owned(),
-                            ),
+                            SettingsItem::Note(tr!("sue-keeps-work-you-have-not").to_owned()),
                             param("general.autosave_seconds"),
                         ],
                     ),
-                    group("Quitting", vec![param("general.confirm_on_exit")]),
+                    group(tr!("quitting"), vec![param("general.confirm_on_exit")]),
                 ],
             ),
+            SettingsPage::new("language", tr!("language"), {
+                let mut own: Vec<SettingsItem> = vec![SettingsItem::Note(
+                    tr!("each-studio-tool-follows-sues-language").to_owned(),
+                )];
+                own.extend(
+                    self.launchpad
+                        .manifests()
+                        .filter(|manifest| manifest.role.is_page())
+                        .map(|manifest| param(&sue_wm::language_key(&manifest.id))),
+                );
+                vec![
+                    group(
+                        tr!("sue"),
+                        vec![
+                            SettingsItem::Note(
+                                tr!("language-sue-every-studio-tool-follows").to_owned(),
+                            ),
+                            param(sue_wm::LANGUAGE_KEY),
+                        ],
+                    ),
+                    group(tr!("studios-and-tools"), own),
+                ]
+            }),
             SettingsPage::new(
                 "appearance",
-                "Appearance & Rice",
+                tr!("appearance-and-rice"),
                 vec![
-                    group("Theme", vec![SettingsItem::Presets]),
-                    group("Colors", vec![section("colors")]),
-                    group("Geometry", vec![section("layout")]),
-                    group("Typography", vec![section("typography")]),
+                    group(tr!("theme"), vec![SettingsItem::Presets]),
+                    group(tr!("colors"), vec![section("colors")]),
+                    group(tr!("geometry"), vec![section("layout")]),
+                    group(tr!("typography"), vec![section("typography")]),
                     group(
-                        "Rice File",
+                        tr!("rice-file"),
                         vec![
                             fact("rice.path"),
                             SettingsItem::Actions(vec![
-                                CommandButton::new("Reload from Disk", "rice.reload"),
-                                CommandButton::new("Export...", "rice.export"),
-                                CommandButton::new("Open Folder", "rice.reveal"),
+                                CommandButton::new(tr!("reload-from-disk"), "rice.reload"),
+                                CommandButton::new(tr!("export-ellipsis"), "rice.export"),
+                                CommandButton::new(tr!("open-folder"), "rice.reveal"),
                             ]),
                         ],
                     ),
@@ -387,41 +412,45 @@ impl Engine {
             ),
             SettingsPage::new(
                 "display",
-                "Display & Graphics",
+                tr!("display-and-graphics"),
                 vec![
                     group(
-                        "Performance",
+                        tr!("performance"),
                         vec![param("profile.hardware"), fact("display.profile")],
                     ),
                     group(
-                        "Graphics Card",
+                        tr!("graphics-card"),
                         vec![
                             param("display.gpu_preference"),
                             fact("display.gpu"),
                             fact("display.gpus"),
                             SettingsItem::Actions(vec![CommandButton::new(
-                                "Restart Sue",
+                                tr!("restart-sue"),
                                 "app.restart",
                             )]),
                         ],
                     ),
                     group(
-                        "Frame Pacing",
+                        tr!("frame-pacing"),
                         params(&["display.frame_rate_cap", "motion.settle_grace_ms"]),
                     ),
                     group(
-                        "Interface and Scale",
-                        params(&["display.interface", "display.ui_scale", "input.wheel_line_px"]),
+                        tr!("interface-and-scale"),
+                        params(&[
+                            "display.interface",
+                            "display.ui_scale",
+                            "input.wheel_line_px",
+                        ]),
                     ),
-                    group("Motion", vec![section("motion")]),
+                    group(tr!("motion"), vec![section("motion")]),
                 ],
             ),
             SettingsPage::new(
                 "audio",
-                "Audio & DSP",
+                tr!("audio-and-dsp"),
                 vec![
                     group(
-                        "Output",
+                        tr!("output"),
                         params(&[
                             "audio.output_device",
                             "audio.sample_rate",
@@ -430,46 +459,53 @@ impl Engine {
                             "audio.volume",
                         ]),
                     ),
-                    group("Status", vec![fact("audio.stream"), fact("audio.realtime")]),
+                    group(
+                        tr!("status"),
+                        vec![fact("audio.stream"), fact("audio.realtime")],
+                    ),
                 ],
             ),
             SettingsPage::new(
                 "files",
-                "Files & Codecs",
+                tr!("files-and-codecs"),
                 vec![
                     group(
-                        "JPEG XL",
+                        tr!("jpeg-xl"),
                         params(&["io.jxl_effort", "io.jpeg_lossless_transcode"]),
                     ),
-                    group("Conversion", params(&["io.convert_dir", "io.jpeg_quality"])),
                     group(
-                        "Opening Files",
+                        tr!("conversion"),
+                        params(&["io.convert_dir", "io.jpeg_quality"]),
+                    ),
+                    group(
+                        tr!("opening-files"),
                         params(&["io.max_ingest_mib", "io.byte_map_width"]),
                     ),
-                    group("Built-in Codecs", vec![table("codecs")]),
+                    group(tr!("built-in-codecs"), vec![table("codecs")]),
                 ],
             ),
             SettingsPage::new(
                 "studios",
-                "Studios",
+                tr!("studios"),
                 vec![
                     group(
-                        "Sue Paint",
+                        tr!("sue-paint"),
                         vec![
-                            SettingsItem::Note(
-                                "Each studio can wear its own theme. Sue Paint starts in Gray, like other painting apps; choose Sue theme to have it follow Sue's colors everywhere, or Custom to color it with the wheels below."
-                                    .to_owned(),
-                            ),
+                            SettingsItem::Note(tr!("each-studio-can-wear-own-theme").to_owned()),
                             section("sue_paint"),
                         ],
                     ),
-                    group("Sue Paint Custom Colors", vec![section("sue_paint_colors")]),
                     group(
-                        "Sue Writer",
+                        tr!("sue-paint-custom-colors"),
+                        vec![section("sue_paint_colors")],
+                    ),
+                    group(tr!("image-viewer"), vec![section("image_viewer")]),
+                    group(tr!("converter"), vec![section("convert")]),
+                    group(
+                        tr!("sue-writer"),
                         vec![
                             SettingsItem::Note(
-                                "Sue Writer follows Sue's theme unless you choose a preset. The page itself stays white paper, as it prints, unless you turn on dark paper."
-                                    .to_owned(),
+                                tr!("sue-writer-follows-sues-theme-unless").to_owned(),
                             ),
                             section("sue_writer"),
                         ],
@@ -478,62 +514,73 @@ impl Engine {
             ),
             SettingsPage::new(
                 "packages",
-                "Packages & Updates",
+                tr!("packages-and-updates"),
                 vec![
                     group(
-                        "Trust",
+                        tr!("trust"),
                         vec![
                             param("packages.require_signatures"),
                             fact("packages.policy"),
                         ],
                     ),
-                    group("Installed Applets", vec![table("applets")]),
-                    group("Packages", vec![table("packages")]),
+                    group(tr!("installed-applets"), vec![table("applets")]),
+                    group(tr!("packages"), vec![table("packages")]),
                     group(
-                        "Updates",
+                        tr!("updates"),
                         vec![fact("packages.generation"), fact("packages.health")],
                     ),
                 ],
             ),
             SettingsPage::new(
                 "keymaps",
-                "Keymaps",
+                tr!("keymaps"),
                 vec![
                     group(
-                        "Shortcuts",
+                        tr!("shortcuts"),
                         vec![
-                            SettingsItem::Note(
-                                "Every action can have as many shortcuts as you like: + adds one, x takes one away, and clicking one changes it."
-                                    .to_owned(),
-                            ),
+                            SettingsItem::Note(tr!("every-action-can-have-as-many").to_owned()),
                             section("keys"),
                         ],
                     ),
-                    group("Sue Paint", vec![section("sue_paint_keys")]),
-                    group("Sue Writer", vec![section("sue_writer_keys")]),
-                    group("Image Viewer", vec![section("image_viewer_keys")]),
+                    group(tr!("sue-paint"), vec![section("sue_paint_keys")]),
+                    group(tr!("sue-writer"), vec![section("sue_writer_keys")]),
+                    group(tr!("image-viewer"), vec![section("image_viewer_keys")]),
                 ],
             ),
             SettingsPage::new(
                 "mcp",
                 "MCP",
                 vec![group(
-                    "Model Context Protocol",
-                    vec![SettingsItem::Note("Not yet available.".to_owned())],
+                    tr!("model-context-protocol"),
+                    vec![SettingsItem::Note(tr!("not-yet-available"))],
                 )],
             ),
         ];
 
         // Live choices: the Hub, or any studio or tool to open straight into.
-        let mut pins = vec![Choice::new("", "The Hub")];
+        let mut pins = vec![Choice::new("", tr!("the-hub"))];
         pins.extend(
             self.launchpad
                 .manifests()
                 .filter(|manifest| manifest.role.is_page())
-                .map(|manifest| Choice::new(manifest.id.as_str(), manifest.name.clone())),
+                .map(|manifest| Choice::new(manifest.id.as_str(), manifest.title())),
         );
         catalog.choices.insert(sue_wm::PIN_KEY.to_owned(), pins);
-        let mut devices = vec![Choice::new("", "System default")];
+        // Languages: Sue's, and each studio's and tool's own.
+        catalog.choices.insert(
+            sue_wm::LANGUAGE_KEY.to_owned(),
+            sue_wm::sue_language_choices(),
+        );
+        let sue = sue_wm::sue_language(rice);
+        for manifest in self.launchpad.manifests() {
+            if manifest.role.is_page() {
+                catalog.choices.insert(
+                    sue_wm::language_key(&manifest.id),
+                    sue_wm::applet_language_choices(&sue),
+                );
+            }
+        }
+        let mut devices = vec![Choice::new("", tr!("system-default"))];
         devices.extend(
             self.options
                 .audio_devices
@@ -555,14 +602,14 @@ impl Engine {
         catalog.tables.insert(
             "codecs".to_owned(),
             InfoTable {
-                columns: vec!["Format".into(), "Abilities".into(), "Library".into()],
+                columns: vec![tr!("format"), tr!("abilities"), tr!("library")],
                 rows: sue_io::builtin_codecs()
                     .into_iter()
                     .map(|codec| {
                         vec![
-                            codec.format.to_owned(),
-                            codec.abilities.to_owned(),
-                            codec.library.to_owned(),
+                            sue_lang::translate("io", codec.format),
+                            sue_lang::translate("io", codec.abilities),
+                            sue_lang::translate("io", codec.library),
                         ]
                     })
                     .collect(),
@@ -572,21 +619,17 @@ impl Engine {
         catalog.tables.insert(
             "applets".to_owned(),
             InfoTable {
-                columns: vec!["Applet".into(), "Lives in".into(), "What it does".into()],
+                columns: vec![tr!("applet"), tr!("lives-in"), tr!("what-it-does")],
                 rows: self
                     .launchpad
                     .manifests()
                     .map(|manifest| {
                         let place = match manifest.role {
-                            AppletRole::Studio => "Hub, Studios",
-                            AppletRole::Tool => "Hub, Tools",
-                            AppletRole::Window => "Window",
+                            AppletRole::Studio => tr!("hub-studios"),
+                            AppletRole::Tool => tr!("hub-tools"),
+                            AppletRole::Window => tr!("window"),
                         };
-                        vec![
-                            manifest.name.clone(),
-                            place.to_owned(),
-                            manifest.summary.clone(),
-                        ]
+                        vec![manifest.title(), place.to_owned(), manifest.blurb()]
                     })
                     .collect(),
                 empty: String::new(),
@@ -595,9 +638,9 @@ impl Engine {
         catalog.tables.insert(
             "packages".to_owned(),
             InfoTable {
-                columns: vec!["Package".into(), "Version".into(), "Signature".into()],
+                columns: vec![tr!("package"), tr!("version"), tr!("signature")],
                 rows: Vec::new(),
-                empty: "No packages are installed yet. Everything above is built in.".to_owned(),
+                empty: tr!("no-packages-are-installed-yet-everything"),
             },
         );
 
@@ -607,7 +650,7 @@ impl Engine {
                 .facts
                 .insert(id.to_owned(), (label.to_owned(), value));
         };
-        facts("rice.path", "File", self.rice_source.to_string());
+        facts("rice.path", &tr!("file"), self.rice_source.to_string());
         let target = {
             let mut scheduler =
                 sue_wm::FrameScheduler::new(self.profile, self.capabilities.display_refresh_hz);
@@ -616,11 +659,12 @@ impl Engine {
         };
         facts(
             "display.profile",
-            "Active profile",
-            format!(
-                "{} ({} Hz display, {target} FPS animation target)",
-                sue_wm::profile_label(self.profile),
-                self.capabilities.display_refresh_hz,
+            &tr!("active-profile"),
+            tr!(
+                "hz-display-fps-animation-target",
+                value = sue_wm::profile_label(self.profile),
+                display_refresh_hz = self.capabilities.display_refresh_hz,
+                target = target
             ),
         );
         let running = self.options.gpu_label.clone().unwrap_or_else(|| {
@@ -634,24 +678,28 @@ impl Engine {
             self.options
                 .gpus
                 .iter()
-                .any(|gpu| gpu.ends_with(&format!("({kind} GPU)")))
+                .any(|gpu| gpu.ends_with(&tr!("gpu", kind = kind)))
         };
         let drawing = match (wanted, self.options.gpu_kind.as_deref()) {
             ("auto", _) | (_, None) => running,
             (wanted, Some(kind)) if wanted == kind => running,
             (wanted, Some(_)) if !offered(wanted) => {
-                format!("{running}. This machine has no {wanted} GPU")
+                tr!(
+                    "this-machine-has-no-gpu",
+                    running = running,
+                    wanted = wanted
+                )
             }
             (wanted, Some(_)) => {
-                format!("{running}. Restart Sue to draw on the {wanted} GPU")
+                tr!("restart-sue-draw-gpu", running = running, wanted = wanted)
             }
         };
-        facts("display.gpu", "Drawing on", drawing);
+        facts("display.gpu", &tr!("drawing-on"), drawing);
         facts(
             "display.gpus",
-            "GPUs here",
+            &tr!("gpus-here"),
             if self.options.gpus.is_empty() {
-                "Not probed in this run".to_owned()
+                tr!("not-probed-in-this-run")
             } else {
                 self.options.gpus.join(", ")
             },
@@ -666,35 +714,32 @@ impl Engine {
                         info.sample_rate,
                         info.channels,
                         info.buffer_frames
-                            .map_or_else(String::new, |frames| format!(", {frames} frames"))
+                            .map_or_else(String::new, |frames| tr!("frames", frames = frames))
                     ),
                     match sink.realtime() {
-                        RealtimeStatus::Off => "Off".to_owned(),
+                        RealtimeStatus::Off => tr!("off"),
                         RealtimeStatus::Pending => {
-                            "Requested; granted when playback starts".to_owned()
+                            tr!("requested-granted-when-playback-starts")
                         }
-                        RealtimeStatus::Granted => "Granted by the OS".to_owned(),
+                        RealtimeStatus::Granted => tr!("granted-by-the-os"),
                         RealtimeStatus::Refused => {
-                            "Refused by the OS; the default priority applies".to_owned()
+                            tr!("refused-os-default-priority-applies")
                         }
                     },
                 )
             }
-            (None, Some(error)) => (format!("Unavailable: {error}"), "Not running".to_owned()),
-            (None, None) => (
-                "Closed. It opens when something plays.".to_owned(),
-                "Not running".to_owned(),
-            ),
+            (None, Some(error)) => (tr!("unavailable", error = error), tr!("not-running")),
+            (None, None) => (tr!("closed-opens-when-something-plays"), tr!("not-running")),
         };
-        facts("audio.stream", "Stream", stream);
-        facts("audio.realtime", "Real-time priority", realtime);
+        facts("audio.stream", &tr!("stream"), stream);
+        facts("audio.realtime", &tr!("real-time-priority"), realtime);
         facts(
             "packages.policy",
-            "Policy",
+            &tr!("policy"),
             if rice.get_bool("packages.require_signatures").unwrap_or(true) {
-                "Unsigned or tampered packages are refused".to_owned()
+                tr!("unsigned-tampered-packages-are-refused")
             } else {
-                "Unsigned packages are accepted and marked unverified".to_owned()
+                tr!("unsigned-packages-are-accepted-marked-unverified")
             },
         );
         let generation = sue_pkg::read_active_pointer(&self.paths.packages_dir())
@@ -702,16 +747,16 @@ impl Engine {
             .flatten();
         facts(
             "packages.generation",
-            "Active generation",
+            &tr!("active-generation"),
             generation.map_or_else(
-                || "0, the factory install".to_owned(),
+                || tr!("n-0-the-factory-install"),
                 |generation| generation.to_string(),
             ),
         );
         facts(
             "packages.health",
-            "Rollback",
-            "Healthy: no update has run, so there is nothing to roll back".to_owned(),
+            &tr!("rollback"),
+            tr!("healthy-no-update-has-run-so"),
         );
         catalog
     }
@@ -920,6 +965,7 @@ pub(crate) mod tests {
             titles,
             [
                 "General",
+                "Language",
                 "Appearance & Rice",
                 "Display & Graphics",
                 "Audio & DSP",

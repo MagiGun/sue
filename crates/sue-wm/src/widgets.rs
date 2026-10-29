@@ -157,26 +157,29 @@ pub fn outline(ui: &Ui, rect: Rect, stroke: Stroke, corner: f32) {
 }
 
 /// What a response curve graph says along its edges.
-#[derive(Clone, Copy, Debug)]
-pub struct CurveLabels<'a> {
+#[derive(Clone, Debug)]
+pub struct CurveLabels {
     /// Under the graph, in the middle: what goes in (`Pen pressure`).
-    pub input: &'a str,
+    pub input: String,
     /// Under the graph, at the left (`0%`).
-    pub low: &'a str,
+    pub low: String,
     /// Under the graph, at the right (`100%`).
-    pub high: &'a str,
+    pub high: String,
     /// Left of the graph, between 0% and 100%: what comes out (`Output`).
-    pub output: &'a str,
+    pub output: String,
 }
 
-impl CurveLabels<'_> {
-    /// Pen pressure in, output out.
-    pub const PRESSURE: CurveLabels<'static> = CurveLabels {
-        input: "Pen pressure",
-        low: "0%",
-        high: "100%",
-        output: "Output",
-    };
+impl CurveLabels {
+    /// Pen pressure in, output out, in the language in use.
+    #[must_use]
+    pub fn pressure() -> Self {
+        Self {
+            input: tr!("curve-pen-pressure"),
+            low: "0%".to_owned(),
+            high: "100%".to_owned(),
+            output: tr!("curve-output"),
+        }
+    }
 }
 
 /// Edits a response curve as a graph, the way paint programs show pen
@@ -190,7 +193,7 @@ pub fn response_curve(
     id: impl std::hash::Hash + std::fmt::Debug,
     curve: &mut sue_model::Response,
     side: f32,
-    labels: CurveLabels<'_>,
+    labels: CurveLabels,
     theme: &Theme,
 ) -> bool {
     let font = egui::FontId::proportional(theme.small_size);
@@ -314,7 +317,7 @@ pub fn response_curve(
     label(
         plot.left_center() + vec2(-4.0, 0.0),
         Align2::RIGHT_CENTER,
-        labels.output,
+        &labels.output,
     );
     label(
         plot.left_bottom() + vec2(-4.0, 0.0),
@@ -324,18 +327,18 @@ pub fn response_curve(
     label(
         plot.left_bottom() + vec2(0.0, 3.0),
         Align2::LEFT_TOP,
-        labels.low,
+        &labels.low,
     );
     label(
         plot.right_bottom() + vec2(0.0, 3.0),
         Align2::RIGHT_TOP,
-        labels.high,
+        &labels.high,
     );
     let input_at = if narrow {
         plot.center_bottom() + vec2(0.0, theme.small_size + 6.0)
     } else {
         plot.center_bottom() + vec2(0.0, 3.0)
     };
-    label(input_at, Align2::CENTER_TOP, labels.input);
+    label(input_at, Align2::CENTER_TOP, &labels.input);
     changed
 }

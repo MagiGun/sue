@@ -163,21 +163,18 @@ pub fn light_table(arena: &Arena, cel: EntityId) -> Vec<EntityId> {
 /// The edit that puts `layer` on `cel`'s light table.
 #[must_use]
 pub fn register(cel: EntityId, layer: EntityId) -> Edit {
-    Edit::new("Register to Light Table").then(sue_core::txn::Relate::new(sue_core::Relation::new(
-        cel,
-        LIGHT_TABLE,
-        layer,
-    )))
+    Edit::new(tr!("register-to-light-table")).then(sue_core::txn::Relate::new(
+        sue_core::Relation::new(cel, LIGHT_TABLE, layer),
+    ))
 }
 
 /// The edit that takes `layers` off `cel`'s light table.
 #[must_use]
 pub fn deregister(cel: EntityId, layers: &[EntityId]) -> Edit {
-    layers
-        .iter()
-        .fold(Edit::new("Deregister from Light Table"), |edit, layer| {
-            edit.then(sue_core::txn::Unrelate::new(cel, LIGHT_TABLE, *layer))
-        })
+    layers.iter().fold(
+        Edit::new(tr!("deregister-from-light-table")),
+        |edit, layer| edit.then(sue_core::txn::Unrelate::new(cel, LIGHT_TABLE, *layer)),
+    )
 }
 
 impl FrameView {
@@ -449,7 +446,7 @@ pub fn edit_timeline(arena: &Arena, picture: EntityId, fps: u32, length: u32) ->
     let length = length.max(1);
     let retimed = retimed(sequence, Rate::new(fps.max(1), 1), length);
     Some(
-        Edit::new("Edit Timeline")
+        Edit::new(tr!("edit-timeline"))
             .then(SetExtension::set(picture, retimed))
             .then(SetProperty::new(picture, LENGTH, i64::from(length))),
     )
@@ -489,7 +486,7 @@ pub fn add_audio(
         duration,
     ));
     out.tracks.push(track);
-    let edit = Edit::new(format!("Import Audio {name}"))
+    let edit = Edit::new(tr!("import-audio", name = name))
         .then(sue_core::txn::SpawnEntity::new(sound))
         .then(SetExtension::set(picture, out));
     (edit, id)
@@ -596,9 +593,9 @@ pub fn with_folder(sequence: &Sequence, name: &str) -> Sequence {
 pub fn new_timeline(picture: EntityId, fps: u32, length: u32) -> Edit {
     let sequence = with_folder(
         &Sequence::new(Rate::new(fps.max(1), 1), 48_000),
-        "Animation Folder 1",
+        &tr!("animation-folder-1"),
     );
-    Edit::new("New Timeline")
+    Edit::new(tr!("new-timeline"))
         .then(SetExtension::set(picture, sequence))
         .then(SetProperty::new(picture, LENGTH, i64::from(length.max(1))))
 }
@@ -619,13 +616,13 @@ pub fn import_frames(
     fps: f64,
 ) -> Result<(Edit, usize), String> {
     if frames.is_empty() {
-        return Err("The movie has no frames".to_owned());
+        return Err(tr!("the-movie-has-no-frames"));
     }
     let size = arena
         .get_by_id(picture)
         .ok()
         .and_then(sue_model::picture::size)
-        .ok_or("The picture has no size")?;
+        .ok_or(tr!("the-picture-has-no-size"))?;
     let cels: Vec<(String, sue_core::RasterTile2D)> = frames
         .iter()
         .enumerate()
@@ -652,7 +649,7 @@ pub fn import_frames(
     for (frame, cel) in ids.iter().enumerate() {
         sequence = assign(&sequence, track, frame as u32, Some(*cel), picture, length);
     }
-    let mut edit = Edit::new(format!("Import Movie {name}"));
+    let mut edit = Edit::new(tr!("import-movie", name = name));
     for spawn in spawns {
         edit = edit.then(spawn);
     }

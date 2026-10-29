@@ -33,19 +33,12 @@ pub fn unix_now() -> u64 {
 #[must_use]
 pub fn ago(then: u64, now: u64) -> String {
     let seconds = now.saturating_sub(then);
-    let count = |value: u64, one: &str, many: &str| {
-        if value == 1 {
-            format!("{one} ago")
-        } else {
-            format!("{value} {many} ago")
-        }
-    };
     match seconds {
-        0..60 => "just now".to_owned(),
-        60..3_600 => count(seconds / 60, "a minute", "minutes"),
-        3_600..86_400 => count(seconds / 3_600, "an hour", "hours"),
-        86_400..172_800 => "yesterday".to_owned(),
-        172_800..604_800 => count(seconds / 86_400, "a day", "days"),
+        0..60 => tr!("ago-just-now"),
+        60..3_600 => tr!("ago-minutes", count = seconds / 60),
+        3_600..86_400 => tr!("ago-hours", count = seconds / 3_600),
+        86_400..172_800 => tr!("ago-yesterday"),
+        172_800..604_800 => tr!("ago-days", count = seconds / 86_400),
         _ => {
             let (year, month, day) = civil_date(then / 86_400);
             format!("{year}-{month:02}-{day:02}")
@@ -134,7 +127,7 @@ impl Autosave {
     pub fn title(&self) -> String {
         match &self.project {
             Some(project) => title_of(project),
-            None if self.name.is_empty() => "Untitled".to_owned(),
+            None if self.name.is_empty() => tr!("untitled"),
             None => self.name.clone(),
         }
     }

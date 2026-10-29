@@ -87,7 +87,7 @@ impl SuePaint {
             }
             "story.first" | "story.previous" | "story.next" | "story.last" => {
                 let Some((_, pages, index)) = self.story_here(&cx.world.arena) else {
-                    cx.notify("This canvas is one picture: Story, Add Page makes it a story");
+                    cx.notify(tr!("canvas-one-picture-story-add-page"));
                     return true;
                 };
                 let to = match command {
@@ -145,11 +145,11 @@ impl SuePaint {
             }
             "story.delete" => {
                 let Some((_, pages, index)) = self.story_here(&cx.world.arena) else {
-                    cx.fail("Delete Page works on a story's pages");
+                    cx.fail(tr!("delete-page-works-storys-pages"));
                     return true;
                 };
                 if pages.len() < 2 {
-                    cx.fail("A story keeps at least one page");
+                    cx.fail(tr!("story-keeps-least-one-page"));
                     return true;
                 }
                 let next = if index + 1 < pages.len() {
@@ -165,7 +165,7 @@ impl SuePaint {
             }
             "story.combine" => {
                 let Some((story, pages, index)) = self.story_here(&cx.world.arena) else {
-                    cx.fail("Combine Pages works on a story's pages");
+                    cx.fail(tr!("combine-pages-works-storys-pages"));
                     return true;
                 };
                 let arena = &cx.world.arena;
@@ -176,7 +176,7 @@ impl SuePaint {
                     .find(|pair| pair.contains(&Some(index)))
                     .and_then(|pair| pair.into_iter().flatten().find(|other| *other != index));
                 let Some(partner) = partner else {
-                    cx.fail("This page faces no other page; add one beside it first");
+                    cx.fail(tr!("page-faces-no-other-page-add"));
                     return true;
                 };
                 let (first, second) = (index.min(partner), index.max(partner));
@@ -198,7 +198,7 @@ impl SuePaint {
             }
             "story.separate" => {
                 let Some((story, pages, index)) = self.story_here(&cx.world.arena) else {
-                    cx.fail("Separate Pages works on a story's spread");
+                    cx.fail(tr!("separate-pages-works-storys-spread"));
                     return true;
                 };
                 let page = pages[index];
@@ -211,7 +211,7 @@ impl SuePaint {
                     .and_then(sue_core::Value::as_bool)
                     == Some(true);
                 if !spread {
-                    cx.fail("This page is not a spread: Combine Pages makes one");
+                    cx.fail(tr!("page-not-spread-combine-pages-makes"));
                     return true;
                 }
                 match story::separate(&cx.world.arena, story, page) {
@@ -224,7 +224,7 @@ impl SuePaint {
             }
             "story.page_settings" => {
                 let Some((story, _, _)) = self.story_here(&cx.world.arena) else {
-                    cx.fail("Change Page Settings works on a story");
+                    cx.fail(tr!("change-page-settings-works-story"));
                     return true;
                 };
                 let Some(picture) = self.picture() else {
@@ -292,14 +292,14 @@ impl SuePaint {
                     }
                 }
                 if texts.is_empty() {
-                    cx.notify("No text yet: the Text tool, or Story, Batch Import Text, letters the pages");
+                    cx.notify(tr!("no-text-yet-text-tool-story"));
                     return true;
                 }
                 self.dialog = Some(crate::dialogs::Dialog::StoryEditor(texts));
             }
             "story.import_text" => {
                 if self.picture().is_none() {
-                    cx.fail("Open or make a page first");
+                    cx.fail(tr!("open-make-page-first"));
                     return true;
                 }
                 let start = self
@@ -310,7 +310,7 @@ impl SuePaint {
                     sue_wm::FilePick::open(
                         Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
                         "story-text",
-                        "Batch Import Text",
+                        &tr!("batch-import-text"),
                     )
                     .extensions(&["txt", "md"])
                     .starting_in(start),
@@ -336,7 +336,7 @@ impl SuePaint {
         let text = match std::fs::read_to_string(path) {
             Ok(text) => text,
             Err(error) => {
-                cx.fail(format!("Cannot read {}: {error}", path.display()));
+                cx.fail(tr!("cannot-read", path = path.display(), error = error));
                 return;
             }
         };
@@ -347,7 +347,7 @@ impl SuePaint {
         };
         let blocks = story::text_blocks(&text);
         let rgb = self.main;
-        let mut edit = doc::Edit::new("Batch Import Text");
+        let mut edit = doc::Edit::new(tr!("batch-import-text"));
         let (mut placed, mut left_over) = (0, 0);
         for (offset, page_blocks) in blocks.iter().enumerate() {
             let Some(page) = pages.get(index + offset).copied() else {
@@ -390,25 +390,27 @@ impl SuePaint {
             Self::apply(cx, edit);
         }
         if left_over > 0 {
-            cx.notify(format!(
-                "Lettered {placed} blocks; {left_over} more need more pages"
+            cx.notify(tr!(
+                "lettered-blocks-more-need-more-pages",
+                placed = placed,
+                left_over = left_over
             ));
         } else {
-            cx.notify(format!("Lettered {placed} blocks"));
+            cx.notify(tr!("lettered-blocks", placed = placed));
         }
     }
 
     /// Asks where to export every page, and as what.
     fn ask_export_pages(&mut self, cx: &mut AppletContext<'_>) {
         let Some((story, _, _)) = self.story_here(&cx.world.arena) else {
-            cx.fail("Export All Pages works on a story");
+            cx.fail(tr!("export-all-pages-works-story"));
             return;
         };
         let name = cx
             .world
             .arena
             .get_by_id(story)
-            .map_or_else(|_| "Story".to_owned(), |entity| entity.name().to_owned());
+            .map_or_else(|_| tr!("story"), |entity| entity.name().to_owned());
         let types = sue_io::PICTURE_SAVE_TYPES
             .iter()
             .map(|(what, extensions)| FileType::new(what, extensions))
@@ -418,7 +420,7 @@ impl SuePaint {
             FilePick::save(
                 Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
                 "story-pages",
-                "Export All Pages",
+                &tr!("export-all-pages"),
                 &format!("{name}.png"),
             )
             .types(types)
@@ -437,24 +439,24 @@ impl SuePaint {
         let named = crate::story::story_of(arena, picture).unwrap_or(picture);
         let name = arena
             .get_by_id(named)
-            .map_or_else(|_| "Book".to_owned(), |entity| entity.name().to_owned());
+            .map_or_else(|_| tr!("book"), |entity| entity.name().to_owned());
         let (purpose, what, extension) = if epub {
-            ("book-epub", "EPUB e-book", "epub")
+            ("book-epub", tr!("epub-e-book"), "epub")
         } else {
-            ("book-pdf", "PDF document", "pdf")
+            ("book-pdf", tr!("pdf-document"), "pdf")
         };
         cx.request(sue_wm::ShellRequest::PickFile(
             sue_wm::FilePick::save(
                 Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
                 purpose,
-                if epub {
-                    "Export as EPUB"
+                &if epub {
+                    tr!("export-as-epub")
                 } else {
-                    "Export as PDF"
+                    tr!("export-as-pdf")
                 },
                 &format!("{name}.{extension}"),
             )
-            .types(vec![sue_wm::FileType::new(what, &[extension])])
+            .types(vec![sue_wm::FileType::new(&what, &[extension])])
             .starting_in(self.last_dir.clone()),
         ));
     }
@@ -488,7 +490,7 @@ impl SuePaint {
             .and_then(sue_core::Value::as_f64)
             .unwrap_or(72.0) as f32;
         let book = sue_io::publish::PictureBook {
-            title: entity.map_or_else(|| "Book".to_owned(), |entity| entity.name().to_owned()),
+            title: entity.map_or_else(|| tr!("book"), |entity| entity.name().to_owned()),
             author: entity
                 .and_then(|entity| entity.property("story.author"))
                 .and_then(sue_core::Value::as_str)
@@ -511,8 +513,11 @@ impl SuePaint {
                 .map_err(|error| error.to_string())
                 .map(|()| bytes.len())
         }) {
-            Ok(size) => cx.saved(path, format!("{count} pages, {} KiB", size.div_ceil(1024))),
-            Err(error) => cx.fail(format!("Cannot export: {error}")),
+            Ok(size) => cx.saved(
+                path,
+                tr!("pages-kib", value = size.div_ceil(1024), count = count),
+            ),
+            Err(error) => cx.fail(tr!("cannot-export", error = error)),
         }
     }
 
@@ -524,10 +529,9 @@ impl SuePaint {
             || "png".to_owned(),
             |ext| ext.to_string_lossy().to_ascii_lowercase(),
         );
-        let stem = path.file_stem().map_or_else(
-            || "Page".to_owned(),
-            |stem| stem.to_string_lossy().into_owned(),
-        );
+        let stem = path
+            .file_stem()
+            .map_or_else(|| tr!("page-2"), |stem| stem.to_string_lossy().into_owned());
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
         let quality = cx
             .rice()
@@ -554,13 +558,17 @@ impl SuePaint {
             {
                 Ok(()) => written += 1,
                 Err(error) => {
-                    cx.fail(format!("Cannot export page {}: {error}", index + 1));
+                    cx.fail(tr!("cannot-export-page", value = index + 1, error = error));
                     return;
                 }
             }
         }
         self.last_dir = Some(dir.clone());
-        cx.notify(format!("Exported {written} pages to {}", dir.display()));
+        cx.notify(tr!(
+            "exported-pages-to",
+            dir = dir.display(),
+            written = written
+        ));
     }
 
     /// The Page Manager: the binding, the page buttons and the spreads.
@@ -583,42 +591,42 @@ impl SuePaint {
             .is_some_and(|(story, _, _)| story::bound_right(&cx.world.arena, *story));
         let mut command: Option<&'static str> = None;
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Binding").color(theme.muted));
+            ui.label(RichText::new(tr!("binding-2")).color(theme.muted));
             let mut now = right;
-            ui.selectable_value(&mut now, true, "Right (manga)");
-            ui.selectable_value(&mut now, false, "Left");
+            ui.selectable_value(&mut now, true, tr!("right-manga"));
+            ui.selectable_value(&mut now, false, tr!("left"));
             if now != right {
                 if let Some((story, _, _)) = &story {
                     let edit = doc::set(*story, story::BINDING, if now { "right" } else { "left" });
                     Self::apply(cx, edit);
                 } else {
-                    cx.notify("Add a page first: then this picture becomes a story");
+                    cx.notify(tr!("add-page-first-then-picture-becomes"));
                 }
             }
             ui.separator();
             for (label, name) in [
-                ("Add", "story.add"),
-                ("Insert", "story.insert"),
-                ("Duplicate", "story.duplicate_page"),
-                ("Delete", "story.delete"),
+                (tr!("add-2"), "story.add"),
+                (tr!("insert"), "story.insert"),
+                (tr!("duplicate"), "story.duplicate_page"),
+                (tr!("delete"), "story.delete"),
             ] {
                 if ui.button(label).clicked() {
                     command = Some(name);
                 }
             }
             ui.separator();
-            if ui.button("Move Earlier").clicked() {
+            if ui.button(tr!("move-earlier")).clicked() {
                 command = Some("earlier");
             }
-            if ui.button("Move Later").clicked() {
+            if ui.button(tr!("move-later")).clicked() {
                 command = Some("later");
             }
-            if ui.button("Open").clicked() {
+            if ui.button(tr!("open")).clicked() {
                 command = Some("open");
             }
         });
         ui.label(
-            RichText::new("Click a page to choose it; double-click to open it.")
+            RichText::new(tr!("click-page-choose-double-click-open"))
                 .size(theme.small_size)
                 .color(theme.muted),
         );
@@ -672,7 +680,7 @@ impl SuePaint {
                                 pos2(paper.center().x, paper.bottom() + 9.0),
                                 egui::Align2::CENTER_CENTER,
                                 if here {
-                                    format!("{} (open)", index + 1)
+                                    tr!("open-2", value = index + 1)
                                 } else {
                                     (index + 1).to_string()
                                 },
@@ -690,7 +698,7 @@ impl SuePaint {
                 }
             });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Max), |ui| {
-            if ui.button("Close").clicked() {
+            if ui.button(tr!("close")).clicked() {
                 outcome = Outcome::Cancel;
             }
         });

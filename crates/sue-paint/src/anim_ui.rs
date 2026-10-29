@@ -67,7 +67,10 @@ impl SuePaint {
                 .rev()
                 .find(|info| info.kind == sue_model::picture::LayerKind::Raster)
             {
-                Self::apply(cx, Edit::new("Name Cel").then(Rename::new(layer.id, "1")));
+                Self::apply(
+                    cx,
+                    Edit::new(tr!("name-cel")).then(Rename::new(layer.id, "1")),
+                );
                 if let Some((_, sequence, length)) = self.timeline_here(&cx.world.arena) {
                     let sequence = anim::assign(&sequence, 0, 0, Some(layer.id), picture, length);
                     Self::apply(cx, anim::set(picture, sequence, "Specify Cel"));
@@ -265,7 +268,7 @@ impl SuePaint {
         match command {
             "anim.timeline.new" => {
                 if here.is_some() {
-                    cx.notify("This canvas has a timeline: the Timeline palette edits it");
+                    cx.notify(tr!("canvas-has-timeline-timeline-palette-edits"));
                 } else {
                     Self::apply(cx, anim::new_timeline(picture, 24, 24));
                     self.panels.timeline = true;
@@ -303,7 +306,10 @@ impl SuePaint {
                     self.anim_command("anim.timeline.new", cx);
                     return true;
                 };
-                let name = format!("Animation Folder {}", anim::folders(&sequence).len() + 1);
+                let name = tr!(
+                    "animation-folder",
+                    value = anim::folders(&sequence).len() + 1
+                );
                 let edit = anim::set(
                     picture,
                     anim::with_folder(&sequence, &name),
@@ -343,7 +349,7 @@ impl SuePaint {
                     Ok((spawn, cel)) => {
                         let sequence =
                             anim::assign(&sequence, track, frame, Some(cel), picture, length);
-                        let edit = Edit::new("New Animation Cel")
+                        let edit = Edit::new(tr!("new-animation-cel"))
                             .then(spawn)
                             .then(sue_core::txn::SetExtension::set(picture, sequence));
                         if Self::apply(cx, edit)
@@ -360,7 +366,7 @@ impl SuePaint {
                 let (Some((_, sequence, length)), Some(layer)) =
                     (here, self.doc().and_then(|doc| doc.layer))
                 else {
-                    cx.fail("Make a timeline and pick a layer first");
+                    cx.fail(tr!("make-timeline-pick-layer-first"));
                     return true;
                 };
                 let sequence = anim::assign(&sequence, track, frame, Some(layer), picture, length);
@@ -383,9 +389,9 @@ impl SuePaint {
                 };
                 let sequence = anim::shift(&sequence, frame, by, new_length);
                 let edit = Edit::new(if by > 0 {
-                    "Insert Frame"
+                    tr!("insert-frame")
                 } else {
-                    "Delete Frame"
+                    tr!("delete-frame")
                 })
                 .then(sue_core::txn::SetExtension::set(picture, sequence))
                 .then(SetProperty::new(
@@ -408,15 +414,13 @@ impl SuePaint {
             "anim.light_table.register" => {
                 let (Some(cel), Some(layer)) = (self.editing_cel(&cx.world.arena), self.layer())
                 else {
-                    cx.notify("Go to a frame with a cel to give it a light table");
+                    cx.notify(tr!("go-frame-cel-give-light-table"));
                     return true;
                 };
                 if cel == layer {
-                    cx.notify(
-                        "Pick the layer to trace from in the Layer palette, then register it",
-                    );
+                    cx.notify(tr!("pick-layer-trace-layer-palette-then"));
                 } else if anim::light_table(&cx.world.arena, cel).contains(&layer) {
-                    cx.notify("That layer is on this cel's light table already");
+                    cx.notify(tr!("layer-cels-light-table-already"));
                 } else if Self::apply(cx, anim::register(cel, layer)) {
                     self.light_table = true;
                 }
@@ -449,7 +453,7 @@ impl SuePaint {
                         *length,
                     ));
                 } else {
-                    cx.fail("Make a timeline first: Animation, Timeline, New Timeline");
+                    cx.fail(tr!("make-timeline-first-animation-timeline-new"));
                 }
             }
             "anim.timeline.enable" => self.timeline_on = !self.timeline_on,
@@ -457,12 +461,12 @@ impl SuePaint {
                 let name = self
                     .picture()
                     .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
-                    .map_or_else(|| "Cel".to_owned(), |entity| entity.name().to_owned());
+                    .map_or_else(|| tr!("cel"), |entity| entity.name().to_owned());
                 cx.request(ShellRequest::PickFile(
                     FilePick::save(
                         Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
                         "anim-cels",
-                        "Export Animation Cels",
+                        &tr!("export-animation-cels"),
                         &format!("{name}.png"),
                     )
                     .types(
@@ -486,23 +490,24 @@ impl SuePaint {
     /// Asks where to export the animation, as a GIF or as numbered pictures.
     fn ask_export_animation(&mut self, cx: &mut AppletContext<'_>, command: &str) {
         let Some((picture, _, _)) = self.timeline_here(&cx.world.arena) else {
-            cx.fail("Make a timeline first: Animation, Timeline, New Timeline");
+            cx.fail(tr!("make-timeline-first-animation-timeline-new"));
             return;
         };
-        let name = cx.world.arena.get_by_id(picture).map_or_else(
-            |_| "Animation".to_owned(),
-            |entity| entity.name().to_owned(),
-        );
+        let name = cx
+            .world
+            .arena
+            .get_by_id(picture)
+            .map_or_else(|_| tr!("animation"), |entity| entity.name().to_owned());
         let (purpose, types, file) = if command == "file.export.gif" {
             (
                 "anim-gif",
-                vec![FileType::new("Animated GIF", &["gif"])],
+                vec![FileType::new(&tr!("animated-gif"), &["gif"])],
                 format!("{name}.gif"),
             )
         } else if command == "file.export.movie" {
             (
                 "anim-movie",
-                vec![FileType::new("Motion JPEG AVI video", &["avi"])],
+                vec![FileType::new(&tr!("motion-jpeg-avi-video"), &["avi"])],
                 format!("{name}.avi"),
             )
         } else {
@@ -519,7 +524,7 @@ impl SuePaint {
             FilePick::save(
                 Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
                 purpose,
-                "Export Animation",
+                &tr!("export-animation"),
                 &file,
             )
             .types(types)
@@ -551,10 +556,11 @@ impl SuePaint {
                     .map(|()| (bytes.len(), count))
             });
         match result {
-            Ok((size, count)) => {
-                cx.saved(path, format!("{count} frames, {} KiB", size.div_ceil(1024)))
-            }
-            Err(error) => cx.fail(format!("Cannot export the movie: {error}")),
+            Ok((size, count)) => cx.saved(
+                path,
+                tr!("frames-kib", value = size.div_ceil(1024), count = count),
+            ),
+            Err(error) => cx.fail(tr!("cannot-export-the-movie", error = error)),
         }
     }
 
@@ -602,9 +608,13 @@ impl SuePaint {
             }) {
                 Ok(size) => cx.saved(
                     path,
-                    format!("{} frames, {} KiB", frames.len(), size.div_ceil(1024)),
+                    tr!(
+                        "frames-kib",
+                        count = frames.len(),
+                        value = size.div_ceil(1024)
+                    ),
                 ),
-                Err(error) => cx.fail(format!("Cannot export the animation: {error}")),
+                Err(error) => cx.fail(tr!("cannot-export-the-animation", error = error)),
             }
             return;
         }
@@ -612,24 +622,23 @@ impl SuePaint {
             || "png".to_owned(),
             |ext| ext.to_string_lossy().to_ascii_lowercase(),
         );
-        let stem = path.file_stem().map_or_else(
-            || "Frame".to_owned(),
-            |stem| stem.to_string_lossy().into_owned(),
-        );
+        let stem = path
+            .file_stem()
+            .map_or_else(|| tr!("frame"), |stem| stem.to_string_lossy().into_owned());
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
         for (index, frame) in frames.iter().enumerate() {
             let target = dir.join(format!("{stem}-{:04}.{extension}", index + 1));
             if let Err(error) = sue_io::encode_as(frame, &extension, 90, 7)
                 .and_then(|bytes| write_atomic(&target, &bytes).map_err(|error| error.to_string()))
             {
-                cx.fail(format!("Cannot export frame {}: {error}", index + 1));
+                cx.fail(tr!("cannot-export-frame", value = index + 1, error = error));
                 return;
             }
         }
-        cx.notify(format!(
-            "Exported {} frames to {}",
-            frames.len(),
-            dir.display()
+        cx.notify(tr!(
+            "exported-frames-to",
+            count = frames.len(),
+            dir = dir.display()
         ));
     }
 
@@ -648,55 +657,73 @@ impl SuePaint {
         let has = here.is_some();
         let playing = self.doc().is_some_and(|doc| doc.playing.is_some());
         let buttons: [(Icon, &str, &str, bool, bool); 14] = [
-            (Icon::New, "New timeline", "anim.timeline.new", !has, false),
+            (
+                Icon::New,
+                &tr!("new-timeline-2"),
+                "anim.timeline.new",
+                !has,
+                false,
+            ),
             (
                 Icon::NewFolder,
-                "New animation folder",
+                &tr!("new-animation-folder"),
                 "anim.layer.folder",
                 has,
                 false,
             ),
-            (Icon::Cel, "New animation cel", "anim.cel.new", true, false),
+            (
+                Icon::Cel,
+                &tr!("new-animation-cel-2"),
+                "anim.cel.new",
+                true,
+                false,
+            ),
             (
                 Icon::Edit,
-                "Specify cel: show the current layer from this frame",
+                &tr!("specify-cel-show-current-layer-frame"),
                 "anim.cel.assign",
                 has,
                 false,
             ),
             (
                 Icon::Minus,
-                "Delete the key on this frame",
+                &tr!("delete-key-frame"),
                 "anim.key.delete",
                 has,
                 false,
             ),
             (
                 Icon::Add,
-                "Insert a frame here",
+                &tr!("insert-a-frame-here"),
                 "anim.frame.insert",
                 has,
                 false,
             ),
             (
                 Icon::Delete,
-                "Delete this frame",
+                &tr!("delete-this-frame"),
                 "anim.frame.delete",
                 has,
                 false,
             ),
-            (Icon::Onion, "Onion skin", "anim.onion", has, self.onion),
-            (Icon::First, "First frame", "anim.first", has, false),
-            (Icon::Prev, "Previous frame", "anim.prev", has, false),
+            (
+                Icon::Onion,
+                &tr!("onion-skin"),
+                "anim.onion",
+                has,
+                self.onion,
+            ),
+            (Icon::First, &tr!("first-frame"), "anim.first", has, false),
+            (Icon::Prev, &tr!("previous-frame"), "anim.prev", has, false),
             // One button, as in Clip Studio Paint: Play, and Stop while it plays.
             if playing {
-                (Icon::Stop, "Stop", "anim.play", has, true)
+                (Icon::Stop, &tr!("stop"), "anim.play", has, true)
             } else {
-                (Icon::Play, "Play", "anim.play", has, false)
+                (Icon::Play, &tr!("play"), "anim.play", has, false)
             },
-            (Icon::Next, "Next frame", "anim.next", has, false),
-            (Icon::Last, "Last frame", "anim.last", has, false),
-            (Icon::Loop, "Loop", "anim.loop", has, self.looping),
+            (Icon::Next, &tr!("next-frame"), "anim.next", has, false),
+            (Icon::Last, &tr!("last-frame"), "anim.last", has, false),
+            (Icon::Loop, &tr!("loop"), "anim.loop", has, self.looping),
         ];
         let mut run = None;
         let mut x = bar.left() + 8.0;
@@ -730,16 +757,20 @@ impl SuePaint {
                     .layout(egui::Layout::left_to_right(egui::Align::Center)),
             );
             let fps_changed = child
-                .add(egui::DragValue::new(&mut fps).range(1..=120).suffix(" fps"))
-                .on_hover_text("Frame rate")
+                .add(
+                    egui::DragValue::new(&mut fps)
+                        .range(1..=120)
+                        .suffix(tr!("fps")),
+                )
+                .on_hover_text(tr!("frame-rate"))
                 .changed();
             let length_changed = child
                 .add(
                     egui::DragValue::new(&mut frames)
                         .range(1..=10_000)
-                        .suffix(" frames"),
+                        .suffix(tr!("frames")),
                 )
-                .on_hover_text("Length of the timeline")
+                .on_hover_text(tr!("length-of-the-timeline"))
                 .changed();
             if fps_changed {
                 let mut next = sequence.clone();
@@ -749,7 +780,7 @@ impl SuePaint {
             if length_changed {
                 Self::apply(
                     cx,
-                    Edit::new("Timeline Length").then(SetProperty::new(
+                    Edit::new(tr!("timeline-length")).then(SetProperty::new(
                         *picture,
                         anim::LENGTH,
                         i64::from(frames),
@@ -924,11 +955,11 @@ impl SuePaint {
             let pointer = response.hover_pos();
             response.context_menu(|ui| {
                 let at = pointer.map_or(frame, at_pointer);
-                if ui.button("Show the current layer here").clicked() {
+                if ui.button(tr!("show-the-current-layer-here")).clicked() {
                     action = Some((index, at, Some(self.doc().and_then(|doc| doc.layer))));
                     ui.close();
                 }
-                if ui.button("Blank from here").clicked() {
+                if ui.button(tr!("blank-from-here")).clicked() {
                     action = Some((index, at, Some(None)));
                     ui.close();
                 }
@@ -936,7 +967,7 @@ impl SuePaint {
         }
         // One row per audio track: its clip as a bar to drag, and a menu.
         let rows = anim::folders(&sequence).len();
-        let mut audio_edit: Option<(sue_model::Sequence, &str)> = None;
+        let mut audio_edit: Option<(sue_model::Sequence, String)> = None;
         for (row, index) in anim::audio_tracks(&sequence).into_iter().enumerate() {
             let top = tracks.top() + ruler + (rows + row) as f32 * row_height;
             let track_ref = &sequence.tracks[index];
@@ -948,7 +979,11 @@ impl SuePaint {
                 format!(
                     "{}{}",
                     track_ref.name,
-                    if track_ref.muted { " (muted)" } else { "" }
+                    if track_ref.muted {
+                        tr!("muted")
+                    } else {
+                        String::new()
+                    }
                 ),
                 theme.font(theme.small_size + 0.5),
                 theme.muted,
@@ -1010,33 +1045,39 @@ impl SuePaint {
                     .interact_pointer_pos()
                     .map_or(was, |pos| was + at_pointer(pos) - from);
                 if to != was {
-                    audio_edit = Some((anim::audio_moved(&sequence, index, to), "Move Audio"));
+                    audio_edit = Some((anim::audio_moved(&sequence, index, to), tr!("move-audio")));
                 }
             }
             response.context_menu(|ui| {
-                let label = if track_ref.muted { "Unmute" } else { "Mute" };
+                let label = if track_ref.muted {
+                    tr!("unmute")
+                } else {
+                    tr!("mute")
+                };
                 if ui.button(label).clicked() {
                     let mut toggled = sequence.clone();
                     toggled.tracks[index].muted = !track_ref.muted;
                     audio_edit = Some((
                         toggled,
                         if track_ref.muted {
-                            "Unmute Audio"
+                            tr!("unmute-audio")
                         } else {
-                            "Mute Audio"
+                            tr!("mute-audio")
                         },
                     ));
                     ui.close();
                 }
-                if ui.button("Delete Audio Track").clicked() {
-                    audio_edit =
-                        Some((anim::without_track(&sequence, index), "Delete Audio Track"));
+                if ui.button(tr!("delete-audio-track")).clicked() {
+                    audio_edit = Some((
+                        anim::without_track(&sequence, index),
+                        tr!("delete-audio-track"),
+                    ));
                     ui.close();
                 }
             });
         }
         if let Some((changed, label)) = audio_edit {
-            Self::apply(cx, anim::set(picture, changed, label));
+            Self::apply(cx, anim::set(picture, changed, &label));
         }
         if let Some((index, at, assign)) = action {
             if let Some(doc) = self.doc_mut() {

@@ -11,6 +11,7 @@
 
 [general]
 confirm_on_exit = true         # Ask before closing the window
+language = "system"            # @text Sue's language, which every studio and tool follows unless set apart (system follows the system's language)
 autosave_seconds = 60          # [0..3600] Keep unsaved work this often, so the Hub can bring it back (s; 0 turns autosave off)
 
 [launchpad]
@@ -100,6 +101,7 @@ pen_pressure = "0,0 1,1"       # @text Pen pressure curve for every tool, as pre
 alt_tool = "eyedropper"        # {eyedropper|eraser|none} What Alt while drawing does on the canvas (File, Modifier Key Settings)
 space_tool = "hand"            # {hand|none} What Space does on the canvas (File, Modifier Key Settings)
 ctrl_shift = "pick_layer"      # {pick_layer|none} What Ctrl+Shift click does on the canvas (File, Modifier Key Settings)
+language = "sue"              # @text Language: sue follows Sue's language, a language tag sets this one apart
 
 [sue_paint_colors]
 void = "#2b2b2b"               # Around the picture
@@ -120,6 +122,13 @@ shadow = "#141414"             # Shadow under floating surfaces
 theme = "sue-theme"            # {sue-theme|gray|void|graphite|paper} Sue Writer's colors: Sue's own theme (follows it) or a preset
 smart_quotes = true            # Turn straight quotes into curly ones while typing
 dark_paper = false             # Show the page in the theme's dark colors instead of white paper
+language = "sue"              # @text Language: sue follows Sue's language, a language tag sets this one apart
+
+[image_viewer]
+language = "sue"              # @text Language: sue follows Sue's language, a language tag sets this one apart
+
+[convert]
+language = "sue"              # @text Language: sue follows Sue's language, a language tag sets this one apart
 
 [keys]
 command_palette = "Tab"        # @keybind Open the command palette

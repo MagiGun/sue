@@ -16,25 +16,25 @@ use crate::tools::{SubTool, Tool};
 #[must_use]
 pub(crate) fn guide() -> Vec<String> {
     [
-        "# Starting",
-        "File, New makes an illustration, a comic, a webtoon or an animation. File, Open reads pictures and Photoshop documents with their layers. Your work lives in the Sue project: Save Project keeps every picture, layer and page.",
-        "# Tools",
-        "The tool strip at the left holds the tools; the Sub Tool palette holds their variations and Tool Property their settings. Keys pick them as in Clip Studio Paint: P pen, B brush, E eraser, G fill, M selection, K move, I eyedropper, R ruler, T text, Y correct line.",
-        "Alt picks a color while drawing, Space scrolls, Space with Shift turns the view, Ctrl and Space zooms in and Alt and Space zooms out. Ctrl+Alt drags the brush size. File, Modifier Key Settings changes what Alt, Space and Ctrl+Shift do.",
-        "# Layers",
-        "Raster layers hold pixels, vector layers hold lines you can still edit (Correct Line), 3D layers draw a model you can turn. Folders group layers. The Layer Property palette adds a border, tones and an expression color; masks hide parts of a layer without erasing them.",
-        "# Colors",
-        "The Color Wheel, Color Slider, Color Set, Intermediate and Approximate Color palettes and the Color History all set the main color. X swaps the main and sub colors, C paints with the transparent color.",
-        "# Selections",
-        "The selection tools make a selection; the launcher under it offers what to do next. Quick Mask paints a selection. Select, Color Gamut picks by color.",
-        "# Pages and books",
-        "A comic is a story of pages. The Story menu adds, moves and lays out pages, and exports them as pictures, a PDF or an EPUB. Window, Canvas, Tile shows several canvases at once.",
-        "# Animation",
-        "Animation, Timeline, New Timeline starts an animation. Each animation folder is a track of cels; New Animation Cel draws a new one at the frame shown. Onion skin and the light table help in between. File, Import, Movie brings a GIF, PNG, WebP or AVI in as cels, File, Import, Audio puts sound on the timeline.",
-        "# Repeating work",
-        "Auto Actions (in the Navigator palette) records menu commands and plays them back. The Item Bank keeps sub tools to add again. Window, Workspace keeps a palette layout by name.",
-        "# Exporting",
-        "File, Export writes PNG, JPEG, JPEG XL, BMP, TIFF, TGA, PSD and PSB. File, Print lays the pages on paper and opens them in your PDF viewer.",
+        tr!("starting"),
+        tr!("file-new-makes-illustration-comic-webtoon"),
+        tr!("tools"),
+        tr!("tool-strip-left-holds-tools-sub"),
+        tr!("alt-picks-color-while-drawing-space"),
+        tr!("layers"),
+        tr!("raster-layers-hold-pixels-vector-layers"),
+        tr!("colors"),
+        tr!("color-wheel-color-slider-color-set"),
+        tr!("selections"),
+        tr!("selection-tools-make-selection-launcher-under"),
+        tr!("pages-and-books"),
+        tr!("comic-story-pages-story-menu-adds"),
+        tr!("animation-2"),
+        tr!("animation-timeline-new-timeline-starts-animation"),
+        tr!("repeating-work"),
+        tr!("auto-actions-navigator-palette-records-menu"),
+        tr!("exporting"),
+        tr!("file-export-writes-png-jpeg-jpeg"),
     ]
     .map(String::from)
     .to_vec()
@@ -44,10 +44,10 @@ pub(crate) fn guide() -> Vec<String> {
 #[must_use]
 pub(crate) fn updates() -> Vec<String> {
     vec![
-        format!("This is Sue {}.", sue_core::SUE_VERSION),
-        "New versions are published as releases, for Windows, macOS, Linux (AppImage and packages), Android and iOS:".to_owned(),
+        tr!("this-is-sue", value = sue_core::SUE_VERSION),
+        tr!("new-versions-are-published-as-releases"),
         "https://github.com/MagiGun/sue/releases".to_owned(),
-        "Sue never downloads or installs anything by itself.".to_owned(),
+        tr!("sue-never-downloads-installs-anything-itself"),
     ]
 }
 
@@ -134,11 +134,11 @@ impl AutoActions {
     pub fn builtin() -> Vec<AutoAction> {
         vec![
             AutoAction {
-                name: "Flip Canvas and Fit".to_owned(),
+                name: tr!("flip-canvas-and-fit"),
                 steps: vec!["canvas.flip_h".to_owned(), "view.fit".to_owned()],
             },
             AutoAction {
-                name: "Rotate Canvas Right".to_owned(),
+                name: tr!("rotate-canvas-right"),
                 steps: vec!["canvas.rotate_right".to_owned(), "view.fit".to_owned()],
             },
         ]
@@ -216,7 +216,7 @@ pub(crate) fn panels_line(panels: &Panels) -> String {
         panels.timeline,
     ];
     let bits: String = flags.iter().map(|on| if *on { '1' } else { '0' }).collect();
-    format!("panels {bits}")
+    tr!("panels", bits = bits)
 }
 
 /// Panels from [`panels_line`].
@@ -246,7 +246,7 @@ fn read(folder: Option<&Path>, file: &str) -> Option<String> {
 }
 
 fn write(folder: Option<&Path>, file: &str, text: &str) -> Result<(), String> {
-    let folder = folder.ok_or("Sue Paint has no data folder")?;
+    let folder = folder.ok_or(tr!("sue-paint-has-no-data-folder"))?;
     std::fs::create_dir_all(folder)
         .and_then(|()| std::fs::write(folder.join(file), text))
         .map_err(|error| error.to_string())
@@ -329,13 +329,13 @@ impl SuePaint {
         let mut bar: Vec<String> = self
             .bar_hidden
             .iter()
-            .map(|command| format!("hide {command}\n"))
+            .map(|command| tr!("hide", command = command))
             .collect();
         bar.sort();
         bar.extend(
             self.bar_extra
                 .iter()
-                .map(|command| format!("add {command}\n")),
+                .map(|command| tr!("add-3", command = command)),
         );
         let written = write(
             folder.as_deref(),
@@ -346,7 +346,7 @@ impl SuePaint {
         .and_then(|()| write(folder.as_deref(), "item_bank.txt", &bank))
         .and_then(|()| write(folder.as_deref(), "workspaces.txt", &spaces));
         if let Err(error) = written {
-            cx.fail(format!("Cannot keep the palettes' settings: {error}"));
+            cx.fail(tr!("cannot-keep-the-palettes-settings", error = error));
         }
         self.refresh_workspace_menu();
     }
@@ -365,7 +365,7 @@ impl SuePaint {
     pub(crate) fn workspace_now(&self, name: &str) -> Workspace {
         let mut lines = self.dock.to_lines();
         lines.push(panels_line(&self.panels));
-        lines.push(format!("menus {}", u8::from(!self.menus_hidden)));
+        lines.push(tr!("menus", value = u8::from(!self.menus_hidden)));
         Workspace {
             name: name.to_owned(),
             lines,
@@ -426,7 +426,11 @@ impl SuePaint {
         inner.horizontal(|ui| {
             let recording = self.auto.recording.is_some();
             if ui
-                .button(if recording { "Stop" } else { "Record" })
+                .button(if recording {
+                    tr!("stop")
+                } else {
+                    tr!("record")
+                })
                 .clicked()
             {
                 self.auto.recording = if recording {
@@ -439,11 +443,11 @@ impl SuePaint {
                         .map(|_| self.auto.selected)
                 };
             }
-            if ui.button("Play").clicked() {
+            if ui.button(tr!("play")).clicked() {
                 play = Some(self.auto.selected);
             }
-            if ui.button("New").clicked() {
-                let name = format!("Auto Action {}", self.auto.sets.len() + 1);
+            if ui.button(tr!("new-2")).clicked() {
+                let name = tr!("auto-action", value = self.auto.sets.len() + 1);
                 self.auto.sets.push(AutoAction {
                     name,
                     steps: Vec::new(),
@@ -452,7 +456,7 @@ impl SuePaint {
                 self.auto.recording = Some(self.auto.selected);
                 changed = true;
             }
-            if ui.button("Delete").clicked() && self.auto.selected < self.auto.sets.len() {
+            if ui.button(tr!("delete")).clicked() && self.auto.selected < self.auto.sets.len() {
                 self.auto.sets.remove(self.auto.selected);
                 self.auto.selected = self.auto.selected.saturating_sub(1);
                 self.auto.recording = None;
@@ -460,7 +464,7 @@ impl SuePaint {
             }
         });
         if self.auto.recording.is_some() {
-            inner.colored_label(theme.text, "Recording: run commands from the menus");
+            inner.colored_label(theme.text, tr!("recording-run-commands-menus"));
         }
         egui::ScrollArea::vertical()
             .id_salt("sue-paint-auto")
@@ -469,7 +473,7 @@ impl SuePaint {
                     let chosen = index == self.auto.selected;
                     let response = ui.selectable_label(
                         chosen,
-                        format!("{}  ({} steps)", set.name, set.steps.len()),
+                        tr!("steps", name = set.name, count = set.steps.len()),
                     );
                     if response.clicked() {
                         self.auto.selected = index;
@@ -519,15 +523,12 @@ impl SuePaint {
     ) {
         let mut inner = ui.new_child(egui::UiBuilder::new().max_rect(body.shrink(6.0)));
         let mut changed = false;
-        if inner.button("Keep Current Sub Tool").clicked() {
+        if inner.button(tr!("keep-current-sub-tool")).clicked() {
             self.item_bank.push(Item::of(self.toolbox.current()));
             changed = true;
         }
         if self.item_bank.is_empty() {
-            inner.colored_label(
-                theme.muted,
-                "Kept sub tools show here; add one to its tool with Add.",
-            );
+            inner.colored_label(theme.muted, tr!("kept-sub-tools-show-here-add"));
         }
         let mut add = None;
         let mut remove = None;
@@ -537,7 +538,7 @@ impl SuePaint {
                 for (index, item) in self.item_bank.iter().enumerate() {
                     ui.horizontal(|ui| {
                         ui.label(format!("{} ({})", item.name, item.tool.label()));
-                        if ui.small_button("Add").clicked() {
+                        if ui.small_button(tr!("add-2")).clicked() {
                             add = Some(index);
                         }
                         if ui.small_button("x").clicked() {
@@ -582,27 +583,33 @@ impl SuePaint {
                 .and_then(|entity| entity.property(sue_model::picture::DPI))
                 .and_then(sue_core::Value::as_f64)
                 .unwrap_or(72.0);
-            lines.push(format!(
-                "Canvas  {} x {} px  {dpi:.0} dpi",
-                size[0], size[1]
+            lines.push(tr!(
+                "canvas-x-px-dpi",
+                value = size[0],
+                value2 = size[1],
+                dpi = sue_lang::number(dpi, 0)
             ));
-            lines.push(format!(
-                "Print size  {:.1} x {:.1} cm",
-                f64::from(size[0]) / dpi * 2.54,
-                f64::from(size[1]) / dpi * 2.54
+            lines.push(tr!(
+                "print-size-x-cm",
+                value = sue_lang::number(f64::from(size[0]) / dpi * 2.54, 1),
+                value2 = sue_lang::number(f64::from(size[1]) / dpi * 2.54, 1)
             ));
-            lines.push(format!(
-                "Layers  {}",
-                crate::doc::layers(arena, doc.picture).len()
+            lines.push(tr!(
+                "layers-2",
+                count = crate::doc::layers(arena, doc.picture).len()
             ));
-            lines.push(format!(
-                "Zoom  {:.0}%  Angle {:.0}",
-                doc.view.zoom * 100.0,
-                doc.view.rotation
+            lines.push(tr!(
+                "zoom-percent-angle",
+                value = sue_lang::number(f64::from(doc.view.zoom * 100.0), 0),
+                rotation = sue_lang::number(f64::from(doc.view.rotation), 0)
             ));
             if let Some(pointer) = self.pointer.filter(|pointer| viewport.contains(*pointer)) {
                 let at = doc.view.to_picture(viewport, size, pointer);
-                lines.push(format!("Pointer  {:.0}, {:.0}", at.x, at.y));
+                lines.push(tr!(
+                    "pointer",
+                    x = sue_lang::number(f64::from(at.x), 0),
+                    y = sue_lang::number(f64::from(at.y), 0)
+                ));
                 let (pixels, shown, _) = doc.compositor.display();
                 if at.x >= 0.0
                     && at.y >= 0.0
@@ -611,17 +618,23 @@ impl SuePaint {
                 {
                     let index = ((at.y as u32 * shown[0] + at.x as u32) * 4) as usize;
                     if let Some(rgba) = pixels.get(index..index + 4) {
-                        lines.push(format!(
-                            "Color  R {} G {} B {} A {}  #{:02X}{:02X}{:02X}",
-                            rgba[0], rgba[1], rgba[2], rgba[3], rgba[0], rgba[1], rgba[2]
+                        lines.push(tr!(
+                            "color-r-g-b-a",
+                            value = rgba[0],
+                            value2 = rgba[1],
+                            value3 = rgba[2],
+                            value4 = rgba[3],
+                            value5 = format!("{:02X}", rgba[0]),
+                            value6 = format!("{:02X}", rgba[1]),
+                            value7 = format!("{:02X}", rgba[2])
                         ));
                     }
                 }
             } else {
-                lines.push("Pointer  off the canvas".to_owned());
+                lines.push(tr!("pointer-off-the-canvas"));
             }
         } else {
-            lines.push("No canvas".to_owned());
+            lines.push(tr!("no-canvas"));
         }
         let font = theme.font(theme.small_size + 0.5);
         for (row, line) in lines.iter().enumerate() {

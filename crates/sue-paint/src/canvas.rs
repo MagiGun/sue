@@ -588,7 +588,7 @@ impl SuePaint {
                 .world
                 .arena
                 .get_by_id(doc.picture)
-                .map_or_else(|_| "Picture".to_owned(), |entity| entity.name().to_owned());
+                .map_or_else(|_| tr!("picture"), |entity| entity.name().to_owned());
             let (_, _, version) = doc.compositor.display();
             let modified = self
                 .clean
@@ -661,7 +661,7 @@ impl SuePaint {
                 Stroke::new(1.2, cross_color),
             );
             if cross_response
-                .on_hover_text("Close (the picture stays in your project)")
+                .on_hover_text(tr!("close-picture-stays-your-project"))
                 .clicked()
             {
                 close = Some(index);
@@ -671,9 +671,9 @@ impl SuePaint {
             // Right-click on a tab: what can be done with that canvas.
             response.context_menu(|ui| {
                 for (label, command) in [
-                    ("Save", "file.save"),
-                    ("Save As...", "file.save_as"),
-                    ("Close", "file.close"),
+                    (tr!("save"), "file.save"),
+                    (tr!("save-as-ellipsis"), "file.save_as"),
+                    (tr!("close"), "file.close"),
                 ] {
                     if ui.button(label).clicked() {
                         tab_menu = Some((index, command));
@@ -683,7 +683,15 @@ impl SuePaint {
             });
         }
         let plus = Rect::from_min_size(pos2(x + 2.0, strip.top() + 3.0), vec2(22.0, 22.0));
-        if icon_button(ui, plus, Icon::NewLayer, true, false, "New (Ctrl+N)", theme) {
+        if icon_button(
+            ui,
+            plus,
+            Icon::NewLayer,
+            true,
+            false,
+            &tr!("new-ctrl-n"),
+            theme,
+        ) {
             self.run("file.new", cx);
         }
         if let Some(index) = pick {
@@ -711,21 +719,18 @@ impl SuePaint {
         inner.multiply_opacity(self.cover);
         inner.vertical_centered(|ui| {
             ui.label(
-                RichText::new("No canvas is open")
+                RichText::new(tr!("no-canvas-is-open"))
                     .size(theme.heading_size)
                     .color(theme.text),
             );
-            ui.label(
-                RichText::new("Pictures you make here are saved in your Sue project")
-                    .color(theme.muted),
-            );
+            ui.label(RichText::new(tr!("pictures-you-make-here-are-saved")).color(theme.muted));
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 ui.add_space(70.0);
-                if ui.button("New...").clicked() {
+                if ui.button(tr!("new-ellipsis")).clicked() {
                     self.run("file.new", cx);
                 }
-                if ui.button("Open...").clicked() {
+                if ui.button(tr!("open-ellipsis")).clicked() {
                     self.run("file.open", cx);
                 }
             });
@@ -1076,7 +1081,7 @@ impl SuePaint {
                         mode: crate::vector::Erase::of(sub.kind),
                         offset,
                         changed: false,
-                        label: sub.name.clone(),
+                        label: crate::localize(&sub.name),
                     });
                     self.vector_erase_drag(pos, viewport, size, cx);
                     return;
@@ -1152,7 +1157,7 @@ impl SuePaint {
                     stabilizer,
                     offset,
                     raw: local,
-                    label: sub.name.clone(),
+                    label: crate::localize(&sub.name),
                     shifted,
                     trail: vec![(self.clock.0, local)],
                     correction: sub.correction,
@@ -1184,7 +1189,7 @@ impl SuePaint {
                     last: [p.x - offset[0] as f32, p.y - offset[1] as f32],
                     since: 0.0,
                     offset,
-                    label: sub.name.clone(),
+                    label: crate::localize(&sub.name),
                 });
             }
             Tool::Ruler if sub.mode == 6 => {
@@ -1235,7 +1240,7 @@ impl SuePaint {
                                 picture,
                                 crate::rulers::PERSPECTIVE,
                                 text,
-                                "Delete Vanishing Point",
+                                &tr!("delete-vanishing-point"),
                             ),
                         );
                     }
@@ -1333,7 +1338,7 @@ impl SuePaint {
                     return;
                 };
                 if info.kind != LayerKind::Raster || info.locked {
-                    cx.fail(format!("{} cannot be moved", info.name));
+                    cx.fail(tr!("cannot-be-moved", name = info.name));
                     return;
                 }
                 let old = cx
@@ -1429,7 +1434,7 @@ impl SuePaint {
                 };
                 if !crate::vector::is_vector(&cx.world.arena, info.id) {
                     self.picked_lines = None;
-                    cx.notify("Object picks vector lines: pick a vector layer");
+                    cx.notify(tr!("object-picks-vector-lines-pick-vector"));
                     return;
                 }
                 let offset = info.style.offset;
@@ -1502,10 +1507,7 @@ impl SuePaint {
                     }
                 };
                 if !crate::vector::is_vector(&cx.world.arena, info.id) {
-                    cx.fail(format!(
-                        "{} is not a vector layer: Correct Line works on vector lines",
-                        info.name
-                    ));
+                    cx.fail(tr!("not-vector-layer-correct-line-works", name = info.name));
                     return;
                 }
                 let Some(before) = doc::raster(&cx.world.arena, info.id)
@@ -1570,7 +1572,7 @@ impl SuePaint {
                     done: Vec::new(),
                     offset,
                     changed: false,
-                    label: sub.name.clone(),
+                    label: crate::localize(&sub.name),
                 });
                 if changed {
                     self.correct_changed(cx);
@@ -1579,7 +1581,7 @@ impl SuePaint {
                     self.correct_to(local, cx);
                 }
             }
-            other => cx.notify(format!("{} arrives in a later Sue Paint", other.label())),
+            other => cx.notify(tr!("arrives-later-sue-paint", label = other.label())),
         }
     }
 
@@ -1614,7 +1616,7 @@ impl SuePaint {
         let mut after = before.clone();
         let size = sub.amount.round().max(1.0) as u32;
         if crate::correct::remove_dust(&mut after, width, height, rect, size) == 0 {
-            cx.notify("No dust that small there");
+            cx.notify(tr!("no-dust-that-small-there"));
             return;
         }
         if let Some(raster) = doc::raster_mut(&mut cx.world.arena, info.id)
@@ -1625,7 +1627,7 @@ impl SuePaint {
         if let Some(patch) = doc::diff_patch(&before, &after, width, height) {
             cx.record(ArenaEdit(sue_core::txn::RasterEdit::new(
                 info.id,
-                "Remove Dust",
+                tr!("remove-dust"),
                 vec![patch],
             )));
         }
@@ -1679,19 +1681,19 @@ impl SuePaint {
             .fold(f32::NEG_INFINITY, f32::max);
         let middle = corners.iter().map(|corner| corner.x).sum::<f32>() / 4.0;
         let buttons: [(Icon, &str, &str); 9] = [
-            (Icon::Deselect, "Deselect", "select.none"),
-            (Icon::Reset, "Invert selected area", "select.invert"),
-            (Icon::ZoomIn, "Expand selected area", "select.expand"),
-            (Icon::ZoomOut, "Shrink selected area", "select.shrink"),
-            (Icon::Clear, "Clear", "edit.clear"),
+            (Icon::Deselect, &tr!("deselect"), "select.none"),
+            (Icon::Reset, &tr!("invert-selected-area"), "select.invert"),
+            (Icon::ZoomIn, &tr!("expand-selected-area"), "select.expand"),
+            (Icon::ZoomOut, &tr!("shrink-selected-area"), "select.shrink"),
+            (Icon::Clear, &tr!("clear"), "edit.clear"),
             (
                 Icon::ClearOutside,
-                "Clear outside selection",
+                &tr!("clear-outside-selection"),
                 "edit.clear_outside",
             ),
-            (Icon::FillSelection, "Fill", "edit.fill"),
-            (Icon::Fit, "Scale/Rotate", "edit.transform.scale"),
-            (Icon::Frame, "Crop", "edit.crop"),
+            (Icon::FillSelection, &tr!("fill"), "edit.fill"),
+            (Icon::Fit, &tr!("scale-rotate"), "edit.transform.scale"),
+            (Icon::Frame, &tr!("crop"), "edit.crop"),
         ];
         let width = buttons.len() as f32 * 26.0 + 8.0;
         let bar = Rect::from_min_size(pos2(middle - width / 2.0, bottom + 10.0), vec2(width, 30.0));
@@ -1925,7 +1927,7 @@ impl SuePaint {
                 (
                     rulers::PATHS,
                     all.text(rulers::PATHS),
-                    "Create Figure Ruler",
+                    tr!("create-figure-ruler"),
                 )
             }
             5 => {
@@ -1939,7 +1941,7 @@ impl SuePaint {
                 (
                     rulers::LINEAR,
                     ruler.text(rulers::LINEAR),
-                    "Create Linear Ruler",
+                    tr!("create-linear-ruler"),
                 )
             }
             2 => {
@@ -1951,7 +1953,7 @@ impl SuePaint {
                 (
                     rulers::SPECIAL,
                     Some(special.to_text()),
-                    "Create Special Ruler",
+                    tr!("create-special-ruler"),
                 )
             }
             1 => {
@@ -1966,18 +1968,18 @@ impl SuePaint {
                     return;
                 };
                 let Some(point) = rulers::crossing(first, line) else {
-                    cx.notify("Those lines run side by side, so they never meet: draw two that do");
+                    cx.notify(tr!("those-lines-run-side-side-so"));
                     return;
                 };
                 let current = Rulers::of(&cx.world.arena, picture).perspective;
                 let Some(ruler) = rulers::Perspective::with_point(current.as_ref(), point) else {
-                    cx.fail("A perspective ruler has at most three vanishing points");
+                    cx.fail(tr!("perspective-ruler-has-most-three-vanishing"));
                     return;
                 };
                 (
                     rulers::PERSPECTIVE,
                     Some(ruler.to_text()),
-                    "Add Vanishing Point",
+                    tr!("add-vanishing-point"),
                 )
             }
             _ => {
@@ -1990,11 +1992,11 @@ impl SuePaint {
                 (
                     rulers::SYMMETRY,
                     ruler.text(rulers::SYMMETRY),
-                    "Create Symmetrical Ruler",
+                    tr!("create-symmetrical-ruler"),
                 )
             }
         };
-        if Self::apply(cx, rulers::edit(picture, key, text, label))
+        if Self::apply(cx, rulers::edit(picture, key, text, &label))
             && let Some(doc) = self.doc_mut()
         {
             doc.show_rulers = true;
@@ -2655,7 +2657,7 @@ impl SuePaint {
                         doc::diff_patch(&before, raster.bytes()?, raster.width(), raster.height())?;
                     Some(sue_core::txn::RasterEdit::new(
                         layer,
-                        "Move Lines",
+                        tr!("move-lines"),
                         vec![patch],
                     ))
                 });
@@ -2665,7 +2667,7 @@ impl SuePaint {
                     geometry,
                     &lines,
                     pixels,
-                    "Move Lines",
+                    &tr!("move-lines"),
                 );
                 cx.record(ArenaEdit(edit));
             }
@@ -2675,7 +2677,7 @@ impl SuePaint {
                     let path = crate::rulers::Path::curve(&crate::correct::simplified_points(
                         &points, 1.0,
                     ));
-                    self.add_ruler_path(cx, path, "Create Ruler");
+                    self.add_ruler_path(cx, path, &tr!("create-ruler"));
                 }
             }
             Gesture::Camera { .. } => {
@@ -2716,7 +2718,10 @@ impl SuePaint {
                     }
                 }
                 if after != before {
-                    Self::apply(cx, crate::rulers::edit(picture, key, after, "Move Ruler"));
+                    Self::apply(
+                        cx,
+                        crate::rulers::edit(picture, key, after, &tr!("move-ruler")),
+                    );
                 }
             }
             Gesture::Lasso { op, points } => {
@@ -2742,7 +2747,7 @@ impl SuePaint {
                     })
                     .unwrap_or_default();
                 if now != old {
-                    let mut steps = Batch::new("Move Layer");
+                    let mut steps = Batch::new(tr!("move-layer"));
                     for (key, before) in [(picture::X, &old[0]), (picture::Y, &old[1])] {
                         steps = steps.then(match before {
                             Some(value) => SetProperty::new(layer, key, value.clone()),
@@ -2960,18 +2965,23 @@ impl SuePaint {
         };
         let rgb = color::unit(self.drawing_color());
         let (offset, alpha_lock, opacity) = (info.style.offset, info.alpha_locked, sub.tip.opacity);
-        match doc::rewrite(&cx.world.arena, info.id, "Fill", |pixels, width, height| {
-            fill::paint_mask(
-                pixels,
-                [width, height],
-                offset,
-                &mask,
-                size,
-                rgb,
-                opacity,
-                alpha_lock,
-            );
-        }) {
+        match doc::rewrite(
+            &cx.world.arena,
+            info.id,
+            &tr!("fill"),
+            |pixels, width, height| {
+                fill::paint_mask(
+                    pixels,
+                    [width, height],
+                    offset,
+                    &mask,
+                    size,
+                    rgb,
+                    opacity,
+                    alpha_lock,
+                );
+            },
+        ) {
             Ok(Some(edit)) => {
                 if Self::apply(cx, edit) {
                     self.recent.push(self.drawing_color());
@@ -3138,7 +3148,7 @@ impl SuePaint {
         if let Ok(Some(edit)) = doc::rewrite(
             &cx.world.arena,
             info.id,
-            "Gradient",
+            &tr!("gradient"),
             |pixels, width, height| {
                 fill::gradient(
                     pixels,
@@ -3299,23 +3309,23 @@ impl SuePaint {
             .show(ui.ctx(), |ui| {
                 sue_wm::widgets::pill_frame(theme).show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Puppet warp").color(theme.text));
+                        ui.label(RichText::new(tr!("puppet-warp")).color(theme.text));
                         ui.label(
                             RichText::new(match pins {
-                                0 => "Click to put pins".to_owned(),
-                                1 => "1 pin".to_owned(),
-                                count => format!("{count} pins"),
+                                0 => tr!("click-to-put-pins"),
+                                1 => tr!("n-1-pin"),
+                                count => tr!("pins", count = count),
                             })
                             .color(theme.muted),
                         );
                         if ui
-                            .button("Reset")
-                            .on_hover_text("Take every pin away")
+                            .button(tr!("reset"))
+                            .on_hover_text(tr!("take-every-pin-away"))
                             .clicked()
                         {
                             action = Some(0);
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr!("cancel")).clicked() {
                             action = Some(1);
                         }
                         if ui.button("OK").clicked() {
@@ -3723,10 +3733,14 @@ impl SuePaint {
                 doc.view
                     .set_zoom_at(viewport, size, viewport.center(), percent / 100.0);
             }
-            if ui.small_button("-").on_hover_text("Zoom out").clicked() {
+            if ui
+                .small_button("-")
+                .on_hover_text(tr!("zoom-out"))
+                .clicked()
+            {
                 doc.view.zoom_at(viewport, size, viewport.center(), 0.8);
             }
-            if ui.small_button("+").on_hover_text("Zoom in").clicked() {
+            if ui.small_button("+").on_hover_text(tr!("zoom-in")).clicked() {
                 doc.view.zoom_at(viewport, size, viewport.center(), 1.25);
             }
             ui.separator();
@@ -3744,42 +3758,42 @@ impl SuePaint {
             }
             if ui
                 .small_button("\u{21ba}")
-                .on_hover_text("Rotate left")
+                .on_hover_text(tr!("rotate-left"))
                 .clicked()
             {
                 doc.view.rotate_by(viewport, size, -15.0);
             }
             if ui
                 .small_button("\u{21bb}")
-                .on_hover_text("Rotate right")
+                .on_hover_text(tr!("rotate-right"))
                 .clicked()
             {
                 doc.view.rotate_by(viewport, size, 15.0);
             }
             if ui
                 .small_button("0\u{b0}")
-                .on_hover_text("Reset rotation")
+                .on_hover_text(tr!("reset-rotation"))
                 .clicked()
             {
                 doc.view.set_rotation(viewport, size, 0.0);
             }
             if ui
-                .selectable_label(doc.view.flip_h, "Flip")
-                .on_hover_text("Flip the view left to right")
+                .selectable_label(doc.view.flip_h, tr!("flip"))
+                .on_hover_text(tr!("flip-view-left-right"))
                 .clicked()
             {
                 doc.view.flip(viewport, size, true);
             }
             if ui
-                .small_button("Fit")
-                .on_hover_text("Fit to screen (Ctrl+0)")
+                .small_button(tr!("fit"))
+                .on_hover_text(tr!("fit-to-screen-ctrl-0"))
                 .clicked()
             {
                 doc.view.fit(viewport, size);
             }
             if ui
                 .small_button("100%")
-                .on_hover_text("Actual pixels (Ctrl+Alt+0)")
+                .on_hover_text(tr!("actual-pixels-ctrl-alt-0"))
                 .clicked()
             {
                 doc.view.set_zoom_at(viewport, size, viewport.center(), 1.0);
@@ -3790,7 +3804,12 @@ impl SuePaint {
                     .size(theme.small_size + 0.5)
                     .color(theme.muted)
             };
-            ui.label(small(format!("{} x {} px, {dpi:.0} dpi", size[0], size[1])));
+            ui.label(small(tr!(
+                "x-px-dpi",
+                value = size[0],
+                value2 = size[1],
+                dpi = sue_lang::number(dpi, 0)
+            )));
             if let Some(pointer) = pointer {
                 let p = doc.view.to_picture(viewport, size, pointer);
                 if p.x >= 0.0 && p.y >= 0.0 && p.x < size[0] as f32 && p.y < size[1] as f32 {

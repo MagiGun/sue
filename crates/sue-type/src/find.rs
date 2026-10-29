@@ -43,8 +43,8 @@ impl Finder {
                 .multi_line(true)
                 .build()
                 .map_err(|error| match error {
-                    regex::Error::Syntax(_) => "That regular expression is not valid".to_owned(),
-                    _ => "That regular expression is too large".to_owned(),
+                    regex::Error::Syntax(_) => tr!("regular-expression-not-valid"),
+                    _ => tr!("regular-expression-too-large"),
                 })?;
             Some(regex)
         } else {

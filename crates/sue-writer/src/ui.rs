@@ -38,14 +38,24 @@ fn smooth(t: f32) -> f32 {
 }
 
 impl SueWriter {
-    /// Draws the studio.
-    pub(crate) fn frame(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+    /// Builds the menus again when the language changed, and keeps their
+    /// keys in step with the settings.
+    pub(crate) fn follow_language(&mut self, cx: &AppletContext<'_>) {
+        if self.language.changed() {
+            self.menus = crate::menus::menus();
+            self.bound.invalidate();
+        }
         self.bound.refresh(
             &mut self.menus,
             cx.rice(),
             crate::studio::KEYS_SECTION,
             crate::studio::shortcut_table(),
         );
+    }
+
+    /// Draws the studio.
+    pub(crate) fn frame(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        self.follow_language(cx);
         let present = cx.view.page.as_ref().map(AppletId::as_str) == Some(ID);
         let reveal = cx.view.reveal.clamp(0.0, 1.0);
         self.present = present;
@@ -248,7 +258,7 @@ impl SueWriter {
         let menu = slot(0, false);
         let open = self.menubar.is_open();
         let toggle = thumb(ui, menu, open, true, theme, menu_icon)
-            .on_hover_text("Menus")
+            .on_hover_text(tr!("menus"))
             .clicked();
         let items = crate::menus::phone_menu(&self.menus);
         let picked = {
@@ -272,7 +282,7 @@ impl SueWriter {
                 undo_icon(painter, rect, color, false);
             },
         );
-        if undo.on_hover_text("Undo").clicked() {
+        if undo.on_hover_text(tr!("undo")).clicked() {
             run = Some("edit.undo".to_owned());
         }
         let redo = thumb(
@@ -285,12 +295,12 @@ impl SueWriter {
                 undo_icon(painter, rect, color, true);
             },
         );
-        if redo.on_hover_text("Redo").clicked() {
+        if redo.on_hover_text(tr!("redo")).clicked() {
             run = Some("edit.redo".to_owned());
         }
         let finding = self.find.is_some();
         if thumb(ui, slot(0, true), finding, true, theme, find_icon)
-            .on_hover_text("Find")
+            .on_hover_text(tr!("find"))
             .clicked()
         {
             if finding {
@@ -302,7 +312,7 @@ impl SueWriter {
         if self.project.is_some()
             && !self.simple(cx)
             && thumb(ui, slot(1, true), self.phone_binder, true, theme, book_icon)
-                .on_hover_text("Binder")
+                .on_hover_text(tr!("binder"))
                 .clicked()
         {
             run = Some("view.binder".to_owned());
@@ -495,8 +505,8 @@ impl SueWriter {
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
         );
         right.set_clip_rect(rect.intersect(ui.clip_rect()));
-        if widgets::pill_button(&mut right, "Find", self.find.is_some(), theme)
-            .on_hover_text("Find and replace (Ctrl+F)")
+        if widgets::pill_button(&mut right, &tr!("find"), self.find.is_some(), theme)
+            .on_hover_text(tr!("find-and-replace-ctrl-f"))
             .clicked()
         {
             if self.find.is_some() {
@@ -590,8 +600,8 @@ impl SueWriter {
         if !big {
             let history = (cx.history.can_undo(), cx.history.can_redo());
             for (redo, enabled, hint, command) in [
-                (false, history.0, "Undo (Ctrl+Z)", "edit.undo"),
-                (true, history.1, "Redo (Ctrl+Shift+Z)", "edit.redo"),
+                (false, history.0, tr!("undo-ctrl-z"), "edit.undo"),
+                (true, history.1, tr!("redo-ctrl-shift-z"), "edit.redo"),
             ] {
                 if ui
                     .add_enabled_ui(enabled, |ui| {
@@ -634,18 +644,23 @@ impl SueWriter {
             }
             widgets::pill_divider(ui, theme);
             for (label, command, on, hint) in [
-                ("B", "format.bold", chars.bold || para.bold, "Bold (Ctrl+B)"),
+                (
+                    "B",
+                    "format.bold",
+                    chars.bold || para.bold,
+                    tr!("bold-ctrl-b"),
+                ),
                 (
                     "I",
                     "format.italic",
                     chars.italic || para.italic,
-                    "Italic (Ctrl+I)",
+                    tr!("italic-ctrl-i"),
                 ),
                 (
                     "U",
                     "format.underline",
                     chars.underline,
-                    "Underline (Ctrl+U)",
+                    tr!("underline-ctrl-u"),
                 ),
             ] {
                 let text = match label {
@@ -676,24 +691,32 @@ impl SueWriter {
                 if icon(ui, size, false, theme, |painter, rect, color| {
                     align_icon(painter, rect, color, shown);
                 })
-                .on_hover_text(format!("Alignment (next: {next:?})"))
+                .on_hover_text(tr!("alignment-next", next = next.label()))
                 .clicked()
                 {
                     *run = Some(command.to_owned());
                 }
             } else {
                 for (align, command, hint) in [
-                    (sue_type::Align::Left, "align.left", "Align left (Ctrl+L)"),
-                    (sue_type::Align::Center, "align.center", "Center (Ctrl+E)"),
+                    (
+                        sue_type::Align::Left,
+                        "align.left",
+                        tr!("align-left-ctrl-l"),
+                    ),
+                    (
+                        sue_type::Align::Center,
+                        "align.center",
+                        tr!("center-ctrl-e"),
+                    ),
                     (
                         sue_type::Align::Right,
                         "align.right",
-                        "Align right (Ctrl+R)",
+                        tr!("align-right-ctrl-r"),
                     ),
                     (
                         sue_type::Align::Justify,
                         "align.justify",
-                        "Justify (Ctrl+J)",
+                        tr!("justify-ctrl-j"),
                     ),
                 ] {
                     if icon(
@@ -716,8 +739,13 @@ impl SueWriter {
             let bullet = para.list == Some(sue_type::ListKind::Bullet);
             let number = para.list == Some(sue_type::ListKind::Number);
             for (numbered, on, hint, command) in [
-                (false, bullet, "Bulleted list (Ctrl+Shift+L)", "list.bullet"),
-                (true, number, "Numbered list", "list.number"),
+                (
+                    false,
+                    bullet,
+                    tr!("bulleted-list-ctrl-shift-l"),
+                    "list.bullet",
+                ),
+                (true, number, tr!("numbered-list-2"), "list.number"),
             ] {
                 if icon(ui, size, on, theme, |painter, rect, color| {
                     list_icon(painter, rect, color, numbered);
@@ -729,8 +757,8 @@ impl SueWriter {
                 }
             }
             for (more, hint, command) in [
-                (false, "Decrease indent", "indent.less"),
-                (true, "Increase indent", "indent.more"),
+                (false, tr!("decrease-indent-2"), "indent.less"),
+                (true, tr!("increase-indent-2"), "indent.more"),
             ] {
                 if icon(ui, size, false, theme, |painter, rect, color| {
                     indent_icon(painter, rect, color, more);
@@ -768,18 +796,20 @@ impl SueWriter {
                 let mut filter: String = ui.data(|data| data.get_temp(font_id)).unwrap_or_default();
                 ui.add(
                     egui::TextEdit::singleline(&mut filter)
-                        .hint_text("Search fonts")
+                        .hint_text(tr!("search-fonts"))
                         .desired_width(200.0),
                 );
                 ui.data_mut(|data| data.insert_temp(font_id, filter.clone()));
                 if !sue_wm::fonts::ready() {
-                    ui.label(RichText::new("Finding installed fonts...").color(theme.muted));
+                    ui.label(
+                        RichText::new(tr!("finding-installed-fonts-ellipsis")).color(theme.muted),
+                    );
                 }
                 if ui
-                    .selectable_label(chars.font.is_none(), "Style's font")
+                    .selectable_label(chars.font.is_none(), tr!("styles-font"))
                     .clicked()
                 {
-                    self.editor.set_char(cx, kind::FONT, None, "Font");
+                    self.editor.set_char(cx, kind::FONT, None, &tr!("font"));
                 }
                 let needle = filter.to_lowercase();
                 for family in sue_wm::fonts::families() {
@@ -791,7 +821,7 @@ impl SueWriter {
                             cx,
                             kind::FONT,
                             Some(Value::Text(family.clone())),
-                            "Font",
+                            &tr!("font"),
                         );
                     }
                 }
@@ -813,7 +843,7 @@ impl SueWriter {
                             cx,
                             kind::SIZE,
                             Some(Value::Float(f64::from(option))),
-                            "Size",
+                            &tr!("size"),
                         );
                     }
                 }
@@ -836,17 +866,17 @@ impl SueWriter {
         if pick.released || (pick.changed && !pick.dragging) {
             let hex = format!("#{:02x}{:02x}{:02x}", rgba[0], rgba[1], rgba[2]);
             self.editor
-                .set_char(cx, kind::COLOR, Some(Value::Text(hex)), "Text Color");
+                .set_char(cx, kind::COLOR, Some(Value::Text(hex)), &tr!("text-color"));
         }
         ui.menu_button(
-            RichText::new("Highlight").size(theme.small_size + 1.0),
+            RichText::new(tr!("highlight")).size(theme.small_size + 1.0),
             |ui| {
                 for (name, color) in [
-                    ("Yellow", "yellow"),
-                    ("Green", "green"),
-                    ("Blue", "blue"),
-                    ("Pink", "pink"),
-                    ("None", "none"),
+                    (tr!("yellow"), "yellow"),
+                    (tr!("green"), "green"),
+                    (tr!("blue"), "blue"),
+                    (tr!("pink"), "pink"),
+                    (tr!("none"), "none"),
                 ] {
                     if ui.button(name).clicked() {
                         *run = Some(format!("format.highlight.{color}"));
@@ -873,16 +903,16 @@ impl SueWriter {
         let ui = &mut child;
         let mut run: Option<String> = None;
         ui.horizontal(|ui| {
-            widgets::heading(ui, "Binder", theme);
+            widgets::heading(ui, &tr!("binder"), theme);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if widgets::pill_button(ui, "+ Folder", false, theme)
-                    .on_hover_text("New folder (Ctrl+Shift+N)")
+                if widgets::pill_button(ui, &tr!("folder"), false, theme)
+                    .on_hover_text(tr!("new-folder-ctrl-shift-n"))
                     .clicked()
                 {
                     run = Some("binder.new_folder".to_owned());
                 }
-                if widgets::pill_button(ui, "+ Text", false, theme)
-                    .on_hover_text("New document (Ctrl+N)")
+                if widgets::pill_button(ui, &tr!("text-2"), false, theme)
+                    .on_hover_text(tr!("new-document-ctrl-n"))
                     .clicked()
                 {
                     run = Some("binder.new_doc".to_owned());
@@ -1079,57 +1109,60 @@ impl SueWriter {
                     ui.close();
                 }
             }
-            item(ui, "New Document", "binder.new_doc", run);
-            item(ui, "New Folder", "binder.new_folder", run);
+            item(ui, &tr!("new-document"), "binder.new_doc", run);
+            item(ui, &tr!("new-folder"), "binder.new_folder", run);
             ui.separator();
             if folder_role.is_none() {
-                if ui.button("Rename").clicked() {
+                if ui.button(tr!("rename")).clicked() {
                     self.renaming = Some((id, name.clone()));
                     ui.close();
                 }
-                item(ui, "Duplicate", "project.duplicate", run);
+                item(ui, &tr!("duplicate"), "project.duplicate", run);
                 item(
                     ui,
-                    if included {
-                        "Leave Out of Compile"
+                    &if included {
+                        tr!("leave-out-of-compile")
                     } else {
-                        "Include in Compile"
+                        tr!("include-in-compile")
                     },
                     "project.include",
                     run,
                 );
                 if document {
-                    item(ui, "Take Snapshot", "project.snapshot", run);
-                    item(ui, "Merge With Next", "project.merge", run);
+                    item(ui, &tr!("take-snapshot"), "project.snapshot", run);
+                    item(ui, &tr!("merge-with-next"), "project.merge", run);
                 }
-                ui.menu_button("Label", |ui| {
+                ui.menu_button(tr!("label"), |ui| {
                     for (label, color) in LABELS {
                         if ui
-                            .button(RichText::new(format!("\u{25CF} {label}")).color(rgb(*color)))
+                            .button(
+                                RichText::new(format!("\u{25CF} {}", project::label_text(label)))
+                                    .color(rgb(*color)),
+                            )
                             .clicked()
                         {
                             *run = Some(format!("label.{label}"));
                             ui.close();
                         }
                     }
-                    if ui.button("No Label").clicked() {
+                    if ui.button(tr!("no-label")).clicked() {
                         *run = Some("label.none".to_owned());
                         ui.close();
                     }
                 });
-                ui.menu_button("Status", |ui| {
+                ui.menu_button(tr!("status"), |ui| {
                     for status in STATUSES {
-                        if ui.button(*status).clicked() {
+                        if ui.button(project::status_text(status)).clicked() {
                             *run = Some(format!("status.{status}"));
                             ui.close();
                         }
                     }
-                    if ui.button("No Status").clicked() {
+                    if ui.button(tr!("no-status")).clicked() {
                         *run = Some("status.none".to_owned());
                         ui.close();
                     }
                 });
-                if image && ui.button("Open in Sue Paint").clicked() {
+                if image && ui.button(tr!("open-in-sue-paint")).clicked() {
                     if let Ok(paint) = AppletId::new("sue-paint") {
                         cx.request(ShellRequest::OpenIn {
                             entity: id,
@@ -1139,10 +1172,10 @@ impl SueWriter {
                     ui.close();
                 }
                 ui.separator();
-                item(ui, "Move to Trash", "project.trash", run);
+                item(ui, &tr!("move-to-trash"), "project.trash", run);
             }
             if folder_role.as_deref() == Some(role::TRASH) {
-                item(ui, "Empty Trash", "project.empty_trash", run);
+                item(ui, &tr!("empty-trash"), "project.empty_trash", run);
             }
         });
         // Dragging items onto others moves them: above or below an item, or
@@ -1321,12 +1354,12 @@ impl SueWriter {
                 ui.vertical_centered(|ui| {
                     ui.add_space(60.0);
                     ui.label(
-                        RichText::new("Nothing to write in here yet.")
+                        RichText::new(tr!("nothing-write-here-yet"))
                             .size(theme.heading_size)
                             .color(theme.muted),
                     );
                     ui.add_space(8.0);
-                    if widgets::pill_button(ui, "New Document", false, theme).clicked() {
+                    if widgets::pill_button(ui, &tr!("new-document"), false, theme).clicked() {
                         self.add_item(cx, false);
                     }
                 });
@@ -1532,18 +1565,20 @@ impl SueWriter {
                 .color(theme.text),
         );
         ui.label(
-            RichText::new("Start something new, or open a project from this Sue project.")
+            RichText::new(tr!("start-something-new-open-project-sue"))
                 .size(theme.small_size + 1.0)
                 .color(theme.muted),
         );
         ui.add_space(18.0);
-        widgets::heading(ui, "New", theme);
+        widgets::heading(ui, &tr!("new-2"), theme);
         let card = vec2(196.0, 86.0);
         let columns = ((width + 10.0) / (card.x + 10.0)).floor().max(1.0) as usize;
         let mut chosen = None;
         for row in TEMPLATES.chunks(columns) {
             ui.horizontal(|ui| {
-                for (key, label, about) in row {
+                for (key, ..) in row {
+                    let (label, about) =
+                        (project::template_name(key), project::template_about(key));
                     let (rect, response) = ui.allocate_exact_size(card, Sense::click());
                     let fill = if response.hovered() {
                         theme.hover
@@ -1561,7 +1596,7 @@ impl SueWriter {
                     ui.painter().text(
                         rect.left_top() + vec2(12.0, 10.0),
                         Align2::LEFT_TOP,
-                        *label,
+                        &label,
                         theme.font(theme.ui_size + 1.5),
                         theme.text,
                     );
@@ -1584,8 +1619,11 @@ impl SueWriter {
             let label = TEMPLATES
                 .iter()
                 .find(|(known, ..)| *known == key)
-                .map_or("Untitled", |(_, label, _)| *label);
-            self.new_project(cx, key, label);
+                .map_or_else(
+                    || tr!("untitled"),
+                    |(known, ..)| project::template_name(known),
+                );
+            self.new_project(cx, key, &label);
         }
         let projects: Vec<(EntityId, String, usize)> = cx
             .arena()
@@ -1601,16 +1639,19 @@ impl SueWriter {
             .collect();
         if !projects.is_empty() {
             ui.add_space(14.0);
-            widgets::heading(ui, "In this project", theme);
+            widgets::heading(ui, &tr!("in-this-project"), theme);
             for (id, name, words) in projects {
-                if ui.button(format!("{name}    {words} words")).clicked() {
+                if ui
+                    .button(tr!("words", name = name, words = words))
+                    .clicked()
+                {
                     self.open_project(cx, id, None);
                 }
             }
         }
         ui.add_space(14.0);
-        if widgets::pill_button(ui, "Import a Document...", false, theme)
-            .on_hover_text("Word, Markdown, HTML or plain text")
+        if widgets::pill_button(ui, &tr!("import-a-document-ellipsis"), false, theme)
+            .on_hover_text(tr!("word-markdown-html-plain-text"))
             .clicked()
         {
             self.run("file.import", cx);
@@ -1720,7 +1761,7 @@ impl SueWriter {
                                 painter.text(
                                     rect.right_bottom() - vec2(10.0, 8.0),
                                     Align2::RIGHT_BOTTOM,
-                                    status.to_uppercase(),
+                                    project::status_text(status).to_uppercase(),
                                     egui::FontId::proportional(9.5),
                                     Color32::from_rgba_unmultiplied(0xb0, 0x30, 0x30, 0xa0),
                                 );
@@ -1729,7 +1770,7 @@ impl SueWriter {
                             painter.text(
                                 rect.left_bottom() + vec2(10.0, -8.0),
                                 Align2::LEFT_BOTTOM,
-                                format!("{words} words"),
+                                tr!("word-count", count = words),
                                 egui::FontId::proportional(9.5),
                                 Color32::from_gray(0x88),
                             );
@@ -1762,10 +1803,7 @@ impl SueWriter {
                 }
                 if items.is_empty() {
                     ui.label(
-                        RichText::new(
-                            "No cards here yet. New documents and folders appear as cards.",
-                        )
-                        .color(theme.muted),
+                        RichText::new(tr!("no-cards-here-yet-new-documents")).color(theme.muted),
                     );
                 }
             });
@@ -1798,16 +1836,16 @@ impl SueWriter {
         );
         let ui = &mut child;
         let columns = [
-            ("Title", 0.34),
-            ("Synopsis", 0.34),
-            ("Label", 0.1),
-            ("Status", 0.1),
-            ("Words", 0.06),
-            ("Compile", 0.06),
+            (tr!("title"), 0.34),
+            (tr!("synopsis"), 0.34),
+            (tr!("label"), 0.1),
+            (tr!("status"), 0.1),
+            (tr!("words-3"), 0.06),
+            (tr!("compile"), 0.06),
         ];
         let width = ui.available_width();
         ui.horizontal(|ui| {
-            for (title, share) in columns {
+            for (title, share) in &columns {
                 ui.add_sized(
                     vec2(width * share - 4.0, 18.0),
                     egui::Label::new(
@@ -1872,14 +1910,21 @@ impl SueWriter {
                         .unwrap_or("")
                         .to_owned();
                     let label_color = project::label_color(&label).map_or(theme.muted, rgb);
-                    cell(columns[2].1, label, label_color, &mut x, 0.0);
+                    cell(
+                        columns[2].1,
+                        project::label_text(&label),
+                        label_color,
+                        &mut x,
+                        0.0,
+                    );
                     cell(
                         columns[3].1,
-                        entity
-                            .property(manuscript::STATUS)
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .to_owned(),
+                        project::status_text(
+                            entity
+                                .property(manuscript::STATUS)
+                                .and_then(Value::as_str)
+                                .unwrap_or(""),
+                        ),
                         theme.muted,
                         &mut x,
                         0.0,
@@ -1924,7 +1969,7 @@ impl SueWriter {
         let comments = self.editor.comments();
         if comments.is_empty() {
             ui.label(
-                RichText::new("No comments. Select some words and choose Review, New Comment.")
+                RichText::new(tr!("no-comments-select-some-words-choose"))
                     .size(theme.small_size)
                     .color(theme.muted),
             );
@@ -1973,21 +2018,26 @@ impl SueWriter {
                 let draft = self.drafts.entry((id, "reply")).or_default();
                 let response = ui.add(
                     egui::TextEdit::singleline(draft)
-                        .hint_text("Reply")
+                        .hint_text(tr!("reply"))
                         .desired_width(f32::INFINITY),
                 );
                 let send =
                     response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
                 ui.horizontal(|ui| {
-                    if (ui.small_button("Reply").clicked() || send) && !draft.trim().is_empty() {
+                    if (ui.small_button(tr!("reply")).clicked() || send) && !draft.trim().is_empty()
+                    {
                         let text = std::mem::take(draft).trim().to_owned();
                         act = Some(Box::new(move |me: &mut Self, cx| me.reply(cx, id, &text)));
                     }
-                    let resolve = if thread.resolved { "Reopen" } else { "Resolve" };
+                    let resolve = if thread.resolved {
+                        tr!("reopen")
+                    } else {
+                        tr!("resolve")
+                    };
                     if ui.small_button(resolve).clicked() {
                         act = Some(Box::new(move |me: &mut Self, cx| me.resolve(cx, id)));
                     }
-                    if ui.small_button("Delete").clicked() {
+                    if ui.small_button(tr!("delete")).clicked() {
                         act = Some(Box::new(move |me: &mut Self, cx| {
                             me.editor.remove_comment(cx, id);
                         }));
@@ -1996,7 +2046,7 @@ impl SueWriter {
             });
             ui.add_space(6.0);
         }
-        ui.checkbox(&mut self.show_resolved, "Show resolved comments");
+        ui.checkbox(&mut self.show_resolved, tr!("show-resolved-comments"));
         if let Some(act) = act {
             act(self, cx);
         }
@@ -2060,10 +2110,10 @@ impl SueWriter {
         let mut run: Option<String> = None;
         if self.comments {
             ui.horizontal(|ui| {
-                if ui.selectable_label(false, "Inspector").clicked() {
+                if ui.selectable_label(false, tr!("inspector")).clicked() {
                     self.comments = false;
                 }
-                let _ = ui.selectable_label(true, "Comments");
+                let _ = ui.selectable_label(true, tr!("comments"));
             });
             ui.add_space(4.0);
             egui::ScrollArea::vertical()
@@ -2074,144 +2124,258 @@ impl SueWriter {
         }
         if !self.editor.comments().is_empty() {
             ui.horizontal(|ui| {
-                let _ = ui.selectable_label(true, "Inspector");
-                if ui.selectable_label(false, "Comments").clicked() {
+                let _ = ui.selectable_label(true, tr!("inspector"));
+                if ui.selectable_label(false, tr!("comments")).clicked() {
                     self.comments = true;
                 }
             });
             ui.add_space(4.0);
         }
-        egui::ScrollArea::vertical().id_salt("writer-inspector").auto_shrink([false, false]).show(ui, |ui| {
-            let Some(id) = target else {
-                return;
-            };
-            let Ok(entity) = cx.arena().get_by_id(id) else {
-                return;
-            };
-            let name = entity.name().to_owned();
-            let is_document = entity.string_buffer().is_some();
-            let in_project = self.project.is_some();
-            ui.label(RichText::new(name).size(theme.heading_size).color(theme.text));
-            ui.add_space(6.0);
-            if in_project {
-                widgets::heading(ui, "Synopsis", theme);
-                self.property_field(ui, id, manuscript::SYNOPSIS, 4, "What happens here, in a line or two", cx);
+        egui::ScrollArea::vertical()
+            .id_salt("writer-inspector")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let Some(id) = target else {
+                    return;
+                };
+                let Ok(entity) = cx.arena().get_by_id(id) else {
+                    return;
+                };
+                let name = entity.name().to_owned();
+                let is_document = entity.string_buffer().is_some();
+                let in_project = self.project.is_some();
+                ui.label(
+                    RichText::new(name)
+                        .size(theme.heading_size)
+                        .color(theme.text),
+                );
                 ui.add_space(6.0);
-                let entity = cx.arena().get_by_id(id).ok();
-                let status = entity.and_then(|entity| entity.property(manuscript::STATUS)).and_then(Value::as_str).unwrap_or("No Status").to_owned();
-                let label = entity.and_then(|entity| entity.property(manuscript::LABEL)).and_then(Value::as_str).unwrap_or("No Label").to_owned();
-                let included = entity.is_some_and(manuscript::included);
-                ui.horizontal(|ui| {
-                    egui::ComboBox::from_id_salt(("writer-label", id)).selected_text(label.clone()).width(100.0).show_ui(ui, |ui| {
-                        for (name, color) in LABELS {
-                            if ui.selectable_label(label == *name, RichText::new(format!("\u{25CF} {name}")).color(rgb(*color))).clicked() {
-                                run = Some(format!("label.{name}"));
-                            }
-                        }
-                        if ui.selectable_label(false, "No Label").clicked() {
-                            run = Some("label.none".to_owned());
-                        }
-                    });
-                    egui::ComboBox::from_id_salt(("writer-status", id)).selected_text(status.clone()).width(100.0).show_ui(ui, |ui| {
-                        for name in STATUSES {
-                            if ui.selectable_label(status == *name, *name).clicked() {
-                                run = Some(format!("status.{name}"));
-                            }
-                        }
-                        if ui.selectable_label(false, "No Status").clicked() {
-                            run = Some("status.none".to_owned());
-                        }
-                    });
-                });
-                let mut include = included;
-                if ui.checkbox(&mut include, "Include in compile").changed() {
-                    run = Some("project.include".to_owned());
-                }
-                let target_words = cx.arena().get_by_id(id).ok().and_then(|entity| entity.property(manuscript::TARGET)).and_then(Value::as_i64).unwrap_or(0);
-                let mut words_target = target_words;
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Word target").color(theme.muted));
-                    let response = ui.add(egui::DragValue::new(&mut words_target).range(0..=10_000_000).speed(50));
-                    if (response.drag_stopped() || response.lost_focus()) && words_target != target_words {
-                        let value = (words_target > 0).then_some(Value::Int(words_target));
-                        let _ = cx.apply(ArenaEdit(project::set(id, manuscript::TARGET, value)));
-                    }
-                });
-                if target_words > 0 {
-                    let words = manuscript::total_words(cx.arena(), id) as f32;
-                    progress(ui, words / target_words as f32, theme);
-                }
-                ui.add_space(6.0);
-                widgets::heading(ui, "Keywords", theme);
-                self.property_field(ui, id, manuscript::KEYWORDS, 1, "comma, separated", cx);
-            }
-            if is_document {
-                ui.add_space(8.0);
-                widgets::heading(ui, "Statistics", theme);
-                let text = cx.arena().get_by_id(id).ok().and_then(Entity::string_buffer).map(|text| text.as_str().to_owned()).unwrap_or_default();
-                let words = sue_model::word_count(&text);
-                let paragraphs = text.lines().filter(|line| !line.trim().is_empty()).count();
-                let selection = self.editor.selected_text();
-                ui.label(RichText::new(format!("{words} words, {} characters, {paragraphs} paragraphs", text.chars().filter(|ch| *ch != '\n').count())).color(theme.muted));
-                if !selection.is_empty() {
-                    ui.label(RichText::new(format!("Selected: {} words", sue_model::word_count(selection))).color(theme.muted));
-                }
-                ui.label(RichText::new(format!("About {} minutes to read", (words / 230).max(1))).color(theme.muted));
-            }
-            if in_project {
-                ui.add_space(8.0);
-                widgets::heading(ui, "Notes", theme);
-                self.property_field(ui, id, manuscript::NOTES, 6, "Notes for yourself", cx);
-            }
-            if is_document && in_project {
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    widgets::heading(ui, "Snapshots", theme);
-                    if ui.small_button("Take").on_hover_text("Keep a copy of this document as it is now (Ctrl+5)").clicked() {
-                        run = Some("project.snapshot".to_owned());
-                    }
-                });
-                let shots = project::snapshots(cx.arena(), id);
-                if shots.is_empty() {
-                    ui.label(RichText::new("None yet. Take one before a big rewrite.").size(theme.small_size).color(theme.muted));
-                }
-                let mut restore = None;
-                for shot in shots.iter().rev() {
-                    let Ok(saved) = cx.arena().get_by_id(*shot) else {
-                        continue;
-                    };
-                    let words = saved.string_buffer().map_or(0, |text| sue_model::word_count(text.as_str()));
+                if in_project {
+                    widgets::heading(ui, &tr!("synopsis"), theme);
+                    self.property_field(
+                        ui,
+                        id,
+                        manuscript::SYNOPSIS,
+                        4,
+                        &tr!("what-happens-here-line-two"),
+                        cx,
+                    );
+                    ui.add_space(6.0);
+                    let entity = cx.arena().get_by_id(id).ok();
+                    let status = entity
+                        .and_then(|entity| entity.property(manuscript::STATUS))
+                        .and_then(Value::as_str)
+                        .map_or_else(|| tr!("no-status"), project::status_text);
+                    let label = entity
+                        .and_then(|entity| entity.property(manuscript::LABEL))
+                        .and_then(Value::as_str)
+                        .map_or_else(|| tr!("no-label"), project::label_text);
+                    let included = entity.is_some_and(manuscript::included);
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("{}  ({words} words)", saved.name())).size(theme.small_size + 0.5));
-                        if ui.small_button("Restore").on_hover_text("Put this version back (what is there now is kept as a snapshot)").clicked() {
-                            restore = Some(*shot);
-                        }
+                        egui::ComboBox::from_id_salt(("writer-label", id))
+                            .selected_text(label.clone())
+                            .width(100.0)
+                            .show_ui(ui, |ui| {
+                                for (name, color) in LABELS {
+                                    if ui
+                                        .selectable_label(
+                                            label == project::label_text(name),
+                                            RichText::new(format!(
+                                                "\u{25CF} {}",
+                                                project::label_text(name)
+                                            ))
+                                            .color(rgb(*color)),
+                                        )
+                                        .clicked()
+                                    {
+                                        run = Some(format!("label.{name}"));
+                                    }
+                                }
+                                if ui.selectable_label(false, tr!("no-label")).clicked() {
+                                    run = Some("label.none".to_owned());
+                                }
+                            });
+                        egui::ComboBox::from_id_salt(("writer-status", id))
+                            .selected_text(status.clone())
+                            .width(100.0)
+                            .show_ui(ui, |ui| {
+                                for name in STATUSES {
+                                    let text = project::status_text(name);
+                                    if ui.selectable_label(status == text, text).clicked() {
+                                        run = Some(format!("status.{name}"));
+                                    }
+                                }
+                                if ui.selectable_label(false, tr!("no-status")).clicked() {
+                                    run = Some("status.none".to_owned());
+                                }
+                            });
                     });
-                }
-                if let Some(shot) = restore
-                    && let Some(batch) = project::restore(cx.arena(), id, shot, &project::today())
-                {
-                    self.apply(cx, batch);
-                }
-            }
-            // The headings of what is shown, to jump to.
-            let outline = self.editor.outline();
-            if !outline.is_empty() && self.view == View::Document {
-                ui.add_space(8.0);
-                widgets::heading(ui, "Outline", theme);
-                for entry in outline {
-                    let indent = f32::from(entry.level.saturating_sub(1)) * 12.0;
+                    let mut include = included;
+                    if ui
+                        .checkbox(&mut include, tr!("include-in-compile-2"))
+                        .changed()
+                    {
+                        run = Some("project.include".to_owned());
+                    }
+                    let target_words = cx
+                        .arena()
+                        .get_by_id(id)
+                        .ok()
+                        .and_then(|entity| entity.property(manuscript::TARGET))
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0);
+                    let mut words_target = target_words;
                     ui.horizontal(|ui| {
-                        ui.add_space(indent);
-                        if ui.link(RichText::new(&entry.title).size(theme.small_size + 0.5)).clicked()
-                            && let Some(doc) = self.editor.docs().get(entry.at.doc).copied()
+                        ui.label(RichText::new(tr!("word-target")).color(theme.muted));
+                        let response = ui.add(
+                            egui::DragValue::new(&mut words_target)
+                                .range(0..=10_000_000)
+                                .speed(50),
+                        );
+                        if (response.drag_stopped() || response.lost_focus())
+                            && words_target != target_words
                         {
-                            self.editor.select(doc, entry.at.offset..entry.at.offset);
+                            let value = (words_target > 0).then_some(Value::Int(words_target));
+                            let _ =
+                                cx.apply(ArenaEdit(project::set(id, manuscript::TARGET, value)));
                         }
                     });
+                    if target_words > 0 {
+                        let words = manuscript::total_words(cx.arena(), id) as f32;
+                        progress(ui, words / target_words as f32, theme);
+                    }
+                    ui.add_space(6.0);
+                    widgets::heading(ui, &tr!("keywords"), theme);
+                    self.property_field(
+                        ui,
+                        id,
+                        manuscript::KEYWORDS,
+                        1,
+                        &tr!("comma-separated"),
+                        cx,
+                    );
                 }
-            }
-        });
+                if is_document {
+                    ui.add_space(8.0);
+                    widgets::heading(ui, &tr!("statistics"), theme);
+                    let text = cx
+                        .arena()
+                        .get_by_id(id)
+                        .ok()
+                        .and_then(Entity::string_buffer)
+                        .map(|text| text.as_str().to_owned())
+                        .unwrap_or_default();
+                    let words = sue_model::word_count(&text);
+                    let paragraphs = text.lines().filter(|line| !line.trim().is_empty()).count();
+                    let selection = self.editor.selected_text();
+                    ui.label(
+                        RichText::new(tr!(
+                            "words-characters-paragraphs",
+                            count = text.chars().filter(|ch| *ch != '\n').count(),
+                            words = words,
+                            paragraphs = paragraphs
+                        ))
+                        .color(theme.muted),
+                    );
+                    if !selection.is_empty() {
+                        ui.label(
+                            RichText::new(tr!(
+                                "selected-words",
+                                value = sue_model::word_count(selection)
+                            ))
+                            .color(theme.muted),
+                        );
+                    }
+                    ui.label(
+                        RichText::new(tr!("about-minutes-to-read", value = (words / 230).max(1)))
+                            .color(theme.muted),
+                    );
+                }
+                if in_project {
+                    ui.add_space(8.0);
+                    widgets::heading(ui, &tr!("notes"), theme);
+                    self.property_field(
+                        ui,
+                        id,
+                        manuscript::NOTES,
+                        6,
+                        &tr!("notes-for-yourself"),
+                        cx,
+                    );
+                }
+                if is_document && in_project {
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        widgets::heading(ui, &tr!("snapshots"), theme);
+                        if ui
+                            .small_button(tr!("take"))
+                            .on_hover_text(tr!("keep-copy-document-as-now-ctrl"))
+                            .clicked()
+                        {
+                            run = Some("project.snapshot".to_owned());
+                        }
+                    });
+                    let shots = project::snapshots(cx.arena(), id);
+                    if shots.is_empty() {
+                        ui.label(
+                            RichText::new(tr!("none-yet-take-one-before-big"))
+                                .size(theme.small_size)
+                                .color(theme.muted),
+                        );
+                    }
+                    let mut restore = None;
+                    for shot in shots.iter().rev() {
+                        let Ok(saved) = cx.arena().get_by_id(*shot) else {
+                            continue;
+                        };
+                        let words = saved
+                            .string_buffer()
+                            .map_or(0, |text| sue_model::word_count(text.as_str()));
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(tr!(
+                                    "snapshot-words",
+                                    saved = saved.name(),
+                                    words = words
+                                ))
+                                .size(theme.small_size + 0.5),
+                            );
+                            if ui
+                                .small_button(tr!("restore"))
+                                .on_hover_text(tr!("put-version-back-what-there-now"))
+                                .clicked()
+                            {
+                                restore = Some(*shot);
+                            }
+                        });
+                    }
+                    if let Some(shot) = restore
+                        && let Some(batch) =
+                            project::restore(cx.arena(), id, shot, &project::today())
+                    {
+                        self.apply(cx, batch);
+                    }
+                }
+                // The headings of what is shown, to jump to.
+                let outline = self.editor.outline();
+                if !outline.is_empty() && self.view == View::Document {
+                    ui.add_space(8.0);
+                    widgets::heading(ui, &tr!("outline"), theme);
+                    for entry in outline {
+                        let indent = f32::from(entry.level.saturating_sub(1)) * 12.0;
+                        ui.horizontal(|ui| {
+                            ui.add_space(indent);
+                            if ui
+                                .link(RichText::new(&entry.title).size(theme.small_size + 0.5))
+                                .clicked()
+                                && let Some(doc) = self.editor.docs().get(entry.at.doc).copied()
+                            {
+                                self.editor.select(doc, entry.at.offset..entry.at.offset);
+                            }
+                        });
+                    }
+                }
+            });
         if let Some(command) = run {
             let keep = self.selected;
             self.selected = target;
@@ -2236,9 +2400,9 @@ impl SueWriter {
         let selected = sue_model::word_count(self.editor.selected_text());
         let mut parts = Vec::new();
         if selected > 0 {
-            parts.push(format!("{selected} of {doc_words} words"));
+            parts.push(tr!("of-words", selected = selected, doc_words = doc_words));
         } else {
-            parts.push(format!("{doc_words} words"));
+            parts.push(tr!("word-count", count = doc_words));
         }
         // A phone keeps to the words and the page.
         if self.project.is_some() && !self.simple(cx) && !self.phone {
@@ -2248,12 +2412,14 @@ impl SueWriter {
                 .and_then(Value::as_i64)
                 .unwrap_or(0);
             if target > 0 {
-                parts.push(format!(
-                    "Draft {draft} / {target} ({:.0}%)",
-                    draft as f64 * 100.0 / target as f64
+                parts.push(tr!(
+                    "draft-percent",
+                    value = sue_lang::number(draft as f64 * 100.0 / target as f64, 0),
+                    draft = draft,
+                    target = target
                 ));
             } else {
-                parts.push(format!("Draft {draft} words"));
+                parts.push(tr!("draft-words", draft = draft));
             }
             let goal = self
                 .project_entity(cx)
@@ -2261,14 +2427,18 @@ impl SueWriter {
                 .and_then(Value::as_i64)
                 .unwrap_or(0);
             if goal > 0 {
-                parts.push(format!("Today {session:+} / {goal}"));
+                parts.push(tr!(
+                    "today",
+                    session = format!("{:+}", session),
+                    goal = goal
+                ));
             } else {
-                parts.push(format!("Today {session:+}"));
+                parts.push(tr!("today-2", session = format!("{:+}", session)));
             }
         }
         if self.view == View::Document && self.pages_shown() {
             let (page, pages) = self.page_info;
-            parts.push(format!("Page {} of {}", page + 1, pages.max(1)));
+            parts.push(tr!("page-of", value = page + 1, value2 = pages.max(1)));
         }
         let text = parts.join("    |    ");
         ui.painter().text(
@@ -2294,17 +2464,24 @@ impl SueWriter {
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
         );
         child.spacing_mut().item_spacing.x = 4.0;
-        if child.small_button("+").on_hover_text("Zoom in").clicked() {
+        if child
+            .small_button("+")
+            .on_hover_text(tr!("zoom-in-2"))
+            .clicked()
+        {
             self.run("view.zoom_in", cx);
         }
         let label = if self.fit {
-            format!("Fit {:.0}%", self.shown_zoom * 100.0)
+            tr!(
+                "fit-percent",
+                value = sue_lang::number(f64::from(self.shown_zoom * 100.0), 0)
+            )
         } else {
             format!("{:.0}%", self.shown_zoom * 100.0)
         };
         if child
             .button(RichText::new(label).size(theme.small_size))
-            .on_hover_text("Fit the page to the window, or show it at its size")
+            .on_hover_text(tr!("fit-page-window-show-size"))
             .clicked()
         {
             self.run(
@@ -2318,13 +2495,13 @@ impl SueWriter {
         }
         if child
             .small_button("\u{2212}")
-            .on_hover_text("Zoom out")
+            .on_hover_text(tr!("zoom-out-2"))
             .clicked()
         {
             self.run("view.zoom_out", cx);
         }
         widgets::pill_divider(&mut child, theme);
-        let options = ["Draft", "Page"].map(String::from);
+        let options = [tr!("draft"), tr!("page")].map(String::from);
         let chosen = (self.view == View::Document).then_some(usize::from(self.paged));
         if let Some(index) = widgets::segmented(&mut child, &options, chosen, theme) {
             self.run(["view.draft", "view.page"][index], cx);
@@ -2347,7 +2524,7 @@ impl SueWriter {
         let ui = &mut child;
         let query = ui.add(
             egui::TextEdit::singleline(&mut find.query)
-                .hint_text("Find")
+                .hint_text(tr!("find"))
                 .desired_width(200.0)
                 .id(Id::unique("writer-find")),
         );
@@ -2365,14 +2542,14 @@ impl SueWriter {
         }
         if ui
             .small_button("\u{2191}")
-            .on_hover_text("Previous (Shift+F3)")
+            .on_hover_text(tr!("previous-shift-f3"))
             .clicked()
         {
             action = Some("previous");
         }
         if ui
             .small_button("\u{2193}")
-            .on_hover_text("Next (F3)")
+            .on_hover_text(tr!("next-f3"))
             .clicked()
         {
             action = Some("next");
@@ -2380,24 +2557,24 @@ impl SueWriter {
         if find.replacing {
             ui.add(
                 egui::TextEdit::singleline(&mut find.replace)
-                    .hint_text("Replace with")
+                    .hint_text(tr!("replace-with"))
                     .desired_width(180.0),
             );
-            if ui.button("Replace").clicked() {
+            if ui.button(tr!("replace")).clicked() {
                 action = Some("replace");
             }
-            if ui.button("Replace All").clicked() {
+            if ui.button(tr!("replace-all")).clicked() {
                 action = Some("all");
             }
-        } else if ui.small_button("Replace...").clicked() {
+        } else if ui.small_button(tr!("replace-ellipsis")).clicked() {
             find.replacing = true;
         }
-        ui.checkbox(&mut find.case, "Match case");
-        ui.checkbox(&mut find.words, "Whole words");
-        ui.checkbox(&mut find.regex, "Regular expressions")
-            .on_hover_text("Patterns such as \\d+ or ^Chapter; $1 in the replacement puts back what a group caught");
+        ui.checkbox(&mut find.case, tr!("match-case"));
+        ui.checkbox(&mut find.words, tr!("whole-words"));
+        ui.checkbox(&mut find.regex, tr!("regular-expressions"))
+            .on_hover_text(tr!("patterns-such-as-d-chapter-1"));
         if self.project.is_some() {
-            ui.checkbox(&mut find.project, "Whole project");
+            ui.checkbox(&mut find.project, tr!("whole-project"));
         }
         if !find.message.is_empty() {
             ui.label(RichText::new(&find.message).color(theme.muted));
@@ -2405,7 +2582,7 @@ impl SueWriter {
         let close = ui
             .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.small_button("\u{2715}")
-                    .on_hover_text("Close (Esc)")
+                    .on_hover_text(tr!("close-esc"))
                     .clicked()
             })
             .inner;
@@ -2438,7 +2615,11 @@ impl SueWriter {
             .editor
             .current()
             .map_or(0, |doc| manuscript::words(cx.arena(), doc));
-        let hint = format!("{words} words    |    today {session:+}    |    Esc to leave");
+        let hint = tr!(
+            "words-today-esc-to-leave",
+            words = words,
+            session = format!("{:+}", session)
+        );
         ui.painter().text(
             rect.center_bottom() - vec2(0.0, 14.0),
             Align2::CENTER_BOTTOM,
@@ -2465,17 +2646,17 @@ impl SueWriter {
             )
         });
         let title = match &dialog {
-            Dialog::NewProject { .. } => "New Project",
-            Dialog::Compile(_) => "Compile",
-            Dialog::Settings(_) => "Project Settings",
-            Dialog::Link(_) => "Link",
-            Dialog::Footnote(_) => "Footnote",
-            Dialog::Table { .. } => "Insert Table",
-            Dialog::Furniture(_) => "Header and Footer",
-            Dialog::Contents(_) => "Table of Contents",
-            Dialog::Comment(_) => "New Comment",
-            Dialog::Statistics => "Writing Statistics",
-            Dialog::Shortcuts => "Keyboard Shortcuts",
+            Dialog::NewProject { .. } => tr!("new-project"),
+            Dialog::Compile(_) => tr!("compile"),
+            Dialog::Settings(_) => tr!("project-settings"),
+            Dialog::Link(_) => tr!("link"),
+            Dialog::Footnote(_) => tr!("footnote"),
+            Dialog::Table { .. } => tr!("insert-table"),
+            Dialog::Furniture(_) => tr!("header-and-footer"),
+            Dialog::Contents(_) => tr!("table-of-contents"),
+            Dialog::Comment(_) => tr!("new-comment"),
+            Dialog::Statistics => tr!("writing-statistics"),
+            Dialog::Shortcuts => tr!("keyboard-shortcuts"),
         };
         let escape = ctx.input(|input| input.key_pressed(egui::Key::Escape));
         let id = Id::unique("sue-writer-dialog");
@@ -2503,15 +2684,15 @@ impl SueWriter {
                         }
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
-                            ui.label("Title");
+                            ui.label(tr!("title"));
                             ui.text_edit_singleline(title);
                         });
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
-                            if ui.button("Create").clicked() {
+                            if ui.button(tr!("create")).clicked() {
                                 let key = TEMPLATES[(*template).min(TEMPLATES.len() - 1)].0;
                                 let title = if title.trim().is_empty() {
-                                    "Untitled".to_owned()
+                                    tr!("untitled")
                                 } else {
                                     title.trim().to_owned()
                                 };
@@ -2520,67 +2701,71 @@ impl SueWriter {
                                 }));
                                 keep = false;
                             }
-                            if ui.button("Cancel").clicked() {
+                            if ui.button(tr!("cancel")).clicked() {
                                 keep = false;
                             }
                         });
                     }
                     Dialog::Compile(choices) => {
-                        widgets::heading(ui, "Format", theme);
+                        widgets::heading(ui, &tr!("format"), theme);
                         egui::Grid::new("writer-formats")
                             .num_columns(2)
                             .show(ui, |ui| {
-                                for (index, (_, name, ext)) in FORMATS.iter().enumerate() {
-                                    ui.radio_value(&mut choices.format, index, *name);
+                                for (index, (key, _, ext)) in FORMATS.iter().enumerate() {
+                                    ui.radio_value(
+                                        &mut choices.format,
+                                        index,
+                                        crate::compile::format_name(key),
+                                    );
                                     ui.label(RichText::new(format!(".{ext}")).color(theme.muted));
                                     ui.end_row();
                                 }
                             });
                         ui.add_space(6.0);
-                        widgets::heading(ui, "What", theme);
+                        widgets::heading(ui, &tr!("what"), theme);
                         if self.project.is_some() {
-                            ui.radio_value(&mut choices.whole, true, "The whole manuscript");
-                            ui.radio_value(&mut choices.whole, false, "What is open now");
+                            ui.radio_value(&mut choices.whole, true, tr!("the-whole-manuscript"));
+                            ui.radio_value(&mut choices.whole, false, tr!("what-is-open-now"));
                         }
                         ui.add_space(6.0);
-                        widgets::heading(ui, "Titles", theme);
+                        widgets::heading(ui, &tr!("titles"), theme);
                         ui.radio_value(
                             &mut choices.titles,
                             Titles::Folders,
-                            "Folders become chapter titles",
+                            tr!("folders-become-chapter-titles"),
                         );
                         ui.radio_value(
                             &mut choices.titles,
                             Titles::All,
-                            "Folders and documents both",
+                            tr!("folders-and-documents-both"),
                         );
                         ui.radio_value(
                             &mut choices.titles,
                             Titles::None,
-                            "No titles, just the text",
+                            tr!("no-titles-just-the-text"),
                         );
                         ui.add_space(6.0);
-                        widgets::heading(ui, "Between documents", theme);
+                        widgets::heading(ui, &tr!("between-documents"), theme);
                         ui.radio_value(
                             &mut choices.separator,
                             Separator::SceneBreak,
-                            "A scene break (#)",
+                            tr!("a-scene-break"),
                         );
-                        ui.radio_value(&mut choices.separator, Separator::Page, "A new page");
-                        ui.radio_value(&mut choices.separator, Separator::None, "Nothing");
+                        ui.radio_value(&mut choices.separator, Separator::Page, tr!("a-new-page"));
+                        ui.radio_value(&mut choices.separator, Separator::None, tr!("nothing"));
                         ui.add_space(6.0);
-                        ui.checkbox(&mut choices.title_page, "A title page first");
-                        ui.checkbox(&mut choices.chapter_pages, "Each chapter on a new page");
+                        ui.checkbox(&mut choices.title_page, tr!("a-title-page-first"));
+                        ui.checkbox(&mut choices.chapter_pages, tr!("each-chapter-new-page"));
                         ui.add_space(10.0);
                         ui.horizontal(|ui| {
-                            if ui.button("Export...").clicked() {
+                            if ui.button(tr!("export-ellipsis")).clicked() {
                                 let picked = choices.clone();
                                 after = Some(Box::new(move |me: &mut Self, cx| {
                                     me.ask_compile(cx, picked)
                                 }));
                                 keep = false;
                             }
-                            if ui.button("Cancel").clicked() {
+                            if ui.button(tr!("cancel")).clicked() {
                                 keep = false;
                             }
                         });
@@ -2589,54 +2774,55 @@ impl SueWriter {
                         self.settings_ui(ui, settings, theme);
                         ui.add_space(10.0);
                         ui.horizontal(|ui| {
-                            if ui.button("Apply").clicked() {
+                            if ui.button(tr!("apply")).clicked() {
                                 let settings = settings.clone();
                                 after = Some(Box::new(move |me: &mut Self, cx| {
                                     me.apply_settings(cx, &settings)
                                 }));
                                 keep = false;
                             }
-                            if ui.button("Cancel").clicked() {
+                            if ui.button(tr!("cancel")).clicked() {
                                 keep = false;
                             }
                         });
                     }
                     Dialog::Link(url) => {
-                        ui.label("Web address");
+                        ui.label(tr!("web-address"));
                         ui.add(egui::TextEdit::singleline(url).desired_width(340.0));
                         ui.horizontal(|ui| {
-                            if ui.button("Link").clicked() {
+                            if ui.button(tr!("link")).clicked() {
                                 let url = url.trim().to_owned();
                                 after = Some(Box::new(move |me: &mut Self, cx| {
                                     me.editor.set_char(
                                         cx,
                                         kind::LINK,
                                         (!url.is_empty()).then_some(Value::Text(url)),
-                                        "Link",
+                                        &tr!("link"),
                                     )
                                 }));
                                 keep = false;
                             }
-                            if ui.button("Remove Link").clicked() {
+                            if ui.button(tr!("remove-link")).clicked() {
                                 after = Some(Box::new(|me: &mut Self, cx| {
-                                    me.editor.set_char(cx, kind::LINK, None, "Remove Link")
+                                    me.editor
+                                        .set_char(cx, kind::LINK, None, &tr!("remove-link"))
                                 }));
                                 keep = false;
                             }
-                            if ui.button("Cancel").clicked() {
+                            if ui.button(tr!("cancel")).clicked() {
                                 keep = false;
                             }
                         });
                     }
                     Dialog::Footnote(note) => {
-                        ui.label("The note, printed at the end");
+                        ui.label(tr!("note-printed-end"));
                         ui.add(
                             egui::TextEdit::multiline(note)
                                 .desired_rows(4)
                                 .desired_width(340.0),
                         );
                         ui.horizontal(|ui| {
-                            if ui.button("Add Footnote").clicked() {
+                            if ui.button(tr!("add-footnote")).clicked() {
                                 let note = note.trim().to_owned();
                                 after = Some(Box::new(move |me: &mut Self, cx| {
                                     if !note.is_empty() {
@@ -2644,13 +2830,13 @@ impl SueWriter {
                                             cx,
                                             kind::FOOTNOTE,
                                             Some(Value::Text(note)),
-                                            "Footnote",
+                                            &tr!("footnote"),
                                         );
                                     }
                                 }));
                                 keep = false;
                             }
-                            if ui.button("Cancel").clicked() {
+                            if ui.button(tr!("cancel")).clicked() {
                                 keep = false;
                             }
                         });
@@ -2664,17 +2850,17 @@ impl SueWriter {
                             .num_columns(2)
                             .spacing([12.0, 8.0])
                             .show(ui, |ui| {
-                                ui.label("Columns");
+                                ui.label(tr!("columns"));
                                 ui.add(egui::DragValue::new(columns).range(1..=63));
                                 ui.end_row();
-                                ui.label("Rows");
+                                ui.label(tr!("rows"));
                                 ui.add(egui::DragValue::new(rows).range(1..=999));
                                 ui.end_row();
                             });
-                        ui.checkbox(heading, "Heading row, repeated on each page");
+                        ui.checkbox(heading, tr!("heading-row-repeated-each-page"));
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
-                            if ui.button("Insert").clicked() {
+                            if ui.button(tr!("insert")).clicked() {
                                 let (rows, columns, heading) = (*rows, *columns, *heading);
                                 after = Some(Box::new(move |me: &mut Self, cx| {
                                     me.editor
@@ -2683,18 +2869,18 @@ impl SueWriter {
                                 }));
                                 keep = false;
                             }
-                            if ui.button("Cancel").clicked() {
+                            if ui.button(tr!("cancel")).clicked() {
                                 keep = false;
                             }
                         });
                     }
                     Dialog::Comment(text) => {
-                        ui.label(format!("By {}", self.author_name(cx)));
+                        ui.label(tr!("by", value = self.author_name(cx)));
                         let response = ui.add(
                             egui::TextEdit::multiline(text)
                                 .desired_rows(4)
                                 .desired_width(340.0)
-                                .hint_text("Your comment"),
+                                .hint_text(tr!("your-comment")),
                         );
                         response.request_focus();
                         let send = ui.input_mut(|input| {
@@ -2702,7 +2888,7 @@ impl SueWriter {
                         });
                         ui.horizontal(|ui| {
                             if ui
-                                .button("Add Comment")
+                                .button(tr!("add-comment"))
                                 .on_hover_text("Ctrl+Enter")
                                 .clicked()
                                 || send
@@ -2715,7 +2901,7 @@ impl SueWriter {
                                 }));
                                 keep = false;
                             }
-                            if ui.button("Cancel").clicked() {
+                            if ui.button(tr!("cancel")).clicked() {
                                 keep = false;
                             }
                         });
@@ -2725,23 +2911,21 @@ impl SueWriter {
                             .num_columns(2)
                             .spacing(vec2(12.0, 8.0))
                             .show(ui, |ui| {
-                                ui.label("Title");
+                                ui.label(tr!("title"));
                                 ui.text_edit_singleline(&mut contents.title);
                                 ui.end_row();
-                                ui.label("Heading levels");
+                                ui.label(tr!("heading-levels"));
                                 ui.add(egui::DragValue::new(&mut contents.levels).range(1..=6));
                                 ui.end_row();
                             });
                         ui.label(
-                            RichText::new(
-                                "It lists the headings with their pages and keeps up by itself.",
-                            )
-                            .size(theme.small_size)
-                            .color(theme.muted),
+                            RichText::new(tr!("lists-headings-their-pages-keeps-up"))
+                                .size(theme.small_size)
+                                .color(theme.muted),
                         );
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
-                            if ui.button("Insert").clicked() {
+                            if ui.button(tr!("insert")).clicked() {
                                 let contents = contents.clone();
                                 after = Some(Box::new(move |me: &mut Self, cx| {
                                     me.editor.insert_contents(cx, &contents);
@@ -2749,7 +2933,7 @@ impl SueWriter {
                                 }));
                                 keep = false;
                             }
-                            if ui.button("Cancel").clicked() {
+                            if ui.button(tr!("cancel")).clicked() {
                                 keep = false;
                             }
                         });
@@ -2765,14 +2949,14 @@ impl SueWriter {
                                 }));
                                 keep = false;
                             }
-                            if ui.button("Cancel").clicked() {
+                            if ui.button(tr!("cancel")).clicked() {
                                 keep = false;
                             }
                         });
                     }
                     Dialog::Statistics => {
                         self.statistics_ui(ui, cx, theme);
-                        if ui.button("Close").clicked() {
+                        if ui.button(tr!("close")).clicked() {
                             keep = false;
                         }
                     }
@@ -2784,12 +2968,12 @@ impl SueWriter {
                                 sue_wm::shortcuts::grid_ui(ui, "writer-shortcuts", keys, theme);
                             });
                         ui.horizontal(|ui| {
-                            if ui.button("Close").clicked() {
+                            if ui.button(tr!("close")).clicked() {
                                 keep = false;
                             }
                             if ui
-                                .button("Change Shortcuts...")
-                                .on_hover_text("Settings, Keymaps: any number of keys for each")
+                                .button(tr!("change-shortcuts-ellipsis"))
+                                .on_hover_text(tr!("settings-keymaps-any-number-keys-each"))
                                 .clicked()
                             {
                                 keep = false;
@@ -2819,27 +3003,26 @@ impl SueWriter {
             .num_columns(2)
             .spacing(vec2(12.0, 6.0))
             .show(ui, |ui| {
-                ui.label("Title");
+                ui.label(tr!("title"));
                 ui.text_edit_singleline(&mut settings.title);
                 ui.end_row();
-                ui.label("Author");
+                ui.label(tr!("author"));
                 ui.text_edit_singleline(&mut settings.author);
                 ui.end_row();
-                ui.label("Styles");
+                ui.label(tr!("styles"));
                 egui::ComboBox::from_id_salt("writer-sheet")
-                    .selected_text(
-                        sue_type::SHEETS
-                            .iter()
-                            .find(|(key, _)| *key == settings.sheet)
-                            .map_or("Standard", |(_, name)| *name),
-                    )
+                    .selected_text(sue_type::sheet_name(&settings.sheet))
                     .show_ui(ui, |ui| {
-                        for (key, name) in sue_type::SHEETS {
-                            ui.selectable_value(&mut settings.sheet, (*key).to_owned(), *name);
+                        for (key, _) in sue_type::SHEETS {
+                            ui.selectable_value(
+                                &mut settings.sheet,
+                                (*key).to_owned(),
+                                sue_type::sheet_name(key),
+                            );
                         }
                     });
                 ui.end_row();
-                ui.label("Page");
+                ui.label(tr!("page"));
                 egui::ComboBox::from_id_salt("writer-page")
                     .selected_text(settings.page.clone())
                     .show_ui(ui, |ui| {
@@ -2848,7 +3031,7 @@ impl SueWriter {
                         }
                     });
                 ui.end_row();
-                ui.label("Margins (inches)");
+                ui.label(tr!("margins-inches"));
                 let mut inches = settings.margin / 72.0;
                 if ui
                     .add(
@@ -2862,7 +3045,7 @@ impl SueWriter {
                     settings.margin = inches * 72.0;
                 }
                 ui.end_row();
-                ui.label("Body font");
+                ui.label(tr!("body-font"));
                 font_picker(
                     ui,
                     "writer-body-font",
@@ -2870,7 +3053,7 @@ impl SueWriter {
                     &mut settings.font_filter,
                 );
                 ui.end_row();
-                ui.label("Heading font");
+                ui.label(tr!("heading-font"));
                 let mut filter = String::new();
                 font_picker(
                     ui,
@@ -2879,21 +3062,21 @@ impl SueWriter {
                     &mut filter,
                 );
                 ui.end_row();
-                ui.label("Body size (pt)");
+                ui.label(tr!("body-size-pt"));
                 ui.add(
                     egui::DragValue::new(&mut settings.size)
                         .range(6.0..=48.0)
                         .speed(0.25),
                 );
                 ui.end_row();
-                ui.label("Manuscript target (words)");
+                ui.label(tr!("manuscript-target-words"));
                 ui.add(
                     egui::DragValue::new(&mut settings.target)
                         .range(0..=10_000_000)
                         .speed(100),
                 );
                 ui.end_row();
-                ui.label("Words a day");
+                ui.label(tr!("words-a-day"));
                 ui.add(
                     egui::DragValue::new(&mut settings.session)
                         .range(0..=100_000)
@@ -2903,7 +3086,7 @@ impl SueWriter {
             });
         if !sue_wm::fonts::ready() {
             ui.label(
-                RichText::new("Still finding installed fonts...")
+                RichText::new(tr!("still-finding-installed-fonts-ellipsis"))
                     .size(theme.small_size)
                     .color(theme.muted),
             );
@@ -2915,7 +3098,7 @@ impl SueWriter {
         let Some(root) = self.project else {
             return;
         };
-        let batch = sue_core::txn::Batch::new("Header and Footer")
+        let batch = sue_core::txn::Batch::new(tr!("header-and-footer"))
             .then(project::set(
                 root,
                 project::HEADER,
@@ -2938,7 +3121,7 @@ impl SueWriter {
         let Some(root) = self.project else {
             return;
         };
-        let mut batch = sue_core::txn::Batch::new("Project Settings");
+        let mut batch = sue_core::txn::Batch::new(tr!("project-settings"));
         let text = |value: &str| (!value.is_empty()).then(|| Value::Text(value.to_owned()));
         batch.push(Box::new(project::set(
             root,
@@ -3009,20 +3192,21 @@ impl SueWriter {
         egui::Grid::new("writer-stats")
             .num_columns(2)
             .show(ui, |ui| {
-                ui.label("This sitting");
-                ui.label(format!("{session:+} words"));
+                ui.label(tr!("this-sitting"));
+                ui.label(tr!("word-count-change", change = format!("{session:+}")));
                 ui.end_row();
-                ui.label("The manuscript");
-                ui.label(format!("{draft} words"));
+                ui.label(tr!("the-manuscript"));
+                ui.label(tr!("word-count", count = draft));
                 ui.end_row();
-                ui.label("Everything, with research");
-                ui.label(format!("{total} words"));
+                ui.label(tr!("everything-with-research"));
+                ui.label(tr!("word-count", count = total));
                 ui.end_row();
                 if target > 0 {
-                    ui.label("Target");
-                    ui.label(format!(
-                        "{target} words, {:.0}% there",
-                        draft as f64 * 100.0 / target as f64
+                    ui.label(tr!("target"));
+                    ui.label(tr!(
+                        "words-percent-there",
+                        value = sue_lang::number(draft as f64 * 100.0 / target as f64, 0),
+                        target = target
                     ));
                     ui.end_row();
                 }
@@ -3036,14 +3220,14 @@ impl SueWriter {
             .unwrap_or_default();
         if history.is_empty() {
             ui.label(
-                RichText::new("Days you write on show here once a sitting ends.")
+                RichText::new(tr!("days-you-write-show-here-once"))
                     .size(theme.small_size)
                     .color(theme.muted),
             );
             return;
         }
         ui.add_space(8.0);
-        widgets::heading(ui, "Words by day", theme);
+        widgets::heading(ui, &tr!("words-by-day"), theme);
         let days: Vec<&(String, i64)> = history.iter().rev().take(14).collect();
         let most = days
             .iter()
@@ -3455,7 +3639,7 @@ fn furniture_ui(ui: &mut Ui, furniture: &mut Furniture, theme: &Theme) {
         .spacing(vec2(8.0, 6.0))
         .show(ui, |ui| {
             ui.label("");
-            for part in ["Left", "Middle", "Right"] {
+            for part in [tr!("left"), tr!("middle"), tr!("right")] {
                 ui.label(
                     RichText::new(part)
                         .size(theme.small_size)
@@ -3464,8 +3648,8 @@ fn furniture_ui(ui: &mut Ui, furniture: &mut Furniture, theme: &Theme) {
             }
             ui.end_row();
             for (row, (label, running)) in [
-                ("Header", &mut furniture.header),
-                ("Footer", &mut furniture.footer),
+                (tr!("header"), &mut furniture.header),
+                (tr!("footer"), &mut furniture.footer),
             ]
             .into_iter()
             .enumerate()
@@ -3485,7 +3669,7 @@ fn furniture_ui(ui: &mut Ui, furniture: &mut Furniture, theme: &Theme) {
         });
     ui.horizontal_wrapped(|ui| {
         ui.label(
-            RichText::new("Insert")
+            RichText::new(tr!("insert"))
                 .size(theme.small_size)
                 .color(theme.muted),
         );
@@ -3508,7 +3692,7 @@ fn furniture_ui(ui: &mut Ui, furniture: &mut Furniture, theme: &Theme) {
     });
     ui.checkbox(
         &mut furniture.different_first,
-        "Different first page (none on a title page)",
+        tr!("different-first-page-none-title-page"),
     );
     ui.ctx()
         .data_mut(|data| data.insert_temp(Id::unique("writer-furniture-focus"), focused));
@@ -3520,7 +3704,7 @@ fn font_picker(ui: &mut Ui, salt: &str, font: &mut String, filter: &mut String) 
         .height(360.0)
         .width(180.0)
         .show_ui(ui, |ui| {
-            ui.add(egui::TextEdit::singleline(filter).hint_text("Search fonts"));
+            ui.add(egui::TextEdit::singleline(filter).hint_text(tr!("search-fonts")));
             let needle = filter.to_lowercase();
             for family in sue_wm::fonts::families() {
                 if needle.is_empty() || family.to_lowercase().contains(&needle) {
