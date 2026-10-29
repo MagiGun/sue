@@ -7,16 +7,14 @@ musicians, filmmakers, makers and coders. It has no technical jargon. When a ter
 needs explaining, it is explained the first time it appears.
 
 > **Where things stand:** This guide describes the experience Sue is built for.
-> Sue already opens its own window with the Hub, where
-> you pick a studio, over the infinite canvas described below. You can write,
-> paint in Sue Paint, listen, split and level audio, view pictures and
-> raw bytes, line things up on the timeline, browse files, play music, convert
-> files and keep notes. Everything you change can be undone. Your quick note is
-> saved as you go, and `Ctrl+S` saves everything on the canvas as one project
-> file. The big studios (music, video, 3D) and a web browser built into the
-> window are added in the releases that follow. Sue reads your `.suerice` file when it
-> starts (or when you press Reload in Settings), so close Sue or reload after you
-> edit the file by hand.
+> Sue already opens its own window on the Hub, where you pick a studio or a
+> tool. You can paint in Sue Paint, write and publish in Sue Writer, look at
+> and touch up pictures in the Image Viewer and turn files into other kinds
+> in the Converter. Everything you change can be undone, and `Ctrl+S` saves
+> everything you made as one project file. The big studios (music, video, 3D)
+> are added in the releases that follow. Sue reads your `.suerice` file when
+> it starts (or when you press Reload in Settings), so close Sue or reload
+> after you edit the file by hand.
 
 ---
 
@@ -24,280 +22,193 @@ needs explaining, it is explained the first time it appears.
 
 Sue is **one small app that can become many apps**.
 
-Most days you'll use it for everyday jobs:
+Some days you'll use it for everyday jobs, with its **tools**:
 
-- a **fast file explorer** for browsing your folders and drives,
-- a **music and media player** for your MP3s and videos,
-- a **notes app** for quick thoughts and lists,
+- an **image viewer** to look at pictures large and fix them up quickly,
 - a **file converter**: drop a file in, get it out in another format.
 
-When you need more, one click turns Sue into a full studio:
+When you need more, one click turns Sue into a full **studio**:
 
 | Studio | What you do there |
 | --- | --- |
-| Document processor | Write and lay out letters, reports, books |
-| Vector & raster studio | Draw, paint, edit photos, design logos |
-| Music studio (DAW) | Record, arrange and mix songs |
-| Video editor | Cut, color and caption videos |
-| CAD / 3D modeler | Design parts and build 3D scenes |
-| Code editor (IDE) | Write and run programs |
-| Game engine | Build and play games |
+| Sue Paint | Draw, paint, ink comics and animate |
+| Sue Writer | Write and lay out letters, reports, novels and scripts |
+| Music studio (DAW) | Record, arrange and mix songs (planned) |
+| Video editor | Cut, color and caption videos (planned) |
+| CAD / 3D modeler | Design parts and build 3D scenes (planned) |
+| Code editor (IDE) | Write and run programs (planned) |
+| Game engine | Build and play games (planned) |
 
-Every studio works on **the same files at the same time**. Put a song on the
-timeline and it is the same song you see on the canvas. Nothing is exported,
-imported or converted between them.
+Every studio works on **the same files at the same time**. A picture you
+paint in Sue Paint is the very picture you put in a chapter in Sue Writer.
+Nothing is exported, imported or converted between them.
 
 ---
 
 ## How the screen works
 
-Sue's window is one big **infinite canvas**: a dark board with a faint dot grid
-that goes on forever in every direction. Everything you work on sits on it as a
-card. Out of the box Sue is black, white and grays only, so your own pictures
-and words are the only color you see (you can color it yourself in Settings).
+Sue's window has three parts: a **bar along the top**, the **page** under it,
+and a thin **status bar** along the bottom. Out of the box Sue is black,
+white and grays only, so your own pictures and words are the only color you
+see (you can color it yourself in Settings).
 
 ```text
-┌───┬──────────────────────────────────────────────────────────┬───┐
-│ F │               [ Hub  Command (Tab) ]                     │ I │
-│ P │                                                          │ H │
-│ C │       ┌ Welcome ──────────────────────────────┐          │   │
-│ N │       │ # Welcome to Sue                      │          │   │
-│   │       │ text you can type                     │          │   │
-│   │       │                                       │          │   │
-│   │       └───────────────────────────────────────┘          │   │
-│ ⚙ │                                                          │   │
-├───┴──────────────────────────────────────────────────────────┴───┤
-│ Hub │ Canvas  Welcome              1 entity  Undo 0  Balanced  Idle │
-└──────────────────────────────────────────────────────────────────┘
+┌──────┬────────────────────────────────────────────────────────────┐
+│ Sue  │ File  Edit  Layer  ...   (the menus of what is open)       │
+├──────┴────────────────────────────────────────────────────────────┤
+│  Studios                                                          │
+│  ┌──────────────┐ ┌──────────────┐                                │
+│  │ Sue Paint    │ │ Sue Writer   │                                │
+│  │          [⚲] │ │          [⚲] │                                │
+│  └──────────────┘ └──────────────┘                                │
+│  Tools                                                            │
+│  ┌──────────────┐ ┌──────────────┐                                │
+│  │ Image Viewer │ │ Converter    │                                │
+│  │          [⚲] │ │          [⚲] │                                │
+│  └──────────────┘ └──────────────┘                                │
+├───────────────────────────────────────────────────────────────────┤
+│ Hub                                    0 entities  Undo 0  Idle   │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
 ### The Hub
 
-Sue opens with the **Hub** in front of the canvas: one card for each place
-you can work. **Canvas** is the endless surface with every file of your
-project; **Sue Paint** is the painting studio, and more studios join it as
-they are built. Click one to go there, or press `Esc` to stay on the canvas.
-The **Hub** button at the top of the canvas and at the far left of the status
-bar (also inside every studio) brings it back. If you would rather open
-straight into the canvas or a studio, pick it under Settings, General,
-Startup.
+Sue opens on the **Hub**, a page of boxes: first the **Studios** (Sue Paint,
+Sue Writer), then the **Tools** (the Image Viewer, the Converter). Each box
+says what it is for. Click one to go there: it comes in over the Hub, and a
+studio slides its panels in from the edges. New studios and tools appear in
+the Hub by themselves as they are added.
 
-### Moving around
+At the bottom right of every box is a **pin**. Pin the studio or tool you
+use most and Sue opens straight into it from then on, with no stop at the
+Hub. Only one can be pinned: pinning another moves the pin, and clicking the
+pinned one again takes it away. `Ctrl+Z` undoes a pin like any other change,
+and you can also choose it under Settings, General, Startup.
 
-- **Zoom** with the mouse wheel, from 10% to 3200%. The point under the pointer
-  stays put, so you zoom right into what you are looking at.
-- **Pan** by dragging with the middle mouse button, or hold **Space** and drag.
-- Everything moves on springs: nothing jumps, it glides into place and then
-  stops. When nothing moves, Sue draws nothing at all.
+### The Sue button and its menu
 
-### The Sue button
+At the very top left of the window, always in the same place, is the **Sue**
+button (Sue's silhouette). Right after it come the menus of whatever is open:
+Sue Paint's File, Edit, Story and the rest, or Sue Writer's, or a tool's. On
+the Hub the bar just says Hub.
 
-At the very top left, in the canvas and in every studio, is the **Sue**
-button. It opens the Sue menu, a round menu like the right-click one, made
-for whatever you are working on. It leads to:
+The Sue button opens the **Sue menu**, for Sue as a whole:
 
-- the open studio's own wheel (in Sue Paint: new, open, import as a layer,
-  export, reset the palettes, shortcuts);
-- **Send To**: the thing you are working on, into another studio or tool,
-  with no exporting and importing. A picture from Sue Paint goes onto the
-  canvas or into the Converter; a song goes to the Player; a picture file on
-  the canvas opens in Sue Paint; any file shows in the File Manager. Studios
-  that come later (a video editor, say) appear here by themselves;
-- **File**: a new file, open a file, the File Manager, the Converter, adding
-  music;
+- **Hub**: back to the Hub;
+- **Studios** and **Tools**: go straight to any of them;
+- **New**: a new picture (Illustration, Print A4, Full HD, Square Post,
+  Sprite or a custom size) or a new writing project (a blank document, a
+  novel, a short story, a screenplay and more), opened right where it
+  belongs;
+- **File**: Open File (`Ctrl+O`);
 - **Project**: open, save and save as;
-- **Studios**: the Hub, the canvas and every studio;
-- the command palette and Settings.
+- **Send To**: the thing you are working on, into another studio or tool,
+  with no exporting and importing. A picture in Sue Paint goes into the
+  Converter or into the text in Sue Writer; a picture in the Image Viewer
+  opens in Sue Paint. Studios that come later appear here by themselves;
+- **Open ... at Launch**: pin what is open, as the Hub's pin does;
+- the command palette, Settings and Quit Sue.
 
-### The top pill
+### The Image Viewer
 
-A floating bar at the top of the canvas with just two buttons:
+The **Image Viewer** fills its page with one picture: zoom with the wheel,
+fit it or see it at 100%, drag to pan, and step to the project's other
+pictures with the arrow keys. Its menus (File, Image, View, Send) and the
+toolbar under them do the quick fixes (turn, mirror, crop, resize,
+brightness and contrast, saturation and hue, grayscale, invert), each one
+`Ctrl+Z` step; save the picture as any picture type; re-encode it as a
+lossless JPEG XL; show it in its folder; and send it to the Converter, Sue
+Paint or Sue Writer. File, Open Picture opens one with your system's own
+Open window.
 
-- **Hub** shows every studio you can choose.
-- **Command (Tab)** opens the command palette.
+### The Converter
 
-To work on a card, just click it. New files are made from the marking menu
-(right-click), described below.
+The **Converter** turns any file into another kind. Add files with **Add
+Files** or **Add a Folder** (your system's own Open window), with the Sue
+menu's Send To from any studio or tool, or with **Add from the Project** (the
+pictures and sounds you have open). For each kind of file in the list a
+drop-down says what it becomes:
 
-### The selection pill
+- pictures: PNG, JPEG, JPEG XL, WebP, TIFF, BMP, GIF, TGA, QOI, ICO or PPM,
+  with a new size (scale, width, height, fit inside, exact) and how to
+  resample, turning, mirroring, brightness, contrast, saturation, grays
+  only, filling transparency with a color you pick on the wheel, and the
+  JPEG quality or JPEG XL effort;
+- sounds: FLAC, WAV or AIFF, at a new sample rate, mono or stereo, 16 or
+  24-bit (or 32-bit float WAV), louder or quieter (or normalized), with the
+  start or end cut, faded in or out, sped up or slowed down, or backwards;
+- text: tidied (line endings, trailing spaces, tabs), Markdown as an HTML
+  page, and tables between CSV, TSV and JSON (JSON can also be re-indented);
+- anything at all: Base64 text, a hex dump, a byte map picture, or a plain
+  copy.
 
-Click a card and a second floating bar springs up right above it, with only the
-tools that card needs:
+Choose where the results go (next to each file, or a folder you pick), how
+they are named (`{name}-small`, say), and whether to keep both or replace a
+file of the same name; the file being converted is never written over. Click
+Convert (or `Ctrl+Enter`): big files convert in the background, the list says
+where each one went (click it to see it in Explorer), and the status bar
+names the folder.
 
-- **Documents:** H1, H2, Bold, Monospace, a smaller or larger text size, and
-  Project to Timeline. Headings and bold stay as marks in the text (`#`, `**`),
-  so the text is always plain and portable.
-- **Audio:** Play or Pause, Gain down and up, Split (at the playhead, or in the
-  middle), Normalize and Open in Timeline. None of these change the recording
-  itself: the two halves of a split share the very same sound.
-- **Pictures:** Image Viewer (or double-click the picture), Pixel Grid,
-  Re-encode .jxl (it asks where to save first) and Inspect Hex. The **Image
-  Viewer** fills the window with the picture: zoom, pan, and step to the
-  other pictures with the arrow keys. It does the quick fixes (turn, mirror,
-  crop, resize, brightness and contrast, saturation and hue, grayscale,
-  invert), each one `Ctrl+Z` step, saves the picture as any picture type, and
-  sends it to the Converter, Sue Paint or Sue Writer.
+### Opening and saving files
 
-Click empty canvas and the pill fades away. Drag a card by its title to move
-it, or by its bottom right corner to resize it. Double-click a title to switch
-to that card's mode.
-
-### The marking menu and the command palette
-
-The **Sue button** at the top left (Sue's silhouette) opens the Sue menu.
-
-**Right-click** anywhere on the canvas: a round menu grows around the pointer
-with New File, Open File, Sue Paint, Hub, Command Palette and Reset Camera. Click a slice, or hold the right button, drag toward a slice and let
-go. Right-click a card and the wheel also offers **Delete**, which takes the
-card off the canvas (`Ctrl+Z` brings it back).
-
-**New File** opens a second wheel with the kinds of files Sue makes:
-Document, Picture, Audio and Code. Each of those opens a third wheel with the
-exact kind: a blank document, notes, a to-do list, a letter or a report; an
-illustration, a print page, a Full HD screen, a square post, a transparent
-sprite or a custom size; a tone or silence; a Rust, Python,
-JavaScript, HTML, CSS, JSON or shell file. The new file appears where you
-right-clicked. A new picture opens straight in Sue Paint. Click the middle of a
-wheel to go back to the one before.
-
-Press **Tab** (or `/`) for the **command palette**: start typing and it finds
-any action, mode or tool by a few letters, such as "new notes" for a new
-notes document.
-
-### The timeline
-
-Project to Timeline (or Toggle Timeline in the command palette) slides the
-**timeline** up from the bottom. It has a Document Track, a Paint/Visual Track and an Audio Track. Each
-block on it *is* the card on the canvas, not a copy. Drag blocks to move them,
-click the ruler to move the playhead, and press **Space** (or the Play button)
-to play: audio blocks sound as the playhead passes them.
-
-### Drawers on the sides
-
-The thin **rails** at the far left and far right hold one icon per tool. Click
-one to slide its drawer open; click it again to tuck it away.
-
-- **File Manager** (left): your folders, in tabs (`+` opens another tab on the
-  same folder, `×` closes one), each with its own Back and Forward. Show a
-  folder as a **list**, **details** (name, kind, when it changed, size),
-  **icons** or **cards**, and make them bigger or smaller with the slider;
-  pictures show a preview, and previews arrive quickly. Sort by name, date,
-  size or kind, and flip the order with the arrow.
-  Search the folder as you type, or turn on **Subfolders** to search
-  everything under it. The path bar shows the folder you are in: copy it,
-  or type any folder and press Enter to go there. Click a file to select it
-  (its full path appears, with Copy Path, Rename, Show in Explorer and
-  Open); double-click to open it on the canvas. The **star** makes the folder
-  a favorite, kept under Favorites next to your project, home folder,
-  Desktop, Documents, Downloads, Pictures, Music, Videos and drives. **New
-  Folder** makes one, and **Open in Explorer** shows the folder in your
-  system's file manager. When you save, **Save as type** picks the kind of
-  file, and when something asks for a file, **System Dialog** opens your
-  system's own Open or Save window instead (or always, in Settings). "Open the large File Manager" shows it all in a big window.
-  Hidden system clutter stays hidden.
-- **Player** (left): your music library (MP3, FLAC, WAV, Ogg, M4A and more),
-  playing while you work anywhere in Sue. It works like the music apps you
-  know: the song playing with its cover and a heart to like it; Shuffle,
-  Previous, a big Play and Pause, Next and Repeat (the queue, or one song);
-  a bar to jump around the song; and the volume with a mute button. Browse
-  **Songs**, **Albums** (made from the songs' tags, or put together by hand
-  with New Album), **Artists**, **Liked** songs, **Playlists** and the
-  **Queue**, and search them all by title, artist, album or genre. Each
-  song's `+` (or a right-click) plays it next, adds it to the queue or to a
-  playlist, likes it, or shows it in Explorer. Playlists and your own albums
-  can be renamed, given a cover picture, reordered and deleted. Add songs
-  with **Add Music** or, in the File Manager, pick a song or a whole folder
-  and click **Add to Player**. Your library is yours alone: it is kept by
-  Sue, not in your projects. Under Settings, Audio & DSP, Player you can
-  turn on shuffle and repeat, going on to the next song, evening out
-  loudness between songs, loading the next song early, and cover pictures.
-  "Open the Large Player" shows it in a big window with a sidebar, and the
-  command palette has Play or Pause, Next Song and Previous Song.
-- **Convert** (left): turn any file into another kind. Add files with **Add
-  Files** (one file or a whole folder, through the File Manager), with the
-  File Manager's **Convert** button, or **Add from the Canvas**. For each
-  kind of file in the list a drop-down says what it becomes:
-  - pictures: PNG, JPEG, JPEG XL, WebP, TIFF, BMP, GIF, TGA, QOI, ICO or PPM,
-    with a new size (scale, width, height, fit inside, exact) and how to
-    resample, turning, mirroring, brightness, contrast, saturation, grays
-    only, filling transparency with a color you pick on the wheel, and the
-    JPEG quality or JPEG XL effort;
-  - sounds: FLAC, WAV or AIFF, at a new sample rate, mono or stereo, 16 or
-    24-bit (or 32-bit float WAV), louder or quieter (or normalized), with
-    the start or end cut, faded in or out, sped up or slowed down, or
-    backwards;
-  - text: tidied (line endings, trailing spaces, tabs), Markdown as an HTML
-    page, and tables between CSV, TSV and JSON (JSON can also be
-    re-indented);
-  - anything at all: Base64 text, a hex dump, a byte map picture, or a
-    plain copy.
-
-  Choose where the results go (next to each file, or a folder you pick),
-  how they are named (`{name}-small`, say), and whether to keep both or
-  replace a file of the same name; the file being converted is never
-  written over. Click Convert: big files convert in the background, the
-  list says where each one went (click it to see it in Explorer), and the
-  status bar names the folder.
-- **Notes** (left): jot something down. Notes save themselves. Above the
-  note: Undo and Redo, **Save As** (to a text file, through the File
-  Manager), **Open** (put a text file into the note; Undo brings the old note
-  back), Copy All, Clear, and smaller or larger text; below it, how many
-  words and characters it has. Drag to select past the top or bottom of the
-  note and it scrolls along, so the selection keeps growing.
-- **Inspector** (right): the details of the selected card, and a place to
-  change them: type a new name; change its place and size on the canvas
-  (drag a number or type it); change its values, such as a document's text
-  size or a sound's gain; edit a document's or code's text right there; and
-  change, add or remove the facts of its file, such as a song's title or a
-  picture's notes. It also shows which views it has (Document, Timeline and
-  so on). Every change is one `Ctrl+Z` step.
-- **History** (right): every change you made, newest at the top, as a tree you
-  can click to go back (or forward again) to any moment.
-
-The rails and drawers stay with you inside every studio too, so your files,
-notes and history are always one click away.
-
-You can also drop any file anywhere on the window to put it on the canvas.
+Whenever Sue needs a file, or a place to save one, it shows your system's own
+Open, Save or folder window, the one every other app uses. Open File (in the
+Sue menu, or `Ctrl+O`) and dropping a file anywhere on the window both put
+the file where it belongs: a picture opens in the Image Viewer, a Word,
+Markdown or text file in Sue Writer, and a `.sue` project replaces what is
+open. A file nothing in Sue opens yet is left alone, and the status bar says
+so.
 
 Whenever Sue saves or exports a file (a project, a picture from Sue Paint, a
 re-encoded JPEG XL, an exported rice), the status bar says the file's name and
 the folder it went to. Click that message to see the file, selected, in your
 system's file manager.
 
+### The command palette
+
+Press **Tab** (or `/`) for the **command palette**: start typing and it finds
+any action by a few letters, such as "open viewer" for the Image Viewer or
+"new square" for a new square picture. (In Sue Paint, Tab hides the palettes
+instead, as in other painting apps; the palette is in the Sue menu.)
+
+Everything moves on springs: nothing jumps, it glides into place and then
+stops. When nothing moves, Sue draws nothing at all.
+
 ### Text, everywhere
 
-Every place you type (documents, code, notes, search boxes) works the same: drag
+Every place you type (documents, search boxes, names) works the same: drag
 to select, double-click a word, `Ctrl+A` to select all, `Ctrl+C`, `Ctrl+X` and
 `Ctrl+V` to copy, cut and paste, and `Ctrl+Z` and `Ctrl+Y` to undo and redo.
-Undo is one history for everything: typing, moving a card, a brush stroke or a
-Settings slider all go back in the order you did them.
+Undo is one history for everything: typing, a brush stroke, the Hub's pin or
+a Settings slider all go back in the order you did them.
 
 ### Settings
 
-The gear at the bottom of the left rail (or `Ctrl+,`) opens **Settings** as a
-floating window. A list of categories runs down the left (General, Appearance &
-Rice, Display & Graphics, Audio & DSP, Files & Codecs, Packages & Updates,
+The Sue menu's **Settings** (or `Ctrl+,`) opens Settings as a floating
+window. A list of categories runs down the left (General, Appearance & Rice,
+Display & Graphics, Audio & DSP, Files & Codecs, Studios, Packages & Updates,
 Keymaps, MCP), and the right side shows only that category. Type in "Filter
 settings..." to search all of them.
 
-Under Display & Graphics, **Performance Preference** sets how smooth and how
-frugal Sue is (Auto picks for your machine). **GPU preference** chooses which
-graphics card draws the window: Auto uses the one your screen is plugged into,
-Integrated the power-saving one and Discrete the fast one. Sue shows which card
-it is drawing on and every card it found; the choice takes effect when Sue
-starts, so press **Restart Sue** after changing it. **MCP** (connecting Sue to
-AI tools) is not yet available.
+Under General, **Open At Launch** is the Hub's pin: the Hub, or the studio or
+tool Sue opens straight into. Under Display & Graphics, **Performance
+Preference** sets how smooth and how frugal Sue is (Auto picks for your
+machine). **GPU preference** chooses which graphics card draws the window:
+Auto uses the one your screen is plugged into, Integrated the power-saving
+one and Discrete the fast one. Sue shows which card it is drawing on and
+every card it found; the choice takes effect when Sue starts, so press
+**Restart Sue** after changing it. **MCP** (connecting Sue to AI tools) is
+not yet available.
 
 ---
 
 ## Sue Paint: painting and illustration
 
-Click **Sue Paint** in the Hub (or find it with `Tab`) and the space between the
-side rails becomes a painting studio. If you have used a painting app, it will feel
-familiar:
+Click **Sue Paint** in the Hub (or find it with `Tab`) and the page becomes a
+painting studio. If you have used a painting app, it will feel familiar:
 
-- **Menus along the top:** File, Edit, Story, Animation, Layer, Select, View,
-  Filter, Window and Help. Everything Sue Paint can do is in them. Items shown
+- **Menus along the top,** right after the Sue button: File, Edit, Story,
+  Animation, Layer, Select, View, Filter, Window and Help. Everything Sue Paint can do is in them. Items shown
   in gray are planned but not built yet (correcting vector lines,
   materials and a few more), so you can see what is coming.
 - **Tools on the left:** pen, pencil, brush, airbrush, eraser, fill bucket,
@@ -514,30 +425,28 @@ and File, then Export Single Layer, saves your picture as one again. **Save
 As** (`Ctrl+Shift+S`) asks for a type too: a Sue project keeps every layer,
 and PNG, JPEG XL, JPEG, WebP, TIFF, BMP, TGA, GIF or QOI saves the picture
 flattened. Both
-open the Sue File Manager, showing only the pictures it can read; type a file
-name to save, or click System Dialog to use your system's own window
-instead. `Alt+I`
+use your system's own Open and Save windows, showing only the pictures Sue
+Paint can read. `Alt+I`
 lists every shortcut as you have set it, and **Change Shortcuts** takes you
 to Settings to set them.
 
 Your pictures are part of your project: `Ctrl+S` saves them with everything
-else, and every stroke can be undone with `Ctrl+Z`. When you click **Back to
-Canvas**, the picture is waiting on the canvas as a card; double-click it (or
-use "Open in Sue Paint") to keep painting.
+else, and every stroke can be undone with `Ctrl+Z`. File, **Back to the Hub**
+(or the Sue menu's Hub) leaves Sue Paint; your pictures wait for you there
+the next time you open it.
 
-Going in and out is smooth: opening Sue Paint, the canvas zooms into the
-picture's card, and then the menus and palettes slide in from the edges around
-it. Leaving, they slide back out, the picture
-settles into its card, and the canvas zooms out again. How fast this happens
-follows the Motion settings (Settings, Display & Graphics): a faster animation
-speed shortens it, and "Instant transitions" makes it immediate.
+Going in and out is smooth: opening Sue Paint, its page comes in over the Hub
+and the palettes slide in from the edges around the picture. Leaving, they
+slide back out and the Hub comes back. How fast this happens follows the
+Motion settings (Settings, Display & Graphics): a faster animation speed
+shortens it, and "Instant transitions" makes it immediate.
 
 ---
 
 ## Sue Writer: writing and publishing
 
 **Sue Writer** is where you write, from a letter to a trilogy. Open it from
-the Hub, the top pill, the Sue button, or New File's Writing wheel, which
+the Hub or the Sue menu's Studios, or with the Sue menu's New, Writing, which
 starts a project from a template: a blank document, a novel, a short story, a
 screenplay, a non-fiction book, an essay or paper, a poetry collection, a
 letter or a report.
@@ -577,10 +486,10 @@ as a PDF (set in your fonts, with bookmarks and page numbers), a Word
 document, an OpenDocument file, an EPUB e-book, a web page, RTF, Markdown or
 plain text. `Ctrl+P` goes straight to PDF.
 
-Sue Writer works with the rest of Sue. A project sits on the canvas as a
-card. Pictures from Sue Paint go straight into your text with the Sue menu's
-Send To, and any text on the canvas opens in Sue Writer the same way. Open a
-Word file anywhere in Sue and it comes into Sue Writer, formatting and all.
+Sue Writer works with the rest of Sue. Pictures from Sue Paint go straight
+into your text with the Sue menu's Send To. Open a Word, Markdown, HTML or
+plain text file anywhere in Sue and it comes into Sue Writer, formatting and
+all.
 Everything you do can be undone, and it all saves inside your project.
 
 ---
@@ -588,21 +497,20 @@ Everything you do can be undone, and it all saves inside your project.
 ## Projects: one file for everything
 
 Press `Ctrl+S` to save your work as a **project**, a single `.sue` file. It
-holds everything on the canvas: your documents, pictures, sounds and whatever
-else you made, how they are linked, and where each card sits. The first time,
-Sue asks where to save; after that `Ctrl+S` just saves. "Save Project As" in the
-command palette picks a new file. Choosing where to save, and `Ctrl+O`, both
-open the Sue File Manager. Open a project like any other file (the File
-Manager, `Ctrl+O`, or drop it on the window) and the canvas comes back exactly as
-you left it. Your quick note is yours alone and never goes into projects.
+holds everything you made in every studio and tool: your documents, pictures,
+sounds and whatever else, and how they are linked. The first time, Sue asks
+where to save (your system's own Save window); after that `Ctrl+S` just
+saves. The Sue menu's Project, Save Project As picks a new file. Open a
+project like any other file (Open File, `Ctrl+O`, or drop it on the window)
+and everything comes back exactly as you left it.
 
 A few things make projects safe to keep for years:
 
 - **Nothing is lost.** If a project holds something this copy of Sue cannot
   show yet (made by a newer Sue, or by a feature you have not installed), Sue
-  keeps it untouched and saves it back as it was. The same goes for files Sue
-  cannot open yet, such as videos and PDFs: they sit on the canvas as cards
-  that keep the original file inside and can be saved back out unchanged.
+  keeps it untouched and saves it back as it was. A project saved by an older
+  Sue, with its infinite canvas, still opens: everything in it comes back,
+  and the canvas layout is kept in the file as it was.
 - **Links survive.** Everything has a permanent name inside the project, so a
   clip on the timeline, a picture on a page or a link in a note still points at
   the right thing after you save, reopen, copy or paste.
@@ -631,20 +539,23 @@ engineers' map of how each idea fits is in `HUMANZ.md` §8.
 Sue runs on **Windows, Linux, macOS, Android and iOS**. It is the same app with
 the same files and the same tools on each.
 
-- **On a computer**, the drawers push the canvas aside, and you work with the
-  mouse and keyboard.
-- **On a tablet**, the drawers slide over the canvas so your drawing area stays
-  as big as possible. A pen gets pressure-sensitive strokes.
-- **On a phone**, the drawers slide in from the edges and the timeline becomes a
-  **sheet** you pull up from the bottom, within reach of your thumb.
+Everywhere it is laid out the same way: the Sue button at the top left with
+the menus after it, the Hub or a studio or tool filling the page, and the
+status bar at the bottom.
+
+- **On a computer**, you work with the mouse and keyboard.
+- **On a tablet**, the top bar is taller, so its buttons are easy to tap, and
+  a pen gets pressure-sensitive strokes.
+- **On a phone**, the top bar is taller still, for your thumb, and the Hub
+  shows its boxes two by two with big pins.
 
 **Sue Paint on a tablet** keeps the menus, the tool strip and the Layer
 palette, and folds the other palettes into icons at the right edge: tap one to
-pop it over the canvas. **On a phone** the canvas fills the screen. The top bar
-has the menus, Undo and Redo, then the timeline, the tool settings, the color,
-the layers and the way back; the bottom bar has the tools you reach for most,
-**More** for every tool, and your color. Palettes come up from the bottom as
-sheets, one at a time; tap above a sheet to put it away.
+pop it over the canvas. **On a phone** the canvas fills the screen. The top
+bar has the Sue button, then Sue Paint's menus, Undo and Redo, the layers,
+the color, the tool settings and the timeline; the bottom bar has the tools
+you reach for most, **More** for every tool, and your color. Palettes come up
+from the bottom as sheets, one at a time; tap above a sheet to put it away.
 
 Everywhere, **two fingers** move, zoom and turn the canvas, a quick
 **two-finger tap undoes** and a **three-finger tap redoes**, as in Clip Studio
@@ -737,11 +648,11 @@ file).
 A line like this in your `.suerice` file:
 
 ```toml
-padding = 8   # [2..24] Space inside drawers, pills and controls (px)
+padding = 8   # [2..24] Space inside bars, pills and controls (px)
 ```
 
 shows up in Settings as a slider from 2 to 24 labelled "Padding", with the
-description "Space inside drawers, pills and controls (px)" under it. Move the
+description "Space inside bars, pills and controls (px)" under it. Move the
 slider and the file updates. Edit the file and the slider moves the next time
 Sue reads it. You can share your `.suerice` file with friends or download other
 people's looks from the package manager.

@@ -61,7 +61,7 @@ backbone; section 8 maps every feature area onto it).
 5. **No hidden copies.** Large buffers move by handle or as `Shared`.
 6. **OS code only in `sue-platform`.** No `cfg(target_os)`, `windows-sys`,
    `libc` or `objc` anywhere else. `unsafe` is forbidden everywhere.
-7. **Studios share features.** Use the shared color picker, file picker,
+7. **Studios share features.** Use the shared color picker, file dialogs,
    fonts, text editor, exporters and models; give a shared feature a new mode
    instead of copying it.
 8. **Tests with every backbone change**, and runtime tests (in
@@ -192,8 +192,12 @@ four checks, and make sure it did not touch the backbone without tests.
 - **A file format**: a handler in `crates/sue-io` registered in the
   `FormatRegistry`, with a round trip test, and a decoder that refuses bad
   input with a reason instead of panicking.
-- **A studio**: an applet implementing `SueApplet` in its own crate,
-  registered with the Launchpad. It works on arena entities and offers its
+- **A studio or a tool**: an applet implementing `SueApplet` in its own
+  crate, registered with the Launchpad, with the role `Studio` or `Tool`. It
+  gets a box in the Hub (with its pin) and a place in the Sue menu by
+  itself, draws its page in `page_ui` and its menus after the Sue button in
+  `bar_ui`, works on arena entities, asks for files with
+  `ShellRequest::PickFile` (the system's dialogs answer) and offers its
   actions through `sue_actions`.
 - **A setting**: a `RiceDeclaration` in the applet and the same key in
   `crates/sue-rice/rice/default.suerice` (a test checks they match).

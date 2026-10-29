@@ -187,9 +187,7 @@ buffer. Builders (`with_class`, `with_property`, `with_ext`, `with_component`,
 children, extension components), which is how copies get fresh ids.
 
 Class names are namespaced like every other registry key: `sue.*` for the core,
-`noelle.*` for the game engine, a feature's own prefix for its own. Classes
-starting with `sue.app.` belong to the app itself (the quick note): projects
-leave them out and opening a project keeps them (§1.9).
+`noelle.*` for the game engine, a feature's own prefix for its own.
 
 ### 1.4 The built-in buffers and projections
 
@@ -383,10 +381,11 @@ touched), `InsertBundle` (§1.10) and `Batch<T>`, which applies several
 transactions as one step and takes back the done ones if a later one fails.
 
 `UndoStack<T>` is generic. The shell keeps **one global history**,
-`UndoStack<sue_wm::World>`, where `World { arena, rice, scene }` holds everything
+`UndoStack<sue_wm::World>`, where `World { arena, rice }` holds everything
 undoable. `ArenaEdit(txn)` and `RiceEdit(txn)` lift arena and rice transactions
 onto the world, so a single `Ctrl+Z` (or `Ctrl+Shift+Z` / `Ctrl+Y` to redo) steps
-back through note edits, canvas moves and theme edits in the order they happened.
+back through typing, brush strokes, the Hub's pin and theme edits in the order
+they happened.
 
 ### 1.9 The `.sue` project file
 
@@ -412,10 +411,9 @@ next save). Chunks today:
 | `META` | 1 | Document properties (title, author) | `sue-core` |
 | `PRST` | 1 | A preset library (§1.11) | `sue-core` |
 | `THMB` | 1 | A preview picture (reserved) | `sue-core` |
-| `SCNE` | 1 | The canvas layout: nodes naming entities by id, rectangles, node properties | `sue-wm` |
+| `SCNE` | 1 | The layout of the infinite canvas of builds before the Hub: nodes naming entities by id, rectangles, node properties. This build does not read it and keeps it untouched, like any chunk it does not know | older `sue-wm` |
 
-Saving a document leaves out `sue.app.*` entities (`set_arena_where`), and
-opening one replaces the document while keeping them. Loading never reuses a
+Opening a project replaces the document. Loading never reuses a
 handle that was live before, so caches keyed by handle cannot show stale data.
 Saving a loaded file is byte for byte stable (a test checks it), and a document
 whose extension types are unknown to this build still round-trips byte for
@@ -512,7 +510,7 @@ Three shared shapes need no component of their own:
 | Manuscripts (`sue_model::manuscript`) | a `sue.manuscript` entity, ordered `CHILD` folders and documents | A binder with draft, research and trash folders (`manuscript.role`); synopsis, notes, status, label, include, word target and keywords as `doc.*` properties (§3.8) | novels, scripts, theses, manuals, e-books, outlines |
 | `BlendMode` | its name in `style.blend` | 26 blend modes (normal; darken, multiply, burns; lighten, screen, dodges, add; overlay and the lights; difference, exclusion, divide; hue, saturation, color, luminosity) and W3C compositing with straight alpha; names from a newer Sue fall back to normal | every feature that stacks layers |
 
-A layer can be any raster entity, so a photo that sits on the canvas can also
+A layer can be any raster entity, so a photo open in the Image Viewer can also
 be a layer of a picture: the same entity, never a copy.
 
 A feature that needs something new adds its own `ComponentType` the same way,
@@ -559,7 +557,7 @@ caches default to `.jxl`.
 
 | Use | Feature relied on |
 | --- | --- |
-| 120 FPS File Explorer and canvas thumbnails | Progressive decoding. The DC pass (1:8 scale) is decodable from the first bytes, so a thumbnail never waits for the full file. |
+| 120 FPS thumbnails of folders full of pictures | Progressive decoding. The DC pass (1:8 scale) is decodable from the first bytes, so a thumbnail never waits for the full file. |
 | Multi-layer raster canvases | Native layers / extra channels; one `.jxl` per document |
 | 32-bit float HDR 3D textures | Float samples and wide-gamut / HDR colour encodings |
 | Importing existing JPEGs | **Lossless JPEG recompression**: about 20% smaller, with a `jbrd` box that reconstructs the original JPEG **bit for bit** |
@@ -652,18 +650,18 @@ the `PlatformHost` trait and the portable services next to it:
 | --- | --- |
 | `os`, `form_factor` | `OsFamily::{Windows, Linux, MacOs, Android, Ios, Other}`, `FormFactor` |
 | `capabilities` | `HardwareCapabilities`: logical cores, refresh rate, graphics API, GPU tier and vendor, memory, power source, touch, stylus |
-| `paths` | `PlatformPaths`: config, data, cache and home folders, plus derived `rice_dir`, `packages_dir`, `models_dir`, `notes_dir` |
+| `paths` | `PlatformPaths`: config, data, cache and home folders, plus derived `rice_dir`, `packages_dir`, `models_dir` |
 | `create_surface`, `resize_surface`, `destroy_surface`, `surface` | Window / swap-chain surfaces with logical size, scale factor and safe-area insets |
 | `poll_events` | Drains `InputEvent`s |
 
 | Service | What it does |
 | --- | --- |
 | `AudioOutput` / `AudioSink` | A `cpal` output stream fed from a lock-free ring (§3.5); `NullAudio` is a device-free clock for tests |
-| `list_dir`, `hidden_by_os`, `roots`, `write_atomic` | Sorted folder listings for the File Manager, the drives (or `/`), without dot files or, on Windows, the legacy junctions (`NetHood`, `PrintHood`, `Cookies`, `SendTo`, `Recent`, `Start Menu`, `Templates`, `Application Data`, `Local Settings`, `My Documents`); crash-safe writes (temporary file, sync, rename) |
+| `list_dir`, `hidden_by_os`, `write_atomic` | Sorted folder listings (the Converter adds a whole folder), without dot files or, on Windows, the legacy junctions (`NetHood`, `PrintHood`, `Cookies`, `SendTo`, `Recent`, `Start Menu`, `Templates`, `Application Data`, `Local Settings`, `My Documents`); crash-safe writes (temporary file, sync, rename) |
 | `copy_text` | The system clipboard (`arboard`) for buttons such as Copy All; text fields copy and paste through `egui-winit` |
 | `EguiPainter`, `TextureUpload` | Paints egui frames with `egui-wgpu` into the window or an offscreen texture; uploads image pixels the caller borrows from the arena straight into GPU textures (rule 5) |
 | `open_url`, `reveal_folder` | The system browser (only `http` and `https`, validated by `web_url`) and file manager |
-| `pick_open_file`, `pick_save_file` | Native open and save dialogs (`rfd`) |
+| `pick_open_file`, `pick_save_file`, `pick_folder` | The system's own open, save and folder dialogs (`rfd`): every file Sue asks for goes through them. None is wired up on Android and iOS yet, so a pick there comes back empty |
 
 Path resolution is a pure function of the OS and an injected environment lookup,
 so it can be tested without touching the real environment:
@@ -729,11 +727,11 @@ confirmation, and `exit` lets it save before the loop ends.
 
 ### 3.2 Form-factor topologies
 
-| `FormFactor` | `Topology` | Input model | Geometry |
-| --- | --- | --- | --- |
-| `Desktop` | `Tiled` | Mouse + keyboard, keybinds from rice | Rails at both edges; the drawers and the timeline push the canvas aside |
-| `Tablet` | `Overlay` | Stylus pressure curves ($p' = p^{\gamma}$), the radial marking menu | Same chrome, but drawers slide over the canvas so it stays large |
-| `Mobile` | `Overlay` | Touch, edge swipes | Drawers capped at `layout.drawer_max_fraction` of the screen; the timeline is a thumb-zone sheet capped at `layout.sheet_max_fraction` |
+| `FormFactor` | Input model | Geometry |
+| --- | --- | --- |
+| `Desktop` | Mouse + keyboard, keybinds from rice | The top bar is `layout.bar_height` (28 points) tall |
+| `Tablet` | Stylus pressure curves ($p' = p^{\gamma}$), larger targets | The top bar is at least 36 points tall; Sue Paint docks its tool strip and layers and iconizes the rest |
+| `Mobile` | Touch | The top bar is at least 52 points tall, for 44 point buttons; the Hub shows two columns of boxes; Sue Paint moves its palettes into bottom sheets |
 
 Classification follows Android's resource-qualifier convention: on a mobile OS, a
 smallest screen side of **at least 600 dp** is a tablet (`FormFactor::classify`).
@@ -742,11 +740,12 @@ Desktop operating systems are `Desktop`.
 People can override it: `display.interface` (`auto`, `desktop`, `tablet`,
 `phone`) goes through `FormFactor::chosen` before the shell lays out or hands
 `ShellView::form_factor` to applets, so a phone can run the desktop layout and
-a desktop the touch ones. On a phone an open studio gets the whole width
-(`LayoutRequest::studio_open` leaves the rails out). Sue Paint draws its own
-phone layout (`phone.rs`: top and bottom bars of 44 point buttons, palettes and
-menus as bottom sheets) and, on tablets, docks the tool strip and layers and
-iconizes the rest. Two-finger pan, pinch and turn come from egui's
+a desktop the touch ones. Every form factor has the same structure: the top
+bar with the Sue button, the page (the Hub, a studio or a tool) across the
+whole width, and the status bar. Sue Paint draws its own phone layout
+(`phone.rs`: its row of 44 point buttons in the top bar after the Sue button, a
+bottom bar of them, palettes and menus as bottom sheets) and, on tablets, docks
+the tool strip and layers and iconizes the rest. Two-finger pan, pinch and turn come from egui's
 `multi_touch`; a second finger takes back the stroke the first began (the
 stroke is finished and undone, so no half stroke stays), and short two- and
 three-finger taps undo and redo.
@@ -768,8 +767,7 @@ event loop can be made once per process. The host:
   only one graphics API;
 - drops the surface on `suspended` and makes a new one on `resumed`, skipping
   resizes in between;
-- keeps config and data in the app sandbox (`internal_data_path`) and starts
-  the file picker in shared storage.
+- keeps config and data in the app sandbox (`internal_data_path`).
 
 iOS uses the ordinary executable in an app bundle; its sandbox is `HOME`.
 
@@ -794,36 +792,29 @@ checksums.
 ### 3.3 Layout solver
 
 `solve_layout(&LayoutRequest) -> LayoutSolution` is a pure function. It names
-every region in screen points: `left_rail`, `right_rail`, `status`, the visible
-part of each drawer (`left_drawer`, `right_drawer`) and its full-width rect slid
-by its reveal (`left_drawer_full`, `right_drawer_full`), the same pair for the
-timeline, and the `canvas`.
+every region in screen points: the top `bar`, the `sue_button` square at its
+left and the `menus` after it, the `page` and the `status` bar.
 
 ```text
-┌──────┬────────────┬──────────────────────────────────┬────────────┬──────┐
-│ rail │ left       │          infinite canvas         │ right      │ rail │
-│ 36px │ drawer     │  (top pill and selection pill    │ drawer     │ 36px │
-│      │ 260 px x   │   float over it)                 │ 280 px x   │      │
-│      │ reveal     ├──────────────────────────────────┤ reveal     │      │
-│      │            │ timeline, 240 px x reveal        │            │      │
-├──────┴────────────┴──────────────────────────────────┴────────────┴──────┤
-└──────────────────────────────── status bar (22 px) ──────────────────────┘
+┌────────┬──────────────────────────────────────────────────────────────────┐
+│  Sue   │ File  Edit  ...  (the open studio's or tool's menus)             │ bar
+├────────┴──────────────────────────────────────────────────────────────────┤
+│                                                                           │
+│              the page: the Hub, a studio or a tool                        │
+│                                                                           │
+├───────────────────────────────────────────────────────────────────────────┤
+└──────────────────────────── status bar (22 px) ───────────────────────────┘
 ```
 
-- **Inputs:** viewport, safe-area insets, form factor, the three reveal
-  fractions (spring positions, §3.4) and `LayoutMetrics` (rail, drawer,
-  timeline and status bar sizes, minimum canvas width, drawer and sheet
-  fractions), all read from rice.
-- **Tiled (desktop):** drawers take `width x reveal` and push the canvas; the
-  timeline takes `height x reveal` from the bottom of the canvas column. If the
-  canvas would fall below `layout.min_canvas_width`, both drawers shrink evenly.
-  Drawer content is laid out at full width and slid, never squeezed, so a
-  drawer glides open instead of reflowing.
-- **Overlay (tablet, phone):** the canvas keeps the whole middle; drawers and the
-  timeline slide over it within their caps.
-- **Invariants (tested):** closed drawers leave the canvas between the rails,
-  half-open drawers push it by exactly half their width, and narrow windows
-  shrink drawers before the canvas.
+- **Inputs:** viewport, safe-area insets, form factor and `LayoutMetrics` (the
+  bar and status bar heights), read from rice.
+- **The bar** is `layout.bar_height` tall on a desktop, at least 36 points on
+  a tablet and 52 on a phone (`bar_height`); the Sue button is as wide as the
+  bar is tall (12 points wider on a desktop).
+- **Invariants (tested):** the bar, the page and the status bar stack without
+  gaps, the page has the whole width, the Sue button sits in the top left
+  corner, safe areas keep the bars clear of notches, and a tiny window still
+  lays out in order.
 
 ### 3.4 Hybrid render scheduler
 
@@ -854,15 +845,13 @@ low-power mode becomes `MobileBatterySaver`; a software or legacy GPU, or at mos
 **Pacing in the runtime.** The runtime answers the host's pacing question from
 these facts, in order:
 
-1. A spring is moving (a drawer, the timeline, the camera, a pill, the marking
-   menu, the palette), a node is being dragged, or the timeline plays:
+1. A spring is moving (a page coming in or going out, a window, the palette):
    `Animate`. The shell also calls `request_repaint`, so egui asks for the next
    frame too.
 2. Within `motion.settle_grace_ms` (300 ms) of the last change: `Animate`.
 3. Timed work is pending: `WakeAt(earliest)` for the next audio top-up while
    something plays (every 40 ms), a burst of typing to close into one undo step
-   (`TYPING_PAUSE`, 900 ms), a status message to clear, or a pending note
-   autosave.
+   (`TYPING_PAUSE`, 900 ms), or a status message to clear.
 4. Otherwise `Sleep`: 0 FPS and no CPU. A focused text field still blinks its
    caret through egui's own repaint delay (`motion.caret_blink_ms`; 0 keeps it
    solid and the window fully asleep).
@@ -870,44 +859,30 @@ these facts, in order:
 Each frame measures real elapsed time, `dt = now - last_frame` clamped to
 $[0.0001, 0.05]$ s; the first frame after sleeping advances by one nominal
 frame. Springs see `dt x motion.animation_speed`. The self-check drives the
-whole shell through real egui frames and asserts that the drawer glides over
-many frames (and snaps in one on `LegacyLowSpec`), that a mode switch glides
-the camera, and that afterwards neither the runtime nor egui asks for a frame.
+whole shell through real egui frames and asserts that a page clicked open in
+the Hub glides in over many frames (and snaps in one on `LegacyLowSpec`), and
+that afterwards neither the runtime nor egui asks for a frame.
 
 **Spring physics.** Everything that moves uses a damped harmonic oscillator,
 $F = -kx - cv$, so $m\ddot{x} = -k(x - x_\text{target}) - c\dot{x}$. The
-damping ratio is $\zeta = c / (2\sqrt{km})$. Drawers, pills and the marking
-menu use $k = 260$, $c = 32$ ($\zeta \approx 0.99$). The camera uses $k = 600$,
-$c = 49$ ($\zeta \approx 1.0$): critically damped, it covers 98% of the way to
-a framed entity in about 0.24 s (tested). `SpringDamper` integrates with
+damping ratio is $\zeta = c / (2\sqrt{km})$. Pages, windows and the palette
+use $k = 260$, $c = 32$ ($\zeta \approx 0.99$). `SpringDamper` integrates with
 semi-implicit (symplectic) Euler in sub-steps of at most 1/240 s. A spring is
-**settled** when $|x - x_\text{target}|$ and $|v|$ are both below $10^{-3}$
-(the camera's pan settles within a twentieth of a screen pixel); it then snaps
-exactly to the target. Under `LegacyLowSpec`, or with
+**settled** when $|x - x_\text{target}|$ and $|v|$ are both below $10^{-3}$;
+it then snaps exactly to the target. Under `LegacyLowSpec`, or with
 `motion.instant_transitions`, `SpringMode::InstantSnap` skips integration:
 transitions take 0 ms.
 
-**The camera.** The canvas `Camera` is three springs: the canvas point at the
-center of the view, and the natural log of the zoom (so zooming feels even at
-10% and at 3200%). The wheel zooms by `canvas.zoom_step` per notch around the
-pointer, which keeps showing the same canvas point for the whole glide. Dragging
-snaps the pan springs, so the canvas sticks to the pointer. Framing an entity
-sets all three targets; fitting never magnifies past 200% (1:1 and the wheel go
-further).
-
 **Painting.** egui tessellates every frame and `EguiPainter` draws it with
-`egui-wgpu`. The canvas is an egui layer with a camera transform
-(`set_transform_layer`), so entity nodes are ordinary egui widgets, text fields
-included, at any zoom; hit testing and pointer positions follow the transform.
-Images (pictures, Sue Paint's layers) are uploaded from the arena's own bytes into
+`egui-wgpu`. Images (pictures, Sue Paint's layers) are uploaded from the arena's own bytes into
 native textures by key and version: a layer's version is its `revision`
 metadata, bumped by every stroke and by undo and redo. Textures no frame used
 are freed.
 
-**Telemetry.** The status bar shows the Hub button, the mode, the selected
-entity and the latest message on the left; the arena entity count, the undo
-depth, the hardware profile, the zoom and the frame state (`Idle` while
-asleep, `N FPS` measured over the last second while animating) on the right.
+**Telemetry.** The status bar shows where you are (the Hub, or the studio or
+tool) and the latest message on the left; the arena entity count, the undo
+depth, the hardware profile and the frame state (`Idle` while asleep, `N FPS`
+measured over the last second while animating) on the right.
 A file written anywhere (`cx.saved(path, note)`, `ShellRequest::Saved`) is
 reported with its name, a note and its folder for at least ten seconds; a
 click on that message runs `reveal-file:<path>`, which shows the file
@@ -935,94 +910,131 @@ audio callback ──(atomics: frames played, underruns)──► UI
 registers the callback thread with the OS real-time scheduler
 (`audio_thread_priority`: MMCSS on Windows) on its first call and reports
 whether the OS granted it. The stream opens when something first plays and
-reopens when its settings change. The shared `Transport` (used by the Player,
-audio entities and the timeline) plays a `Clip` whose `ClipSource` is an
-arena entity or a `Shared<PCMFloat1D>` held outside the arena (the Player's
-library, which is not project data); it tops the ring up every 40 ms from the
+reopens when its settings change. The shared `Transport` (Sue Paint's
+animation sound uses it today) plays a `Clip` whose `ClipSource` is an arena
+entity or a `Shared<PCMFloat1D>` held outside the arena (a mix made on the
+fly, which is not project data); it tops the ring up every 40 ms from the
 next slice of the clip, resampled linearly to the
 device rate; the ring is the device boundary, like a texture upload. A DAW graph
 will run on the same ring discipline.
 
-### 3.6 Applets, the Launchpad, the canvas and its chrome
+### 3.6 Applets, the Launchpad, the Hub and the top bar
 
-Every tool, utility and studio implements `SueApplet`:
+Every studio, tool and window implements `SueApplet`:
 
 ```rust
 pub trait SueApplet: Send {
-    fn manifest(&self) -> AppletManifest;   // id, name, role, icon, order, mode, lane
+    fn manifest(&self) -> AppletManifest;   // id, name, summary, role, icon, order
     fn rice_declarations(&self) -> Vec<RiceDeclaration> { Vec::new() }
-    fn accepts(&self, entity: &Entity) -> bool { false }            // for opened files
-    fn node_size(&self, entity: &Entity) -> Vec2;
-    fn new_entity(&mut self, cx: &mut AppletContext<'_>) -> Option<NewEntity> { None }  // a mode with no entity
-    fn templates(&self) -> Vec<FileTemplate> { Vec::new() }         // the New File wheels
-    fn create(&mut self, key: &str, cx: &mut AppletContext<'_>) -> Option<NewEntity> { None }
-    fn studio_focus(&self) -> Option<EntityId> { None }             // a studio's current entity
-    fn node_ui(&mut self, ui: &mut Ui, node: NodeId, cx: &mut AppletContext<'_>) {}
-    fn pill_ui(&mut self, ui: &mut Ui, node: NodeId, cx: &mut AppletContext<'_>) {}
-    fn duration(&self, node: &SceneNode, world: &World) -> f64 { 4.0 }
-    fn drawer_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {}
+    fn accepts(&self, entity: &Entity) -> bool { false }            // what it works on
+    fn templates(&self) -> Vec<FileTemplate> { Vec::new() }         // the Sue menu's New
+    fn create(&mut self, key: &str, cx: &mut AppletContext<'_>) {}
+    fn focus(&self) -> Option<EntityId> { None }                    // what the page works on
+    fn bar_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {}  // its menus, after the Sue button
+    fn page_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {} // its page
     fn window_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {}
-    fn studio_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {}  // a full-window studio
     fn tick(&mut self, cx: &mut AppletContext<'_>) -> Tick { Tick::default() }
     fn commands(&self) -> Vec<PaletteEntry> { Vec::new() }
     fn command(&mut self, name: &str, cx: &mut AppletContext<'_>) -> bool { false }
     fn navigate(&mut self, target: &str) -> bool { false }        // e.g. a Settings page
     fn captures_keys(&self) -> bool { false }                      // e.g. recording a shortcut
+    fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {}
+    fn sue_actions(&self, focus: Option<&Entity>, current: bool) -> Vec<SueAction> { Vec::new() }
+    fn take_entity(&mut self, purpose: &str, entity: EntityId, cx: &mut AppletContext<'_>) {}
+    fn opens_file(&self, path: &Path) -> bool { false }
+    fn reserved_keys(&self) -> Vec<Keybind> { Vec::new() }
 }
 ```
 
-The **role** decides where an applet lives: `Node` applets draw one kind of
-entity on the canvas and its selection pill, `LeftDrawer` and `RightDrawer`
-applets sit on a rail, the `Window` applet (Settings) floats over the canvas,
-and `Studio` applets (Sue Paint, §3.7) take the canvas's place between the
-rails and drawers. A studio opens from the Hub, the marking menu or the
-palette (`ShellRequest::OpenStudio`) and leaves with `CloseStudio`; the rails,
-the drawers, the status bar, the palette, Settings and the global undo, save
-and open keys stay with it, and `Ctrl+O` asks the studio first.
+The **role** decides where an applet lives. A `Studio` is a whole workspace
+for making something (Sue Paint, Sue Writer); a `Tool` does a focused job on a
+file or an entity (the Image Viewer, the Converter). Both fill the **page**
+under the top bar (`page_ui`) and put their menus in the bar after the Sue
+button (`bar_ui`), so a tool opens exactly like a studio. A `Window` (Settings)
+floats over the page. There are no side panels.
 
-**Shared features and the Sue menu.** Sue owns its features and every
-studio uses them: one color wheel (`color_button`), one way to pick and save
-files (`FilePick`, answered by the File Manager), one Converter, one Player,
-one theme system, and the shared models below. When a studio needs more, the
-shared feature gains a mode or parameter. Work moves between studios by
-`EntityId`: `ShellRequest::OpenIn { entity, applet }` opens an entity in a
-studio (on its card, made if needed) or puts it on the canvas, and
-`ShellRequest::SendEntity` hands one to a tool (`SueApplet::take_entity`).
+**The Hub** is the page Sue opens on, a full page and not an overlay: a
+heading **Studios** with a box for every `Studio` manifest, then **Tools** with
+a box for every `Tool`, in manifest order. Each box has sharp corners and
+shows the applet's icon, name and summary; a click opens it
+(`ShellRequest::Open`). At each box's bottom right is a **pin**. Pinning makes
+that studio or tool the one Sue opens straight into at launch, already in
+place; there is one pin at a time, so pinning another moves it, and a click
+on the pinned one takes it away (`ShellRequest::Pin`). The pin is the rice
+key `launchpad.pinned` (empty for the Hub), set as one undoable `RiceEdit`,
+so `Ctrl+Z` takes it back, and it shows in Settings, General, Startup as a
+drop-down of the Hub and every studio and tool. A narrow window or a phone
+gets two columns of boxes and 44 point pins.
 
-The **Sue button**, at the top of the left rail in the canvas and in every
-studio, opens the **Sue menu**: a marking-menu wheel built for what is in
-focus (the open studio's `studio_focus`, else the selected card). Its first
-wheel leads to the open studio's own wheel, Send To, File, Project and
-Studios, then Command Palette and Settings. The shell fills Project (open,
-save, save as), File (New File's wheels, Open File), Send To (every studio
-whose `accepts` takes the entity, and Canvas from inside a studio) and
-Studios (the Hub, the canvas, each studio). Everything else comes from the
-applets' `sue_actions(focus, current)`: `SueAction`s on a named wheel
-(`wheel::PROJECT`, `wheel::FILE`, `wheel::SEND_TO`, or the studio's own name)
-with the request each runs. The File Manager adds itself and Show in File
-Manager or Explorer for an entity with a source file; the Converter adds
-Convert for any picture (Sue Paint's layered ones flattened through
-`sue_paint::composite::flatten`) or sound; the Player adds songs; Sue Paint
-adds its own wheel while open and opens picture files from the canvas as new
-pictures. A wheel with nothing on it does not show.
+**The top bar** runs across the window (§3.3). The **Sue button** sits once,
+in its top left corner, with Sue's silhouette; no studio or tool draws one of
+its own. Right after it come the open page's menus: a studio or tool draws
+them in `bar_ui` with a `MenuBar` (menus are data, `Menu` and `MenuItem` with
+a command and a shortcut; each frame the applet says per command whether it
+works and whether it is checked, `ItemState`, so items whose feature is not
+built yet are grayed out). On the Hub the bar reads Hub. On a phone Sue Paint
+puts its row of large buttons there instead. While a page comes in or goes
+out, its part of the bar fades with it and takes no clicks.
 
-**Studio themes.** A studio whose rice section (its id with `-` as `_`)
-has a `theme` wears `Theme::for_studio`: a preset's colors, the Sue theme
+**The Sue menu** (`ShellRequest::SueMenu`, or a click on the Sue button) drops
+down under the button, built for what is open (`MenuBar::dropdown`):
+
+| Item | What it does |
+| --- | --- |
+| Hub | Back to the Hub (checked there) |
+| Studios, Tools | Every studio and every tool (the open one checked) |
+| New | A submenu per kind of file from the applets' `templates` (a `FileTemplate` names a category such as Picture, the exact kind such as Square Post, and a key the applet's `create` gets back; the applet makes it and opens itself) |
+| File | Open File (`Ctrl+O`), and what applets add there |
+| Project | Open Project, Save Project (`Ctrl+S`), Save Project As |
+| Send To | What the page works on (`focus`), into every other studio or tool whose `accepts` takes it (`ShellRequest::OpenIn`), and what applets add (`SueAction`s, such as Converter, or Sue Writer for a picture) |
+| Any other submenu | `SueAction`s on a menu of an applet's own |
+| Open ... at Launch | The open page's pin (checked when it is pinned) |
+| Command Palette, Settings, Quit Sue | With their shortcuts |
+
+Applets add to it with `sue_actions(focus, current)`: `SueAction`s on a named
+submenu (`sue_menu::FILE`, `sue_menu::PROJECT`, `sue_menu::SEND_TO`, or one of
+their own) with the request each runs; an item whose label is already on its
+submenu is not added twice, and a submenu with nothing on it does not show.
+Studios offer nothing for themselves while open, since their menus sit right
+beside the Sue button.
+
+**Shared features.** Sue owns its features and every studio uses them: one
+color wheel (`color_button`), one way to pick and save files (`FilePick`,
+answered by the system's dialogs), one Converter, one theme system, and the
+shared models. When a studio needs more, the shared feature gains a mode or
+parameter. Work moves between studios by `EntityId`: `ShellRequest::OpenIn {
+entity, applet }` hands an entity to a studio or tool (`take_entity` with the
+purpose `open`) and opens its page, and `ShellRequest::SendEntity` hands one
+to an applet for a purpose of its own (`figure`, `add`, `adopt`).
+
+**Opening files.** A file opened anywhere (Open File, a drop on the window)
+goes first to an applet whose `opens_file` takes it as it is (Sue Writer:
+Word, Markdown, HTML, Fountain and plain text). Anything else is read into
+the arena through the ingest path (§2.2), a `.sue` project replacing the
+document, and opens in the first studio, then tool, whose `accepts` takes the
+entity (`Applets::page_for`): a picture in the Image Viewer. A file nothing
+opens is not kept in the project, and the status bar says so.
+
+**Asking for a file.** No applet opens a dialog itself. It sends
+`ShellRequest::PickFile(FilePick)` (who asks, what for, a title, the
+extensions or the kinds of file it takes, a file name when saving, a folder
+to start in, or a folder instead of a file); the runtime shows the system's
+own open, save or folder dialog (`sue_platform::pick_open_file`,
+`pick_save_file`, `pick_folder`, the kinds as its filters,
+`FilePick::filters`). The chosen path comes back as `ShellRequest::Picked`,
+which the shell delivers to the asking applet's `picked`; a pick with no
+applet behind it (opening a file or a project, saving the project, exporting
+the rice) goes to the engine. A headless run keeps the pick for a script to
+answer (`Runtime::answer_pick`), which is how the tests and snapshots choose
+files.
+
+**Studio themes.** A studio or tool whose rice section (its id with `-` as
+`_`) has a `theme` wears `Theme::for_studio`: a preset's colors, the Sue theme
 (`sue-theme`, the global colors, so it follows every change to them), or its
 own colors in `<section>_colors` (`custom`). Only the colors change. The
-shell sets egui's visuals to the studio's theme while the studio draws, so
-its menus and popups wear it too, and back to Sue's for the side panels,
-the status bar and Settings.
-
-**The Hub** (`ShellRequest::Hub`, `Shell::set_hub`) is a card for the canvas
-and one for each `Studio` manifest (name, icon, summary), over a scrim, on a
-spring. `launchpad.boot_mode` is `hub` by default (the Hub over the canvas);
-`canvas` boots without it, and a studio's id opens that studio. The top pill
-and the status bar's left end both open it; `Esc` or a click on the scrim
-closes it, and opening a studio closes it too. Studios draw their menus with `MenuBar`: menus
-are data (`Menu`, `MenuItem` with a command and a shortcut), and each frame the
-studio says per command whether it works and whether it is checked
-(`ItemState`), so items whose feature is not built yet are grayed out.
+shell sets egui's visuals to the page's theme while the page and its part of
+the top bar draw, so its menus and popups wear it too, and back to Sue's for
+the status bar, the palette and Settings.
 
 **Shortcuts.** Every applet assigns keys the same way, through
 `sue_wm::shortcuts`: it lists its commands with their default chords
@@ -1032,141 +1044,83 @@ studio says per command whether it works and whether it is checked
 `sue_writer_keys` and `image_viewer_keys`), and `take` consumes this frame's
 presses of the chords as they are set now. A `Keybinds` value holds any
 number of chords, written `A or B`; `keys::consume` matches exact modifiers,
-so `Ctrl+S` never fires for `Ctrl+Shift+S`. `shortcuts::Bound` keeps a
-studio's menus showing its current first chords and gives the shell the
-chords the open studio keeps for itself (`SueApplet::reserved_keys`). The
-shell's own keys (`[keys]`) work the same way.
+so `Ctrl+S` never fires for `Ctrl+Shift+S`. `shortcuts::Bound` keeps an
+applet's menus showing its current first chords and gives the shell the
+chords the open page keeps for itself (`SueApplet::reserved_keys`). The
+shell's own keys (`[keys]`: the palette, Settings, open, save, quit, undo
+and redo) work the same way; `Ctrl+O` asks the open page first.
 
 **Sue's icon.** `assets/icons` holds the app icon and the bare silhouette,
 each as SVG (the source), PNG and JPEG XL at 1024 pixels, and a Windows
 `.ico` with six sizes, plus inverted and black versions. `sue_wm::brand`
 reads the `.ico` sizes: the app icon is the window's and the taskbar's
 (`DesktopOptions::icon`), and `brand::mark` draws the silhouette, white on
-clear, tinted to the theme's text color, on the Sue button and the Hub. On
-Windows, `bins/sue/build.rs` copies the icon's sizes into a compiled
-resource file the MSVC linker takes, so `sue.exe` itself carries the icon
-(plain Rust reading Cargo's target variables, no resource compiler).
+clear, tinted to the theme's text color, on the Sue button. On Windows,
+`bins/sue/build.rs` copies the icon's sizes into a compiled resource file the
+MSVC linker takes, so `sue.exe` itself carries the icon (plain Rust reading
+Cargo's target variables, no resource compiler).
 
-**Going in and out of a studio.** Opening a studio, the shell finds the card
-it will work on (the selected node, if the studio `accepts` its entity, else
-the node of its `studio_focus`), closes the timeline (the side panels stay),
-and glides the camera so the card's content fills the studio's area (the
-canvas area between the rails and drawers) with the same
-24-point margin the studio fits its picture with. Once the camera is near
-(within 3% of its zoom and 3 points of its center), the studio's reveal spring
-runs from 0 to 1 and the studio, drawn on a layer above the canvas's cards,
-slides its palettes in from the window's edges (`ShellView::studio_reveal`);
-its picture fits the space the palettes leave, and its ground and picture turn
-opaque in the first third of the way, while they still line up with the card.
-A shield takes the clicks until the reveal is complete. Leaving, the camera
-jumps under the studio to the card of its current entity, the reveal runs
-back to 0 (the picture grows from its view to filling the window, where the
-card waits), and then the timeline comes back and the camera glides out to
-everything. Every spring follows `motion.animation_speed` and
+**Going in and out of a page.** Opening a studio or tool from the Hub, its
+reveal spring runs from 0 to 1: the page, drawn on a layer above the Hub,
+fades in and a studio slides its palettes in from the window's edges
+(`ShellView::reveal`); a shield takes the clicks until it is in place, and
+from then on the Hub is not drawn under it. Going back to the Hub
+(`ShellRequest::Hub`, the Sue menu's Hub, or a studio's Back to the Hub) runs
+the reveal back to 0 over the Hub, which takes clicks at once. Opening one
+page from another switches straight to it. A pinned page opens at launch
+already in place. Every spring follows `motion.animation_speed` and
 `motion.instant_transitions`.
 
-Nothing in the shell names an applet: the Hub's cards come from `Studio`
-manifests; the modes (the palette's and the status bar's) come from
-manifests' `mode`; the marking menu's New File wheels come from the applets'
-`templates` (a `FileTemplate` names a category such as Picture, the exact kind
-such as Square Post, and a key the applet's `create` gets back; a node applet
-returns the entity for the shell to place where the menu opened, a studio
-makes its own and places it); the timeline's lanes come from `lane`, the rail
-icons from `icon` and `order`, and opened files go to the first node applet
-that `accepts` the ingested entity. `Launchpad` is the runtime registry of factories; `Applets` is
-the set of live instances, sorted by `order`.
+Nothing in the shell names an applet: the Hub's boxes and the Sue menu's
+Studios and Tools come from manifests' `role` and `order`, New from the
+applets' `templates`, Send To from `accepts` and `sue_actions`, the palette
+from `commands`, and opened files go to the first applet that `opens_file`
+or `accepts` them. `Launchpad` is the runtime registry of factories;
+`Applets` is the set of live instances, sorted by `order`.
 
-Applets hold `AssetHandle`s and `NodeId`s, never media. They change the world
-only through the global `UndoStack<World>` (`cx.apply`, `cx.edit_rice`, or
-`cx.record` for an edit that already happened in place), and ask for things
-through `cx.request(ShellRequest::…)`: select, focus or frame a node, switch
-mode, spawn or create from a template, place an entity, open or close a
-studio, open the timeline or Settings, open a file, run an engine command,
-show a message.
+Applets hold `AssetHandle`s and `EntityId`s, never media. They change the
+world only through the global `UndoStack<World>` (`cx.apply`, `cx.edit_rice`,
+or `cx.record` for an edit that already happened in place), and ask for
+things through `cx.request(ShellRequest::…)`: open a studio or tool or the
+Hub, pin one, make a new file from a template, open an entity in an applet,
+send one, ask for a file, run an engine command, open Settings or the
+palette, show a message.
 
-**Asking for a file.** No studio opens the system's file dialog itself. It
-sends `ShellRequest::PickFile(FilePick)` (who asks, what for, a title, the
-extensions it takes, a file name when saving, a folder to start in); the
-shell hands it to the first applet whose `begin_pick` takes it (the File
-Manager) and shows that applet's window, titled by `window_title`. The
-chosen path comes back as `ShellRequest::Picked`, which the shell delivers
-to the asking applet's `picked`; a pick with no applet behind it (opening on
-the canvas, saving the project, exporting the rice) goes to the engine.
-The File Manager's System Dialog button, or a build without a picking
-applet, falls back to the native dialog.
+**The world.** `World` holds the arena and the live rice: every project is
+the arena's entities and relations (§1.9), with no layout of its own.
 
-**The scene.** `World` holds the arena, the live rice and the `Scene`: one
-`SceneNode` per card on the canvas, holding an `AssetHandle`, the applet that
-draws it, its rect in canvas units, its stacking order and a few numeric
-properties (a document's `font_size`; an audio clip's `clip_start`, `clip_end`
-and `gain`; `t0` and `dur` on the timeline). Several nodes may show one entity:
-splitting audio places a second node over the same samples. `SpawnNode` (create
-an entity and its node; redo restores the same entity under the same handle),
-`PlaceNode`, `RemoveNode` (the entity stays in the arena), `SetNodeRect`,
-`SetNodeProp` and `Batch` (several steps as one, atomic) are the scene's
-transactions.
-
-**The shell** (`Shell::ui`) draws, in order: the canvas (void fill, an adaptive
-dot or line grid that keeps 14 to 112 points between marks, and the scene layer
-with every visible node as a card: title bar with name and kind, a dot when it
-is on the timeline, the applet's content, a resize grip), the rails, the
-drawers, the timeline, the status bar, then the floating surfaces:
+**The shell** (`Shell::ui`) draws, in order: the Hub (unless a page covers it
+whole), the page, the top bar with the Sue button and the page's menus, the
+status bar, then the floating surfaces:
 
 | Surface | Behavior |
 | --- | --- |
-| Top pill | Centered over the canvas: `Hub` and `Command (Tab)`. Fades and slides in at boot, and away while a studio is open. |
-| Hub | A card per place to work (the canvas and every studio) over a scrim, on a spring; open at boot unless `launchpad.boot_mode` says otherwise. |
-| Selection pill | Above the selected node's top edge, clamped into view, drawn by its applet's `pill_ui`. Springs in and out; when the selection moves to another node it glides from the old place. |
-| Marking menu | Right-click: wedges whose radius grows on a spring (`layout.radial_radius`): New File, Open File, the studios, Hub, Command Palette, Reset Camera. Click a wedge, or press, drag and release. New File opens a wheel of template categories around the wedge, each category a wheel of its templates; the middle of a nested wheel goes back. The new file lands where the menu opened. |
-| Command palette | `Tab` or `/` when no text field has focus: fuzzy search (in-order letters, bonuses for runs and word starts) over shell actions, every mode, template (`New Document: Notes`) and drawer, and the applets' `commands`. |
+| Sue menu | A drop-down under the Sue button, built for what is open; submenus open on hover; `Esc` or a click outside closes it. |
+| Command palette | `Tab` or `/` when no text field has focus (unless the page keeps the key): fuzzy search (in-order letters, bonuses for runs and word starts) over the Hub, every studio and tool, the pin, Sue's own actions, every template (`New Picture: Square Post`) and the applets' `commands`. |
 | Settings window | Over a scrim; 190 px category sidebar, filter field, one page at a time (§4.3). |
 | Quit dialog | When `general.confirm_on_exit` is on. |
 
-Interaction: the wheel zooms around the pointer, the middle button or Space
-plus drag pans (a tap on Space plays or pauses the timeline instead), a click on
-a node selects and raises it, a double-click on its title focuses it (its mode,
-framed), dragging the title moves it and the grip resizes it (one undo step each
-on release), a click on empty canvas deselects, `Delete` removes the selected
-node from the canvas, and a file dropped anywhere is ingested and placed.
+A file dropped anywhere opens as above.
 
-**Text and undo.** Every text surface is an `egui::TextEdit`. Documents, code
-and the note edit the arena's `StringBuffer` in place through `ArenaText`, an
-egui `TextBuffer` that records each insert and delete as a byte-offset delta.
+**Text and undo.** Every text surface is an `egui::TextEdit` or `sue-type`'s
+editor. Text in the arena is edited in place through `ArenaText`, an egui
+`TextBuffer` that records each insert and delete as a byte-offset delta.
 `Typing` groups a burst (same entity, no pause of 900 ms) into one
 `TextEdits` transaction and records it, already applied, in the global undo
 tree. The shell consumes the riced undo and redo chords (`Ctrl+Z`,
 `Ctrl+Shift+Z`, `Ctrl+Y`) before any widget sees them, closes the open burst,
 and walks the global tree, so text fields never run egui's private undo.
 
-**The timeline** is a bottom drawer on a spring. Its lanes are the distinct
-`lane` names of the node applets; its blocks are the nodes whose entity carries
-the `Timeline` projection, at `t0` for `dur` seconds (audio: the clip's length).
-Project to Timeline is one undoable `Batch`: it attaches the projection (a
-`TimeSpan` component next to the entity's own data, nothing copied), places the
-block after the last one in its lane, and opens the timeline. Blocks drag along
-their lane (one `SetNodeProp` on release); the ruler and the playhead seek;
-play advances the playhead with real time and plays each audio block through the
-shared `Transport` as the playhead crosses it.
-
 The built-in applets are registered by the binary, like any package would
 register its own:
 
-| Applet | Role | Mode, templates, lane | What it does |
+| Applet | Role | Templates | What it does |
 | --- | --- | --- | --- |
-| Document | Node | Document; Document: Blank, Notes, To-Do List, Letter, Report; Document Track | Markdown-like text (`#`, `##`, `**`, backticks styled, never hidden) in a `TextEdit`; pill: H1, H2, Bold, Monospace, text size, Project to Timeline |
-| Audio | Node | Audio (palette only); Audio: Tone (A 440), Silence (10 s); Audio Track | Waveform of a clip of a `PCMFloat1D`; Play or Pause, Gain, Split (zero-copy), Normalize, Open in Timeline |
-| Image | Node | Image (palette only); Paint/Visual Track | Decoded JPEG XL, PNG or JPEG; Image Viewer (also a double-click), Pixel Grid, Re-encode .jxl (asks where through the File Manager; bit-exact for JPEG when a codec allows), Inspect Hex |
-| Image Viewer | Studio | n/a | One picture of the canvas filling the window: fit, 100% and wheel zoom, panning, the next and previous pictures; simple edits (turn, mirror, crop, resize, brightness and contrast, saturation and hue, grayscale, invert), each one undo step on the same entity (`ReplaceComponent`); Save As in any picture format, a lossless JPEG XL re-encode, the Converter, and Send To Sue Paint or Sue Writer by `EntityId` |
-| Code / Hex | Node | Code / Hex (palette only); Code: Rust, Python, JavaScript, HTML, CSS, JSON, Shell Script | Code in a monospace `TextEdit`, or a selectable hex dump of any file's bytes; Copy All |
-| File Manager | Left drawer and window | n/a | Folder tabs with back and forward; a typed or copied path bar; list, details, icons or cards (`files.view`), sort (`files.sort`, reversed with `files.sort_reverse`), a size slider; picture thumbnails (PNG, JPEG, JPEG XL, GIF, BMP, WebP, TGA, TIFF) decoded and shrunk by a small pool of background workers, newest request first; a star that makes the folder a favorite (`files.saved`) and a Favorites section; when saving, a Save as type list from `FilePick::types` that changes the extension; the system's own Open and Save dialogs instead, from a button or always (`files.dialog = "system"`); search of the folder or, on a background thread, everything under it (2,000 results, 200,000 entries at most); places (project, home and its usual folders, `sue_platform::roots`) and saved folders (`files.saved`, undoable rice edits); new folder, rename, copy path, show in Explorer; the large window answers every `FilePick` |
-| Player | Left drawer and window | n/a | A music library in the data folder (a versioned tab-separated text file: songs with tags and length from `sue_io::probe_audio`, playlists, hand-made albums, likes); albums from the tags, artists, search; a queue with shuffle, repeat off, all or one, and autoplay; songs decoded on a background thread into `Shared` buffers, the next one ahead of time, with loudness evening; shuffle, previous, play, next, repeat, seek, volume and mute; covers from a collection's picture or `cover.jpg` and the like beside the songs; `player.*` settings; palette commands |
-| Convert | Left drawer and window | n/a | Any file in (picked through the File Manager, a folder at a time, sent by its Convert button, or from the canvas); a target per kind (pictures: PNG, JPEG, JPEG XL, WebP, TIFF, BMP, GIF, TGA, QOI, ICO, PPM; sounds: FLAC, WAV, AIFF; text: tidied, Markdown to HTML, CSV, TSV, JSON; anything: Base64, hex dump, byte map, copy); picture resizing with Lanczos, bicubic, bilinear or nearest in premultiplied alpha, turns, mirrors, brightness, contrast, saturation, grays, flattening; sound trimming, channels, Lanczos resampling, speed, reverse, gain or normalizing, fades, depth; text tidying; output folder, name pattern and keep or replace (never the source); files convert on a background thread |
-| Notes | Left drawer | n/a | One shared note in a `TextEdit`, autosaved every `general.autosave_seconds` and on exit; a toolbar with Undo and Redo (`AppletContext::undo`), Save As and Open through the File Manager (Open replaces the text as one typing step), Copy All, Clear and text size; word and character counts; a drag past the note's edges scrolls it (`edge_scroll`) so a selection can grow |
-| Inspector | Right drawer | n/a | The selected node, editable: its entity's name (`Rename`), X, Y, W and H (`SetNodeRect`, live while dragged and one step on release), its properties (`SetNodeProp`), its text in place (`ArenaText`), and its metadata changed, added or removed (`SetMeta`); its projections and memory |
-| History | Right drawer | n/a | The undo tree, newest first, branches indented; a click checks out any state |
+| Sue Paint | Studio | Picture: Illustration, Print A4, Full HD, Square Post, Sprite, Custom... | The painting studio (§3.7) |
+| Sue Writer | Studio | Writing: Blank Document, Novel, Short Story, Screenplay and the other project templates (§3.8) | The writing and publishing studio (§3.8) |
+| Image Viewer | Tool | n/a | One picture filling its page: fit, 100% and wheel zoom, panning, the project's next and previous pictures; simple edits (turn, mirror, crop, resize, brightness and contrast, saturation and hue, grayscale, invert), each one undo step on the same entity (`ReplaceComponent`); menus File (Open Picture, Save As in any picture format, Save Over, a lossless JPEG XL re-encode, Show in Folder, Back to the Hub), Image, View and Send (the Converter, Sue Paint and Sue Writer by `EntityId`), and a toolbar under them |
+| Converter | Tool | n/a | Any file in (Add Files, Add a Folder, the project's pictures and sounds, or Send To from any studio or tool); a target per kind (pictures: PNG, JPEG, JPEG XL, WebP, TIFF, BMP, GIF, TGA, QOI, ICO, PPM; sounds: FLAC, WAV, AIFF; text: tidied, Markdown to HTML, CSV, TSV, JSON; anything: Base64, hex dump, byte map, copy); picture resizing with Lanczos, bicubic, bilinear or nearest in premultiplied alpha, turns, mirrors, brightness, contrast, saturation, grays, flattening; sound trimming, channels, Lanczos resampling, speed, reverse, gain or normalizing, fades, depth; text tidying; output folder, name pattern and keep or replace (never the source); files convert on a background thread; menus File and Convert (`Ctrl+Enter`) |
 | Settings | Window | n/a | Preferences by category (§4.3) |
-| Illustration | Node | n/a (pictures come from Sue Paint) | A Sue Paint picture on the canvas: a preview that follows its layers; pill and double-click: Open in Sue Paint |
-| Sue Paint | Studio | Sue Paint; Picture: Illustration, Print A4, Full HD, Square Post, Sprite, Custom... | The painting studio (§3.7) |
 
 ### 3.7 Sue Paint (`sue-paint`)
 
@@ -1175,7 +1129,7 @@ out the way painting apps usually are. It fills the window with:
 
 | Part | What it holds |
 | --- | --- |
-| Menu bar | File, Edit, Story, Animation, Layer, Select, View, Filter, Window, Help; about 230 items, the unbuilt ones grayed out; Back to Canvas at the right (its icon alone in a narrow window); hidden with `Shift+Tab` |
+| Menus | File, Edit, Story, Animation, Layer, Select, View, Filter, Window, Help, in Sue's top bar after the Sue button (`SueApplet::bar_ui`); about 230 items, the unbuilt ones grayed out; File, Back to the Hub; hidden with `Shift+Tab` |
 | Command bar | New, Open, Save (with a menu for Save As and the exports); Undo, Redo; Clear, Clear Outside, Fill, Deselect, Transform; view flip, rotate and fit; snapping; shortcuts, about, and search (the command palette) |
 | Tool strip | Zoom, Hand, Operation, Move Layer, Selection, Auto Select, Eyedropper, Pen, Pencil, Brush, Airbrush, Decoration, Eraser, Blend, Fill, Gradient, Figure, Frame Border, Ruler, Text, Balloon, Correct Line; main and sub color chips |
 | Sub Tool and Tool Property | The sub tools of the tool (G-Pen, Mapping Pen, Turnip Pen, Marker; Pencil, Mechanical, Rough; Watercolor, Opaque Watercolor, Gouache, Ink Brush; Soft, Strong, Fine airbrushes; Hard, Soft, Rough erasers; fill, gradient, figure, selection modes) and their settings, with a live stroke preview |
@@ -1183,7 +1137,7 @@ out the way painting apps usually are. It fills the window with:
 | Color Wheel, Color Slider | A hue ring around a saturation and value square; RGB and HSV sliders and hex |
 | Color Set, Color History | Color sets (Default, Grays, Skin Tones, Pastels, and the user's) in a drop-down, kept in the data folder (`color_sets.txt`), with a settings menu (new, duplicate, delete, swatch size, restore), GIMP palette and hex import, GIMP palette export, and add, replace and delete; the colors painted with, newest first |
 | Canvas | Tabs of open pictures; the view zooms (1% to 6400%), scrolls, turns and mirrors; a status strip with zoom, rotation, flip, size, resolution and the pointer's pixel |
-| Navigator, Sub View | The whole picture with the visible area outlined (drag to scroll), zoom and rotation sliders, turns, flips; reference pictures (import through the File Manager, previous, next, list, eyedropper, zoom, turn, fit, delete) |
+| Navigator, Sub View | The whole picture with the visible area outlined (drag to scroll), zoom and rotation sliders, turns, flips; reference pictures (import through the system's open dialog, previous, next, list, eyedropper, zoom, turn, fit, delete) |
 | Layer, Layer Property, History | Blend mode (26), opacity, clip, draft, lock, lock transparent pixels; new, duplicate, merge down, move, delete; the stack with visibility, thumbnails, rename by double-click; the current layer's settings; the undo list |
 | Timeline, Animation Cels | The timeline picker, new timeline, animation folder and cel, specify and delete cels, keyframes, onion skin, light table and playback, grayed out until animation arrives; the timeline's top edge resizes it |
 
@@ -1214,8 +1168,10 @@ resolution, paper color) or by opening a PNG, JPEG or JPEG XL through the
 format registry. Every open tab is a picture in the arena: tabs appear for
 pictures made, opened, loaded with a project or brought back by redo, and
 closing a tab leaves the picture in the project. The studio keeps only views,
-screen images, the current layer and selections. Each new picture is also
-placed on the canvas as an Illustration card, the same entity.
+screen images, the current layer and selections. Other studios and tools reach
+the same entity by `EntityId`: Send To Sue Paint opens a layered picture as it
+is, and any other picture (from the Image Viewer, say) becomes a layered
+picture whose layer is that very entity.
 
 **Painting.** The brush engine (`sue_paint::brush`) is built so lines come out
 clean without the brush feeling slow. A stroke passes through these stages:
@@ -1664,7 +1620,7 @@ text entity (`PublishFormat`). `zip` writes and reads the archives.
 
 | Part | What it holds |
 | --- | --- |
-| Menu bar | File, Edit, View, Insert, Format, Project, Help; Back to Canvas at the right |
+| Menus | File, Edit, View, Insert, Format, Project, Help, in Sue's top bar after the Sue button; File, Back to the Hub |
 | Toolbar | paragraph style, font (every installed family, searchable), size, bold, italic, underline, strikethrough, raised and lowered, text color, highlight, alignment, lists, indents, line spacing; Focus, Find and the views (Page, Draft, Cards, Outline) at the right; it wraps onto a second row in a narrow window |
 | Binder | the project's folders and documents: click to open (a folder shows its documents one after another), double-click to rename, drag to move (above, below or into a folder), a right-click menu (new, rename, duplicate, include in compile, snapshot, merge, label, status, trash, Open in Sue Paint for pictures) |
 | Text | the editor on pages that fit the window (until you zoom) or one column |
@@ -1681,11 +1637,11 @@ title page) and writes any of the formats above. Projects come from
 templates: blank document, novel, short story, screenplay, non-fiction book,
 essay or paper, poetry collection, letter and report.
 
-**Woven in.** A project is a card on the canvas; its documents are the
-shared rich text, its pictures the shared pictures. The Sue menu offers Sue
-Writer's own wheel while it is open, and Send To Sue Writer for any text
-(opened in place) and any picture (put into the text at the caret, drawn with
-Sue Paint's compositing). Opening a Word file anywhere in Sue
+**Woven in.** A project is an entity of the arena; its documents are the
+shared rich text, its pictures the shared pictures. The Sue menu offers Send
+To Sue Writer for any text (opened in place) and any picture (put into the
+text at the caret, drawn with Sue Paint's compositing). Opening a Word,
+Markdown, HTML, Fountain or plain text file anywhere in Sue
 (`SueApplet::opens_file`) brings it into Sue Writer. Writing sessions are
 counted and kept on the project by day (`sue_writer.history`).
 
@@ -1749,8 +1705,8 @@ never stops Sue from booting.
   only the new value into the original value span. Defaults registered at runtime
   are inserted at the end of their section, or in a new section.
 
-**Settings.** Preferences open as a floating window over the canvas (the
-gear at the foot of the left rail, or `keys.open_settings`, `Ctrl+,`). A
+**Settings.** Preferences open as a floating window over the page (the Sue
+menu's Settings, or `keys.open_settings`, `Ctrl+,`). A
 category sidebar (`layout.settings_sidebar_width`, 190 px) lists the pages; the
 right pane shows only the chosen page, under a "Filter settings..." field.
 While a filter is active, matching parameters from every page are listed.
@@ -1760,9 +1716,9 @@ packages can add their own:
 
 | Page | Holds |
 | --- | --- |
-| General | Where Sue opens (the Hub, the canvas or a studio), the File Manager's folder, hidden files, view, sort, card size and saved folders, autosave interval, quit confirmation, the note file and its text size |
-| Appearance & Rice | Theme presets (Void, Graphite, Paper, Gray), every color, geometry (padding, hairlines, radii, pill and rail sizes, drawer and timeline sizes, the marking menu, shadows), the canvas (zoom limits, wheel step, grid), typography, the rice file with Reload, Export and Open Folder |
-| Display & Graphics | The performance preference (`profile.hardware`, labeled Performance Preference) and the active profile; the GPU preference (picked by adapter type: integrated, discrete, or the display's GPU), the GPU drawing, every GPU found and Restart Sue (the GPU is chosen at startup); the frame-rate cap, the settle grace, UI scale, list wheel speed, motion (instant snap, animation speed, drawer and camera spring constants, caret blink, message time) |
+| General | Where Sue opens (`launchpad.pinned`, labeled Open At Launch: the Hub, or the studio or tool pinned there) and quit confirmation |
+| Appearance & Rice | Theme presets (Void, Graphite, Paper, Gray), every color, geometry (padding, hairlines, radii, pill buttons, the top bar and the status bar, shadows), typography, the rice file with Reload, Export and Open Folder |
+| Display & Graphics | The performance preference (`profile.hardware`, labeled Performance Preference) and the active profile; the GPU preference (picked by adapter type: integrated, discrete, or the display's GPU), the GPU drawing, every GPU found and Restart Sue (the GPU is chosen at startup); the frame-rate cap, the settle grace, UI scale, list wheel speed, motion (instant snap, animation speed, spring constants, caret blink, message time) |
 | Audio & DSP | Output device, sample rate, buffer size, real-time priority, volume, and the live stream and real-time status |
 | Files & Codecs | JPEG XL effort, bit-exact JPEG recompression, the conversion folder and JPEG quality, the open-file size limit, byte-map width, the built-in codecs |
 | Studios | Each studio's own settings and theme: for Sue Paint the new picture size and resolution, `sue_paint.theme` (Gray by default, the Sue theme, a preset, or Custom) and the Custom colors (`sue_paint_colors`) |
@@ -1779,7 +1735,7 @@ parameter stays reachable (tested).
 | `IntRange` / `FloatRange` | Slider with a 4 px track, a filled part and a round thumb, its value on the right |
 | `ColorHex` | A swatch that opens the shared color wheel (`sue_wm::color_button`: a hue ring around a saturation and value square, an opacity bar, HSV numbers and a row of grays) in a layer over every window; dragging previews, release commits |
 | `EnumChoice` | A segmented control for up to five short options, else a compact drop-down |
-| A text parameter with live choices (output device, boot mode) | A drop-down |
+| A text parameter with live choices (output device, the pin) | A drop-down |
 | `Keybind` | One key cap per chord: click one and press its new chord, x takes one away, + adds another, as many as wanted (`Esc` cancels; global shortcuts are held back while recording) |
 | `ShaderPath` / `Text` | Text field |
 
@@ -1817,14 +1773,18 @@ Tests check that the shipped `default.suerice` matches the declarations key for
 key, description included, and that it holds no undeclared key.
 
 **Format and migration.** The shipped file declares its format in its header
-(`# sue-rice format 3`). Each released default is frozen in `rice/history/`
-(`v1`, `v2`). At boot, `migrate` brings an older file up to date: a value still
-equal to the old default takes the new default (so the purple and gold palette
-of format 1 and the blue `#3b82f6` accent of format 2 become the monochrome
-palette), a value the user changed is carried over when its key still exists
-and the value passes the new checks, and the rest is reported. Any color that
-is not a gray is reset to its default even in a current file (`purged`), so a
-tinted color never survives a start. The old file is kept as
+(`# sue-rice format 5`). Each released default is frozen in `rice/history/`
+(`v1` to `v4`). At boot, `migrate` brings an older file up to date: a value
+still equal to the old default takes the new default (so the purple and gold
+palette of format 1 and the blue `#3b82f6` accent of format 2 become the
+monochrome palette), a value the user changed is carried over when its key
+still exists and the value passes the new checks, and the rest is reported. A
+key that moved is carried to its new name: format 5 turned the boot mode into
+the Hub's pin, so `launchpad.boot_mode` set to a studio becomes
+`launchpad.pinned`, while `hub` and `canvas` mean no pin; the keys of the
+canvas, the drawers, the File Manager, Notes and the Player are gone. Any color
+that is not a gray is reset to its default even in a current file (`purged`),
+so a tinted color never survives a start. The old file is kept as
 `default.suerice.v<format>.bak`. A file that does not parse is moved to
 `default.suerice.broken` and the defaults are used, so a typo never stops Sue
 from starting.
@@ -1978,9 +1938,9 @@ separators are measured against, and it exercises the full zero-copy path.
 | §1.7 Time, rates, drop-frame timecode | **Implemented** | `sue-core/src/time.rs` |
 | §1.8 Delta-tree undo, `checkout`, `record` | **Implemented** | `sue-core/src/undo.rs` |
 | §1.8 Generic edits by id and `Batch<T>` | **Implemented** | `sue-core/src/txn.rs`, `format.rs` |
-| §1.8 One global history for arena, canvas and rice edits | **Implemented** (`UndoStack<World>`) | `sue-wm/src/world.rs` |
-| §1.9 `.sue` container, `ARNA`, `META`, `PRST`, `SCNE` | **Implemented**; save with `Ctrl+S`, open like any file; compressed chunks planned | `sue-core/src/file.rs`, `sue-wm/src/scene.rs`, `world.rs`, `bins/sue/src/runtime.rs` |
-| §1.10 Format registry, bundles, copy with fresh ids | **Implemented**; the canvas still opens dropped files through the ingest path (§2.2) and the `.sue` handler | `sue-core/src/format.rs`, `sue-io/src/formats.rs` |
+| §1.8 One global history for arena and rice edits | **Implemented** (`UndoStack<World>`) | `sue-wm/src/world.rs` |
+| §1.9 `.sue` container, `ARNA`, `META`, `PRST`; an old `SCNE` kept untouched | **Implemented**; save with `Ctrl+S`, open like any file; compressed chunks planned | `sue-core/src/file.rs`, `sue-wm/src/world.rs`, `bins/sue/src/runtime.rs` |
+| §1.10 Format registry, bundles, copy with fresh ids | **Implemented**; opened and dropped files still go through the ingest path (§2.2) and the `.sue` handler | `sue-core/src/format.rs`, `sue-io/src/formats.rs` |
 | §1.11 Operators and presets | **Implemented** in the kernel; the palette and applets do not route through operators yet | `sue-core/src/operator.rs` |
 | §1.12 Job pool and shared buffers | **Implemented**; no feature uses the pool yet | `sue-core/src/jobs.rs`, `shared.rs` |
 | §1.8 `RasterEdit` (pixel rectangles before and after) | **Implemented**; Sue Paint records every stroke, fill and filter with it | `sue-core/src/txn.rs` |
@@ -2004,19 +1964,19 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.1 Native desktop host (`winit` window, `wgpu` surface, egui input, IME, clipboard, file drops) | **Implemented** (one window; tested on Windows) | `sue-platform/src/desktop.rs`, `gpu.rs`, `paint.rs` |
 | §3.1 GPU choice (`display.gpu_preference`: auto, integrated, discrete) | **Implemented**; `auto` draws on the display GPU, which a device test checks on Windows | `sue-platform/src/gpu.rs`, `bins/sue/src/desktop.rs` |
 | §3.1 Frame pacing: application and egui repaint requests combined in `about_to_wait`, timed wakes, close confirmation | **Implemented**; the self-check asserts that neither the runtime nor egui asks for frames once idle | `sue-platform/src/desktop.rs`, `bins/sue/src/runtime.rs` |
-| §3.1 Native dialogs, system browser, file manager | **Implemented** with `rfd` and `open` (web addresses limited to `http` and `https`) | `sue-platform/src/os.rs` |
+| §3.1 Native open, save and folder dialogs, system browser, file manager | **Implemented** with `rfd` and `open` (web addresses limited to `http` and `https`) on desktops; no system file dialog on Android and iOS yet | `sue-platform/src/os.rs` |
 | §3.1 Native mobile hosts (Android, iOS) | Planned (the mobile topologies already run on `HeadlessHost`) | n/a |
-| §3.2 to 3.4 Topologies, layout, springs, spring camera, scheduler | **Implemented** | `sue-wm` |
+| §3.2 to 3.4 Form factors, layout, springs, scheduler | **Implemented** | `sue-wm` |
 | §3.4 Painting with egui (`egui-wgpu`), arena images as native textures | **Implemented**; the self-check renders a frame on the GPU and counts tinted pixels (zero) | `sue-platform/src/paint.rs` |
 | §3.4 Multi-pass shader effects | Planned (the `ShaderPath` parameter type exists; no shipped parameter uses it yet) | n/a |
 | §3.5 Audio output (ring, atomic gain, real-time priority) and the shared transport | **Implemented** with `cpal`; the transport is tested headlessly with `NullAudio`, and a device test streams to the real output | `sue-platform/src/audio.rs`, `sue-wm/src/transport.rs` |
 | §3.5 DAW audio graph | Specified; planned with the DAW studio | n/a |
-| §3.6 Applets, Launchpad, infinite canvas, top and selection pills, marking menu, palette, drawers, status bar | **Implemented** (fourteen built-in applets, see §3.6) | `sue-wm`, `bins/sue/src`, `sue-paint` |
+| §3.6 Applets, Launchpad, the Hub with its pins, the top bar with the Sue button and the page's menus, palette, status bar | **Implemented** (five built-in applets: two studios, two tools and Settings, see §3.6) | `sue-wm`, `bins/sue/src`, `sue-paint`, `sue-writer` |
 | §3.6 Text editing over the arena with one global undo (`ArenaText`, `Typing`) | **Implemented**; the self-check types, undoes with `Ctrl+Z` and redoes with `Ctrl+Y` through egui events | `sue-wm/src/text.rs`, `sue-core/src/txn.rs` |
 | §3.6 Timeline: lanes, projected blocks, playhead, playback of audio blocks | **Implemented** (blocks are moved, not trimmed; video lanes arrive with the video studio) | `sue-wm/src/timeline.rs`, `shell.rs` |
 | §3.6 Studio role, data-driven menu bars with grayed items | **Implemented** | `sue-wm/src/applet.rs`, `shell.rs`, `menubar.rs` |
 | §3.6 Studios beyond Sue Paint (DAW, video, 3D and CAD, IDE, game engine) | Planned; they arrive as studio applets, the way Sue Paint did | n/a |
-| §3.7 Sue Paint: layout, every menu, tools and sub tools, brush engine with pressure and stabilization, fills, gradients, figures, selections, layers, 26 blend modes, edits and filters, open and export, canvas cards | **Implemented**; an end-to-end test drives it with egui events (New, a pressure stroke, a layer, undo, save and reopen), the self-check paints, undoes, saves and exports, and three snapshots show it | `sue-paint`, `bins/sue/src/runtime.rs`, `selfcheck.rs`, `snapshot.rs` |
+| §3.7 Sue Paint: layout, every menu, tools and sub tools, brush engine with pressure and stabilization, fills, gradients, figures, selections, layers, 26 blend modes, edits and filters, open and export | **Implemented**; an end-to-end test drives it with egui events (New, a pressure stroke, a layer, undo, save and reopen), the self-check paints, undoes, saves and exports, and three snapshots show it | `sue-paint`, `bins/sue/src/runtime.rs`, `selfcheck.rs`, `snapshot.rs` |
 | §3.7 Sue Paint: pen pressure curves and dynamics, starting and ending modes, color jitter, puppet warp, stories and the Page Manager, frame borders, balloons, focus and speed lines, screentone, animation timelines with onion skin and GIF export | **Implemented**; end-to-end tests drive puppet warp, stories, manga and animation with egui events, and snapshots show the pressure dialog, the Page Manager and the Timeline | `sue-paint`, `bins/sue/src/runtime.rs`, `snapshot.rs` |
 | §3.7 Sue Paint: scale and free transform, layer folders, layer masks, canvas size, crop and resolution, the symmetrical ruler, text layers and balloon text, tone curve, levels, color balance and gradient maps | **Implemented**; end-to-end tests drive each with egui events (Ctrl+T, Ctrl+G and the folder moves, crop, a mirrored stroke, a mask erased, words written and edited) | `sue-paint`, `sue-type/src/raster.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: Close gap and Area scaling, the Blend tool (Blur, Finger Tip, Liquify) and correction layers | **Implemented**; unit tests for a fill held in a broken ring, every dab kind and every correction read back from its text; end-to-end runs that liquify a stroke and add, undo and cancel correction layers | `sue-paint/src/fill.rs`, `blend.rs`, `composite.rs`, `bins/sue/src/runtime.rs` |
@@ -2033,7 +1993,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: 3D layers (shapes and OBJ models), their camera and look, and lines and tones from them | **Implemented**; unit tests for the renderer's coverage, outlines and folds (a sphere smooth inside), each look, and a layer turned and undone; an end-to-end run makes a cube, turns it with the Object tool, undoes, converts it to lines and tones and imports an OBJ model | `sue-paint/src/three.rs`, `canvas.rs`, `panels.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: audio tracks on the animation timeline, played in step | **Implemented**; a unit test for a sound imported, mixed from its frame, moved, removed and undone; the animation end-to-end run imports a WAV and plays and stops it with the animation | `sue-paint/src/anim.rs`, `anim_ui.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: brush tip materials | Planned; the menu item is present and grayed out | n/a |
-| §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
+| §3.6 Embedded web view | Planned (a Browser drawer of earlier builds was retired) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |
 | §4.3 Settings window: categories, filter, segmented, slider, switch, color and keycap controls, presets, undoable edits, atomic persistence | **Implemented** (the file is read at boot and by Reload from Disk; watching it for outside edits is planned) | `bins/sue/src/settings.rs`, `runtime.rs`, `engine.rs` |

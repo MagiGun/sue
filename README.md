@@ -12,58 +12,55 @@
 ![unsafe](https://img.shields.io/badge/unsafe-forbidden-111111)
 
 **Sue, the Singular Unified Engine,** is one lightweight, endlessly expandable
-creative environment. Day to day it is a fast file explorer, media player, notes
-app and converter. One click turns it into a document processor, the **Sue
-Paint** illustration studio, audio editor or code and hex viewer, and later into
-a DAW, video editor, CAD/3D modeler, IDE or game engine.
+creative environment. Its tools view and touch up pictures and convert any
+file into another kind; its studios are **Sue Paint** for illustration, comics
+and animation and **Sue Writer** for writing and publishing, and later a DAW,
+video editor, CAD/3D modeler, IDE or game engine.
 
 Sue does this without a pile of separate apps or an N×N grid of file converters.
 Every tool works on the same data in one shared, generation-indexed **Arena**.
-Putting a document on the timeline, or a song next to a painting, attaches a new
-*projection* to the data that is already there. Nothing is copied or converted.
+A picture painted in Sue Paint is the very picture a chapter in Sue Writer
+shows; putting something on a timeline attaches a new *projection* to the data
+that is already there. Nothing is copied or converted.
 
 ## Where things stand
 
 Sue is made of the eleven crates below and the `sue` executable. It opens a native GPU window drawn with egui in a pure monochrome
-theme (black to white, nothing else), straight onto an **infinite canvas**:
+theme (black to white, nothing else), straight onto the **Hub**:
 
-- **The Hub:** Sue opens with a card for each place to work (the Canvas and
-  every studio); `Esc` stays on the canvas.
-- **The canvas:** a live dot grid you zoom from 10% to 3200% with the wheel and
-  pan with the middle button or Space and drag, with the Welcome document on
-  it to type and select text in.
-- **The top pill:** Hub and the command palette, nothing else.
-- **Sue Paint:** a full-window painting studio with the usual menu bar (File,
-  Edit, Story, Animation, Layer, Select, View, Filter, Window, Help, every
-  item working), a command bar, tools and sub tools (pens, pencils,
-  brushes, airbrushes, erasers, fill, gradient, figures, selections,
-  eyedropper, hand, zoom, move layer) with pen pressure and stabilization, a
-  color wheel and sets, canvas tabs with a turnable view, a navigator, and
-  layers with 26 blend modes, clipping and locks. Pictures live in the project
-  and also sit on the canvas as cards. Going in, the canvas zooms into the
-  card and the panels slide in; going out, they slide away and the canvas
-  zooms back out.
-- **The selection pill:** select an entity and a floating toolbar springs up
-  above it with only its tools: headings, bold and text size for documents;
-  brush, line, rectangle, eraser, size, value and JPEG XL export for paint;
-  play, gain, split and normalize for audio; 1:1 zoom, pixel grid, re-encode and
-  hex for pictures.
-- **The marking menu:** right-click anywhere for a radial menu that grows on a
-  spring. Its New File wedge opens a wheel of kinds of files (Document,
-  Picture, Audio, Code) and each kind a wheel of exact kinds, from the
-  applets' templates. **The command palette:** `Tab` or `/` for a fuzzy search
-  over every action and template.
-- **The timeline:** a bottom dock that springs open with Document, Paint/Visual
-  and Audio tracks. Its blocks are the very entities on the canvas.
-- **Drawers:** Files, Player, Convert and Notes on the left; Inspector and
-  History (the clickable undo tree) on the right. Each slides on a spring.
-- **Settings:** a floating window (gear or `Ctrl+,`) with eight categories, a
-  filter box and a live control for every rice parameter.
+- **The Hub:** a full page with a box for every studio (Sue Paint, Sue Writer)
+  and every tool (the Image Viewer, the Converter). A click opens one. The pin
+  at each box's bottom right makes Sue open straight into it at launch, one
+  pin at a time (`launchpad.pinned` in the rice, so it shows in Settings).
+- **The top bar:** the **Sue button** sits once in the top left corner,
+  followed by the open studio's or tool's own menus. It opens the Sue menu:
+  the Hub, every studio and tool, New, Open File, projects, Send To (the
+  thing you work on, into another studio or tool by its id), the pin, the
+  command palette and Settings.
+- **Sue Paint:** a painting studio with the usual menus (File, Edit, Story,
+  Animation, Layer, Select, View, Filter, Window, Help), a command bar, tools
+  and sub tools (pens, pencils, brushes, airbrushes, erasers, fill, gradient,
+  figures, selections, eyedropper, hand, zoom, move layer) with pen pressure
+  and stabilization, a color wheel and sets, canvas tabs with a turnable
+  view, a navigator, and layers with 26 blend modes, clipping and locks. Its
+  page comes in over the Hub and its palettes slide in from the edges.
+- **Sue Writer:** pages, styles, a binder, a corkboard, an outliner,
+  composition mode and compiling to PDF, Word, OpenDocument, EPUB and more.
+- **The Image Viewer** and **the Converter:** tools with pages of their own,
+  like the studios. One shows a picture large with quick fixes and saving as
+  any picture type; the other turns pictures, sounds, text and tables into
+  other kinds of files on a background thread.
+- **The command palette:** `Tab` or `/` for a fuzzy search over every action
+  and template.
+- **Settings:** a floating window (the Sue menu or `Ctrl+,`) with nine
+  categories, a filter box and a live control for every rice parameter.
 
 Every text field selects with the mouse, double-clicks words, copies, cuts and
-pastes, and `Ctrl+Z` and `Ctrl+Y` undo through the one global undo tree. Drop
-any file on the window and Sue puts it on the canvas by its content. `Ctrl+S`
-saves the whole canvas as a `.sue` project; opening a project brings it back.
+pastes, and `Ctrl+Z` and `Ctrl+Y` undo through the one global undo tree. Every
+file Sue asks for goes through the system's own open, save and folder dialogs.
+Drop any file on the window and it opens in the studio or tool that takes it.
+`Ctrl+S` saves everything as a `.sue` project; opening a project brings it
+back.
 
 Under the shell sits the **backbone** every future feature will share
 (`HUMANZ.md` §1): stable entity ids, typed and ordered relations, open and
@@ -90,10 +87,10 @@ feature Sue may grow into onto the backbone.
 | [`sue-io`](crates/sue-io) | Magic-byte sniffer, JPEG XL, PNG, JPEG and audio codecs, every format handler, ingest, tile cache, byte map | `sniff_stream`, `formats`, `ingest_bytes`, `NativeJxlPipeline`, `decode_audio`, `encode_jpeg`, `TileCache` |
 | [`sue-pkg`](crates/sue-pkg) | Content-addressed packages, Ed25519 trust, resolver, atomic generations | `PackageManifest`, `ContentHash`, `TrustStore`, `PackageIndex`, `resolve`, `AtomicUpdater` |
 | [`sue-ai`](crates/sue-ai) | Offline, zero-copy AI substrate | `LocalModelRegistry`, `ComputeBackend`, `ZeroCopyTensorTask` |
-| [`sue-wm`](crates/sue-wm) | The shell: infinite canvas, spring camera, pills, marking menu, palette, timeline, drawers, studios, menu bars, theme | `SueApplet`, `Launchpad`, `Shell`, `MenuBar`, `Camera`, `Scene`, `SpringDamper`, `Typing`, `Transport` |
-| [`sue-paint`](crates/sue-paint) | Sue Paint: the painting studio, its brush engine, compositing, selections, fills and filters | `SuePaint`, `PictureCard`, `Stroke`, `Compositor`, `Selection`, `Filter` |
+| [`sue-wm`](crates/sue-wm) | The shell: the Hub with its pins, the top bar with the Sue button and menus, studios and tools, palette, springs, theme | `SueApplet`, `Launchpad`, `Shell`, `MenuBar`, `SpringDamper`, `Typing`, `Transport` |
+| [`sue-paint`](crates/sue-paint) | Sue Paint: the painting studio, its brush engine, compositing, selections, fills and filters | `SuePaint`, `Stroke`, `Compositor`, `Selection`, `Filter` |
 | [`sue-type`](crates/sue-type) | Typography for every studio that sets text: paragraph styles, the rich text editor, page layout and typesetting | `Editor`, `StyleSheet`, `PageSetup` |
-| [`sue-writer`](crates/sue-writer) | Sue Writer: the writing and publishing studio | `SueWriter`, `WriterCard` |
+| [`sue-writer`](crates/sue-writer) | Sue Writer: the writing and publishing studio | `SueWriter` |
 | [`bins/sue`](bins/sue) | The executable: runtime, built-in applets, self-check, snapshots | `Engine`, `Runtime` |
 
 ```text
@@ -157,21 +154,24 @@ Support/Sue` on macOS, `~/.config/sue` on Linux). The first launch creates it as
 a copy of the shipped defaults. A file from an older release, or one with any
 color that is not a gray, is migrated on the next start: Sue keeps the values
 you changed (except tinted colors) and saves the old file beside it as
-`default.suerice.v2.bak` (or `.v1.bak`, `.v3.bak`).
+`default.suerice.v4.bak` (or `.v1.bak` to `.v3.bak`).
 
 `--self-check` boots every subsystem headlessly and prints a diagnostics log:
 the Arena, the rice introspection, the sniffer, the package manager, the AI
-registry and the shell working together through real egui frames (a drawer that
-glides on its spring, a mode switch that glides the camera, typing undone with
-`Ctrl+Z`, a paint stroke undone tile by tile, the timeline, the marking menu and
-the palette, then 0 FPS), and the backbone (the live canvas saved as a project
-and opened again, pictures and tables through the format registry, an operator
-run with a preset and undone, a background job). When a GPU is available it
-also renders a frame and checks that not one pixel is tinted. The process exits non-zero if any check
-fails. `--snapshot <dir>` renders ten scenes into PNG files in `<dir>`, from a
-fresh temporary profile: the canvas, a selection pill, Document mode, the
-timeline, the marking menu, the palette, two Settings pages, the drawers with a
-picture, and Code / Hex.
+registry and the shell working together through real egui frames (Sue opening
+on the Hub, a click on a pin with `Ctrl+Z` and `Ctrl+Y`, a click on a box that
+glides Sue Paint in (and snaps on legacy hardware), the Sue button's menu, a
+picture opened in the Image Viewer and sent to the Converter, the palette and
+Settings, then 0 FPS), the studios (a painting and a novel made, undone,
+redone, saved and exported), and the backbone (the project saved and opened
+again, pictures and tables through the format registry, an operator run with
+a preset and undone, a background job). When a GPU is available it also
+renders a frame and checks that not one pixel is tinted. The process exits
+non-zero if any check fails. `--snapshot <dir>` renders the main scenes into
+PNG files in `<dir>`, from a fresh temporary profile: the Hub and a pin, the
+Sue menu, the palette, Settings, the Image Viewer, the Converter, Sue Paint
+and its menus and dialogs, Sue Writer's views, and the Hub and Sue Paint on a
+phone and a tablet.
 
 ## Community
 

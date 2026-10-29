@@ -115,8 +115,9 @@ Do:
   touching the backbone.
 - Keep each change small and on a branch, with tests for what it promises.
 - Use the shared features (`sue-wm` widgets, `sue_wm::fonts`, `sue-type`,
-  `sue-io` formats, `FilePick`, the shared models) instead of writing new
-  ones; give a shared feature a new mode when a studio needs more.
+  `sue-io` formats, `FilePick` for the system's file dialogs, the shared
+  models) instead of writing new ones; give a shared feature a new mode
+  when a studio needs more.
 - Update `HUMANZ.md` and `HUMANS.md` when a feature changes.
 - Say plainly what you verified and what you did not.
 
@@ -163,10 +164,11 @@ cargo run -p sue -- --self-check
   color picker, file dialog, converter, brush engine, font list, text
   editor, 3D view or exporter when Sue has one (the shared widgets in
   `sue-wm`, the installed fonts in `sue_wm::fonts`, the rich text editor and
-  typesetting in `sue-type`, the publishing formats in `sue-io`, the File
-  Manager's `FilePick`, the Converter, the shared models). When a studio
-  needs more than a feature offers, give that feature a new mode or
-  parameter so every studio gains it, instead of copying it.
+  typesetting in `sue-type`, the publishing formats in `sue-io`, the
+  system's own open, save and folder dialogs through `FilePick`, the
+  Converter, the shared models). When a studio needs more than a feature
+  offers, give that feature a new mode or parameter so every studio gains
+  it, instead of copying it.
 - Studios are woven together. Work moves between them by `EntityId`
   (`ShellRequest::OpenIn`, `ShellRequest::SendEntity`, the Sue menu's Send
   To), never by exporting a file and importing it again. Offer what a studio
