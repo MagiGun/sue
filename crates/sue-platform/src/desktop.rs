@@ -215,10 +215,10 @@ impl std::fmt::Debug for DesktopHost {
 }
 
 impl DesktopHost {
-    /// The part of the window Android's system bars leave free, in points,
-    /// and the insets it means; `None` until Android has said.
+    /// What Android's system bars and on-screen keyboard cover of the
+    /// window, in points; `None` until Android has said.
     #[cfg(target_os = "android")]
-    fn android_safe_rect(&mut self) -> Option<egui::Rect> {
+    fn android_insets(&self) -> Option<SafeAreaInsets> {
         let app = crate::android::app()?;
         let content = app.content_rect();
         let size = self.window.inner_size();
@@ -226,12 +226,31 @@ impl DesktopHost {
         if content.right <= content.left || content.bottom <= content.top {
             return None;
         }
-        let insets = SafeAreaInsets {
+        Some(SafeAreaInsets {
             top: content.top.max(0) as f32 / scale,
             left: content.left.max(0) as f32 / scale,
             right: (size.width as i32 - content.right).max(0) as f32 / scale,
             bottom: (size.height as i32 - content.bottom).max(0) as f32 / scale,
-        };
+        })
+    }
+
+    /// `true` when Android moved the content rectangle since the last
+    /// frame: the on-screen keyboard came up or went away (the activity
+    /// resizes for it), which reaches winit with no event of its own.
+    #[cfg(target_os = "android")]
+    fn android_content_moved(&self) -> bool {
+        self.android_insets()
+            .is_some_and(|insets| insets != self.info.safe_area)
+    }
+
+    /// The part of the window Android's system bars and on-screen keyboard
+    /// leave free, in points, and the insets it means; `None` until Android
+    /// has said.
+    #[cfg(target_os = "android")]
+    fn android_safe_rect(&mut self) -> Option<egui::Rect> {
+        let insets = self.android_insets()?;
+        let size = self.window.inner_size();
+        let scale = self.window.scale_factor() as f32;
         self.info.safe_area = insets;
         Some(egui::Rect::from_min_max(
             egui::pos2(insets.left, insets.top),
@@ -628,6 +647,12 @@ impl<A: DesktopApp> ApplicationHandler for Runner<A> {
         let Some(host) = self.host.as_mut() else {
             return;
         };
+        // The window lays out above an on-screen keyboard: draw again as
+        // soon as it comes up or goes away.
+        #[cfg(target_os = "android")]
+        if host.android_content_moved() {
+            host.window.request_redraw();
+        }
         let now = Instant::now();
         let mut pacing = self.app.pacing(now);
         if let FramePacing::WakeAt(at) = pacing

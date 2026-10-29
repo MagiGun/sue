@@ -454,8 +454,8 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         applet.navigate("view/document");
     }
 
-    // 20 to 23. The touch layouts: the Hub and Sue Paint on a phone and on
-    // a tablet.
+    // 20 to 23. The touch layouts: the Hub, Sue Paint and Sue Writer on a
+    // phone and on a tablet.
     for (interface, size, prefix) in [
         ("phone", [430_u32, 932_u32], "20-phone"),
         ("tablet", [1180, 820], "22-tablet"),
@@ -473,6 +473,28 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
             camera.now,
         );
         shoot(&mut runtime, &mut camera, &format!("{prefix}-sue-paint"))?;
+        runtime.request(
+            ShellRequest::OpenIn {
+                entity: novel,
+                applet: writer.clone(),
+            },
+            &mut camera.painter,
+            camera.now,
+        );
+        shoot(&mut runtime, &mut camera, &format!("{prefix}-sue-writer"))?;
+        if interface == "phone" {
+            // Writing with the on-screen keyboard up: the window above it
+            // keeps the caret's line and the formatting in sight.
+            camera.size = [430, 520];
+            if let Some(applet) = runtime.applets.get_mut(&writer) {
+                applet.navigate("text/end");
+            }
+            shoot(
+                &mut runtime,
+                &mut camera,
+                &format!("{prefix}-sue-writer-typing"),
+            )?;
+        }
     }
     written.extend(entering);
     let _ = std::fs::remove_dir_all(&root);

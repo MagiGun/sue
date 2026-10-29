@@ -1,4 +1,9 @@
 //! Sue Writer's menus, as data for the shared menu bar.
+//!
+//! They follow LibreOffice Writer's grouping (26.8): the character
+//! formats under Format, Text, and alignment, spacing and lists in their
+//! own submenus, so that each menu stays short. The toolbar holds what
+//! Word's mini toolbar and LibreOffice's single toolbar keep at hand.
 
 use sue_wm::{Menu, MenuItem};
 
@@ -41,8 +46,6 @@ pub fn menus() -> Vec<Menu> {
                 MenuItem::Separator,
                 item("Find...", "edit.find").key("Ctrl+F"),
                 item("Replace...", "edit.replace").key("Ctrl+H"),
-                item("Find Next", "edit.find_next").key("F3"),
-                item("Find Previous", "edit.find_previous").key("Shift+F3"),
             ],
         ),
         Menu::new(
@@ -54,16 +57,21 @@ pub fn menus() -> Vec<Menu> {
                 MenuItem::Separator,
                 item("Page View", "view.page"),
                 item("Draft View", "view.draft"),
-                item("Composition Mode", "view.composition").key("F11"),
-                item("Typewriter Scrolling", "view.typewriter"),
                 MenuItem::Separator,
                 item("Binder", "view.binder"),
                 item("Inspector", "view.inspector"),
                 MenuItem::Separator,
-                item("Zoom In", "view.zoom_in"),
-                item("Zoom Out", "view.zoom_out"),
-                item("Actual Size", "view.zoom_reset"),
-                item("Fit to Window", "view.zoom_fit"),
+                item("Composition Mode", "view.composition").key("F11"),
+                item("Typewriter Scrolling", "view.typewriter"),
+                MenuItem::sub(
+                    "Zoom",
+                    vec![
+                        item("Zoom In", "view.zoom_in"),
+                        item("Zoom Out", "view.zoom_out"),
+                        item("Actual Size", "view.zoom_reset"),
+                        item("Fit to Window", "view.zoom_fit"),
+                    ],
+                ),
             ],
         ),
         Menu::new(
@@ -80,24 +88,17 @@ pub fn menus() -> Vec<Menu> {
         Menu::new(
             "Format",
             vec![
-                item("Bold", "format.bold").key("Ctrl+B"),
-                item("Italic", "format.italic").key("Ctrl+I"),
-                item("Underline", "format.underline").key("Ctrl+U"),
-                item("Strikethrough", "format.strike").key("Ctrl+Shift+X"),
-                item("Superscript", "format.superscript").key("Ctrl+Shift+="),
-                item("Subscript", "format.subscript").key("Ctrl+="),
-                item("Small Capitals", "format.small_caps"),
-                item("Code", "format.code"),
-                item("Clear Formatting", "format.clear").key("Ctrl+Space"),
-                MenuItem::Separator,
                 MenuItem::sub(
-                    "Highlight",
+                    "Text",
                     vec![
-                        item("Yellow", "format.highlight.yellow"),
-                        item("Green", "format.highlight.green"),
-                        item("Blue", "format.highlight.blue"),
-                        item("Pink", "format.highlight.pink"),
-                        item("None", "format.highlight.none"),
+                        item("Bold", "format.bold").key("Ctrl+B"),
+                        item("Italic", "format.italic").key("Ctrl+I"),
+                        item("Underline", "format.underline").key("Ctrl+U"),
+                        item("Strikethrough", "format.strike").key("Ctrl+Shift+X"),
+                        item("Superscript", "format.superscript").key("Ctrl+Shift+="),
+                        item("Subscript", "format.subscript").key("Ctrl+="),
+                        item("Small Capitals", "format.small_caps"),
+                        item("Code", "format.code"),
                     ],
                 ),
                 MenuItem::sub(
@@ -110,9 +111,19 @@ pub fn menus() -> Vec<Menu> {
                         item("Gray", "format.color.6b6b6b"),
                     ],
                 ),
+                MenuItem::sub(
+                    "Highlight",
+                    vec![
+                        item("Yellow", "format.highlight.yellow"),
+                        item("Green", "format.highlight.green"),
+                        item("Blue", "format.highlight.blue"),
+                        item("Pink", "format.highlight.pink"),
+                        item("None", "format.highlight.none"),
+                    ],
+                ),
                 MenuItem::Separator,
                 MenuItem::sub(
-                    "Alignment",
+                    "Align Text",
                     vec![
                         item("Left", "align.left").key("Ctrl+L"),
                         item("Center", "align.center").key("Ctrl+E"),
@@ -129,10 +140,17 @@ pub fn menus() -> Vec<Menu> {
                         item("Double", "spacing.2"),
                     ],
                 ),
-                item("Bulleted List", "list.bullet").key("Ctrl+Shift+L"),
-                item("Numbered List", "list.number"),
-                item("Increase Indent", "indent.more"),
-                item("Decrease Indent", "indent.less"),
+                MenuItem::sub(
+                    "Lists",
+                    vec![
+                        item("Bulleted List", "list.bullet").key("Ctrl+Shift+L"),
+                        item("Numbered List", "list.number"),
+                        item("Increase Indent", "indent.more"),
+                        item("Decrease Indent", "indent.less"),
+                    ],
+                ),
+                MenuItem::Separator,
+                item("Clear Direct Formatting", "format.clear").key("Ctrl+Space"),
             ],
         ),
         Menu::new(
@@ -164,9 +182,57 @@ pub fn menus() -> Vec<Menu> {
                 ),
                 MenuItem::Separator,
                 item("Writing Statistics...", "project.statistics"),
-                item("Project Settings...", "project.settings"),
             ],
         ),
         Menu::new("Help", vec![item("Keyboard Shortcuts", "help.shortcuts")]),
     ]
+}
+
+/// The menus for a phone: one list under a single button, each menu a
+/// submenu, without Help (its shortcuts need a keyboard).
+#[must_use]
+pub fn phone_menu(menus: &[Menu]) -> Vec<MenuItem> {
+    menus
+        .iter()
+        .filter(|menu| menu.title != "Help")
+        .map(|menu| MenuItem::sub(menu.title.clone(), menu.items.clone()))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn count(items: &[MenuItem]) -> usize {
+        items
+            .iter()
+            .filter(|item| !matches!(item, MenuItem::Separator))
+            .count()
+    }
+
+    #[test]
+    fn menus_stay_short() {
+        // LibreOffice keeps a menu's first level to about a dozen entries;
+        // Sue Writer's are shorter still, the rest in submenus.
+        for menu in menus() {
+            assert!(
+                count(&menu.items) <= 12,
+                "{} has {} entries",
+                menu.title,
+                count(&menu.items)
+            );
+        }
+        let format = menus()
+            .into_iter()
+            .find(|menu| menu.title == "Format")
+            .unwrap();
+        assert_eq!(count(&format.items), 7);
+        let phone = phone_menu(&menus());
+        assert_eq!(phone.len(), menus().len() - 1);
+        assert!(
+            phone
+                .iter()
+                .all(|item| matches!(item, MenuItem::Sub { .. }))
+        );
+    }
 }

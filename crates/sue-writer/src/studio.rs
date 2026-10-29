@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use egui::{Key, Modifiers, Ui, Vec2};
+use egui::{Key, Modifiers, Rect, Ui, Vec2};
 use sue_core::{Entity, EntityId, Value};
 use sue_model::manuscript::{self, role};
 use sue_model::{class, mark_kind as kind, picture};
@@ -151,6 +151,18 @@ pub struct SueWriter {
     pub(crate) shown_zoom: f32,
     /// The toolbar's height: one row, or two when the studio is narrow.
     pub(crate) toolbar_height: f32,
+    /// Laid out for a phone this frame.
+    pub(crate) phone: bool,
+    /// Pages on a phone, which reflows the text to the screen unless
+    /// asked for them (View, Page View).
+    pub(crate) phone_pages: bool,
+    /// The binder over a phone's page (it starts closed: the text first).
+    pub(crate) phone_binder: bool,
+    /// The Writer's own bars last frame: a press there keeps the keyboard
+    /// with the text.
+    pub(crate) bars: Vec<Rect>,
+    /// The Writer's row in Sue's top bar on a phone.
+    pub(crate) top_bar: Option<Rect>,
 }
 
 impl Default for SueWriter {
@@ -170,7 +182,9 @@ impl Default for SueWriter {
             menus: crate::menus::menus(),
             bound: sue_wm::shortcuts::Bound::default(),
             binder: true,
-            inspector: true,
+            // Shown from View, Inspector: the page and the binder are what
+            // a word processor opens with.
+            inspector: false,
             binder_width: 230.0,
             inspector_width: 260.0,
             find: None,
@@ -189,6 +203,11 @@ impl Default for SueWriter {
             fit: true,
             shown_zoom: 1.0,
             toolbar_height: 36.0,
+            phone: false,
+            phone_pages: false,
+            phone_binder: false,
+            bars: Vec::new(),
+            top_bar: None,
         }
     }
 }
@@ -263,6 +282,25 @@ impl SueWriter {
     }
 
     /// `true` for a single document shown like a word processor's file.
+    /// Whether the binder shows: a phone's covers the page when asked for.
+    pub(crate) fn binder_shown(&self) -> bool {
+        if self.phone {
+            self.phone_binder
+        } else {
+            self.binder
+        }
+    }
+
+    /// Whether the text shows as pages: on a phone it reflows to the
+    /// screen unless asked for pages.
+    pub(crate) fn pages_shown(&self) -> bool {
+        if self.phone {
+            self.phone_pages
+        } else {
+            self.paged
+        }
+    }
+
     pub(crate) fn simple(&self, cx: &AppletContext<'_>) -> bool {
         self.project.is_none()
             || self
@@ -744,12 +782,13 @@ impl SueWriter {
             "view.document" => self.view = View::Document,
             "view.corkboard" => self.view = View::Corkboard,
             "view.outliner" => self.view = View::Outliner,
-            "view.page" => {
-                self.paged = true;
-                self.view = View::Document;
-            }
-            "view.draft" => {
-                self.paged = false;
+            "view.page" | "view.draft" => {
+                let pages = command == "view.page";
+                if self.phone {
+                    self.phone_pages = pages;
+                } else {
+                    self.paged = pages;
+                }
                 self.view = View::Document;
             }
             "view.composition" => {
@@ -758,7 +797,13 @@ impl SueWriter {
                 self.editor.focus();
             }
             "view.typewriter" => self.typewriter = !self.typewriter,
-            "view.binder" => self.binder = !self.binder,
+            "view.binder" => {
+                if self.phone {
+                    self.phone_binder = !self.phone_binder;
+                } else {
+                    self.binder = !self.binder;
+                }
+            }
             "view.inspector" => self.inspector = !self.inspector,
             "view.zoom_in" => {
                 self.fit = false;
@@ -1352,6 +1397,8 @@ pub(crate) fn shortcut_table() -> &'static [sue_wm::shortcuts::Shortcut] {
                         "style.heading2" => "Heading 2",
                         "style.heading3" => "Heading 3",
                         "style.body" => "Body Text",
+                        "edit.find_next" => "Find Next",
+                        "edit.find_previous" => "Find Previous",
                         other => other,
                     }
                     .to_owned()
@@ -1530,6 +1577,15 @@ impl SueApplet for SueWriter {
             }
             "view/composition" => {
                 self.composition = true;
+                true
+            }
+            // The caret at the end of the open text, with the keyboard.
+            "text/end" => {
+                if let Some(doc) = self.editor.current() {
+                    let end = self.editor.text().len();
+                    self.editor.select(doc, end..end);
+                }
+                self.view = View::Document;
                 true
             }
             "dialog/compile" => {

@@ -25,9 +25,22 @@ follow [Semantic Versioning](https://semver.org/).
   Files browser on iPhone and iPad. On Android, saving a file you opened
   writes back to the original, and a folder you choose is read and
   written (the Converter's Add a Folder and its output folder).
+- Typing in Sue Writer feels smooth: the caret glides to its new place
+  instead of jumping, as you type, delete, move with the keys or click, and
+  as lines and pages wrap. It blinks only while it rests. Settings, Display
+  & Graphics, Motion has Smooth Caret to turn it off and Caret Glide Time
+  for its speed.
 
 ### Changed
 
+- Sue Writer on a phone: the text flows to the screen's width at a size you
+  can read, the formatting is a row of big buttons right above the keyboard,
+  and the line you are writing stays in sight when the keyboard comes up.
+  Tapping a formatting button keeps the keyboard up.
+- Sue Writer has fewer options in the way: one short toolbar (what Word and
+  LibreOffice Writer keep at hand), the Format menu grouped as LibreOffice
+  groups it, Draft and Page beside the zoom, and the inspector hidden until
+  View, Inspector. Tablets get larger toolbar buttons.
 - The Sue button sits once, in the window's top left corner, and the
   open studio's or tool's menus follow it.
 - The Image Viewer and the Converter are tools with pages of their own,
