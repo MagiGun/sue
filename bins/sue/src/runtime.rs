@@ -5119,4 +5119,95 @@ f 2 3 4
         }
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    #[test]
+    fn the_sue_menu_changes_the_language_and_a_tool_can_keep_its_own() {
+        let (mut runtime, root) = runtime("language");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+
+        // Headless runs start in English; the Sue menu offers every language.
+        runtime.with_shell(&mut NoTextures, start, |shell, io, _| {
+            shell.open_sue_menu(io)
+        });
+        let languages = runtime.shell.sue_menu_labels(&["Language"]);
+        let japanese = sue_lang::name("ja");
+        assert!(languages.contains(&japanese), "{languages:?}");
+        assert!(languages.contains(&sue_lang::name("es")), "{languages:?}");
+
+        // Picking Japanese is an undoable rice edit, and the menu speaks it.
+        let picked = runtime.with_shell(&mut NoTextures, start, |shell, io, now| {
+            shell.sue_menu_pick(&["Language", &japanese], io, now)
+        });
+        assert!(picked);
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        assert_eq!(
+            runtime.engine.world.rice.get_str(sue_wm::LANGUAGE_KEY),
+            Some("ja")
+        );
+        runtime.with_shell(&mut NoTextures, start, |shell, io, _| {
+            shell.open_sue_menu(io)
+        });
+        let labels = runtime.shell.sue_menu_labels(&[]);
+        let settings = {
+            let _ja = sue_lang::scope("ja");
+            sue_lang::text("wm", "settings")
+        };
+        assert_ne!(settings, "Settings");
+        assert!(labels.contains(&settings), "{labels:?}");
+        runtime.shell.dismiss_overlays();
+
+        // The Image Viewer set apart in Spanish: what it says is Spanish,
+        // while Sue's own menu stays Japanese.
+        let viewer = AppletId::new(crate::viewer::ID).unwrap();
+        runtime
+            .engine
+            .world
+            .rice
+            .set(
+                &sue_wm::language_key(&viewer),
+                sue_rice::RiceValue::Text("es".to_owned()),
+            )
+            .unwrap();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: viewer,
+                command: "no.such.command".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        let spanish = {
+            let _es = sue_lang::scope("es");
+            sue_lang::tr!("wm", "is-not-available", command = "no.such.command")
+        };
+        assert_eq!(
+            runtime.shell.message().map(|(text, _)| text),
+            Some(spanish.as_str())
+        );
+        runtime.with_shell(&mut NoTextures, start, |shell, io, _| {
+            shell.open_sue_menu(io)
+        });
+        assert!(runtime.shell.sue_menu_labels(&[]).contains(&settings));
+
+        // English again: the menu reads English.
+        let _ = runtime.engine.world.rice.set(
+            sue_wm::LANGUAGE_KEY,
+            sue_rice::RiceValue::Text(sue_lang::ENGLISH.to_owned()),
+        );
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        runtime.with_shell(&mut NoTextures, start, |shell, io, _| {
+            shell.open_sue_menu(io)
+        });
+        assert!(
+            runtime
+                .shell
+                .sue_menu_labels(&[])
+                .contains(&"Settings".to_owned())
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
