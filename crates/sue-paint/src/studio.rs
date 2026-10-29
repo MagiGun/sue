@@ -494,6 +494,9 @@ fn implemented(command: &str) -> bool {
             | "layer.new.frame"
             | "layer.new.balloon"
             | "layer.folder_insert"
+            | "edit.canvas_size"
+            | "edit.resolution"
+            | "edit.crop"
             | "layer.new.folder"
             | "anim.timeline.new"
             | "anim.layer.folder"
@@ -1845,6 +1848,63 @@ impl SuePaint {
                 self.dialog = Some(Dialog::Frame(crate::comic::FrameSpec::default()));
             }
             "layer.new.balloon" => self.add_balloon_layer(cx),
+            "edit.canvas_size" | "edit.resolution" => {
+                let Some(old) = self
+                    .picture()
+                    .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
+                    .and_then(|entity| {
+                        let dpi = entity
+                            .property(picture::DPI)
+                            .and_then(Value::as_f64)
+                            .unwrap_or(72.0);
+                        picture::size(entity).map(|size| (size, dpi))
+                    })
+                else {
+                    return;
+                };
+                let (size, dpi) = old;
+                self.dialog = Some(if command == "edit.canvas_size" {
+                    Dialog::Canvas(crate::dialogs::CanvasDialog {
+                        size,
+                        old: size,
+                        anchor: 4,
+                    })
+                } else {
+                    Dialog::Resolution(crate::dialogs::ResolutionDialog {
+                        size,
+                        old: size,
+                        dpi,
+                        keep: true,
+                    })
+                });
+            }
+            "edit.crop" => {
+                let (Some(picture), Some(bounds)) = (
+                    self.picture(),
+                    self.doc()
+                        .and_then(|doc| doc.selection.as_ref())
+                        .and_then(Selection::bounds),
+                ) else {
+                    cx.fail("Select the area to keep first");
+                    return;
+                };
+                let [x0, y0, x1, y1] = bounds;
+                match doc::resize_canvas(
+                    &cx.world.arena,
+                    picture,
+                    [x1 - x0, y1 - y0],
+                    [-i64::from(x0), -i64::from(y0)],
+                ) {
+                    Ok(edit) => {
+                        let edit = sue_core::txn::Batch::new("Crop").then(edit);
+                        Self::apply(cx, edit);
+                        if let Some(doc) = self.doc_mut() {
+                            doc.set_selection(None);
+                        }
+                    }
+                    Err(error) => cx.fail(error),
+                }
+            }
             "layer.new" | "layer.new.fill" => {
                 let Some(picture) = self.picture() else {
                     return;

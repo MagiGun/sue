@@ -313,6 +313,35 @@ impl PressureDialog {
     }
 }
 
+/// Change Canvas Size: the new size and where the old picture sits in it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CanvasDialog {
+    pub size: [u32; 2],
+    pub old: [u32; 2],
+    /// 0 top left to 8 bottom right, row by row.
+    pub anchor: u8,
+}
+
+impl CanvasDialog {
+    /// Where the old top left corner lands.
+    pub(crate) fn shift(&self) -> [i64; 2] {
+        let (column, row) = (i64::from(self.anchor % 3), i64::from(self.anchor / 3));
+        [
+            (i64::from(self.size[0]) - i64::from(self.old[0])) * column / 2,
+            (i64::from(self.size[1]) - i64::from(self.old[1])) * row / 2,
+        ]
+    }
+}
+
+/// Change Image Resolution: the new size in pixels and the resolution.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ResolutionDialog {
+    pub size: [u32; 2],
+    pub old: [u32; 2],
+    pub dpi: f64,
+    pub keep: bool,
+}
+
 /// The Page Manager: the story's pages as spreads, one chosen.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PagesDialog {
@@ -329,6 +358,8 @@ pub(crate) enum Dialog {
     Pressure(PressureDialog),
     Pages(PagesDialog),
     Frame(crate::comic::FrameSpec),
+    Canvas(CanvasDialog),
+    Resolution(ResolutionDialog),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -397,6 +428,8 @@ impl SuePaint {
             Dialog::Shortcuts => ("Keyboard Shortcuts", vec2(470.0, 560.0)),
             Dialog::Pages(_) => ("Page Manager", vec2(820.0, 620.0)),
             Dialog::Frame(_) => ("New Frame Border Folder", vec2(420.0, 330.0)),
+            Dialog::Canvas(_) => ("Change Canvas Size", vec2(380.0, 300.0)),
+            Dialog::Resolution(_) => ("Change Image Resolution", vec2(380.0, 250.0)),
             Dialog::Pressure(pressure) => (
                 "Adjust pen pressure",
                 vec2(560.0, if pressure.show_graph { 520.0 } else { 330.0 }),
@@ -440,6 +473,10 @@ impl SuePaint {
                             }
                             Dialog::Pages(pages) => outcome = self.pages_ui(ui, pages, cx, theme),
                             Dialog::Frame(frame) => outcome = frame_ui(ui, frame, theme),
+                            Dialog::Canvas(canvas) => outcome = canvas_ui(ui, canvas, theme),
+                            Dialog::Resolution(resolution) => {
+                                outcome = resolution_ui(ui, resolution, theme)
+                            }
                             Dialog::Shortcuts => {
                                 egui::ScrollArea::vertical().max_height(size.y - 90.0).show(
                                     ui,
@@ -561,6 +598,33 @@ impl SuePaint {
                 }
             }
             (Dialog::Frame(frame), Outcome::Ok) => self.add_frame_layer(cx, frame),
+            (Dialog::Canvas(canvas), Outcome::Ok) => {
+                if let Some(picture) = self.picture() {
+                    match doc::resize_canvas(&cx.world.arena, picture, canvas.size, canvas.shift())
+                    {
+                        Ok(edit) => {
+                            Self::apply(cx, edit);
+                            if let Some(doc) = self.doc_mut() {
+                                doc.set_selection(None);
+                            }
+                        }
+                        Err(error) => cx.fail(error),
+                    }
+                }
+            }
+            (Dialog::Resolution(resolution), Outcome::Ok) => {
+                if let Some(picture) = self.picture() {
+                    match doc::resample(&cx.world.arena, picture, resolution.size, resolution.dpi) {
+                        Ok(edit) => {
+                            Self::apply(cx, edit);
+                            if let Some(doc) = self.doc_mut() {
+                                doc.set_selection(None);
+                            }
+                        }
+                        Err(error) => cx.fail(error),
+                    }
+                }
+            }
             (Dialog::New(new), Outcome::Ok) => {
                 let spec = new.spec();
                 match new.project {
@@ -583,11 +647,125 @@ impl SuePaint {
                 | Dialog::Shortcuts
                 | Dialog::Pressure(_)
                 | Dialog::Pages(_)
-                | Dialog::Frame(_),
+                | Dialog::Frame(_)
+                | Dialog::Canvas(_)
+                | Dialog::Resolution(_),
                 Outcome::Cancel | Outcome::Ok,
             ) => {}
         }
     }
+}
+
+/// Change Canvas Size: width, height and the anchor.
+fn canvas_ui(ui: &mut Ui, canvas: &mut CanvasDialog, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    egui::Grid::new("sue-paint-canvas-size")
+        .num_columns(2)
+        .spacing(vec2(12.0, 8.0))
+        .show(ui, |ui| {
+            label(ui, "Width:", theme);
+            ui.add(
+                egui::DragValue::new(&mut canvas.size[0])
+                    .range(1..=doc::MAX_SIDE)
+                    .suffix(" px"),
+            );
+            ui.end_row();
+            label(ui, "Height:", theme);
+            ui.add(
+                egui::DragValue::new(&mut canvas.size[1])
+                    .range(1..=doc::MAX_SIDE)
+                    .suffix(" px"),
+            );
+            ui.end_row();
+            label(ui, "Reference point:", theme);
+            egui::Grid::new("sue-paint-anchor")
+                .spacing(vec2(2.0, 2.0))
+                .show(ui, |ui| {
+                    for index in 0..9_u8 {
+                        let chosen = canvas.anchor == index;
+                        let button =
+                            egui::Button::new(if chosen { "\u{25CF}" } else { "\u{25CB}" })
+                                .min_size(vec2(24.0, 22.0))
+                                .selected(chosen);
+                        if ui.add(button).clicked() {
+                            canvas.anchor = index;
+                        }
+                        if index % 3 == 2 {
+                            ui.end_row();
+                        }
+                    }
+                });
+            ui.end_row();
+        });
+    ui.label(
+        RichText::new(format!("Now {} by {} px", canvas.old[0], canvas.old[1]))
+            .size(theme.small_size)
+            .color(theme.muted),
+    );
+    ok_cancel(ui, &mut outcome);
+    outcome
+}
+
+/// Change Image Resolution: the size in pixels (keeping its shape) and the
+/// resolution.
+fn resolution_ui(ui: &mut Ui, resolution: &mut ResolutionDialog, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    let ratio = resolution.old[1] as f64 / resolution.old[0].max(1) as f64;
+    egui::Grid::new("sue-paint-resolution")
+        .num_columns(2)
+        .spacing(vec2(12.0, 8.0))
+        .show(ui, |ui| {
+            label(ui, "Width:", theme);
+            if ui
+                .add(
+                    egui::DragValue::new(&mut resolution.size[0])
+                        .range(1..=doc::MAX_SIDE)
+                        .suffix(" px"),
+                )
+                .changed()
+                && resolution.keep
+            {
+                resolution.size[1] =
+                    ((f64::from(resolution.size[0]) * ratio).round() as u32).max(1);
+            }
+            ui.end_row();
+            label(ui, "Height:", theme);
+            if ui
+                .add(
+                    egui::DragValue::new(&mut resolution.size[1])
+                        .range(1..=doc::MAX_SIDE)
+                        .suffix(" px"),
+                )
+                .changed()
+                && resolution.keep
+            {
+                resolution.size[0] =
+                    ((f64::from(resolution.size[1]) / ratio.max(1e-6)).round() as u32).max(1);
+            }
+            ui.end_row();
+            label(ui, "Resolution:", theme);
+            ui.add(
+                egui::DragValue::new(&mut resolution.dpi)
+                    .range(1.0..=2400.0)
+                    .suffix(" dpi"),
+            );
+            ui.end_row();
+        });
+    ui.checkbox(&mut resolution.keep, "Keep the shape");
+    ok_cancel(ui, &mut outcome);
+    outcome
+}
+
+/// OK and Cancel at the bottom right.
+fn ok_cancel(ui: &mut Ui, outcome: &mut Outcome) {
+    ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
+        if ui.button("OK").clicked() {
+            *outcome = Outcome::Ok;
+        }
+        if ui.button("Cancel").clicked() {
+            *outcome = Outcome::Cancel;
+        }
+    });
 }
 
 /// New Frame Border Folder: a layout, the border and the gaps.

@@ -1941,6 +1941,91 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_crops_to_the_selection_in_one_undo_step() {
+        let (mut runtime, root) = runtime("paint-crop");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.studio_focus())
+            .unwrap();
+        let size = |runtime: &Runtime| {
+            sue_model::picture::size(runtime.engine.world.arena.get_by_id(picture).unwrap())
+                .unwrap()
+        };
+        assert_eq!(size(&runtime), [1600, 1200]);
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        // M picks the rectangle selection; drag a box around the middle.
+        step(&mut runtime, vec![key(egui::Key::M, egui::Modifiers::NONE)]);
+        let (a, b) = (middle - vec2(40.0, 30.0), middle + vec2(40.0, 30.0));
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(a), press(a, true)],
+        );
+        step(&mut runtime, vec![egui::Event::PointerMoved(b)]);
+        step(&mut runtime, vec![press(b, false)]);
+        let depth = runtime.engine.history.depth();
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: paint.clone(),
+                command: "edit.crop".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        let [width, height] = size(&runtime);
+        assert!(
+            width < 400 && height < 300 && width > height,
+            "cropped to {width} by {height}"
+        );
+        assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
+        let layer = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+            .last()
+            .unwrap()
+            .id;
+        assert_eq!(
+            sue_paint::doc::raster(&runtime.engine.world.arena, layer)
+                .unwrap()
+                .width(),
+            width
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        assert_eq!(size(&runtime), [1600, 1200]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_saves_as_a_project_or_any_picture_type() {
         let (mut runtime, root) = runtime("paint-save-as");
         let ctx = egui::Context::default();

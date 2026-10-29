@@ -166,6 +166,248 @@ pub fn layers(arena: &Arena, picture: EntityId) -> Vec<LayerInfo> {
         .collect()
 }
 
+// ----- Canvas size and resolution -------------------------------------------------
+
+/// RGBA8 pixels resized to `to`: averaged over each new pixel's area when
+/// smaller, bilinear when larger, premultiplied so edges stay clean.
+#[must_use]
+pub fn resize_rgba(pixels: &[u8], from: [u32; 2], to: [u32; 2]) -> Vec<u8> {
+    let (w, h) = (from[0].max(1), from[1].max(1));
+    let (nw, nh) = (to[0].max(1), to[1].max(1));
+    let (sx, sy) = (w as f32 / nw as f32, h as f32 / nh as f32);
+    let mut out = vec![0; (nw * nh * 4) as usize];
+    for y in 0..nh {
+        for x in 0..nw {
+            let pixel = if sx <= 1.0 && sy <= 1.0 {
+                crate::warp::sample(pixels, w, h, (x as f32 + 0.5) * sx, (y as f32 + 0.5) * sy)
+            } else {
+                // The average of the source pixels this one covers.
+                let (x0, x1) = (
+                    (x as f32 * sx) as u32,
+                    (((x + 1) as f32 * sx).ceil() as u32).min(w),
+                );
+                let (y0, y1) = (
+                    (y as f32 * sy) as u32,
+                    (((y + 1) as f32 * sy).ceil() as u32).min(h),
+                );
+                let (mut sum, mut alpha, mut count) = ([0.0_f32; 3], 0.0_f32, 0.0_f32);
+                for py in y0..y1.max(y0 + 1) {
+                    for px in x0..x1.max(x0 + 1) {
+                        let at = ((py.min(h - 1) * w + px.min(w - 1)) * 4) as usize;
+                        let a = f32::from(pixels[at + 3]) / 255.0;
+                        for (channel, value) in sum.iter_mut().zip(&pixels[at..at + 3]) {
+                            *channel += f32::from(*value) * a;
+                        }
+                        alpha += a;
+                        count += 1.0;
+                    }
+                }
+                if alpha <= 0.0 {
+                    [0; 4]
+                } else {
+                    [
+                        (sum[0] / alpha).round() as u8,
+                        (sum[1] / alpha).round() as u8,
+                        (sum[2] / alpha).round() as u8,
+                        (alpha / count * 255.0).round() as u8,
+                    ]
+                }
+            };
+            out[((y * nw + x) * 4) as usize..][..4].copy_from_slice(&pixel);
+        }
+    }
+    out
+}
+
+/// Text shapes (frame panels, balloons) with every number pair moved by
+/// `shift` and then scaled by `scale`.
+fn move_shapes(text: &str, shift: [f32; 2], scale: [f32; 2]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut axis = 0;
+    let mut number = String::new();
+    let flush = |number: &mut String, out: &mut String, axis: &mut usize| {
+        if number.is_empty() {
+            return;
+        }
+        let value: f32 = number.parse().unwrap_or(0.0);
+        let moved = (value + shift[*axis % 2]) * scale[*axis % 2];
+        out.push_str(&moved.round().to_string());
+        *axis += 1;
+        number.clear();
+    };
+    for ch in text.chars() {
+        if ch.is_ascii_digit() || ch == '.' || (ch == '-' && number.is_empty()) {
+            number.push(ch);
+        } else {
+            flush(&mut number, &mut out, &mut axis);
+            if ch == ';' || ch == ':' {
+                axis = 0;
+            }
+            out.push(ch);
+        }
+    }
+    flush(&mut number, &mut out, &mut axis);
+    out
+}
+
+/// The edit that changes `picture`'s canvas to `size`, every layer's
+/// pixels moved by `shift` (where the old top left corner lands) and cut
+/// or widened to the new canvas: Change Canvas Size and Crop.
+///
+/// # Errors
+/// If the size is out of range.
+pub fn resize_canvas(
+    arena: &Arena,
+    picture: EntityId,
+    size: [u32; 2],
+    shift: [i64; 2],
+) -> Result<Edit, String> {
+    let [width, height] = size;
+    if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE {
+        return Err(format!("A canvas must be 1 to {MAX_SIDE} pixels a side"));
+    }
+    let mut edit = Edit::new("Change Canvas Size")
+        .then(SetProperty::new(picture, picture::WIDTH, i64::from(width)))
+        .then(SetProperty::new(
+            picture,
+            picture::HEIGHT,
+            i64::from(height),
+        ));
+    for info in layers(arena, picture) {
+        let Some(raster) = raster(arena, info.id) else {
+            continue;
+        };
+        let (Some(bytes), PixelFormat::Rgba8) = (raster.bytes(), raster.format()) else {
+            continue;
+        };
+        let at = [
+            info.style.offset[0] + shift[0],
+            info.style.offset[1] + shift[1],
+        ];
+        let mut pixels = vec![0; (width * height * 4) as usize];
+        for y in 0..raster.height() {
+            let ty = i64::from(y) + at[1];
+            if ty < 0 || ty >= i64::from(height) {
+                continue;
+            }
+            for x in 0..raster.width() {
+                let tx = i64::from(x) + at[0];
+                if tx < 0 || tx >= i64::from(width) {
+                    continue;
+                }
+                let from = ((y * raster.width() + x) * 4) as usize;
+                let to = ((ty as u32 * width + tx as u32) * 4) as usize;
+                pixels[to..to + 4].copy_from_slice(&bytes[from..from + 4]);
+            }
+        }
+        let tile = RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels)
+            .map_err(|error| error.to_string())?;
+        edit = edit.then(sue_core::txn::ReplaceComponent::new(
+            info.id,
+            tile,
+            "Change Canvas Size",
+        ));
+        if info.style.offset != [0, 0] {
+            edit = edit
+                .then(SetProperty::new(info.id, picture::X, 0_i64))
+                .then(SetProperty::new(info.id, picture::Y, 0_i64));
+        }
+        edit = shapes_moved(
+            arena,
+            info.id,
+            edit,
+            [shift[0] as f32, shift[1] as f32],
+            [1.0, 1.0],
+        );
+    }
+    Ok(edit)
+}
+
+/// `edit` followed by moving a frame's or balloon layer's shapes too.
+fn shapes_moved(
+    arena: &Arena,
+    layer: EntityId,
+    mut edit: Edit,
+    shift: [f32; 2],
+    scale: [f32; 2],
+) -> Edit {
+    let Ok(entity) = arena.get_by_id(layer) else {
+        return edit;
+    };
+    for key in [crate::manga::PANELS, crate::manga::SHAPES] {
+        if let Some(text) = entity.property(key).and_then(Value::as_str) {
+            edit = edit.then(SetProperty::new(
+                layer,
+                key,
+                move_shapes(text, shift, scale),
+            ));
+        }
+    }
+    edit
+}
+
+/// The edit that resamples `picture` and every layer to `size`, at
+/// `dpi`: Change Image Resolution.
+///
+/// # Errors
+/// If the size is out of range.
+pub fn resample(
+    arena: &Arena,
+    picture: EntityId,
+    size: [u32; 2],
+    dpi: f64,
+) -> Result<Edit, String> {
+    let [width, height] = size;
+    if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE {
+        return Err(format!("A picture must be 1 to {MAX_SIDE} pixels a side"));
+    }
+    let [old_w, old_h] = size_of(arena, picture)?;
+    let scale = [width as f32 / old_w as f32, height as f32 / old_h as f32];
+    let mut edit = Edit::new("Change Image Resolution")
+        .then(SetProperty::new(picture, picture::WIDTH, i64::from(width)))
+        .then(SetProperty::new(
+            picture,
+            picture::HEIGHT,
+            i64::from(height),
+        ))
+        .then(SetProperty::new(picture, picture::DPI, dpi));
+    for info in layers(arena, picture) {
+        let Some(raster) = raster(arena, info.id) else {
+            continue;
+        };
+        let (Some(bytes), PixelFormat::Rgba8) = (raster.bytes(), raster.format()) else {
+            continue;
+        };
+        let to = [
+            ((raster.width() as f32 * scale[0]).round() as u32).max(1),
+            ((raster.height() as f32 * scale[1]).round() as u32).max(1),
+        ];
+        let pixels = resize_rgba(bytes, [raster.width(), raster.height()], to);
+        let tile = RasterTile2D::from_bytes(to[0], to[1], PixelFormat::Rgba8, pixels)
+            .map_err(|error| error.to_string())?;
+        edit = edit.then(sue_core::txn::ReplaceComponent::new(
+            info.id,
+            tile,
+            "Change Image Resolution",
+        ));
+        if info.style.offset != [0, 0] {
+            edit = edit
+                .then(SetProperty::new(
+                    info.id,
+                    picture::X,
+                    (info.style.offset[0] as f32 * scale[0]).round() as i64,
+                ))
+                .then(SetProperty::new(
+                    info.id,
+                    picture::Y,
+                    (info.style.offset[1] as f32 * scale[1]).round() as i64,
+                ));
+        }
+        edit = shapes_moved(arena, info.id, edit, [0.0, 0.0], scale);
+    }
+    Ok(edit)
+}
+
 // ----- Layer folders ---------------------------------------------------------------
 
 /// The relation from a layer folder to each layer in it.
@@ -764,6 +1006,69 @@ mod tests {
                 ..NewPicture::default()
             })
             .is_err()
+        );
+    }
+
+    #[test]
+    fn canvas_size_crop_and_resolution_keep_the_drawing() {
+        let mut arena = Arena::new();
+        let mut history: sue_core::UndoStack<Arena> = sue_core::UndoStack::new();
+        let (edit, picture) = create(&NewPicture {
+            width: 20,
+            height: 10,
+            paper: None,
+            ..NewPicture::default()
+        })
+        .unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        let layer = layers(&arena, picture)[0].id;
+        if let Some(bytes) = raster_mut(&mut arena, layer).and_then(RasterTile2D::bytes_mut) {
+            // One red pixel at (2, 3).
+            bytes[(3 * 20 + 2) * 4..][..4].copy_from_slice(&[255, 0, 0, 255]);
+        }
+        let red_at = |arena: &Arena| {
+            let tile = raster(arena, layer).unwrap();
+            let bytes = tile.bytes().unwrap();
+            (0..tile.width() * tile.height())
+                .find(|index| bytes[(*index * 4) as usize] == 255)
+                .map(|index| [index % tile.width(), index / tile.width()])
+        };
+        // A bigger canvas anchored in the middle: everything moves 5, 5.
+        let edit = resize_canvas(&arena, picture, [30, 20], [5, 5]).unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        assert_eq!(
+            picture::size(arena.get_by_id(picture).unwrap()),
+            Some([30, 20])
+        );
+        assert_eq!(red_at(&arena), Some([7, 8]));
+        // Crop to a box around it.
+        let edit = resize_canvas(&arena, picture, [4, 4], [-6, -7]).unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        assert_eq!(red_at(&arena), Some([1, 1]));
+        // Twice the resolution.
+        let edit = resample(&arena, picture, [8, 8], 144.0).unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        let tile = raster(&arena, layer).unwrap();
+        assert_eq!(tile.width(), 8);
+        let strongest = (0..64_u32)
+            .max_by_key(|index| tile.bytes().unwrap()[(*index * 4 + 3) as usize])
+            .unwrap();
+        assert!(
+            (2..=3).contains(&(strongest % 8)) && (2..=3).contains(&(strongest / 8)),
+            "{strongest}"
+        );
+        // Undo all three: back to the start.
+        for _ in 0..3 {
+            history.undo(&mut arena).unwrap();
+        }
+        assert_eq!(red_at(&arena), Some([2, 3]));
+        assert_eq!(
+            picture::size(arena.get_by_id(picture).unwrap()),
+            Some([20, 10])
+        );
+        assert_eq!(
+            move_shapes("10,20 30,40;e:1,2,3,4", [5.0, -5.0], [2.0, 2.0]),
+            "30,30 70,70;e:12,-6,16,-2"
         );
     }
 
