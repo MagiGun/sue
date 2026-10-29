@@ -448,6 +448,12 @@ familiar:
   from: pick the layer, then Register Selected Layer.
   File, Export Animation saves an animated GIF, a movie or every frame as a
   picture.
+- **Webtoons:** File, New has a tall Webtoon canvas, and File, Export
+  Webtoon cuts it into numbered pictures at the height and width you
+  choose, ready to upload.
+- **Timeline:** Animation, Timeline, Edit Timeline changes the frame rate
+  and length without moving your keys; Export Animation, Animation Cels
+  saves every cel as its own picture.
 - **Line art from photos and scans:** Filter, Line Extraction turns a
   picture into clean black lines; Convert to Lines and Tones also makes its
   shading into screentone, each on a layer of its own.

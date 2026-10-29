@@ -103,7 +103,10 @@ impl SuePaint {
     /// which cels this frame shows.
     pub(crate) fn animate(&mut self, cx: &mut AppletContext<'_>, ctx: &egui::Context) {
         let now = cx.view.now;
-        let Some((_, sequence, length)) = self.timeline_here(&cx.world.arena) else {
+        let timeline = self
+            .timeline_here(&cx.world.arena)
+            .filter(|_| self.timeline_on);
+        let Some((_, sequence, length)) = timeline else {
             if let Some(doc) = self.doc_mut() {
                 doc.playing = None;
                 doc.compositor.set_view(None);
@@ -369,6 +372,38 @@ impl SuePaint {
             "anim.next" => self.go_to_frame(&cx.world.arena, i64::from(frame) + 1),
             "anim.prev" => self.go_to_frame(&cx.world.arena, i64::from(frame) - 1),
             "anim.first" => self.go_to_frame(&cx.world.arena, 0),
+            "anim.timeline.edit" => {
+                if let Some((_, sequence, length)) = &here {
+                    self.dialog = Some(crate::dialogs::Dialog::Timeline(
+                        anim::fps(sequence).round() as u32,
+                        *length,
+                    ));
+                } else {
+                    cx.fail("Make a timeline first: Animation, Timeline, New Timeline");
+                }
+            }
+            "anim.timeline.enable" => self.timeline_on = !self.timeline_on,
+            "file.export.cels" => {
+                let name = self
+                    .picture()
+                    .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
+                    .map_or_else(|| "Cel".to_owned(), |entity| entity.name().to_owned());
+                cx.request(ShellRequest::PickFile(
+                    FilePick::save(
+                        Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
+                        "anim-cels",
+                        "Export Animation Cels",
+                        &format!("{name}.png"),
+                    )
+                    .types(
+                        sue_io::PICTURE_SAVE_TYPES
+                            .iter()
+                            .map(|(what, extensions)| FileType::new(what, extensions))
+                            .collect(),
+                    )
+                    .starting_in(self.last_dir.clone()),
+                ));
+            }
             "anim.last" => self.go_to_frame(&cx.world.arena, -1),
             "file.export.gif" | "file.export.sequence" | "file.export.movie" => {
                 self.ask_export_animation(cx, command);

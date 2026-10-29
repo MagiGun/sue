@@ -410,6 +410,46 @@ pub fn shift(sequence: &Sequence, frame: u32, by: i64, length: u32) -> Sequence 
     out
 }
 
+/// `sequence` at `rate` instead, every key on the frame it was on and
+/// `length` frames long (Edit Timeline).
+#[must_use]
+pub fn retimed(sequence: &Sequence, rate: Rate, length: u32) -> Sequence {
+    let old = sequence.rate;
+    let mut out = sequence.clone();
+    out.rate = rate;
+    for index in folders(sequence) {
+        let track = &sequence.tracks[index];
+        let mut moved = Track::new(track.name.clone(), track.kind.clone());
+        moved.properties = track.properties.clone();
+        moved.muted = track.muted;
+        moved.locked = track.locked;
+        for clip in track.clips() {
+            let frame = clip.start.frame(old);
+            if frame >= i64::from(length) {
+                continue;
+            }
+            let mut clip = clip.clone();
+            clip.start = Time::from_frames(frame, rate);
+            moved.insert(clip);
+        }
+        out.tracks[index] = tidy(&moved, rate, length);
+    }
+    out
+}
+
+/// The edit that sets `picture`'s timeline to `fps` and `length` frames.
+#[must_use]
+pub fn edit_timeline(arena: &Arena, picture: EntityId, fps: u32, length: u32) -> Option<Edit> {
+    let sequence = timeline(arena, picture)?;
+    let length = length.max(1);
+    let retimed = retimed(sequence, Rate::new(fps.max(1), 1), length);
+    Some(
+        Edit::new("Edit Timeline")
+            .then(SetExtension::set(picture, retimed))
+            .then(SetProperty::new(picture, LENGTH, i64::from(length))),
+    )
+}
+
 /// `sequence` with a new animation folder named `name`.
 #[must_use]
 pub fn with_folder(sequence: &Sequence, name: &str) -> Sequence {
@@ -441,6 +481,36 @@ pub fn set(picture: EntityId, sequence: Sequence, label: &str) -> Edit {
 mod tests {
     use super::*;
     use sue_core::{Entity, ReversibleTransaction};
+
+    #[test]
+    fn edit_timeline_keeps_keys_on_their_frames() {
+        let mut arena = Arena::new();
+        let entity = Entity::empty("Walk", sue_model::class::IMAGE);
+        let id = entity.id();
+        arena.insert(entity);
+        let mut edit = new_timeline(id, 12, 24);
+        edit.apply(&mut arena).unwrap();
+        let mut sequence = timeline(&arena, id).unwrap().clone();
+        let (one, two, three) = (EntityId::new(), EntityId::new(), EntityId::new());
+        sequence = assign(&sequence, 0, 0, Some(one), id, 24);
+        sequence = assign(&sequence, 0, 6, Some(two), id, 24);
+        sequence = assign(&sequence, 0, 20, Some(three), id, 24);
+        let mut set_it = set(id, sequence, "Keys");
+        set_it.apply(&mut arena).unwrap();
+        // 24 frames a second, 12 frames long: the keys stay at frames 0
+        // and 6; the one at 20 is past the end.
+        let mut edit = edit_timeline(&arena, id, 24, 12).unwrap();
+        edit.apply(&mut arena).unwrap();
+        let sequence = timeline(&arena, id).unwrap();
+        assert_eq!(fps(sequence), 24.0);
+        assert_eq!(length(&arena, id), 12);
+        assert_eq!(
+            keys(&sequence.tracks[0], sequence.rate),
+            vec![(0, Some(one)), (6, Some(two))]
+        );
+        edit.revert(&mut arena).unwrap();
+        assert_eq!(length(&arena, id), 24, "undone");
+    }
 
     #[test]
     fn onion_skin_settings_show_as_many_cels_as_asked_fading_away() {

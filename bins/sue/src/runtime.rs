@@ -2713,6 +2713,28 @@ pub(crate) mod tests {
                 .iter()
                 .any(|(name, _)| name == "OEBPS/page-0001.xhtml")
         );
+
+        // Export Webtoon: OK keeps the cut and width (1280 and 800), then
+        // the picture goes out scaled to 800 wide in numbered pieces.
+        command(&mut runtime, "file.export.webtoon");
+        step(&mut runtime, Vec::new());
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        runtime.request(
+            ShellRequest::Picked {
+                pick: FilePick::save(
+                    Some(paint.clone()),
+                    "webtoon",
+                    "Export Webtoon",
+                    "Strip.png",
+                ),
+                path: root.join("Strip.png"),
+            },
+            &mut NoTextures,
+            start,
+        );
+        let piece = std::fs::read(root.join("Strip-001.png")).expect("the first piece");
+        let tile = sue_io::decode_png(&piece).unwrap().tile;
+        assert_eq!(tile.width(), 800);
         let _ = std::fs::remove_dir_all(&root);
     }
 

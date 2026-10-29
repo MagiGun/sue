@@ -336,6 +336,10 @@ pub struct SuePaint {
     pub(crate) polyline: Vec<[f32; 2]>,
     /// The Selection Launcher shows under the selection.
     pub(crate) launcher: bool,
+    /// How Export Webtoon cuts and scales the picture.
+    pub(crate) webtoon: (u32, u32),
+    /// The timeline drives what shows (Enable Timeline).
+    pub(crate) timeline_on: bool,
     /// A camera being set up and not keyed yet: its folder, the frame and
     /// where it stands.
     pub(crate) camera_pending: Option<(EntityId, u32, crate::camera::Camera)>,
@@ -434,6 +438,8 @@ impl Default for SuePaint {
             curve_points: Vec::new(),
             polyline: Vec::new(),
             launcher: true,
+            webtoon: (1280, 800),
+            timeline_on: true,
             camera_pending: None,
             material_kind: 0,
             material_pick: None,
@@ -701,6 +707,12 @@ fn implemented(command: &str) -> bool {
             | "select.quick_mask"
             | "select.launcher"
             | "edit.material.paste"
+            | "file.export.webtoon"
+            | "file.export.cels"
+            | "anim.first"
+            | "anim.last"
+            | "anim.timeline.edit"
+            | "anim.timeline.enable"
             | "filter.line_extraction"
             | "filter.lines_tones"
             | "file.export.pdf"
@@ -1135,6 +1147,171 @@ impl SuePaint {
             }
             Err(error) => cx.fail(error),
         }
+    }
+
+    /// Asks where to write the webtoon, cut every `height` pixels and
+    /// scaled to `width`.
+    pub(crate) fn ask_export_webtoon(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        height: u32,
+        width: u32,
+    ) {
+        self.webtoon = (height.max(1), width.max(1));
+        let name = self
+            .picture()
+            .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
+            .map_or_else(|| "Webtoon".to_owned(), |entity| entity.name().to_owned());
+        cx.request(ShellRequest::PickFile(
+            FilePick::save(
+                Some(me_id()),
+                "webtoon",
+                "Export Webtoon",
+                &format!("{name}.png"),
+            )
+            .types(
+                sue_io::PICTURE_SAVE_TYPES
+                    .iter()
+                    .map(|(what, extensions)| sue_wm::FileType::new(what, extensions))
+                    .collect(),
+            )
+            .starting_in(self.last_dir.clone()),
+        ));
+    }
+
+    /// Writes the picture to numbered files next to `path`, scaled to the
+    /// webtoon width and cut every webtoon height, top to bottom.
+    fn export_webtoon(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let Some(flat) = composite::flatten(
+            &cx.world.arena,
+            picture,
+            RenderOptions {
+                paper: true,
+                drafts: false,
+            },
+        ) else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        let (cut, width) = self.webtoon;
+        let from = [flat.width(), flat.height()];
+        let to = [
+            width,
+            ((f64::from(from[1]) * f64::from(width) / f64::from(from[0].max(1))).round() as u32)
+                .max(1),
+        ];
+        let Some(bytes) = flat.bytes() else {
+            return;
+        };
+        let scaled = if to == from {
+            bytes.to_vec()
+        } else {
+            doc::resize_rgba(bytes, from, to)
+        };
+        let extension = path.extension().map_or_else(
+            || "png".to_owned(),
+            |ext| ext.to_string_lossy().to_ascii_lowercase(),
+        );
+        let stem = path.file_stem().map_or_else(
+            || "Webtoon".to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        );
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let mut written = 0;
+        let mut top = 0;
+        while top < to[1] {
+            let rows = cut.min(to[1] - top);
+            let start = (top * to[0] * 4) as usize;
+            let piece = scaled[start..start + (rows * to[0] * 4) as usize].to_vec();
+            let Ok(tile) = sue_core::RasterTile2D::from_bytes(
+                to[0],
+                rows,
+                sue_core::PixelFormat::Rgba8,
+                piece,
+            ) else {
+                break;
+            };
+            written += 1;
+            let target = dir.join(format!("{stem}-{written:03}.{extension}"));
+            if let Err(error) = sue_io::encode_as(&tile, &extension, 92, 7)
+                .and_then(|bytes| write_atomic(&target, &bytes).map_err(|error| error.to_string()))
+            {
+                cx.fail(format!("Cannot export piece {written}: {error}"));
+                return;
+            }
+            top += rows;
+        }
+        cx.notify(format!(
+            "Exported the webtoon as {written} pictures, {} px wide",
+            to[0]
+        ));
+    }
+
+    /// Writes each animation cel as a picture of its own, named for it, next
+    /// to `path`.
+    fn export_cels(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let Some(sequence) = crate::anim::timeline(&cx.world.arena, picture) else {
+            cx.fail("Make a timeline first: Animation, Timeline, New Timeline");
+            return;
+        };
+        let mut cels: Vec<EntityId> = crate::anim::folders(sequence)
+            .into_iter()
+            .flat_map(|index| crate::anim::keys(&sequence.tracks[index], sequence.rate))
+            .filter_map(|(_, cel)| cel)
+            .collect();
+        cels.sort();
+        cels.dedup();
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        let extension = path.extension().map_or_else(
+            || "png".to_owned(),
+            |ext| ext.to_string_lossy().to_ascii_lowercase(),
+        );
+        let stem = path.file_stem().map_or_else(
+            || "Cel".to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        );
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let mut written = 0;
+        for cel in cels {
+            let (Some(raster), Ok(entity)) = (
+                doc::raster(&cx.world.arena, cel),
+                cx.world.arena.get_by_id(cel),
+            ) else {
+                continue;
+            };
+            let name: String = entity
+                .name()
+                .chars()
+                .map(|c| {
+                    if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .collect();
+            let target = dir.join(format!("{stem}-{name}.{extension}"));
+            match sue_io::encode_as(raster, &extension, 92, 7)
+                .and_then(|bytes| write_atomic(&target, &bytes).map_err(|error| error.to_string()))
+            {
+                Ok(()) => written += 1,
+                Err(error) => {
+                    cx.fail(format!("Cannot export {name}: {error}"));
+                    return;
+                }
+            }
+        }
+        cx.notify(format!("Exported {written} cels"));
     }
 
     /// Convert to Lines and Tones: the current layer's lines on a new layer
@@ -2317,6 +2494,7 @@ impl SuePaint {
                 .doc()
                 .map_or(ItemState::off(), |doc| flag(doc.quick_mask.is_some())),
             "select.launcher" => flag(self.launcher),
+            "anim.timeline.enable" => flag(self.timeline_on),
             "layer.from_selection" => when(selection && raster),
             "edit.cut"
             | "edit.copy"
@@ -2463,7 +2641,9 @@ impl SuePaint {
         }
         if (command.starts_with("anim.")
             || command.starts_with("file.export.gif")
-            || command == "file.export.sequence")
+            || command == "file.export.sequence"
+            || command == "file.export.movie"
+            || command == "file.export.cels")
             && self.anim_command(command, cx)
         {
             return;
@@ -3035,6 +3215,12 @@ impl SuePaint {
             "layer.toggle.visible" => self.toggle_layer(cx, picture::VISIBLE, true),
             "file.export.pdf" | "file.export.epub" => {
                 self.ask_export_book(cx, command == "file.export.epub")
+            }
+
+            "file.export.webtoon" => {
+                if self.picture().is_some() {
+                    self.dialog = Some(Dialog::Webtoon(self.webtoon.0, self.webtoon.1));
+                }
             }
             "layer.rasterize" => {
                 let (Some(picture), Some(layer)) = (self.picture(), self.layer()) else {
@@ -4099,6 +4285,8 @@ impl SueApplet for SuePaint {
             "book-epub" => self.export_book(cx, path, true),
             "anim-gif" => self.export_animation(cx, path, true),
             "anim-movie" => self.export_movie(cx, path),
+            "webtoon" => self.export_webtoon(cx, path),
+            "anim-cels" => self.export_cels(cx, path),
             "timelapse" => self.export_timelapse(cx, path),
             "anim-sequence" => self.export_animation(cx, path, false),
             "subview" => self.add_reference(path, cx),

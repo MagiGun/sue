@@ -73,6 +73,7 @@ pub(crate) fn new_presets() -> PresetLibrary {
         ("Screen (Full HD)", 1920, 1080, 72.0, true),
         ("Square Post", 2048, 2048, 72.0, true),
         ("Transparent Sprite", 512, 512, 72.0, false),
+        ("Webtoon (800 x 12800)", 800, 12800, 72.0, true),
     ] {
         library.add(Preset::new(
             name,
@@ -384,6 +385,11 @@ pub(crate) enum Dialog {
     /// Select Color Gamut: the tolerance and whether it looks at every
     /// layer.
     Gamut(f32, bool),
+    /// Export Webtoon: the height each piece is cut at and the width the
+    /// pieces are scaled to, in pixels.
+    Webtoon(u32, u32),
+    /// Edit Timeline: frames a second and length in frames.
+    Timeline(u32, u32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -468,6 +474,8 @@ impl SuePaint {
                 vec2(320.0, 140.0),
             ),
             Dialog::Gamut(..) => ("Select Color Gamut", vec2(340.0, 170.0)),
+            Dialog::Webtoon(..) => ("Export Webtoon", vec2(340.0, 170.0)),
+            Dialog::Timeline(..) => ("Edit Timeline", vec2(320.0, 150.0)),
             Dialog::Correction(_, filter, ..) => (
                 filter.label(),
                 vec2(
@@ -545,6 +553,33 @@ impl SuePaint {
                                     }
                                 });
                                 ui.checkbox(all, "Refer to all layers");
+                                ok_cancel(ui, &mut outcome);
+                            }
+                            Dialog::Webtoon(height, width) => {
+                                egui::Grid::new("sue-paint-webtoon").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
+                                    label(ui, "Split every:", theme);
+                                    ui.add(egui::DragValue::new(height).range(200..=20000).suffix(" px"));
+                                    ui.end_row();
+                                    label(ui, "Output width:", theme);
+                                    ui.add(egui::DragValue::new(width).range(100..=4000).suffix(" px"));
+                                    ui.end_row();
+                                });
+                                ui.label(
+                                    RichText::new("The tall canvas is cut into numbered pictures, top to bottom")
+                                        .size(theme.small_size)
+                                        .color(theme.muted),
+                                );
+                                ok_cancel(ui, &mut outcome);
+                            }
+                            Dialog::Timeline(fps, length) => {
+                                egui::Grid::new("sue-paint-timeline-edit").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
+                                    label(ui, "Frame rate:", theme);
+                                    ui.add(egui::DragValue::new(fps).range(1..=120).suffix(" fps"));
+                                    ui.end_row();
+                                    label(ui, "Playback time:", theme);
+                                    ui.add(egui::DragValue::new(length).range(1..=100_000).suffix(" frames"));
+                                    ui.end_row();
+                                });
                                 ok_cancel(ui, &mut outcome);
                             }
                             Dialog::Material(name) => {
@@ -778,6 +813,17 @@ impl SuePaint {
                 }
             }
             (Dialog::Gamut(tolerance, all), Outcome::Ok) => self.select_gamut(cx, tolerance, all),
+            (Dialog::Webtoon(height, width), Outcome::Ok) => {
+                self.ask_export_webtoon(cx, height, width)
+            }
+            (Dialog::Timeline(fps, length), Outcome::Ok) => {
+                if let Some(picture) = self.picture()
+                    && let Some(edit) =
+                        crate::anim::edit_timeline(&cx.world.arena, picture, fps, length)
+                {
+                    Self::apply(cx, edit);
+                }
+            }
             (Dialog::Onion(onion), Outcome::Ok) => {
                 if let Some(picture) = self.picture() {
                     let edit = doc::Edit::new("Onion Skin Settings").then(
@@ -881,7 +927,9 @@ impl SuePaint {
                 | Dialog::Timelapse(_)
                 | Dialog::Material(_)
                 | Dialog::SelectBy(..)
-                | Dialog::Gamut(..),
+                | Dialog::Gamut(..)
+                | Dialog::Webtoon(..)
+                | Dialog::Timeline(..),
                 Outcome::Cancel,
             ) => {}
         }

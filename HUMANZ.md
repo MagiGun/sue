@@ -1276,6 +1276,14 @@ back into the selection. The Selection Launcher, under any selection, holds
 Deselect, Invert, Expand, Shrink, Clear, Clear Outside, Fill, Scale/Rotate
 and Crop.
 
+**Webtoons and timelines.** New has a Webtoon canvas (800 by 12800
+pixels); Export Webtoon scales the flattened picture to an output width and
+cuts it every split height into numbered pictures, top to bottom. Edit
+Timeline changes the frame rate and length, keeping every key on its frame
+(`anim::retimed`) and dropping keys past the end, as one step; Enable
+Timeline turns the frame view off and on; First and Last Frame jump; Export
+Animation Cels writes each cel as a picture named for it.
+
 **Line extraction and books.** Filter, Line Extraction turns a photo or scan
 into black line art on clear: where the picture is darker than its
 surroundings (a fine gaussian against a coarser one), stronger the higher
