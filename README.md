@@ -156,6 +156,15 @@ fresh temporary profile: the canvas, a selection pill, Document mode, the
 timeline, the marking menu, the palette, two Settings pages, the drawers with a
 picture, and Code / Hex.
 
+## Community
+
+- Website: <https://magigun.github.io/sue/>
+- Discord: <https://discord.gg/h4Hp2bKrHd>, for questions, ideas and showing what you made
+- Downloads: <https://github.com/MagiGun/sue/releases>
+
+The website lives on the `gh-pages` branch, and GitHub Pages publishes it
+again on every push there.
+
 ## Read next
 
 | File | For whom |
