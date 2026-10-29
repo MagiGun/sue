@@ -10,6 +10,10 @@ use zune_core::bytestream::ZCursor;
 use zune_core::colorspace::ColorSpace;
 use zune_core::options::DecoderOptions;
 
+/// Sue's application id. Linux desktops match the window to
+/// `io.github.MagiGun.Sue.desktop` by it, and the Flatpak is named after it.
+pub const APP_ID: &str = "io.github.MagiGun.Sue";
+
 /// The app icon: a white silhouette on a black rounded square, at every
 /// size its `.ico` holds.
 pub const APP_ICON: &[u8] = include_bytes!("../../../assets/icons/sue_icon.ico");

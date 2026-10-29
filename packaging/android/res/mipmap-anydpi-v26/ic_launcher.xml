@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sue's launcher icon on Android 8 and newer: the white silhouette on
+     black, in whatever shape the launcher cuts icons to, instead of the
+     whole picture shrunk inside a circle. The monochrome layer is the one
+     Android 13's themed icons tint. Older Android uses mipmap/ic_launcher.png,
+     which build_apk.py copies from assets/icons/sue_icon.png. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+    <monochrome android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

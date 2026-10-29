@@ -33,9 +33,9 @@ if [ -z "${SKIP_BUILD:-}" ]; then
 fi
 install -m 755 "${CARGO_TARGET_DIR:-$root/target}/release/sue" "$work/bin/sue"
 strip "$work/bin/sue" 2>/dev/null || true
-install -m 644 packaging/linux/sue.desktop "$work/share/applications/sue.desktop"
-install -m 644 assets/icons/sue_icon_512.png "$work/share/icons/hicolor/512x512/apps/sue.png"
-install -m 644 assets/icons/sue_icon.svg "$work/share/icons/hicolor/scalable/apps/sue.svg"
+install -m 644 packaging/linux/io.github.MagiGun.Sue.desktop "$work/share/applications/io.github.MagiGun.Sue.desktop"
+install -m 644 assets/icons/sue_icon_512.png "$work/share/icons/hicolor/512x512/apps/io.github.MagiGun.Sue.png"
+install -m 644 assets/icons/sue_icon.svg "$work/share/icons/hicolor/scalable/apps/io.github.MagiGun.Sue.svg"
 install -m 644 README.md LICENSE "$work/share/doc/sue/"
 
 tar -C "$root/target/freebsd-package" -czf "$out/Sue-$version-freebsd-$arch.tar.gz" "sue-$version"

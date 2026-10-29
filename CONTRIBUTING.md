@@ -107,7 +107,7 @@ set `Cargo.toml`'s version to it so local builds match.
 
 | System | Command | Makes |
 | --- | --- | --- |
-| Windows | `powershell -File packaging/windows/build.ps1 -Arch x64` (or `x86`, `arm64`) | an `.msi` installer and a portable zip, with `Sue.exe` (no console) and `sue-cli.exe` (for a terminal); the installer needs WiX 5 (`dotnet tool install --global wix --version 5.0.2`, then `wix extension add -g WixToolset.UI.wixext/5.0.2`) |
+| Windows | `powershell -File packaging/windows/build.ps1 -Arch x64` (or `x86`, `arm64`) | a setup `.exe`, an `.msi` and a portable zip, with `Sue.exe` (no console) and `sue-cli.exe` (for a terminal); the installers need WiX 5 (`dotnet tool install --global wix --version 5.0.2`, then `wix extension add -g WixToolset.UI.wixext/5.0.2` and `wix extension add -g WixToolset.BootstrapperApplications.wixext/5.0.2`) |
 | Linux | `packaging/linux/build.sh` | `.tar.gz`, `.deb`, `.rpm` and an AppImage with its `.zsync` (for AppImage updaters); for another CPU set `SUE_TARGET`, `SUE_ARCH` and `STRIP` (the Release workflow builds RISC-V this way) |
 | Linux from any system | `docker build -t sue-linux packaging/linux`, then `docker run --rm -v "$PWD:/src" -v sue-target:/target sue-linux` | the same, built in Debian 12 |
 | Arch Linux, CachyOS, Manjaro | `packaging/arch/build.sh` (on Arch, after the Linux script) | a `.pkg.tar.zst` and the AUR's `PKGBUILD` for the release |

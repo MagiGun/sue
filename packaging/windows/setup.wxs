@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sue's setup program (WiX 5): one .exe with Sue's icon that shows the
+     license and installs the .msi inside it. packaging/windows/build.ps1
+     builds the .msi first, then:
+
+       wix build setup.wxs -arch x64 -ext WixToolset.BootstrapperApplications.wixext -d Version=0.0.1 -d Source=<folder> -d Msi=<the .msi>
+
+     Apps in Settings lists the setup program as Sue (and hides the .msi it
+     installs), so it uninstalls from there. The UpgradeCode never changes;
+     it is not the .msi's. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <Bundle Name="Sue"
+          Manufacturer="MagiGun"
+          Version="$(var.Version)"
+          UpgradeCode="48923D1E-3E59-4236-9700-9B9AED5097AD"
+          IconSourceFile="$(var.Source)\sue_icon.ico"
+          AboutUrl="https://magigun.github.io/sue/"
+          HelpUrl="https://discord.gg/h4Hp2bKrHd">
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication Theme="rtfLargeLicense"
+                                              LicenseFile="$(var.Source)\LICENSE.rtf"
+                                              LogoFile="$(var.Source)\logo.png"
+                                              ShowVersion="yes" />
+    </BootstrapperApplication>
+    <Chain>
+      <MsiPackage SourceFile="$(var.Msi)" />
+    </Chain>
+  </Bundle>
+</Wix>

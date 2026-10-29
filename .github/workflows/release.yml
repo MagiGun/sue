@@ -71,10 +71,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      - name: WiX, for the installer
+      - name: WiX, for the installers
         run: |
           dotnet tool install --global wix --version 5.0.2
           wix extension add -g WixToolset.UI.wixext/5.0.2
+          wix extension add -g WixToolset.BootstrapperApplications.wixext/5.0.2
       - run: powershell -File packaging/windows/build.ps1 -Arch ${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
@@ -82,6 +83,7 @@ jobs:
           path: |
             dist/*.zip
             dist/*.msi
+            dist/*.exe
 
   linux:
     name: linux (${{ matrix.runner }})

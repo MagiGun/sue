@@ -2,10 +2,11 @@
 <!-- Sue's Windows installer (WiX 5). packaging/windows/build.ps1 passes the
      version, the folder with the files and the architecture:
 
-       wix build sue.wxs -arch x64 -ext WixToolset.UI.wixext -d Version=0.0.1 -d Source=<folder>
+       wix build sue.wxs -arch x64 -ext WixToolset.UI.wixext -d Version=0.0.1 -d Source=<folder> -d Art=<folder>
 
      It installs into Program Files, adds Sue to the Start menu, and a newer
-     version replaces an older one in place. The UpgradeCode never changes. -->
+     version replaces an older one in place. The UpgradeCode never changes.
+     setup.wxs wraps this .msi in a setup .exe that carries Sue's icon. -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="Sue"
@@ -17,8 +18,10 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of Sue is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
-    <Icon Id="SueIcon" SourceFile="$(var.Source)\sue_icon.ico" />
-    <Property Id="ARPPRODUCTICON" Value="SueIcon" />
+    <!-- The Id is the file name Windows keeps the icon under, so it ends in
+         .ico: without it the Start menu shortcut cannot read the icon. -->
+    <Icon Id="Sue.ico" SourceFile="$(var.Source)\sue_icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="Sue.ico" />
     <Property Id="ARPURLINFOABOUT" Value="https://magigun.github.io/sue/" />
     <Property Id="ARPHELPLINK" Value="https://discord.gg/h4Hp2bKrHd" />
 
@@ -34,7 +37,7 @@
                     Name="Sue"
                     Description="Painting, comics, animation, writing and sound"
                     WorkingDirectory="INSTALLFOLDER"
-                    Icon="SueIcon"
+                    Icon="Sue.ico"
                     Advertise="yes" />
         </File>
       </Component>
@@ -53,8 +56,11 @@
       <ComponentGroupRef Id="SueFiles" />
     </Feature>
 
-    <!-- Welcome, license, where to install, install. -->
+    <!-- Welcome, license, where to install, install; with Sue's icon on
+         every page (build.ps1 draws the two pictures). -->
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
-    <WixVariable Id="WixUILicenseRtf" Value="$(var.Source)\LICENSE.rtf" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.Art)\LICENSE.rtf" />
+    <WixVariable Id="WixUIBannerBmp" Value="$(var.Art)\banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="$(var.Art)\dialog.bmp" />
   </Package>
 </Wix>

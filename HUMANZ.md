@@ -773,11 +773,20 @@ event loop can be made once per process. The host:
 
 iOS uses the ordinary executable in an app bundle; its sandbox is `HOME`.
 
-**Packages.** `packaging/` has a script per system: a Windows zip; a Linux
-tarball, `.deb`, `.rpm` and AppImage (also buildable in Docker from any
-system); a universal macOS app and disk image; an unsigned iOS `.ipa` and a
-simulator build; and an Android APK for arm64, armv7 and x86_64 linked,
-aligned and signed with the SDK's own tools (no Gradle). The CI workflow runs
+**Packages.** `packaging/` has a script per system: for Windows a portable
+zip, an `.msi` (WiX, with Sue's icon on its pages and its Start menu
+shortcut) and a setup `.exe` that wraps the `.msi` and carries the icon
+itself; a Linux tarball, `.deb`, `.rpm` and AppImage (also buildable in
+Docker from any system); a universal macOS app and disk image; an unsigned
+iOS `.ipa` and a simulator build; and an Android APK for arm64, armv7 and
+x86_64 linked, aligned and signed with the SDK's own tools (no Gradle), with
+an adaptive launcher icon. Every Linux package names its desktop entry and
+icon after the app id `io.github.MagiGun.Sue` (`sue_wm::brand::APP_ID`),
+which the window also reports (Wayland's app id, X11's `WM_CLASS`), so the
+desktop shows the icon on the window. On Windows `sue-platform` sets the
+window's small and big icons from the one built into `Sue.exe` and shows
+the window only after its first frame: the taskbar asks a newly shown
+window for its icon once, and a window still starting up answers too late. The CI workflow runs
 the four checks on Windows, macOS and Linux and builds Android and iOS; the
 Release workflow builds every package on a `v*` tag and publishes them with
 checksums.

@@ -655,8 +655,9 @@ device decides), Desktop, Tablet or Phone. Sue Paint's Window, Interface menu
 does the same, and on a phone the row at the top of the menus does too. So a
 phone can use the full desktop layout, and a computer can try the touch ones.
 
-**Getting Sue.** Each release has a package for every system: for Windows an
-installer (`.msi`) or a portable zip, for 64-bit, 32-bit and ARM PCs; a
+**Getting Sue.** Each release has a package for every system: for Windows a
+setup program (`-setup.exe`, the easiest), the same installer as an `.msi`
+(for managed PCs) or a portable zip, for 64-bit, 32-bit and ARM PCs; a
 `.dmg` for macOS; FreeBSD; for Linux (Intel, ARM and RISC-V) an AppImage
 (runs almost anywhere), a
 Flatpak, a `.deb` (Debian, Ubuntu, Mint), an `.rpm` (Fedora, openSUSE), a

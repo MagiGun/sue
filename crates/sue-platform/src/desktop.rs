@@ -51,8 +51,100 @@ pub struct DesktopOptions {
     /// Which GPU draws the window (from rice).
     pub gpu: GpuPreference,
     /// The window's and the taskbar's icon: square RGBA8 pixels and their
-    /// side.
+    /// side. On Windows the icon built into the program (its first icon
+    /// resource) is used instead when it has one.
     pub icon: Option<(Vec<u8>, u32)>,
+    /// The application's id in reverse domain form, such as
+    /// `io.github.MagiGun.Sue`. Linux and BSD desktops (Wayland's app id,
+    /// X11's `WM_CLASS`) match it to the `.desktop` file of the same name,
+    /// which names the icon the window, the taskbar and the switcher show.
+    /// Empty leaves it to the system.
+    pub app_id: String,
+}
+
+/// The icon from the pixels the options give.
+fn pixel_icon(options: &DesktopOptions) -> Option<Icon> {
+    options
+        .icon
+        .as_ref()
+        .and_then(|(rgba, side)| Icon::from_rgba(rgba.clone(), *side, *side).ok())
+}
+
+/// Windows shows two icons: the window icon (the small one, in the title
+/// bar) and the taskbar icon (the big one, in the taskbar and Alt+Tab).
+/// The window starts hidden and appears once Sue has started and drawn
+/// its first frame: the taskbar asks the window for its icon when it
+/// appears, gives up on a window too busy to answer (starting the GPU and
+/// the engine) and does not ask again, leaving a generic icon.
+#[cfg(target_os = "windows")]
+fn system_attributes(
+    attributes: winit::window::WindowAttributes,
+    options: &DesktopOptions,
+) -> winit::window::WindowAttributes {
+    use winit::platform::windows::WindowAttributesExtWindows;
+    attributes
+        .with_taskbar_icon(pixel_icon(options))
+        .with_visible(false)
+}
+
+/// Wayland and X11 desktops find the window's icon through its app id.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn system_attributes(
+    attributes: winit::window::WindowAttributes,
+    options: &DesktopOptions,
+) -> winit::window::WindowAttributes {
+    use winit::platform::wayland::WindowAttributesExtWayland;
+    if options.app_id.is_empty() {
+        attributes
+    } else {
+        // One name serves both: Wayland's app id and X11's WM_CLASS.
+        attributes.with_name(options.app_id.clone(), options.app_id.clone())
+    }
+}
+
+/// Elsewhere the system takes the icon from the app bundle or package.
+#[cfg(not(any(
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "netbsd",
+    target_os = "openbsd"
+)))]
+fn system_attributes(
+    attributes: winit::window::WindowAttributes,
+    _options: &DesktopOptions,
+) -> winit::window::WindowAttributes {
+    attributes
+}
+
+/// The icon built into the program (its first icon resource, which
+/// `bins/sue/build.rs` puts there), at the two sizes this window's scale
+/// wants: Windows picks the closest size the file holds instead of
+/// shrinking one big picture, so both stay sharp. A program without the
+/// resource keeps the pixels it was given. The window is still hidden
+/// here.
+#[cfg(target_os = "windows")]
+fn resource_icons(window: &Window) {
+    use winit::dpi::PhysicalSize;
+    use winit::platform::windows::{IconExtWindows, WindowExtWindows};
+    let scale = window.scale_factor();
+    let sized = |points: u32| {
+        let pixels = (f64::from(points) * scale).round().clamp(16.0, 256.0) as u32;
+        PhysicalSize::new(pixels, pixels)
+    };
+    if let Ok(small) = Icon::from_resource(1, Some(sized(16))) {
+        window.set_window_icon(Some(small));
+    }
+    if let Ok(big) = Icon::from_resource(1, Some(sized(32))) {
+        window.set_taskbar_icon(Some(big));
+    }
 }
 
 /// An application driven by the desktop host.
@@ -175,17 +267,14 @@ impl DesktopHost {
             .with_title(options.title.clone())
             .with_inner_size(LogicalSize::new(options.width, options.height))
             .with_min_inner_size(LogicalSize::new(360.0, 480.0))
-            .with_window_icon(
-                options
-                    .icon
-                    .as_ref()
-                    .and_then(|(rgba, side)| Icon::from_rgba(rgba.clone(), *side, *side).ok()),
-            );
+            .with_window_icon(pixel_icon(options));
         let window = Arc::new(
             event_loop
-                .create_window(attributes)
+                .create_window(system_attributes(attributes, options))
                 .map_err(|error| PlatformError::Window(error.to_string()))?,
         );
+        #[cfg(target_os = "windows")]
+        resource_icons(&window);
         // An Android window takes one graphics API: try Vulkan alone, then
         // OpenGL ES alone, so a surface of one never blocks the other.
         // Elsewhere every backend is offered at once.
@@ -603,6 +692,15 @@ impl<A: DesktopApp> ApplicationHandler for Runner<A> {
         match DesktopHost::create(event_loop, &self.options) {
             Ok(mut host) => match self.app.start(&mut host) {
                 Ok(()) => {
+                    // On Windows the window is still hidden: draw its first
+                    // frame, then show it, whole and with nothing left to do
+                    // when the taskbar asks it for its icon.
+                    #[cfg(target_os = "windows")]
+                    {
+                        host.frame(&mut self.app);
+                        self.last_frame = Some(Instant::now());
+                        host.window.set_visible(true);
+                    }
                     host.window.request_redraw();
                     self.host = Some(host);
                 }

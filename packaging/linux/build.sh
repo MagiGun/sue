@@ -40,9 +40,9 @@ binary="${CARGO_TARGET_DIR:-$root/target}/${SUE_TARGET:+$SUE_TARGET/}release/sue
 stage() {
   local prefix="$1"
   install -Dm755 "$binary" "$prefix/usr/bin/sue"
-  install -Dm644 packaging/linux/sue.desktop "$prefix/usr/share/applications/sue.desktop"
-  install -Dm644 assets/icons/sue_icon_512.png "$prefix/usr/share/icons/hicolor/512x512/apps/sue.png"
-  install -Dm644 assets/icons/sue_icon.svg "$prefix/usr/share/icons/hicolor/scalable/apps/sue.svg"
+  install -Dm644 packaging/linux/io.github.MagiGun.Sue.desktop "$prefix/usr/share/applications/io.github.MagiGun.Sue.desktop"
+  install -Dm644 assets/icons/sue_icon_512.png "$prefix/usr/share/icons/hicolor/512x512/apps/io.github.MagiGun.Sue.png"
+  install -Dm644 assets/icons/sue_icon.svg "$prefix/usr/share/icons/hicolor/scalable/apps/io.github.MagiGun.Sue.svg"
   install -Dm644 README.md "$prefix/usr/share/doc/sue/README.md"
   install -Dm644 LICENSE "$prefix/usr/share/doc/sue/LICENSE"
   install -Dm644 LICENSE "$prefix/usr/share/doc/sue/copyright"
@@ -97,9 +97,9 @@ cp -a $rpm/root/. %{buildroot}/
 
 %files
 /usr/bin/sue
-/usr/share/applications/sue.desktop
-/usr/share/icons/hicolor/512x512/apps/sue.png
-/usr/share/icons/hicolor/scalable/apps/sue.svg
+/usr/share/applications/io.github.MagiGun.Sue.desktop
+/usr/share/icons/hicolor/512x512/apps/io.github.MagiGun.Sue.png
+/usr/share/icons/hicolor/scalable/apps/io.github.MagiGun.Sue.svg
 /usr/share/doc/sue/README.md
 %license /usr/share/doc/sue/LICENSE
 /usr/share/doc/sue/copyright
@@ -119,8 +119,8 @@ fi
 appdir="$work/Sue.AppDir"
 stage "$appdir"
 ln -sf usr/bin/sue "$appdir/AppRun"
-cp packaging/linux/sue.desktop "$appdir/sue.desktop"
-cp assets/icons/sue_icon.png "$appdir/sue.png"
+cp packaging/linux/io.github.MagiGun.Sue.desktop "$appdir/io.github.MagiGun.Sue.desktop"
+cp assets/icons/sue_icon_512.png "$appdir/io.github.MagiGun.Sue.png"
 tools="$root/target/tools"
 mkdir -p "$tools"
 appimagetool="$tools/appimagetool-$arch.AppImage"

@@ -95,6 +95,7 @@ pub fn run() -> Result<(), String> {
             height: 900.0,
             gpu: gpu_preference(),
             icon: sue_wm::brand::pixels(sue_wm::brand::APP_ICON, 256),
+            app_id: sue_wm::brand::APP_ID.to_owned(),
         },
     )
     .map_err(|error| error.to_string())

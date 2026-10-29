@@ -9,4 +9,4 @@ Terminal=false
 Categories=Graphics;2DGraphics;RasterGraphics;
 MimeType=image/png;image/jpeg;image/jxl;image/vnd.adobe.photoshop;image/webp;
 Keywords=paint;draw;illustration;comic;animation;write;audio;
-StartupWMClass=sue
+StartupWMClass=io.github.MagiGun.Sue

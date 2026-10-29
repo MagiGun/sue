@@ -19,8 +19,8 @@ modules:
     buildsystem: simple
     build-commands:
       - install -Dm755 usr/bin/sue /app/bin/sue
-      - install -Dm644 usr/share/icons/hicolor/512x512/apps/sue.png /app/share/icons/hicolor/512x512/apps/io.github.MagiGun.Sue.png
-      - install -Dm644 usr/share/icons/hicolor/scalable/apps/sue.svg /app/share/icons/hicolor/scalable/apps/io.github.MagiGun.Sue.svg
+      - install -Dm644 usr/share/icons/hicolor/512x512/apps/io.github.MagiGun.Sue.png /app/share/icons/hicolor/512x512/apps/io.github.MagiGun.Sue.png
+      - install -Dm644 usr/share/icons/hicolor/scalable/apps/io.github.MagiGun.Sue.svg /app/share/icons/hicolor/scalable/apps/io.github.MagiGun.Sue.svg
       - install -Dm644 io.github.MagiGun.Sue.desktop /app/share/applications/io.github.MagiGun.Sue.desktop
       - install -Dm644 io.github.MagiGun.Sue.metainfo.xml /app/share/metainfo/io.github.MagiGun.Sue.metainfo.xml
       - install -Dm644 usr/share/doc/sue/LICENSE /app/share/licenses/io.github.MagiGun.Sue/LICENSE
