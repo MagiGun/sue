@@ -38,20 +38,34 @@ jobs:
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
+      build: ${{ steps.version.outputs.build }}
     steps:
       - id: version
         env:
           GIVEN: ${{ inputs.version || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           tag="$GIVEN"
           case "$tag" in v*) ;; *) tag="v$tag" ;; esac
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
-          echo "Releasing $tag"
+          # Publishing a draft made by hand creates its tag, and that tag's
+          # push starts this workflow again. A release that already has its
+          # files is left as it is: building it again would swap them for
+          # new builds with other checksums after people downloaded them.
+          files=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length' 2>/dev/null || echo 0)
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$files" != 0 ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$tag already has its files (it was built by hand), so this tag push builds nothing."
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "Releasing $tag"
+          fi
 
   windows:
     name: windows (${{ matrix.arch }})
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -101,6 +115,7 @@ jobs:
   linux:
     name: linux (${{ matrix.runner }})
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -126,6 +141,7 @@ jobs:
   linux-riscv64:
     name: linux (riscv64)
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-22.04
     continue-on-error: true
     env:
@@ -173,6 +189,7 @@ jobs:
 
   freebsd:
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-24.04
     continue-on-error: true
     env:
@@ -197,6 +214,7 @@ jobs:
 
   macos:
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: macos-latest
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
@@ -219,6 +237,7 @@ jobs:
 
   ios:
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: macos-latest
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
@@ -237,6 +256,7 @@ jobs:
 
   android:
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-24.04
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
