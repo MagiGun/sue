@@ -7,9 +7,10 @@
 use std::collections::HashMap;
 
 use sue_core::{Arena, ComponentKind, EntityId, Value};
-use sue_io::publish::{Book, Figure, PublishStyle, Section};
+use sue_io::publish::{Book, Figure, PublishStyle, PublishTable, Section};
 use sue_model::manuscript;
 use sue_model::{TextMarks, mark_kind as kind, picture};
+use sue_type::tables::TableSource;
 use sue_type::typeset::{PrintDoc, typeset};
 use sue_type::{PageSetup, StyleSheet};
 
@@ -276,6 +277,30 @@ fn figures(arena: &Arena, sections: &[Section]) -> HashMap<EntityId, Figure> {
     out
 }
 
+/// The tables the sections show, for the publishing formats.
+fn tables(arena: &Arena, sections: &[Section]) -> HashMap<EntityId, PublishTable> {
+    let mut out = HashMap::new();
+    for section in sections {
+        for mark in section.marks.marks() {
+            if mark.kind == kind::EMBED
+                && let Value::Entity(id) = mark.value
+                && !out.contains_key(&id)
+                && let Some(table) = TableSource::read(arena, id)
+            {
+                out.insert(
+                    id,
+                    PublishTable {
+                        cells: table.cells,
+                        header_rows: table.header_rows,
+                        shares: table.shares,
+                    },
+                );
+            }
+        }
+    }
+    out
+}
+
 /// Compiles with `options` into the bytes of a file.
 ///
 /// # Errors
@@ -314,6 +339,7 @@ pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>,
             &look.sheet,
             &look.page,
             &pictures,
+            &|id| TableSource::read(arena, id),
             &look.title,
             &look.author,
         );
@@ -325,11 +351,15 @@ pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>,
         language: "en".to_owned(),
         identifier: format!("urn:sue:{}", options.from),
         figures: figures(arena, &sections),
+        tables: tables(arena, &sections),
         sections,
         styles: publish_styles(&look.sheet),
         page: look.page.size,
         margins: look.page.margins,
-        page_numbers: look.page.numbers,
+        header: look.page.header.clone(),
+        footer: look.page.footer.clone(),
+        different_first: look.page.different_first,
+        date: look.page.date.clone(),
     };
     use sue_io::publish as p;
     Ok(match options.format.as_str() {

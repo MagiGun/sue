@@ -1018,6 +1018,19 @@ so `Ctrl+Z` takes it back, and it shows in Settings, General, Startup as a
 drop-down of the Hub and every studio and tool. A narrow window or a phone
 gets two columns of boxes and 44 point pins.
 
+Under the boxes the Hub lists the **work Sue remembers** (`WorkList`, below):
+**Recent** (the files and projects opened or saved lately, newest first, as
+many as `launchpad.recent_count`), **Saved Projects** (every `.sue` project
+the list knows, by name, with the studio it was saved from) and **Unsaved
+Work** (autosaves of other runs). Three columns side by side when the page
+is wide enough, one under the other when not, each row a sharp box with the
+title, what it is, when and the folder, the full path on hover, 56 points
+tall on touch. A recent file or project opens with `ShellRequest::OpenFile`;
+kept work has **Recover** (also a click on the row, `ShellRequest::Recover`)
+and **Discard** (`ShellRequest::Discard`), which arms on a first click
+(Really Discard) and acts on a second. `Shell::hub_rows` reports where each
+row and button was drawn, for scripted runs and tests.
+
 **The top bar** runs across the window (§3.3). The **Sue button** sits once,
 in its top left corner, with Sue's silhouette; no studio or tool draws one of
 its own. Right after it come the open page's menus: a studio or tool draws
@@ -1036,7 +1049,7 @@ down under the button, built for what is open (`MenuBar::dropdown`):
 | Hub | Back to the Hub (checked there) |
 | Studios, Tools | Every studio and every tool (the open one checked) |
 | New | A submenu per kind of file from the applets' `templates` (a `FileTemplate` names a category such as Picture, the exact kind such as Square Post, and a key the applet's `create` gets back; the applet makes it and opens itself) |
-| File | Open File (`Ctrl+O`), and what applets add there |
+| File | Open File (`Ctrl+O`), Open Recent (the `WorkList`'s ten newest), and what applets add there |
 | Project | Open Project, Save Project (`Ctrl+S`), Save Project As |
 | Send To | What the page works on (`focus`), into every other studio or tool whose `accepts` takes it (`ShellRequest::OpenIn`), and what applets add (`SueAction`s, such as Converter, or Sue Writer for a picture) |
 | Any other submenu | `SueAction`s on a menu of an applet's own |
@@ -1067,6 +1080,35 @@ document, and opens in the first studio, then tool, whose `accepts` takes the
 entity (`Applets::page_for`): a picture in the Image Viewer. A file nothing
 opens is not kept in the project, and the status bar says so.
 
+**The work Sue remembers.** `sue_wm::WorkList` is one list for every studio
+and tool, kept in Sue's data folder (`<data>/work`), read by the shell for the
+Hub and the Sue menu and by applets through `AppletContext::work` (Sue
+Paint's File, Open Recent filters it to the pictures it opens). Only the
+runtime changes it; applets ask with `ShellRequest::Remember { path, saved }`
+and `ShellRequest::Forget`. `recent.txt` holds one line per file (when it
+was opened, when saved, the page it was worked on in, the path), newest
+first, at most 100, under a format line. The runtime remembers every file
+`open_path` opens and every project `save_project_to` writes; files that are
+gone drop off when the Hub opens (`WorkList::refresh`). On first use the list
+takes over Sue Paint's old `paint/recent.txt`.
+
+**Autosave.** Work nobody saved is kept by itself: `general.autosave_seconds`
+(60; 0 turns it off) after the arena's revision changes, and at quit
+(`Runtime::shutdown`), the runtime writes the project as it would be saved
+into `<data>/work/autosave/<id>.sue` with a note (`<id>.txt`: when, the
+project file it belongs to, what it holds, its page). A digest of the bytes
+skips work that equals the saved file or the last copy kept, and saving the
+project lets the copy go. The id is the run's own (seconds, process and a
+count), so runs never share one, and a run never lists its own kept work.
+Opening another project (or recovering kept work) first keeps the work it
+replaces, then starts a new id. Recovering loads the copy as the project,
+with its project file, opens it in its page (`open_first_page`: the page it
+names if it takes something, else the first studio, then tool, that does)
+and adopts its id, so it stays kept until saved. Kept work its project file
+has since caught up with is let go when the Hub opens. Only a runtime that
+remembers (`Runtime::remembering`, on in the desktop and mobile window)
+touches the data folder; tests choose it, and the self-check never does.
+
 **Asking for a file.** No applet opens a dialog itself. It sends
 `ShellRequest::PickFile(FilePick)` (who asks, what for, a title, the
 extensions or the kinds of file it takes, a file name when saving, a folder
@@ -1086,7 +1128,11 @@ files.
 own colors in `<section>_colors` (`custom`). Only the colors change. The
 shell sets egui's visuals to the page's theme while the page and its part of
 the top bar draw, so its menus and popups wear it too, and back to Sue's for
-the status bar, the palette and Settings.
+the status bar, the palette and Settings. The page's and the bar's own `Ui`s
+are handed that style (`UiBuilder::style`): an egui child takes its parent's
+style, not the context's, so without it a studio in Gray inside a Paper Sue
+got Paper's white fields. A light theme (`Theme::is_light`, a light page)
+starts from egui's light visuals, so what egui picks by itself reads on it.
 
 **Shortcuts.** Every applet assigns keys the same way, through
 `sue_wm::shortcuts`: it lists its commands with their default chords
@@ -1611,6 +1657,44 @@ very start). Character runs are read once for every view and format
 note's text, on the words it follows) and `embed` (an entity shown on an
 object replacement character).
 
+**Tables in the text (`sue-model::table`, `sue-type::tables`).** A word
+processor's table is an entity of class `sue.text_table` holding the shared
+`Table`, shown where an `embed` mark names it, on an object character in a
+paragraph of its own (as a picture is). `Table::grid` makes every cell an
+empty text so a new table's size is its shape; `sue.table.header_rows`
+(`Int`) and `sue.table.widths` (shares of the line) are properties of the
+entity. `Reshape` inserts and removes rows and columns as one undo step
+with its exact inverse (removed cells and column definitions come back).
+`sue-type::tables` lays a table out as one block whose rows are the block's
+rows, so page view breaks it between rows, and repeats the heading rows at
+the top of each later page; the editor paints it and hit-tests cells, and a
+caret in a cell (`CellCaret`) types there in place, recorded with
+`Typing::hold` so a burst in one cell is one undo step that the shell's
+`Ctrl+Z` sees like any other typing. `Tab` moves on and adds a row in the
+last cell. A copied document, a snapshot and a restored snapshot get copies
+of their tables, so they never share one. The typesetter sets tables for
+print with ruled cells and repeated heading rows; Word (`w:tbl`, a repeated
+`w:tblHeader`), OpenDocument (`table:table` with header rows and column
+widths), HTML and EPUB (`thead` and `tbody`), RTF (`\trowd` rows, `\trhdr`),
+Markdown (pipe tables) and plain text (tab-separated rows) write them.
+
+**Running headers and footers (`sue-model::layout`).** `Running` holds a
+header's or footer's left, middle and right parts, stored as one text parted
+by tabs; each part is text with fields in braces (`FIELDS`: `{page}`,
+`{pages}`, `{title}`, `{author}`, `{date}`). `fill` sets them for one page
+(`PageFields`), and `running_pieces` hands formats the fields to write as
+their own live ones. `sue-type`'s `PageSetup` carries a header, a footer
+(the page number in the middle by default), `different_first` and the
+document fields; `PageSetup::furniture` gives each page what its margins
+show, which the editor paints and the typesetter sets. A `Book` carries the
+same: Word writes a header and a footer part with `PAGE` and `NUMPAGES`
+fields at a centered and a right tab stop (`w:titlePg` for a title page),
+OpenDocument a master page's `style:header` and `style:footer` with
+`text:page-number` and `text:page-count` (and `style:header-first`), RTF
+`\header` and `\footer` groups with `PAGE` and `NUMPAGES` fields
+(`\titlepg`). Sue Writer keeps them on the project
+(`sue_writer.header`, `sue_writer.footer`, `sue_writer.different_first`).
+
 **Manuscripts (`sue-model::manuscript`).** A long work is an entity of class
 `sue.manuscript` whose ordered `sue.child` relations make a binder of folders
 and documents. Its top folders have a `manuscript.role`: `draft` (what is
@@ -1696,7 +1780,7 @@ text entity (`PublishFormat`). `zip` writes and reads the archives.
 
 | Part | What it holds |
 | --- | --- |
-| Menus | File, Edit, View, Insert, Format, Project, Help, in Sue's top bar after the Sue button; File, Back to the Hub. Each keeps to a dozen entries at most (a test checks): Format groups like LibreOffice Writer's (Text, Text Color, Highlight, Align Text, Line Spacing, Lists, Clear Direct Formatting), View puts the zooms in a submenu |
+| Menus | File, Edit, View, Insert, Format, Table, Project, Help, in Sue's top bar after the Sue button; Table as LibreOffice Writer's (Insert Table, rows and columns, delete, heading row, convert text and tables); File, Back to the Hub. Each keeps to a dozen entries at most (a test checks): Format groups like LibreOffice Writer's (Text, Text Color, Highlight, Align Text, Line Spacing, Lists, Clear Direct Formatting), View puts the zooms in a submenu |
 | Toolbar | what Word's mini toolbar and LibreOffice Writer's single toolbar (26.8) keep at hand: undo, redo, paragraph style, font (every installed family, searchable), size, bold, italic, underline, text color, highlight, alignment, lists, indents; Find at the right; it wraps onto a second row in a narrow window, and a tablet's buttons are 32 points |
 | Binder | the project's folders and documents: click to open (a folder shows its documents one after another), double-click to rename, drag to move (above, below or into a folder), a right-click menu (new, rename, duplicate, include in compile, snapshot, merge, label, status, trash, Open in Sue Paint for pictures) |
 | Text | the editor on pages that fit the window (until you zoom) or one column |
@@ -1814,7 +1898,7 @@ packages can add their own:
 
 | Page | Holds |
 | --- | --- |
-| General | Where Sue opens (`launchpad.pinned`, labeled Open At Launch: the Hub, or the studio or tool pinned there) and quit confirmation |
+| General | Where Sue opens (`launchpad.pinned`, labeled Open At Launch: the Hub, or the studio or tool pinned there), how many recent files the Hub lists (`launchpad.recent_count`), how often unsaved work is kept (`general.autosave_seconds`, labeled Autosave Every) and quit confirmation |
 | Appearance & Rice | Theme presets (Void, Graphite, Paper, Gray), every color, geometry (padding, hairlines, radii, pill buttons, the top bar and the status bar, shadows), typography, the rice file with Reload, Export and Open Folder |
 | Display & Graphics | The performance preference (`profile.hardware`, labeled Performance Preference) and the active profile; the GPU preference (picked by adapter type: integrated, discrete, or the display's GPU), the GPU drawing, every GPU found and Restart Sue (the GPU is chosen at startup); the frame-rate cap, the settle grace, UI scale, list wheel speed, motion (instant snap, animation speed, spring constants, caret blink, smooth caret and its glide time, message time) |
 | Audio & DSP | Output device, sample rate, buffer size, real-time priority, volume, and the live stream and real-time status |

@@ -37,6 +37,7 @@ mod text;
 mod theme;
 mod transport;
 pub mod widgets;
+mod work;
 mod world;
 
 pub use applet::{
@@ -57,9 +58,10 @@ pub use layout::{LayoutMetrics, LayoutRequest, LayoutSolution, bar_height, solve
 pub use menubar::{ItemState, Menu, MenuBar, MenuItem, context_items};
 pub use palette::{Palette, PaletteOutcome, fuzzy_score};
 pub use scheduler::{Damage, FrameScheduler, FrameTicket, RenderDemand};
-pub use shell::{PIN_KEY, Shell, ShellIo, pinned, profile_label};
+pub use shell::{HubRow, PIN_KEY, Shell, ShellIo, pinned, profile_label};
 pub use spring::{SpringDamper, SpringMode, SpringParams};
 pub use text::{ArenaText, TYPING_PAUSE, Typing};
 pub use theme::{COLOR_KEYS, STUDIO_THEME_CUSTOM, STUDIO_THEME_SUE, Theme};
 pub use transport::{Clip, ClipSource, Transport, pcm_of};
+pub use work::{Autosave, RecentFile, WorkList, ago, unix_now};
 pub use world::{ArenaEdit, Batch, RiceEdit, World};

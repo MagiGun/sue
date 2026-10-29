@@ -70,6 +70,9 @@ pub(crate) fn para_html(
     notes: &mut Vec<String>,
     figure: &dyn Fn(sue_core::EntityId) -> Option<String>,
 ) -> String {
+    if let Some(table) = book.table(para) {
+        return table_html(table);
+    }
     let mut inner = String::new();
     if let Some(id) = para.embed
         && let Some(src) = figure(id)
@@ -158,6 +161,43 @@ pub(crate) fn para_html(
         }
         None => format!("<p{attrs}>{inner}</p>"),
     }
+}
+
+/// A table as HTML: column widths, heading rows in `thead`.
+pub(crate) fn table_html(table: &crate::publish::PublishTable) -> String {
+    let columns = table.columns().max(1);
+    let mut out = String::from("<table class=\"sue-table\"><colgroup>");
+    for column in 0..columns {
+        let _ = write!(
+            out,
+            "<col style=\"width: {:.2}%\"/>",
+            table.share(column) * 100.0
+        );
+    }
+    out.push_str("</colgroup>");
+    let cell = |row: usize, column: usize| escape(table.cell(row, column)).replace('\n', "<br/>");
+    let heading = table.header_rows.min(table.cells.len());
+    if heading > 0 {
+        out.push_str("<thead>");
+        for row in 0..heading {
+            out.push_str("<tr>");
+            for column in 0..columns {
+                let _ = write!(out, "<th>{}</th>", cell(row, column));
+            }
+            out.push_str("</tr>");
+        }
+        out.push_str("</thead>");
+    }
+    out.push_str("<tbody>");
+    for row in heading..table.cells.len() {
+        out.push_str("<tr>");
+        for column in 0..columns {
+            let _ = write!(out, "<td>{}</td>", cell(row, column));
+        }
+        out.push_str("</tr>");
+    }
+    out.push_str("</tbody></table>");
+    out
 }
 
 /// The body of a run of paragraphs: lists become `ul` and `ol`.
@@ -492,6 +532,7 @@ pub fn from_html(html: &str) -> (String, TextMarks) {
 #[cfg(test)]
 mod tests {
     use super::super::tests::sample;
+    use super::super::tests::with_table;
     use super::*;
 
     #[test]
@@ -526,5 +567,16 @@ mod tests {
             .unwrap();
         assert_eq!(note.value.as_str(), Some("Or so they say."));
         assert_eq!(base64(b"Sue!"), "U3VlIQ==");
+    }
+
+    #[test]
+    fn html_tables_have_a_head_and_a_body() {
+        let html = to_html(&with_table());
+        assert!(
+            html.contains("<thead><tr><th>Item</th><th>Count &amp; size</th></tr></thead>"),
+            "{html}"
+        );
+        assert!(html.contains("<tbody><tr><td>Bolt &lt;M8&gt;</td><td>40</td></tr></tbody>"));
+        assert!(html.contains("width: 70.00%"));
     }
 }

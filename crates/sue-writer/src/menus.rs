@@ -80,6 +80,7 @@ pub fn menus() -> Vec<Menu> {
                 item("Page Break", "insert.page_break").key("Ctrl+Enter"),
                 item("Scene Break", "insert.scene_break"),
                 item("Footnote...", "insert.footnote").key("Ctrl+Alt+F"),
+                item("Header and Footer...", "insert.header_footer"),
                 item("Link...", "insert.link").key("Ctrl+K"),
                 item("Picture...", "insert.picture"),
                 item("Today's Date", "insert.date"),
@@ -151,6 +152,39 @@ pub fn menus() -> Vec<Menu> {
                 ),
                 MenuItem::Separator,
                 item("Clear Direct Formatting", "format.clear").key("Ctrl+Space"),
+            ],
+        ),
+        Menu::new(
+            "Table",
+            vec![
+                item("Insert Table...", "table.insert").key("Ctrl+F12"),
+                MenuItem::Separator,
+                MenuItem::sub(
+                    "Insert",
+                    vec![
+                        item("Rows Above", "table.row_above"),
+                        item("Rows Below", "table.row_below"),
+                        item("Columns Before", "table.column_left"),
+                        item("Columns After", "table.column_right"),
+                    ],
+                ),
+                MenuItem::sub(
+                    "Delete",
+                    vec![
+                        item("Rows", "table.delete_row"),
+                        item("Columns", "table.delete_column"),
+                        item("Table", "table.delete"),
+                    ],
+                ),
+                item("Heading Row", "table.header"),
+                MenuItem::Separator,
+                MenuItem::sub(
+                    "Convert",
+                    vec![
+                        item("Text to Table", "table.from_text"),
+                        item("Table to Text", "table.to_text"),
+                    ],
+                ),
             ],
         ),
         Menu::new(

@@ -13,6 +13,16 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Headers and footers in Sue Writer (Insert, Header and Footer): left,
+  middle and right parts with the page number, page count, title, author
+  and date, and a different first page. They print in PDFs and go into
+  Word, OpenDocument and RTF as live page numbers.
+- Tables in Sue Writer: Table, Insert Table (`Ctrl+F12`), then type in the
+  cells; `Tab` moves on and adds a row at the end. Insert and delete rows
+  and columns, a heading row that repeats on every page, and text to table
+  and back. Tables print in PDFs and go into Word, OpenDocument, EPUB, web
+  pages, RTF, Markdown and plain text.
+
 - The Hub is Sue's home page: a box for every studio (Sue Paint, Sue
   Writer) and every tool (the Image Viewer, the Converter). The pin at a
   box's bottom right makes Sue open straight into it; one pin at a time,
@@ -25,6 +35,14 @@ follow [Semantic Versioning](https://semver.org/).
   Files browser on iPhone and iPad. On Android, saving a file you opened
   writes back to the original, and a folder you choose is read and
   written (the Converter's Add a Folder and its output folder).
+- The Hub lists your work under its boxes: **Recent** files and projects,
+  **Saved Projects**, and **Unsaved Work**. Click one to open it in its
+  studio. The Sue menu's File, Open Recent shows the same recent files.
+- Sue keeps work you have not saved by itself (a minute after a change, and
+  when you quit), so nothing is lost to a crash or a quick Quit. The Hub's
+  Unsaved Work brings it back (Recover) or throws it away (Discard, which
+  asks once more). Opening another project keeps the unsaved work it
+  replaces there too. Settings, General sets how often, or turns it off.
 - Typing in Sue Writer feels smooth: the caret glides to its new place
   instead of jumping, as you type, delete, move with the keys or click, and
   as lines and pages wrap. It blinks only while it rests. Settings, Display
@@ -32,6 +50,9 @@ follow [Semantic Versioning](https://semver.org/).
   for its speed.
 
 ### Changed
+
+- Sue Paint's File, Open Recent now shows the pictures from Sue's one list
+  of recent files, the same one the Hub shows.
 
 - Sue Writer on a phone: the text flows to the screen's width at a size you
   can read, the formatting is a row of big buttons right above the keyboard,
@@ -64,6 +85,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Sue Writer no longer crashes on a page narrower than about 543 points,
   such as a phone's.
+- Studios and tools wear their own colors again: with a light Sue theme
+  (Paper), Sue Paint in Gray showed white fields and buttons with dark text
+  on its gray panels.
 - On iPhone and iPad the on-screen keyboard no longer covers the bottom of
   Sue: Sue fits itself above the keyboard, as on Android, so the line you
   are writing in Sue Writer stays in sight.

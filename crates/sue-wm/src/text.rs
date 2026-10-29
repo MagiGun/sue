@@ -5,7 +5,8 @@
 //! so `Ctrl+Z` and `Ctrl+Y` work the same in every text field (backbone rule 2).
 //! Rich text, whose formatting moves with every edit, hands [`Typing`] the
 //! formatting as it was when the burst began ([`Typing::record_with`]), so
-//! the same undo step puts both back.
+//! the same undo step puts both back. Typing that is not a text buffer's (a
+//! table cell's text) joins the same bursts with [`Typing::hold`].
 
 use std::any::TypeId;
 use std::ops::Range;
@@ -14,7 +15,9 @@ use std::time::{Duration, Instant};
 use egui::TextBuffer;
 use egui::text::CharIndex;
 use sue_core::txn::{Batch, SetExtension, TextEdits, TextOp};
-use sue_core::{AssetHandle, Component, EntityId, StringBuffer, UndoStack};
+use sue_core::{
+    AssetHandle, Component, EntityId, ReversibleTransaction, StringBuffer, TxnError, UndoStack,
+};
 
 use crate::{ArenaEdit, World};
 
@@ -90,6 +93,32 @@ pub struct Typing {
     /// The extension component that changed with the text, as it was when
     /// the open group began.
     before: Option<(EntityId, Box<dyn Component>)>,
+    /// Typing that is not a text buffer's, made in place: what it edits,
+    /// the step that undoes the burst, and when it last typed.
+    held: Option<(u64, Held, Instant)>,
+}
+
+/// A held burst's undo step, recorded as it is.
+struct Held(Box<dyn ReversibleTransaction<World>>);
+
+impl std::fmt::Debug for Held {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Held").field(&self.0.label()).finish()
+    }
+}
+
+impl ReversibleTransaction<World> for Held {
+    fn label(&self) -> String {
+        self.0.label()
+    }
+
+    fn apply(&mut self, world: &mut World) -> Result<(), TxnError> {
+        self.0.apply(world)
+    }
+
+    fn revert(&mut self, world: &mut World) -> Result<(), TxnError> {
+        self.0.revert(world)
+    }
 }
 
 impl Typing {
@@ -104,6 +133,9 @@ impl Typing {
     ) {
         if ops.is_empty() {
             return;
+        }
+        if self.held.is_some() {
+            self.flush(history);
         }
         let stale = self.pending.as_ref().is_some_and(|(group, last)| {
             group.handle() != handle || now.duration_since(*last) >= TYPING_PAUSE
@@ -146,8 +178,36 @@ impl Typing {
         }
     }
 
+    /// Records typing that already happened in place but is not a text
+    /// buffer's (a table cell typed in). `key` names what it edits: edits
+    /// of one key in a row, without a pause, are one undo step, and `undo`
+    /// is the step for the whole burst, so only the first one's is kept
+    /// (taken from the state before the burst).
+    pub fn hold(
+        &mut self,
+        history: &mut UndoStack<World>,
+        key: u64,
+        undo: Box<dyn ReversibleTransaction<World>>,
+        now: Instant,
+    ) {
+        let joins = self.held.as_ref().is_some_and(|(known, _, last)| {
+            *known == key && now.duration_since(*last) < TYPING_PAUSE
+        });
+        if joins {
+            if let Some((_, _, last)) = &mut self.held {
+                *last = now;
+            }
+            return;
+        }
+        self.flush(history);
+        self.held = Some((key, Held(undo), now));
+    }
+
     /// Closes the open group into one undo step.
     pub fn flush(&mut self, history: &mut UndoStack<World>) {
+        if let Some((_, held, _)) = self.held.take() {
+            history.record(held);
+        }
         let before = self.before.take();
         if let Some((group, _)) = self.pending.take()
             && !group.is_empty()
@@ -170,10 +230,9 @@ impl Typing {
 
     /// Closes the group once typing paused. Returns `true` if it did.
     pub fn flush_if_paused(&mut self, history: &mut UndoStack<World>, now: Instant) -> bool {
-        if self
-            .pending
-            .as_ref()
-            .is_some_and(|(_, last)| now.duration_since(*last) >= TYPING_PAUSE)
+        let paused = |last: &Instant| now.duration_since(*last) >= TYPING_PAUSE;
+        if self.pending.as_ref().is_some_and(|(_, last)| paused(last))
+            || self.held.as_ref().is_some_and(|(_, _, last)| paused(last))
         {
             self.flush(history);
             return true;
@@ -184,13 +243,17 @@ impl Typing {
     /// When the open group will close by itself.
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
-        self.pending.as_ref().map(|(_, last)| *last + TYPING_PAUSE)
+        self.pending
+            .as_ref()
+            .map(|(_, last)| *last)
+            .or(self.held.as_ref().map(|(_, _, last)| *last))
+            .map(|last| last + TYPING_PAUSE)
     }
 
     /// `true` while a group is open.
     #[must_use]
     pub fn is_open(&self) -> bool {
-        self.pending.is_some()
+        self.pending.is_some() || self.held.is_some()
     }
 }
 
@@ -254,6 +317,54 @@ mod tests {
         assert_eq!(text(&world, handle), "héllo");
         history.redo(&mut world).unwrap();
         assert_eq!(text(&world, handle), "Héllo!");
+    }
+
+    #[test]
+    fn held_typing_is_one_step_per_burst() {
+        #[derive(Debug)]
+        struct Name(AssetHandle, String);
+        impl ReversibleTransaction<crate::World> for Name {
+            fn label(&self) -> String {
+                "Typing".to_owned()
+            }
+            fn apply(&mut self, world: &mut World) -> Result<(), TxnError> {
+                self.revert(world)
+            }
+            fn revert(&mut self, world: &mut World) -> Result<(), TxnError> {
+                let entity = world.arena.get_mut(self.0)?;
+                let now = entity.name().to_owned();
+                entity.set_name(std::mem::replace(&mut self.1, now));
+                Ok(())
+            }
+        }
+        let mut world = World::default();
+        let handle = world.arena.spawn("", StringBuffer::from(String::new()));
+        let name = |world: &World| world.arena.get(handle).unwrap().name().to_owned();
+        let mut history = UndoStack::new();
+        let mut typing = Typing::default();
+        let start = Instant::now();
+        // Two edits in place, one burst: the first one's undo is kept.
+        for (index, (before, now)) in [("", "a"), ("a", "ab")].into_iter().enumerate() {
+            world
+                .arena
+                .get_mut(handle)
+                .unwrap()
+                .set_name(now.to_owned());
+            let at = start + Duration::from_millis(100 * index as u64);
+            typing.hold(
+                &mut history,
+                7,
+                Box::new(Name(handle, before.to_owned())),
+                at,
+            );
+        }
+        assert!(typing.is_open());
+        assert!(typing.flush_if_paused(&mut history, start + TYPING_PAUSE * 2));
+        assert_eq!(history.len(), 1);
+        history.undo(&mut world).unwrap();
+        assert_eq!(name(&world), "");
+        history.redo(&mut world).unwrap();
+        assert_eq!(name(&world), "ab");
     }
 
     #[test]
