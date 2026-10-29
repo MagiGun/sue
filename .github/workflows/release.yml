@@ -34,7 +34,7 @@ env:
 
 jobs:
   version:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
@@ -66,7 +66,7 @@ jobs:
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Toolchain (from rust-toolchain.toml)
         run: |
           rustup toolchain install
@@ -90,7 +90,7 @@ jobs:
             "SUE_SIGN=/f `"$pfx`" /p `"$env:CERTIFICATE_PASSWORD`"" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           }
       - run: powershell -File packaging/windows/build.ps1 -Arch ${{ matrix.arch }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-${{ matrix.arch }}
           path: |
@@ -109,7 +109,7 @@ jobs:
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Toolchain (from rust-toolchain.toml)
         run: rustup toolchain install
       - name: Libraries and packaging tools
@@ -118,7 +118,7 @@ jobs:
           sudo apt-get install -y build-essential pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libgl1-mesa-dev libgtk-3-dev rpm file desktop-file-utils
       - uses: Swatinem/rust-cache@v2
       - run: packaging/linux/build.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-${{ matrix.runner }}
           path: dist/*
@@ -138,7 +138,7 @@ jobs:
       PKG_CONFIG_ALLOW_CROSS: "1"
       PKG_CONFIG_LIBDIR: /usr/lib/riscv64-linux-gnu/pkgconfig:/usr/share/pkgconfig
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Toolchain (from rust-toolchain.toml)
         run: |
           rustup toolchain install
@@ -166,19 +166,19 @@ jobs:
         with:
           key: riscv64
       - run: packaging/linux/build.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-riscv64
           path: dist/*
 
   freebsd:
     needs: version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: vmactions/freebsd-vm@v1
         with:
           envs: SUE_VERSION
@@ -190,7 +190,7 @@ jobs:
             . "$HOME/.cargo/env"
             rustup toolchain install
             packaging/freebsd/build.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: freebsd
           path: dist/*.tar.gz
@@ -201,7 +201,7 @@ jobs:
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Toolchain (from rust-toolchain.toml)
         run: |
           rustup toolchain install
@@ -210,7 +210,7 @@ jobs:
       - run: packaging/macos/build.sh
         env:
           SUE_SIGN_IDENTITY: ${{ secrets.SUE_SIGN_IDENTITY }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           path: |
@@ -223,26 +223,26 @@ jobs:
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Toolchain (from rust-toolchain.toml)
         run: |
           rustup toolchain install
           rustup target add aarch64-apple-ios aarch64-apple-ios-sim
       - uses: Swatinem/rust-cache@v2
       - run: packaging/ios/build.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ios
           path: dist/*
 
   android:
     needs: version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
@@ -265,22 +265,22 @@ jobs:
           ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
           SUE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'android' }}
         run: python3 packaging/android/build_apk.py --release $KEYSTORE_ARGS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android
           path: dist/*.apk
 
   arch:
     needs: [version, linux]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: archlinux:latest
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - name: Packaging tools
         run: pacman -Syu --noconfirm --needed base-devel git
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: linux-ubuntu-*
           path: dist
@@ -289,7 +289,7 @@ jobs:
       - run: |
           SUE_ARCH=x86_64 packaging/arch/build.sh
           SUE_ARCH=aarch64 packaging/arch/build.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: arch
           path: |
@@ -304,7 +304,7 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             linux: linux-ubuntu-22.04
           - arch: aarch64
             runner: ubuntu-24.04-arm
@@ -315,13 +315,13 @@ jobs:
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.linux }}
           path: dist
       - run: packaging/flatpak/build.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: flatpak-${{ matrix.arch }}
           path: dist/*.flatpak
@@ -329,10 +329,10 @@ jobs:
   publish:
     needs: [version, windows, linux, linux-riscv64, freebsd, macos, ios, android, arch, flatpak]
     if: ${{ !cancelled() && needs.windows.result == 'success' && needs.linux.result == 'success' && needs.macos.result == 'success' && needs.android.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -341,7 +341,7 @@ jobs:
         run: python3 packaging/scoop/manifest.py --tag ${{ needs.version.outputs.tag }} --dist dist
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS.txt
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           # Comes before the notes GitHub writes from the changes.

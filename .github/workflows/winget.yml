@@ -35,7 +35,7 @@ jobs:
       - name: Without a token, nothing to send
         if: env.TOKEN == ''
         run: echo "::notice::There is no WINGET_TOKEN secret, so nothing went to winget. The top of .github/workflows/winget.yml says how to add one."
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: env.TOKEN != ''
       - name: Manifests from the release's installers
         if: env.TOKEN != ''

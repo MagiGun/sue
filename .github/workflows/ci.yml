@@ -20,11 +20,11 @@ env:
 
 jobs:
   version:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: version
@@ -46,11 +46,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-24.04, windows-latest, macos-latest]
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Linux libraries
         if: runner.os == 'Linux'
         run: |
@@ -71,12 +71,12 @@ jobs:
   android:
     name: Android build
     needs: version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
@@ -99,7 +99,7 @@ jobs:
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Toolchain and targets
         run: |
           rustup toolchain install
@@ -118,7 +118,7 @@ jobs:
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Libraries and packaging tools
         run: |
           sudo apt-get update
@@ -127,7 +127,7 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - run: packaging/linux/build.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-packages
           path: dist/*
@@ -135,15 +135,15 @@ jobs:
   arch-package:
     name: Arch package
     needs: [version, linux-packages]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: archlinux:latest
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - name: Packaging tools
         run: pacman -Syu --noconfirm --needed base-devel git
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: linux-packages
           path: dist
@@ -156,20 +156,20 @@ jobs:
   flatpak:
     name: Flatpak
     needs: [version, linux-packages]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-24.08
       options: --privileged
     env:
       SUE_VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: linux-packages
           path: dist
       - run: packaging/flatpak/build.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: flatpak
           path: dist/*.flatpak
