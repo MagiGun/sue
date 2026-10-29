@@ -9,6 +9,7 @@ use crate::select::Selection;
 
 /// A pixel operation with its settings.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[allow(clippy::large_enum_variant, reason = "one filter is set up at a time")]
 pub enum Filter {
     /// Turns every color into its opposite.
     Invert,
@@ -67,6 +68,49 @@ pub enum Filter {
     BrightnessToOpacity {
         /// The color left behind.
         rgb: [u8; 3],
+    },
+    /// Tone Curve: a curve for all channels, then one for each.
+    ToneCurve {
+        /// All of red, green and blue.
+        rgb: sue_model::Response,
+        /// Red alone.
+        red: sue_model::Response,
+        /// Green alone.
+        green: sue_model::Response,
+        /// Blue alone.
+        blue: sue_model::Response,
+        /// The channel being edited (0 all, then red, green, blue).
+        channel: u8,
+    },
+    /// Level Correction: the input's black, middle and white points, and
+    /// the output's black and white.
+    Levels {
+        /// Input black, 0 to 1.
+        black: f32,
+        /// Input white, 0 to 1.
+        white: f32,
+        /// Middle gray's gamma, 0.1 to 10 (1 leaves it).
+        gamma: f32,
+        /// Output black, 0 to 1.
+        out_black: f32,
+        /// Output white, 0 to 1.
+        out_white: f32,
+    },
+    /// Color Balance: shifts toward red, green and blue (or away, to cyan,
+    /// magenta and yellow) in the shadows, midtones and highlights.
+    ColorBalance {
+        /// For shadows, midtones and highlights: red, green and blue shifts,
+        /// -1 to 1.
+        shifts: [[f32; 3]; 3],
+        /// The range being edited (0 shadows, 1 midtones, 2 highlights).
+        range: u8,
+    },
+    /// Gradient Map: brightness picks a color from a gradient.
+    GradientMap {
+        /// The color of black.
+        from: [u8; 3],
+        /// The color of white.
+        to: [u8; 3],
     },
     /// Manga focus lines toward the middle (Clip Studio Paint's saturated
     /// lines).
@@ -128,6 +172,10 @@ impl Filter {
             Self::Noise { .. } => "Add Noise",
             Self::Recolor { .. } => "Change Color to Drawing Color",
             Self::BrightnessToOpacity { .. } => "Convert Brightness to Opacity",
+            Self::ToneCurve { .. } => "Tone Curve",
+            Self::Levels { .. } => "Level Correction",
+            Self::ColorBalance { .. } => "Color Balance",
+            Self::GradientMap { .. } => "Gradient Map",
             Self::FocusLines { .. } => "Focus Lines",
             Self::SpeedLines { .. } => "Speed Lines",
             Self::Tone { .. } => "Screentone",
@@ -156,6 +204,28 @@ impl Filter {
                 }
             }
             Self::Mosaic { size } => mosaic(pixels, width, height, size.max(1)),
+            Self::ToneCurve {
+                rgb,
+                red,
+                green,
+                blue,
+                ..
+            } => {
+                // A table per channel: the curves run once per value, not
+                // once per pixel.
+                let table = |curve: &sue_model::Response| -> [u8; 256] {
+                    std::array::from_fn(|value| {
+                        let out = curve.eval(rgb.eval(value as f32 / 255.0));
+                        (out.clamp(0.0, 1.0) * 255.0).round() as u8
+                    })
+                };
+                let tables = [table(&red), table(&green), table(&blue)];
+                for pixel in pixels.as_chunks_mut::<4>().0 {
+                    for (channel, table) in pixel.iter_mut().zip(&tables) {
+                        *channel = table[usize::from(*channel)];
+                    }
+                }
+            }
             Self::FocusLines {
                 count,
                 gap,
@@ -270,6 +340,48 @@ impl Filter {
             }
             Self::Recolor { rgb } => {
                 return [rgb[0], rgb[1], rgb[2], a];
+            }
+            Self::ToneCurve {
+                rgb: all,
+                red,
+                green,
+                blue,
+                ..
+            } => [
+                red.eval(all.eval(rgb[0])),
+                green.eval(all.eval(rgb[1])),
+                blue.eval(all.eval(rgb[2])),
+            ],
+            Self::Levels {
+                black,
+                white,
+                gamma,
+                out_black,
+                out_white,
+            } => rgb.map(|value| {
+                let t = ((value - black) / (white - black).max(1e-4)).clamp(0.0, 1.0);
+                out_black + (out_white - out_black) * t.powf(1.0 / gamma.max(0.01))
+            }),
+            Self::ColorBalance { shifts, .. } => {
+                let light = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+                let shadow = (1.0 - light).powi(2);
+                let highlight = light.powi(2);
+                let middle = (1.0 - shadow - highlight).max(0.0);
+                let weights = [shadow, middle, highlight];
+                let mut out = rgb;
+                for (range, weight) in weights.iter().enumerate() {
+                    for channel in 0..3 {
+                        out[channel] += shifts[range][channel] * weight * 0.5;
+                    }
+                }
+                out
+            }
+            Self::GradientMap { from, to } => {
+                let light = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+                [0, 1, 2].map(|channel| {
+                    let (low, high) = (unit(from[channel]), unit(to[channel]));
+                    low + (high - low) * light
+                })
             }
             Self::BrightnessToOpacity { rgb: color } => {
                 let luma = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
@@ -411,6 +523,50 @@ mod tests {
             }
         }
         pixels
+    }
+
+    #[test]
+    fn tonal_corrections_follow_their_settings() {
+        let run = |filter: Filter, pixel: [u8; 4]| {
+            let mut pixels = pixel.to_vec();
+            filter.apply(&mut pixels, 1, 1, None, [0, 0]);
+            [pixels[0], pixels[1], pixels[2], pixels[3]]
+        };
+        let linear = sue_model::Response::LINEAR;
+        // A tone curve that darkens red only.
+        let dark = sue_model::Response::new(&[[0.0, 0.0], [1.0, 0.5]]);
+        let curve = Filter::ToneCurve {
+            rgb: linear,
+            red: dark,
+            green: linear,
+            blue: linear,
+            channel: 1,
+        };
+        assert_eq!(run(curve, [200, 100, 50, 255]), [100, 100, 50, 255]);
+        // Levels: the input white at 50% makes the middle white.
+        let levels = Filter::Levels {
+            black: 0.0,
+            white: 0.5,
+            gamma: 1.0,
+            out_black: 0.0,
+            out_white: 1.0,
+        };
+        assert_eq!(run(levels, [128, 64, 0, 200]), [255, 128, 0, 200]);
+        // Color balance toward red in the midtones warms a gray.
+        let mut shifts = [[0.0; 3]; 3];
+        shifts[1][0] = 1.0;
+        let balanced = run(
+            Filter::ColorBalance { shifts, range: 1 },
+            [128, 128, 128, 255],
+        );
+        assert!(balanced[0] > 128 && balanced[1] == 128, "{balanced:?}");
+        // A gradient map from navy to yellow.
+        let map = Filter::GradientMap {
+            from: [0, 0, 80],
+            to: [255, 255, 0],
+        };
+        assert_eq!(run(map, [0, 0, 0, 255]), [0, 0, 80, 255]);
+        assert_eq!(run(map, [255, 255, 255, 255]), [255, 255, 0, 255]);
     }
 
     #[test]

@@ -483,6 +483,10 @@ fn implemented(command: &str) -> bool {
             | "story.delete"
             | "story.export_page"
             | "story.export_pages"
+            | "filter.curve"
+            | "filter.levels"
+            | "filter.balance"
+            | "filter.gradient_map"
             | "filter.focus_lines"
             | "filter.speed_lines"
             | "filter.tone"
@@ -1654,6 +1658,37 @@ impl SuePaint {
             "filter.gaussian" => self.filter_dialog(cx, Filter::GaussianBlur { radius: 4.0 }),
             "filter.mosaic" => self.filter_dialog(cx, Filter::Mosaic { size: 12 }),
             "filter.noise" => self.filter_dialog(cx, Filter::Noise { amount: 0.2 }),
+            "filter.curve" => self.filter_dialog(
+                cx,
+                Filter::ToneCurve {
+                    rgb: sue_model::Response::LINEAR,
+                    red: sue_model::Response::LINEAR,
+                    green: sue_model::Response::LINEAR,
+                    blue: sue_model::Response::LINEAR,
+                    channel: 0,
+                },
+            ),
+            "filter.levels" => self.filter_dialog(
+                cx,
+                Filter::Levels {
+                    black: 0.0,
+                    white: 1.0,
+                    gamma: 1.0,
+                    out_black: 0.0,
+                    out_white: 1.0,
+                },
+            ),
+            "filter.balance" => self.filter_dialog(
+                cx,
+                Filter::ColorBalance {
+                    shifts: [[0.0; 3]; 3],
+                    range: 1,
+                },
+            ),
+            "filter.gradient_map" => {
+                let (from, to) = (self.main, self.sub);
+                self.filter_dialog(cx, Filter::GradientMap { from, to });
+            }
             "filter.focus_lines" => {
                 let rgb = self.drawing_color();
                 self.filter_dialog(

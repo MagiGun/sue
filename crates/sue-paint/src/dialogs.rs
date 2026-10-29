@@ -321,6 +321,7 @@ pub(crate) struct PagesDialog {
 
 /// An open dialog.
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant, reason = "one dialog is open at a time")]
 pub(crate) enum Dialog {
     New(NewDialog),
     Filter(FilterDialog),
@@ -382,7 +383,17 @@ impl SuePaint {
             });
         let (title, size) = match &dialog {
             Dialog::New(_) => ("New", vec2(560.0, 560.0)),
-            Dialog::Filter(filter) => (filter.filter.label(), vec2(400.0, 250.0)),
+            Dialog::Filter(filter) => (
+                filter.filter.label(),
+                vec2(
+                    400.0,
+                    match filter.filter {
+                        Filter::ToneCurve { .. } => 360.0,
+                        Filter::Levels { .. } => 330.0,
+                        _ => 250.0,
+                    },
+                ),
+            ),
             Dialog::Shortcuts => ("Keyboard Shortcuts", vec2(470.0, 560.0)),
             Dialog::Pages(_) => ("Page Manager", vec2(820.0, 620.0)),
             Dialog::Frame(_) => ("New Frame Border Folder", vec2(420.0, 330.0)),
@@ -1089,6 +1100,76 @@ fn filter_ui(ui: &mut Ui, dialog: &mut FilterDialog, theme: &Theme) -> Outcome {
         }
         Filter::Sharpen { amount } => {
             ui.add(egui::Slider::new(amount, 0.0..=3.0).text("Amount"));
+        }
+        Filter::ToneCurve {
+            rgb,
+            red,
+            green,
+            blue,
+            channel,
+        } => {
+            ui.horizontal(|ui| {
+                for (index, name) in ["RGB", "Red", "Green", "Blue"].iter().enumerate() {
+                    ui.selectable_value(channel, index as u8, *name);
+                }
+            });
+            let curve = match channel {
+                1 => red,
+                2 => green,
+                3 => blue,
+                _ => rgb,
+            };
+            widgets::response_curve(
+                ui,
+                ("tone-curve", *channel),
+                curve,
+                180.0,
+                widgets::CurveLabels {
+                    input: "Input",
+                    low: "0",
+                    high: "255",
+                    output: "Output",
+                },
+                theme,
+            );
+        }
+        Filter::Levels {
+            black,
+            white,
+            gamma,
+            out_black,
+            out_white,
+        } => {
+            ui.label(RichText::new("Input").color(theme.muted));
+            ui.add(egui::Slider::new(black, 0.0..=0.99).text("Shadow"));
+            ui.add(
+                egui::Slider::new(gamma, 0.1..=10.0)
+                    .logarithmic(true)
+                    .text("Gamma"),
+            );
+            ui.add(egui::Slider::new(white, 0.01..=1.0).text("Highlight"));
+            ui.label(RichText::new("Output").color(theme.muted));
+            ui.add(egui::Slider::new(out_black, 0.0..=1.0).text("Shadow"));
+            ui.add(egui::Slider::new(out_white, 0.0..=1.0).text("Highlight"));
+        }
+        Filter::ColorBalance { shifts, range } => {
+            ui.horizontal(|ui| {
+                for (index, name) in ["Shadow", "Midtone", "Highlight"].iter().enumerate() {
+                    ui.selectable_value(range, index as u8, *name);
+                }
+            });
+            let shift = &mut shifts[usize::from((*range).min(2))];
+            ui.add(egui::Slider::new(&mut shift[0], -1.0..=1.0).text("Cyan to red"));
+            ui.add(egui::Slider::new(&mut shift[1], -1.0..=1.0).text("Magenta to green"));
+            ui.add(egui::Slider::new(&mut shift[2], -1.0..=1.0).text("Yellow to blue"));
+        }
+        Filter::GradientMap { from, to } => {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Black becomes").color(theme.muted));
+                ui.color_edit_button_srgb(from);
+                ui.label(RichText::new("white becomes").color(theme.muted));
+                ui.color_edit_button_srgb(to);
+            });
         }
         Filter::FocusLines {
             count,
