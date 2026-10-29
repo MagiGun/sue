@@ -1087,6 +1087,31 @@ impl SuePaint {
                     ui.selectable_value(&mut sub.mode, 1, "All layers");
                 });
                 if tool == Tool::Fill {
+                    ui.horizontal(|ui| {
+                        ui.label(small("Close gap"));
+                        for (level, name) in ["None", "Weak", "Medium", "Strong", "Max"]
+                            .iter()
+                            .enumerate()
+                        {
+                            ui.selectable_value(&mut sub.gap, level as u32, *name);
+                        }
+                    })
+                    .response
+                    .on_hover_text("Fills hold inside lines with small breaks");
+                    let mut spread = sub.spread as f32;
+                    if slider_row(
+                        ui,
+                        "Area scaling",
+                        &mut spread,
+                        0.0..=20.0,
+                        " px",
+                        false,
+                        theme,
+                    ) {
+                        sub.spread = spread.round() as u32;
+                    }
+                }
+                if tool == Tool::Fill {
                     let mut opacity = sub.tip.opacity * 100.0;
                     if slider_row(ui, "Opacity", &mut opacity, 0.0..=100.0, " %", false, theme) {
                         sub.tip.opacity = opacity / 100.0;

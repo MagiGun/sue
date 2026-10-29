@@ -66,6 +66,164 @@ pub fn flood(reference: &[u8], size: [u32; 2], seed: [u32; 2], tolerance: f32) -
     grow(&mask, width, height)
 }
 
+/// How far a Close gap level (0 none, then weak to strongest) reaches,
+/// in pixels.
+#[must_use]
+pub const fn gap_radius(level: u32) -> u32 {
+    match level {
+        0 => 0,
+        1 => 2,
+        2 => 4,
+        3 => 7,
+        _ => 11,
+    }
+}
+
+/// `mask` (one flag a pixel) grown by `radius` pixels, a square at a time.
+fn dilate(mask: &[bool], width: u32, height: u32, radius: u32) -> Vec<bool> {
+    if radius == 0 {
+        return mask.to_vec();
+    }
+    let (w, h, r) = (width as usize, height as usize, radius as usize);
+    let mut across = vec![false; mask.len()];
+    for y in 0..h {
+        let row = &mask[y * w..(y + 1) * w];
+        let mut prefix = vec![0_u32; w + 1];
+        for x in 0..w {
+            prefix[x + 1] = prefix[x] + u32::from(row[x]);
+        }
+        for x in 0..w {
+            let (low, high) = (x.saturating_sub(r), (x + r + 1).min(w));
+            across[y * w + x] = prefix[high] > prefix[low];
+        }
+    }
+    let mut out = vec![false; mask.len()];
+    for x in 0..w {
+        let mut prefix = vec![0_u32; h + 1];
+        for y in 0..h {
+            prefix[y + 1] = prefix[y] + u32::from(across[y * w + x]);
+        }
+        for y in 0..h {
+            let (low, high) = (y.saturating_sub(r), (y + r + 1).min(h));
+            out[y * w + x] = prefix[high] > prefix[low];
+        }
+    }
+    out
+}
+
+/// A flood fill that closes gaps in lines (Clip Studio Paint's Close gap)
+/// and spreads under them (Area scaling): the lines (pixels that are not
+/// like the seed) count as `gap` pixels thicker while flooding, so small
+/// breaks hold the fill in; the area then grows back up to the lines it
+/// was kept from, and `spread` pixels further, under them.
+#[must_use]
+pub fn flood_closing(
+    reference: &[u8],
+    size: [u32; 2],
+    seed: [u32; 2],
+    tolerance: f32,
+    gap: u32,
+    spread: u32,
+) -> Vec<u8> {
+    let plain = flood(reference, size, seed, tolerance);
+    let [width, height] = size;
+    if gap == 0 && spread == 0 {
+        return plain;
+    }
+    let count = (width * height) as usize;
+    let premultiplied = |index: usize| {
+        let p = &reference[index * 4..index * 4 + 4];
+        let alpha = u32::from(p[3]);
+        [
+            u32::from(p[0]) * alpha / 255,
+            u32::from(p[1]) * alpha / 255,
+            u32::from(p[2]) * alpha / 255,
+            alpha,
+        ]
+    };
+    if seed[0] >= width || seed[1] >= height || reference.len() < count * 4 {
+        return plain;
+    }
+    let target = premultiplied((seed[1] * width + seed[0]) as usize);
+    let limit = (tolerance.clamp(0.0, 1.0) * 255.0).round() as u32;
+    let open: Vec<bool> = (0..count)
+        .map(|index| {
+            premultiplied(index)
+                .iter()
+                .zip(target)
+                .all(|(a, b)| a.abs_diff(b) <= limit)
+        })
+        .collect();
+    let mut region: Vec<bool> = if gap > 0 {
+        // Flood where even the thickened lines leave room.
+        let walls: Vec<bool> = open.iter().map(|open| !open).collect();
+        let blocked = dilate(&walls, width, height, gap);
+        let start = (seed[1] * width + seed[0]) as usize;
+        if blocked[start] {
+            plain.iter().map(|value| *value != 0).collect()
+        } else {
+            let mut region = vec![false; count];
+            let mut stack = vec![start];
+            while let Some(index) = stack.pop() {
+                if region[index] || blocked[index] {
+                    continue;
+                }
+                region[index] = true;
+                let (x, y) = (index as u32 % width, index as u32 / width);
+                if x > 0 {
+                    stack.push(index - 1);
+                }
+                if x + 1 < width {
+                    stack.push(index + 1);
+                }
+                if y > 0 {
+                    stack.push(index - width as usize);
+                }
+                if y + 1 < height {
+                    stack.push(index + width as usize);
+                }
+            }
+            // Back out to the lines, through open pixels only.
+            let mut frontier: Vec<usize> = (0..count).filter(|index| region[*index]).collect();
+            for _ in 0..=gap {
+                let mut next = Vec::new();
+                for index in frontier {
+                    let (x, y) = (index as u32 % width, index as u32 / width);
+                    let mut near = Vec::with_capacity(4);
+                    if x > 0 {
+                        near.push(index - 1);
+                    }
+                    if x + 1 < width {
+                        near.push(index + 1);
+                    }
+                    if y > 0 {
+                        near.push(index - width as usize);
+                    }
+                    if y + 1 < height {
+                        near.push(index + width as usize);
+                    }
+                    for neighbor in near {
+                        if !region[neighbor] && open[neighbor] {
+                            region[neighbor] = true;
+                            next.push(neighbor);
+                        }
+                    }
+                }
+                frontier = next;
+            }
+            region
+        }
+    } else {
+        plain.iter().map(|value| *value != 0).collect()
+    };
+    // Under the lines: one pixel always (as the plain fill), more by spread.
+    region = dilate(&region, width, height, 1 + spread);
+    region
+        .into_iter()
+        .map(|inside| if inside { 255 } else { 0 })
+        .collect()
+}
+
 /// The mask grown by one pixel in every direction.
 fn grow(mask: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut out = mask.to_vec();
@@ -197,6 +355,46 @@ pub fn gradient(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn close_gap_keeps_a_fill_inside_a_broken_line() {
+        // A ring of black line with a three pixel break on its right.
+        let (width, height) = (40_u32, 40_u32);
+        let mut pixels = vec![0_u8; (width * height * 4) as usize];
+        for y in 0..height {
+            for x in 0..width {
+                let (dx, dy) = (x as f32 - 20.0, y as f32 - 20.0);
+                let ring = (dx.hypot(dy) - 12.0).abs() < 1.5;
+                let gap = x > 30 && (19..22).contains(&y);
+                if ring && !gap {
+                    pixels[((y * width + x) * 4) as usize..][..4].copy_from_slice(&[0, 0, 0, 255]);
+                }
+            }
+        }
+        let inside = [20, 20];
+        let leaked = flood(&pixels, [width, height], inside, 0.1);
+        assert_eq!(
+            leaked[(2 * width + 2) as usize],
+            255,
+            "without close gap it leaks out"
+        );
+        let held = flood_closing(&pixels, [width, height], inside, 0.1, gap_radius(2), 0);
+        assert_eq!(
+            held[(2 * width + 2) as usize],
+            0,
+            "with it the fill stays inside"
+        );
+        assert_eq!(held[(20 * width + 20) as usize], 255);
+        assert_eq!(
+            held[(20 * width + 30) as usize],
+            255,
+            "and reaches the line"
+        );
+        // Area scaling spreads under the line.
+        let spread = flood_closing(&pixels, [width, height], inside, 0.1, gap_radius(2), 2);
+        let count = |mask: &[u8]| mask.iter().filter(|value| **value != 0).count();
+        assert!(count(&spread) > count(&held));
+    }
 
     /// A 6 by 4 picture split by a black vertical line at x = 2.
     fn walled() -> Vec<u8> {

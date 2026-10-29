@@ -1071,7 +1071,14 @@ impl SuePaint {
                 placed
             }
         };
-        let mut mask = fill::flood(&reference, size, [p.x as u32, p.y as u32], sub.tolerance);
+        let mut mask = fill::flood_closing(
+            &reference,
+            size,
+            [p.x as u32, p.y as u32],
+            sub.tolerance,
+            fill::gap_radius(sub.gap),
+            sub.spread,
+        );
         if let Some(selection) = self.doc().and_then(|doc| doc.selection.as_ref()) {
             for (index, value) in mask.iter_mut().enumerate() {
                 let (x, y) = (index as u32 % size[0], index as u32 / size[0]);

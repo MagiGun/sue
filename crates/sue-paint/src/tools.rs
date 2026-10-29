@@ -464,6 +464,10 @@ pub struct SubTool {
     pub lines: u32,
     /// A symmetrical ruler mirrors across its line (Line symmetry).
     pub mirror: bool,
+    /// A fill's Close gap level, 0 (none) to 4 (strongest).
+    pub gap: u32,
+    /// A fill's Area scaling, in pixels under the lines.
+    pub spread: u32,
 }
 
 impl SubTool {
@@ -482,6 +486,8 @@ impl SubTool {
             tolerance: 0.0,
             lines: 1,
             mirror: true,
+            gap: 0,
+            spread: 0,
         }
     }
 
