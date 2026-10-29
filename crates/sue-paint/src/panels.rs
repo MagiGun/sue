@@ -90,11 +90,18 @@ fn header(
     let font = theme.font(theme.small_size + 0.5);
     let mut x = strip.left() + 4.0;
     let mut clicked = None;
-    for (index, (title, enabled)) in tabs.iter().enumerate() {
-        let galley = painter.layout_no_wrap((*title).to_owned(), font.clone(), theme.text);
+    // Tabs pad less when there are many, so they fit the palette.
+    let galleys: Vec<_> = tabs
+        .iter()
+        .map(|(title, _)| painter.layout_no_wrap((*title).to_owned(), font.clone(), theme.text))
+        .collect();
+    let text: f32 = galleys.iter().map(|galley| galley.size().x + 2.0).sum();
+    let pad = ((strip.width() - 8.0 - text) / tabs.len().max(1) as f32).clamp(6.0, 16.0);
+    let painter = painter.with_clip_rect(strip);
+    for ((index, (title, enabled)), galley) in tabs.iter().enumerate().zip(galleys) {
         let tab = Rect::from_min_size(
             pos2(x, strip.top() + 2.0),
-            vec2(galley.size().x + 16.0, 22.0),
+            vec2(galley.size().x + pad, 22.0),
         );
         x = tab.right() + 2.0;
         let chosen = index as u8 == selected;
@@ -458,6 +465,47 @@ fn dynamics_ui(ui: &mut Ui, label: &str, dynamics: &mut Dynamics, theme: &Theme)
     });
 }
 
+/// The command bar's buttons, in groups: icon, command, tip.
+pub(crate) const BAR_GROUPS: [&[(Icon, &str, &str)]; 5] = [
+    &[
+        (Icon::New, "file.new", "New (Ctrl+N)"),
+        (Icon::Open, "file.open", "Open (Ctrl+O)"),
+        (Icon::Save, "file.save", "Save Project (Ctrl+S)"),
+    ],
+    &[
+        (Icon::Undo, "edit.undo", "Undo (Ctrl+Z)"),
+        (Icon::Redo, "edit.redo", "Redo (Ctrl+Y)"),
+    ],
+    &[
+        (Icon::Clear, "edit.clear", "Clear (Del)"),
+        (
+            Icon::ClearOutside,
+            "edit.clear_outside",
+            "Clear Outside Selection",
+        ),
+        (Icon::FillSelection, "edit.fill", "Fill (Alt+Del)"),
+        (Icon::Deselect, "select.none", "Deselect (Ctrl+D)"),
+        (
+            Icon::MoveLayer,
+            "edit.transform.scale",
+            "Scale/Rotate (Ctrl+T)",
+        ),
+    ],
+    &[
+        (Icon::FlipH, "view.flip_h", "Flip View Horizontally"),
+        (Icon::RotateLeft, "view.rotate_left", "Rotate View Left"),
+        (Icon::RotateRight, "view.rotate_right", "Rotate View Right"),
+        (Icon::Fit, "view.fit", "Fit to Screen (Ctrl+0)"),
+    ],
+    &[
+        (Icon::Ruler, "view.snap_ruler", "Snap to Ruler"),
+        (Icon::Frame, "view.snap_grid", "Snap to Grid"),
+        (Icon::Reference, "help.shortcuts", "Keyboard Shortcuts"),
+        (Icon::Help, "help.about", "About Sue Paint"),
+        (Icon::Search, "app.palette", "Search every command"),
+    ],
+];
+
 impl SuePaint {
     // ----- Command bar ----------------------------------------------------------
 
@@ -471,47 +519,10 @@ impl SuePaint {
         ui.painter().rect_filled(strip, 0.0, theme.panel);
         ui.painter()
             .hline(strip.x_range(), strip.bottom(), theme.hairline());
-        let groups: [&[(Icon, &str, &str)]; 5] = [
-            &[
-                (Icon::New, "file.new", "New (Ctrl+N)"),
-                (Icon::Open, "file.open", "Open (Ctrl+O)"),
-                (Icon::Save, "file.save", "Save Project (Ctrl+S)"),
-            ],
-            &[
-                (Icon::Undo, "edit.undo", "Undo (Ctrl+Z)"),
-                (Icon::Redo, "edit.redo", "Redo (Ctrl+Y)"),
-            ],
-            &[
-                (Icon::Clear, "edit.clear", "Clear (Del)"),
-                (
-                    Icon::ClearOutside,
-                    "edit.clear_outside",
-                    "Clear Outside Selection",
-                ),
-                (Icon::FillSelection, "edit.fill", "Fill (Alt+Del)"),
-                (Icon::Deselect, "select.none", "Deselect (Ctrl+D)"),
-                (
-                    Icon::MoveLayer,
-                    "edit.transform.scale",
-                    "Scale/Rotate (Ctrl+T)",
-                ),
-            ],
-            &[
-                (Icon::FlipH, "view.flip_h", "Flip View Horizontally"),
-                (Icon::RotateLeft, "view.rotate_left", "Rotate View Left"),
-                (Icon::RotateRight, "view.rotate_right", "Rotate View Right"),
-                (Icon::Fit, "view.fit", "Fit to Screen (Ctrl+0)"),
-            ],
-            &[
-                (Icon::Ruler, "view.snap_ruler", "Snap to Ruler"),
-                (Icon::Frame, "view.snap_grid", "Snap to Grid"),
-                (Icon::Reference, "help.shortcuts", "Keyboard Shortcuts"),
-                (Icon::Help, "help.about", "About Sue Paint"),
-                (Icon::Search, "app.palette", "Search every command"),
-            ],
-        ];
+        let groups = BAR_GROUPS;
         let mut x = strip.left() + 8.0;
-        let mut clicked = None;
+        let mut clicked: Option<String> = None;
+        let mut save_at = None;
         for (index, group) in groups.iter().enumerate() {
             if index > 0 {
                 ui.painter().vline(
@@ -522,8 +533,14 @@ impl SuePaint {
                 x += 8.0;
             }
             for (icon, command, tip) in group.iter() {
+                if self.bar_hidden.contains(*command) {
+                    continue;
+                }
                 let rect = Rect::from_min_size(pos2(x, strip.top() + 3.0), vec2(28.0, 28.0));
                 x += 30.0;
+                if *command == "file.save" {
+                    save_at = Some(rect);
+                }
                 let state = self.state(command, &cx.world.arena, cx.history);
                 if icon_button(
                     ui,
@@ -534,13 +551,54 @@ impl SuePaint {
                     tip,
                     theme,
                 ) {
-                    clicked = Some(*command);
+                    clicked = Some((*command).to_owned());
                 }
             }
         }
+        // Commands people added (Command Bar Settings), as text buttons.
+        let font = theme.font(theme.small_size + 0.5);
+        for command in &self.bar_extra {
+            let label = crate::menus::label_of(&self.menus, command)
+                .unwrap_or(command)
+                .trim_end_matches("...")
+                .to_owned();
+            let galley = ui.painter().layout_no_wrap(label, font.clone(), theme.text);
+            let rect = Rect::from_min_size(
+                pos2(x + 4.0, strip.top() + 4.0),
+                vec2(galley.size().x + 14.0, 26.0),
+            );
+            x = rect.right() + 2.0;
+            let state = self.state(command, &cx.world.arena, cx.history);
+            let response = ui.interact(
+                rect,
+                Id::unique(("sue-paint-bar", command.as_str())),
+                Sense::click(),
+            );
+            if response.hovered() && state.enabled {
+                ui.painter().rect_filled(rect, 3.0, theme.hover);
+            }
+            let color = if state.enabled {
+                theme.text
+            } else {
+                theme.muted
+            };
+            ui.painter()
+                .galley(rect.center() - galley.size() / 2.0, galley, color);
+            if response.clicked() && state.enabled {
+                clicked = Some(command.clone());
+            }
+        }
         // Save's menu: the project, or the picture as a file.
+        let Some(save_button) = save_at else {
+            match clicked.as_deref() {
+                Some("app.palette") => cx.request(ShellRequest::Palette),
+                Some(command) => self.run(command, cx),
+                None => {}
+            }
+            return;
+        };
         let save = Rect::from_min_size(
-            pos2(strip.left() + 8.0 + 2.0 * 30.0 + 26.0, strip.top() + 9.0),
+            pos2(save_button.right() - 2.0, strip.top() + 9.0),
             vec2(10.0, 16.0),
         );
         let response = ui.interact(save, Id::unique("sue-paint-save-menu"), Sense::click());
@@ -568,11 +626,11 @@ impl SuePaint {
                 ("Export as JPEG XL", "file.export.jxl"),
             ] {
                 if ui.button(label).clicked() {
-                    clicked = Some(command);
+                    clicked = Some(command.to_owned());
                 }
             }
         });
-        match clicked {
+        match clicked.as_deref() {
             Some("app.palette") => cx.request(ShellRequest::Palette),
             Some(command) => self.run(command, cx),
             None => {}
@@ -2702,12 +2760,24 @@ impl SuePaint {
         let (body, clicked) = header(
             ui,
             rect,
-            &[("Navigator", true), ("Sub View", true)],
+            &[
+                ("Navigator", true),
+                ("Sub View", true),
+                ("Info", true),
+                ("Auto Actions", true),
+                ("Item Bank", true),
+            ],
             self.nav_tab,
             theme,
         );
         if let Some(tab) = clicked {
             self.nav_tab = tab;
+        }
+        match self.nav_tab {
+            2 => return self.info_tab(ui, body, cx, theme),
+            3 => return self.auto_tab(ui, body, cx, theme),
+            4 => return self.item_bank_tab(ui, body, cx, theme),
+            _ => {}
         }
         let body = body.shrink(6.0);
         if self.nav_tab == 1 {

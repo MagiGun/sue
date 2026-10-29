@@ -221,7 +221,128 @@ pub(crate) struct Laid {
     pub center: Rect,
 }
 
+/// Every palette, for reading layouts back.
+const PALETTES: [Palette; 7] = [
+    Palette::Tools,
+    Palette::SubTool,
+    Palette::BrushSize,
+    Palette::Color,
+    Palette::ColorSet,
+    Palette::Navigator,
+    Palette::Layer,
+];
+
+fn palette_named(title: &str) -> Option<Palette> {
+    PALETTES
+        .into_iter()
+        .find(|palette| palette.title() == title)
+}
+
 impl Dock {
+    /// The layout as lines (a registered workspace): each column with its
+    /// width and palettes, the floating palettes, the collapsed ones and
+    /// the timeline's height.
+    #[must_use]
+    pub fn to_lines(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (side, columns) in [("left", &self.left), ("right", &self.right)] {
+            for column in columns {
+                let palettes: Vec<String> = column
+                    .palettes
+                    .iter()
+                    .map(|(palette, weight)| format!("{}={weight}", palette.title()))
+                    .collect();
+                out.push(format!("{side} {} {}", column.width, palettes.join(",")));
+            }
+        }
+        for (palette, rect) in &self.floating {
+            out.push(format!(
+                "float {} {} {} {} {}",
+                rect.min.x,
+                rect.min.y,
+                rect.width(),
+                rect.height(),
+                palette.title()
+            ));
+        }
+        for palette in &self.iconized {
+            out.push(format!("icon {}", palette.title()));
+        }
+        out.push(format!("timeline {}", self.timeline));
+        out
+    }
+
+    /// A layout from [`Self::to_lines`] (lines it does not know are
+    /// skipped); `None` when no palette is placed.
+    #[must_use]
+    pub fn from_lines(lines: &[String]) -> Option<Self> {
+        let mut dock = Self {
+            left: Vec::new(),
+            right: Vec::new(),
+            floating: Vec::new(),
+            iconized: Vec::new(),
+            ..Self::default()
+        };
+        for line in lines {
+            let mut words = line.splitn(3, ' ');
+            match (words.next(), words.next(), words.next()) {
+                (Some(side @ ("left" | "right")), Some(width), Some(palettes)) => {
+                    let palettes: Vec<(Palette, f32)> = palettes
+                        .split(',')
+                        .filter_map(|entry| {
+                            let (title, weight) = entry.split_once('=')?;
+                            Some((palette_named(title)?, weight.parse().ok()?))
+                        })
+                        .collect();
+                    if palettes.is_empty() {
+                        continue;
+                    }
+                    let column = Column {
+                        palettes,
+                        width: width.parse().unwrap_or(260.0),
+                    };
+                    if side == "left" {
+                        dock.left.push(column);
+                    } else {
+                        dock.right.push(column);
+                    }
+                }
+                (Some("float"), Some(x), Some(rest)) => {
+                    let parts: Vec<&str> = rest.splitn(4, ' ').collect();
+                    if let ([y, w, h, title], Ok(x)) = (parts.as_slice(), x.parse::<f32>())
+                        && let (Ok(y), Ok(w), Ok(h), Some(palette)) = (
+                            y.parse::<f32>(),
+                            w.parse::<f32>(),
+                            h.parse::<f32>(),
+                            palette_named(title),
+                        )
+                    {
+                        dock.floating
+                            .push((palette, Rect::from_min_size(pos2(x, y), vec2(w, h))));
+                    }
+                }
+                (Some("icon"), Some(first), rest) => {
+                    let title =
+                        rest.map_or_else(|| first.to_owned(), |rest| format!("{first} {rest}"));
+                    if let Some(palette) = palette_named(&title) {
+                        dock.iconized.push(palette);
+                    }
+                }
+                (Some("timeline"), Some(height), None) => {
+                    if let Ok(height) = height.parse() {
+                        dock.timeline = height;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let placed = !dock.left.is_empty()
+            || !dock.right.is_empty()
+            || !dock.floating.is_empty()
+            || !dock.iconized.is_empty();
+        placed.then_some(dock)
+    }
+
     /// Takes `palette` out of wherever it is.
     pub fn remove(&mut self, palette: Palette) {
         for column in self.left.iter_mut().chain(self.right.iter_mut()) {
@@ -924,6 +1045,17 @@ impl SuePaint {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_layout_round_trips_as_lines() {
+        let mut dock = Dock::default();
+        dock.float(Palette::Color, pos2(40.0, 60.0));
+        dock.iconize(Palette::ColorSet);
+        dock.timeline = 210.0;
+        let back = Dock::from_lines(&dock.to_lines()).unwrap();
+        assert_eq!(back.to_lines(), dock.to_lines());
+        assert!(Dock::from_lines(&["nonsense".to_owned()]).is_none());
+    }
+
     use super::*;
 
     fn all(_: Palette) -> bool {

@@ -61,10 +61,13 @@ impl SuePaint {
             pos2(rect.left(), rect.bottom() - 26.0 + slide),
             pos2(rect.right(), rect.bottom() + slide),
         );
-        let viewport = Rect::from_min_max(
+        let mut viewport = Rect::from_min_max(
             pos2(rect.left(), tabs.bottom()),
             pos2(rect.right(), status.top()),
         );
+        if self.tiled && self.docs.len() > 1 {
+            viewport = self.tile_others(ui, viewport, cx, theme);
+        }
         self.viewport = viewport;
         ui.painter()
             .rect_filled(viewport, 0.0, theme.void.gamma_multiply(self.cover));
@@ -135,6 +138,96 @@ impl SuePaint {
             self.transform_ui(ui, viewport, size, cx, theme);
         }
         self.status_strip(ui, status, Some(size), cx, theme);
+    }
+
+    /// Window, Canvas, Tile: every open canvas in a grid cell of `area`,
+    /// the current one live in its cell (returned), the others as they
+    /// last showed; a click on one makes it current.
+    fn tile_others(
+        &mut self,
+        ui: &mut Ui,
+        area: Rect,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) -> Rect {
+        let count = self.docs.len();
+        let columns = (count as f32).sqrt().ceil().max(1.0) as usize;
+        let rows = count.div_ceil(columns);
+        let cell_size = vec2(area.width() / columns as f32, area.height() / rows as f32);
+        let cell = |index: usize| {
+            let (column, row) = (index % columns, index / columns);
+            Rect::from_min_size(
+                area.min + vec2(column as f32 * cell_size.x, row as f32 * cell_size.y),
+                cell_size,
+            )
+            .shrink(1.0)
+        };
+        let mut pick = None;
+        for index in (0..count).filter(|index| *index != self.active) {
+            let rect = cell(index);
+            let doc = &self.docs[index];
+            let painter = ui.painter().with_clip_rect(rect);
+            painter.rect_filled(rect, 0.0, theme.void);
+            let size = cx
+                .world
+                .arena
+                .get_by_id(doc.picture)
+                .ok()
+                .and_then(picture::size);
+            let (pixels, shown, version) = doc.compositor.display();
+            if let Some(size) = size.filter(|size| *size == shown) {
+                let mut view = doc.view;
+                view.fit(rect, size);
+                let corners = view.corners(rect, size);
+                if let Some(texture) = cx.textures.texture(
+                    crate::studio::texture_key(doc.picture, 0),
+                    version,
+                    size,
+                    4,
+                    pixels,
+                    false,
+                ) {
+                    let mut mesh = Mesh::with_texture(texture);
+                    for (corner, uv) in corners.iter().zip([
+                        pos2(0.0, 0.0),
+                        pos2(1.0, 0.0),
+                        pos2(1.0, 1.0),
+                        pos2(0.0, 1.0),
+                    ]) {
+                        mesh.vertices.push(Vertex {
+                            pos: *corner,
+                            uv,
+                            color: Color32::WHITE,
+                        });
+                    }
+                    mesh.indices = vec![0, 1, 2, 0, 2, 3];
+                    painter.add(Shape::mesh(mesh));
+                }
+            }
+            painter.rect_stroke(
+                rect,
+                0.0,
+                Stroke::new(1.0, theme.border),
+                egui::StrokeKind::Inside,
+            );
+            if ui
+                .interact(rect, Id::unique(("sue-paint-tile", index)), Sense::click())
+                .clicked()
+            {
+                pick = Some(index);
+            }
+        }
+        if let Some(index) = pick {
+            self.active = index;
+        }
+        let own = cell(self.active);
+        ui.painter().rect_stroke(
+            own,
+            0.0,
+            Stroke::new(1.0, theme.border_active),
+            egui::StrokeKind::Outside,
+        );
+        own
     }
 
     fn tabs(&mut self, ui: &mut Ui, strip: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
@@ -473,7 +566,14 @@ impl SuePaint {
             }
             return;
         }
-        if modifiers.command && modifiers.shift && !space {
+        let rice = |key: &str, default: &str| cx.rice().get_str(key).unwrap_or(default).to_owned();
+        let (alt_does, space_does, ctrl_shift) = (
+            rice("sue_paint.alt_tool", "eyedropper"),
+            rice("sue_paint.space_tool", "hand"),
+            rice("sue_paint.ctrl_shift", "pick_layer"),
+        );
+        let space = space && space_does != "none";
+        if modifiers.command && modifiers.shift && !space && ctrl_shift != "none" {
             self.pick_layer_at(&cx.world.arena, p);
             return;
         }
@@ -520,7 +620,11 @@ impl SuePaint {
         if space {
             tool = Tool::Hand;
         } else if modifiers.alt && tool.paints() && tool != Tool::Eraser && tool != Tool::Figure {
-            tool = Tool::Eyedropper;
+            match alt_does.as_str() {
+                "eyedropper" => tool = Tool::Eyedropper,
+                "eraser" => tool = Tool::Eraser,
+                _ => {}
+            }
         }
         let sub: SubTool = if tool == self.toolbox.tool() {
             self.toolbox.current().clone()

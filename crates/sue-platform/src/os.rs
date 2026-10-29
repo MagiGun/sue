@@ -78,6 +78,21 @@ pub fn reveal_folder(dir: &Path) -> io::Result<()> {
     open::that_detached(dir)
 }
 
+/// Opens a document (a PDF to print, a picture) in the program the
+/// system opens it with.
+///
+/// # Errors
+/// If the file is gone, or the OS fails to open it.
+pub fn open_document(path: &Path) -> io::Result<()> {
+    if !path.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{} is gone", path.display()),
+        ));
+    }
+    open::that_detached(path)
+}
+
 /// Shows a file in the system file manager, selected in its folder where
 /// the system allows it (Explorer and Finder do), else just its folder.
 ///

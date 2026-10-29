@@ -25,6 +25,54 @@ pub fn recent_items(files: &[std::path::PathBuf]) -> Vec<MenuItem> {
     items
 }
 
+/// Every command of `menus` with its label, in menu order.
+#[must_use]
+pub fn commands(menus: &[Menu]) -> Vec<(String, String)> {
+    fn walk(items: &[MenuItem], out: &mut Vec<(String, String)>) {
+        for item in items {
+            match item {
+                MenuItem::Action { label, command, .. } => {
+                    out.push((label.trim_end_matches("...").to_owned(), command.clone()))
+                }
+                MenuItem::Sub { items, .. } => walk(items, out),
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for menu in menus {
+        walk(&menu.items, &mut out);
+    }
+    out
+}
+
+/// Shows the registered workspaces `names` in Window, Workspace.
+pub fn set_workspaces(menus: &mut [Menu], names: &[String]) {
+    let mut items: Vec<MenuItem> = names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| act(name, &format!("window.workspace.use.{index}")))
+        .collect();
+    if !items.is_empty() {
+        items.push(SEP);
+    }
+    items.push(act("Register Workspace...", "window.workspace.save"));
+    items.push(act("Manage Workspaces...", "window.workspace.manage"));
+    for menu in menus.iter_mut().filter(|menu| menu.title == "Window") {
+        for item in &mut menu.items {
+            if let MenuItem::Sub {
+                label,
+                items: inside,
+            } = item
+                && label == "Workspace"
+            {
+                *inside = items;
+                return;
+            }
+        }
+    }
+}
+
 /// Puts `items` in the Open Recent submenu of `menus`.
 pub fn set_recent(menus: &mut [Menu], items: Vec<MenuItem>) {
     for menu in menus.iter_mut().filter(|menu| menu.title == "File") {

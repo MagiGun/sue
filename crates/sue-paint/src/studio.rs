@@ -328,6 +328,21 @@ pub struct SuePaint {
     pub(crate) recent_files: Vec<PathBuf>,
     /// The recent files were read from Sue Paint's data folder.
     pub(crate) recent_loaded: bool,
+    /// The Auto Actions palette's actions.
+    pub(crate) auto: crate::extras::AutoActions,
+    /// The Item Bank's sub tools.
+    pub(crate) item_bank: Vec<crate::extras::Item>,
+    /// The registered workspaces.
+    pub(crate) workspaces: Vec<crate::extras::Workspace>,
+    /// Every open canvas shows at once, side by side (Window, Canvas,
+    /// Tile).
+    pub(crate) tiled: bool,
+    /// How pictures go on paper (File, Print Settings).
+    pub(crate) print: crate::print::PrintSettings,
+    /// Command bar buttons people hid (Command Bar Settings).
+    pub(crate) bar_hidden: HashSet<String>,
+    /// Commands people added to the command bar.
+    pub(crate) bar_extra: Vec<String>,
     pub(crate) hue: f32,
     pub(crate) recent: History,
     pub(crate) docs: Vec<Doc>,
@@ -459,6 +474,13 @@ impl Default for SuePaint {
             saved_at: HashMap::new(),
             recent_files: Vec::new(),
             recent_loaded: false,
+            auto: crate::extras::AutoActions::default(),
+            item_bank: Vec::new(),
+            workspaces: Vec::new(),
+            tiled: false,
+            print: crate::print::PrintSettings::default(),
+            bar_hidden: HashSet::new(),
+            bar_extra: Vec::new(),
             docs: Vec::new(),
             active: 0,
             closed: HashSet::new(),
@@ -804,7 +826,25 @@ fn implemented(command: &str) -> bool {
             | "file.import.pattern"
             | "file.recent.clear"
             | "file.revert"
+            | "file.print_settings"
+            | "file.print"
+            | "file.export.batch"
+            | "file.modifiers"
+            | "file.command_bar"
+            | "help.guide"
+            | "help.updates"
+            | "window.new"
+            | "window.tile"
+            | "window.cascade"
+            | "window.workspace.save"
+            | "window.workspace.manage"
+            | "window.sub_view"
+            | "window.cels"
+            | "window.auto_actions"
+            | "window.item_bank"
+            | "window.info"
     ) || command.starts_with("file.recent.open.")
+        || command.starts_with("window.workspace.use.")
         || TOOL_KEYS.iter().any(|(known, _, _)| *known == command)
 }
 
@@ -1973,7 +2013,10 @@ impl SuePaint {
             .map(|(_, entity)| entity.id())
             .collect();
         let current = self.picture();
+        let shown = self.docs.get(self.active).map(|doc| doc.picture);
+        let before = self.docs.len();
         self.docs.retain(|doc| pictures.contains(&doc.picture));
+        let kept_index = (self.docs.len() == before && shown == current).then_some(self.active);
         let mut added = None;
         for id in pictures {
             if !self.closed.contains(&id) && !self.docs.iter().any(|doc| doc.picture == id) {
@@ -1982,6 +2025,7 @@ impl SuePaint {
             }
         }
         self.active = added
+            .or(kept_index)
             .or_else(|| current.and_then(|id| self.docs.iter().position(|doc| doc.picture == id)))
             .unwrap_or(0)
             .min(self.docs.len().saturating_sub(1));
@@ -2685,6 +2729,99 @@ impl SuePaint {
         }
     }
 
+    /// File, Print: the pages (every page of a story, or the canvas) laid
+    /// on paper as Print Settings says, written as a PDF and opened in the
+    /// system's viewer to print.
+    pub(crate) fn print_now(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let arena = &cx.world.arena;
+        let ids = match self.story_here(arena) {
+            Some((_, pages, _)) if self.print.all_pages => pages,
+            _ => vec![picture],
+        };
+        let options = RenderOptions {
+            paper: true,
+            drafts: false,
+        };
+        let pages: Vec<RasterTile2D> = ids
+            .iter()
+            .filter_map(|page| composite::flatten(arena, *page, options))
+            .collect();
+        let entity = arena.get_by_id(picture).ok();
+        let dpi = entity
+            .and_then(|entity| entity.property(picture::DPI))
+            .and_then(Value::as_f64)
+            .unwrap_or(72.0) as f32;
+        let name = entity.map_or_else(|| "Print".to_owned(), |entity| entity.name().to_owned());
+        let folder = crate::colorsets::folder(cx)
+            .map_or_else(std::env::temp_dir, |folder| folder.join("print"));
+        let path = folder.join(format!("{}.pdf", name.replace(['/', '\\', ':'], "_")));
+        let printed = crate::print::pdf(&self.print, &pages, dpi, &name).and_then(|bytes| {
+            std::fs::create_dir_all(&folder)
+                .and_then(|()| std::fs::write(&path, bytes))
+                .map_err(|error| error.to_string())?;
+            sue_platform::open_document(&path).map_err(|error| error.to_string())
+        });
+        match printed {
+            Ok(()) => cx.notify(format!(
+                "{} pages ready to print in your PDF viewer",
+                pages.len()
+            )),
+            Err(error) => cx.fail(format!("Cannot print: {error}")),
+        }
+    }
+
+    /// Batch Export of canvases: every open canvas flattened to `path`'s
+    /// format, each named after `path` and its canvas.
+    fn export_canvases(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let extension = path.extension().map_or_else(
+            || "png".to_owned(),
+            |ext| ext.to_string_lossy().to_ascii_lowercase(),
+        );
+        let stem = path.file_stem().map_or_else(
+            || "Canvas".to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        );
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        self.last_dir = Some(dir.clone());
+        let options = RenderOptions {
+            paper: true,
+            drafts: false,
+        };
+        let pictures: Vec<EntityId> = {
+            let mut seen = Vec::new();
+            for doc in &self.docs {
+                if !seen.contains(&doc.picture) {
+                    seen.push(doc.picture);
+                }
+            }
+            seen
+        };
+        let mut written = 0;
+        for picture in pictures {
+            let arena = &cx.world.arena;
+            let Some(flat) = composite::flatten(arena, picture, options) else {
+                continue;
+            };
+            let name = arena
+                .get_by_id(picture)
+                .map_or_else(|_| "Picture".to_owned(), |entity| entity.name().to_owned());
+            let target = free_path(&dir.join(format!("{stem}-{name}.{extension}")));
+            match sue_io::encode_as(&flat, &extension, jpeg_quality(cx), jxl_effort(cx))
+                .and_then(|bytes| std::fs::write(&target, bytes).map_err(|error| error.to_string()))
+            {
+                Ok(()) => written += 1,
+                Err(error) => {
+                    cx.fail(format!("Cannot export {name}: {error}"));
+                    return;
+                }
+            }
+        }
+        cx.notify(format!("Exported {written} canvases to {}", dir.display()));
+    }
+
     /// Goes back to where the picture was last saved or opened (File,
     /// Revert), as undoing step by step would; Redo brings the changes
     /// back.
@@ -3182,6 +3319,14 @@ impl SuePaint {
             "window.material" => flag(self.panels.color_set && self.set_tab == 2),
             "window.color_history" => flag(self.panels.color_set && self.set_tab == 1),
             "window.navigator" => flag(self.panels.navigator),
+            "window.sub_view" => flag(self.panels.navigator && self.nav_tab == 1),
+            "window.info" => flag(self.panels.navigator && self.nav_tab == 2),
+            "window.auto_actions" => flag(self.panels.navigator && self.nav_tab == 3),
+            "window.item_bank" => flag(self.panels.navigator && self.nav_tab == 4),
+            "window.cels" => flag(self.panels.layer && self.layer_tab == 3),
+            "window.tile" => flag(self.tiled),
+            "window.cascade" => when(self.tiled),
+            "window.new" => when(has_doc),
             "window.layer" => flag(self.panels.layer && self.layer_tab == 0),
             "window.layer_property" => flag(self.panels.layer && self.layer_tab == 1),
             "window.history" => flag(self.panels.layer && self.layer_tab == 2),
@@ -3208,6 +3353,7 @@ impl SuePaint {
     /// Runs a command of the menus, the command bar or a shortcut.
     #[allow(clippy::too_many_lines, reason = "one arm per command")]
     pub(crate) fn run(&mut self, command: &str, cx: &mut AppletContext<'_>) {
+        self.record_auto(command);
         if command.starts_with("story.") && self.story_command(command, cx) {
             return;
         }
@@ -3290,6 +3436,57 @@ impl SuePaint {
                         .extensions(extensions)
                         .starting_in(start),
                 ));
+            }
+            "file.print_settings" => self.dialog = Some(Dialog::Print(self.print, false)),
+            "file.print" => self.dialog = Some(Dialog::Print(self.print, true)),
+            "file.export.batch" => {
+                if self.story_here(&cx.world.arena).is_some() {
+                    self.story_command("story.export_pages", cx);
+                } else {
+                    let start = self.last_dir.clone().unwrap_or_else(|| export_dir(cx));
+                    cx.request(ShellRequest::PickFile(
+                        FilePick::save(
+                            Some(me_id()),
+                            "batch",
+                            "Batch Export: every open canvas",
+                            "Canvas.png",
+                        )
+                        .types(
+                            sue_io::PICTURE_SAVE_TYPES
+                                .iter()
+                                .map(|(what, extensions)| FileType::new(what, extensions))
+                                .collect(),
+                        )
+                        .starting_in(Some(start)),
+                    ));
+                }
+            }
+            "file.modifiers" => {
+                let rice = cx.rice();
+                let chosen = crate::dialogs::MODIFIERS.map(|(key, _, choices)| {
+                    let now = rice.get_str(key).unwrap_or(choices[0]);
+                    choices
+                        .iter()
+                        .position(|choice| *choice == now)
+                        .unwrap_or(0)
+                });
+                self.dialog = Some(Dialog::Modifiers(chosen));
+            }
+            "file.command_bar" => {
+                self.panels.command_bar = true;
+                self.dialog = Some(Dialog::CommandBar(String::new()));
+            }
+            "help.guide" => {
+                self.dialog = Some(Dialog::Message(
+                    "Sue Paint Guide".to_owned(),
+                    crate::extras::guide(),
+                ))
+            }
+            "help.updates" => {
+                self.dialog = Some(Dialog::Message(
+                    "Check for Updates".to_owned(),
+                    crate::extras::updates(),
+                ))
             }
             "file.export.bmp" => self.export(cx, "bmp"),
             "file.export.tif" => self.export(cx, "tif"),
@@ -4340,6 +4537,45 @@ impl SuePaint {
             }
             "window.command_bar" => self.panels.command_bar = !self.panels.command_bar,
             "window.hide_menus" => self.menus_hidden = !self.menus_hidden,
+            "window.workspace.save" => {
+                self.dialog = Some(Dialog::Workspace(format!(
+                    "Workspace {}",
+                    self.workspaces.len() + 1
+                )))
+            }
+            "window.workspace.manage" => self.dialog = Some(Dialog::Workspaces),
+            used if used.starts_with("window.workspace.use.") => {
+                if let Ok(index) = used["window.workspace.use.".len()..].parse::<usize>() {
+                    self.use_workspace(index);
+                }
+            }
+            "window.sub_view" | "window.info" | "window.auto_actions" | "window.item_bank" => {
+                self.panels.navigator = true;
+                self.nav_tab = match command {
+                    "window.sub_view" => 1,
+                    "window.info" => 2,
+                    "window.auto_actions" => 3,
+                    _ => 4,
+                };
+            }
+            "window.cels" => {
+                self.panels.layer = true;
+                self.layer_tab = 3;
+            }
+            "window.new" => {
+                if let Some(doc) = self.doc() {
+                    let mut view = Doc::new(doc.picture);
+                    view.view = doc.view;
+                    view.layer = doc.layer;
+                    view.frame = doc.frame;
+                    view.track = doc.track;
+                    self.docs.insert(self.active + 1, view);
+                    self.active += 1;
+                    self.tiled = true;
+                }
+            }
+            "window.tile" => self.tiled = true,
+            "window.cascade" => self.tiled = false,
             "window.workspace.reset" => {
                 self.dock = crate::dock::Dock::default();
                 self.panels = Panels::default();
@@ -4899,6 +5135,16 @@ impl SueApplet for SuePaint {
                 "Pen pressure curve for every tool, as pressure,output points (File, Pen Pressure Settings draws it)",
             ),
         ];
+        for (key, name, choices) in crate::dialogs::MODIFIERS {
+            declarations.push(RiceDeclaration::new(
+                key,
+                RiceParameter::EnumChoice {
+                    value: choices[0].to_owned(),
+                    options: choices.iter().map(|choice| (*choice).to_owned()).collect(),
+                },
+                format!("What {name} does on the canvas (File, Modifier Key Settings)"),
+            ));
+        }
         declarations.extend(Self::custom_colors());
         declarations.extend(sue_wm::shortcuts::declarations(
             KEYS_SECTION,
@@ -4909,6 +5155,7 @@ impl SueApplet for SuePaint {
 
     fn studio_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
         self.load_recent(cx);
+        self.load_extras(cx);
         self.frame(ui, cx);
     }
 
@@ -5010,6 +5257,7 @@ impl SueApplet for SuePaint {
             "open" => self.open_picked(cx, path, false),
             "layer" => self.open_picked(cx, path, true),
             "import-layers" => self.open_picked(cx, path, true),
+            "batch" => self.export_canvases(cx, path),
             "import-vector" | "import-movie" | "import-pattern" => {
                 self.import_file(cx, pick.purpose.as_str(), path)
             }

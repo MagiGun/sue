@@ -392,7 +392,35 @@ pub(crate) enum Dialog {
     Timeline(u32, u32),
     /// New 3D Layer: which of Sue Paint's shapes.
     Shape3D(usize),
+    /// Register Workspace: its name.
+    Workspace(String),
+    /// Manage Workspaces.
+    Workspaces,
+    /// A page to read: its title and paragraphs.
+    Message(String, Vec<String>),
+    /// Print Settings, or Print when set.
+    Print(crate::print::PrintSettings, bool),
+    /// Modifier Key Settings: what Alt, Space and Ctrl+Shift do on the
+    /// canvas (indexes into their choices).
+    Modifiers([usize; 3]),
+    /// Command Bar Settings.
+    CommandBar(String),
 }
+
+/// What each modifier can do: its rice key, label and choices.
+pub(crate) const MODIFIERS: [(&str, &str, &[&str]); 3] = [
+    (
+        "sue_paint.alt_tool",
+        "Alt while drawing",
+        &["eyedropper", "eraser", "none"],
+    ),
+    ("sue_paint.space_tool", "Space", &["hand", "none"]),
+    (
+        "sue_paint.ctrl_shift",
+        "Ctrl+Shift click",
+        &["pick_layer", "none"],
+    ),
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Outcome {
@@ -479,6 +507,13 @@ impl SuePaint {
             Dialog::Webtoon(..) => ("Export Webtoon", vec2(340.0, 170.0)),
             Dialog::Timeline(..) => ("Edit Timeline", vec2(320.0, 150.0)),
             Dialog::Shape3D(_) => ("New 3D Layer", vec2(300.0, 230.0)),
+            Dialog::Workspace(_) => ("Register Workspace", vec2(340.0, 140.0)),
+            Dialog::Workspaces => ("Manage Workspaces", vec2(380.0, 320.0)),
+            Dialog::Message(title, _) => (title.as_str(), vec2(520.0, 460.0)),
+            Dialog::Print(_, true) => ("Print", vec2(380.0, 330.0)),
+            Dialog::Print(_, false) => ("Print Settings", vec2(380.0, 330.0)),
+            Dialog::Modifiers(_) => ("Modifier Key Settings", vec2(400.0, 230.0)),
+            Dialog::CommandBar(_) => ("Command Bar Settings", vec2(420.0, 460.0)),
             Dialog::Correction(_, filter, ..) => (
                 filter.label(),
                 vec2(
@@ -495,6 +530,7 @@ impl SuePaint {
                 vec2(560.0, if pressure.show_graph { 520.0 } else { 330.0 }),
             ),
         };
+        let title = title.to_owned();
         let size = size.min(screen.size() - vec2(16.0, 16.0));
         let at = screen.center() - size / 2.0;
         let mut outcome = Outcome::Open;
@@ -519,7 +555,7 @@ impl SuePaint {
                         ui.set_max_size(inner);
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new(title)
+                                RichText::new(title.as_str())
                                     .size(theme.ui_size + 1.0)
                                     .color(theme.text),
                             );
@@ -541,6 +577,173 @@ impl SuePaint {
                                     ui.add(egui::Slider::new(amount, 1.0..=100.0).suffix(" px"));
                                 });
                                 ok_cancel(ui, &mut outcome);
+                            }
+                            Dialog::Workspace(name) => {
+                                ui.horizontal(|ui| {
+                                    label(ui, "Name:", theme);
+                                    ui.text_edit_singleline(name);
+                                });
+                                ok_cancel(ui, &mut outcome);
+                            }
+                            Dialog::Workspaces => {
+                                let mut chosen = None;
+                                let mut gone = None;
+                                egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                                    for (index, space) in self.workspaces.iter_mut().enumerate() {
+                                        ui.horizontal(|ui| {
+                                            ui.text_edit_singleline(&mut space.name);
+                                            if ui.button("Use").clicked() {
+                                                chosen = Some(index);
+                                            }
+                                            if ui.button("Delete").clicked() {
+                                                gone = Some(index);
+                                            }
+                                        });
+                                    }
+                                    if self.workspaces.is_empty() {
+                                        ui.label(
+                                            RichText::new("No workspaces yet: Window, Workspace, Register Workspace keeps the palettes as they are")
+                                                .size(theme.small_size)
+                                                .color(theme.muted),
+                                        );
+                                    }
+                                });
+                                if let Some(index) = chosen {
+                                    self.use_workspace(index);
+                                }
+                                if let Some(index) = gone {
+                                    self.workspaces.remove(index);
+                                }
+                                ui.add_space(8.0);
+                                if ui.button("Close").clicked() {
+                                    outcome = Outcome::Ok;
+                                }
+                            }
+                            Dialog::Print(settings, printing) => {
+                                ui.horizontal(|ui| {
+                                    label(ui, "Paper:", theme);
+                                    egui::ComboBox::from_id_salt("sue-paint-paper")
+                                        .selected_text(crate::print::PAPERS[settings.paper].0)
+                                        .show_ui(ui, |ui| {
+                                            for (index, (name, ..)) in crate::print::PAPERS.iter().enumerate() {
+                                                ui.selectable_value(&mut settings.paper, index, *name);
+                                            }
+                                        });
+                                });
+                                ui.horizontal(|ui| {
+                                    label(ui, "Orientation:", theme);
+                                    ui.radio_value(&mut settings.orientation, 0, "Auto");
+                                    ui.radio_value(&mut settings.orientation, 1, "Portrait");
+                                    ui.radio_value(&mut settings.orientation, 2, "Landscape");
+                                });
+                                ui.horizontal(|ui| {
+                                    label(ui, "Size:", theme);
+                                    ui.radio_value(&mut settings.size, 0, "Fit to page");
+                                    ui.radio_value(&mut settings.size, 1, "Print size");
+                                    ui.radio_value(&mut settings.size, 2, "Scale");
+                                });
+                                if settings.size == 2 {
+                                    ui.add(egui::Slider::new(&mut settings.percent, 1.0..=400.0).suffix(" %"));
+                                }
+                                ui.horizontal(|ui| {
+                                    label(ui, "Margin:", theme);
+                                    ui.add(egui::Slider::new(&mut settings.margin, 0.0..=50.0).suffix(" mm"));
+                                });
+                                ui.checkbox(&mut settings.all_pages, "Every page of the story");
+                                if *printing {
+                                    ui.label(
+                                        RichText::new("The pages open as a PDF in your viewer, ready to print")
+                                            .size(theme.small_size)
+                                            .color(theme.muted),
+                                    );
+                                }
+                                ok_cancel(ui, &mut outcome);
+                            }
+                            Dialog::Modifiers(chosen) => {
+                                for ((_, name, choices), pick) in MODIFIERS.iter().zip(chosen.iter_mut()) {
+                                    ui.horizontal(|ui| {
+                                        label(ui, name, theme);
+                                        egui::ComboBox::from_id_salt(("sue-paint-modifier", *name))
+                                            .selected_text(choices[(*pick).min(choices.len() - 1)].replace('_', " "))
+                                            .show_ui(ui, |ui| {
+                                                for (index, choice) in choices.iter().enumerate() {
+                                                    ui.selectable_value(pick, index, choice.replace('_', " "));
+                                                }
+                                            });
+                                    });
+                                }
+                                ui.label(
+                                    RichText::new("Space with Shift turns the view, with Ctrl or Alt zooms; Ctrl+Alt drags the brush size")
+                                        .size(theme.small_size)
+                                        .color(theme.muted),
+                                );
+                                ok_cancel(ui, &mut outcome);
+                            }
+                            Dialog::CommandBar(adding) => {
+                                egui::ScrollArea::vertical().max_height(size.y - 150.0).show(ui, |ui| {
+                                    for group in crate::panels::BAR_GROUPS {
+                                        for (_, command, tip) in group.iter() {
+                                            let mut shown = !self.bar_hidden.contains(*command);
+                                            if ui.checkbox(&mut shown, *tip).changed() {
+                                                if shown {
+                                                    self.bar_hidden.remove(*command);
+                                                } else {
+                                                    self.bar_hidden.insert((*command).to_owned());
+                                                }
+                                            }
+                                        }
+                                        ui.separator();
+                                    }
+                                    let mut gone = None;
+                                    for (index, command) in self.bar_extra.iter().enumerate() {
+                                        ui.horizontal(|ui| {
+                                            ui.label(crate::menus::label_of(&self.menus, command).unwrap_or(command));
+                                            if ui.small_button("Remove").clicked() {
+                                                gone = Some(index);
+                                            }
+                                        });
+                                    }
+                                    if let Some(index) = gone {
+                                        self.bar_extra.remove(index);
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    label(ui, "Add:", theme);
+                                    let picked = crate::menus::label_of(&self.menus, adding).unwrap_or("A menu command").to_owned();
+                                    egui::ComboBox::from_id_salt("sue-paint-bar-add")
+                                        .selected_text(picked)
+                                        .height(320.0)
+                                        .show_ui(ui, |ui| {
+                                            for (label, command) in crate::menus::commands(&self.menus) {
+                                                ui.selectable_value(adding, command, label);
+                                            }
+                                        });
+                                    if ui.button("Add").clicked() && !adding.is_empty() && !self.bar_extra.contains(adding) {
+                                        self.bar_extra.push(adding.clone());
+                                    }
+                                });
+                                ui.add_space(6.0);
+                                if ui.button("Close").clicked() {
+                                    outcome = Outcome::Ok;
+                                }
+                            }
+                            Dialog::Message(_, paragraphs) => {
+                                egui::ScrollArea::vertical().max_height(size.y - 110.0).show(ui, |ui| {
+                                    for paragraph in paragraphs.iter() {
+                                        if paragraph.starts_with("https://") {
+                                            ui.hyperlink(paragraph.as_str());
+                                        } else if let Some(heading) = paragraph.strip_prefix("# ") {
+                                            ui.add_space(6.0);
+                                            ui.label(RichText::new(heading).size(theme.ui_size).color(theme.text).strong());
+                                        } else {
+                                            ui.label(RichText::new(paragraph.as_str()).size(theme.small_size + 0.5).color(theme.text));
+                                        }
+                                    }
+                                });
+                                ui.add_space(8.0);
+                                if ui.button("Close").clicked() {
+                                    outcome = Outcome::Ok;
+                                }
                             }
                             Dialog::Gamut(tolerance, all) => {
                                 ui.label(
@@ -842,6 +1045,39 @@ impl SuePaint {
                 }
             }
             (Dialog::Gamut(tolerance, all), Outcome::Ok) => self.select_gamut(cx, tolerance, all),
+            (Dialog::Workspace(name), Outcome::Ok) => {
+                let name = if name.trim().is_empty() {
+                    "Workspace".to_owned()
+                } else {
+                    name.trim().to_owned()
+                };
+                let space = self.workspace_now(&name);
+                match self.workspaces.iter().position(|known| known.name == name) {
+                    Some(index) => self.workspaces[index] = space,
+                    None => self.workspaces.push(space),
+                }
+                self.save_extras(cx);
+            }
+            (Dialog::Workspaces, _) => self.save_extras(cx),
+            (Dialog::Message(..) | Dialog::Print(..) | Dialog::Modifiers(_), Outcome::Cancel) => {}
+            (Dialog::Message(..), _) => {}
+            (Dialog::Print(settings, printing), _) => {
+                self.print = settings;
+                if printing {
+                    self.print_now(cx);
+                }
+            }
+            (Dialog::Modifiers(chosen), _) => {
+                for ((key, _, choices), pick) in MODIFIERS.iter().zip(chosen) {
+                    let value = choices[pick.min(choices.len() - 1)].to_owned();
+                    if let Err(error) =
+                        cx.edit_rice(SetRiceValue::new(*key, RiceValue::Text(value)))
+                    {
+                        cx.fail(format!("Cannot keep the modifier keys: {error}"));
+                    }
+                }
+            }
+            (Dialog::CommandBar(_), _) => self.save_extras(cx),
             (Dialog::Webtoon(height, width), Outcome::Ok) => {
                 self.ask_export_webtoon(cx, height, width)
             }
@@ -965,7 +1201,8 @@ impl SuePaint {
                 | Dialog::Gamut(..)
                 | Dialog::Webtoon(..)
                 | Dialog::Timeline(..)
-                | Dialog::Shape3D(_),
+                | Dialog::Shape3D(_)
+                | Dialog::Workspace(_),
                 Outcome::Cancel,
             ) => {}
         }

@@ -711,6 +711,16 @@ impl Toolbox {
         set.2 = index + 1;
     }
 
+    /// Adds `sub` at the end of its tool's sub tools and picks it (the
+    /// Item Bank's Add).
+    pub fn add_sub(&mut self, sub: SubTool) {
+        let tool = sub.tool;
+        let set = self.set_mut(tool);
+        set.1.push(sub);
+        set.2 = set.1.len() - 1;
+        self.pick(tool);
+    }
+
     /// Deletes sub tool `index` of `tool`; a tool keeps at least one.
     pub fn delete_sub(&mut self, tool: Tool, index: usize) -> bool {
         let set = self.set_mut(tool);
