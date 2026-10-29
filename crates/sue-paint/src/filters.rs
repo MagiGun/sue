@@ -54,6 +54,16 @@ pub enum Filter {
         /// Block side in pixels.
         size: u32,
     },
+    /// Line Extraction: the lines of a photo or scan as black line art on
+    /// clear, from a difference of gaussians, with dark areas filled.
+    LineExtraction {
+        /// How faint an edge still becomes a line, 0 to 1.
+        sensitivity: f32,
+        /// Areas darker than this fill black, 0 (none) to 1.
+        black: f32,
+        /// How much the picture is smoothed first, in pixels.
+        smooth: f32,
+    },
     /// Grain.
     Noise {
         /// 0 to 1.
@@ -169,6 +179,7 @@ impl Filter {
             Self::GaussianBlur { .. } => "Gaussian Blur",
             Self::Sharpen { .. } => "Sharpen",
             Self::Mosaic { .. } => "Mosaic",
+            Self::LineExtraction { .. } => "Line Extraction",
             Self::Noise { .. } => "Add Noise",
             Self::Recolor { .. } => "Change Color to Drawing Color",
             Self::BrightnessToOpacity { .. } => "Convert Brightness to Opacity",
@@ -204,6 +215,11 @@ impl Filter {
                 }
             }
             Self::Mosaic { size } => mosaic(pixels, width, height, size.max(1)),
+            Self::LineExtraction {
+                sensitivity,
+                black,
+                smooth,
+            } => extract_lines(pixels, width, height, sensitivity, black, smooth),
             Self::ToneCurve {
                 rgb,
                 red,
@@ -517,11 +533,62 @@ impl Filter {
             Self::GaussianBlur { .. }
             | Self::Sharpen { .. }
             | Self::Mosaic { .. }
+            | Self::LineExtraction { .. }
             | Self::FocusLines { .. }
             | Self::SpeedLines { .. }
             | Self::Tone { .. } => rgb,
         };
         [byte(out[0]), byte(out[1]), byte(out[2]), a]
+    }
+}
+
+/// The brightness of each pixel over white, 0 to 1.
+fn luma_over_white(pixels: &[u8]) -> Vec<f32> {
+    pixels
+        .chunks(4)
+        .map(|p| {
+            let a = f32::from(p[3]) / 255.0;
+            let l = (0.299 * f32::from(p[0]) + 0.587 * f32::from(p[1]) + 0.114 * f32::from(p[2]))
+                / 255.0;
+            l * a + (1.0 - a)
+        })
+        .collect()
+}
+
+/// `values` (one a pixel) blurred by `radius`, through [`blur`].
+fn blurred_values(values: &[f32], width: u32, height: u32, radius: f32) -> Vec<f32> {
+    let mut gray: Vec<u8> = values
+        .iter()
+        .flat_map(|value| {
+            let byte = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+            [byte, byte, byte, 255]
+        })
+        .collect();
+    blur(&mut gray, width, height, radius);
+    gray.chunks(4).map(|p| f32::from(p[0]) / 255.0).collect()
+}
+
+/// Line Extraction: where the picture is darker than its surroundings (a
+/// difference of a fine and a coarse gaussian), black line art on clear;
+/// areas darker than `black` fill in.
+fn extract_lines(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    sensitivity: f32,
+    black: f32,
+    smooth: f32,
+) {
+    let luma = luma_over_white(pixels);
+    let fine = blurred_values(&luma, width, height, smooth.max(0.5));
+    let coarse = blurred_values(&luma, width, height, smooth.max(0.5) * 2.5 + 1.0);
+    let gain = 4.0 + sensitivity.clamp(0.0, 1.0) * 40.0;
+    for (index, pixel) in pixels.chunks_mut(4).enumerate() {
+        let edge = ((coarse[index] - fine[index]) * gain - 0.15).clamp(0.0, 1.0);
+        let dark = if luma[index] < black { 1.0 } else { 0.0 };
+        let ink = edge.max(dark);
+        let ink = ink * ink * (3.0 - 2.0 * ink);
+        pixel.copy_from_slice(&[0, 0, 0, (ink * 255.0).round() as u8]);
     }
 }
 
@@ -640,6 +707,36 @@ fn mosaic(pixels: &mut [u8], width: u32, height: u32, size: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_extraction_finds_the_lines_of_a_picture() {
+        // A gray photo-like ground with a dark stripe and a black blot.
+        let (w, h) = (60_u32, 40_u32);
+        let mut pixels = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                let value = if (28..31).contains(&x) {
+                    40
+                } else if x < 8 && y < 8 {
+                    0
+                } else {
+                    200
+                };
+                pixels.extend_from_slice(&[value, value, value, 255]);
+            }
+        }
+        Filter::LineExtraction {
+            sensitivity: 0.6,
+            black: 0.1,
+            smooth: 1.0,
+        }
+        .apply(&mut pixels, w, h, None, [0, 0]);
+        let alpha = |x: u32, y: u32| pixels[((y * w + x) * 4 + 3) as usize];
+        assert!(alpha(29, 20) > 200, "the stripe is a line");
+        assert!(alpha(45, 20) < 20, "the plain ground is clear");
+        assert!(alpha(2, 2) > 200, "dark areas fill in");
+        assert_eq!(&pixels[..3], &[0, 0, 0], "black line art");
+    }
     use crate::select::Op;
 
     fn image() -> Vec<u8> {

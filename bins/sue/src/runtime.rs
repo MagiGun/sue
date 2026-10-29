@@ -2673,6 +2673,46 @@ pub(crate) mod tests {
         assert!(named(&runtime, "Quick Mask").is_some());
         command(&mut runtime, "select.quick_mask");
         assert!(named(&runtime, "Quick Mask").is_none(), "gone again");
+
+        // Convert to Lines and Tones: a lines layer over a tone layer.
+        command(&mut runtime, "layer.select_below");
+        command(&mut runtime, "filter.lines_tones");
+        let tones = named(&runtime, "Tones").expect("a tone layer");
+        assert!(named(&runtime, "Lines").is_some(), "and a lines layer");
+        assert!(
+            sue_paint::effects::Effects::of(
+                runtime.engine.world.arena.get_by_id(tones.id).unwrap(),
+                72.0
+            )
+            .tone
+            .is_some()
+        );
+
+        // Export as PDF and as EPUB.
+        std::fs::create_dir_all(&root).unwrap();
+        for (purpose, file) in [("book-pdf", "Book.pdf"), ("book-epub", "Book.epub")] {
+            runtime.request(
+                ShellRequest::Picked {
+                    pick: FilePick::save(Some(paint.clone()), purpose, "Export", file),
+                    path: root.join(file),
+                },
+                &mut NoTextures,
+                start,
+            );
+        }
+        assert!(
+            std::fs::read(root.join("Book.pdf"))
+                .unwrap()
+                .starts_with(b"%PDF")
+        );
+        let epub = std::fs::read(root.join("Book.epub")).unwrap();
+        let files = sue_io::zip::read_zip(&epub).unwrap();
+        assert_eq!(files[0].0, "mimetype");
+        assert!(
+            files
+                .iter()
+                .any(|(name, _)| name == "OEBPS/page-0001.xhtml")
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

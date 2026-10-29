@@ -701,6 +701,10 @@ fn implemented(command: &str) -> bool {
             | "select.quick_mask"
             | "select.launcher"
             | "edit.material.paste"
+            | "filter.line_extraction"
+            | "filter.lines_tones"
+            | "file.export.pdf"
+            | "file.export.epub"
             | "layer.toggle.reference"
             | "layer.rasterize"
             | "window.material"
@@ -1130,6 +1134,91 @@ impl SuePaint {
                 }
             }
             Err(error) => cx.fail(error),
+        }
+    }
+
+    /// Convert to Lines and Tones: the current layer's lines on a new layer
+    /// (Line Extraction) and its shading on another as dots (a gray layer
+    /// with the Tone effect on), the layer itself hidden, as one step.
+    pub(crate) fn lines_and_tones(&mut self, cx: &mut AppletContext<'_>) {
+        let (Some(picture), Some(info)) = (self.picture(), self.paintable(&cx.world.arena).ok())
+        else {
+            cx.fail("Pick a raster layer to convert to lines and tones");
+            return;
+        };
+        let Some(raster) = doc::raster(&cx.world.arena, info.id) else {
+            return;
+        };
+        let Some(size) = cx
+            .world
+            .arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(picture::size)
+        else {
+            return;
+        };
+        if [raster.width(), raster.height()] != size || info.style.offset != [0, 0] {
+            cx.fail("Move the layer back into place (or merge it) before converting it");
+            return;
+        }
+        let Some(bytes) = raster.bytes() else {
+            return;
+        };
+        let mut lines = bytes.to_vec();
+        Filter::LineExtraction {
+            sensitivity: 0.5,
+            black: 0.12,
+            smooth: 1.0,
+        }
+        .apply(&mut lines, size[0], size[1], None, [0, 0]);
+        // The shading: darker is more ink.
+        let tones: Vec<u8> = bytes
+            .chunks(4)
+            .flat_map(|p| {
+                let a = f32::from(p[3]) / 255.0;
+                let l =
+                    (0.299 * f32::from(p[0]) + 0.587 * f32::from(p[1]) + 0.114 * f32::from(p[2]))
+                        / 255.0;
+                let gray = (l * 255.0).round() as u8;
+                [
+                    gray,
+                    gray,
+                    gray,
+                    ((1.0 - l) * a * 255.0).round().min(255.0) as u8,
+                ]
+            })
+            .collect();
+        let tile = |pixels: Vec<u8>| {
+            sue_core::RasterTile2D::from_bytes(
+                size[0],
+                size[1],
+                sue_core::PixelFormat::Rgba8,
+                pixels,
+            )
+        };
+        let (Ok(lines), Ok(tones)) = (tile(lines), tile(tones)) else {
+            return;
+        };
+        let Ok((spawns, ids)) = doc::add_layers_pixels(
+            &cx.world.arena,
+            picture,
+            Some(info.id),
+            vec![("Tones".to_owned(), tones), ("Lines".to_owned(), lines)],
+        ) else {
+            return;
+        };
+        let mut edit = doc::Edit::new("Convert to Lines and Tones");
+        for spawn in spawns {
+            edit = edit.then(spawn);
+        }
+        let edit = edit
+            .then(SetProperty::new(ids[0], crate::effects::TONE, true))
+            .then(SetProperty::new(info.id, picture::VISIBLE, false));
+        if Self::apply(cx, edit)
+            && let Some(doc) = self.doc_mut()
+        {
+            doc.layer = Some(ids[1]);
         }
     }
 
@@ -2526,6 +2615,15 @@ impl SuePaint {
             "filter.binarize" => self.filter_dialog(cx, Filter::Binarize { threshold: 0.5 }),
             "filter.gaussian" => self.filter_dialog(cx, Filter::GaussianBlur { radius: 4.0 }),
             "filter.mosaic" => self.filter_dialog(cx, Filter::Mosaic { size: 12 }),
+            "filter.line_extraction" => self.filter_dialog(
+                cx,
+                Filter::LineExtraction {
+                    sensitivity: 0.5,
+                    black: 0.12,
+                    smooth: 1.0,
+                },
+            ),
+            "filter.lines_tones" => self.lines_and_tones(cx),
             "filter.noise" => self.filter_dialog(cx, Filter::Noise { amount: 0.2 }),
             "filter.curve" => self.filter_dialog(
                 cx,
@@ -2935,6 +3033,9 @@ impl SuePaint {
                 }
             }
             "layer.toggle.visible" => self.toggle_layer(cx, picture::VISIBLE, true),
+            "file.export.pdf" | "file.export.epub" => {
+                self.ask_export_book(cx, command == "file.export.epub")
+            }
             "layer.rasterize" => {
                 let (Some(picture), Some(layer)) = (self.picture(), self.layer()) else {
                     return;
@@ -3994,6 +4095,8 @@ impl SueApplet for SuePaint {
             }
             "save-as" => self.save_as_to(cx, path),
             "story-pages" => self.export_pages(cx, path),
+            "book-pdf" => self.export_book(cx, path, false),
+            "book-epub" => self.export_book(cx, path, true),
             "anim-gif" => self.export_animation(cx, path, true),
             "anim-movie" => self.export_movie(cx, path),
             "timelapse" => self.export_timelapse(cx, path),

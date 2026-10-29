@@ -1276,6 +1276,18 @@ back into the selection. The Selection Launcher, under any selection, holds
 Deselect, Invert, Expand, Shrink, Clear, Clear Outside, Fill, Scale/Rotate
 and Crop.
 
+**Line extraction and books.** Filter, Line Extraction turns a photo or scan
+into black line art on clear: where the picture is darker than its
+surroundings (a fine gaussian against a coarser one), stronger the higher
+the sensitivity, with areas darker than the black level filled. Convert to
+Lines and Tones puts that on a Lines layer over a Tones layer (the shading
+as ink by darkness, with the Tone effect on) and hides the layer, as one
+step. Export as PDF and Export as EPUB write every page of a story, or the
+picture alone, through `sue_io::publish::PictureBook`: a PDF page a
+picture at its size on paper with a bookmark each, or a fixed-layout EPUB 3
+(`rendition:layout` pre-paginated, a JPEG and an XHTML page each, the spine
+right to left for manga).
+
 **Colors and layers.** The color palette has Clip Studio Paint's
 Intermediate Color (a grid blending four corner colors, each set to the
 drawing color by a click, in 2 to 24 steps) and Approximate Color (a 9 by 9

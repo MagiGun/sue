@@ -448,6 +448,11 @@ familiar:
   from: pick the layer, then Register Selected Layer.
   File, Export Animation saves an animated GIF, a movie or every frame as a
   picture.
+- **Line art from photos and scans:** Filter, Line Extraction turns a
+  picture into clean black lines; Convert to Lines and Tones also makes its
+  shading into screentone, each on a layer of its own.
+- **PDF and EPUB:** File, Export as PDF or Export as EPUB makes a book of
+  every page of your comic (manga read right to left), or of one picture.
 - **More color palettes:** **Intermediate Color** blends four colors you set
   at its corners, and **Approximate Color** shows the shades near your
   color, as in Clip Studio Paint.

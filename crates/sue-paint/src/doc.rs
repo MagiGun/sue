@@ -816,6 +816,49 @@ pub fn rasterize(
     Ok((edit.then(delete(layer)), id))
 }
 
+/// New raster layers right above `below` (or at the top), in the order
+/// given (the first lowest), each named and holding its raster (the
+/// picture's size); their spawns and ids.
+///
+/// # Errors
+/// If a raster is not the picture's size.
+pub fn add_layers_pixels(
+    arena: &Arena,
+    picture: EntityId,
+    below: Option<EntityId>,
+    layers_in: Vec<(String, RasterTile2D)>,
+) -> Result<(Vec<SpawnEntity>, Vec<EntityId>), String> {
+    let [width, height] = size_of(arena, picture)?;
+    let stack = layers(arena, picture);
+    let at = below.and_then(|id| stack.iter().position(|layer| layer.id == id));
+    let mut low = match at {
+        Some(index) => Some(stack[index].order.clone()),
+        None => stack.last().map(|layer| layer.order.clone()),
+    };
+    let high = at
+        .and_then(|index| stack.get(index + 1))
+        .map(|layer| layer.order.clone());
+    let (mut spawns, mut ids) = (Vec::new(), Vec::new());
+    for (name, raster) in layers_in {
+        if raster.width() != width || raster.height() != height {
+            return Err("the layer is not the picture's size".to_owned());
+        }
+        let order = match (&low, &high) {
+            (Some(low), Some(high)) if high > low => OrderKey::between(Some(low), Some(high)),
+            (low, _) => OrderKey::between(low.as_ref(), None),
+        };
+        let layer = Entity::new(name, raster).with_class(class::LAYER);
+        let id = layer.id();
+        spawns.push(
+            SpawnEntity::new(layer)
+                .with_relation(Relation::new(picture, CHILD, id).ordered(order.clone())),
+        );
+        ids.push(id);
+        low = Some(order);
+    }
+    Ok((spawns, ids))
+}
+
 /// A layer the fill and auto select can refer to (Set as Reference Layer,
 /// `Bool`).
 pub const REFERENCE: &str = "layer.reference";

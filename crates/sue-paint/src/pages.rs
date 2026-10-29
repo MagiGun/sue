@@ -201,6 +201,94 @@ impl SuePaint {
 
     /// Writes every page of the current story next to `path`, numbered
     /// (`Name-001.png`, `Name-002.png`), in the format of its extension.
+    /// Asks where to export the story (or the picture) as a PDF or EPUB.
+    pub(crate) fn ask_export_book(&mut self, cx: &mut AppletContext<'_>, epub: bool) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let arena = &cx.world.arena;
+        let named = crate::story::story_of(arena, picture).unwrap_or(picture);
+        let name = arena
+            .get_by_id(named)
+            .map_or_else(|_| "Book".to_owned(), |entity| entity.name().to_owned());
+        let (purpose, what, extension) = if epub {
+            ("book-epub", "EPUB e-book", "epub")
+        } else {
+            ("book-pdf", "PDF document", "pdf")
+        };
+        cx.request(sue_wm::ShellRequest::PickFile(
+            sue_wm::FilePick::save(
+                Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
+                purpose,
+                if epub {
+                    "Export as EPUB"
+                } else {
+                    "Export as PDF"
+                },
+                &format!("{name}.{extension}"),
+            )
+            .types(vec![sue_wm::FileType::new(what, &[extension])])
+            .starting_in(self.last_dir.clone()),
+        ));
+    }
+
+    /// Writes every page of the story (or the picture alone) to `path` as a
+    /// PDF or, with `epub`, a fixed-layout EPUB.
+    pub(crate) fn export_book(&mut self, cx: &mut AppletContext<'_>, path: &Path, epub: bool) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        let arena = &cx.world.arena;
+        let story = crate::story::story_of(arena, picture);
+        let ids = story.map_or_else(|| vec![picture], |story| crate::story::pages(arena, story));
+        let options = RenderOptions {
+            paper: true,
+            drafts: false,
+        };
+        let pages: Vec<sue_core::RasterTile2D> = ids
+            .iter()
+            .filter_map(|page| crate::composite::flatten(arena, *page, options))
+            .collect();
+        let named = story.unwrap_or(picture);
+        let entity = arena.get_by_id(named).ok();
+        let dpi = arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(|entity| entity.property(sue_model::picture::DPI))
+            .and_then(sue_core::Value::as_f64)
+            .unwrap_or(72.0) as f32;
+        let book = sue_io::publish::PictureBook {
+            title: entity.map_or_else(|| "Book".to_owned(), |entity| entity.name().to_owned()),
+            author: entity
+                .and_then(|entity| entity.property("story.author"))
+                .and_then(sue_core::Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            language: "en".to_owned(),
+            identifier: format!("urn:uuid:{}", named),
+            pages,
+            right_to_left: story.is_some_and(|story| crate::story::bound_right(arena, story)),
+            dpi,
+        };
+        let count = book.pages.len();
+        let bytes = if epub {
+            sue_io::publish::picture_epub(&book, 90)
+        } else {
+            sue_io::publish::picture_pdf(&book)
+        };
+        match bytes.and_then(|bytes| {
+            sue_platform::write_atomic(path, &bytes)
+                .map_err(|error| error.to_string())
+                .map(|()| bytes.len())
+        }) {
+            Ok(size) => cx.saved(path, format!("{count} pages, {} KiB", size.div_ceil(1024))),
+            Err(error) => cx.fail(format!("Cannot export: {error}")),
+        }
+    }
+
     pub(crate) fn export_pages(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
         let Some((_, pages, _)) = self.story_here(&cx.world.arena) else {
             return;

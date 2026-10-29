@@ -725,6 +725,7 @@ impl SuePaint {
                         Filter::GaussianBlur { .. }
                             | Filter::Sharpen { .. }
                             | Filter::Mosaic { .. }
+                            | Filter::LineExtraction { .. }
                     );
                     if wanted != filter.shown && (cheap || !pointer_down) {
                         let pixels = match wanted {
@@ -1671,6 +1672,15 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
                     .logarithmic(true)
                     .text("Block size"),
             );
+        }
+        Filter::LineExtraction {
+            sensitivity,
+            black,
+            smooth,
+        } => {
+            ui.add(egui::Slider::new(sensitivity, 0.0..=1.0).text("Edge sensitivity"));
+            ui.add(egui::Slider::new(black, 0.0..=1.0).text("Black area"));
+            ui.add(egui::Slider::new(smooth, 0.5..=8.0).text("Smoothing"));
         }
         Filter::Noise { amount } => {
             ui.add(egui::Slider::new(amount, 0.0..=1.0).text("Amount"));

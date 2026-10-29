@@ -11,6 +11,7 @@ mod epub;
 mod html;
 mod markdown;
 mod odt;
+mod pictures;
 mod rtf;
 pub mod xml;
 
@@ -25,6 +26,7 @@ pub use epub::to_epub;
 pub use html::{from_html, to_html};
 pub use markdown::{from_markdown, to_markdown};
 pub use odt::to_odt;
+pub use pictures::{PictureBook, picture_epub, picture_pdf};
 pub use rtf::to_rtf;
 
 /// A paragraph style, as the formats need it.
