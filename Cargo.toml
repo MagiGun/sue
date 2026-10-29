@@ -7,7 +7,7 @@ version = "1.0.0"
 edition = "2024"
 rust-version = "1.95"
 publish = false
-repository = "https://github.com/uvxszi/Sue"
+repository = "https://github.com/MagiGun/sue"
 
 [workspace.dependencies]
 sue-core = { path = "crates/sue-core" }
