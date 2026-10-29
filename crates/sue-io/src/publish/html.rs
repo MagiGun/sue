@@ -135,6 +135,16 @@ pub(crate) fn para_html(
         if let Some(link) = &look.link {
             piece = format!("<a href=\"{}\">{piece}</a>", escape(link));
         }
+        if let Some(thread) = look.comment.and_then(|id| book.comments.get(&id)) {
+            let said: Vec<String> = std::iter::once(&thread.first)
+                .chain(&thread.replies)
+                .map(|note| format!("{}: {}", note.author, note.text))
+                .collect();
+            piece = format!(
+                "<mark class=\"comment\" title=\"{}\">{piece}</mark>",
+                escape(&said.join("\n"))
+            );
+        }
         inner.push_str(&piece);
         if let Some(note) = &look.footnote {
             notes.push(note.clone());
@@ -543,6 +553,15 @@ pub fn from_html(html: &str) -> (String, TextMarks) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn html_comments_mark_their_words() {
+        let html = to_html(&super::super::tests::with_comment());
+        assert!(
+            html.contains("<mark class=\"comment\" title=\"Ann: Too much?\nBo: Keep it.\">"),
+            "{html}"
+        );
+    }
+
     #[test]
     fn html_contents_are_a_list_of_the_headings() {
         let html = to_html(&super::super::tests::with_contents());

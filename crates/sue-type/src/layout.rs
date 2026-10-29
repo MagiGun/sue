@@ -298,7 +298,7 @@ pub(crate) fn format(
     let mut background = Color32::TRANSPARENT;
     if let Some(rgb) = run.highlight {
         background = color(rgb);
-    } else if run.comment {
+    } else if run.comment.is_some() {
         background = Color32::from_rgba_unmultiplied(0xf2, 0xc0, 0x3a, 0x55);
     } else if run.code {
         background = ink.shade;

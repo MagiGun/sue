@@ -136,6 +136,27 @@ pub fn sample_project(cx: &mut AppletContext<'_>) -> Option<EntityId> {
         if let Some(at) = text.find("breathing") {
             marks.set(at..at + 9, kind::BOLD, Some(Value::Bool(true)));
         }
+        // A comment and its reply on the bell that should not be there.
+        if let Some(at) = text.find("a bell rang once") {
+            let comment = sue_model::comments::comment(
+                "A. Writer",
+                "2026-10-29",
+                "Plant the bell earlier, in chapter one?",
+            );
+            let id = comment.id();
+            let reply = sue_model::comments::comment("Editor", "2026-10-30", "Yes, in the storm.");
+            let reply_id = reply.id();
+            let batch = sue_core::txn::Batch::new("Comment")
+                .then(sue_core::txn::SpawnEntity::new(comment))
+                .then(
+                    sue_core::txn::SpawnEntity::new(reply).with_relation(
+                        sue_core::Relation::new(id, sue_model::comments::REPLY, reply_id)
+                            .ordered(sue_core::OrderKey::sequence(None, 1)[0].clone()),
+                    ),
+                );
+            cx.apply(ArenaEdit(batch)).ok()?;
+            marks.set(at..at + 16, kind::COMMENT, Some(Value::Entity(id)));
+        }
         for item in ["A lamp", "Her father's", "One letter"] {
             if let Some(at) = text.find(item) {
                 marks.set_paragraphs(

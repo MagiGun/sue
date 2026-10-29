@@ -4967,6 +4967,92 @@ f 2 3 4
     }
 
     #[test]
+    fn sue_writer_comments_go_on_words_and_come_off_with_undo() {
+        let (mut runtime, root) = runtime("sue-writer-comments");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let writer = AppletId::new(sue_writer::ID).unwrap();
+        runtime.request(
+            ShellRequest::Create {
+                applet: writer.clone(),
+                key: "blank".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![egui::Event::Text("A dark and stormy night".to_owned())]
+            } else {
+                Vec::new()
+            }
+        });
+        runtime.typing.flush(&mut runtime.engine.history);
+        let command = |runtime: &mut Runtime, command: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: writer.clone(),
+                    command: command.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let key = |key: egui::Key, modifiers: egui::Modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        // New Comment on the word at the caret, typed and sent with
+        // Ctrl+Enter.
+        command(&mut runtime, "review.comment");
+        frames(&mut runtime, &ctx, size, start, |frame| match frame {
+            1 => vec![egui::Event::Text("Too much?".to_owned())],
+            2 => vec![key(egui::Key::Enter, egui::Modifiers::COMMAND)],
+            _ => Vec::new(),
+        });
+        let comments = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .filter(|(_, entity)| entity.class() == sue_model::comments::COMMENT)
+                .map(|(_, entity)| entity.id())
+                .collect::<Vec<_>>()
+        };
+        let found = comments(&runtime);
+        assert_eq!(found.len(), 1, "a comment was made");
+        let thread = sue_model::comments::thread(&runtime.engine.world.arena, found[0]).unwrap();
+        assert_eq!(thread.first.text, "Too much?");
+        let marked = runtime.engine.world.arena.iter().any(|(_, entity)| {
+            entity.ext::<sue_model::TextMarks>().is_some_and(|marks| {
+                marks.marks().iter().any(|mark| {
+                    mark.kind == sue_model::mark_kind::COMMENT
+                        && mark.value == sue_core::Value::Entity(found[0])
+                })
+            })
+        });
+        assert!(marked, "its words carry it");
+        // Delete it from the Review menu; undo brings it back.
+        command(&mut runtime, "review.delete_comment");
+        assert!(comments(&runtime).is_empty());
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]
+            } else {
+                Vec::new()
+            }
+        });
+        assert_eq!(comments(&runtime), found);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_writer_tables_take_typing_grow_with_tab_undo_and_export() {
         let (mut runtime, root) = runtime("sue-writer-tables");
         let ctx = egui::Context::default();

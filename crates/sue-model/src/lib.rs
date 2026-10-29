@@ -8,6 +8,7 @@
 //! | --- | --- |
 //! | [`TextMarks`] | word processing, notes, markdown, novels, LaTeX, layout |
 //! | [`manuscript`] | novels, scripts, theses, manuals, e-books, outlines |
+//! | [`comments`] | comments and replies on any text |
 //! | [`contents`] | tables of contents in any text, made from its headings |
 //! | [`Table`] | spreadsheets, databases, CSV, schedules, bills of materials |
 //! | [`Animation`] / [`Curve`] | motion graphics, 2D and 3D animation, automation, grading |
@@ -22,6 +23,7 @@
 //! way (see `HUMANZ.md` §8), and register it with [`register`].
 
 mod blend;
+pub mod comments;
 pub mod contents;
 mod curve;
 mod encoded;

@@ -91,6 +91,8 @@ pub(crate) enum Dialog {
     Furniture(Furniture),
     /// A new table of contents.
     Contents(sue_model::contents::Contents),
+    /// A new comment on the selection.
+    Comment(String),
     /// A new table: rows, columns, and whether the first row is headings.
     Table {
         rows: u32,
@@ -146,6 +148,10 @@ pub struct SueWriter {
     pub(crate) bound: sue_wm::shortcuts::Bound,
     pub(crate) binder: bool,
     pub(crate) inspector: bool,
+    /// The comments show where the inspector does.
+    pub(crate) comments: bool,
+    /// Resolved comments show too.
+    pub(crate) show_resolved: bool,
     pub(crate) binder_width: f32,
     pub(crate) inspector_width: f32,
     pub(crate) find: Option<Find>,
@@ -205,6 +211,8 @@ impl Default for SueWriter {
             // Shown from View, Inspector: the page and the binder are what
             // a word processor opens with.
             inspector: false,
+            comments: false,
+            show_resolved: false,
             binder_width: 230.0,
             inspector_width: 260.0,
             find: None,
@@ -713,6 +721,84 @@ impl SueWriter {
         }
     }
 
+    /// Who writes comments: the project's author.
+    pub(crate) fn author_name(&self, cx: &AppletContext<'_>) -> String {
+        let author = self.project_text(cx, manuscript::AUTHOR, "");
+        if author.trim().is_empty() {
+            "Author".to_owned()
+        } else {
+            author
+        }
+    }
+
+    /// Puts a new comment saying `text` on the selection.
+    pub(crate) fn add_comment(&mut self, cx: &mut AppletContext<'_>, text: &str) {
+        let comment = sue_model::comments::comment(&self.author_name(cx), &project::today(), text);
+        if self.editor.add_comment(cx, comment) {
+            self.inspector = true;
+            self.comments = true;
+        } else {
+            cx.notify("Select the words to comment on");
+        }
+    }
+
+    /// Replies `text` to comment `id`.
+    pub(crate) fn reply(&mut self, cx: &mut AppletContext<'_>, id: EntityId, text: &str) {
+        let reply = sue_model::comments::comment(&self.author_name(cx), &project::today(), text);
+        let reply_id = reply.id();
+        let order = cx
+            .arena()
+            .relations()
+            .next_order(id, sue_model::comments::REPLY);
+        let step = sue_core::txn::SpawnEntity::new(reply).with_relation(
+            sue_core::Relation::new(id, sue_model::comments::REPLY, reply_id).ordered(order),
+        );
+        let _ = cx.apply(ArenaEdit(sue_core::txn::Batch::new("Reply").then(step)));
+    }
+
+    /// Resolves comment `id`, or opens it again.
+    pub(crate) fn resolve(&mut self, cx: &mut AppletContext<'_>, id: EntityId) {
+        let resolved =
+            sue_model::comments::thread(cx.arena(), id).is_some_and(|thread| thread.resolved);
+        let label = if resolved {
+            "Reopen Comment"
+        } else {
+            "Resolve Comment"
+        };
+        let step = sue_core::txn::Batch::new(label).then(project::set(
+            id,
+            sue_model::comments::RESOLVED,
+            (!resolved).then_some(Value::Bool(true)),
+        ));
+        let _ = cx.apply(ArenaEdit(step));
+    }
+
+    /// Selects the next (or previous) comment's words after the caret.
+    pub(crate) fn next_comment(&mut self, cx: &mut AppletContext<'_>, backward: bool) {
+        let comments = self.editor.comments();
+        let here = (self.editor.caret().doc, self.editor.selection().start);
+        let pick = if backward {
+            comments
+                .iter()
+                .rev()
+                .find(|(doc, range, _)| (*doc, range.start) < here)
+                .or(comments.last())
+        } else {
+            comments
+                .iter()
+                .find(|(doc, range, _)| (*doc, range.start) > here)
+                .or(comments.first())
+        };
+        let Some((doc, range, _)) = pick.cloned() else {
+            cx.notify("No comments");
+            return;
+        };
+        if let Some(id) = self.editor.docs().get(doc).copied() {
+            self.editor.select(id, range);
+            self.editor.focus();
+        }
+    }
+
     /// Asks where to save a compile in `format`.
     pub(crate) fn ask_compile(&mut self, cx: &mut AppletContext<'_>, choices: CompileChoices) {
         let (key, name, ext) = FORMATS[choices.format.min(FORMATS.len() - 1)];
@@ -806,6 +892,34 @@ impl SueWriter {
                     session: self.project_number(cx, project::SESSION_TARGET, 500.0) as i64,
                     font_filter: String::new(),
                 }));
+            }
+            "review.comment" => {
+                if self.editor.current().is_some() {
+                    self.dialog = Some(Dialog::Comment(String::new()));
+                }
+            }
+            "review.comments" => {
+                let shown = self.inspector && self.comments;
+                self.inspector = !shown;
+                self.comments = !shown;
+            }
+            "review.next_comment" | "review.previous_comment" => {
+                self.next_comment(cx, command == "review.previous_comment");
+            }
+            "review.resolve" => match self.editor.comment_here() {
+                Some(id) => self.resolve(cx, id),
+                None => cx.notify("Put the caret in a comment's words first"),
+            },
+            "review.delete_comment" => match self.editor.comment_here() {
+                Some(id) => {
+                    self.editor.remove_comment(cx, id);
+                }
+                None => cx.notify("Put the caret in a comment's words first"),
+            },
+            "review.delete_all_comments" => {
+                for (_, _, id) in self.editor.comments() {
+                    self.editor.remove_comment(cx, id);
+                }
             }
             "insert.contents" => {
                 self.dialog = Some(Dialog::Contents(sue_model::contents::Contents::default()));
@@ -1387,6 +1501,7 @@ impl SueWriter {
             (alt, Key::Num3, "style.heading3"),
             (alt, Key::Num0, "style.body"),
             (alt, Key::F, "insert.footnote"),
+            (alt, Key::C, "review.comment"),
             (command, Key::Enter, "insert.page_break"),
             (command, Key::K, "insert.link"),
             (command, Key::F, "edit.find"),

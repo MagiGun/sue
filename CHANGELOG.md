@@ -13,6 +13,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Comments in Sue Writer (Review, New Comment, `Ctrl+Alt+C`): shown beside
+  the text with their replies, to reply to, resolve or delete. They go into
+  Word and OpenDocument files as comments.
 - A table of contents in Sue Writer (Insert, Table of Contents): the
   headings with their pages, kept up as you write; click an entry to go
   there. It prints in PDFs and goes into Word, OpenDocument, web pages,

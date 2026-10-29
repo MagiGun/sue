@@ -318,6 +318,23 @@ fn contents(arena: &Arena, sections: &[Section]) -> HashMap<EntityId, Contents> 
     out
 }
 
+/// The comment threads the sections' words carry, for the formats that
+/// keep comments.
+fn comments(arena: &Arena, sections: &[Section]) -> HashMap<EntityId, sue_model::comments::Thread> {
+    let mut out = HashMap::new();
+    for section in sections {
+        for mark in section.marks.marks() {
+            if mark.kind == kind::COMMENT
+                && let Value::Entity(id) = mark.value
+                && let Some(thread) = sue_model::comments::thread(arena, id)
+            {
+                out.insert(id, thread);
+            }
+        }
+    }
+    out
+}
+
 /// Compiles with `options` into the bytes of a file.
 ///
 /// # Errors
@@ -375,6 +392,7 @@ pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>,
         figures: figures(arena, &sections),
         tables: tables(arena, &sections),
         contents: contents(arena, &sections),
+        comments: comments(arena, &sections),
         sections,
         styles: publish_styles(&look.sheet),
         page: look.page.size,

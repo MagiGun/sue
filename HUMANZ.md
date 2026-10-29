@@ -1678,6 +1678,19 @@ print with ruled cells and repeated heading rows; Word (`w:tbl`, a repeated
 widths), HTML and EPUB (`thead` and `tbody`), RTF (`\trowd` rows, `\trhdr`),
 Markdown (pipe tables) and plain text (tab-separated rows) write them.
 
+**Comments (`sue-model::comments`).** A comment is an entity of class
+`sue.comment`: its text in its `StringBuffer`, `sue.comment.author`,
+`sue.comment.date` and `sue.comment.resolved` as properties; a `comment`
+mark names it over its words (`CharFormat::comment` is now the comment's
+entity). Replies are comments too, related in order by `sue.comment.reply`,
+and `thread` reads a comment with its replies. `Editor::add_comment` spawns
+one and marks the selection in one undo step, `remove_comment` takes the
+marks off and despawns the thread (undo restores both), `comments` lists
+them in order. Word gets `w:commentRangeStart`, `w:commentRangeEnd` and a
+`comments.xml` part (replies as named paragraphs), OpenDocument
+`office:annotation` and `office:annotation-end`, HTML a `mark` with the
+thread as its title.
+
 **Tables of contents (`sue-model::contents`, `sue-type::contents`).** A
 table of contents is an entity of class `sue.text_contents` shown by an
 `embed` mark; it keeps only its settings (`sue.contents.title`,
@@ -1802,7 +1815,7 @@ text entity (`PublishFormat`). `zip` writes and reads the archives.
 
 | Part | What it holds |
 | --- | --- |
-| Menus | File, Edit, View, Insert, Format, Table, Project, Help, in Sue's top bar after the Sue button; Table as LibreOffice Writer's (Insert Table, rows and columns, delete, heading row, convert text and tables); File, Back to the Hub. Each keeps to a dozen entries at most (a test checks): Format groups like LibreOffice Writer's (Text, Text Color, Highlight, Align Text, Line Spacing, Lists, Clear Direct Formatting), View puts the zooms in a submenu |
+| Menus | File, Edit, View, Insert, Format, Table, Review (comments), Project, Help, in Sue's top bar after the Sue button; Table as LibreOffice Writer's (Insert Table, rows and columns, delete, heading row, convert text and tables); File, Back to the Hub. Each keeps to a dozen entries at most (a test checks): Format groups like LibreOffice Writer's (Text, Text Color, Highlight, Align Text, Line Spacing, Lists, Clear Direct Formatting), View puts the zooms in a submenu |
 | Toolbar | what Word's mini toolbar and LibreOffice Writer's single toolbar (26.8) keep at hand: undo, redo, paragraph style, font (every installed family, searchable), size, bold, italic, underline, text color, highlight, alignment, lists, indents; Find at the right; it wraps onto a second row in a narrow window, and a tablet's buttons are 32 points |
 | Binder | the project's folders and documents: click to open (a folder shows its documents one after another), double-click to rename, drag to move (above, below or into a folder), a right-click menu (new, rename, duplicate, include in compile, snapshot, merge, label, status, trash, Open in Sue Paint for pictures) |
 | Text | the editor on pages that fit the window (until you zoom) or one column |
