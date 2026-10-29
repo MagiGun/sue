@@ -206,7 +206,8 @@ you choose any folder but the top of Download). iPhone and iPad save
 first and then ask where in Files the file goes, each time you save; a
 folder you choose there is written to directly. Wherever Sue names such a
 file (the status bar's "Saved", the Image Viewer's info row and its Save
-over the original question, the Converter's output folder), it names what
+over the original question, the Converter's output folder, the Hub's
+recent work), it names what
 you chose, such as "Picture.png in Download", with its folder where the
 system says it. A phone has no file manager for Sue to show files in, so
 those messages are not clickable there, and Show in Folder and the

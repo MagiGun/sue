@@ -101,9 +101,9 @@ follow [Semantic Versioning](https://semver.org/).
   are writing in Sue Writer stays in sight.
 - On Android, a file you chose in the system's picker is named as you know
   it, such as "Picture.png in Download", in the status bar, the Image
-  Viewer and the Converter, instead of a path inside Sue's cache. There
-  the Image Viewer and the Converter no longer offer to show files in
-  Explorer, which a phone does not have.
+  Viewer, the Converter and the Hub, instead of a path inside Sue's
+  cache. There the Image Viewer and the Converter no longer offer to
+  show files in Explorer, which a phone does not have.
 
 ## [0.0.3] - 2026-10-29
 

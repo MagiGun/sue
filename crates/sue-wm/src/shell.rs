@@ -146,16 +146,22 @@ struct ListRow {
     kept: Option<String>,
 }
 
-/// The folder `path` is in, by its name.
-fn folder_name(path: &std::path::Path) -> String {
-    path.parent()
-        .map(|parent| {
+/// `lead` and the folder `path` is in, by its name: for a file a phone's
+/// picker chose, the folder people chose it in, where the system says it.
+fn in_folder(lead: String, path: &std::path::Path) -> String {
+    let folder = match sue_platform::shown_place(path) {
+        Some(shown) => shown.folder,
+        None => path.parent().map(|parent| {
             parent.file_name().map_or_else(
                 || parent.display().to_string(),
                 |name| name.to_string_lossy().into_owned(),
             )
-        })
-        .unwrap_or_default()
+        }),
+    };
+    match folder {
+        Some(folder) => format!("{lead} in {folder}"),
+        None => lead,
+    }
 }
 
 /// What a palette entry does.
@@ -1613,12 +1619,11 @@ impl Shell {
                             .map(|extension| extension.to_string_lossy().to_uppercase())
                             .unwrap_or_default()
                     },
-                    detail: format!(
-                        "{verb} {} in {}",
-                        crate::ago(file.last(), now),
-                        folder_name(&file.path)
+                    detail: in_folder(
+                        format!("{verb} {}", crate::ago(file.last(), now)),
+                        &file.path,
                     ),
-                    hover: file.path.display().to_string(),
+                    hover: sue_platform::shown_path(&file.path),
                     open: HubRow::Open(file.path.clone()),
                     kept: None,
                 }
@@ -1641,12 +1646,8 @@ impl Shell {
                 ListRow {
                     title: file.title(),
                     kind: Self::studio_name(io, file.page.as_ref()),
-                    detail: format!(
-                        "{verb} {} in {}",
-                        crate::ago(when, now),
-                        folder_name(&file.path)
-                    ),
-                    hover: file.path.display().to_string(),
+                    detail: in_folder(format!("{verb} {}", crate::ago(when, now)), &file.path),
+                    hover: sue_platform::shown_path(&file.path),
                     open: HubRow::Open(file.path.clone()),
                     kept: None,
                 }
