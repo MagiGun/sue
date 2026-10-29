@@ -12,7 +12,17 @@
 #[unsafe(no_mangle)]
 fn android_main(app: sue_platform::android::AndroidApp) {
     sue_platform::android::set_app(app);
-    if let Err(error) = sue::run_window() {
-        eprintln!("sue: {error}");
-    }
+    let code = match std::panic::catch_unwind(sue::run_window) {
+        Ok(Ok(())) => 0,
+        Ok(Err(error)) => {
+            eprintln!("sue: {error}");
+            1
+        }
+        Err(_) => 101,
+    };
+    // Android may start the activity again in this same process (after
+    // Back, or after Sue stopped on an error), and a window's event loop
+    // can only be made once per process: ending it here makes the next
+    // start a fresh one.
+    std::process::exit(code);
 }

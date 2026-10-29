@@ -612,6 +612,12 @@ impl SuePaint {
                             );
                         });
                         ui.separator();
+                        // A dialog larger than the screen (a phone) scrolls inside
+                        // its frame, so its buttons stay in reach.
+                        egui::ScrollArea::both()
+                            .id_salt("sue-paint-dialog-body")
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
                         match &mut dialog {
                             Dialog::New(new) => outcome = new_ui(ui, new, theme),
                             Dialog::Filter(filter) => outcome = filter_ui(ui, filter, theme),
@@ -1084,6 +1090,7 @@ impl SuePaint {
                                 });
                             }
                         }
+                            });
                     });
             });
         let (escape, enter) = ctx.input(|input| {

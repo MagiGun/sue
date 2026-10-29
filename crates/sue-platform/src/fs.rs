@@ -47,7 +47,16 @@ const LEGACY_JUNCTIONS: [&str; 10] = [
 /// elsewhere.
 #[must_use]
 pub fn roots() -> Vec<PathBuf> {
-    if cfg!(windows) {
+    if cfg!(target_os = "android") {
+        // People's files (Download, Pictures, Documents) and Sue's own.
+        let mut roots = vec![PathBuf::from("/storage/emulated/0")];
+        roots.extend(
+            crate::PlatformPaths::detect()
+                .ok()
+                .map(|paths| paths.data_dir),
+        );
+        roots
+    } else if cfg!(windows) {
         (b'A'..=b'Z')
             .map(|letter| PathBuf::from(format!("{}:\\", char::from(letter))))
             .filter(|drive| drive.is_dir())

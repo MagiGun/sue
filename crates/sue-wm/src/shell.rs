@@ -1707,6 +1707,7 @@ impl Shell {
             right_reveal: self.right.reveal.position(),
             timeline_reveal: self.timeline_reveal.position(),
             metrics: self.config.metrics,
+            studio_open: self.studio.is_some(),
         });
         self.canvas = layout.canvas;
         // A studio works between the side panels, which stay with it.
@@ -1823,8 +1824,11 @@ impl Shell {
             layout.status.top(),
             theme.hairline(),
         );
-        self.rail_ui(root, layout.left_rail, true, io, &theme);
-        self.rail_ui(root, layout.right_rail, false, io, &theme);
+        // A phone's open studio has the whole width: no rails to draw.
+        if layout.left_rail.width() > 0.0 {
+            self.rail_ui(root, layout.left_rail, true, io, &theme);
+            self.rail_ui(root, layout.right_rail, false, io, &theme);
+        }
         self.drawer_ui(
             root,
             layout.left_drawer,
@@ -2784,6 +2788,40 @@ impl Shell {
             font.clone(),
             theme.muted,
         );
+        let items = [
+            format!("{} entities", io.world.arena.len()),
+            format!("Undo {}", io.history.depth()),
+            profile_label(self.profile),
+            format!("{:.0}%", self.camera.zoom() * 100.0),
+            match io.fps {
+                Some(fps) if self.animating => format!("{fps} FPS"),
+                _ => "Idle".to_owned(),
+            },
+        ];
+        let mut x = rect.right() - theme.padding;
+        // From the right; on a narrow screen the ones that would run into
+        // the mode's name are left out.
+        for (index, item) in items.iter().enumerate().rev() {
+            let width = painter
+                .layout_no_wrap(item.clone(), font.clone(), theme.muted)
+                .size()
+                .x;
+            if x - width < placed.right() + theme.padding * 2.0 {
+                break;
+            }
+            let shown = painter.text(
+                pos2(x, rect.center().y),
+                Align2::RIGHT_CENTER,
+                item,
+                font.clone(),
+                theme.muted,
+            );
+            x = shown.left() - theme.padding;
+            if index > 0 {
+                painter.vline(x, rect.shrink2(vec2(0.0, 5.0)).y_range(), theme.hairline());
+                x -= theme.padding;
+            }
+        }
         if let Some((text, error)) = self.message() {
             let text = if error {
                 format!("! {text}")
@@ -2792,6 +2830,11 @@ impl Shell {
             };
             let at = pos2(placed.right() + theme.padding * 3.0, rect.center().y);
             let galley = painter.layout_no_wrap(text, font.clone(), theme.muted);
+            // The message keeps to the room the counters left.
+            let painter = painter.with_clip_rect(Rect::from_min_max(
+                pos2(at.x, rect.top()),
+                pos2(x.max(at.x), rect.bottom()),
+            ));
             let area =
                 Rect::from_min_size(pos2(at.x, rect.top()), vec2(galley.size().x, rect.height()));
             let mut color = if error { theme.text } else { theme.muted };
@@ -2821,31 +2864,6 @@ impl Shell {
                 galley,
                 color,
             );
-        }
-        let items = [
-            format!("{} entities", io.world.arena.len()),
-            format!("Undo {}", io.history.depth()),
-            profile_label(self.profile),
-            format!("{:.0}%", self.camera.zoom() * 100.0),
-            match io.fps {
-                Some(fps) if self.animating => format!("{fps} FPS"),
-                _ => "Idle".to_owned(),
-            },
-        ];
-        let mut x = rect.right() - theme.padding;
-        for (index, item) in items.iter().enumerate().rev() {
-            let placed = painter.text(
-                pos2(x, rect.center().y),
-                Align2::RIGHT_CENTER,
-                item,
-                font.clone(),
-                theme.muted,
-            );
-            x = placed.left() - theme.padding;
-            if index > 0 {
-                painter.vline(x, rect.shrink2(vec2(0.0, 5.0)).y_range(), theme.hairline());
-                x -= theme.padding;
-            }
         }
     }
 
@@ -3030,7 +3048,7 @@ impl Shell {
         let card = if narrow {
             vec2(
                 ((screen.width() - 32.0 - theme.padding * 4.0 - gap) / 2.0).max(120.0),
-                132.0,
+                184.0,
             )
         } else {
             vec2(220.0, 168.0)

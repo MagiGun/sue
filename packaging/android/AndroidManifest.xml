@@ -24,7 +24,7 @@
         android:extractNativeLibs="true"
         android:requestLegacyExternalStorage="true"
         android:resizeableActivity="true"
-        android:theme="@android:style/Theme.Black.NoTitleBar">
+        android:theme="@style/Sue">
         <activity
             android:name="android.app.NativeActivity"
             android:exported="true"

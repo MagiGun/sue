@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Sue's window stays between the status bar and the navigation bar,
+         so nothing it draws hides under them (Android 15 would otherwise
+         draw every app edge to edge). -->
+    <style name="Sue" parent="android:Theme.Black.NoTitleBar">
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+    </style>
+</resources>

@@ -98,7 +98,8 @@ pub const MAIN_SURFACE: SurfaceId = SurfaceId(0);
 pub struct DesktopHost {
     window: Arc<Window>,
     gpu: GpuContext,
-    surface: WindowSurface,
+    /// `None` while the system has taken the window away.
+    surface: Option<WindowSurface>,
     painter: EguiPainter,
     egui: egui_winit::State,
     ctx: egui::Context,
@@ -122,6 +123,33 @@ impl std::fmt::Debug for DesktopHost {
 }
 
 impl DesktopHost {
+    /// The part of the window Android's system bars leave free, in points,
+    /// and the insets it means; `None` until Android has said.
+    #[cfg(target_os = "android")]
+    fn android_safe_rect(&mut self) -> Option<egui::Rect> {
+        let app = crate::android::app()?;
+        let content = app.content_rect();
+        let size = self.window.inner_size();
+        let scale = self.window.scale_factor() as f32;
+        if content.right <= content.left || content.bottom <= content.top {
+            return None;
+        }
+        let insets = SafeAreaInsets {
+            top: content.top.max(0) as f32 / scale,
+            left: content.left.max(0) as f32 / scale,
+            right: (size.width as i32 - content.right).max(0) as f32 / scale,
+            bottom: (size.height as i32 - content.bottom).max(0) as f32 / scale,
+        };
+        self.info.safe_area = insets;
+        Some(egui::Rect::from_min_max(
+            egui::pos2(insets.left, insets.top),
+            egui::pos2(
+                size.width as f32 / scale - insets.right,
+                size.height as f32 / scale - insets.bottom,
+            ),
+        ))
+    }
+
     /// Makes the window's surface again, for a window the system gave back.
     fn renew_surface(&mut self) -> Result<(), PlatformError> {
         let surface = self
@@ -130,8 +158,12 @@ impl DesktopHost {
             .create_surface(Arc::clone(&self.window))
             .map_err(|error| PlatformError::Gpu(error.to_string()))?;
         let size = self.window.inner_size();
-        self.surface =
-            WindowSurface::new(surface, &self.gpu, size.width.max(1), size.height.max(1))?;
+        self.surface = Some(WindowSurface::new(
+            surface,
+            &self.gpu,
+            size.width.max(1),
+            size.height.max(1),
+        )?);
         Ok(())
     }
 
@@ -154,18 +186,44 @@ impl DesktopHost {
                 .create_window(attributes)
                 .map_err(|error| PlatformError::Window(error.to_string()))?,
         );
-        let descriptor = wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(
-            event_loop.owned_display_handle(),
-        ));
-        let instance = wgpu::Instance::new(descriptor);
-        let surface = instance
-            .create_surface(Arc::clone(&window))
-            .map_err(|error| PlatformError::Gpu(error.to_string()))?;
-        let gpu = pollster::block_on(GpuContext::with_instance(
-            instance,
-            Some(&surface),
-            options.gpu,
-        ))?;
+        // An Android window takes one graphics API: try Vulkan alone, then
+        // OpenGL ES alone, so a surface of one never blocks the other.
+        // Elsewhere every backend is offered at once.
+        let attempts: &[Option<wgpu::Backends>] = if cfg!(target_os = "android") {
+            &[Some(wgpu::Backends::VULKAN), Some(wgpu::Backends::GL)]
+        } else {
+            &[None]
+        };
+        let mut chosen = None;
+        let mut last_error = PlatformError::Gpu("no GPU can draw this window".to_owned());
+        for backends in attempts {
+            let mut descriptor = wgpu::InstanceDescriptor::new_with_display_handle_from_env(
+                Box::new(event_loop.owned_display_handle()),
+            );
+            if let Some(backends) = backends {
+                descriptor.backends = *backends;
+            }
+            let instance = wgpu::Instance::new(descriptor);
+            let surface = match instance.create_surface(Arc::clone(&window)) {
+                Ok(surface) => surface,
+                Err(error) => {
+                    last_error = PlatformError::Gpu(error.to_string());
+                    continue;
+                }
+            };
+            match pollster::block_on(GpuContext::with_instance(
+                instance,
+                Some(&surface),
+                options.gpu,
+            )) {
+                Ok(gpu) => {
+                    chosen = Some((gpu, surface));
+                    break;
+                }
+                Err(error) => last_error = error,
+            }
+        }
+        let (gpu, surface) = chosen.ok_or(last_error)?;
         let size = window.inner_size();
         let surface = WindowSurface::new(surface, &gpu, size.width, size.height)?;
         let painter = EguiPainter::new(&gpu, surface.format());
@@ -204,7 +262,7 @@ impl DesktopHost {
         Ok(Self {
             window,
             gpu,
-            surface,
+            surface: Some(surface),
             painter,
             egui,
             ctx,
@@ -255,7 +313,13 @@ impl DesktopHost {
 
     /// Builds, paints and presents one frame.
     fn frame<A: DesktopApp>(&mut self, app: &mut A) {
-        let raw = self.egui.take_egui_input(&self.window);
+        #[cfg_attr(not(target_os = "android"), allow(unused_mut))]
+        let mut raw = self.egui.take_egui_input(&self.window);
+        #[cfg(target_os = "android")]
+        if let Some(safe) = self.android_safe_rect() {
+            // Lay everything out between the status and navigation bars.
+            raw.screen_rect = Some(safe);
+        }
         let ctx = self.ctx.clone();
         let output = ctx.run_ui(raw, |ui| app.ui(ui, self));
         self.egui
@@ -266,8 +330,13 @@ impl DesktopHost {
             .map_or(Duration::MAX, |viewport| viewport.repaint_delay);
         // Anything past a day is egui's "never".
         self.repaint_at = (delay < Duration::from_secs(86_400)).then(|| Instant::now() + delay);
-        let (width, height) = self.surface.size();
-        match self.surface.acquire(&self.gpu) {
+        let Some(surface) = self.surface.as_mut() else {
+            // No window to draw into: keep egui's textures in step.
+            self.painter.apply_textures(output.textures_delta);
+            return;
+        };
+        let (width, height) = surface.size();
+        match surface.acquire(&self.gpu) {
             Some(frame) => {
                 let view = frame
                     .texture
@@ -508,6 +577,11 @@ impl<A: DesktopApp> ApplicationHandler for Runner<A> {
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
         self.paused = true;
+        // Let go of the surface now: Android takes the window away and a
+        // new surface cannot connect to it while the old one is still there.
+        if let Some(host) = self.host.as_mut() {
+            host.surface = None;
+        }
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -571,7 +645,16 @@ impl<A: DesktopApp> ApplicationHandler for Runner<A> {
                 host.window.request_redraw();
             }
             OsWindowEvent::Resized(size) => {
-                host.surface.resize(&host.gpu, size.width, size.height);
+                // While the system has the window (Android in the
+                // background), its surface is gone; the size is used when
+                // the surface is made again.
+                if let Some(surface) = host
+                    .surface
+                    .as_mut()
+                    .filter(|_| size.width > 0 && size.height > 0)
+                {
+                    surface.resize(&host.gpu, size.width, size.height);
+                }
                 let scale = host.window.scale_factor() as f32;
                 host.info.width = size.width as f32 / scale;
                 host.info.height = size.height as f32 / scale;

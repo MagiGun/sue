@@ -125,6 +125,7 @@ def main() -> None:
     manifest = manifest.replace("@VERSION_CODE@", str(max(code, 1))).replace("@VERSION_NAME@", number)
     (work / "AndroidManifest.xml").write_text(manifest, encoding="utf-8")
     shutil.copy2(ROOT / "assets" / "icons" / "sue_icon.png", work / "res" / "mipmap-xxxhdpi" / "ic_launcher.png")
+    shutil.copytree(HERE / "res", work / "res", dirs_exist_ok=True)
     aapt2 = tool(build_tools, "aapt2")
     run([aapt2, "compile", "--dir", work / "res", "-o", work / "res.zip"])
     base = work / "base.apk"

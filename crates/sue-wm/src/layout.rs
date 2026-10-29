@@ -64,6 +64,9 @@ pub struct LayoutRequest {
     pub timeline_reveal: f32,
     /// Sizes from the rice.
     pub metrics: LayoutMetrics,
+    /// A studio fills the window: on a phone it gets the whole width, the
+    /// rails left out.
+    pub studio_open: bool,
 }
 
 /// Where everything goes.
@@ -109,7 +112,11 @@ pub fn solve_layout(request: &LayoutRequest) -> LayoutSolution {
     let status_height = metrics.status_bar_height.min(area.height() / 4.0).max(0.0);
     let status = Rect::from_min_max(pos2(area.left(), area.bottom() - status_height), area.max);
     let body = Rect::from_min_max(area.min, pos2(area.right(), status.top()));
-    let rail = metrics.rail_width.min(body.width() / 6.0).max(0.0);
+    let rail = if request.form_factor == FormFactor::Mobile && request.studio_open {
+        0.0
+    } else {
+        metrics.rail_width.min(body.width() / 6.0).max(0.0)
+    };
     let left_rail = Rect::from_min_size(body.min, vec2(rail, body.height()));
     let right_rail = Rect::from_min_max(pos2(body.right() - rail, body.top()), body.max);
     let middle = Rect::from_min_max(
@@ -222,7 +229,25 @@ mod tests {
             right_reveal: reveals[1],
             timeline_reveal: reveals[2],
             metrics: metrics(),
+            studio_open: false,
         }
+    }
+
+    #[test]
+    fn a_phone_gives_an_open_studio_the_whole_width() {
+        let canvas = solve_layout(&request(FormFactor::Mobile, [0.0; 3], 390.0));
+        assert!(canvas.left_rail.width() > 0.0, "the canvas keeps its rails");
+        let studio = solve_layout(&LayoutRequest {
+            studio_open: true,
+            ..request(FormFactor::Mobile, [0.0; 3], 390.0)
+        });
+        assert_eq!(studio.left_rail.width(), 0.0);
+        assert_eq!(studio.canvas.width(), 390.0);
+        let desktop = solve_layout(&LayoutRequest {
+            studio_open: true,
+            ..request(FormFactor::Desktop, [0.0; 3], 1440.0)
+        });
+        assert!(desktop.left_rail.width() > 0.0, "desktops keep them");
     }
 
     #[test]

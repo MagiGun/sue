@@ -26,11 +26,19 @@ impl PlatformPaths {
     /// root.
     pub fn detect() -> Result<Self, PlatformError> {
         let sandbox = sandbox_root();
-        Self::resolve(
+        #[cfg_attr(not(target_os = "android"), allow(unused_mut))]
+        let mut paths = Self::resolve(
             OsFamily::current(),
             |name| std::env::var(name).ok(),
             sandbox.as_deref(),
-        )
+        )?;
+        // On Android people's own files are in shared storage, where files
+        // sent to the device land (its Download folder).
+        #[cfg(target_os = "android")]
+        {
+            paths.home_dir = crate::android::shared_storage();
+        }
+        Ok(paths)
     }
 
     /// Resolves the directories for `os`.
