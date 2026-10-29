@@ -804,11 +804,28 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         studios >= 2 && tools >= 2 && windows == 1,
         "the studios, tools and Settings are not all installed",
     )?;
+    // Sue opens on the Hub, or straight into what is pinned there (the
+    // check runs against this machine's own settings).
+    let pinned_at_boot = sue_wm::pinned(&runtime.engine.world.rice, &runtime.applets);
     run_frames(runtime, &ctx, &mut clock, Vec::new());
-    ensure(
-        runtime.shell.hub_open() && runtime.shell.page().is_none(),
-        "with nothing pinned, Sue did not open on the Hub",
-    )?;
+    let opened = match &pinned_at_boot {
+        None => {
+            ensure(
+                runtime.shell.hub_open() && runtime.shell.page().is_none(),
+                "with nothing pinned, Sue did not open on the Hub",
+            )?;
+            "booted on the Hub".to_owned()
+        }
+        Some(id) => {
+            ensure(
+                runtime.shell.page() == Some(id) && runtime.shell.reveal() > 0.999,
+                "Sue did not open straight into the pinned studio or tool",
+            )?;
+            runtime.request(ShellRequest::Hub, &mut tex, clock);
+            run_frames(runtime, &ctx, &mut clock, Vec::new());
+            format!("booted straight into the pinned {id}, then the Hub")
+        }
+    };
     ensure(
         runtime.shell.hub_boxes().len() == studios + tools,
         "the Hub does not show a box for every studio and tool",
@@ -1021,7 +1038,7 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         "the idle shell keeps drawing",
     )?;
     let mut detail = format!(
-        "booted on the Hub ({}, {}, {}); pinned with a click, one pin at a time, Ctrl+Z and Ctrl+Y; a box opened Sue Paint, gliding in {glide} frames ({}) vs {snap} (legacy snap); the Sue button's menu; a picture into the Image Viewer, Send To the Converter; palette, Settings, back to the Hub; then 0 FPS",
+        "{opened} ({}, {}, {}); pinned with a click, one pin at a time, Ctrl+Z and Ctrl+Y; a box opened Sue Paint, gliding in {glide} frames ({}) vs {snap} (legacy snap); the Sue button's menu; a picture into the Image Viewer, Send To the Converter; palette, Settings, back to the Hub; then 0 FPS",
         count(studios, "studio", "studios"),
         count(tools, "tool", "tools"),
         count(windows, "window", "windows"),
