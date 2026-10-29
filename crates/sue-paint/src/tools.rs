@@ -139,10 +139,7 @@ impl Tool {
     /// `true` if it works in this build.
     #[must_use]
     pub const fn available(self) -> bool {
-        !matches!(
-            self,
-            Self::Decoration | Self::Blend | Self::CorrectLine | Self::Operation
-        )
+        !matches!(self, Self::Decoration | Self::CorrectLine | Self::Operation)
     }
 
     /// `true` for tools that paint with a [`Tip`].
@@ -432,7 +429,21 @@ impl Tool {
             }
             Self::Ruler => vec![plain("Symmetrical Ruler", 0)],
             Self::Text => vec![plain("Text", 0)],
-            Self::Decoration | Self::Blend | Self::CorrectLine | Self::Operation => {
+            Self::Blend => {
+                let soft = tip(60.0, |t| {
+                    t.opacity = 0.6;
+                    t.size_by.pressure = false;
+                });
+                vec![
+                    SubTool::new(self, "Blur", 0, soft),
+                    SubTool::new(self, "Finger Tip", 1, soft),
+                    SubTool::new(self, "Liquify: Push", 2, soft),
+                    SubTool::new(self, "Liquify: Expand", 3, soft),
+                    SubTool::new(self, "Liquify: Pinch", 4, soft),
+                    SubTool::new(self, "Liquify: Twirl", 5, soft),
+                ]
+            }
+            Self::Decoration | Self::CorrectLine | Self::Operation => {
                 vec![plain(self.label(), 0)]
             }
         }

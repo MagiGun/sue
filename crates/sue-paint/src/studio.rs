@@ -117,6 +117,16 @@ pub(crate) enum Gesture {
     },
     /// Dragging puppet warp pin `index`.
     Pin { index: usize },
+    /// A Blend tool drag on `layer`: its pixels from before, where the
+    /// last dab was (layer pixels), and how far the pen went since.
+    Blend {
+        layer: EntityId,
+        before: Vec<u8>,
+        last: [f32; 2],
+        since: f32,
+        offset: [i64; 2],
+        label: String,
+    },
     /// Dragging a transform handle: what it grabbed, where (layer pixels),
     /// and the box as it was.
     Transform {

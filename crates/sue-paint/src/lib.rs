@@ -26,6 +26,7 @@
 
 pub mod anim;
 mod anim_ui;
+pub mod blend;
 pub mod brush;
 mod canvas;
 mod card;

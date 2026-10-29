@@ -2340,6 +2340,99 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_liquify_pushes_a_stroke_in_one_undo_step() {
+        let (mut runtime, root) = runtime("paint-liquify");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.studio_focus())
+            .unwrap();
+        let layer = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+            .last()
+            .unwrap()
+            .id;
+        let ink = |runtime: &Runtime, rows: std::ops::Range<u32>| {
+            let raster = sue_paint::doc::raster(&runtime.engine.world.arena, layer).unwrap();
+            rows.map(|y| {
+                u32::from(raster.bytes().unwrap()[((y * raster.width() + 800) * 4 + 3) as usize])
+            })
+            .sum::<u32>()
+        };
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let mut drag = |runtime: &mut Runtime, before: Vec<egui::Event>, path: &[Pos2]| {
+            step(runtime, before);
+            step(
+                runtime,
+                vec![egui::Event::PointerMoved(path[0]), press(path[0], true)],
+            );
+            step(
+                runtime,
+                path[1..]
+                    .iter()
+                    .map(|at| egui::Event::PointerMoved(*at))
+                    .collect(),
+            );
+            step(runtime, vec![press(*path.last().unwrap(), false)]);
+        };
+        drag(
+            &mut runtime,
+            Vec::new(),
+            &[middle - vec2(60.0, 0.0), middle, middle + vec2(60.0, 0.0)],
+        );
+        assert!(ink(&runtime, 590..610) > 0);
+        assert_eq!(ink(&runtime, 640..700), 0);
+        let depth = runtime.engine.history.depth();
+        // J for Blend, then two sub tools on: Liquify, Push. Push down.
+        let path: Vec<Pos2> = (0..12)
+            .map(|index| middle + vec2(0.0, -10.0 + index as f32 * 4.0))
+            .collect();
+        drag(
+            &mut runtime,
+            vec![
+                key(egui::Key::J, plain),
+                key(egui::Key::Period, plain),
+                key(egui::Key::Period, plain),
+            ],
+            &path,
+        );
+        assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
+        assert!(ink(&runtime, 610..700) > 0, "the stroke was pushed down");
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        assert_eq!(ink(&runtime, 640..700), 0, "undo puts it back");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_saves_as_a_project_or_any_picture_type() {
         let (mut runtime, root) = runtime("paint-save-as");
         let ctx = egui::Context::default();

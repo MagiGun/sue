@@ -1193,6 +1193,37 @@ impl SuePaint {
                 }
                 ui.label(small("Ctrl+2 (Snap to Special Ruler) turns it on and off"));
             }
+            Tool::Blend => {
+                slider_row(
+                    ui,
+                    "Brush Size",
+                    &mut sub.tip.size,
+                    2.0..=600.0,
+                    " px",
+                    true,
+                    theme,
+                );
+                let mut strength = sub.tip.opacity * 100.0;
+                if slider_row(
+                    ui,
+                    "Strength",
+                    &mut strength,
+                    1.0..=100.0,
+                    " %",
+                    false,
+                    theme,
+                ) {
+                    sub.tip.opacity = strength / 100.0;
+                }
+                ui.label(small(match sub.mode {
+                    0 => "Softens what is under the brush",
+                    1 => "Drags color along the stroke",
+                    2 => "Moves the picture along the stroke",
+                    3 => "Swells the picture from the brush's middle",
+                    4 => "Draws the picture into the brush's middle",
+                    _ => "Turns the picture around the brush's middle",
+                }));
+            }
             Tool::Frame => {
                 ui.label(small(if sub.mode == 1 {
                     "Drag a line across a panel to divide it"
