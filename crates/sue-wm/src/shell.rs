@@ -40,10 +40,11 @@ use crate::{
 /// launch, empty for the Hub.
 pub const PIN_KEY: &str = "launchpad.pinned";
 
-/// A hardware profile as people read it, e.g. `Legacy Low Spec`.
+/// A hardware profile as people read it, e.g. `Legacy Low Spec`, in the
+/// language in use (as Settings names the choice).
 #[must_use]
 pub fn profile_label(profile: HardwareProfile) -> String {
-    profile
+    let english = profile
         .rice_name()
         .split('-')
         .map(|word| {
@@ -53,7 +54,9 @@ pub fn profile_label(profile: HardwareProfile) -> String {
             })
         })
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" ");
+    let key = format!("profile-hardware.{}", profile.rice_name());
+    sue_lang::text_or("rice", &key, &english)
 }
 
 /// The studio or tool pinned in `rice`, if it is installed.

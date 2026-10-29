@@ -454,6 +454,46 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         applet.navigate("view/document");
     }
 
+    // 19b. Sue in Japanese, chosen from the Sue menu's Language submenu;
+    // 19c. Sue Paint set apart in Spanish while Sue stays Japanese.
+    runtime.request(ShellRequest::Hub, &mut camera.painter, camera.now);
+    camera.click(runtime.shell.sue_button().center());
+    let now = camera.now;
+    let japanese = sue_lang::name("ja");
+    runtime.with_shell(&mut camera.painter, now, |shell, io, now| {
+        shell.sue_menu_pick(&["Language", &japanese], io, now)
+    });
+    camera.settle(&mut runtime);
+    camera.click(runtime.shell.sue_button().center());
+    shoot(&mut runtime, &mut camera, "19b-sue-menu-japanese")?;
+    runtime.shell.dismiss_overlays();
+    let _ = runtime.engine.world.rice.set(
+        "sue_paint.language",
+        sue_rice::RiceValue::Text("es".to_owned()),
+    );
+    runtime.request(
+        ShellRequest::Open(paint.clone()),
+        &mut camera.painter,
+        camera.now,
+    );
+    camera.click(runtime.shell.sue_button().center());
+    shoot(
+        &mut runtime,
+        &mut camera,
+        "19c-sue-paint-spanish-in-japanese-sue",
+    )?;
+    runtime.shell.dismiss_overlays();
+    for (key, value) in [
+        (sue_wm::LANGUAGE_KEY, sue_lang::SYSTEM),
+        ("sue_paint.language", sue_lang::FOLLOW),
+    ] {
+        let _ = runtime
+            .engine
+            .world
+            .rice
+            .set(key, sue_rice::RiceValue::Text(value.to_owned()));
+    }
+
     // 20 to 23. The touch layouts: the Hub, Sue Paint and Sue Writer on a
     // phone and on a tablet.
     for (interface, size, prefix) in [
