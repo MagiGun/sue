@@ -2026,6 +2026,102 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_symmetry_ruler_mirrors_strokes_until_turned_off() {
+        let (mut runtime, root) = runtime("paint-symmetry");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.studio_focus())
+            .unwrap();
+        let layer = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+            .last()
+            .unwrap()
+            .id;
+        let ink = |runtime: &Runtime, columns: std::ops::Range<u32>, rows: std::ops::Range<u32>| {
+            let raster = sue_paint::doc::raster(&runtime.engine.world.arena, layer).unwrap();
+            let bytes = raster.bytes().unwrap();
+            rows.flat_map(|y| columns.clone().map(move |x| (x, y)))
+                .map(|(x, y)| u32::from(bytes[((y * raster.width() + x) * 4 + 3) as usize]))
+                .sum::<u32>()
+        };
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        // U three times picks the Ruler tool; a click lays a vertical ruler.
+        for _ in 0..3 {
+            step(&mut runtime, vec![key(egui::Key::U, plain)]);
+        }
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(middle), press(middle, true)],
+        );
+        step(&mut runtime, vec![press(middle, false)]);
+        // A pen stroke on the left only.
+        step(&mut runtime, vec![key(egui::Key::P, plain)]);
+        let mut stroke = |runtime: &mut Runtime, y: f32| {
+            let (a, b) = (middle + vec2(-80.0, y), middle + vec2(-30.0, y));
+            step(runtime, vec![egui::Event::PointerMoved(a), press(a, true)]);
+            step(
+                runtime,
+                vec![
+                    egui::Event::PointerMoved(middle + vec2(-55.0, y)),
+                    egui::Event::PointerMoved(b),
+                ],
+            );
+            step(runtime, vec![press(b, false)]);
+        };
+        stroke(&mut runtime, 0.0);
+        assert!(ink(&runtime, 650..740, 580..620) > 0, "drawn on the left");
+        assert!(
+            ink(&runtime, 860..950, 580..620) > 0,
+            "mirrored on the right"
+        );
+        // Snap to Special Ruler (Ctrl+2) turns it off: the next stroke
+        // stays on its side.
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: paint.clone(),
+                command: "view.snap_special".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        stroke(&mut runtime, 60.0);
+        assert!(ink(&runtime, 650..740, 690..760) > 0);
+        assert_eq!(
+            ink(&runtime, 860..950, 690..760),
+            0,
+            "no mirror with the ruler off"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_saves_as_a_project_or_any_picture_type() {
         let (mut runtime, root) = runtime("paint-save-as");
         let ctx = egui::Context::default();

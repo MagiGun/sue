@@ -52,6 +52,11 @@ pub(crate) struct Doc {
     pub track: usize,
     /// Playing since then, from that frame.
     pub playing: Option<(std::time::Instant, u32)>,
+    /// The symmetrical ruler: its center and angle (radians), in picture
+    /// pixels.
+    pub ruler: Option<([f32; 2], f32)>,
+    /// Strokes follow the ruler (Snap to Special Ruler).
+    pub ruler_on: bool,
     pub selection: Option<Selection>,
     pub last_selection: Option<Selection>,
     pub edges: Option<Vec<[[f32; 2]; 2]>>,
@@ -67,6 +72,8 @@ impl Doc {
             frame: 0,
             track: 0,
             playing: None,
+            ruler: None,
+            ruler_on: true,
             selection: None,
             last_selection: None,
             edges: None,
@@ -497,6 +504,7 @@ fn implemented(command: &str) -> bool {
             | "edit.canvas_size"
             | "edit.resolution"
             | "edit.crop"
+            | "view.snap_special"
             | "layer.new.folder"
             | "anim.timeline.new"
             | "anim.layer.folder"
@@ -1848,6 +1856,11 @@ impl SuePaint {
                 self.dialog = Some(Dialog::Frame(crate::comic::FrameSpec::default()));
             }
             "layer.new.balloon" => self.add_balloon_layer(cx),
+            "view.snap_special" => {
+                if let Some(doc) = self.doc_mut() {
+                    doc.ruler_on = !doc.ruler_on;
+                }
+            }
             "edit.canvas_size" | "edit.resolution" => {
                 let Some(old) = self
                     .picture()

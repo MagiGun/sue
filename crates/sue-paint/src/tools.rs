@@ -141,12 +141,7 @@ impl Tool {
     pub const fn available(self) -> bool {
         !matches!(
             self,
-            Self::Decoration
-                | Self::Blend
-                | Self::Text
-                | Self::Ruler
-                | Self::CorrectLine
-                | Self::Operation
+            Self::Decoration | Self::Blend | Self::Text | Self::CorrectLine | Self::Operation
         )
     }
 
@@ -435,12 +430,10 @@ impl Tool {
                     SubTool::new(self, "Balloon Tail", 1, outline),
                 ]
             }
-            Self::Decoration
-            | Self::Blend
-            | Self::Text
-            | Self::Ruler
-            | Self::CorrectLine
-            | Self::Operation => vec![plain(self.label(), 0)],
+            Self::Ruler => vec![plain("Symmetrical Ruler", 0)],
+            Self::Decoration | Self::Blend | Self::Text | Self::CorrectLine | Self::Operation => {
+                vec![plain(self.label(), 0)]
+            }
         }
     }
 }
@@ -466,6 +459,10 @@ pub struct SubTool {
     pub flick: bool,
     /// How different a color may be and still be filled or selected, 0 to 1.
     pub tolerance: f32,
+    /// A symmetrical ruler's turns around its center, 1 to 32.
+    pub lines: u32,
+    /// A symmetrical ruler mirrors across its line (Line symmetry).
+    pub mirror: bool,
 }
 
 impl SubTool {
@@ -482,6 +479,8 @@ impl SubTool {
             correction: 0,
             flick: false,
             tolerance: 0.0,
+            lines: 1,
+            mirror: true,
         }
     }
 

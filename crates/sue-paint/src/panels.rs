@@ -908,6 +908,7 @@ impl SuePaint {
                 .size(theme.small_size + 0.5)
                 .color(theme.muted)
         };
+        let mut remove_ruler = false;
         let sub = self.toolbox.current_mut();
         match tool {
             tool if tool.paints() => {
@@ -1144,9 +1145,53 @@ impl SuePaint {
             Tool::MoveLayer => {
                 ui.label(small("Drag to move the current layer"));
             }
+            Tool::Ruler => {
+                ui.label(small(
+                    "Drag on the canvas to lay the ruler: strokes draw on both sides",
+                ));
+                let mut lines = sub.lines as f32;
+                if slider_row(
+                    ui,
+                    "Number of lines",
+                    &mut lines,
+                    1.0..=16.0,
+                    "",
+                    false,
+                    theme,
+                ) {
+                    sub.lines = lines.round() as u32;
+                }
+                ui.checkbox(&mut sub.mirror, small("Line symmetry"))
+                    .on_hover_text("Mirror across the ruler as well as turning around its middle");
+                if ui.button("Remove the ruler").clicked() {
+                    remove_ruler = true;
+                }
+                ui.label(small("Ctrl+2 (Snap to Special Ruler) turns it on and off"));
+            }
+            Tool::Frame => {
+                ui.label(small(if sub.mode == 1 {
+                    "Drag a line across a panel to divide it"
+                } else {
+                    "Drag to draw a rectangle panel"
+                }));
+            }
+            Tool::Balloon => {
+                let mut line = sub.tip.size;
+                if slider_row(ui, "Line width", &mut line, 1.0..=20.0, " px", false, theme) {
+                    sub.tip.size = line;
+                }
+                ui.label(small(if sub.mode == 1 {
+                    "Drag from inside a balloon to where its tail points"
+                } else {
+                    "Drag to draw a balloon"
+                }));
+            }
             _ => {
                 ui.label(small("This tool arrives in a later Sue Paint"));
             }
+        }
+        if remove_ruler && let Some(doc) = self.doc_mut() {
+            doc.ruler = None;
         }
     }
 

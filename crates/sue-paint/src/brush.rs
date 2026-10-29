@@ -231,6 +231,62 @@ fn jittered(color: [f32; 3], sub: [f32; 3], amounts: [f32; 4], chance: [f32; 4])
     [0, 1, 2].map(|i| rgb[i] + (sub[i] - rgb[i]) * toward)
 }
 
+/// An affine map of layer pixels, `[a, b, c, d, tx, ty]`: a point goes to
+/// `(a x + b y + tx, c x + d y + ty)`. A stroke paints once through each of
+/// its copies (symmetry rulers).
+pub type Copy2D = [f32; 6];
+
+/// Leaves points where they are.
+pub const SAME: Copy2D = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+
+/// `point` through `copy`.
+#[must_use]
+pub fn copied(copy: &Copy2D, [x, y]: [f32; 2]) -> [f32; 2] {
+    [
+        copy[0] * x + copy[1] * y + copy[4],
+        copy[2] * x + copy[3] * y + copy[5],
+    ]
+}
+
+/// The copies of a symmetry ruler through `center` along `angle`
+/// (radians): `lines` turns around the center and, with `mirror`, each
+/// one's reflection across the ruler too (`lines` 1 with `mirror` is a
+/// left and right mirror).
+#[must_use]
+pub fn symmetry(center: [f32; 2], angle: f32, lines: u32, mirror: bool) -> Vec<Copy2D> {
+    let lines = lines.clamp(1, 32);
+    let mut out = Vec::new();
+    for turn in 0..lines {
+        let theta = turn as f32 * std::f32::consts::TAU / lines as f32;
+        let (sin, cos) = theta.sin_cos();
+        let rotation = [cos, -sin, sin, cos];
+        let mut kinds = vec![rotation];
+        if mirror {
+            // A reflection across the ruler's line, then the turn.
+            let (s2, c2) = (2.0 * angle).sin_cos();
+            let reflect = [c2, s2, s2, -c2];
+            kinds.push([
+                rotation[0] * reflect[0] + rotation[1] * reflect[2],
+                rotation[0] * reflect[1] + rotation[1] * reflect[3],
+                rotation[2] * reflect[0] + rotation[3] * reflect[2],
+                rotation[2] * reflect[1] + rotation[3] * reflect[3],
+            ]);
+        }
+        for [a, b, c, d] in kinds {
+            // About the center: p' = M (p - center) + center.
+            out.push([
+                a,
+                b,
+                c,
+                d,
+                center[0] - (a * center[0] + b * center[1]),
+                center[1] - (c * center[0] + d * center[1]),
+            ]);
+        }
+    }
+    out
+}
+
 /// A steady chance from 0 to 1 for `seed` and `salt`.
 fn noise(seed: u32, salt: u32) -> f32 {
     let mut h = seed ^ salt.wrapping_mul(0x9E37_79B1);
@@ -446,6 +502,7 @@ pub struct Stroke {
     seed: u32,
     sub: [f32; 3],
     end_speeds: Option<(f32, f32)>,
+    copies: Vec<Copy2D>,
 }
 
 impl Stroke {
@@ -471,7 +528,19 @@ impl Stroke {
             seed: 0,
             sub: [1.0; 3],
             end_speeds: None,
+            copies: vec![SAME],
         }
+    }
+
+    /// Paints every sample once through each of `copies` (symmetry rulers;
+    /// the first should be [`SAME`]). The copies share the stroke's
+    /// coverage, so where they overlap they do not stack.
+    pub fn set_copies(&mut self, copies: Vec<Copy2D>) {
+        self.copies = if copies.is_empty() {
+            vec![SAME]
+        } else {
+            copies
+        };
     }
 
     /// The sub color, for color jitter that blends toward it.
@@ -565,12 +634,20 @@ impl Stroke {
                 self.carried = self.color;
             }
         }
+        let copies = self.copies.clone();
+        let through = |copy: &Copy2D, sample: Sample| Sample {
+            at: copied(copy, sample.at),
+            ..sample
+        };
         match self.samples.last().copied() {
             None => {
-                if self.tip.dabbed() {
-                    self.dab(raster, sample, 0.0, selection);
-                } else {
-                    self.capsule(raster, sample, sample, 0.0, 0.0, selection);
+                for copy in &copies {
+                    let sample = through(copy, sample);
+                    if self.tip.dabbed() {
+                        self.dab(raster, sample, 0.0, selection);
+                    } else {
+                        self.capsule(raster, sample, sample, 0.0, 0.0, selection);
+                    }
                 }
             }
             Some(last) => {
@@ -579,11 +656,22 @@ impl Stroke {
                     return;
                 }
                 let start = self.travelled;
-                if self.tip.dabbed() {
-                    self.dabs(raster, last, sample, start, length, selection);
-                } else {
-                    self.capsule(raster, last, sample, start, start + length, selection);
+                // Every copy starts from the same dab spacing.
+                let since = self.since_dab;
+                let mut after = since;
+                for (index, copy) in copies.iter().enumerate() {
+                    let (a, b) = (through(copy, last), through(copy, sample));
+                    if self.tip.dabbed() {
+                        self.since_dab = since;
+                        self.dabs(raster, a, b, start, length, selection);
+                        if index == 0 {
+                            after = self.since_dab;
+                        }
+                    } else {
+                        self.capsule(raster, a, b, start, start + length, selection);
+                    }
                 }
+                self.since_dab = after;
                 self.travelled += length;
             }
         }
@@ -1968,6 +2056,43 @@ mod tests {
             .map(|x| bytes[((10 * 200 + x) * 4) as usize])
             .collect();
         assert!(reds.len() > 4, "dabs in several colors");
+    }
+
+    #[test]
+    fn a_symmetry_ruler_paints_every_copy_without_stacking() {
+        // A mirror down x = 50: a stroke on the left shows on the right.
+        let copies = symmetry([50.0, 50.0], std::f32::consts::FRAC_PI_2, 1, true);
+        assert_eq!(copies.len(), 2);
+        assert!(
+            copied(&copies[1], [20.0, 30.0])
+                .iter()
+                .zip([80.0, 30.0])
+                .all(|(a, b)| (a - b).abs() < 1e-3)
+        );
+        let tip = Tip {
+            size: 6.0,
+            size_by: Dynamics::NONE,
+            opacity: 0.5,
+            ..Tip::default()
+        };
+        let mut raster = layer(100, 100);
+        let mut stroke = Stroke::new(EntityId::new(), tip, [0.0; 3], false);
+        stroke.set_copies(copies);
+        // From the left of the axis across it: the copies overlap there.
+        stroke.to(&mut raster, [20.0, 50.0], 1.0, None);
+        stroke.to(&mut raster, [60.0, 50.0], 1.0, None);
+        assert!(alpha(&raster, 25, 50) > 100);
+        assert!(alpha(&raster, 75, 50) > 100, "the mirrored copy");
+        assert_eq!(
+            alpha(&raster, 50, 50),
+            alpha(&raster, 30, 50),
+            "no stacking where they overlap"
+        );
+        // Four turns around the middle.
+        let four = symmetry([50.0, 50.0], 0.0, 4, false);
+        assert_eq!(four.len(), 4);
+        let turned = copied(&four[1], [70.0, 50.0]);
+        assert!((turned[0] - 50.0).abs() < 1e-3 && (turned[1] - 70.0).abs() < 1e-3);
     }
 
     #[test]

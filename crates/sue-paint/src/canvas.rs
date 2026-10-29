@@ -535,6 +535,18 @@ impl SuePaint {
                     BrushStroke::new(info.id, tip, rgb, info.alpha_locked && !tip.eraser);
                 let other = if self.sub_active { self.main } else { self.sub };
                 stroke.set_sub_color(color::unit(other));
+                if let Some((center, angle)) = doc.ruler.filter(|_| doc.ruler_on) {
+                    // The symmetrical ruler: a copy through every turn and
+                    // mirror, in the layer's pixels.
+                    let ruler = self.toolbox.of(Tool::Ruler);
+                    let center = [center[0] - offset[0] as f32, center[1] - offset[1] as f32];
+                    stroke.set_copies(crate::brush::symmetry(
+                        center,
+                        angle,
+                        ruler.lines,
+                        ruler.mirror,
+                    ));
+                }
                 let shifted = doc
                     .selection
                     .as_ref()
@@ -561,7 +573,7 @@ impl SuePaint {
                     line: modifiers.shift,
                 });
             }
-            Tool::Frame | Tool::Balloon => {
+            Tool::Frame | Tool::Balloon | Tool::Ruler => {
                 self.gesture = Some(Gesture::Shape {
                     tool,
                     sub: Box::new(sub),
@@ -862,6 +874,20 @@ impl SuePaint {
                 Tool::Figure => self.figure(from, to, &sub, size, cx),
                 Tool::Gradient => self.gradient(from, to, &sub, cx),
                 Tool::Frame => self.frame_drag(from, to, &sub, cx),
+                Tool::Ruler => {
+                    // The ruler runs through where the drag began, along it
+                    // (straight up and down for a click).
+                    let (dx, dy) = (to.x - from.x, to.y - from.y);
+                    let angle = if dx.hypot(dy) < 4.0 {
+                        std::f32::consts::FRAC_PI_2
+                    } else {
+                        dy.atan2(dx)
+                    };
+                    if let Some(doc) = self.docs.get_mut(self.active) {
+                        doc.ruler = Some(([from.x, from.y], angle));
+                        doc.ruler_on = true;
+                    }
+                }
                 Tool::Balloon => self.balloon_drag(from, to, &sub, cx),
                 _ => {}
             },
@@ -1540,8 +1566,10 @@ impl SuePaint {
                         painter.circle_stroke(screen([from.x, from.y]), 4.0, outline);
                         painter.circle_stroke(screen([to.x, to.y]), 4.0, outline);
                     }
-                    Tool::Figure | Tool::Frame | Tool::Balloon
-                        if (tool == &Tool::Figure && sub.mode == 0) || sub.mode == 1 =>
+                    Tool::Figure | Tool::Frame | Tool::Balloon | Tool::Ruler
+                        if (tool == &Tool::Figure && sub.mode == 0)
+                            || sub.mode == 1
+                            || tool == &Tool::Ruler =>
                     {
                         painter.line_segment(
                             [screen([from.x, from.y]), screen([to.x, to.y])],
@@ -1572,6 +1600,27 @@ impl SuePaint {
                 painter.add(Shape::line(path, Stroke::new(1.0, theme.border_active)));
             }
             _ => {}
+        }
+        // The symmetrical ruler: its lines through the middle.
+        if let Some((center, angle)) = doc.ruler {
+            let ruler = self.toolbox.of(Tool::Ruler);
+            let lines = ruler.lines.max(1);
+            let reach = (size[0] + size[1]) as f32;
+            let color = if doc.ruler_on {
+                Color32::from_rgb(170, 120, 255)
+            } else {
+                Color32::from_rgb(170, 120, 255).gamma_multiply(0.35)
+            };
+            for line in 0..lines {
+                let theta = angle + line as f32 * std::f32::consts::PI / lines as f32;
+                let (dx, dy) = (theta.cos() * reach, theta.sin() * reach);
+                let ends = [
+                    screen([center[0] - dx, center[1] - dy]),
+                    screen([center[0] + dx, center[1] + dy]),
+                ];
+                painter.add(Shape::dashed_line(&ends, Stroke::new(1.5, color), 8.0, 5.0));
+            }
+            painter.circle_stroke(screen(center), 5.0, Stroke::new(1.5, color));
         }
         // The brush outline under the pointer.
         let tool = self.toolbox.tool();
