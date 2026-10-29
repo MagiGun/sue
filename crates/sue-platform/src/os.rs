@@ -153,6 +153,65 @@ pub fn reveal_file(path: &Path) -> io::Result<()> {
     }
 }
 
+/// The name of the file manager [`reveal_file`] shows files in, for
+/// words such as "Show it in Explorer"; `None` where Sue cannot show a
+/// file in one (phones and tablets).
+#[must_use]
+pub fn file_manager() -> Option<&'static str> {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
+        None
+    } else if cfg!(target_os = "windows") {
+        Some("Explorer")
+    } else if cfg!(target_os = "macos") {
+        Some("Finder")
+    } else {
+        Some("the file manager")
+    }
+}
+
+/// Where a file or folder is, in the words people know it by.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShownPlace {
+    /// Its name, e.g. `Picture.png`.
+    pub name: String,
+    /// The folder it is in, where the system can say it, e.g. `Download`
+    /// or `Documents/Exports`.
+    pub folder: Option<String>,
+}
+
+impl std::fmt::Display for ShownPlace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.folder {
+            Some(folder) => write!(f, "{} in {folder}", self.name),
+            None => f.write_str(&self.name),
+        }
+    }
+}
+
+/// What people chose, for a path a system picker staged in Sue's cache
+/// on a phone or tablet: writes to it go to that place (see
+/// [`deliver_picked_files`]). `None` for every other path, so always on
+/// desktops.
+#[must_use]
+pub fn shown_place(path: &Path) -> Option<ShownPlace> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        crate::picks::native_shown(path)
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+/// A path as people should read it: what they chose for a path a system
+/// picker staged (see [`shown_place`]), else the path itself.
+#[must_use]
+pub fn shown_path(path: &Path) -> String {
+    shown_place(path).map_or_else(|| path.display().to_string(), |shown| shown.to_string())
+}
+
 /// A file-type filter for the native dialogs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileFilter {
@@ -341,5 +400,18 @@ mod tests {
         ] {
             assert!(web_url(bad).is_err(), "{bad:?} must be rejected");
         }
+    }
+
+    #[test]
+    fn desktops_show_paths_as_they_are() {
+        let path = std::env::temp_dir().join("Picture.png");
+        assert_eq!(shown_place(&path), None);
+        assert_eq!(shown_path(&path), path.display().to_string());
+        assert!(file_manager().is_some());
+        let shown = ShownPlace {
+            name: "Picture.png".to_owned(),
+            folder: None,
+        };
+        assert_eq!(shown.to_string(), "Picture.png");
     }
 }

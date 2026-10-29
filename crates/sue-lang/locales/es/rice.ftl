@@ -8,8 +8,13 @@ general-confirm_on_exit = Confirmar al salir
 general-language = Idioma
     .description = El idioma de Sue, que siguen todos los estudios y herramientas salvo los que tengan uno propio (sistema sigue el idioma del sistema)
 
+general-autosave_seconds = Autoguardado cada
+    .description = Guardar el trabajo sin guardar cada tanto, para que el Hub pueda recuperarlo (s; 0 lo desactiva)
+
 ## [launchpad]
 
+launchpad-recent_count = Archivos recientes en el Hub
+    .description = Cuántos archivos y proyectos recientes muestra el Hub (0 oculta la lista)
 launchpad-pinned = Abrir al iniciar
     .description = El estudio o la herramienta en que Sue se abre directamente (la chincheta de su cuadro en el Hub; vacío abre el Hub)
 

@@ -162,6 +162,14 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
                 }
                 open_list = list;
             }
+            if let Some(contents) = book.contents_of(&para) {
+                if open_list.take().is_some() {
+                    body.push_str("</text:list>");
+                }
+                tables += 1;
+                body.push_str(&contents_xml(book, contents, tables));
+                continue;
+            }
             if let Some(table) = book.table(&para) {
                 if open_list.take().is_some() {
                     body.push_str("</text:list>");
@@ -287,14 +295,28 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
     styles.push_str("<style:style style:name=\"Footnote\" style:family=\"paragraph\"><style:text-properties fo:font-size=\"10pt\"/></style:style>");
     styles.push_str("<style:style style:name=\"Table_20_Heading\" style:display-name=\"Table Heading\" style:family=\"paragraph\"><style:text-properties fo:font-weight=\"bold\"/></style:style>");
     let [top, right, bottom, left] = book.margins;
-    let footer = if book.page_numbers {
-        "<style:footer><text:p text:style-name=\"Sue_20_Footer\"><text:page-number text:select-page=\"current\">1</text:page-number></text:p></style:footer>"
-    } else {
-        ""
-    };
+    let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+    let mut furniture = String::new();
+    for (running, tag) in [(&book.header, "header"), (&book.footer, "footer")] {
+        if running.is_empty() {
+            continue;
+        }
+        let paragraph = running_xml(book, running);
+        let _ = write!(furniture, "<style:{tag}>{paragraph}</style:{tag}>");
+        if book.different_first {
+            let _ = write!(
+                furniture,
+                "<style:{tag}-first><text:p text:style-name=\"Sue_20_Footer\"/></style:{tag}-first>"
+            );
+        }
+    }
+    let footer = furniture;
     let styles_xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<office:document-styles {NS}><office:styles>{styles}<style:style style:name=\"Sue_20_Footer\" style:family=\"paragraph\"><style:paragraph-properties fo:text-align=\"center\"/></style:style></office:styles><office:automatic-styles><style:page-layout style:name=\"Page\"><style:page-layout-properties fo:page-width=\"{}pt\" fo:page-height=\"{}pt\" fo:margin-top=\"{top}pt\" fo:margin-right=\"{right}pt\" fo:margin-bottom=\"{bottom}pt\" fo:margin-left=\"{left}pt\"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name=\"Standard\" style:page-layout-name=\"Page\">{footer}</style:master-page></office:master-styles></office:document-styles>",
-        book.page[0], book.page[1]
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<office:document-styles {NS}><office:styles>{styles}<style:style style:name=\"Sue_20_Footer\" style:family=\"paragraph\"><style:paragraph-properties><style:tab-stops><style:tab-stop style:position=\"{}pt\" style:type=\"center\"/><style:tab-stop style:position=\"{}pt\" style:type=\"right\"/></style:tab-stops></style:paragraph-properties><style:text-properties fo:font-size=\"9pt\"/></style:style></office:styles><office:automatic-styles><style:page-layout style:name=\"Page\"><style:page-layout-properties fo:page-width=\"{}pt\" fo:page-height=\"{}pt\" fo:margin-top=\"{top}pt\" fo:margin-right=\"{right}pt\" fo:margin-bottom=\"{bottom}pt\" fo:margin-left=\"{left}pt\"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name=\"Standard\" style:page-layout-name=\"Page\">{footer}</style:master-page></office:master-styles></office:document-styles>",
+        width / 2.0,
+        width,
+        book.page[0],
+        book.page[1]
     );
     let meta = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<office:document-meta {NS}><office:meta><dc:title>{}</dc:title><dc:creator>{}</dc:creator><dc:language>{}</dc:language><meta:generator>Sue</meta:generator></office:meta></office:document-meta>",
@@ -322,6 +344,58 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
         zip.add(&name, &bytes, true);
     }
     zip.finish()
+}
+
+/// A running header or footer's paragraph: its parts parted by tabs (the
+/// paragraph style's centered and right tab stops), its page fields
+/// OpenDocument's own.
+fn running_xml(book: &Book, running: &sue_model::Running) -> String {
+    use crate::publish::Live;
+    let mut out = String::from("<text:p text:style-name=\"Sue_20_Footer\">");
+    for (index, part) in book.live(running).iter().enumerate() {
+        if index > 0 {
+            out.push_str("<text:tab/>");
+        }
+        for piece in part {
+            match piece {
+                Live::Text(text) => out.push_str(&escape(text)),
+                Live::Page => {
+                    out.push_str(
+                        "<text:page-number text:select-page=\"current\">1</text:page-number>",
+                    );
+                }
+                Live::Pages => out.push_str("<text:page-count>1</text:page-count>"),
+            }
+        }
+    }
+    out.push_str("</text:p>");
+    out
+}
+
+/// A table of contents as OpenDocument's own, over the outline levels it
+/// lists, its body the book's headings.
+fn contents_xml(book: &Book, contents: &sue_model::contents::Contents, number: usize) -> String {
+    let name = format!("Contents{number}");
+    let title = escape(&contents.title);
+    let mut out = format!(
+        "<text:table-of-content text:protected=\"true\" text:name=\"{name}\"><text:table-of-content-source text:outline-level=\"{}\"><text:index-title-template text:style-name=\"Contents_20_Heading\">{title}</text:index-title-template></text:table-of-content-source><text:index-body>",
+        contents.levels
+    );
+    if !contents.title.is_empty() {
+        let _ = write!(
+            out,
+            "<text:index-title text:name=\"{name}_Head\"><text:p text:style-name=\"Contents_20_Heading\">{title}</text:p></text:index-title>"
+        );
+    }
+    for (level, heading) in book.headings(contents) {
+        let _ = write!(
+            out,
+            "<text:p text:style-name=\"Contents_20_{level}\">{}</text:p>",
+            escape(&heading)
+        );
+    }
+    out.push_str("</text:index-body></text:table-of-content>");
+    out
 }
 
 /// Table number `number` as OpenDocument, `width` points across: its
@@ -382,6 +456,36 @@ fn table_xml(table: &crate::publish::PublishTable, number: usize, width: f32) ->
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn opendocument_contents_are_an_index_of_the_outline() {
+        let files = read_zip(&to_odt(&super::super::tests::with_contents())).unwrap();
+        let content = files
+            .iter()
+            .find(|(name, _)| name == "content.xml")
+            .unwrap();
+        let xml = String::from_utf8(content.1.clone()).unwrap();
+        assert!(
+            xml.contains("<text:table-of-content-source text:outline-level=\"2\">"),
+            "{xml}"
+        );
+        assert!(xml.contains("<text:p text:style-name=\"Contents_20_2\">Two</text:p>"));
+        assert!(!xml.contains("Contents_20_3"));
+    }
+
+    #[test]
+    fn opendocument_headers_and_footers_carry_live_page_fields() {
+        let mut book = sample();
+        book.header = sue_model::Running::parse("{author}\t\t{page}/{pages}");
+        book.different_first = true;
+        let files = read_zip(&to_odt(&book)).unwrap();
+        let styles = files.iter().find(|(name, _)| name == "styles.xml").unwrap();
+        let xml = String::from_utf8(styles.1.clone()).unwrap();
+        assert!(xml.contains("<style:header><text:p text:style-name=\"Sue_20_Footer\">A. Writer<text:tab/><text:tab/><text:page-number"), "{xml}");
+        assert!(xml.contains("<text:page-count>1</text:page-count>"));
+        assert!(xml.contains("<style:header-first>"));
+        assert!(xml.contains("<style:footer>"));
+    }
+
     use super::super::tests::sample;
     use super::super::tests::with_table;
     use super::super::xml::{XmlEvent, parse};

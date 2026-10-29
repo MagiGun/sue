@@ -52,3 +52,20 @@ heading-row = Heading Row
 ## tables.rs
 
 table = Table
+
+## editor.rs
+
+insert-table-of-contents = Insert Table of Contents
+
+## find.rs
+
+regular-expression-not-valid = That regular expression is not valid
+regular-expression-too-large = That regular expression is too large
+
+## Change Case (sue_type::case::Case::ALL keeps these in English)
+
+case-sentence = Sentence case
+case-lower = lowercase
+case-upper = UPPERCASE
+case-title = Capitalize Every Word
+case-toggle = tOGGLE cASE

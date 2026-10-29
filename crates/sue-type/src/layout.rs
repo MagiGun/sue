@@ -9,7 +9,8 @@ use std::sync::Arc;
 use egui::text::{ByteIndex, LayoutJob, LayoutSection, TextFormat};
 use egui::{Color32, FontFamily, FontId, Galley, Stroke, Vec2, vec2};
 use sue_core::{EntityId, Value};
-use sue_model::{Mark, TextMarks, mark_kind as kind};
+use sue_model::contents::Contents;
+use sue_model::{Mark, PageFields, Running, TextMarks, mark_kind as kind};
 
 use crate::style::{
     Align, CharFormat, ListKind, ParagraphLook, StyleSheet, marks_by_paragraph, paragraph_look,
@@ -20,17 +21,26 @@ use crate::tables::{TableBlock, TableSource, lay_table};
 /// Screen pixels per point at 100% zoom (a 96 dpi screen).
 pub const PX_PER_PT: f32 = 96.0 / 72.0;
 
-/// A page's size and margins, in points.
+/// A page's size and margins, in points, and what its margins show.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PageSetup {
     /// Width and height.
     pub size: [f32; 2],
     /// Top, right, bottom and left margins.
     pub margins: [f32; 4],
-    /// Page numbers at the bottom.
-    pub numbers: bool,
-    /// Text at the top of every page but the first (a running head).
-    pub header: String,
+    /// The running header, in the top margin.
+    pub header: Running,
+    /// The running footer, in the bottom margin (the page number in the
+    /// middle, unless set otherwise).
+    pub footer: Running,
+    /// No header or footer on the first page (a title page).
+    pub different_first: bool,
+    /// The title, author and date their fields show.
+    pub title: String,
+    /// The author.
+    pub author: String,
+    /// The date.
+    pub date: String,
 }
 
 impl Default for PageSetup {
@@ -38,13 +48,35 @@ impl Default for PageSetup {
         Self {
             size: [612.0, 792.0],
             margins: [72.0; 4],
-            numbers: true,
-            header: String::new(),
+            header: Running::default(),
+            footer: Running::parse("{page}"),
+            different_first: false,
+            title: String::new(),
+            author: String::new(),
+            date: String::new(),
         }
     }
 }
 
 impl PageSetup {
+    /// What page `page` (from 0) of `pages` shows in its header and in its
+    /// footer: left, middle and right, fields filled in. `None` for none.
+    #[must_use]
+    pub fn furniture(&self, page: usize, pages: usize) -> [Option<[String; 3]>; 2] {
+        if page == 0 && self.different_first {
+            return [None, None];
+        }
+        let fields = PageFields {
+            page: page + 1,
+            pages,
+            title: &self.title,
+            author: &self.author,
+            date: &self.date,
+        };
+        [&self.header, &self.footer]
+            .map(|running| (!running.is_empty()).then(|| running.fill(&fields)))
+    }
+
     /// The width text runs across, in points.
     #[must_use]
     pub fn text_width(&self) -> f32 {
@@ -129,6 +161,10 @@ pub struct Block {
     pub figure: Option<(EntityId, Vec2)>,
     /// An embedded table filling the paragraph; its rows are the block's.
     pub table: Option<Arc<TableBlock>>,
+    /// A table of contents filling the paragraph: its entity and settings
+    /// (its entries, in `table`, come with the pages,
+    /// [`crate::contents::fill`]).
+    pub contents: Option<(EntityId, Contents)>,
     /// Each row's top and bottom, in galley pixels.
     pub rows: Vec<(f32, f32)>,
     /// Space above and below, in pixels.
@@ -194,6 +230,8 @@ pub struct Source<'a> {
     pub figure_size: &'a dyn Fn(EntityId) -> Option<Vec2>,
     /// Tables it shows ([`crate::tables`]).
     pub tables: &'a dyn Fn(EntityId) -> Option<TableSource>,
+    /// Tables of contents it shows ([`crate::contents`]).
+    pub contents: &'a dyn Fn(EntityId) -> Option<Contents>,
 }
 
 /// What a paragraph's text is laid out with.
@@ -355,11 +393,14 @@ pub fn lay_document(
             let source = (source.tables)(id)?;
             Some(Arc::new(lay_table(ctx, id, &source, &look, setting, width)))
         });
-        let figure = embed.filter(|_| table.is_none()).and_then(|id| {
-            let size = (source.figure_size)(id)? * setting.scale;
-            let fit = (width / size.x.max(1.0)).min(1.0);
-            Some((id, size * fit))
-        });
+        let contents = embed.and_then(|id| Some((id, (source.contents)(id)?)));
+        let figure = embed
+            .filter(|_| table.is_none() && contents.is_none())
+            .and_then(|id| {
+                let size = (source.figure_size)(id)? * setting.scale;
+                let fit = (width / size.x.max(1.0)).min(1.0);
+                Some((id, size * fit))
+            });
         let mut job = LayoutJob::default();
         job.wrap.max_width = width;
         job.halign = match look.align {
@@ -437,6 +478,7 @@ pub fn lay_document(
             label,
             figure,
             table,
+            contents,
             rows,
         });
     }
@@ -605,6 +647,7 @@ mod tests {
                         .find(|(known, _)| *known == id)
                         .map(|(_, table)| table.clone())
                 },
+                contents: &|_| None,
             };
             out.blocks = lay_document(ui.ctx(), 0, &source, &setting);
             out.doc_starts = vec![0];
@@ -625,6 +668,24 @@ mod tests {
             margins: [20.0; 4],
             ..PageSetup::default()
         };
+        // The footer numbers each page; a title page shows none.
+        let footers = page.furniture(1, 3);
+        assert_eq!(footers[0], None);
+        assert_eq!(
+            footers[1],
+            Some([String::new(), "2".to_owned(), String::new()])
+        );
+        let titled = PageSetup {
+            different_first: true,
+            header: Running::parse("{title}\t\tPage {page} of {pages}"),
+            title: "Book".to_owned(),
+            ..page.clone()
+        };
+        assert_eq!(titled.furniture(0, 3), [None, None]);
+        assert_eq!(
+            titled.furniture(2, 3)[0],
+            Some(["Book".to_owned(), String::new(), "Page 3 of 3".to_owned()])
+        );
         let paged = laid(&text, &marks, ViewMode::Page, &page);
         assert_eq!(paged.blocks.len(), 4);
         assert!(paged.pages > 2, "{} pages", paged.pages);
@@ -669,13 +730,7 @@ mod tests {
             header_rows: 1,
             shares: vec![0.75, 0.25],
         };
-        let text = format!(
-            "Before
-{}
-After
-",
-            sue_model::OBJECT
-        );
+        let text = format!("Before\n{}\nAfter\n", sue_model::OBJECT);
         let mut marks = TextMarks::new();
         let at = text.find(sue_model::OBJECT).unwrap();
         marks.set(

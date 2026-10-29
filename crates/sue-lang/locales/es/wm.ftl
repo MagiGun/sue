@@ -50,7 +50,6 @@ redo = Rehacer
 
 ## La barra de estado y los mensajes
 
-saved-click-show = { $name }{ $note } guardado en { $folder }. Haz clic para mostrarlo
 there-no-studio-tool-called = No hay ningún estudio ni herramienta llamado { $id }
 that-is-gone = Eso ya no existe
 is-not-available = { $command } no está disponible

@@ -7,8 +7,13 @@ general-confirm_on_exit = 終了時に確認
 general-language = 言語
     .description = Sue の言語。独自の言語を設定したもの以外、すべてのスタジオとツールがこれに合わせます (「システム」はシステムの言語に合わせます)
 
+general-autosave_seconds = 自動保存の間隔
+    .description = 未保存の作業をこの間隔で保管し、ハブから戻せるようにする (秒、0 で自動保存しない)
+
 ## [launchpad]
 
+launchpad-recent_count = ハブの最近使ったファイル
+    .description = ハブに表示する最近のファイルとプロジェクトの数 (0 で一覧を隠す)
 launchpad-pinned = 起動時に開く
     .description = Sue が直接開くスタジオやツール (ハブのボックスにあるピン。空ならハブを開きます)
 

@@ -80,6 +80,8 @@ pub fn menus() -> Vec<Menu> {
                 item(tr!("page-break"), "insert.page_break").key("Ctrl+Enter"),
                 item(tr!("scene-break"), "insert.scene_break"),
                 item(tr!("footnote-ellipsis"), "insert.footnote").key("Ctrl+Alt+F"),
+                item(tr!("header-and-footer-ellipsis"), "insert.header_footer"),
+                item(tr!("table-of-contents-ellipsis"), "insert.contents"),
                 item(tr!("link-ellipsis"), "insert.link").key("Ctrl+K"),
                 item(tr!("picture-ellipsis"), "insert.picture"),
                 item(tr!("todays-date"), "insert.date"),
@@ -99,6 +101,19 @@ pub fn menus() -> Vec<Menu> {
                         item(tr!("subscript"), "format.subscript").key("Ctrl+="),
                         item(tr!("small-capitals"), "format.small_caps"),
                         item(tr!("code"), "format.code"),
+                        MenuItem::Separator,
+                        MenuItem::sub(
+                            tr!("change-case"),
+                            sue_type::case::Case::ALL
+                                .iter()
+                                .map(|(_, key, name)| {
+                                    item(
+                                        sue_lang::translate("type", name),
+                                        format!("format.case.{key}"),
+                                    )
+                                })
+                                .collect(),
+                        ),
                     ],
                 ),
                 MenuItem::sub(

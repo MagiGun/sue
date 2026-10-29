@@ -44,6 +44,10 @@ impl System for Files {
         )
     }
 
+    fn folder(&self, place: &str) -> Option<String> {
+        crate::picks::files_folder(place)
+    }
+
     fn copy_in(&self, place: &str, file: &Path) -> Result<(), String> {
         fs::copy(place, file).map_err(|error| error.to_string())?;
         // The picker's copy is Sue's to tidy away.

@@ -48,21 +48,26 @@ pub fn is_picture(entity: &Entity) -> bool {
 /// The viewer's menus, in Sue's top bar.
 fn menus() -> Vec<Menu> {
     let act = MenuItem::action;
+    let mut file = vec![
+        act(tr!("open-picture-ellipsis"), "viewer.open").key("Ctrl+O"),
+        MenuItem::Separator,
+        act(tr!("save-as-ellipsis"), "viewer.save_as"),
+        act(tr!("save-over-the-file-ellipsis"), "viewer.save"),
+        act(tr!("re-encode-as-jpeg-xl-ellipsis"), "viewer.reencode"),
+    ];
+    // Phones and tablets have no file manager to show the file in.
+    if sue_platform::file_manager().is_some() {
+        file.extend([
+            MenuItem::Separator,
+            act(tr!("show-in-folder"), "viewer.show"),
+        ]);
+    }
+    file.extend([
+        MenuItem::Separator,
+        act(tr!("back-to-the-hub"), "viewer.leave").key("Esc"),
+    ]);
     vec![
-        Menu::new(
-            tr!("file"),
-            vec![
-                act(tr!("open-picture-ellipsis"), "viewer.open").key("Ctrl+O"),
-                MenuItem::Separator,
-                act(tr!("save-as-ellipsis"), "viewer.save_as"),
-                act(tr!("save-over-the-file-ellipsis"), "viewer.save"),
-                act(tr!("re-encode-as-jpeg-xl-ellipsis"), "viewer.reencode"),
-                MenuItem::Separator,
-                act(tr!("show-in-folder"), "viewer.show"),
-                MenuItem::Separator,
-                act(tr!("back-to-the-hub"), "viewer.leave").key("Esc"),
-            ],
-        ),
+        Menu::new(tr!("file"), file),
         Menu::new(
             tr!("image"),
             vec![
@@ -1110,7 +1115,7 @@ impl Viewer {
             parts.push(human_bytes(bytes));
         }
         if let Some(path) = entity.meta(meta::SOURCE) {
-            parts.push(path.to_owned());
+            parts.push(sue_platform::shown_path(Path::new(path)));
         }
         let pictures = Self::pictures(cx);
         if let Some(at) = pictures.iter().position(|id| Some(*id) == self.current) {
@@ -1239,7 +1244,7 @@ impl Viewer {
                     ui.label(
                         RichText::new(tr!("save-over-the-original-file")).size(theme.heading_size),
                     );
-                    ui.label(RichText::new(path.display().to_string()).color(theme.muted));
+                    ui.label(RichText::new(sue_platform::shown_path(path)).color(theme.muted));
                     ui.label(tr!("file-replaced-picture-as-now"));
                     ui.horizontal(|ui| {
                         if ui.button(tr!("save-over-it")).clicked() {
@@ -1292,7 +1297,11 @@ impl Viewer {
                         human_bytes(bytes.len() as u64)
                     ),
                 ),
-                Err(error) => cx.fail(tr!("cannot-write", path = path.display(), error = error)),
+                Err(error) => cx.fail(tr!(
+                    "cannot-write-2",
+                    value = sue_platform::shown_path(path),
+                    error = error
+                )),
             },
             Err(error) => cx.fail(error),
         }

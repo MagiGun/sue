@@ -1,6 +1,6 @@
 [package]
 name = "sue-ios"
-description = "Sue on iOS: the audited Objective-C calls that show UIKit's document picker for sue-platform."
+description = "Sue on iOS: the audited Objective-C calls that show UIKit's document picker and watch the on-screen keyboard for sue-platform."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,17 +9,34 @@ repository.workspace = true
 license-file.workspace = true
 
 # The same Objective-C crates winit uses on iOS, with the parts of
-# Foundation and UIKit the document picker needs.
+# Foundation and UIKit the document picker and the keyboard need.
 [target.'cfg(target_os = "ios")'.dependencies]
+block2 = { workspace = true, features = ["std"] }
 objc2.workspace = true
-objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSObject", "NSSet", "NSString", "NSURL"] }
+objc2-core-foundation = { workspace = true, features = ["CFCGTypes", "objc2"] }
+objc2-foundation = { workspace = true, features = [
+    "std",
+    "block2",
+    "NSArray",
+    "NSDictionary",
+    "NSEnumerator",
+    "NSNotification",
+    "NSObject",
+    "NSOperation",
+    "NSSet",
+    "NSString",
+    "NSURL",
+    "NSValue",
+] }
 objc2-ui-kit = { workspace = true, features = [
     "std",
     "block2",
+    "objc2-core-foundation",
     "UIApplication",
     "UIDocumentPickerViewController",
     "UIResponder",
     "UIScene",
+    "UIScreen",
     "UIView",
     "UIViewController",
     "UIWindow",
@@ -30,7 +47,10 @@ objc2-ui-kit = { workspace = true, features = [
 # sue-platform, backbone rule 6) relaxes the workspace's `forbid` to
 # `deny` so that audited items may allow it. Approved by the maintainer
 # on 2026-10-29 for the document picker's delegate and the calls that
-# show the picker; any other unsafe code here needs its own approval.
+# show the picker, and on 2026-10-29 for the keyboard's notification
+# observers (the observer calls, UIKit's constants, the notification and
+# the keyboard's frame in it); any other unsafe code here needs its own
+# approval.
 [lints.rust]
 unsafe_code = "deny"
 rust_2018_idioms = { level = "warn", priority = -1 }

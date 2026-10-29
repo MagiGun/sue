@@ -65,15 +65,19 @@ jpeg-encoder = "0.7"
 
 # The system's own file pickers on phones and tablets: Java's (JNI) on
 # Android and UIKit's on iOS, the versions winit and cpal already use.
+# Blocks and CoreGraphics' rectangles watch iOS's on-screen keyboard.
+block2 = { version = "0.6", default-features = false }
 jni = "0.21"
 objc2 = "0.6"
+objc2-core-foundation = { version = "0.3", default-features = false }
 objc2-foundation = { version = "0.3", default-features = false }
 objc2-ui-kit = { version = "0.3", default-features = false }
 
-# Typography and publishing: reading installed fonts, and the deflate
-# inside DOCX, EPUB, ODT and PDF files.
+# Typography and publishing: reading installed fonts, the deflate inside
+# DOCX, EPUB, ODT and PDF files, and regular expressions in find.
 miniz_oxide = "0.8"
 ttf-parser = "0.25"
+regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
 
 # The converter: more picture formats in and out, and FLAC out.
 flacenc = { version = "0.5", default-features = false }

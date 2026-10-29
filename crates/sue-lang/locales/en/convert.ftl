@@ -173,3 +173,9 @@ kind-picture = Picture
 kind-sound = Sound
 kind-text-file = Text file
 kind-other-file = Other file
+
+## convert.rs
+
+files-converted-failed-into-2 = { $count } files converted, { $failed } failed, into { $value }
+show-it-in = Show it in { $manager }
+show-result-when-done = Show the result in { $manager } when done

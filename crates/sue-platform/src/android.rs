@@ -176,6 +176,10 @@ impl System for Documents {
         .unwrap_or_else(|| "file".to_owned())
     }
 
+    fn folder(&self, place: &str) -> Option<String> {
+        crate::picks::document_folder(place)
+    }
+
     fn copy_in(&self, place: &str, file: &Path) -> Result<(), String> {
         let file = file.to_string_lossy();
         done(call(

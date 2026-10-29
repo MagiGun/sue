@@ -260,6 +260,147 @@ impl ComponentType for PageLayout {
     }
 }
 
+/// A running header or footer: what goes at the left, the middle and the
+/// right of every page's top or bottom margin. Each part is text with
+/// fields in braces that each page fills in: `{page}`, `{pages}`, `{title}`,
+/// `{author}` and `{date}`. Stored as one text, the parts parted by tabs
+/// (a text without a tab is the middle part).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Running {
+    /// At the left margin.
+    pub left: String,
+    /// In the middle.
+    pub center: String,
+    /// At the right margin.
+    pub right: String,
+}
+
+/// The fields a page fills into its [`Running`] header and footer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PageFields<'a> {
+    /// The page's number, from 1.
+    pub page: usize,
+    /// The number of pages.
+    pub pages: usize,
+    /// The document's title.
+    pub title: &'a str,
+    /// Its author.
+    pub author: &'a str,
+    /// Today's date, as the document writes dates.
+    pub date: &'a str,
+}
+
+/// Every field a [`Running`] part may hold, and what people read for it.
+pub const FIELDS: &[(&str, &str)] = &[
+    ("page", "Page Number"),
+    ("pages", "Page Count"),
+    ("title", "Title"),
+    ("author", "Author"),
+    ("date", "Date"),
+];
+
+/// A piece of a [`Running`] part: plain text or a field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunningPiece<'a> {
+    /// Text as it is.
+    Text(&'a str),
+    /// A field by its name, e.g. `page`.
+    Field(&'a str),
+}
+
+impl Running {
+    /// The parts of a stored header or footer (see [`Self::store`]).
+    #[must_use]
+    pub fn parse(stored: &str) -> Self {
+        let parts: Vec<&str> = stored.split('\t').collect();
+        match parts.as_slice() {
+            [center] => Self {
+                center: (*center).to_owned(),
+                ..Self::default()
+            },
+            [left, center] => Self {
+                left: (*left).to_owned(),
+                center: (*center).to_owned(),
+                right: String::new(),
+            },
+            [left, center, right, ..] => Self {
+                left: (*left).to_owned(),
+                center: (*center).to_owned(),
+                right: (*right).to_owned(),
+            },
+            [] => Self::default(),
+        }
+    }
+
+    /// One text holding the three parts, parted by tabs (just the middle
+    /// part when the others are empty).
+    #[must_use]
+    pub fn store(&self) -> String {
+        if self.left.is_empty() && self.right.is_empty() {
+            self.center.clone()
+        } else {
+            format!("{}\t{}\t{}", self.left, self.center, self.right)
+        }
+    }
+
+    /// `true` when all three parts are empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.left.trim().is_empty() && self.center.trim().is_empty() && self.right.trim().is_empty()
+    }
+
+    /// The left, middle and right parts with `fields` filled in.
+    #[must_use]
+    pub fn fill(&self, fields: &PageFields<'_>) -> [String; 3] {
+        [&self.left, &self.center, &self.right].map(|part| fill(part, fields))
+    }
+}
+
+/// `part` cut into its text and its fields. An unknown name in braces
+/// stays text.
+#[must_use]
+pub fn running_pieces(part: &str) -> Vec<RunningPiece<'_>> {
+    let mut out = Vec::new();
+    let mut rest = part;
+    while let Some(open) = rest.find('{') {
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('}') else {
+            break;
+        };
+        let name = &after[..close];
+        if FIELDS.iter().any(|(known, _)| *known == name) {
+            if open > 0 {
+                out.push(RunningPiece::Text(&rest[..open]));
+            }
+            out.push(RunningPiece::Field(name));
+        } else {
+            out.push(RunningPiece::Text(&rest[..open + close + 2]));
+        }
+        rest = &after[close + 1..];
+    }
+    if !rest.is_empty() {
+        out.push(RunningPiece::Text(rest));
+    }
+    out
+}
+
+/// `part` with `fields` filled in.
+#[must_use]
+pub fn fill(part: &str, fields: &PageFields<'_>) -> String {
+    running_pieces(part)
+        .into_iter()
+        .map(|piece| match piece {
+            RunningPiece::Text(text) => text.to_owned(),
+            RunningPiece::Field("page") => fields.page.to_string(),
+            RunningPiece::Field("pages") => fields.pages.to_string(),
+            RunningPiece::Field("title") => fields.title.to_owned(),
+            RunningPiece::Field("author") => fields.author.to_owned(),
+            RunningPiece::Field("date") => fields.date.to_owned(),
+            RunningPiece::Field(other) => format!("{{{other}}}"),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,5 +429,37 @@ mod tests {
         let bytes = out.into_bytes();
         let back = PageLayout::decode(1, &mut Reader::new(&bytes)).unwrap();
         assert_eq!(back, layout);
+    }
+
+    #[test]
+    fn running_heads_fill_their_fields_by_page() {
+        let footer = Running::parse("{title}\tPage {page} of {pages}\t{date}");
+        assert_eq!(footer.left, "{title}");
+        assert_eq!(Running::parse(&footer.store()), footer);
+        let fields = PageFields {
+            page: 3,
+            pages: 12,
+            title: "Book",
+            author: "Me",
+            date: "2026-10-29",
+        };
+        assert_eq!(
+            footer.fill(&fields),
+            ["Book", "Page 3 of 12", "2026-10-29"].map(String::from)
+        );
+        let head = Running::parse("{author}: {nope}");
+        assert_eq!(head.center, "{author}: {nope}");
+        assert_eq!(head.store(), "{author}: {nope}");
+        assert_eq!(head.fill(&fields)[1], "Me: {nope}");
+        assert_eq!(
+            running_pieces("p{page}/{pages}"),
+            vec![
+                RunningPiece::Text("p"),
+                RunningPiece::Field("page"),
+                RunningPiece::Text("/"),
+                RunningPiece::Field("pages"),
+            ]
+        );
+        assert!(Running::parse("\t \t").is_empty());
     }
 }

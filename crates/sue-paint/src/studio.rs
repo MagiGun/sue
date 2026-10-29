@@ -39,6 +39,18 @@ use crate::view::View;
 /// The applet id.
 pub const ID: &str = "sue-paint";
 
+/// The picture files Sue Paint opens as canvases.
+const OPENS: &[&str] = &[
+    "png", "jpg", "jpeg", "jxl", "psd", "psb", "webp", "tif", "tiff", "bmp",
+];
+
+/// `true` for a picture file Sue Paint opens as a canvas.
+fn opens(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| OPENS.contains(&extension.to_ascii_lowercase().as_str()))
+}
+
 /// One open canvas tab.
 #[derive(Debug)]
 pub(crate) struct Doc {
@@ -328,10 +340,11 @@ pub struct SuePaint {
     /// Where in the undo history each picture was last saved or opened
     /// (File, Revert goes back there).
     pub(crate) saved_at: HashMap<EntityId, sue_core::NodeId>,
-    /// The files opened lately, newest first (File, Open Recent).
+    /// The pictures opened or saved lately, newest first (File, Open
+    /// Recent), from the work Sue remembers.
     pub(crate) recent_files: Vec<PathBuf>,
-    /// The recent files were read from Sue Paint's data folder.
-    pub(crate) recent_loaded: bool,
+    /// The revision of the work Sue remembers they were read at.
+    pub(crate) recent_seen: Option<u64>,
     /// The Auto Actions palette's actions.
     pub(crate) auto: crate::extras::AutoActions,
     /// The Item Bank's sub tools.
@@ -510,7 +523,7 @@ impl Default for SuePaint {
             recent: History::default(),
             saved_at: HashMap::new(),
             recent_files: Vec::new(),
-            recent_loaded: false,
+            recent_seen: None,
             auto: crate::extras::AutoActions::default(),
             item_bank: Vec::new(),
             workspaces: Vec::new(),
@@ -2495,19 +2508,33 @@ impl SuePaint {
             return;
         };
         match sue_io::encode_as(&flat, &extension, jpeg_quality(cx), jxl_effort(cx)) {
-            Ok(bytes) => self.write_export(cx, path, &bytes),
+            Ok(bytes) => {
+                if self.write_export(cx, path, &bytes) {
+                    cx.request(ShellRequest::Remember {
+                        path: path.to_path_buf(),
+                        saved: true,
+                    });
+                }
+            }
             Err(error) => cx.fail(tr!("cannot-save-as", extension = extension, error = error)),
         }
     }
 
-    /// Writes an encoded export to `path` and says where it went.
-    fn write_export(&mut self, cx: &mut AppletContext<'_>, path: &Path, bytes: &[u8]) {
+    /// Writes an encoded export to `path` and says where it went. Returns
+    /// `true` once written.
+    fn write_export(&mut self, cx: &mut AppletContext<'_>, path: &Path, bytes: &[u8]) -> bool {
         if let Some(dir) = path.parent() {
             self.last_dir = Some(dir.to_path_buf());
         }
         match write_atomic(path, bytes) {
-            Ok(()) => cx.saved(path, tr!("kib", value = bytes.len().div_ceil(1024))),
-            Err(error) => cx.fail(tr!("cannot-write", path = path.display(), error = error)),
+            Ok(()) => {
+                cx.saved(path, tr!("kib", value = bytes.len().div_ceil(1024)));
+                true
+            }
+            Err(error) => {
+                cx.fail(tr!("cannot-write", path = path.display(), error = error));
+                false
+            }
         }
     }
 
@@ -2582,9 +2609,7 @@ impl SuePaint {
                 purpose,
                 &title,
             )
-            .extensions(&[
-                "png", "jpg", "jpeg", "jxl", "psd", "psb", "webp", "tif", "tiff", "bmp",
-            ])
+            .extensions(OPENS)
             .starting_in(start),
         ));
     }
@@ -2598,7 +2623,7 @@ impl SuePaint {
             Ok(bytes) => match self.open_bytes(cx, path, &bytes, as_layer) {
                 Ok(()) => {
                     if !as_layer {
-                        self.remember_recent(cx, path);
+                        Self::remember_recent(cx, path);
                     }
                 }
                 Err(error) => cx.fail(error),
@@ -3014,57 +3039,33 @@ impl SuePaint {
         cx.notify(tr!("reverted-changes-redo-brings-them-back", steps = steps));
     }
 
-    /// Reads the recent files from Sue Paint's data folder, once.
+    /// Reads the recent pictures from the work Sue remembers (shared with
+    /// the Hub and every studio) whenever it changed, into Open Recent.
     fn load_recent(&mut self, cx: &AppletContext<'_>) {
-        if self.recent_loaded {
+        let revision = cx.work.revision();
+        if self.recent_seen == Some(revision) {
             return;
         }
-        self.recent_loaded = true;
-        if let Some(text) = crate::colorsets::folder(cx)
-            .and_then(|folder| std::fs::read_to_string(folder.join("recent.txt")).ok())
-        {
-            self.recent_files = text
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .map(PathBuf::from)
-                .collect();
-        }
-        crate::menus::set_recent(
-            &mut self.menus,
-            crate::menus::recent_items(&self.recent_files),
-        );
-    }
-
-    /// Puts `path` first among the recent files.
-    fn remember_recent(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
-        self.load_recent(cx);
-        let path = path.to_path_buf();
-        self.recent_files.retain(|known| *known != path);
-        self.recent_files.insert(0, path);
-        self.recent_files.truncate(10);
-        self.save_recent(cx);
-    }
-
-    /// Writes the recent files and shows them in Open Recent.
-    fn save_recent(&mut self, cx: &mut AppletContext<'_>) {
-        crate::menus::set_recent(
-            &mut self.menus,
-            crate::menus::recent_items(&self.recent_files),
-        );
-        let Some(folder) = crate::colorsets::folder(cx) else {
-            return;
-        };
-        let text: String = self
-            .recent_files
-            .iter()
-            .map(|path| format!("{}\n", path.display()))
+        self.recent_seen = Some(revision);
+        self.recent_files = cx
+            .work
+            .recent()
+            .filter(|file| opens(&file.path))
+            .take(10)
+            .map(|file| file.path.clone())
             .collect();
-        if std::fs::create_dir_all(&folder)
-            .and_then(|()| std::fs::write(folder.join("recent.txt"), text))
-            .is_err()
-        {
-            cx.fail(tr!("cannot-remember-the-recent-files"));
-        }
+        crate::menus::set_recent(
+            &mut self.menus,
+            crate::menus::recent_items(&self.recent_files),
+        );
+    }
+
+    /// Puts `path` first among the files Sue remembers.
+    fn remember_recent(cx: &mut AppletContext<'_>, path: &Path) {
+        cx.request(ShellRequest::Remember {
+            path: path.to_path_buf(),
+            saved: false,
+        });
     }
 
     /// Creates a picture from the New dialog and makes it current.
@@ -3552,8 +3553,9 @@ impl SuePaint {
             }
             "file.revert" => self.revert(cx),
             "file.recent.clear" => {
-                self.recent_files.clear();
-                self.save_recent(cx);
+                for path in std::mem::take(&mut self.recent_files) {
+                    cx.request(ShellRequest::Forget(path));
+                }
             }
             recent if recent.starts_with("file.recent.open.") => {
                 let index = recent["file.recent.open.".len()..].parse::<usize>().ok();
@@ -3565,8 +3567,7 @@ impl SuePaint {
                         self.open_picked(cx, &path, false);
                     } else {
                         cx.fail(tr!("is-gone", path = path.display()));
-                        self.recent_files.retain(|known| *known != path);
-                        self.save_recent(cx);
+                        cx.request(ShellRequest::Forget(path));
                     }
                 }
             }

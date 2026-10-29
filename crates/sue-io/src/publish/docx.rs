@@ -238,7 +238,17 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
             false,
         ),
     ];
-    if book.page_numbers {
+    let has_header = !book.header.is_empty();
+    let has_footer = !book.footer.is_empty();
+    if has_header {
+        relations.push((
+            "rIdHeader".into(),
+            "header".into(),
+            "header1.xml".into(),
+            false,
+        ));
+    }
+    if has_footer {
         relations.push((
             "rIdFooter".into(),
             "footer".into(),
@@ -328,6 +338,11 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
                 body.push_str(&table_xml(table, width));
                 continue;
             }
+            if let Some(contents) = book.contents_of(&para) {
+                let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+                body.push_str(&contents_xml(book, contents, width));
+                continue;
+            }
             let _ = write!(body, "<w:p><w:pPr>{props}</w:pPr>");
             if let Some(id) = para.embed
                 && let Some(figure) = book.figures.get(&id)
@@ -370,14 +385,21 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
         }
     }
     let [top, right, bottom, left] = book.margins;
-    let footer = if book.page_numbers {
-        "<w:footerReference w:type=\"default\" r:id=\"rIdFooter\"/>"
+    let mut references = String::new();
+    if has_header {
+        references.push_str("<w:headerReference w:type=\"default\" r:id=\"rIdHeader\"/>");
+    }
+    if has_footer {
+        references.push_str("<w:footerReference w:type=\"default\" r:id=\"rIdFooter\"/>");
+    }
+    let title_page = if book.different_first {
+        "<w:titlePg/>"
     } else {
         ""
     };
     let _ = write!(
         body,
-        "<w:sectPr>{footer}<w:pgSz w:w=\"{}\" w:h=\"{}\"/><w:pgMar w:top=\"{}\" w:right=\"{}\" w:bottom=\"{}\" w:left=\"{}\" w:header=\"720\" w:footer=\"720\" w:gutter=\"0\"/></w:sectPr>",
+        "<w:sectPr>{references}<w:pgSz w:w=\"{}\" w:h=\"{}\"/><w:pgMar w:top=\"{}\" w:right=\"{}\" w:bottom=\"{}\" w:left=\"{}\" w:header=\"720\" w:footer=\"720\" w:gutter=\"0\"/>{title_page}</w:sectPr>",
         twips(book.page[0]),
         twips(book.page[1]),
         twips(top),
@@ -452,12 +474,18 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
     }
     footnotes.push_str("</w:footnotes>");
 
+    // Word fills in a table of contents' page numbers when it opens.
+    let update = if book.contents.is_empty() {
+        ""
+    } else {
+        "<w:updateFields w:val=\"true\"/>"
+    };
     let settings = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:settings xmlns:w=\"{W}\"><w:defaultTabStop w:val=\"720\"/><w:compat><w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"15\"/></w:compat></w:settings>"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:settings xmlns:w=\"{W}\">{update}<w:defaultTabStop w:val=\"720\"/><w:compat><w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"15\"/></w:compat></w:settings>"
     );
-    let footer = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:ftr xmlns:w=\"{W}\"><w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType=\"end\"/></w:r></w:p></w:ftr>"
-    );
+    let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+    let header = running_xml(book, &book.header, "w:hdr", width);
+    let footer = running_xml(book, &book.footer, "w:ftr", width);
 
     let mut rels = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
@@ -480,7 +508,13 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
     let mut types = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"png\" ContentType=\"image/png\"/><Override PartName=\"/word/document.xml\" ContentType=\"{main}.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"{main}.styles+xml\"/><Override PartName=\"/word/numbering.xml\" ContentType=\"{main}.numbering+xml\"/><Override PartName=\"/word/footnotes.xml\" ContentType=\"{main}.footnotes+xml\"/><Override PartName=\"/word/settings.xml\" ContentType=\"{main}.settings+xml\"/><Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/><Override PartName=\"/docProps/app.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.extended-properties+xml\"/>"
     );
-    if book.page_numbers {
+    if has_header {
+        let _ = write!(
+            types,
+            "<Override PartName=\"/word/header1.xml\" ContentType=\"{main}.header+xml\"/>"
+        );
+    }
+    if has_footer {
         let _ = write!(
             types,
             "<Override PartName=\"/word/footer1.xml\" ContentType=\"{main}.footer+xml\"/>"
@@ -506,7 +540,10 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
     zip.add_text("word/numbering.xml", &numbering);
     zip.add_text("word/footnotes.xml", &footnotes);
     zip.add_text("word/settings.xml", &settings);
-    if book.page_numbers {
+    if has_header {
+        zip.add_text("word/header1.xml", &header);
+    }
+    if has_footer {
         zip.add_text("word/footer1.xml", &footer);
     }
     zip.add_text("word/_rels/document.xml.rels", &rels);
@@ -829,6 +866,91 @@ pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
     Ok((text, marks))
 }
 
+/// A running header (`w:hdr`) or footer (`w:ftr`) part: one paragraph with
+/// a centered and a right tab stop across `width` points, its page fields
+/// Word's own `PAGE` and `NUMPAGES`.
+fn running_xml(book: &Book, running: &sue_model::Running, tag: &str, width: f32) -> String {
+    use crate::publish::Live;
+    let mut out = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<{tag} xmlns:w=\"{W}\"><w:p><w:pPr><w:tabs><w:tab w:val=\"center\" w:pos=\"{}\"/><w:tab w:val=\"right\" w:pos=\"{}\"/></w:tabs><w:rPr><w:sz w:val=\"18\"/></w:rPr></w:pPr>",
+        twips(width / 2.0),
+        twips(width)
+    );
+    for (index, part) in book.live(running).iter().enumerate() {
+        if index > 0 {
+            out.push_str("<w:r><w:tab/></w:r>");
+        }
+        for piece in part {
+            match piece {
+                Live::Text(text) if !text.is_empty() => {
+                    let _ = write!(
+                        out,
+                        "<w:r><w:rPr><w:sz w:val=\"18\"/></w:rPr>{}</w:r>",
+                        run_text(text)
+                    );
+                }
+                Live::Text(_) => {}
+                Live::Page | Live::Pages => {
+                    let code = if *piece == Live::Page {
+                        "PAGE"
+                    } else {
+                        "NUMPAGES"
+                    };
+                    let _ = write!(
+                        out,
+                        "<w:fldSimple w:instr=\" {code} \"><w:r><w:rPr><w:sz w:val=\"18\"/></w:rPr><w:t>1</w:t></w:r></w:fldSimple>"
+                    );
+                }
+            }
+        }
+    }
+    let _ = write!(out, "</w:p></{tag}>");
+    out
+}
+
+/// A table of contents as Word's own `TOC` field over the headings, its
+/// entries the book's headings (Word fills in the pages when it opens).
+fn contents_xml(book: &Book, contents: &sue_model::contents::Contents, width: f32) -> String {
+    let mut out = String::new();
+    if !contents.title.is_empty() {
+        let _ = write!(
+            out,
+            "<w:p><w:pPr><w:pStyle w:val=\"TOCHeading\"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val=\"32\"/></w:rPr>{}</w:r></w:p>",
+            run_text(&contents.title)
+        );
+    }
+    let headings = book.headings(contents);
+    let tabs = format!(
+        "<w:tabs><w:tab w:val=\"right\" w:leader=\"dot\" w:pos=\"{}\"/></w:tabs>",
+        twips(width)
+    );
+    let field = format!(
+        "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> TOC \\o \"1-{}\" \\h \\z \\u </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>",
+        contents.levels
+    );
+    let end = "<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>";
+    if headings.is_empty() {
+        let _ = write!(out, "<w:p>{field}{end}</w:p>");
+        return out;
+    }
+    for (index, (level, title)) in headings.iter().enumerate() {
+        let _ = write!(
+            out,
+            "<w:p><w:pPr><w:pStyle w:val=\"TOC{level}\"/>{tabs}<w:ind w:left=\"{}\"/></w:pPr>",
+            twips(f32::from(level.saturating_sub(1)) * 18.0)
+        );
+        if index == 0 {
+            out.push_str(&field);
+        }
+        let _ = write!(out, "<w:r>{}</w:r>", run_text(title));
+        if index + 1 == headings.len() {
+            out.push_str(end);
+        }
+        out.push_str("</w:p>");
+    }
+    out
+}
+
 /// A table as WordprocessingML, `width` points across: a grid of the
 /// column widths, single borders, the heading rows marked to repeat.
 fn table_xml(table: &crate::publish::PublishTable, width: f32) -> String {
@@ -879,6 +1001,39 @@ fn table_xml(table: &crate::publish::PublishTable, width: f32) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn word_contents_are_a_toc_field_word_updates() {
+        let bytes = to_docx(&super::super::tests::with_contents());
+        let files: HashMap<String, Vec<u8>> = read_zip(&bytes).unwrap().into_iter().collect();
+        let xml = String::from_utf8(files["word/document.xml"].clone()).unwrap();
+        assert!(xml.contains("TOC \\o \"1-2\""), "{xml}");
+        assert_eq!(xml.matches("w:fldCharType=\"begin\"").count(), 1);
+        assert_eq!(xml.matches("w:fldCharType=\"end\"").count(), 1);
+        assert!(xml.contains("<w:pStyle w:val=\"TOC2\"/>"));
+        let settings = String::from_utf8(files["word/settings.xml"].clone()).unwrap();
+        assert!(settings.contains("<w:updateFields w:val=\"true\"/>"));
+    }
+
+    #[test]
+    fn word_headers_and_footers_carry_live_page_fields() {
+        let mut book = sample();
+        book.header = sue_model::Running::parse("{title}\t\tPage {page} of {pages}");
+        book.different_first = true;
+        let bytes = to_docx(&book);
+        let files: HashMap<String, Vec<u8>> = read_zip(&bytes).unwrap().into_iter().collect();
+        let header = String::from_utf8(files["word/header1.xml"].clone()).unwrap();
+        assert!(header.contains("My Story"), "{header}");
+        assert!(header.contains("w:instr=\" PAGE \""));
+        assert!(header.contains("w:instr=\" NUMPAGES \""));
+        assert_eq!(header.matches("<w:tab/>").count(), 2);
+        assert!(files.contains_key("word/footer1.xml"));
+        let document = String::from_utf8(files["word/document.xml"].clone()).unwrap();
+        assert!(document.contains("<w:headerReference w:type=\"default\" r:id=\"rIdHeader\"/>"));
+        assert!(document.contains("<w:titlePg/></w:sectPr>"));
+        let rels = String::from_utf8(files["word/_rels/document.xml.rels"].clone()).unwrap();
+        assert!(rels.contains("header1.xml"));
+    }
+
     use super::super::tests::sample;
     use super::super::tests::with_table;
     use super::*;

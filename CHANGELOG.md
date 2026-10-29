@@ -18,6 +18,18 @@ follow [Semantic Versioning](https://semver.org/).
   once, and Settings, Language lets any studio or tool keep a language of
   its own. Spanish and Japanese ship as drafts waiting for a native
   speaker's review; anything not yet translated shows in English.
+- A table of contents in Sue Writer (Insert, Table of Contents): the
+  headings with their pages, kept up as you write; click an entry to go
+  there. It prints in PDFs and goes into Word, OpenDocument, web pages,
+  e-books, RTF, Markdown and plain text.
+- Find and Replace in Sue Writer takes regular expressions, and the
+  replacement can put back what a group caught (`$1`).
+- Change Case in Sue Writer (Format, Text): Sentence case, lowercase,
+  UPPERCASE, Capitalize Every Word and tOGGLE cASE.
+- Headers and footers in Sue Writer (Insert, Header and Footer): left,
+  middle and right parts with the page number, page count, title, author
+  and date, and a different first page. They print in PDFs and go into
+  Word, OpenDocument and RTF as live page numbers.
 - Tables in Sue Writer: Table, Insert Table (`Ctrl+F12`), then type in the
   cells; `Tab` moves on and adds a row at the end. Insert and delete rows
   and columns, a heading row that repeats on every page, and text to table
@@ -36,6 +48,14 @@ follow [Semantic Versioning](https://semver.org/).
   Files browser on iPhone and iPad. On Android, saving a file you opened
   writes back to the original, and a folder you choose is read and
   written (the Converter's Add a Folder and its output folder).
+- The Hub lists your work under its boxes: **Recent** files and projects,
+  **Saved Projects**, and **Unsaved Work**. Click one to open it in its
+  studio. The Sue menu's File, Open Recent shows the same recent files.
+- Sue keeps work you have not saved by itself (a minute after a change, and
+  when you quit), so nothing is lost to a crash or a quick Quit. The Hub's
+  Unsaved Work brings it back (Recover) or throws it away (Discard, which
+  asks once more). Opening another project keeps the unsaved work it
+  replaces there too. Settings, General sets how often, or turns it off.
 - Typing in Sue Writer feels smooth: the caret glides to its new place
   instead of jumping, as you type, delete, move with the keys or click, and
   as lines and pages wrap. It blinks only while it rests. Settings, Display
@@ -43,6 +63,9 @@ follow [Semantic Versioning](https://semver.org/).
   for its speed.
 
 ### Changed
+
+- Sue Paint's File, Open Recent now shows the pictures from Sue's one list
+  of recent files, the same one the Hub shows.
 
 - Sue Writer on a phone: the text flows to the screen's width at a size you
   can read, the formatting is a row of big buttons right above the keyboard,
@@ -75,6 +98,17 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Sue Writer no longer crashes on a page narrower than about 543 points,
   such as a phone's.
+- Studios and tools wear their own colors again: with a light Sue theme
+  (Paper), Sue Paint in Gray showed white fields and buttons with dark text
+  on its gray panels.
+- On iPhone and iPad the on-screen keyboard no longer covers the bottom of
+  Sue: Sue fits itself above the keyboard, as on Android, so the line you
+  are writing in Sue Writer stays in sight.
+- On Android, a file you chose in the system's picker is named as you know
+  it, such as "Picture.png in Download", in the status bar, the Image
+  Viewer, the Converter and the Hub, instead of a path inside Sue's
+  cache. There the Image Viewer and the Converter no longer offer to
+  show files in Explorer, which a phone does not have.
 
 ## [0.0.3] - 2026-10-29
 

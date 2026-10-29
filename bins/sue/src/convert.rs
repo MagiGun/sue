@@ -575,15 +575,16 @@ impl Convert {
                 cx.saved(
                     many[0].to_path_buf(),
                     tr!(
-                        "files-converted-failed-into",
+                        "files-converted-failed-into-2",
                         count = many.len(),
-                        folder = folder.display(),
+                        value = sue_platform::shown_path(&folder),
                         failed = failed
                     ),
                 );
             }
         }
         if self.reveal_after
+            && sue_platform::file_manager().is_some()
             && let Some(first) = done.first()
         {
             cx.request(ShellRequest::Command(format!(
@@ -769,7 +770,10 @@ impl Convert {
             {
                 remove = Some(index);
             } else if let Status::Done(path, _) = &input.status
-                && response.on_hover_text(tr!("show-it-in-explorer")).clicked()
+                && let Some(manager) = sue_platform::file_manager()
+                && response
+                    .on_hover_text(tr!("show-it-in", manager = manager))
+                    .clicked()
             {
                 reveal = Some(path.clone());
             }
@@ -1169,7 +1173,7 @@ impl Convert {
             ui.horizontal_wrapped(|ui| {
                 ui.add(
                     egui::Label::new(
-                        RichText::new(folder.display().to_string())
+                        RichText::new(sue_platform::shown_path(&folder))
                             .size(theme.small_size)
                             .color(theme.text),
                     )
@@ -1178,7 +1182,9 @@ impl Convert {
                 if widgets::pill_button(ui, &tr!("change"), false, &theme).clicked() {
                     Self::pick(cx, "folder", &tr!("choose-where-converted-files-go"), true);
                 }
-                if widgets::pill_button(ui, &tr!("open"), false, &theme).clicked() {
+                if sue_platform::file_manager().is_some()
+                    && widgets::pill_button(ui, &tr!("open"), false, &theme).clicked()
+                {
                     cx.request(ShellRequest::Command(format!(
                         "reveal:{}",
                         folder.display()
@@ -1204,10 +1210,12 @@ impl Convert {
                 &options,
             );
         });
-        ui.checkbox(
-            &mut self.reveal_after,
-            tr!("show-result-explorer-when-done"),
-        );
+        if let Some(manager) = sue_platform::file_manager() {
+            ui.checkbox(
+                &mut self.reveal_after,
+                tr!("show-result-when-done", manager = manager),
+            );
+        }
     }
 
     fn body(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {

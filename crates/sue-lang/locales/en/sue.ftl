@@ -37,3 +37,14 @@ reload-default-suerice = Reload default.suerice
 reloaded-values-from-disk = Reloaded { $count } values from disk
 reload-failed = Reload failed: { $error }
 export-rice = Export Rice
+
+## runtime.rs
+
+could-not-keep-unsaved-work = Could not keep the unsaved work: { $error }
+that-unsaved-work-is-gone = That unsaved work is gone
+cannot-recover = Cannot recover { $title }: { $error }
+recovered-save-keep = Recovered { $title }; save it to keep it{ $value }
+discarded = Discarded { $title }
+cannot-discard = Cannot discard { $title }: { $error }
+cannot-remember-the-recent-files = Cannot remember the recent files: { $error }
+opened-2 = Opened { $value }{ $value2 }

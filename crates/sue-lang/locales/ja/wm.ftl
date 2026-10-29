@@ -50,7 +50,6 @@ redo = やり直し
 
 ## ステータスバーとメッセージ
 
-saved-click-show = { $name }{ $note }を{ $folder }に保存しました。クリックで表示
 there-no-studio-tool-called = { $id } というスタジオやツールはありません
 that-is-gone = それはもうありません
 is-not-available = { $command } は使用できません

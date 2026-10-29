@@ -10,11 +10,15 @@ general-confirm_on_exit = Confirm on exit
     .description = Ask before closing the window
 general-language = Language
     .description = Sue's language, which every studio and tool follows unless set apart (system follows the system's language)
+general-autosave_seconds = Autosave Every
+    .description = Keep unsaved work this often, so the Hub can bring it back (s; 0 turns autosave off)
 
 ## [launchpad]
 
 launchpad-pinned = Open At Launch
     .description = The studio or tool Sue opens straight into (the pin on its box in the Hub; empty opens the Hub)
+launchpad-recent_count = Recent Files on the Hub
+    .description = How many recent files and projects the Hub lists (0 hides the list)
 
 ## [profile]
 

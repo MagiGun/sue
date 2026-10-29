@@ -85,3 +85,7 @@ image-viewer-save-as-ellipsis = Image Viewer: Save As...
 image-viewer-re-encode-as-jpeg-ellipsis = Image Viewer: Re-encode as JPEG XL...
 image-viewer-rotate-right = Image Viewer: Rotate Right
 image-viewer-crop = Image Viewer: Crop
+
+## viewer.rs
+
+cannot-write-2 = Cannot write { $value }: { $error }

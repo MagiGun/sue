@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::SystemTime;
 
-use crate::os::{PickNews, Picking};
+use crate::os::{PickNews, Picking, ShownPlace};
 
 /// What a picker is asked for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,6 +64,13 @@ pub(crate) trait System: Send + Sync + 'static {
 
     /// The name the place shows people, e.g. `Picture.png`.
     fn name(&self, place: &str) -> String;
+
+    /// The folder the place is in, as people know it, where the system
+    /// can say (e.g. `Download`).
+    fn folder(&self, place: &str) -> Option<String> {
+        let _ = place;
+        None
+    }
 
     /// Copies the document at `place` into `file`.
     fn copy_in(&self, place: &str, file: &Path) -> Result<(), String>;
@@ -161,6 +168,8 @@ struct Staging {
     root: PathBuf,
     next: u64,
     kept: Vec<(PathBuf, Place)>,
+    /// What each kept path stands for, as people chose it.
+    shown: HashMap<PathBuf, ShownPlace>,
     stamps: HashMap<PathBuf, Stamp>,
     /// Files in a chosen folder, with the documents made for them.
     made: HashMap<PathBuf, String>,
@@ -177,6 +186,7 @@ impl Staging {
             root,
             next: 0,
             kept: Vec::new(),
+            shown: HashMap::new(),
             stamps: HashMap::new(),
             made: HashMap::new(),
             away: HashSet::new(),
@@ -193,8 +203,8 @@ impl Staging {
     }
 
     /// Hands writes to `path` (a file, or each file in a folder) back to
-    /// `place` from now on.
-    fn keep(&mut self, path: PathBuf, place: Place) {
+    /// `place` from now on; `shown` is what people chose.
+    fn keep(&mut self, path: PathBuf, place: Place, shown: ShownPlace) {
         let files = match place {
             Place::Folder(_) => Self::files_in(&path),
             Place::Document(_) | Place::Export => vec![path.clone()],
@@ -204,7 +214,28 @@ impl Staging {
                 self.stamps.insert(file, now);
             }
         }
+        self.shown.insert(path.clone(), shown);
         self.kept.push((path, place));
+    }
+
+    /// What a kept path stands for, as people chose it; a file in a
+    /// chosen folder is in that folder.
+    fn shown(&self, path: &Path) -> Option<ShownPlace> {
+        if let Some(shown) = self.shown.get(path) {
+            return Some(shown.clone());
+        }
+        let folder = self.kept.iter().find_map(|(kept, place)| {
+            (matches!(place, Place::Folder(_)) && Some(kept.as_path()) == path.parent())
+                .then(|| self.shown.get(kept))
+                .flatten()
+        })?;
+        Some(ShownPlace {
+            name: shown(path),
+            folder: Some(match &folder.folder {
+                Some(outer) => format!("{outer}/{}", folder.name),
+                None => folder.name.clone(),
+            }),
+        })
     }
 
     /// The files right inside a folder, without hidden ones (a write in
@@ -283,6 +314,7 @@ enum Landed {
     Opened {
         file: PathBuf,
         place: String,
+        shown: ShownPlace,
         result: Result<(), String>,
     },
     /// A staged file reached its place (with the document made for it).
@@ -294,6 +326,7 @@ enum Landed {
     Listed {
         dir: PathBuf,
         place: String,
+        shown: ShownPlace,
         result: Result<(Vec<(PathBuf, String)>, usize), String>,
     },
 }
@@ -337,7 +370,11 @@ impl<S: System> Picker<S> {
         if kind == Kind::Save && !S::SAVE_ASKS_FIRST {
             return match self.staging.slot(file_name) {
                 Ok(file) => {
-                    self.staging.keep(file.clone(), Place::Export);
+                    let shown = ShownPlace {
+                        name: shown(&file),
+                        folder: None,
+                    };
+                    self.staging.keep(file.clone(), Place::Export, shown);
                     Picking::Chosen(file)
                 }
                 Err(error) => Picking::Failed(error.to_string()),
@@ -371,10 +408,14 @@ impl<S: System> Picker<S> {
                 Landed::Opened {
                     file,
                     place,
+                    shown,
                     result: Ok(()),
                 } => {
+                    // An opened file that is only a copy (iOS) stands for
+                    // nothing people chose, so it shows its own path.
                     if S::WRITES_BACK {
-                        self.staging.keep(file.clone(), Place::Document(place));
+                        self.staging
+                            .keep(file.clone(), Place::Document(place), shown);
                     }
                     news.push(PickNews::Answered(Picking::Chosen(file)));
                 }
@@ -392,18 +433,18 @@ impl<S: System> Picker<S> {
                 Landed::Listed {
                     dir,
                     place,
+                    shown,
                     result: Ok((copied, unread)),
                 } => {
                     // A copied file written later goes back to its own
                     // document.
                     self.staging.made.extend(copied);
-                    self.staging.keep(dir.clone(), Place::Folder(place));
                     if unread > 0 {
                         news.push(PickNews::Failed(format!(
-                            "{unread} files in {} could not be read",
-                            shown(&dir)
+                            "{unread} files in {shown} could not be read"
                         )));
                     }
+                    self.staging.keep(dir.clone(), Place::Folder(place), shown);
                     news.push(PickNews::Answered(Picking::Chosen(dir)));
                 }
                 Landed::Listed {
@@ -424,13 +465,15 @@ impl<S: System> Picker<S> {
                 news.push(PickNews::Answered(Picking::Failed(why)));
             }
             (Asking::Pick(Kind::Open), Answer::Chosen(place)) => {
-                match self.staging.slot(&self.system.name(&place)) {
+                let shown = self.chosen(&place);
+                match self.staging.slot(&shown.name) {
                     Ok(file) => self.spawn(
                         move |system, file| {
                             let result = system.copy_in(&place, &file);
                             Landed::Opened {
                                 file,
                                 place,
+                                shown,
                                 result,
                             }
                         },
@@ -442,9 +485,11 @@ impl<S: System> Picker<S> {
                 }
             }
             (Asking::Pick(Kind::Save), Answer::Chosen(place)) => {
-                let answer = match self.staging.slot(&self.system.name(&place)) {
+                let shown = self.chosen(&place);
+                let answer = match self.staging.slot(&shown.name) {
                     Ok(file) => {
-                        self.staging.keep(file.clone(), Place::Document(place));
+                        self.staging
+                            .keep(file.clone(), Place::Document(place), shown);
                         Picking::Chosen(file)
                     }
                     Err(error) => Picking::Failed(error.to_string()),
@@ -458,19 +503,22 @@ impl<S: System> Picker<S> {
                 }
                 // The folder's files are copied in first, so that what
                 // reads the folder finds them.
-                match self
-                    .staging
-                    .slot(&self.system.name(&place))
-                    .and_then(|dir| {
-                        fs::create_dir_all(&dir)?;
-                        Ok(dir)
-                    }) {
+                let shown = self.chosen(&place);
+                match self.staging.slot(&shown.name).and_then(|dir| {
+                    fs::create_dir_all(&dir)?;
+                    Ok(dir)
+                }) {
                     Ok(dir) => self.spawn(
                         move |system, dir| {
                             let result = system
                                 .list_in(&place)
                                 .map(|documents| copy_folder(system, &dir, documents));
-                            Landed::Listed { dir, place, result }
+                            Landed::Listed {
+                                dir,
+                                place,
+                                shown,
+                                result,
+                            }
                         },
                         dir,
                     ),
@@ -481,14 +529,36 @@ impl<S: System> Picker<S> {
             }
             (Asking::Export(file), answer) => {
                 self.staging.landed(&file, None);
-                if let Answer::Failed(why) = answer {
-                    news.push(PickNews::Failed(format!(
+                match answer {
+                    // From now on it reads as where it went.
+                    Answer::Chosen(place) => {
+                        let folder = self.system.folder(&place);
+                        if let Some(shown) = self.staging.shown.get_mut(&file) {
+                            shown.folder = folder;
+                        }
+                    }
+                    Answer::Failed(why) => news.push(PickNews::Failed(format!(
                         "Cannot save {}: {why}",
                         shown(&file)
-                    )));
+                    ))),
+                    Answer::Cancelled => {}
                 }
             }
         }
+    }
+
+    /// What people chose at `place`: its name and folder.
+    fn chosen(&self, place: &str) -> ShownPlace {
+        ShownPlace {
+            name: self.system.name(place),
+            folder: self.system.folder(place),
+        }
+    }
+
+    /// What a staged path stands for, as people chose it: `None` for a
+    /// path that is not one.
+    pub(crate) fn shown(&self, path: &Path) -> Option<ShownPlace> {
+        self.staging.shown(path)
     }
 
     /// Hands every staged file written since last time back to the place
@@ -604,27 +674,131 @@ fn copy_folder<S: System>(
     (copied, unread)
 }
 
+/// The folder an Android document is in, read from its content URI where
+/// the URI says it: the device's storage (`Download/Comics`) and the
+/// Download folder. Other apps' documents (Google Drive, say) keep their
+/// folders to themselves.
+#[cfg_attr(
+    not(target_os = "android"),
+    allow(dead_code, reason = "Android's places; the tests read them everywhere")
+)]
+pub(crate) fn document_folder(uri: &str) -> Option<String> {
+    let rest = uri.strip_prefix("content://")?;
+    let (authority, rest) = rest.split_once('/')?;
+    // `document/<id>`, `tree/<id>`, or a document in a tree:
+    // `tree/<id>/document/<id>`. Ids are percent-encoded, slashes too.
+    let parts: Vec<&str> = rest.split('/').collect();
+    let id = parts
+        .iter()
+        .rposition(|part| *part == "document")
+        .or_else(|| parts.iter().position(|part| *part == "tree"))
+        .and_then(|at| parts.get(at + 1))?;
+    let id = percent_decoded(id);
+    let path = match authority {
+        "com.android.externalstorage.documents" => {
+            let (volume, path) = id.split_once(':')?;
+            // The `home` volume is the Documents folder.
+            if volume == "home" {
+                format!("Documents/{path}")
+            } else {
+                path.to_owned()
+            }
+        }
+        "com.android.providers.downloads.documents" => match id.strip_prefix("raw:") {
+            Some(raw) => on_volume(raw).to_owned(),
+            // The Download folder itself, or a download in it.
+            None if id == "downloads" => return None,
+            None => return Some("Download".to_owned()),
+        },
+        _ => return None,
+    };
+    let (folder, _) = path.trim_end_matches('/').rsplit_once('/')?;
+    (!folder.is_empty()).then(|| folder.to_owned())
+}
+
+/// The folder a place in iOS's Files is in: the name of the folder that
+/// holds it, unless that is the top of a place in Files (On My iPhone,
+/// iCloud Drive), whose folder has an inner name.
+#[cfg_attr(
+    not(target_os = "ios"),
+    allow(dead_code, reason = "iOS's places; the tests read them everywhere")
+)]
+pub(crate) fn files_folder(place: &str) -> Option<String> {
+    let folder = Path::new(place).parent()?.file_name()?.to_string_lossy();
+    (folder != "File Provider Storage" && !folder.contains('~')).then(|| folder.into_owned())
+}
+
+/// A path on an Android storage volume, from the volume's top, e.g.
+/// `/storage/emulated/0/Download/a.png` is `Download/a.png`.
+fn on_volume(path: &str) -> &str {
+    if let Some(rest) = path.strip_prefix("/storage/emulated/") {
+        return rest.split_once('/').map_or("", |(_, rest)| rest);
+    }
+    if let Some(rest) = path.strip_prefix("/storage/") {
+        return rest.split_once('/').map_or("", |(_, rest)| rest);
+    }
+    path.strip_prefix("/sdcard/").unwrap_or(path)
+}
+
+/// `text` with its `%XX` escapes decoded.
+fn percent_decoded(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        let escape = (bytes[at] == b'%')
+            .then(|| text.get(at + 1..at + 3))
+            .flatten()
+            .filter(|hex| hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        match escape {
+            Some(byte) => {
+                out.push(byte);
+                at += 3;
+            }
+            None => {
+                out.push(bytes[at]);
+                at += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// A staged file's name, for messages.
 fn shown(file: &Path) -> String {
     file.file_name()
         .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
 }
 
+/// The picker of this phone or tablet, once something used it.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+static PICKER: std::sync::OnceLock<std::sync::Mutex<Picker<Native>>> = std::sync::OnceLock::new();
+
 /// The picker of this phone or tablet, staging in Sue's cache.
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub(crate) fn native() -> std::sync::MutexGuard<'static, Picker<Native>> {
-    use std::sync::{Mutex, OnceLock, PoisonError};
-    static PICKER: OnceLock<Mutex<Picker<Native>>> = OnceLock::new();
     PICKER
         .get_or_init(|| {
             let root = crate::PlatformPaths::detect().map_or_else(
                 |_| std::env::temp_dir().join("sue-picked"),
                 |paths| paths.cache_dir.join("picked"),
             );
-            Mutex::new(Picker::new(Native::default(), root))
+            std::sync::Mutex::new(Picker::new(Native::default(), root))
         })
         .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// What a staged path stands for (see [`Picker::shown`]). A picker that
+/// was never used staged nothing, so this does not start one.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) fn native_shown(path: &Path) -> Option<ShownPlace> {
+    PICKER
+        .get()?
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .shown(path)
 }
 
 #[cfg(target_os = "android")]
@@ -689,6 +863,13 @@ mod tests {
                         .unwrap()
                         .to_string_lossy()
                         .into_owned()
+                }
+
+                fn folder(&self, place: &str) -> Option<String> {
+                    Path::new(place)
+                        .parent()
+                        .and_then(Path::file_name)
+                        .map(|name| name.to_string_lossy().into_owned())
                 }
 
                 fn copy_in(&self, place: &str, file: &Path) -> Result<(), String> {
@@ -973,6 +1154,177 @@ mod tests {
         picker.deliver();
         assert!(!picker.busy());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    fn place(name: &str, folder: Option<&str>) -> Option<ShownPlace> {
+        Some(ShownPlace {
+            name: name.to_owned(),
+            folder: folder.map(str::to_owned),
+        })
+    }
+
+    #[test]
+    fn staged_paths_show_what_people_chose() {
+        let dir = scratch("shown");
+        let documents = dir.join("documents");
+        let picture = documents.join("Picture.png");
+        fs::write(&picture, b"pixels").unwrap();
+        let mut picker = Picker::new(Android::default(), dir.join("cache"));
+
+        // An opened document reads as its name in its folder.
+        picker.show(Kind::Open, &[], "");
+        picker
+            .system
+            .0
+            .answer_with(Answer::Chosen(picture.to_string_lossy().into_owned()));
+        let copy = chosen(&settle(&mut picker));
+        let shown = picker.shown(&copy);
+        assert_eq!(shown, place("Picture.png", Some("documents")));
+        assert_eq!(shown.unwrap().to_string(), "Picture.png in documents");
+
+        // So does a new document saved somewhere.
+        picker.show(Kind::Save, &[], "Novel.docx");
+        let novel = documents.join("Novel (1).docx");
+        picker
+            .system
+            .0
+            .answer_with(Answer::Chosen(novel.to_string_lossy().into_owned()));
+        let file = chosen(&picker.poll());
+        assert_eq!(
+            picker.shown(&file),
+            place("Novel (1).docx", Some("documents"))
+        );
+
+        // A chosen folder, and every file made in it, read as that folder.
+        picker.show(Kind::Folder, &[], "");
+        picker
+            .system
+            .0
+            .answer_with(Answer::Chosen(documents.to_string_lossy().into_owned()));
+        let staged = chosen(&settle(&mut picker));
+        let outer = dir.file_name().unwrap().to_string_lossy().into_owned();
+        assert_eq!(picker.shown(&staged), place("documents", Some(&outer)));
+        let inner = format!("{outer}/documents");
+        for name in ["Picture.png", "Picture.jxl"] {
+            assert_eq!(picker.shown(&staged.join(name)), place(name, Some(&inner)));
+        }
+
+        // Anything else is not a pick: its own path shows.
+        assert_eq!(picker.shown(copy.parent().unwrap()), None);
+        assert_eq!(picker.shown(&staged.join("sub").join("a.png")), None);
+        assert_eq!(picker.shown(&picture), None);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ios_saves_read_as_where_they_went() {
+        let dir = scratch("ios-shown");
+        let mut picker = Picker::new(Ios::default(), dir.join("cache"));
+        let Picking::Chosen(file) = picker.show(Kind::Save, &[], "Untitled.sue") else {
+            panic!("iOS saves to Sue's cache first");
+        };
+        assert_eq!(picker.shown(&file), place("Untitled.sue", None));
+        write(&file, "project");
+        picker.deliver();
+        assert!(picker.poll().is_empty());
+        picker
+            .system
+            .0
+            .answer_with(Answer::Chosen("/Files/Untitled.sue".to_owned()));
+        assert!(picker.poll().is_empty());
+        assert_eq!(picker.shown(&file), place("Untitled.sue", Some("Files")));
+
+        // An opened file is only a copy there, so it is no pick.
+        let song = dir.join("documents").join("Song.wav");
+        fs::write(&song, b"samples").unwrap();
+        picker.show(Kind::Open, &[], "");
+        picker
+            .system
+            .0
+            .answer_with(Answer::Chosen(song.to_string_lossy().into_owned()));
+        let copy = chosen(&settle(&mut picker));
+        assert_eq!(picker.shown(&copy), None);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn android_document_uris_say_their_folder() {
+        let storage = "content://com.android.externalstorage.documents";
+        let downloads = "content://com.android.providers.downloads.documents";
+        for (uri, folder) in [
+            (
+                format!("{storage}/document/primary%3ADownload%2FPicture.png"),
+                Some("Download"),
+            ),
+            (
+                format!("{storage}/document/primary%3ADownload%2FComics%2FPage%201.png"),
+                Some("Download/Comics"),
+            ),
+            (format!("{storage}/document/primary%3APicture.png"), None),
+            (
+                format!("{storage}/document/1A2B-3C4D%3AMusic%2FSong.flac"),
+                Some("Music"),
+            ),
+            (
+                format!("{storage}/document/home%3ANovel.docx"),
+                Some("Documents"),
+            ),
+            // A chosen folder, and a document made in it.
+            (
+                format!("{storage}/tree/primary%3ADocuments%2FExports"),
+                Some("Documents"),
+            ),
+            (format!("{storage}/tree/primary%3ADocuments"), None),
+            (
+                format!("{storage}/tree/primary%3ADocuments/document/primary%3ADocuments%2Fa.jxl"),
+                Some("Documents"),
+            ),
+            (
+                format!("{downloads}/document/msf%3A1000000123"),
+                Some("Download"),
+            ),
+            (format!("{downloads}/document/31"), Some("Download")),
+            (
+                format!("{downloads}/document/raw%3A%2Fstorage%2Femulated%2F0%2FDownload%2Fa.png"),
+                Some("Download"),
+            ),
+            (format!("{downloads}/tree/downloads"), None),
+            (
+                "content://com.android.providers.media.documents/document/image%3A1234".to_owned(),
+                None,
+            ),
+            (
+                "content://com.google.android.apps.docs.storage/document/acc%3D1%3Bdoc%3D9"
+                    .to_owned(),
+                None,
+            ),
+            ("/sdcard/Download/a.png".to_owned(), None),
+        ] {
+            assert_eq!(document_folder(&uri).as_deref(), folder, "{uri}");
+        }
+    }
+
+    #[test]
+    fn ios_places_say_their_folder() {
+        let provider = "/private/var/mobile/Containers/Shared/AppGroup/1/File Provider Storage";
+        assert_eq!(
+            files_folder(&format!("{provider}/Downloads/a.png")).as_deref(),
+            Some("Downloads")
+        );
+        assert_eq!(files_folder(&format!("{provider}/a.png")), None);
+        let icloud = "/private/var/mobile/Library/Mobile Documents/com~apple~CloudDocs";
+        assert_eq!(files_folder(&format!("{icloud}/a.png")), None);
+        assert_eq!(files_folder("a.png"), None);
+    }
+
+    #[test]
+    fn escapes_decode() {
+        assert_eq!(
+            percent_decoded("primary%3ADownload%2Fa.png"),
+            "primary:Download/a.png"
+        );
+        assert_eq!(percent_decoded("Caf%C3%A9%20%2"), "Caf\u{e9} %2");
+        assert_eq!(percent_decoded("100%zz%+1"), "100%zz%+1");
     }
 
     #[test]

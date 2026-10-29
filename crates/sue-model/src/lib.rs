@@ -8,6 +8,7 @@
 //! | --- | --- |
 //! | [`TextMarks`] | word processing, notes, markdown, novels, LaTeX, layout |
 //! | [`manuscript`] | novels, scripts, theses, manuals, e-books, outlines |
+//! | [`contents`] | tables of contents in any text, made from its headings |
 //! | [`Table`] | spreadsheets, databases, CSV, schedules, bills of materials |
 //! | [`Animation`] / [`Curve`] | motion graphics, 2D and 3D animation, automation, grading |
 //! | [`Sequence`] / [`Notes`] | video editing, DAWs, slideshows, subtitles, singing synthesis |
@@ -21,6 +22,7 @@
 //! way (see `HUMANZ.md` §8), and register it with [`register`].
 
 mod blend;
+pub mod contents;
 mod curve;
 mod encoded;
 mod geometry;
@@ -37,7 +39,10 @@ pub use curve::{Animation, Curve, Interpolation, Key, Response};
 pub use encoded::Encoded;
 pub use geometry::{AttributeData, Domain, Geometry, Prim, PrimKind, Transform};
 pub use graph::{GraphEdit, GraphOp, Link, Node, NodeGraph, NodeKey, NodeRegistry, NodeType, Port};
-pub use layout::{Frame, PAGE_SIZES, Page, PageLayout, Rect, page_size, points};
+pub use layout::{
+    FIELDS, Frame, PAGE_SIZES, Page, PageFields, PageLayout, Rect, Running, RunningPiece,
+    page_size, points, running_pieces,
+};
 pub use sequence::{Clip, Note, Notes, Sequence, Track};
 pub use table::{
     Axis, Cell, Column, HEADER_ROWS, Reshape, SetCell, TEXT_TABLE, Table, WIDTHS, column_name,

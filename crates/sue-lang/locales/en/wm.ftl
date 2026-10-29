@@ -53,7 +53,6 @@ redo = Redo
 
 ## The status bar and messages
 
-saved-click-show = Saved { $name }{ $note } in { $folder }. Click to show it
 there-no-studio-tool-called = There is no studio or tool called { $id }
 that-is-gone = That is gone
 is-not-available = { $command } is not available
@@ -76,3 +75,42 @@ pick-a-color = Pick a color
 none = None
 curve-pen-pressure = Pen pressure
 curve-output = Output
+
+## shell.rs
+
+in-folder = { $lead } in { $folder }
+saved-in-folder = {" "}in { $folder }
+click-to-show-it = {"."} Click to show it
+saved = Saved { $name }{ $note }{ $folder }{ $click }
+open-recent = Open Recent
+recent = Recent
+files-projects-you-open-save-show = Files and projects you open or save show up here.
+saved-projects = Saved Projects
+projects-you-save-sue-menu-project = Projects you save (Sue menu, Project, Save Project) show up here.
+unsaved-work = Unsaved Work
+work-sue-keeps-you-before-saved = Work Sue keeps for you before it is saved shows up here, to recover or discard.
+saved-2 = Saved
+opened = Opened
+kept-newer-than = Kept { $value }, newer than { $value2 }
+kept-never-saved = Kept { $value }, never saved
+really-discard = Really Discard
+discard = Discard
+recover = Recover
+
+## How long ago (the Hub's lists)
+
+ago-just-now = just now
+ago-yesterday = yesterday
+ago-minutes = { $count ->
+    [one] a minute ago
+   *[other] { $count } minutes ago
+}
+ago-hours = { $count ->
+    [one] an hour ago
+   *[other] { $count } hours ago
+}
+ago-days = { $count ->
+    [one] a day ago
+   *[other] { $count } days ago
+}
+untitled = Untitled

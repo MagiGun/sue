@@ -110,3 +110,8 @@ results-for = Results for "{ $filter }"
 
 applet-name = Settings
 applet-summary = Every setting and every rice parameter.
+
+## engine.rs
+
+unsaved-work = Unsaved Work
+sue-keeps-work-you-have-not = Sue keeps work you have not saved by itself. The Hub lists it under Unsaved Work, to recover or discard.

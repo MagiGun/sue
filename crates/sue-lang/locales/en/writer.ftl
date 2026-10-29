@@ -404,3 +404,22 @@ click-in-a-table-first = Click in a table first
 
 heading-row-repeated-each-page = Heading row, repeated on each page
 insert-table = Insert Table
+
+## menus.rs
+
+header-and-footer-ellipsis = Header and Footer...
+table-of-contents-ellipsis = Table of Contents...
+change-case = Change Case
+
+## ui.rs
+
+regular-expressions = Regular expressions
+patterns-such-as-d-chapter-1 = Patterns such as \d+ or ^Chapter; $1 in the replacement puts back what a group caught
+header-and-footer = Header and Footer
+table-of-contents = Table of Contents
+heading-levels = Heading levels
+lists-headings-their-pages-keeps-up = It lists the headings with their pages and keeps up by itself.
+middle = Middle
+header = Header
+footer = Footer
+different-first-page-none-title-page = Different first page (none on a title page)

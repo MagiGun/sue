@@ -10,6 +10,7 @@ license-file.workspace = true
 
 [dependencies]
 egui.workspace = true
+regex.workspace = true
 sue-core.workspace = true
 sue-lang.workspace = true
 sue-io.workspace = true

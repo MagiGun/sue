@@ -19,7 +19,8 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use sue_core::{EntityId, Value};
-use sue_model::{CharFormat, TextMarks, mark_kind as kind};
+use sue_model::contents::Contents;
+use sue_model::{CharFormat, Running, RunningPiece, TextMarks, mark_kind as kind, running_pieces};
 
 pub use docx::{from_docx, to_docx};
 pub use epub::to_epub;
@@ -224,12 +225,53 @@ pub struct Book {
     pub figures: HashMap<EntityId, Figure>,
     /// The tables.
     pub tables: HashMap<EntityId, PublishTable>,
+    /// The tables of contents (their entries are the book's headings).
+    pub contents: HashMap<EntityId, Contents>,
     /// The page size.
     pub page: [f32; 2],
     /// Top, right, bottom and left margins.
     pub margins: [f32; 4],
-    /// Page numbers in the footer.
-    pub page_numbers: bool,
+    /// The running header, in the top margin.
+    pub header: Running,
+    /// The running footer (the page number in the middle by default).
+    pub footer: Running,
+    /// No header or footer on the first page.
+    pub different_first: bool,
+    /// The date a `{date}` field shows.
+    pub date: String,
+}
+
+/// A piece of a running header or footer as a format writes it: text, or
+/// a field the reader's program fills in on each page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Live {
+    /// Text.
+    Text(String),
+    /// The page's number.
+    Page,
+    /// The number of pages.
+    Pages,
+}
+
+impl Book {
+    /// The left, middle and right parts of `running`, with the book's own
+    /// title, author and date filled in and the page fields left live.
+    pub(crate) fn live(&self, running: &Running) -> [Vec<Live>; 3] {
+        [&running.left, &running.center, &running.right].map(|part| {
+            running_pieces(part)
+                .into_iter()
+                .map(|piece| match piece {
+                    RunningPiece::Text(text) => Live::Text(text.to_owned()),
+                    RunningPiece::Field("page") => Live::Page,
+                    RunningPiece::Field("pages") => Live::Pages,
+                    RunningPiece::Field("title") => Live::Text(self.title.clone()),
+                    RunningPiece::Field("author") => Live::Text(self.author.clone()),
+                    RunningPiece::Field("date") => Live::Text(self.date.clone()),
+                    RunningPiece::Field(other) => Live::Text(format!("{{{other}}}")),
+                })
+                .collect()
+        })
+    }
 }
 
 impl Book {
@@ -251,10 +293,34 @@ impl Book {
             styles: PublishStyle::defaults(),
             figures: HashMap::new(),
             tables: HashMap::new(),
+            contents: HashMap::new(),
             page: [612.0, 792.0],
             margins: [72.0; 4],
-            page_numbers: true,
+            header: Running::default(),
+            footer: Running::parse("{page}"),
+            different_first: false,
+            date: String::new(),
         }
+    }
+
+    /// The table of contents paragraph `para` shows, if it shows one.
+    #[must_use]
+    pub fn contents_of(&self, para: &Para) -> Option<&Contents> {
+        para.embed.and_then(|id| self.contents.get(&id))
+    }
+
+    /// The headings `contents` lists: their level and text, in order.
+    #[must_use]
+    pub fn headings(&self, contents: &Contents) -> Vec<(u8, String)> {
+        self.sections
+            .iter()
+            .flat_map(|section| paragraphs(&section.text, &section.marks))
+            .filter_map(|para| {
+                let level = para.outline(self)?;
+                let text = para.text().trim().to_owned();
+                (contents.lists(level) && !text.is_empty()).then_some((level, text))
+            })
+            .collect()
     }
 
     /// The table paragraph `para` shows, if it shows one.
@@ -413,6 +479,18 @@ pub fn to_text(book: &Book) -> String {
             out.push('\n');
         }
         for para in paragraphs(&section.text, &section.marks) {
+            if let Some(contents) = book.contents_of(&para) {
+                if !contents.title.is_empty() {
+                    out.push_str(&contents.title);
+                    out.push('\n');
+                }
+                for (level, title) in book.headings(contents) {
+                    out.push_str(&"  ".repeat(usize::from(level.saturating_sub(1))));
+                    out.push_str(&title);
+                    out.push('\n');
+                }
+                continue;
+            }
             if let Some(table) = book.table(&para) {
                 for row in &table.cells {
                     out.push_str(&row.join("\t").replace('\n', " "));
@@ -494,6 +572,47 @@ mod tests {
             },
         );
         book
+    }
+
+    /// A book with a table of contents before two headings.
+    pub(crate) fn with_contents() -> Book {
+        let text = format!("{}\nOne\nBody text.\nTwo\nThree\n", sue_model::OBJECT);
+        let mut marks = TextMarks::new();
+        let id = EntityId::new();
+        marks.set(
+            0..sue_model::OBJECT.len_utf8(),
+            kind::EMBED,
+            Some(Value::Entity(id)),
+        );
+        for (heading, style) in [
+            ("One", "heading1"),
+            ("Two", "heading2"),
+            ("Three", "heading3"),
+        ] {
+            let at = text.find(heading).unwrap_or(0);
+            marks.set_paragraphs(&text, at..at, kind::STYLE, Some(style.into()));
+        }
+        let mut book = Book::single("Guide", &text, &marks);
+        book.contents.insert(
+            id,
+            Contents {
+                title: "Contents".to_owned(),
+                levels: 2,
+            },
+        );
+        book
+    }
+
+    #[test]
+    fn contents_list_the_books_headings() {
+        let book = with_contents();
+        let contents = book.contents.values().next().unwrap();
+        assert_eq!(
+            book.headings(contents),
+            vec![(1, "One".to_owned()), (2, "Two".to_owned())]
+        );
+        let plain = to_text(&book);
+        assert!(plain.starts_with("Contents\nOne\n  Two\nOne\n"), "{plain}");
     }
 
     #[test]

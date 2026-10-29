@@ -16,7 +16,7 @@ use sue_core::{Arena, AssetHandle, CoreError, Entity, ReversibleTransaction, Txn
 use sue_platform::{AudioSink, FormFactor, TextureUpload};
 use sue_rice::{HardwareProfile, RiceDeclaration, RiceSchema, SetRiceValue};
 
-use crate::{Catalog, RiceEdit, Theme, Transport, Typing, WmError, World};
+use crate::{Catalog, RiceEdit, Theme, Transport, Typing, WmError, WorkList, World};
 
 /// An applet's unique id: `[a-z][a-z0-9-]*`, e.g. `paint`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -296,6 +296,21 @@ pub enum ShellRequest {
         /// What it is, e.g. `JPEG XL, lossless, 1.2 MiB`.
         note: String,
     },
+    /// Put a file first in the work Sue remembers (the Hub's lists and
+    /// every Open Recent): it was opened, or `saved`.
+    Remember {
+        /// The file.
+        path: PathBuf,
+        /// `true` when it was saved, `false` when opened.
+        saved: bool,
+    },
+    /// Forget a file in the work Sue remembers.
+    Forget(PathBuf),
+    /// Bring back work Sue kept by itself (an autosave, by its id) and open
+    /// it in its studio.
+    Recover(String),
+    /// Throw away work Sue kept by itself (an autosave, by its id).
+    Discard(String),
 }
 
 /// A request for a file, answered by the system's own open or save dialog:
@@ -561,6 +576,9 @@ pub struct AppletContext<'a> {
     pub audio: Option<&'a mut (dyn AudioSink + 'static)>,
     /// The shared audio transport.
     pub transport: &'a mut Transport,
+    /// The files of late and the work Sue kept; change it with
+    /// [`ShellRequest::Remember`] and [`ShellRequest::Forget`].
+    pub work: &'a WorkList,
     /// What the shell shows.
     pub view: ShellView,
 }

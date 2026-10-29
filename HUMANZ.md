@@ -63,7 +63,8 @@ created through its safe API, so `sue-platform` keeps the lint too. Native FFI
 is relaxed only in its two small entry crates, each item approved by the
 maintainer: `crates/sue-platform/android` (the native activity's entry and the
 two raw JNI pointers it wraps) and `crates/sue-platform/ios` (UIKit's
-document picker); `sue-platform` calls Java through `jni`'s safe API.
+document picker and keyboard notifications); `sue-platform` calls Java
+through `jni`'s safe API.
 
 ---
 
@@ -668,6 +669,7 @@ the `PlatformHost` trait and the portable services next to it:
 | `open_url`, `reveal_folder` | The system browser (only `http` and `https`, validated by `web_url`) and file manager |
 | `pick_open_file`, `pick_save_file`, `pick_folder` | The system's own open, save and folder dialogs: every file Sue asks for goes through them. Each answers a `Picking`: `Chosen(path)`, `Cancelled`, `Failed(why)`, or `Waiting` on phones and tablets (below) |
 | `poll_picks`, `deliver_picked_files`, `picks_busy` | The answers of pickers that run beside Sue (`PickNews`), the hand-back of files written to the paths they chose, and whether to keep polling; no-ops on desktops |
+| `shown_place`, `shown_path`, `file_manager` | How to name a path to people: what they chose for a staged path (`ShownPlace`, a name and, where the system says it, a folder), else the path itself; and the file manager `reveal_file` shows files in (`Explorer`, `Finder`), `None` on phones and tablets, which hide "show it" actions |
 
 Path resolution is a pure function of the OS and an injected environment lookup,
 so it can be tested without touching the real environment:
@@ -778,6 +780,20 @@ event loop can be made once per process. The host:
 - keeps config and data in the app sandbox (`internal_data_path`).
 
 iOS uses the ordinary executable in an app bundle; its sandbox is `HOME`.
+egui lays out over the whole window there (`egui-winit` takes winit's outer
+size), and the host shrinks `raw.screen_rect` from the bottom by
+`sue_ios::keyboard_inset()`, the points the on-screen keyboard covers. That
+crate observes `UIKeyboardWillChangeFrameNotification` and
+`UIKeyboardWillHideNotification` on the main queue with blocks (approved by
+the maintainer on 2026-10-29), keeps the keyboard's end frame in screen
+coordinates, and converts it into the key window's coordinates when asked,
+so a window that does not fill the screen (Slide Over, Stage Manager) loses
+only the part the keyboard really covers. A keyboard that floats or is split
+on an iPad, or does not reach the window's bottom edge, covers nothing, as
+UIKit's keyboard layout guide counts it (`cover.rs`, tested on every
+system). The keyboard moves with no winit event, so `about_to_wait` compares
+the inset with the last frame's (`SurfaceInfo::safe_area.bottom`) and
+redraws when it changed.
 
 **File pickers on phones and tablets.** Desktops show `rfd`'s dialogs, which
 block until they close. Android and iOS show the system's own picker beside
@@ -798,7 +814,16 @@ stand-in:
   file back on a worker thread; hidden files (`write_atomic`'s temporaries)
   are skipped, and a failure comes back as `PickNews::Failed`;
 - the staging folder is emptied when Sue starts, since what it held stood for
-  places of the last run.
+  places of the last run;
+- each staged path whose writes reach a place (Android's documents and
+  folders, iOS's exports) remembers what people chose, a name and a folder
+  (`System::folder`), and a file made in a chosen folder is in that folder.
+  `shown_place` answers it, so messages never print Sue's cache. Android's
+  folder is read from the content URI alone: the device's storage
+  (`primary:Download/Comics/a.png` is in `Download/Comics`, `home:` is
+  Documents) and the Download folder; other apps' documents have none. An
+  iOS place is in the folder that holds it, unless that is the top of a
+  place in Files.
 
 | | Android (`android::Documents`) | iOS (`ios::Files`) |
 | --- | --- | --- |
@@ -925,7 +950,9 @@ A file written anywhere (`cx.saved(path, note)`, `ShellRequest::Saved`) is
 reported with its name, a note and its folder for at least ten seconds; a
 click on that message runs `reveal-file:<path>`, which shows the file
 selected in Explorer or Finder (`sue_platform::reveal_file`), or its folder
-elsewhere.
+elsewhere. A staged file reads as what people chose (`shown_place`), and
+where there is no file manager (`file_manager()` is `None`) the message
+is not clickable.
 
 ### 3.5 Real-time audio thread isolation
 
@@ -1004,6 +1031,19 @@ so `Ctrl+Z` takes it back, and it shows in Settings, General, Startup as a
 drop-down of the Hub and every studio and tool. A narrow window or a phone
 gets two columns of boxes and 44 point pins.
 
+Under the boxes the Hub lists the **work Sue remembers** (`WorkList`, below):
+**Recent** (the files and projects opened or saved lately, newest first, as
+many as `launchpad.recent_count`), **Saved Projects** (every `.sue` project
+the list knows, by name, with the studio it was saved from) and **Unsaved
+Work** (autosaves of other runs). Three columns side by side when the page
+is wide enough, one under the other when not, each row a sharp box with the
+title, what it is, when and the folder, the full path on hover, 56 points
+tall on touch. A recent file or project opens with `ShellRequest::OpenFile`;
+kept work has **Recover** (also a click on the row, `ShellRequest::Recover`)
+and **Discard** (`ShellRequest::Discard`), which arms on a first click
+(Really Discard) and acts on a second. `Shell::hub_rows` reports where each
+row and button was drawn, for scripted runs and tests.
+
 **The top bar** runs across the window (§3.3). The **Sue button** sits once,
 in its top left corner, with Sue's silhouette; no studio or tool draws one of
 its own. Right after it come the open page's menus: a studio or tool draws
@@ -1022,7 +1062,7 @@ down under the button, built for what is open (`MenuBar::dropdown`):
 | Hub | Back to the Hub (checked there) |
 | Studios, Tools | Every studio and every tool (the open one checked) |
 | New | A submenu per kind of file from the applets' `templates` (a `FileTemplate` names a category such as Picture, the exact kind such as Square Post, and a key the applet's `create` gets back; the applet makes it and opens itself) |
-| File | Open File (`Ctrl+O`), and what applets add there |
+| File | Open File (`Ctrl+O`), Open Recent (the `WorkList`'s ten newest), and what applets add there |
 | Project | Open Project, Save Project (`Ctrl+S`), Save Project As |
 | Send To | What the page works on (`focus`), into every other studio or tool whose `accepts` takes it (`ShellRequest::OpenIn`), and what applets add (`SueAction`s, such as Converter, or Sue Writer for a picture) |
 | Any other submenu | `SueAction`s on a menu of an applet's own |
@@ -1053,6 +1093,35 @@ document, and opens in the first studio, then tool, whose `accepts` takes the
 entity (`Applets::page_for`): a picture in the Image Viewer. A file nothing
 opens is not kept in the project, and the status bar says so.
 
+**The work Sue remembers.** `sue_wm::WorkList` is one list for every studio
+and tool, kept in Sue's data folder (`<data>/work`), read by the shell for the
+Hub and the Sue menu and by applets through `AppletContext::work` (Sue
+Paint's File, Open Recent filters it to the pictures it opens). Only the
+runtime changes it; applets ask with `ShellRequest::Remember { path, saved }`
+and `ShellRequest::Forget`. `recent.txt` holds one line per file (when it
+was opened, when saved, the page it was worked on in, the path), newest
+first, at most 100, under a format line. The runtime remembers every file
+`open_path` opens and every project `save_project_to` writes; files that are
+gone drop off when the Hub opens (`WorkList::refresh`). On first use the list
+takes over Sue Paint's old `paint/recent.txt`.
+
+**Autosave.** Work nobody saved is kept by itself: `general.autosave_seconds`
+(60; 0 turns it off) after the arena's revision changes, and at quit
+(`Runtime::shutdown`), the runtime writes the project as it would be saved
+into `<data>/work/autosave/<id>.sue` with a note (`<id>.txt`: when, the
+project file it belongs to, what it holds, its page). A digest of the bytes
+skips work that equals the saved file or the last copy kept, and saving the
+project lets the copy go. The id is the run's own (seconds, process and a
+count), so runs never share one, and a run never lists its own kept work.
+Opening another project (or recovering kept work) first keeps the work it
+replaces, then starts a new id. Recovering loads the copy as the project,
+with its project file, opens it in its page (`open_first_page`: the page it
+names if it takes something, else the first studio, then tool, that does)
+and adopts its id, so it stays kept until saved. Kept work its project file
+has since caught up with is let go when the Hub opens. Only a runtime that
+remembers (`Runtime::remembering`, on in the desktop and mobile window)
+touches the data folder; tests choose it, and the self-check never does.
+
 **Asking for a file.** No applet opens a dialog itself. It sends
 `ShellRequest::PickFile(FilePick)` (who asks, what for, a title, the
 extensions or the kinds of file it takes, a file name when saving, a folder
@@ -1072,7 +1141,11 @@ files.
 own colors in `<section>_colors` (`custom`). Only the colors change. The
 shell sets egui's visuals to the page's theme while the page and its part of
 the top bar draw, so its menus and popups wear it too, and back to Sue's for
-the status bar, the palette and Settings.
+the status bar, the palette and Settings. The page's and the bar's own `Ui`s
+are handed that style (`UiBuilder::style`): an egui child takes its parent's
+style, not the context's, so without it a studio in Gray inside a Paper Sue
+got Paper's white fields. A light theme (`Theme::is_light`, a light page)
+starts from egui's light visuals, so what egui picks by itself reads on it.
 
 **Shortcuts.** Every applet assigns keys the same way, through
 `sue_wm::shortcuts`: it lists its commands with their default chords
@@ -1618,6 +1691,37 @@ print with ruled cells and repeated heading rows; Word (`w:tbl`, a repeated
 widths), HTML and EPUB (`thead` and `tbody`), RTF (`\trowd` rows, `\trhdr`),
 Markdown (pipe tables) and plain text (tab-separated rows) write them.
 
+**Tables of contents (`sue-model::contents`, `sue-type::contents`).** A
+table of contents is an entity of class `sue.text_contents` shown by an
+`embed` mark; it keeps only its settings (`sue.contents.title`,
+`sue.contents.levels`), and its entries are the headings of the text it is
+in, made at every layout, so it never goes stale. The editor lays it out as
+a read-only `TableBlock` with a `Listing` (each entry set in by level, its
+page at the right, a dotted leader): once to paginate, then again with each
+heading's page; a press on an entry moves the caret to its heading. The
+typesetter sets the book twice when it holds contents (`Embeds`), the second
+time with the pages the first found. Word gets a `TOC` field over the
+headings with `w:updateFields`, so Word fills in the pages on opening;
+OpenDocument a `text:table-of-content` over the outline levels; HTML and
+EPUB a `nav` list; RTF, Markdown and plain text the headings, set in.
+
+**Running headers and footers (`sue-model::layout`).** `Running` holds a
+header's or footer's left, middle and right parts, stored as one text parted
+by tabs; each part is text with fields in braces (`FIELDS`: `{page}`,
+`{pages}`, `{title}`, `{author}`, `{date}`). `fill` sets them for one page
+(`PageFields`), and `running_pieces` hands formats the fields to write as
+their own live ones. `sue-type`'s `PageSetup` carries a header, a footer
+(the page number in the middle by default), `different_first` and the
+document fields; `PageSetup::furniture` gives each page what its margins
+show, which the editor paints and the typesetter sets. A `Book` carries the
+same: Word writes a header and a footer part with `PAGE` and `NUMPAGES`
+fields at a centered and a right tab stop (`w:titlePg` for a title page),
+OpenDocument a master page's `style:header` and `style:footer` with
+`text:page-number` and `text:page-count` (and `style:header-first`), RTF
+`\header` and `\footer` groups with `PAGE` and `NUMPAGES` fields
+(`\titlepg`). Sue Writer keeps them on the project
+(`sue_writer.header`, `sue_writer.footer`, `sue_writer.different_first`).
+
 **Manuscripts (`sue-model::manuscript`).** A long work is an entity of class
 `sue.manuscript` whose ordered `sue.child` relations make a binder of folders
 and documents. Its top folders have a `manuscript.role`: `draft` (what is
@@ -1682,6 +1786,14 @@ and tested apart from egui (curve, landing exactly, retargeting, the blink, no
 frames at rest); `bins/sue` types in Sue Writer and checks egui's repaint
 delay: zero while it glides, the blink at rest, nothing after.
 
+**Find and case (`sue-type::find`, `case`).** `Finder` searches plain
+text (case folded unless asked, whole words) or a regular expression (the
+`regex` crate; case and whole words apply to it too, no empty matches), and
+fills a regular expression's replacement with what its groups caught (`$1`,
+`${name}`). `case::change` turns text into upper, lower, sentence or title
+case or swaps it; `Editor::change_case` does it to the selection or the
+word at the caret as one undo step, keeping the marks.
+
 **Typesetting and PDF (`sue-type::typeset`, `sue-io::pdf`).** For print, the
 same styles and marks are set from the font files themselves (`ttf-parser`
 widths): lines broken at spaces, justified, paginated with the same rules,
@@ -1723,11 +1835,13 @@ and an on-screen keyboard:
 | Binder, inspector | each covers the page when asked for; picking a document closes the binder |
 | Status bar | the words and the page |
 
-Two rules keep the line being written in sight. The Android host redraws
-when the activity's content rectangle moves (the keyboard comes up or goes
-away; winit passes no event for it) and lays the window out above the
-keyboard, and the editor scrolls the caret back into view whenever its view
-changes size while it has the keyboard. A press on the Writer's own bars
+Two rules keep the line being written in sight. The host lays the window
+out above the keyboard and redraws when the keyboard comes up, goes away or
+changes height (winit passes no event for it): on Android when the
+activity's content rectangle moves, on iPhone and iPad when UIKit's keyboard
+notifications move the keyboard's frame (§3.1). And the editor scrolls the
+caret back into view whenever its view changes size while it has the
+keyboard. A press on the Writer's own bars
 calls `Editor::keep_focus`, so the editor keeps egui's focus (and the IME
 its keyboard) through the tap, and a formatting command from a menu gives
 the keyboard back to the text (`run_typing`).
@@ -1891,7 +2005,7 @@ packages can add their own:
 
 | Page | Holds |
 | --- | --- |
-| General | Where Sue opens (`launchpad.pinned`, labeled Open At Launch: the Hub, or the studio or tool pinned there) and quit confirmation |
+| General | Where Sue opens (`launchpad.pinned`, labeled Open At Launch: the Hub, or the studio or tool pinned there), how many recent files the Hub lists (`launchpad.recent_count`), how often unsaved work is kept (`general.autosave_seconds`, labeled Autosave Every) and quit confirmation |
 | Appearance & Rice | Theme presets (Void, Graphite, Paper, Gray), every color, geometry (padding, hairlines, radii, pill buttons, the top bar and the status bar, shadows), typography, the rice file with Reload, Export and Open Folder |
 | Display & Graphics | The performance preference (`profile.hardware`, labeled Performance Preference) and the active profile; the GPU preference (picked by adapter type: integrated, discrete, or the display's GPU), the GPU drawing, every GPU found and Restart Sue (the GPU is chosen at startup); the frame-rate cap, the settle grace, UI scale, list wheel speed, motion (instant snap, animation speed, spring constants, caret blink, smooth caret and its glide time, message time) |
 | Audio & DSP | Output device, sample rate, buffer size, real-time priority, volume, and the live stream and real-time status |
@@ -2125,7 +2239,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.8 Installed fonts | **Implemented** (a background scan; faces installed into egui on first use) | `sue-wm/src/fonts.rs`, `sue-platform/src/paths.rs` |
 | §3.8 Rich text editor, styles, page layout, typesetting | **Implemented**; the caret glides and blinks at rest (`sue-type/src/caret.rs`) | `sue-type` |
 | §3.8 Publishing formats and PDF | **Implemented** (Word both ways; OpenDocument, EPUB, HTML, RTF, Markdown, text out; HTML and Markdown in; fonts embedded whole, not subset) | `sue-io/src/publish`, `pdf.rs`, `zip.rs` |
-| §3.8 Sue Writer | **Implemented**; on a phone laid out for a thumb and an on-screen keyboard (text reflowed to the screen, formatting above the keyboard, the caret kept in sight); snapshots show the phone with and without the keyboard | `sue-writer`, `sue-type/src/editor.rs`, `sue-platform/src/desktop.rs` |
+| §3.8 Sue Writer | **Implemented**; on a phone laid out for a thumb and an on-screen keyboard (text reflowed to the screen, formatting above the keyboard, the caret kept in sight); snapshots show the phone with and without the keyboard | `sue-writer`, `sue-type/src/editor.rs`, `sue-platform/src/desktop.rs`, `crates/sue-platform/ios/src/keyboard.rs` |
 | §2.1 Three-tier sniffer | **Implemented** | `sue-io/src/sniff.rs` |
 | §2.2 JXL probe (boxes + `SizeHeader`) | **Implemented** | `sue-io/src/jxl.rs` |
 | §2.2 JXL pixel decode and JPEG reconstruction | **Implemented** with `jxl-oxide` (no CMYK yet; the DC preview and pass targets come from a full decode until a streaming decoder lands) | `sue-io/src/jxl.rs` |
@@ -2141,6 +2255,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.1 Frame pacing: application and egui repaint requests combined in `about_to_wait`, timed wakes, close confirmation | **Implemented**; the self-check asserts that neither the runtime nor egui asks for frames once idle | `sue-platform/src/desktop.rs`, `bins/sue/src/runtime.rs` |
 | §3.1 Native open, save and folder dialogs, system browser, file manager | **Implemented** with `rfd` and `open` (web addresses limited to `http` and `https`) on desktops | `sue-platform/src/os.rs` |
 | §3.1 The system's own file pickers on Android and iOS (staged copies handed back) | **Implemented**; the engine is tested headless with a stand-in system; Android's picker is tried on an emulator; the iOS picker is type-checked but not yet run on a device | `sue-platform/src/picks.rs`, `android.rs`, `ios.rs`, `crates/sue-platform/ios`, `packaging/android/java` |
+| §3.1 Layout above the on-screen keyboard on Android and iOS | **Implemented**; Android reads the activity's content rectangle; iOS watches UIKit's keyboard notifications, type-checked but not yet run on a device (the geometry is tested on every system) | `sue-platform/src/desktop.rs`, `crates/sue-platform/ios/src/keyboard.rs`, `cover.rs` |
 | §3.1 Native mobile hosts (Android, iOS) | Planned (the mobile topologies already run on `HeadlessHost`) | n/a |
 | §3.2 to 3.4 Form factors, layout, springs, scheduler | **Implemented** | `sue-wm` |
 | §3.4 Painting with egui (`egui-wgpu`), arena images as native textures | **Implemented**; the self-check renders a frame on the GPU and counts tinted pixels (zero) | `sue-platform/src/paint.rs` |

@@ -16,7 +16,7 @@ use sue_wm::{AppletContext, AppletId, ArenaEdit, ItemState, ShellRequest, Theme,
 
 use crate::compile::{FORMATS, Separator, Titles};
 use crate::project::{self, LABELS, STATUSES, TEMPLATES};
-use crate::studio::{Dialog, Figure, ID, PAGES, Settings, SueWriter, View};
+use crate::studio::{Dialog, Figure, Furniture, ID, PAGES, Settings, SueWriter, View};
 
 const TOOLBAR_HEIGHT: f32 = 36.0;
 const STATUS_HEIGHT: f32 = 24.0;
@@ -2452,6 +2452,8 @@ impl SueWriter {
         }
         ui.checkbox(&mut find.case, tr!("match-case"));
         ui.checkbox(&mut find.words, tr!("whole-words"));
+        ui.checkbox(&mut find.regex, tr!("regular-expressions"))
+            .on_hover_text(tr!("patterns-such-as-d-chapter-1"));
         if self.project.is_some() {
             ui.checkbox(&mut find.project, tr!("whole-project"));
         }
@@ -2531,6 +2533,8 @@ impl SueWriter {
             Dialog::Link(_) => tr!("link"),
             Dialog::Footnote(_) => tr!("footnote"),
             Dialog::Table { .. } => tr!("insert-table"),
+            Dialog::Furniture(_) => tr!("header-and-footer"),
+            Dialog::Contents(_) => tr!("table-of-contents"),
             Dialog::Statistics => tr!("writing-statistics"),
             Dialog::Shortcuts => tr!("keyboard-shortcuts"),
         };
@@ -2750,6 +2754,54 @@ impl SueWriter {
                             }
                         });
                     }
+                    Dialog::Contents(contents) => {
+                        egui::Grid::new("writer-contents")
+                            .num_columns(2)
+                            .spacing(vec2(12.0, 8.0))
+                            .show(ui, |ui| {
+                                ui.label(tr!("title"));
+                                ui.text_edit_singleline(&mut contents.title);
+                                ui.end_row();
+                                ui.label(tr!("heading-levels"));
+                                ui.add(egui::DragValue::new(&mut contents.levels).range(1..=6));
+                                ui.end_row();
+                            });
+                        ui.label(
+                            RichText::new(tr!("lists-headings-their-pages-keeps-up"))
+                                .size(theme.small_size)
+                                .color(theme.muted),
+                        );
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            if ui.button(tr!("insert")).clicked() {
+                                let contents = contents.clone();
+                                after = Some(Box::new(move |me: &mut Self, cx| {
+                                    me.editor.insert_contents(cx, &contents);
+                                    me.editor.focus();
+                                }));
+                                keep = false;
+                            }
+                            if ui.button(tr!("cancel")).clicked() {
+                                keep = false;
+                            }
+                        });
+                    }
+                    Dialog::Furniture(furniture) => {
+                        furniture_ui(ui, furniture, theme);
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            if ui.button("OK").clicked() {
+                                let furniture = furniture.clone();
+                                after = Some(Box::new(move |me: &mut Self, cx| {
+                                    me.apply_furniture(cx, &furniture);
+                                }));
+                                keep = false;
+                            }
+                            if ui.button(tr!("cancel")).clicked() {
+                                keep = false;
+                            }
+                        });
+                    }
                     Dialog::Statistics => {
                         self.statistics_ui(ui, cx, theme);
                         if ui.button(tr!("close")).clicked() {
@@ -2865,9 +2917,6 @@ impl SueWriter {
                         .speed(0.25),
                 );
                 ui.end_row();
-                ui.label(tr!("running-head"));
-                ui.text_edit_singleline(&mut settings.header);
-                ui.end_row();
                 ui.label(tr!("manuscript-target-words"));
                 ui.add(
                     egui::DragValue::new(&mut settings.target)
@@ -2890,6 +2939,30 @@ impl SueWriter {
                     .color(theme.muted),
             );
         }
+    }
+
+    /// Keeps the header and footer on the project, as one undo step.
+    fn apply_furniture(&mut self, cx: &mut AppletContext<'_>, furniture: &Furniture) {
+        let Some(root) = self.project else {
+            return;
+        };
+        let batch = sue_core::txn::Batch::new(tr!("header-and-footer"))
+            .then(project::set(
+                root,
+                project::HEADER,
+                Some(Value::Text(furniture.header.store())),
+            ))
+            .then(project::set(
+                root,
+                project::FOOTER,
+                Some(Value::Text(furniture.footer.store())),
+            ))
+            .then(project::set(
+                root,
+                project::DIFFERENT_FIRST,
+                Some(Value::Bool(furniture.different_first)),
+            ));
+        self.apply(cx, batch);
     }
 
     fn apply_settings(&mut self, cx: &mut AppletContext<'_>, settings: &Settings) {
@@ -2937,11 +3010,6 @@ impl SueWriter {
             root,
             project::SIZE,
             Some(Value::Float(f64::from(settings.size))),
-        )));
-        batch.push(Box::new(project::set(
-            root,
-            project::HEADER,
-            text(&settings.header),
         )));
         batch.push(Box::new(project::set(
             root,
@@ -3408,6 +3476,76 @@ fn picture_icon(painter: &Painter, rect: Rect, color: Color32) {
 }
 
 /// A combo box of installed fonts with a search field.
+/// The header and footer fields: three parts each, left, middle and right,
+/// with buttons that put in a field.
+fn furniture_ui(ui: &mut Ui, furniture: &mut Furniture, theme: &Theme) {
+    let mut focused: Option<(usize, usize)> = ui
+        .ctx()
+        .data(|data| data.get_temp(Id::unique("writer-furniture-focus")));
+    egui::Grid::new("writer-furniture")
+        .num_columns(4)
+        .spacing(vec2(8.0, 6.0))
+        .show(ui, |ui| {
+            ui.label("");
+            for part in [tr!("left"), tr!("middle"), tr!("right")] {
+                ui.label(
+                    RichText::new(part)
+                        .size(theme.small_size)
+                        .color(theme.muted),
+                );
+            }
+            ui.end_row();
+            for (row, (label, running)) in [
+                (tr!("header"), &mut furniture.header),
+                (tr!("footer"), &mut furniture.footer),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                ui.label(label);
+                for (column, part) in [&mut running.left, &mut running.center, &mut running.right]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let response = ui.add(egui::TextEdit::singleline(part).desired_width(130.0));
+                    if response.has_focus() || response.gained_focus() {
+                        focused = Some((row, column));
+                    }
+                }
+                ui.end_row();
+            }
+        });
+    ui.horizontal_wrapped(|ui| {
+        ui.label(
+            RichText::new(tr!("insert"))
+                .size(theme.small_size)
+                .color(theme.muted),
+        );
+        for (field, name) in sue_model::FIELDS {
+            if ui.small_button(*name).clicked() {
+                let (row, column) = focused.unwrap_or((1, 1));
+                let running = if row == 0 {
+                    &mut furniture.header
+                } else {
+                    &mut furniture.footer
+                };
+                let part = match column {
+                    0 => &mut running.left,
+                    1 => &mut running.center,
+                    _ => &mut running.right,
+                };
+                part.push_str(&format!("{{{field}}}"));
+            }
+        }
+    });
+    ui.checkbox(
+        &mut furniture.different_first,
+        tr!("different-first-page-none-title-page"),
+    );
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(Id::unique("writer-furniture-focus"), focused));
+}
+
 fn font_picker(ui: &mut Ui, salt: &str, font: &mut String, filter: &mut String) {
     egui::ComboBox::from_id_salt(salt.to_owned())
         .selected_text(font.clone())
