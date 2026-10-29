@@ -141,6 +141,8 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
     let mut notes = 0;
     let mut images: Vec<(String, Vec<u8>)> = Vec::new();
     let mut page_breaks = false;
+    let mut tables = 0;
+    let mut table_styles = String::new();
     for (index, section) in book.sections.iter().enumerate() {
         let mut open_list: Option<&str> = None;
         for (para_index, para) in paragraphs(&section.text, &section.marks)
@@ -159,6 +161,17 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
                     let _ = write!(body, "<text:list text:style-name=\"{name}\">");
                 }
                 open_list = list;
+            }
+            if let Some(table) = book.table(&para) {
+                if open_list.take().is_some() {
+                    body.push_str("</text:list>");
+                }
+                tables += 1;
+                let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+                let (styles, xml) = table_xml(table, tables, width);
+                table_styles.push_str(&styles);
+                body.push_str(&xml);
+                continue;
             }
             let mut inner = String::new();
             if let Some(id) = para.embed
@@ -225,7 +238,7 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
             body.push_str("</text:list>");
         }
     }
-    let mut auto = String::new();
+    let mut auto = table_styles;
     for (index, props) in automatic.iter().enumerate() {
         let _ = write!(
             auto,
@@ -272,6 +285,7 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
         styles.push_str(&paragraph_style(style));
     }
     styles.push_str("<style:style style:name=\"Footnote\" style:family=\"paragraph\"><style:text-properties fo:font-size=\"10pt\"/></style:style>");
+    styles.push_str("<style:style style:name=\"Table_20_Heading\" style:display-name=\"Table Heading\" style:family=\"paragraph\"><style:text-properties fo:font-weight=\"bold\"/></style:style>");
     let [top, right, bottom, left] = book.margins;
     let footer = if book.page_numbers {
         "<style:footer><text:p text:style-name=\"Sue_20_Footer\"><text:page-number text:select-page=\"current\">1</text:page-number></text:p></style:footer>"
@@ -310,9 +324,66 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
     zip.finish()
 }
 
+/// Table number `number` as OpenDocument, `width` points across: its
+/// automatic styles (the width of the table and each column, cell borders)
+/// and the table, heading rows repeated.
+fn table_xml(table: &crate::publish::PublishTable, number: usize, width: f32) -> (String, String) {
+    let name = format!("Table{number}");
+    let columns = table.columns().max(1);
+    let mut styles = format!(
+        "<style:style style:name=\"{name}\" style:family=\"table\"><style:table-properties style:width=\"{width}pt\" table:align=\"margins\"/></style:style><style:style style:name=\"{name}.Cell\" style:family=\"table-cell\"><style:table-cell-properties fo:padding=\"3pt\" fo:border=\"0.5pt solid #000000\"/></style:style>"
+    );
+    for column in 0..columns {
+        let _ = write!(
+            styles,
+            "<style:style style:name=\"{name}.C{column}\" style:family=\"table-column\"><style:table-column-properties style:column-width=\"{}pt\"/></style:style>",
+            width * table.share(column)
+        );
+    }
+    let mut xml = format!("<table:table table:name=\"{name}\" table:style-name=\"{name}\">");
+    for column in 0..columns {
+        let _ = write!(
+            xml,
+            "<table:table-column table:style-name=\"{name}.C{column}\"/>"
+        );
+    }
+    for (row, cells) in table.cells.iter().enumerate() {
+        if row == 0 && table.header_rows > 0 {
+            xml.push_str("<table:table-header-rows>");
+        }
+        xml.push_str("<table:table-row>");
+        for column in 0..columns {
+            let _ = write!(
+                xml,
+                "<table:table-cell table:style-name=\"{name}.Cell\" office:value-type=\"string\">"
+            );
+            let text = cells.get(column).map_or("", String::as_str);
+            for line in text.split('\n') {
+                if row < table.header_rows {
+                    let _ = write!(
+                        xml,
+                        "<text:p text:style-name=\"Table_20_Heading\">{}</text:p>",
+                        escape(line)
+                    );
+                } else {
+                    let _ = write!(xml, "<text:p>{}</text:p>", escape(line));
+                }
+            }
+            xml.push_str("</table:table-cell>");
+        }
+        xml.push_str("</table:table-row>");
+        if row + 1 == table.header_rows.min(table.cells.len()) {
+            xml.push_str("</table:table-header-rows>");
+        }
+    }
+    xml.push_str("</table:table>");
+    (styles, xml)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::tests::sample;
+    use super::super::tests::with_table;
     use super::super::xml::{XmlEvent, parse};
     use super::*;
     use crate::zip::read_zip;
@@ -343,5 +414,25 @@ mod tests {
             .filter(|e| matches!(e, XmlEvent::Close(_)))
             .count();
         assert_eq!(opens, closes);
+    }
+
+    #[test]
+    fn opendocument_tables_have_columns_and_heading_rows() {
+        let bytes = to_odt(&with_table());
+        let files = read_zip(&bytes).unwrap();
+        let content = files
+            .iter()
+            .find(|(name, _)| name == "content.xml")
+            .unwrap();
+        let xml = String::from_utf8(content.1.clone()).unwrap();
+        assert_eq!(
+            xml.matches("<table:table-cell ").count(),
+            xml.matches("</table:table-cell>").count()
+        );
+        assert!(xml.contains("<table:table table:name=\"Table1\""), "{xml}");
+        assert_eq!(xml.matches("<table:table-column ").count(), 2);
+        assert_eq!(xml.matches("<table:table-header-rows>").count(), 1);
+        assert_eq!(xml.matches("<table:table-row>").count(), 2);
+        assert!(xml.contains("Bolt &lt;M8&gt;"));
     }
 }

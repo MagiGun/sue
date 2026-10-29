@@ -2354,6 +2354,7 @@ impl SueWriter {
             Dialog::Settings(_) => "Project Settings",
             Dialog::Link(_) => "Link",
             Dialog::Footnote(_) => "Footnote",
+            Dialog::Table { .. } => "Insert Table",
             Dialog::Statistics => "Writing Statistics",
             Dialog::Shortcuts => "Keyboard Shortcuts",
         };
@@ -2527,6 +2528,39 @@ impl SueWriter {
                                             "Footnote",
                                         );
                                     }
+                                }));
+                                keep = false;
+                            }
+                            if ui.button("Cancel").clicked() {
+                                keep = false;
+                            }
+                        });
+                    }
+                    Dialog::Table {
+                        rows,
+                        columns,
+                        heading,
+                    } => {
+                        egui::Grid::new("writer-table-size")
+                            .num_columns(2)
+                            .spacing([12.0, 8.0])
+                            .show(ui, |ui| {
+                                ui.label("Columns");
+                                ui.add(egui::DragValue::new(columns).range(1..=63));
+                                ui.end_row();
+                                ui.label("Rows");
+                                ui.add(egui::DragValue::new(rows).range(1..=999));
+                                ui.end_row();
+                            });
+                        ui.checkbox(heading, "Heading row, repeated on each page");
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            if ui.button("Insert").clicked() {
+                                let (rows, columns, heading) = (*rows, *columns, *heading);
+                                after = Some(Box::new(move |me: &mut Self, cx| {
+                                    me.editor
+                                        .insert_table(cx, rows, columns, u32::from(heading));
+                                    me.editor.focus();
                                 }));
                                 keep = false;
                             }

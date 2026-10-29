@@ -138,16 +138,16 @@ of work is by how much people miss each one (the plan at the end).
 
 | Feature | Source | Sue | Notes |
 | --- | --- | --- | --- |
-| Insert a table | WL | missing | Shared `sue_model::Table` |
-| Insert and delete rows and columns | WL | missing | |
+| Insert a table | WL | done | Shared `sue_model::Table`, an entity shown by an `embed` mark |
+| Insert and delete rows and columns | WL | done | Tab in the last cell adds a row |
 | Select cell, row, column, table | WL | missing | |
 | Merge and split cells | WL | missing | |
 | Split and merge tables | WL | missing | |
-| Column width, row height, distribute, autofit | WL | missing | |
-| Header rows repeated on each page | WL | missing | |
-| Borders and shading, table styles and autoformat | WL | missing | |
+| Column width, row height, distribute, autofit | WL | partial | Rows fit their text; widths are read from the table (Word import) but cannot be dragged yet |
+| Header rows repeated on each page | WL | done | On screen, in PDF, Word, OpenDocument, RTF |
+| Borders and shading, table styles and autoformat | WL | partial | Every table ruled, its heading row shaded; no styles yet |
 | Cell alignment, margins and text direction | WL | missing | |
-| Convert text to table and table to text | WL | missing | |
+| Convert text to table and table to text | WL | done | Tabs, else commas |
 | Sort | WL | missing | |
 | Formulas and number formats | WL | missing | |
 | Nested tables | WL | missing | |

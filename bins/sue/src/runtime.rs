@@ -4327,4 +4327,124 @@ f 2 3 4
         assert_eq!(runtime.shell.page(), Some(&writer));
         let _ = std::fs::remove_dir_all(&root);
     }
+    #[test]
+    fn sue_writer_tables_take_typing_grow_with_tab_undo_and_export() {
+        let (mut runtime, root) = runtime("sue-writer-tables");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let writer = AppletId::new(sue_writer::ID).unwrap();
+        runtime.request(
+            ShellRequest::Create {
+                applet: writer.clone(),
+                key: "novel".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let command = |runtime: &mut Runtime, command: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: writer.clone(),
+                    command: command.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        command(&mut runtime, "table.insert.2x2");
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let table_of = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .find(|(_, entity)| entity.class() == sue_model::TEXT_TABLE)
+                .and_then(|(_, entity)| entity.ext::<sue_model::Table>().cloned())
+                .expect("a table in the arena")
+        };
+        assert_eq!(table_of(&runtime).size(), (2, 2));
+        let key = |key: egui::Key, modifiers: egui::Modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        // Typing goes into the first cell; Tab moves on, and Tab in the last
+        // cell adds a row.
+        frames(&mut runtime, &ctx, size, start, |frame| match frame {
+            1 => vec![egui::Event::Text("Name".to_owned())],
+            2 => vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
+            3 => vec![egui::Event::Text("Qty".to_owned())],
+            4 => vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
+            5 => vec![egui::Event::Text("Bolt".to_owned())],
+            6 => vec![
+                key(egui::Key::Tab, egui::Modifiers::NONE),
+                key(egui::Key::Tab, egui::Modifiers::NONE),
+            ],
+            _ => Vec::new(),
+        });
+        let table = table_of(&runtime);
+        assert_eq!(table.text(0, 0), "Name");
+        assert_eq!(table.text(0, 1), "Qty");
+        assert_eq!(table.text(1, 0), "Bolt");
+        assert_eq!(table.size(), (3, 2), "Tab in the last cell adds a row");
+        // Undo takes the new row back, then the typing in the cell before.
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]
+            } else {
+                Vec::new()
+            }
+        });
+        assert_eq!(table_of(&runtime).size(), (2, 2));
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]
+            } else {
+                Vec::new()
+            }
+        });
+        assert_eq!(
+            table_of(&runtime).text(1, 0),
+            "",
+            "{:?}",
+            table_of(&runtime)
+        );
+        assert_eq!(table_of(&runtime).text(0, 1), "Qty");
+        // A column after the caret's, from the Table menu.
+        command(&mut runtime, "table.column_right");
+        assert_eq!(table_of(&runtime).size(), (2, 3));
+        // The table goes out in a web page and a Word file.
+        for (format, needle) in [("html", "<td>"), ("docx", "")] {
+            let home = runtime.engine.catalog.folders["home"].clone();
+            std::fs::create_dir_all(&home).unwrap();
+            let path = home.join(format!("tables.{format}"));
+            runtime.request(
+                ShellRequest::Picked {
+                    pick: FilePick::save(
+                        Some(writer.clone()),
+                        &format!("compile.{format}"),
+                        "Export",
+                        "tables",
+                    ),
+                    path: path.clone(),
+                },
+                &mut NoTextures,
+                start,
+            );
+            let bytes = std::fs::read(&path).unwrap();
+            if format == "html" {
+                let html = String::from_utf8(bytes).unwrap();
+                assert!(html.contains(needle) && html.contains("Qty"), "{html}");
+            } else {
+                assert!(bytes.starts_with(b"PK"));
+            }
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

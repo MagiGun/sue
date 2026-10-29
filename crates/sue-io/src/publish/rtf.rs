@@ -51,6 +51,11 @@ pub fn to_rtf(book: &Book) -> String {
         for para in paragraphs(&section.text, &section.marks) {
             let style = book.style(&para.style);
             let base = font(&style.font);
+            if let Some(table) = book.table(&para) {
+                let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+                body.push_str(&table_rtf(table, width, base, style.size));
+                continue;
+            }
             let _ = write!(
                 body,
                 "\\pard\\plain\\f{base}\\fs{}",
@@ -192,9 +197,44 @@ pub fn to_rtf(book: &Book) -> String {
     out
 }
 
+/// A table as RTF rows, `width` points across, in font `font` at `size`.
+fn table_rtf(table: &crate::publish::PublishTable, width: f32, font: usize, size: f32) -> String {
+    let columns = table.columns().max(1);
+    let mut out = String::new();
+    for (row, cells) in table.cells.iter().enumerate() {
+        out.push_str("\\trowd\\trgaph72");
+        if row < table.header_rows {
+            out.push_str("\\trhdr");
+        }
+        let mut right = 0.0;
+        for column in 0..columns {
+            right += width * table.share(column);
+            for side in ["t", "l", "b", "r"] {
+                let _ = write!(out, "\\clbrdr{side}\\brdrs\\brdrw10");
+            }
+            let _ = write!(out, "\\cellx{}", twips(right));
+        }
+        out.push('\n');
+        for column in 0..columns {
+            let text = cells.get(column).map_or("", String::as_str);
+            let _ = writeln!(
+                out,
+                "\\pard\\intbl\\plain\\f{font}\\fs{}{} {}\\cell",
+                (size * 2.0).round() as i32,
+                if row < table.header_rows { "\\b" } else { "" },
+                escape(text).replace('\n', "\\line ")
+            );
+        }
+        out.push_str("\\row\n");
+    }
+    out.push_str("\\pard\n");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::tests::sample;
+    use super::super::tests::with_table;
     use super::*;
 
     #[test]
@@ -206,5 +246,13 @@ mod tests {
         assert!(rtf.contains("\\bullet\\tab"));
         assert_eq!(rtf.matches('{').count(), rtf.matches('}').count());
         assert_eq!(escape("é{"), "\\u233?\\{");
+    }
+
+    #[test]
+    fn rtf_tables_are_rows_of_cells() {
+        let rtf = to_rtf(&with_table());
+        assert_eq!(rtf.matches("\\row").count(), 2, "{rtf}");
+        assert_eq!(rtf.matches("\\trhdr").count(), 1);
+        assert_eq!(rtf.matches("\\cell\n").count(), 4);
     }
 }

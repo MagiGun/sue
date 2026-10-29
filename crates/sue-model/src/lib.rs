@@ -39,7 +39,10 @@ pub use geometry::{AttributeData, Domain, Geometry, Prim, PrimKind, Transform};
 pub use graph::{GraphEdit, GraphOp, Link, Node, NodeGraph, NodeKey, NodeRegistry, NodeType, Port};
 pub use layout::{Frame, PAGE_SIZES, Page, PageLayout, Rect, page_size, points};
 pub use sequence::{Clip, Note, Notes, Sequence, Track};
-pub use table::{Cell, Column, SetCell, Table, column_name, parse_a1};
+pub use table::{
+    Axis, Cell, Column, HEADER_ROWS, Reshape, SetCell, TEXT_TABLE, Table, WIDTHS, column_name,
+    column_shares, parse_a1,
+};
 pub use text::{
     CharFormat, Mark, OBJECT, PARAGRAPH_KINDS, TextMarks, char_format, ensure_final_newline,
     is_paragraph_kind, kind as mark_kind, marks_by_paragraph, paragraph_at, paragraphs, points_of,

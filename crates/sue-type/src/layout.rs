@@ -15,6 +15,7 @@ use crate::style::{
     Align, CharFormat, ListKind, ParagraphLook, StyleSheet, marks_by_paragraph, paragraph_look,
     runs,
 };
+use crate::tables::{TableBlock, TableSource, lay_table};
 
 /// Screen pixels per point at 100% zoom (a 96 dpi screen).
 pub const PX_PER_PT: f32 = 96.0 / 72.0;
@@ -126,6 +127,8 @@ pub struct Block {
     /// An embedded picture filling the paragraph: the entity and its size
     /// in pixels.
     pub figure: Option<(EntityId, Vec2)>,
+    /// An embedded table filling the paragraph; its rows are the block's.
+    pub table: Option<Arc<TableBlock>>,
     /// Each row's top and bottom, in galley pixels.
     pub rows: Vec<(f32, f32)>,
     /// Space above and below, in pixels.
@@ -189,6 +192,8 @@ pub struct Source<'a> {
     pub marks: &'a TextMarks,
     /// Pictures it shows: entity and size in pixels at 100%.
     pub figure_size: &'a dyn Fn(EntityId) -> Option<Vec2>,
+    /// Tables it shows ([`crate::tables`]).
+    pub tables: &'a dyn Fn(EntityId) -> Option<TableSource>,
 }
 
 /// What a paragraph's text is laid out with.
@@ -218,7 +223,7 @@ fn bullet(level: usize) -> &'static str {
 }
 
 /// A paragraph's text format for one run.
-fn format(
+pub(crate) fn format(
     ctx: &egui::Context,
     look: &ParagraphLook,
     run: &CharFormat,
@@ -335,7 +340,7 @@ pub fn lay_document(
         let base_font = format(ctx, &look, &CharFormat::default(), setting, None).font_id;
         let natural = ctx.fonts_mut(|fonts| fonts.row_height(&base_font));
         let line = Some(natural * look.line_spacing);
-        let figure = (text[body.clone()] == sue_model::OBJECT.to_string())
+        let embed = (text[body.clone()] == sue_model::OBJECT.to_string())
             .then(|| {
                 marks
                     .iter()
@@ -345,12 +350,16 @@ pub fn lay_document(
                         _ => None,
                     })
             })
-            .flatten()
-            .and_then(|id| {
-                let size = (source.figure_size)(id)? * setting.scale;
-                let fit = (width / size.x.max(1.0)).min(1.0);
-                Some((id, size * fit))
-            });
+            .flatten();
+        let table = embed.and_then(|id| {
+            let source = (source.tables)(id)?;
+            Some(Arc::new(lay_table(ctx, id, &source, &look, setting, width)))
+        });
+        let figure = embed.filter(|_| table.is_none()).and_then(|id| {
+            let size = (source.figure_size)(id)? * setting.scale;
+            let fit = (width / size.x.max(1.0)).min(1.0);
+            Some((id, size * fit))
+        });
         let mut job = LayoutJob::default();
         job.wrap.max_width = width;
         job.halign = match look.align {
@@ -392,6 +401,11 @@ pub fn lay_document(
         if let Some((_, size)) = figure {
             rows = vec![(0.0, size.y)];
         }
+        if let Some(table) = &table
+            && !table.rows.is_empty()
+        {
+            rows.clone_from(&table.rows);
+        }
         if rows.is_empty() {
             rows.push((0.0, natural));
         }
@@ -404,10 +418,17 @@ pub fn lay_document(
             doc,
             index,
             range: body,
-            space: (
-                look.space_before * setting.scale,
-                look.space_after * setting.scale,
-            ),
+            space: if table.is_some() {
+                (
+                    look.space_before.max(crate::tables::TABLE_SPACE) * setting.scale,
+                    look.space_after.max(crate::tables::TABLE_SPACE) * setting.scale,
+                )
+            } else {
+                (
+                    look.space_before * setting.scale,
+                    look.space_after * setting.scale,
+                )
+            },
             look,
             galley,
             origin,
@@ -415,6 +436,7 @@ pub fn lay_document(
             width,
             label,
             figure,
+            table,
             rows,
         });
     }
@@ -458,6 +480,17 @@ pub fn paginate(laid: &mut Laid, mode: ViewMode, page: &PageSetup, scale: f32, d
         }
         let rows = block.rows.clone();
         let height = |from: usize, to: usize| rows[to - 1].1 - rows[from].0;
+        // A table that runs onto another page repeats its heading rows
+        // there first.
+        let (repeat, headings) = block.table.as_ref().map_or((0.0, 0), |table| {
+            if paged {
+                (table.repeat_height(), table.header_rows)
+            } else {
+                (0.0, 0)
+            }
+        });
+        // Where this page's rows of the block start (below any headings).
+        let mut page_top = 0.0;
         // A heading stays with the first line after it.
         if paged && block.look.keep_with_next && y > 0.0 {
             let next_line = laid
@@ -478,9 +511,10 @@ pub fn paginate(laid: &mut Laid, mode: ViewMode, page: &PageSetup, scale: f32, d
                 to += 1;
             }
             if to == from {
-                if y > 0.0 {
+                if y > page_top {
                     page_index += 1;
-                    y = 0.0;
+                    page_top = if from >= headings.max(1) { repeat } else { 0.0 };
+                    y = page_top;
                     continue;
                 }
                 // Taller than a page: it goes on one anyway.
@@ -503,7 +537,8 @@ pub fn paginate(laid: &mut Laid, mode: ViewMode, page: &PageSetup, scale: f32, d
             from = to;
             if from < rows.len() {
                 page_index += 1;
-                y = 0.0;
+                page_top = if from >= headings.max(1) { repeat } else { 0.0 };
+                y = page_top;
             }
         }
         y += laid.blocks[index].space.1;
@@ -539,6 +574,16 @@ mod tests {
     use crate::style::Fonts;
 
     fn laid(text: &str, marks: &TextMarks, mode: ViewMode, page: &PageSetup) -> Laid {
+        laid_with(text, marks, mode, page, &[])
+    }
+
+    fn laid_with(
+        text: &str,
+        marks: &TextMarks,
+        mode: ViewMode,
+        page: &PageSetup,
+        tables: &[(EntityId, TableSource)],
+    ) -> Laid {
         let ctx = egui::Context::default();
         let mut out = Laid::default();
         let mut full = ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -554,6 +599,12 @@ mod tests {
                 text,
                 marks,
                 figure_size: &no_figures,
+                tables: &|id| {
+                    tables
+                        .iter()
+                        .find(|(known, _)| *known == id)
+                        .map(|(_, table)| table.clone())
+                },
             };
             out.blocks = lay_document(ui.ctx(), 0, &source, &setting);
             out.doc_starts = vec![0];
@@ -604,5 +655,71 @@ mod tests {
         let block = &paged.blocks[3];
         assert_eq!(byte_of_char(&text, block, 1), block.range.start + 1);
         assert_eq!(char_of_byte(&text, block, block.range.end), 3);
+    }
+
+    #[test]
+    fn tables_break_between_rows_and_repeat_their_headings() {
+        let id = EntityId::new();
+        let mut cells = vec![vec!["Part".to_owned(), "Count".to_owned()]];
+        for row in 0..60 {
+            cells.push(vec![format!("Part {row}"), row.to_string()]);
+        }
+        let source = TableSource {
+            cells,
+            header_rows: 1,
+            shares: vec![0.75, 0.25],
+        };
+        let text = format!(
+            "Before
+{}
+After
+",
+            sue_model::OBJECT
+        );
+        let mut marks = TextMarks::new();
+        let at = text.find(sue_model::OBJECT).unwrap();
+        marks.set(
+            at..at + sue_model::OBJECT.len_utf8(),
+            kind::EMBED,
+            Some(Value::Entity(id)),
+        );
+        let page = PageSetup {
+            size: [300.0, 400.0],
+            margins: [20.0; 4],
+            ..PageSetup::default()
+        };
+        let paged = laid_with(&text, &marks, ViewMode::Page, &page, &[(id, source)]);
+        let block = &paged.blocks[1];
+        let table = block.table.as_ref().expect("a table block");
+        assert_eq!(block.rows.len(), 61);
+        assert_eq!(table.columns(), 2);
+        assert!((table.edges[1] - table.edges[2] * 0.75).abs() < 0.5);
+        let pieces: Vec<&Piece> = paged
+            .pieces
+            .iter()
+            .filter(|piece| piece.block == 1)
+            .collect();
+        assert!(pieces.len() > 1, "the table runs onto more pages");
+        // Later pages start below the repeated heading row.
+        let heading = table.repeat_height();
+        assert!(heading > 0.0);
+        for piece in &pieces[1..] {
+            assert!(
+                (piece.top - heading).abs() < 0.01,
+                "{} vs {heading}",
+                piece.top
+            );
+            let rows = &block.rows[piece.rows.clone()];
+            let bottom = piece.top + rows.last().unwrap().1 - rows[0].0;
+            assert!(bottom <= paged.text_height + 0.5);
+        }
+        // Every row is placed once, in order.
+        let placed: Vec<usize> = pieces.iter().flat_map(|piece| piece.rows.clone()).collect();
+        assert_eq!(placed, (0..61).collect::<Vec<_>>());
+        // A cell is hit by a point inside it.
+        let rect = table.cell_rect(3, 1);
+        let (row, column, offset) = table.hit(rect.center().to_vec2()).unwrap();
+        assert_eq!((row, column), (3, 1));
+        assert!(offset <= table.texts[3][1].len());
     }
 }

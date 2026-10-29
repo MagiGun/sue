@@ -13,6 +13,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Tables in Sue Writer: Table, Insert Table (`Ctrl+F12`), then type in the
+  cells; `Tab` moves on and adds a row at the end. Insert and delete rows
+  and columns, a heading row that repeats on every page, and text to table
+  and back. Tables print in PDFs and go into Word, OpenDocument, EPUB, web
+  pages, RTF, Markdown and plain text.
+
 - The Hub is Sue's home page: a box for every studio (Sue Paint, Sue
   Writer) and every tool (the Image Viewer, the Converter). The pin at a
   box's bottom right makes Sue open straight into it; one pin at a time,

@@ -570,7 +570,49 @@ pub fn empty_trash(arena: &Arena, root: EntityId) -> Option<Batch<Arena>> {
     Some(batch)
 }
 
-fn copy_of(entity: &Entity, name: &str) -> Entity {
+/// Copies of the tables `marks` shows, the marks pointing at the copies
+/// now: a copied document owns its tables, so editing one copy leaves the
+/// other alone.
+fn copy_tables(arena: &Arena, marks: &mut TextMarks) -> Vec<Entity> {
+    let shown: Vec<(std::ops::Range<usize>, EntityId)> = marks
+        .marks()
+        .iter()
+        .filter(|mark| mark.kind == kind::EMBED)
+        .filter_map(|mark| match mark.value {
+            Value::Entity(id) => Some((mark.range.clone(), id)),
+            _ => None,
+        })
+        .collect();
+    let mut copies = Vec::new();
+    for (range, id) in shown {
+        let Ok(table) = arena.get_by_id(id) else {
+            continue;
+        };
+        if table.class() != sue_model::TEXT_TABLE {
+            continue;
+        }
+        let Some(cells) = table.ext::<sue_model::Table>() else {
+            continue;
+        };
+        let mut copy = Entity::empty(table.name(), table.class()).with_ext(cells.clone());
+        for (key, value) in table.properties().iter() {
+            copy = copy.with_property(key, value.clone());
+        }
+        marks.set(range, kind::EMBED, Some(Value::Entity(copy.id())));
+        copies.push(copy);
+    }
+    copies
+}
+
+/// Spawns each of `entities` in `batch`.
+fn spawn_all(batch: &mut Batch<Arena>, entities: Vec<Entity>) {
+    for entity in entities {
+        batch.push(Box::new(SpawnEntity::new(entity)));
+    }
+}
+
+/// A copy of `entity` named `name`, and copies of the tables it shows.
+fn copy_of(arena: &Arena, entity: &Entity, name: &str) -> (Entity, Vec<Entity>) {
     let mut copy = match entity.string_buffer() {
         Some(text) => Entity::new(name, StringBuffer::from(text.as_str().to_owned())),
         None => Entity::empty(name, entity.class()),
@@ -579,10 +621,13 @@ fn copy_of(entity: &Entity, name: &str) -> Entity {
     for (key, value) in entity.properties().iter() {
         copy = copy.with_property(key, value.clone());
     }
+    let mut tables = Vec::new();
     if let Some(marks) = entity.ext::<TextMarks>() {
-        copy = copy.with_ext(marks.clone());
+        let mut marks = marks.clone();
+        tables = copy_tables(arena, &mut marks);
+        copy = copy.with_ext(marks);
     }
-    copy
+    (copy, tables)
 }
 
 /// A copy of `id` (and everything under it) right after it.
@@ -594,9 +639,10 @@ pub fn duplicate(arena: &Arena, id: EntityId) -> Option<Batch<Arena>> {
         .iter()
         .position(|child| *child == id)?
         + 1;
-    let copy = copy_of(entity, &format!("{} (copy)", entity.name()));
+    let (copy, tables) = copy_of(arena, entity, &format!("{} (copy)", entity.name()));
     let copy_id = copy.id();
     let mut batch = add(arena, parent, index, copy, "Duplicate");
+    spawn_all(&mut batch, tables);
     fn under(arena: &Arena, from: EntityId, to: EntityId, batch: &mut Batch<Arena>) {
         let children = manuscript::children(arena, from);
         for (child, order) in children
@@ -606,11 +652,12 @@ pub fn duplicate(arena: &Arena, id: EntityId) -> Option<Batch<Arena>> {
             let Ok(entity) = arena.get_by_id(*child) else {
                 continue;
             };
-            let copy = copy_of(entity, entity.name());
+            let (copy, tables) = copy_of(arena, entity, entity.name());
             let id = copy.id();
             batch.push(Box::new(
                 SpawnEntity::new(copy).with_relation(Relation::new(to, CHILD, id).ordered(order)),
             ));
+            spawn_all(batch, tables);
             under(arena, *child, id, batch);
         }
     }
@@ -725,12 +772,15 @@ pub fn take_snapshot(
     taken: &str,
 ) -> Option<Batch<Arena>> {
     let entity = arena.get_by_id(id).ok()?;
-    let copy = copy_of(entity, title).with_property(TAKEN, taken);
+    let (copy, tables) = copy_of(arena, entity, title);
+    let copy = copy.with_property(TAKEN, taken);
     let copy_id = copy.id();
     let order = arena.relations().next_order(id, SNAPSHOT);
-    Some(Batch::new("Take Snapshot").then(
+    let mut batch = Batch::new("Take Snapshot").then(
         SpawnEntity::new(copy).with_relation(Relation::new(id, SNAPSHOT, copy_id).ordered(order)),
-    ))
+    );
+    spawn_all(&mut batch, tables);
+    Some(batch)
 }
 
 /// Puts snapshot `snapshot`'s text back into document `id` (after taking
@@ -744,8 +794,10 @@ pub fn restore(
 ) -> Option<Batch<Arena>> {
     let saved = arena.get_by_id(snapshot).ok()?;
     let text = saved.string_buffer()?.as_str().to_owned();
-    let marks = saved.ext::<TextMarks>().cloned().unwrap_or_default();
+    let mut marks = saved.ext::<TextMarks>().cloned().unwrap_or_default();
+    let tables = copy_tables(arena, &mut marks);
     let mut batch = Batch::new("Restore Snapshot");
+    spawn_all(&mut batch, tables);
     batch.push(Box::new(take_snapshot(
         arena,
         id,

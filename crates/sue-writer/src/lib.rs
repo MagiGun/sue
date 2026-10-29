@@ -53,6 +53,23 @@ pub fn sample_project(cx: &mut AppletContext<'_>) -> Option<EntityId> {
         .iter()
         .filter_map(|chapter| manuscript::children(cx.arena(), *chapter).first().copied())
         .collect();
+    // The last lines of the logbook, in a table of their own.
+    let log = sue_type::tables::table_of(
+        &[
+            vec!["Night".to_owned(), "Weather".to_owned(), "Oil".to_owned()],
+            vec!["Monday".to_owned(), "Fog".to_owned(), "One pint".to_owned()],
+            vec![
+                "Tuesday".to_owned(),
+                "Gale from the west".to_owned(),
+                "Two pints".to_owned(),
+            ],
+        ],
+        1,
+    );
+    let log_id = log.id();
+    cx.apply(ArenaEdit(sue_core::txn::SpawnEntity::new(log)))
+        .ok()?;
+    let object = sue_model::OBJECT.to_string();
     let first = [
         "The storm came in off the water a little after six, the way storms always did on that coast: first the gulls went quiet, then the light turned the color of old pewter, and then the rain arrived all at once, as if someone had opened a door.",
         "Mara had kept the light for eleven years. She knew every sound the tower made. Tonight it made a new one.",
@@ -60,6 +77,8 @@ pub fn sample_project(cx: &mut AppletContext<'_>) -> Option<EntityId> {
         "A lamp with oil for three nights",
         "Her father's logbook",
         "One letter she had never opened",
+        "The logbook's last page read:",
+        object.as_str(),
         "Somewhere below, a bell rang once, though there was no bell on the island.",
     ];
     let second = [
@@ -98,6 +117,13 @@ pub fn sample_project(cx: &mut AppletContext<'_>) -> Option<EntityId> {
                 at..at + 12,
                 kind::FOOTNOTE,
                 Some(Value::Text("Since the winter her father died.".into())),
+            );
+        }
+        if let Some(at) = text.find(sue_model::OBJECT) {
+            marks.set(
+                at..at + sue_model::OBJECT.len_utf8(),
+                kind::EMBED,
+                Some(Value::Entity(log_id)),
             );
         }
         if let Some(at) = text.find("breathing") {

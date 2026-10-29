@@ -504,6 +504,16 @@ For long work it is also a writing studio:
   the line you are on kept in the middle. `Esc` comes back.
 - **Find and replace** across one scene or the whole project.
 
+**Tables** come from Table, Insert Table (`Ctrl+F12`): choose the columns
+and rows, and whether the first row is a heading. Click in a cell and type;
+`Tab` goes to the next cell and, in the last one, adds a row; `Shift+Tab`
+goes back, and the arrow keys move between cells and out of the table. The
+Table menu inserts rows and columns, deletes them or the whole table, turns
+the heading row on and off, and converts text with tabs or commas into a
+table and back. A table that runs onto the next page breaks between rows and
+repeats its heading row at the top. Tables go into every format you compile
+to, PDF and Word included.
+
 When you are done, **Compile** (`Ctrl+Shift+E`) puts the book together, with
 chapter titles from your folders, scene breaks and a title page, and saves it
 as a PDF (set in your fonts, with bookmarks and page numbers), a Word

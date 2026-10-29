@@ -609,6 +609,17 @@ impl AppletContext<'_> {
             .record_with(self.history, handle, id, ops, before, now);
     }
 
+    /// Records typing already done in place that is not a text buffer's (a
+    /// table cell's): edits with the same `key` in a burst are one undo
+    /// step, and `undo` (built before this edit) is kept from the first.
+    pub fn record_held_typing<X>(&mut self, key: u64, undo: X)
+    where
+        X: ReversibleTransaction<World> + 'static,
+    {
+        let now = self.view.now;
+        self.typing.hold(self.history, key, Box::new(undo), now);
+    }
+
     /// A message for the status bar.
     pub fn notify(&mut self, text: impl Into<String>) {
         self.requests.push(ShellRequest::Notify(text.into()));
