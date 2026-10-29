@@ -1,0 +1,30 @@
+name: Bug
+description: Something does not work as it should
+labels: [bug]
+body:
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did
+      description: The steps, from opening Sue, that show the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Your system
+      description: For example Windows 11, an AMD GPU, a pen tablet.
+    validations:
+      required: true
+  - type: textarea
+    id: check
+    attributes:
+      label: Self-check
+      description: The output of `sue --self-check` (or `cargo run -p sue -- --self-check`).
+      render: text

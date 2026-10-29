@@ -1,0 +1,20 @@
+name: Feature
+description: Something Sue should do
+labels: [feature]
+body:
+  - type: textarea
+    id: want
+    attributes:
+      label: What you want to do
+      description: The work you are trying to get done, and how you do it today (in another app, if any).
+    validations:
+      required: true
+  - type: input
+    id: studio
+    attributes:
+      label: Where
+      description: Which studio or part of Sue (Sue Paint, Sue Writer, the canvas, Settings).
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else

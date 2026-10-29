@@ -1,0 +1,4 @@
+# Aider reads the project rules on every session.
+read:
+  - AGENTS.md
+  - CONTRIBUTING.md

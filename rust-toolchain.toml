@@ -1,0 +1,5 @@
+[toolchain]
+# The version the checks are known to pass with; CI installs the same.
+channel = "1.99.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

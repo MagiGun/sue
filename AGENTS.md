@@ -107,6 +107,31 @@ code.
 - At hand-off, explain in plain language what changed and why, and what was
   verified.
 
+## Do and do not, in short
+
+Do:
+
+- Read `CONTRIBUTING.md` for where a change goes, and `HUMANZ.md` before
+  touching the backbone.
+- Keep each change small and on a branch, with tests for what it promises.
+- Use the shared features (`sue-wm` widgets, `sue_wm::fonts`, `sue-type`,
+  `sue-io` formats, `FilePick`, the shared models) instead of writing new
+  ones; give a shared feature a new mode when a studio needs more.
+- Update `HUMANZ.md` and `HUMANS.md` when a feature changes.
+- Say plainly what you verified and what you did not.
+
+Do not:
+
+- Keep a private copy of a document, link data by pointer or path, or
+  snapshot a whole document for undo.
+- Hardcode a list of features, formats, operators or node types in the
+  backbone.
+- Put OS-specific code outside `crates/sue-platform`, or write `unsafe`.
+- Add a dependency that duplicates one the workspace already has.
+- Commit build output (`target/`), editor folders, secrets or files you were
+  not asked to change.
+- Push, force push or rewrite history unless the human asked.
+
 ---
 
 ## Definition of done

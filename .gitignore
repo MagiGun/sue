@@ -1,1 +1,13 @@
 /target
+
+# Editors and systems
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Release and mobile build output
+/dist/
+/bins/sue-android/app/build/
+/bins/sue-android/.gradle/

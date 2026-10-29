@@ -24,7 +24,7 @@ Putting a document on the timeline, or a song next to a painting, attaches a new
 
 ## Where things stand
 
-v1.0 "Faustian Enigma" contains the nine crates below and the `sue`
+v1.0 "Faustian Enigma" contains the eleven crates below and the `sue`
 executable. It opens a native GPU window drawn with egui in a pure monochrome
 theme (black to white, nothing else), straight onto an **infinite canvas**:
 
@@ -35,8 +35,8 @@ theme (black to white, nothing else), straight onto an **infinite canvas**:
   it to type and select text in.
 - **The top pill:** Hub and the command palette, nothing else.
 - **Sue Paint:** a full-window painting studio with the usual menu bar (File,
-  Edit, Story, Animation, Layer, Select, View, Filter, Window, Help; items not
-  built yet are grayed out), a command bar, tools and sub tools (pens, pencils,
+  Edit, Story, Animation, Layer, Select, View, Filter, Window, Help, every
+  item working), a command bar, tools and sub tools (pens, pencils,
   brushes, airbrushes, erasers, fill, gradient, figures, selections,
   eyedropper, hand, zoom, move layer) with pen pressure and stabilization, a
   color wheel and sets, canvas tabs with a turnable view, a navigator, and
@@ -93,6 +93,8 @@ feature Sue may grow into onto the backbone.
 | [`sue-ai`](crates/sue-ai) | Offline, zero-copy AI substrate | `LocalModelRegistry`, `ComputeBackend`, `ZeroCopyTensorTask` |
 | [`sue-wm`](crates/sue-wm) | The shell: infinite canvas, spring camera, pills, marking menu, palette, timeline, drawers, studios, menu bars, theme | `SueApplet`, `Launchpad`, `Shell`, `MenuBar`, `Camera`, `Scene`, `SpringDamper`, `Typing`, `Transport` |
 | [`sue-paint`](crates/sue-paint) | Sue Paint: the painting studio, its brush engine, compositing, selections, fills and filters | `SuePaint`, `PictureCard`, `Stroke`, `Compositor`, `Selection`, `Filter` |
+| [`sue-type`](crates/sue-type) | Typography for every studio that sets text: paragraph styles, the rich text editor, page layout and typesetting | `Editor`, `StyleSheet`, `PageSetup` |
+| [`sue-writer`](crates/sue-writer) | Sue Writer: the writing and publishing studio | `SueWriter`, `WriterCard` |
 | [`bins/sue`](bins/sue) | The executable: runtime, built-in applets, self-check, snapshots | `Engine`, `Runtime` |
 
 ```text
@@ -160,7 +162,9 @@ picture, and Code / Hex.
 | --- | --- |
 | [`HUMANS.md`](HUMANS.md) | Everyday users and creators: what Sue is and how the screen works, in plain English |
 | [`HUMANZ.md`](HUMANZ.md) | Systems engineers: the full architectural specification |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | New contributors: setting up, where a change goes, the checks to run, and how AI assistants find the rules |
 | [`AGENTS.md`](AGENTS.md) | Contributors and AI agents: the backbone rules (they bind only the shared foundations) |
 | [`CLAUDE.md`](CLAUDE.md) | The same rules, mirrored for Claude-based agents |
+| [`SECURITY.md`](SECURITY.md) | Reporting a security problem privately |
 
 Agents commit only when asked and never push unless asked (rule 8 in `AGENTS.md`).
