@@ -68,6 +68,25 @@ jobs:
       - name: Self-check
         run: cargo run -p sue -- --self-check
 
+  # Every dependency's license, known security problems and where it comes
+  # from, by the rules in deny.toml.
+  dependencies:
+    name: Dependencies (cargo-deny)
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_DENY: "0.20.2"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain (from rust-toolchain.toml)
+        run: rustup toolchain install
+      - name: cargo-deny
+        run: |
+          name="cargo-deny-$CARGO_DENY-x86_64-unknown-linux-musl"
+          curl -fsSL "https://github.com/EmbarkStudios/cargo-deny/releases/download/$CARGO_DENY/$name.tar.gz" | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
+      - name: Check
+        run: cargo deny check
+
   android:
     name: Android build
     needs: version

@@ -207,3 +207,7 @@ License with one more condition, so please read it before you use Sue:
    README or your own license file is enough.
 
 Contributions to this repository are made under the same license.
+
+Sue is built on open source libraries, each under its own license
+(`deny.toml` lists the ones allowed). This software is based in part on
+the work of the Independent JPEG Group.

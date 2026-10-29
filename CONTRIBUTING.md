@@ -70,7 +70,8 @@ backbone; section 8 maps every feature area onto it).
    dashes or middle dots (a test scans for them). The window title is exactly
    `Sue`. The default look is monochrome.
 10. **Docs move with the code.** Update `HUMANZ.md` for how a feature is
-    built and `HUMANS.md` for how people use it.
+    built and `HUMANS.md` for how people use it, and say what changed for
+    them under Unreleased in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Before you open a pull request
 
@@ -92,7 +93,13 @@ cargo test --workspace
 cargo run -p sue -- --self-check
 ```
 
-The CI workflow runs the same four on Windows, macOS and Linux.
+The CI workflow runs the same four on Windows, macOS and Linux. It also
+checks every dependency with [cargo-deny](https://github.com/EmbarkStudios/cargo-deny)
+by the rules in `deny.toml`: no known security problem, a license Sue can
+ship, and crates.io as the only source. Run it yourself with
+`cargo install cargo-deny` and then `cargo deny check`. A new dependency
+with a license `deny.toml` does not list needs a look at what that
+license asks before it joins the list.
 
 ## Building packages
 
@@ -102,8 +109,16 @@ version. Every package lands in `dist/`. The version comes from
 `SUE_VERSION` when it is set (the workflow sets it from the version typed
 or the tag), else from `Cargo.toml`; Sue reports the same one. The CI
 workflow's builds between releases are named after the latest release and
-the commits since it, such as `0.0.1+dev.4`. After publishing a release,
-set `Cargo.toml`'s version to it so local builds match.
+the commits since it, such as `0.0.1+dev.4`.
+
+To make a release: in `CHANGELOG.md`, turn Unreleased into the new
+version's section (`## [0.0.4] - <date>`, with a fresh empty Unreleased
+above it and the compare links at the bottom updated), set `Cargo.toml`'s
+version to it, push, and run the Release workflow with the version. Its
+notes are that changelog section followed by how to install
+(`packaging/release_notes.py`). Push nothing under `.github/workflows`
+while it builds, or publishing fails. It makes a draft; publishing the
+draft creates the tag.
 
 | System | Command | Makes |
 | --- | --- | --- |

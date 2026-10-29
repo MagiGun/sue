@@ -1,0 +1,90 @@
+# cargo-deny's rules for Sue's dependencies. The CI workflow runs
+#
+#   cargo deny check
+#
+# on every push and pull request (install it with `cargo install cargo-deny`
+# to run it yourself). It fails when a dependency has a known security
+# problem, a license Sue cannot ship under the Sayn License, or comes from
+# anywhere but crates.io. A new dependency with a license not listed below
+# needs a look at what that license asks before it is added here.
+
+[graph]
+# Every system Sue ships for, so dependencies used on only one of them are
+# checked too.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "i686-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "riscv64gc-unknown-linux-gnu",
+    "x86_64-unknown-freebsd",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "aarch64-apple-ios",
+    "aarch64-apple-ios-sim",
+    "aarch64-linux-android",
+    "armv7-linux-androideabi",
+    "x86_64-linux-android",
+]
+
+[advisories]
+# Known vulnerabilities (the RustSec advisory database) always fail the
+# check. Unmaintained crates fail it only when Sue uses them directly;
+# deeper ones are the business of the crates that use them.
+unmaintained = "workspace"
+yanked = "deny"
+# An advisory accepted for now goes here with the reason.
+ignore = [
+    # ttf-parser (fonts in sue-io, sue-type and sue-wm, and winit's title
+    # bars on Linux) gets no more fixes; skrifa, already among Sue's
+    # dependencies, is its successor. Moving Sue's own crates to it is a
+    # change of its own; winit still brings ttf-parser until it moves too.
+    { id = "RUSTSEC-2026-0192", reason = "unmaintained, not vulnerable; moving to skrifa is planned" },
+]
+
+[licenses]
+# What Sue's dependencies may be licensed under. All are permissive, but a
+# few ask something of Sue's releases:
+# - IJG (jpeg-encoder): the release's documentation says that "this
+#   software is based in part on the work of the Independent JPEG Group".
+# - OFL-1.1 and Ubuntu-font-1.0 (egui's built-in fonts): the fonts' licenses
+#   go with the program.
+# - MPL-2.0 (symphonia's audio decoders, audio_thread_priority): their source
+#   stays available (it is, on crates.io) and changes to their files would
+#   be shared under MPL-2.0.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "IJG",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+# Sue's own crates are under the Sayn License and are not published.
+[licenses.private]
+ignore = true
+
+[bans]
+# Two versions of one crate (windows-sys, hashbrown and others) cost build
+# time, not correctness, so they are allowed.
+multiple-versions = "allow"
+wildcards = "deny"
+# Sue's own crates depend on each other by path.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
