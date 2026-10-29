@@ -141,7 +141,7 @@ impl Tool {
     pub const fn available(self) -> bool {
         !matches!(
             self,
-            Self::Decoration | Self::Blend | Self::Text | Self::CorrectLine | Self::Operation
+            Self::Decoration | Self::Blend | Self::CorrectLine | Self::Operation
         )
     }
 
@@ -431,7 +431,8 @@ impl Tool {
                 ]
             }
             Self::Ruler => vec![plain("Symmetrical Ruler", 0)],
-            Self::Decoration | Self::Blend | Self::Text | Self::CorrectLine | Self::Operation => {
+            Self::Text => vec![plain("Text", 0)],
+            Self::Decoration | Self::Blend | Self::CorrectLine | Self::Operation => {
                 vec![plain(self.label(), 0)]
             }
         }
@@ -655,7 +656,7 @@ mod tests {
         toolbox.cycle('E');
         assert_eq!(toolbox.tool(), Tool::Eraser);
         assert!(toolbox.current().tip.eraser);
-        toolbox.pick(Tool::Text);
+        toolbox.pick(Tool::Decoration);
         assert_eq!(
             toolbox.tool(),
             Tool::Eraser,

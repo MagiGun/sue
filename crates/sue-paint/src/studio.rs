@@ -508,6 +508,7 @@ fn implemented(command: &str) -> bool {
             | "edit.resolution"
             | "edit.crop"
             | "view.snap_special"
+            | "layer.new.text"
             | "layer.mask.outside"
             | "layer.mask.inside"
             | "layer.mask.delete"
@@ -1889,6 +1890,16 @@ impl SuePaint {
                 self.dialog = Some(Dialog::Frame(crate::comic::FrameSpec::default()));
             }
             "layer.new.balloon" => self.add_balloon_layer(cx),
+            "layer.new.text" => {
+                let middle = self
+                    .picture()
+                    .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
+                    .and_then(picture::size)
+                    .map_or([0.0, 0.0], |[w, h]| [w as f32 / 2.0, h as f32 / 2.0]);
+                let mut lettering = crate::lettering::Lettering::new(middle, self.drawing_color());
+                lettering.center = true;
+                self.dialog = Some(Dialog::Text(None, lettering));
+            }
             "view.snap_special" => {
                 if let Some(doc) = self.doc_mut() {
                     doc.ruler_on = !doc.ruler_on;

@@ -3201,6 +3201,7 @@ dependencies = [
  "sue-model",
  "sue-platform",
  "sue-rice",
+ "sue-type",
  "sue-wm",
 ]
 

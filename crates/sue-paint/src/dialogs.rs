@@ -360,6 +360,8 @@ pub(crate) enum Dialog {
     Frame(crate::comic::FrameSpec),
     Canvas(CanvasDialog),
     Resolution(ResolutionDialog),
+    /// The Text tool's words: the text layer they go to (new if `None`).
+    Text(Option<EntityId>, crate::lettering::Lettering),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -430,6 +432,7 @@ impl SuePaint {
             Dialog::Frame(_) => ("New Frame Border Folder", vec2(420.0, 330.0)),
             Dialog::Canvas(_) => ("Change Canvas Size", vec2(380.0, 300.0)),
             Dialog::Resolution(_) => ("Change Image Resolution", vec2(380.0, 250.0)),
+            Dialog::Text(..) => ("Text", vec2(440.0, 380.0)),
             Dialog::Pressure(pressure) => (
                 "Adjust pen pressure",
                 vec2(560.0, if pressure.show_graph { 520.0 } else { 330.0 }),
@@ -473,6 +476,7 @@ impl SuePaint {
                             }
                             Dialog::Pages(pages) => outcome = self.pages_ui(ui, pages, cx, theme),
                             Dialog::Frame(frame) => outcome = frame_ui(ui, frame, theme),
+                            Dialog::Text(_, lettering) => outcome = text_ui(ui, lettering, theme),
                             Dialog::Canvas(canvas) => outcome = canvas_ui(ui, canvas, theme),
                             Dialog::Resolution(resolution) => {
                                 outcome = resolution_ui(ui, resolution, theme)
@@ -544,7 +548,7 @@ impl SuePaint {
             && !ctx.text_edit_focused()
             && !matches!(
                 dialog,
-                Dialog::Shortcuts | Dialog::Pressure(_) | Dialog::Pages(_)
+                Dialog::Shortcuts | Dialog::Pressure(_) | Dialog::Pages(_) | Dialog::Text(..)
             )
         {
             outcome = Outcome::Ok;
@@ -598,6 +602,7 @@ impl SuePaint {
                 }
             }
             (Dialog::Frame(frame), Outcome::Ok) => self.add_frame_layer(cx, frame),
+            (Dialog::Text(layer, lettering), Outcome::Ok) => self.put_text(cx, layer, &lettering),
             (Dialog::Canvas(canvas), Outcome::Ok) => {
                 if let Some(picture) = self.picture() {
                     match doc::resize_canvas(&cx.world.arena, picture, canvas.size, canvas.shift())
@@ -649,7 +654,8 @@ impl SuePaint {
                 | Dialog::Pages(_)
                 | Dialog::Frame(_)
                 | Dialog::Canvas(_)
-                | Dialog::Resolution(_),
+                | Dialog::Resolution(_)
+                | Dialog::Text(..),
                 Outcome::Cancel | Outcome::Ok,
             ) => {}
         }
@@ -753,6 +759,80 @@ fn resolution_ui(ui: &mut Ui, resolution: &mut ResolutionDialog, theme: &Theme) 
         });
     ui.checkbox(&mut resolution.keep, "Keep the shape");
     ok_cancel(ui, &mut outcome);
+    outcome
+}
+
+/// The Text tool's words, font, size, ink and placement.
+fn text_ui(ui: &mut Ui, lettering: &mut crate::lettering::Lettering, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    let edit = ui.add(
+        egui::TextEdit::multiline(&mut lettering.content)
+            .desired_rows(5)
+            .desired_width(f32::INFINITY)
+            .hint_text("Type here"),
+    );
+    // The words take the keys while nothing else does.
+    if ui.ctx().memory(|memory| memory.focused().is_none()) {
+        edit.request_focus();
+    }
+    egui::Grid::new("sue-paint-text")
+        .num_columns(2)
+        .spacing(vec2(12.0, 8.0))
+        .show(ui, |ui| {
+            label(ui, "Font:", theme);
+            let shown = if lettering.font.is_empty() {
+                "Sue (Ubuntu Light)".to_owned()
+            } else {
+                lettering.font.clone()
+            };
+            egui::ComboBox::from_id_salt("sue-paint-text-font")
+                .selected_text(shown)
+                .width(240.0)
+                .height(320.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut lettering.font, String::new(), "Sue (Ubuntu Light)");
+                    for family in sue_wm::fonts::families() {
+                        ui.selectable_value(&mut lettering.font, family.clone(), family);
+                    }
+                });
+            ui.end_row();
+            label(ui, "Size:", theme);
+            ui.add(
+                egui::Slider::new(&mut lettering.size, 6.0..=400.0)
+                    .logarithmic(true)
+                    .suffix(" px"),
+            );
+            ui.end_row();
+            label(ui, "Color:", theme);
+            ui.color_edit_button_srgb(&mut lettering.rgb);
+            ui.end_row();
+        });
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut lettering.center, "Centered");
+        ui.checkbox(&mut lettering.vertical, "Vertical (columns, right to left)");
+    });
+    ui.label(
+        RichText::new("Enter starts a new line; Ctrl+Enter is OK")
+            .size(theme.small_size)
+            .color(theme.muted),
+    );
+    ok_cancel(ui, &mut outcome);
+    let commit = ui.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if modifiers.command
+            )
+        })
+    });
+    if commit {
+        outcome = Outcome::Ok;
+    }
     outcome
 }
 

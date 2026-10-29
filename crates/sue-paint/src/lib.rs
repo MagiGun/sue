@@ -39,6 +39,7 @@ mod dock;
 pub mod fill;
 pub mod filters;
 mod icons;
+mod lettering;
 pub mod manga;
 mod menus;
 mod pages;

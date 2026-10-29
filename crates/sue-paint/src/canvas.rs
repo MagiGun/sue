@@ -582,6 +582,7 @@ impl SuePaint {
                     line: modifiers.shift,
                 });
             }
+            Tool::Text => self.text_at(p, cx),
             Tool::Frame | Tool::Balloon | Tool::Ruler => {
                 self.gesture = Some(Gesture::Shape {
                     tool,

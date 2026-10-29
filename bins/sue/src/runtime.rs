@@ -2224,6 +2224,122 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_text_tool_writes_and_edits_a_text_layer() {
+        let (mut runtime, root) = runtime("paint-text");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.studio_focus())
+            .unwrap();
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let text_layers = |runtime: &Runtime| -> Vec<sue_core::EntityId> {
+            let arena = &runtime.engine.world.arena;
+            sue_paint::doc::layers(arena, picture)
+                .into_iter()
+                .filter(|info| {
+                    arena
+                        .get_by_id(info.id)
+                        .is_ok_and(|entity| entity.class() == "sue.paint.text")
+                })
+                .map(|info| info.id)
+                .collect()
+        };
+        // T, a click, the words, Ctrl+Enter.
+        step(&mut runtime, vec![key(egui::Key::T, plain)]);
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(middle), press(middle, true)],
+        );
+        step(&mut runtime, vec![press(middle, false)]);
+        step(&mut runtime, Vec::new());
+        step(&mut runtime, vec![egui::Event::Text("Hello".to_owned())]);
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, Vec::new());
+        let layers = text_layers(&runtime);
+        assert_eq!(layers.len(), 1, "a text layer");
+        let content = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .get_by_id(layers[0])
+                .ok()
+                .and_then(|entity| {
+                    entity
+                        .property("text.content")
+                        .and_then(sue_core::Value::as_str)
+                        .map(str::to_owned)
+                })
+        };
+        assert_eq!(content(&runtime).as_deref(), Some("Hello"));
+        let inked = sue_paint::doc::raster(&runtime.engine.world.arena, layers[0])
+            .unwrap()
+            .bytes()
+            .unwrap()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel[3] > 128)
+            .count();
+        assert!(inked > 200, "the words are drawn: {inked}");
+        // A click on the words edits them in the same layer.
+        let depth = runtime.engine.history.depth();
+        let on = middle + vec2(10.0, 8.0);
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(on), press(on, true)],
+        );
+        step(&mut runtime, vec![press(on, false)]);
+        step(&mut runtime, Vec::new());
+        step(
+            &mut runtime,
+            vec![
+                key(egui::Key::End, plain),
+                egui::Event::Text(" Sue".to_owned()),
+            ],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, Vec::new());
+        assert_eq!(text_layers(&runtime), layers, "the same layer");
+        assert_eq!(content(&runtime).as_deref(), Some("Hello Sue"));
+        assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_saves_as_a_project_or_any_picture_type() {
         let (mut runtime, root) = runtime("paint-save-as");
         let ctx = egui::Context::default();

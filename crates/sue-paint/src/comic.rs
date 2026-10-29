@@ -82,7 +82,7 @@ impl SuePaint {
 
     /// Spawns a layer of `class` drawn as `pixels`, on top, and makes it
     /// the current layer.
-    fn spawn_drawn_layer(
+    pub(crate) fn spawn_drawn_layer(
         &mut self,
         cx: &mut AppletContext<'_>,
         name: &str,

@@ -23,6 +23,7 @@
 pub mod edit;
 pub mod editor;
 pub mod layout;
+pub mod raster;
 pub mod style;
 pub mod typeset;
 
