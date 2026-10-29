@@ -155,6 +155,8 @@ pub struct Convert {
     results: Option<Receiver<Finished>>,
     menus: Vec<Menu>,
     menubar: MenuBar,
+    /// When to build the menus again, in another language.
+    language: sue_lang::Watch,
 }
 
 impl Default for Convert {
@@ -177,6 +179,7 @@ impl Default for Convert {
             results: None,
             menus: Self::menus(),
             menubar: MenuBar::new(),
+            language: sue_lang::Watch::default(),
         }
     }
 }
@@ -1320,6 +1323,9 @@ impl SueApplet for Convert {
     }
 
     fn bar_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        if self.language.changed() {
+            self.menus = Self::menus();
+        }
         let theme = cx.theme.clone();
         let rect = ui.max_rect();
         let mut menubar = std::mem::take(&mut self.menubar);
