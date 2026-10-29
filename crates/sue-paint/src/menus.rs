@@ -329,6 +329,9 @@ pub fn menus() -> Vec<Menu> {
                         act("Mask Selection", "layer.mask.inside"),
                         act("Delete Mask", "layer.mask.delete"),
                         act("Apply Mask to Layer", "layer.mask.apply"),
+                        SEP,
+                        act("Enable Mask", "layer.mask.toggle"),
+                        act("Edit Mask", "layer.mask.edit"),
                     ],
                 ),
                 sub(

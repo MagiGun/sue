@@ -2122,6 +2122,108 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_masks_hide_without_erasing_the_layer() {
+        let (mut runtime, root) = runtime("paint-mask");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.studio_focus())
+            .unwrap();
+        let layer = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+            .last()
+            .unwrap()
+            .id;
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let mut drag = |runtime: &mut Runtime, before: Vec<egui::Event>, a, b| {
+            step(runtime, before);
+            step(runtime, vec![egui::Event::PointerMoved(a), press(a, true)]);
+            step(runtime, vec![egui::Event::PointerMoved(b)]);
+            step(runtime, vec![press(b, false)]);
+        };
+        drag(
+            &mut runtime,
+            Vec::new(),
+            middle - vec2(60.0, 0.0),
+            middle + vec2(60.0, 0.0),
+        );
+        let command = |runtime: &mut Runtime, name: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: name.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        command(&mut runtime, "layer.mask.outside");
+        command(&mut runtime, "layer.mask.edit");
+        let mask = sue_paint::doc::mask_of(&runtime.engine.world.arena, layer).expect("a mask");
+        // The eraser (E) on the mask along the stroke's left half.
+        drag(
+            &mut runtime,
+            vec![key(egui::Key::E, plain)],
+            middle - vec2(60.0, 0.0),
+            middle - vec2(15.0, 0.0),
+        );
+        let arena = &runtime.engine.world.arena;
+        let alpha_of = |raster: &sue_core::RasterTile2D, x: u32| {
+            raster.bytes().unwrap()[((600 * raster.width() + x) * 4 + 3) as usize]
+        };
+        let options = sue_paint::composite::RenderOptions {
+            paper: false,
+            drafts: true,
+        };
+        let shown = sue_paint::composite::flatten(arena, picture, options).unwrap();
+        assert!(
+            alpha_of(sue_paint::doc::raster(arena, layer).unwrap(), 720) > 200,
+            "the layer keeps its pixels"
+        );
+        assert!(
+            alpha_of(sue_paint::doc::raster(arena, mask).unwrap(), 720) < 50,
+            "the mask hides them"
+        );
+        assert!(
+            alpha_of(&shown, 720) < 50,
+            "so the picture does not show them"
+        );
+        assert!(alpha_of(&shown, 880) > 200, "the rest shows");
+        // The mask off: everything shows again.
+        command(&mut runtime, "layer.mask.toggle");
+        let shown =
+            sue_paint::composite::flatten(&runtime.engine.world.arena, picture, options).unwrap();
+        assert!(alpha_of(&shown, 720) > 200);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_saves_as_a_project_or_any_picture_type() {
         let (mut runtime, root) = runtime("paint-save-as");
         let ctx = egui::Context::default();

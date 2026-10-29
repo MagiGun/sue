@@ -2126,6 +2126,7 @@ impl SuePaint {
         let mut toggle = None;
         let mut rename_done = None;
         let mut fold = None;
+        let mut mask_click = None;
         egui::ScrollArea::vertical()
             .id_salt("sue-paint-layers")
             .show(&mut list_ui, |ui| {
@@ -2238,8 +2239,48 @@ impl SuePaint {
                     } else {
                         self.layer_thumbnail(ui, thumb_rect, info, cx, theme);
                     }
+                    // The mask beside the layer: click it to draw on it.
+                    let mut text_left = thumb_rect.right() + 8.0;
+                    if doc::mask_of(&cx.world.arena, info.id).is_some() {
+                        let mask_rect = Rect::from_min_size(
+                            pos2(thumb_rect.right() + 4.0, thumb_rect.top()),
+                            vec2(28.0, 36.0),
+                        );
+                        let on = doc::mask_on(&cx.world.arena, info.id);
+                        let editing = chosen && self.doc().is_some_and(|doc| doc.mask_edit);
+                        ui.painter().rect_filled(
+                            mask_rect,
+                            2.0,
+                            egui::Color32::from_gray(if on { 225 } else { 120 }),
+                        );
+                        icons::paint(
+                            ui.painter(),
+                            mask_rect.shrink(6.0),
+                            Icon::Mask,
+                            egui::Color32::from_gray(40),
+                        );
+                        if editing {
+                            ui.painter().rect_stroke(
+                                mask_rect,
+                                2.0,
+                                Stroke::new(2.0, theme.border_active),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
+                        let mask_response = ui.interact(
+                            mask_rect,
+                            Id::unique(("sue-paint-mask", info.id.to_u128())),
+                            Sense::click(),
+                        );
+                        if mask_response
+                            .on_hover_text("Draw on the mask: the pen shows, the eraser hides")
+                            .clicked()
+                        {
+                            mask_click = Some(info.id);
+                        }
+                        text_left = mask_rect.right() + 8.0;
+                    }
                     // Text.
-                    let text_left = thumb_rect.right() + 8.0;
                     let top_line = match info.kind {
                         LayerKind::Paper => "Paper".to_owned(),
                         _ => format!(
@@ -2306,6 +2347,9 @@ impl SuePaint {
         if let Some(id) = pick
             && let Some(doc) = self.doc_mut()
         {
+            if doc.layer != Some(id) {
+                doc.mask_edit = false;
+            }
             doc.layer = Some(id);
         }
         if let Some((id, visible)) = toggle {
@@ -2313,6 +2357,14 @@ impl SuePaint {
         }
         if let Some((id, open)) = fold {
             Self::apply(cx, doc::set(id, doc::OPEN, open));
+        }
+        if let Some(id) = mask_click
+            && let Some(doc) = self.doc_mut()
+        {
+            // The mask of the current layer toggles; another layer's mask
+            // picks that layer with its mask.
+            doc.mask_edit = doc.layer != Some(id) || !doc.mask_edit;
+            doc.layer = Some(id);
         }
         if let Some((id, name, cancelled)) = rename_done {
             self.renaming = None;

@@ -531,8 +531,17 @@ impl SuePaint {
                     // covers at this zoom.
                     tip.size /= doc.view.zoom.max(0.01);
                 }
-                let mut stroke =
-                    BrushStroke::new(info.id, tip, rgb, info.alpha_locked && !tip.eraser);
+                // Editing the mask: the pen shows the layer, the eraser
+                // hides it, in the mask's own pixels.
+                let target = doc
+                    .mask_edit
+                    .then(|| doc::mask_of(&cx.world.arena, info.id))
+                    .flatten();
+                let (target, rgb, locked) = match target {
+                    Some(mask) => (mask, [1.0; 3], false),
+                    None => (info.id, rgb, info.alpha_locked && !tip.eraser),
+                };
+                let mut stroke = BrushStroke::new(target, tip, rgb, locked);
                 let other = if self.sub_active { self.main } else { self.sub };
                 stroke.set_sub_color(color::unit(other));
                 if let Some((center, angle)) = doc.ruler.filter(|_| doc.ruler_on) {
@@ -557,7 +566,7 @@ impl SuePaint {
                 let start = stabilizer.sample(local, doc.view.zoom, self.clock.1);
                 let pressure = self.pressure.unwrap_or(1.0);
                 let selection = shifted.as_ref().or(doc.selection.as_ref());
-                if let Some(raster) = doc::raster_mut(&mut cx.world.arena, info.id) {
+                if let Some(raster) = doc::raster_mut(&mut cx.world.arena, target) {
                     stroke.to(raster, start, pressure, selection);
                 }
                 self.gesture = Some(Gesture::Stroke {

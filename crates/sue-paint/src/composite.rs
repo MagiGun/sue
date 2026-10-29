@@ -53,6 +53,8 @@ struct Layer<'a> {
     style: LayerStyle,
     /// Drawn in this color (onion skin), keeping its alpha.
     tint: Option<[f32; 3]>,
+    /// The layer mask, the layer's size: its alpha is how much shows.
+    mask: Option<&'a RasterTile2D>,
 }
 
 impl Layer<'_> {
@@ -148,13 +150,29 @@ fn gather_view<'a>(
                 }
                 LayerKind::Other => return None,
             };
+            let mask = crate::doc::mask_of(arena, entity.id())
+                .filter(|_| crate::doc::mask_on(arena, entity.id()))
+                .and_then(|mask| arena.get_by_id(mask).ok())
+                .and_then(|mask| mask.component(ComponentKind::RasterTile2D)?.as_raster());
             Some(Layer {
                 source,
                 style,
                 tint,
+                mask,
             })
         })
         .collect()
+}
+
+/// How much of a masked layer shows at picture pixel `(x, y)`.
+fn mask_at(mask: &RasterTile2D, offset: [i64; 2], x: u32, y: u32) -> f32 {
+    let (lx, ly) = (i64::from(x) - offset[0], i64::from(y) - offset[1]);
+    if lx < 0 || ly < 0 || lx >= i64::from(mask.width()) || ly >= i64::from(mask.height()) {
+        return 0.0;
+    }
+    mask.bytes().map_or(1.0, |bytes| {
+        f32::from(bytes[((ly as u32 * mask.width() + lx as u32) * 4 + 3) as usize]) / 255.0
+    })
 }
 
 /// The composited color of one pixel.
@@ -173,6 +191,9 @@ fn pixel(layers: &[Layer<'_>], x: u32, y: u32) -> [f32; 4] {
             continue;
         }
         let mut source = layer.sample(x, y);
+        if let Some(mask) = layer.mask {
+            source[3] *= mask_at(mask, layer.style.offset, x, y);
+        }
         if let Some([r, g, b]) = layer.tint {
             source = [r, g, b, source[3]];
         }
@@ -285,11 +306,13 @@ pub fn signature(arena: &Arena, picture: EntityId) -> Vec<(EntityId, u64)> {
             .map_or(u64::MAX, sue_core::Entity::revision)
     };
     let mut seen = vec![(picture, revision(picture))];
-    seen.extend(
-        picture::layers(arena, picture)
-            .into_iter()
-            .map(|id| (id, revision(id))),
-    );
+    for id in picture::layers(arena, picture) {
+        seen.push((id, revision(id)));
+        // A mask's edits change how its layer looks.
+        if let Some(mask) = crate::doc::mask_of(arena, id) {
+            seen.push((mask, revision(mask)));
+        }
+    }
     seen
 }
 
@@ -494,6 +517,7 @@ pub fn thumbnail(arena: &Arena, layer: EntityId, max: [u32; 2]) -> Option<(Vec<u
         source,
         style: LayerStyle::default(),
         tint: None,
+        mask: None,
     };
     let scale = (max[0] as f32 / size[0].max(1) as f32).min(max[1] as f32 / size[1].max(1) as f32);
     let out = [

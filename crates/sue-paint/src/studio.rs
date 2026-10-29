@@ -57,6 +57,8 @@ pub(crate) struct Doc {
     pub ruler: Option<([f32; 2], f32)>,
     /// Strokes follow the ruler (Snap to Special Ruler).
     pub ruler_on: bool,
+    /// Drawing edits the current layer's mask, not its pixels.
+    pub mask_edit: bool,
     pub selection: Option<Selection>,
     pub last_selection: Option<Selection>,
     pub edges: Option<Vec<[[f32; 2]; 2]>>,
@@ -74,6 +76,7 @@ impl Doc {
             playing: None,
             ruler: None,
             ruler_on: true,
+            mask_edit: false,
             selection: None,
             last_selection: None,
             edges: None,
@@ -505,6 +508,12 @@ fn implemented(command: &str) -> bool {
             | "edit.resolution"
             | "edit.crop"
             | "view.snap_special"
+            | "layer.mask.outside"
+            | "layer.mask.inside"
+            | "layer.mask.delete"
+            | "layer.mask.apply"
+            | "layer.mask.toggle"
+            | "layer.mask.edit"
             | "layer.new.folder"
             | "anim.timeline.new"
             | "anim.layer.folder"
@@ -1580,6 +1589,30 @@ impl SuePaint {
                 info.map_or(ItemState::off(), |info| flag(info.style.visible))
             }
             "layer.toggle.clip" => info.map_or(ItemState::off(), |info| flag(info.style.clip)),
+            "layer.mask.outside" | "layer.mask.inside" => {
+                let masked = info
+                    .as_ref()
+                    .is_some_and(|info| doc::mask_of(arena, info.id).is_some());
+                let mut state =
+                    when(raster && !masked && (command == "layer.mask.outside" || selection));
+                state.checked = Some(masked);
+                state
+            }
+            "layer.mask.delete" | "layer.mask.apply" => when(
+                info.as_ref()
+                    .is_some_and(|info| doc::mask_of(arena, info.id).is_some()),
+            ),
+            "layer.mask.toggle" | "layer.mask.edit" => match info
+                .as_ref()
+                .filter(|info| doc::mask_of(arena, info.id).is_some())
+            {
+                Some(info) => flag(if command == "layer.mask.toggle" {
+                    doc::mask_on(arena, info.id)
+                } else {
+                    self.doc().is_some_and(|doc| doc.mask_edit)
+                }),
+                None => ItemState::off(),
+            },
             "layer.toggle.draft" => info.map_or(ItemState::off(), |info| flag(info.style.draft)),
             "layer.toggle.lock" => info.map_or(ItemState::off(), |info| flag(info.locked)),
             "view.grid" => flag(self.grid),
@@ -1983,6 +2016,71 @@ impl SuePaint {
             }
             "layer.toggle.visible" => self.toggle_layer(cx, picture::VISIBLE, true),
             "layer.toggle.clip" => self.toggle_layer(cx, picture::CLIP, false),
+            "layer.mask.outside" | "layer.mask.inside" => {
+                let Some(layer) = self.layer() else {
+                    return;
+                };
+                let selection = self.doc().and_then(|doc| doc.selection.clone());
+                if command == "layer.mask.inside" && selection.is_none() {
+                    cx.fail("Select what to hide first");
+                    return;
+                }
+                let inside = command == "layer.mask.inside";
+                let show = |x: i64, y: i64| {
+                    let cover = selection.as_ref().map_or(1.0, |selection| {
+                        if x < 0 || y < 0 {
+                            0.0
+                        } else {
+                            selection.at(x as u32, y as u32)
+                        }
+                    });
+                    if inside { 1.0 - cover } else { cover }
+                };
+                match doc::new_mask(&cx.world.arena, layer, show) {
+                    Ok((edit, _)) => {
+                        Self::apply(cx, edit);
+                    }
+                    Err(error) => cx.fail(error),
+                }
+            }
+            "layer.mask.delete" => {
+                if let Some(edit) = self
+                    .layer()
+                    .and_then(|layer| doc::delete_mask(&cx.world.arena, layer))
+                {
+                    Self::apply(cx, edit);
+                    if let Some(doc) = self.doc_mut() {
+                        doc.mask_edit = false;
+                    }
+                }
+            }
+            "layer.mask.apply" => {
+                if let Some(layer) = self.layer() {
+                    match doc::apply_mask(&cx.world.arena, layer) {
+                        Ok(edit) => {
+                            Self::apply(cx, edit);
+                            if let Some(doc) = self.doc_mut() {
+                                doc.mask_edit = false;
+                            }
+                        }
+                        Err(error) => cx.fail(error),
+                    }
+                }
+            }
+            "layer.mask.toggle" => {
+                if let Some(layer) = self.layer() {
+                    let on = doc::mask_on(&cx.world.arena, layer);
+                    Self::apply(cx, doc::set(layer, doc::MASK_ON, !on));
+                }
+            }
+            "layer.mask.edit" => {
+                let masked = self
+                    .layer()
+                    .is_some_and(|layer| doc::mask_of(&cx.world.arena, layer).is_some());
+                if let Some(doc) = self.doc_mut() {
+                    doc.mask_edit = masked && !doc.mask_edit;
+                }
+            }
             "layer.toggle.draft" => self.toggle_layer(cx, picture::DRAFT, false),
             "layer.toggle.lock" => self.toggle_layer(cx, picture::LOCKED, false),
             "layer.toggle.lock_alpha" => self.toggle_layer(cx, picture::ALPHA_LOCKED, false),

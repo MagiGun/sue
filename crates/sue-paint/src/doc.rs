@@ -408,6 +408,115 @@ pub fn resample(
     Ok(edit)
 }
 
+// ----- Layer masks -------------------------------------------------------------------
+
+/// The relation from a layer to its mask.
+pub const MASK: &str = "sue.paint.mask";
+/// A layer's mask is in use (`Bool`, on the layer).
+pub const MASK_ON: &str = "layer.mask_on";
+/// The class of a layer mask: an RGBA raster whose alpha is how much of
+/// its layer shows.
+pub const MASK_CLASS: &str = "sue.paint.layer_mask";
+
+/// The mask of `layer`, if it has one.
+#[must_use]
+pub fn mask_of(arena: &Arena, layer: EntityId) -> Option<EntityId> {
+    arena.relations().targets(layer, MASK).into_iter().next()
+}
+
+/// `true` if `layer`'s mask is in use.
+#[must_use]
+pub fn mask_on(arena: &Arena, layer: EntityId) -> bool {
+    arena
+        .get_by_id(layer)
+        .ok()
+        .and_then(|entity| entity.property(MASK_ON))
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+}
+
+/// The edit that gives `layer` a mask showing it where `show` (picture
+/// pixels, 0 to 1) says, and the mask's id: Mask Outside Selection is the
+/// selection, Mask Selection its opposite.
+///
+/// # Errors
+/// If the layer has no pixels or already has a mask.
+pub fn new_mask(
+    arena: &Arena,
+    layer: EntityId,
+    show: impl Fn(i64, i64) -> f32,
+) -> Result<(Edit, EntityId), String> {
+    if mask_of(arena, layer).is_some() {
+        return Err("This layer has a mask already".to_owned());
+    }
+    let tile = raster(arena, layer).ok_or("Only a raster layer takes a mask")?;
+    let (width, height) = (tile.width(), tile.height());
+    let offset = arena
+        .get_by_id(layer)
+        .map(LayerStyle::of)
+        .map(|style| style.offset)
+        .unwrap_or_default();
+    let mut pixels = vec![255; (width * height * 4) as usize];
+    for y in 0..height {
+        for x in 0..width {
+            let cover = show(i64::from(x) + offset[0], i64::from(y) + offset[1]).clamp(0.0, 1.0);
+            pixels[((y * width + x) * 4 + 3) as usize] = (cover * 255.0).round() as u8;
+        }
+    }
+    let mask = Entity::new(
+        "Mask",
+        RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels)
+            .map_err(|error| error.to_string())?,
+    )
+    .with_class(MASK_CLASS);
+    let id = mask.id();
+    let edit = Edit::new("New Layer Mask")
+        .then(SpawnEntity::new(mask).with_relation(Relation::new(layer, MASK, id)))
+        .then(SetProperty::new(layer, MASK_ON, true));
+    Ok((edit, id))
+}
+
+/// The edit that takes `layer`'s mask away (undo brings it back).
+#[must_use]
+pub fn delete_mask(arena: &Arena, layer: EntityId) -> Option<Edit> {
+    let mask = mask_of(arena, layer)?;
+    Some(Edit::new("Delete Mask").then(DespawnEntity::new(mask)))
+}
+
+/// The edit that applies `layer`'s mask to its pixels, then deletes it.
+///
+/// # Errors
+/// If the layer or its mask has no pixels, or they differ in size.
+pub fn apply_mask(arena: &Arena, layer: EntityId) -> Result<Edit, String> {
+    let mask = mask_of(arena, layer).ok_or("This layer has no mask")?;
+    let (tile, shape) = (
+        raster(arena, layer).ok_or("The layer has no pixels")?,
+        raster(arena, mask).ok_or("The mask has no pixels")?,
+    );
+    if [tile.width(), tile.height()] != [shape.width(), shape.height()] {
+        return Err("The mask and its layer differ in size".to_owned());
+    }
+    let mut pixels = tile.bytes().ok_or("The layer has no pixels")?.to_vec();
+    let alpha = shape.bytes().ok_or("The mask has no pixels")?;
+    for (pixel, cover) in pixels
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(alpha.as_chunks::<4>().0)
+    {
+        pixel[3] = ((u16::from(pixel[3]) * u16::from(cover[3]) + 127) / 255) as u8;
+    }
+    let applied = RasterTile2D::from_bytes(tile.width(), tile.height(), PixelFormat::Rgba8, pixels)
+        .map_err(|error| error.to_string())?;
+    Ok(Edit::new("Apply Mask to Layer")
+        .then(sue_core::txn::ReplaceComponent::new(
+            layer,
+            applied,
+            "Apply Mask to Layer",
+        ))
+        .then(DespawnEntity::new(mask)))
+}
+
 // ----- Layer folders ---------------------------------------------------------------
 
 /// The relation from a layer folder to each layer in it.
@@ -1070,6 +1179,61 @@ mod tests {
             move_shapes("10,20 30,40;e:1,2,3,4", [5.0, -5.0], [2.0, 2.0]),
             "30,30 70,70;e:12,-6,16,-2"
         );
+    }
+
+    #[test]
+    fn masks_hide_part_of_a_layer_and_apply_to_it() {
+        let mut arena = Arena::new();
+        let mut history: sue_core::UndoStack<Arena> = sue_core::UndoStack::new();
+        let (edit, picture) = create(&NewPicture {
+            width: 4,
+            height: 1,
+            paper: None,
+            ..NewPicture::default()
+        })
+        .unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        let layer = layers(&arena, picture)[0].id;
+        if let Some(bytes) = raster_mut(&mut arena, layer).and_then(RasterTile2D::bytes_mut) {
+            bytes.fill(255);
+        }
+        let shown = |arena: &Arena| -> Vec<u8> {
+            render(arena, picture, [0, 0, 4, 1], RenderOptions::default())
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|pixel| pixel[3])
+                .collect()
+        };
+        // Show only the left half.
+        let (edit, mask) = new_mask(&arena, layer, |x, _| if x < 2 { 1.0 } else { 0.0 }).unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        assert_eq!(mask_of(&arena, layer), Some(mask));
+        assert_eq!(shown(&arena), vec![255, 255, 0, 0]);
+        assert!(
+            new_mask(&arena, layer, |_, _| 1.0).is_err(),
+            "one mask a layer"
+        );
+        // Off, the whole layer shows.
+        history
+            .apply(&mut arena, set(layer, MASK_ON, false))
+            .unwrap();
+        assert_eq!(shown(&arena), vec![255; 4]);
+        history.undo(&mut arena).unwrap();
+        // Applied: the hidden half is gone for good, and so is the mask.
+        let edit = apply_mask(&arena, layer).unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        assert_eq!(mask_of(&arena, layer), None);
+        assert_eq!(shown(&arena), vec![255, 255, 0, 0]);
+        history.undo(&mut arena).unwrap();
+        assert_eq!(
+            mask_of(&arena, layer),
+            Some(mask),
+            "undo brings the mask back"
+        );
+        let edit = delete_mask(&arena, layer).unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        assert_eq!(shown(&arena), vec![255; 4]);
     }
 
     #[test]
