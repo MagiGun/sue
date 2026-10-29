@@ -1,0 +1,33 @@
+# Sue as a Flatpak, from the release's Linux tarball (packaging/flatpak/build.sh
+# points the archive source at it). For Flathub, which builds from source,
+# the module would build with cargo from vendored crates instead.
+app-id: io.github.MagiGun.Sue
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: sue
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  # A creative app opens and saves files anywhere in your home folder.
+  - --filesystem=home
+modules:
+  - name: sue
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 usr/bin/sue /app/bin/sue
+      - install -Dm644 usr/share/icons/hicolor/512x512/apps/sue.png /app/share/icons/hicolor/512x512/apps/io.github.MagiGun.Sue.png
+      - install -Dm644 usr/share/icons/hicolor/scalable/apps/sue.svg /app/share/icons/hicolor/scalable/apps/io.github.MagiGun.Sue.svg
+      - install -Dm644 io.github.MagiGun.Sue.desktop /app/share/applications/io.github.MagiGun.Sue.desktop
+      - install -Dm644 io.github.MagiGun.Sue.metainfo.xml /app/share/metainfo/io.github.MagiGun.Sue.metainfo.xml
+      - install -Dm644 usr/share/doc/sue/LICENSE /app/share/licenses/io.github.MagiGun.Sue/LICENSE
+    sources:
+      - type: archive
+        path: TARBALL
+      - type: file
+        path: io.github.MagiGun.Sue.desktop
+      - type: file
+        path: io.github.MagiGun.Sue.metainfo.xml

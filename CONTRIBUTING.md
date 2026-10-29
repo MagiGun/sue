@@ -104,9 +104,18 @@ them all when a `v*` tag is pushed. Every package lands in `dist/`.
 | Windows | `powershell -File packaging/windows/build.ps1` | a zip with `Sue.exe` |
 | Linux | `packaging/linux/build.sh` | `.tar.gz`, `.deb`, `.rpm` and an AppImage |
 | Linux from any system | `docker build -t sue-linux packaging/linux`, then `docker run --rm -v "$PWD:/src" -v sue-target:/target sue-linux` | the same, built in Debian 12 |
+| Arch Linux, CachyOS, Manjaro | `packaging/arch/build.sh` (on Arch, after the Linux script) | a `.pkg.tar.zst` and the AUR's `PKGBUILD` for the release |
+| Flatpak | `packaging/flatpak/build.sh` (needs `flatpak-builder`, after the Linux script) | a `.flatpak` bundle |
 | macOS | `packaging/macos/build.sh` (on a Mac) | `Sue.app` for Apple silicon and Intel, zipped and as a `.dmg` |
 | iPhone and iPad | `packaging/ios/build.sh` (on a Mac with Xcode) | an unsigned `.ipa` and a simulator build |
 | Android phones and tablets | `python packaging/android/build_apk.py --release` | one APK for arm64, armv7 and x86_64 |
+
+Flathub and the AUR are hosted, so publishing there is a step of its own.
+Flathub reviews a pull request to `flathub/flathub` with a manifest that
+builds from source (`packaging/flatpak/io.github.MagiGun.Sue.yml` is the
+start; Flathub wants the cargo crates vendored with
+`flatpak-cargo-generator`). The AUR takes the `PKGBUILD` a release writes,
+pushed with an AUR account to `ssh://aur@aur.archlinux.org/sue-bin.git`.
 
 Android needs the SDK with the NDK, Java's `keytool`, `cargo install
 cargo-ndk` and the Rust targets `aarch64-linux-android`,

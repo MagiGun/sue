@@ -58,7 +58,8 @@ Architecture: $deb_arch
 Maintainer: MagiGun (https://github.com/MagiGun/sue)
 Section: graphics
 Priority: optional
-Depends: libc6, libasound2 | libasound2t64, libxkbcommon0, libwayland-client0, libgtk-3-0, libudev1
+Depends: libc6, libasound2 | libasound2t64, libxkbcommon0, libwayland-client0
+Recommends: libvulkan1, libegl1, xdg-desktop-portal
 Description: Sue, the Singular Unified Engine
  One creative environment: painting and illustration, comics and
  animation, writing and publishing, sound, and a file manager and
@@ -78,7 +79,8 @@ Release: 1
 Summary: Sue, the Singular Unified Engine
 License: LicenseRef-Sayn
 URL: https://github.com/MagiGun/sue
-Requires: alsa-lib, libxkbcommon, gtk3
+Requires: alsa-lib, libxkbcommon, libwayland-client
+Recommends: vulkan-loader, mesa-libEGL, xdg-desktop-portal
 
 %description
 One creative environment: painting and illustration, comics and animation,

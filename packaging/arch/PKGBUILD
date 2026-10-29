@@ -1,0 +1,32 @@
+# Maintainer: MagiGun <https://github.com/MagiGun/sue>
+#
+# Sue for Arch Linux and the systems built on it (CachyOS, EndeavourOS,
+# Manjaro), from the release's Linux tarball. The AUR takes this file as
+# `sue-bin`; packaging/arch/build.sh fills in the version and checksum and
+# builds the .pkg.tar.zst the release carries.
+pkgname=sue-bin
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Sue, the Singular Unified Engine: painting, comics, animation, writing and sound in one app"
+arch=('x86_64' 'aarch64')
+url="https://github.com/MagiGun/sue"
+license=('LicenseRef-Sayn')
+depends=('glibc' 'gcc-libs' 'alsa-lib' 'libxkbcommon' 'wayland' 'libx11' 'libxcursor' 'libxi' 'libxrandr')
+optdepends=(
+  'vulkan-icd-loader: drawing with Vulkan'
+  'mesa: drawing with OpenGL when Vulkan is missing'
+  'xdg-desktop-portal: the system open and save dialogs'
+)
+provides=('sue')
+conflicts=('sue')
+options=('!strip' '!debug')
+source_x86_64=("https://github.com/MagiGun/sue/releases/download/v${pkgver}/Sue-${pkgver}-linux-x86_64.tar.gz")
+source_aarch64=("https://github.com/MagiGun/sue/releases/download/v${pkgver}/Sue-${pkgver}-linux-aarch64.tar.gz")
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+package() {
+  cd "sue-${pkgver}"
+  cp -a usr "${pkgdir}/"
+  install -Dm644 usr/share/doc/sue/LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

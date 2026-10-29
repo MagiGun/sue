@@ -116,8 +116,46 @@ jobs:
           name: android
           path: dist/*.apk
 
+  arch:
+    needs: linux
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Packaging tools
+        run: pacman -Syu --noconfirm --needed base-devel git
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-ubuntu-22.04
+          path: dist
+      - run: packaging/arch/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch
+          path: |
+            dist/*.pkg.tar.zst
+            dist/PKGBUILD
+
+  flatpak:
+    needs: linux
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-24.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-ubuntu-22.04
+          path: dist
+      - run: packaging/flatpak/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: dist/*.flatpak
+
   publish:
-    needs: [windows, linux, macos, ios, android]
+    needs: [windows, linux, macos, ios, android, arch, flatpak]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

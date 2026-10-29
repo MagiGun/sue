@@ -656,7 +656,9 @@ does the same, and on a phone the row at the top of the menus does too. So a
 phone can use the full desktop layout, and a computer can try the touch ones.
 
 **Getting Sue.** Each release has a package for every system: a zip for
-Windows, a `.dmg` for macOS, an AppImage, `.deb`, `.rpm` or tarball for Linux,
+Windows, a `.dmg` for macOS; for Linux an AppImage (runs almost anywhere), a
+Flatpak, a `.deb` (Debian, Ubuntu, Mint), an `.rpm` (Fedora, openSUSE), a
+`.pkg.tar.zst` (Arch, CachyOS, Manjaro: `sudo pacman -U` it) or a tarball;
 one APK for every Android phone and tablet, and a package for iPhone and iPad
 to sign with your own Apple account. On Android, to open your own pictures
 (say, ones you sent to the device's Download folder), allow Sue to manage files

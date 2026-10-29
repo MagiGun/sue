@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.MagiGun.Sue</id>
+  <name>Sue</name>
+  <summary>Painting, comics, animation, writing and sound in one app</summary>
+  <developer id="io.github.magigun">
+    <name>MagiGun</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-Sayn</project_license>
+  <description>
+    <p>
+      Sue, the Singular Unified Engine, is one creative environment. Sue Paint
+      draws and paints with pressure-sensitive brushes, layers, vector lines,
+      screen tones and filters, and makes comics, webtoons and frame-by-frame
+      animation. Sue Writer writes and publishes documents and books. Every
+      tool works on the same project, so a picture, a page and a sound are the
+      same things wherever you use them.
+    </p>
+    <p>
+      It works offline, opens and saves PNG, JPEG, JPEG XL, Photoshop and many
+      other files, and has layouts for computers, tablets and phones.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.MagiGun.Sue.desktop</launchable>
+  <url type="homepage">https://github.com/MagiGun/sue</url>
+  <url type="bugtracker">https://github.com/MagiGun/sue/issues</url>
+  <categories>
+    <category>Graphics</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+  <releases>
+    <release version="1.0.0" date="2026-10-29"/>
+  </releases>
+</component>
