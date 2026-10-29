@@ -117,6 +117,16 @@ set `Cargo.toml`'s version to it so local builds match.
 | iPhone and iPad | `packaging/ios/build.sh` (on a Mac with Xcode) | an unsigned `.ipa` and a simulator build |
 | Android phones and tablets | `python packaging/android/build_apk.py --release` | one APK for arm64, armv7 and x86_64 |
 
+Windows calls unsigned programs "Unknown publisher" and warns before
+running them. `build.ps1` signs every program and installer it makes when
+`SUE_SIGN` holds the `signtool` arguments that pick a certificate (a
+`.pfx`, one on a token, or Azure Artifact Signing; the top of the script
+shows each), and the Release workflow does when the repository has the
+`WINDOWS_CERTIFICATE` (the `.pfx` in base64) and
+`WINDOWS_CERTIFICATE_PASSWORD` secrets. A signature names the publisher
+right away; SmartScreen's "Windows protected your PC" fades as the
+certificate builds a reputation through downloads.
+
 Flathub and the AUR are hosted, so publishing there is a step of its own.
 Flathub reviews a pull request to `flathub/flathub` with a manifest that
 builds from source (`packaging/flatpak/io.github.MagiGun.Sue.yml` is the

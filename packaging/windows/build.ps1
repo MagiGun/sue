@@ -13,6 +13,19 @@
 # without it only the zip is made. The version is SUE_VERSION when set (the
 # Release workflow sets it from the version typed or the tag pushed), else
 # Cargo.toml's.
+#
+# Signing: Windows calls unsigned programs "Unknown publisher" and warns
+# before running them. With SUE_SIGN set to the signtool arguments that
+# pick a certificate, every program and installer is signed with it and
+# timestamped:
+#
+#   a certificate file          /f "C:\path\to\cert.pfx" /p <password>
+#   one in the store or a token  /sha1 <the certificate's thumbprint>
+#   Azure Artifact Signing       /dlib "<folder>\Azure.CodeSigning.Dlib.dll" /dmdf "<folder>\metadata.json"
+#
+# SUE_SIGN_TIMESTAMP picks the timestamp server (DigiCert's by default;
+# Azure Artifact Signing wants http://timestamp.acs.microsoft.com) and
+# SIGNTOOL the signtool.exe (the newest Windows SDK's by default).
 param(
     [ValidateSet("x64", "x86", "arm64")]
     [string]$Arch = "x64"
@@ -31,12 +44,34 @@ $art = Join-Path $root "target\windows-package\$Arch\installer"
 Remove-Item -Recurse -Force (Split-Path $work) -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $out, $work, $art | Out-Null
 
+$signing = [bool]$env:SUE_SIGN
+if ($signing) {
+    $signtool = if ($env:SIGNTOOL) { $env:SIGNTOOL } else {
+        Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+            Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1 -ExpandProperty FullName
+    }
+    if (-not $signtool) { throw "SUE_SIGN is set but there is no signtool.exe: install the Windows SDK or set SIGNTOOL" }
+    $timestamp = if ($env:SUE_SIGN_TIMESTAMP) { $env:SUE_SIGN_TIMESTAMP } else { "http://timestamp.digicert.com" }
+} else {
+    Write-Warning "SUE_SIGN is not set: the programs and installers are not signed"
+}
+# Signs files in place (nothing without SUE_SIGN). The description is the
+# name Windows shows when it asks whether to let the program change the PC.
+function Sign-Files([string[]]$Paths) {
+    if (-not $signing) { return }
+    $files = ($Paths | ForEach-Object { "`"$_`"" }) -join " "
+    $arguments = "sign $env:SUE_SIGN /fd SHA256 /tr $timestamp /td SHA256 /d Sue /du https://magigun.github.io/sue/ $files"
+    $process = Start-Process -FilePath $signtool -ArgumentList $arguments -NoNewWindow -Wait -PassThru
+    if ($process.ExitCode -ne 0) { throw "signtool could not sign $($Paths -join ', ')" }
+}
+
 # Sue.exe opens the window with no console; sue-cli.exe is for a terminal.
 # Both carry Sue's icon (bins/sue/build.rs).
 cargo build --release -p sue --bins --target $target
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Copy-Item "target\$target\release\sue.exe" (Join-Path $work "Sue.exe")
 Copy-Item "target\$target\release\sue-cli.exe" (Join-Path $work "sue-cli.exe")
+Sign-Files (Join-Path $work "Sue.exe"), (Join-Path $work "sue-cli.exe")
 Copy-Item README.md $work
 Copy-Item LICENSE (Join-Path $work "LICENSE.txt")
 Copy-Item assets\icons\sue_icon.ico $work
@@ -116,11 +151,25 @@ $msi = Join-Path $out "Sue-$version-windows-$Arch.msi"
 & $wix.Source build packaging\windows\sue.wxs -arch $Arch -ext WixToolset.UI.wixext `
     -d "Version=$numbers" -d "Source=$work" -d "Art=$art" -o $msi
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Sign-Files $msi
 
-# The setup program, with the .msi inside.
+# The setup program, with the (signed) .msi inside. Signed, it is signed
+# twice: first the engine inside it, which runs the install with the
+# rights it asks for, then the whole program.
 $setup = Join-Path $out "Sue-$version-windows-$Arch-setup.exe"
 & $wix.Source build packaging\windows\setup.wxs -arch $Arch -ext WixToolset.BootstrapperApplications.wixext `
     -d "Version=$numbers" -d "Source=$art" -d "Msi=$msi" -o $setup
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($signing) {
+    $engine = Join-Path $art "engine.exe"
+    $unsigned = Join-Path $art "setup.exe"
+    Move-Item -Force $setup $unsigned
+    & $wix.Source burn detach $unsigned -engine $engine
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Sign-Files $engine
+    & $wix.Source burn reattach $unsigned -engine $engine -o $setup
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Sign-Files $setup
+}
 Remove-Item (Join-Path $out "*.wixpdb") -ErrorAction SilentlyContinue
 Get-ChildItem $out -Filter "Sue-$version-windows-$Arch*"

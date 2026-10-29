@@ -8,7 +8,10 @@
 #
 # Android releases are signed with the key in the ANDROID_KEYSTORE secret
 # (base64 of the keystore), ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS;
-# without them they are signed with a debug key. macOS builds are signed
+# without them they are signed with a debug key. Windows programs and
+# installers are signed with WINDOWS_CERTIFICATE (base64 of a .pfx) and
+# WINDOWS_CERTIFICATE_PASSWORD when they are set, and unsigned (so Windows
+# calls them "Unknown publisher") without them. macOS builds are signed
 # with SUE_SIGN_IDENTITY when it is set (ad hoc otherwise); iOS packages
 # are unsigned, to be signed with your own team. FreeBSD and RISC-V are
 # newer: when one of them fails, the release goes out without it.
@@ -76,6 +79,16 @@ jobs:
           dotnet tool install --global wix --version 5.0.2
           wix extension add -g WixToolset.UI.wixext/5.0.2
           wix extension add -g WixToolset.BootstrapperApplications.wixext/5.0.2
+      - name: Signing certificate, when the repository has one
+        env:
+          CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ($env:CERTIFICATE) {
+            $pfx = Join-Path $env:RUNNER_TEMP "sue.pfx"
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERTIFICATE))
+            "SUE_SIGN=/f `"$pfx`" /p `"$env:CERTIFICATE_PASSWORD`"" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          }
       - run: powershell -File packaging/windows/build.ps1 -Arch ${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
