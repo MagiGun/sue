@@ -204,6 +204,9 @@ pub fn menus() -> Vec<Menu> {
         Menu::new(
             tr!("review"),
             vec![
+                item(tr!("check-spelling"), "review.spelling"),
+                item(tr!("next-misspelling"), "review.next_misspelling").key("F7"),
+                MenuItem::Separator,
                 item(tr!("new-comment-ellipsis"), "review.comment").key("Ctrl+Alt+C"),
                 item(tr!("previous-comment"), "review.previous_comment"),
                 item(tr!("next-comment"), "review.next_comment"),

@@ -580,6 +580,14 @@ table and back. A table that runs onto the next page breaks between rows and
 repeats its heading row at the top. Tables go into every format you compile
 to, PDF and Word included.
 
+**Spelling** is checked as you type: a misspelled word gets a red wavy
+underline (not the word you are still typing). Right-click it for what you
+may have meant, **Ignore All** for this sitting, or **Add to Dictionary**,
+which keeps the word in the project's own dictionary. Review, Next
+Misspelling (`F7`) goes to the next one, and Review, Check Spelling While
+Typing (or Settings, Studios, Sue Writer) turns the underlines off. English
+ships with Sue; words in other alphabets are left alone for now.
+
 **Comments** are in the Review menu. Select some words and choose New
 Comment (`Ctrl+Alt+C`); type it and press `Ctrl+Enter`. The words are shaded,
 and Review, Comments shows every comment beside the text: the words it is

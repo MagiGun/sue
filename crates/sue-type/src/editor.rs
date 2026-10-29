@@ -64,6 +64,9 @@ pub struct EditorView<'a> {
     /// The names of the documents, shown between them when there are
     /// several.
     pub titles: &'a [String],
+    /// Spelling as you type, while set: the words it also takes as right
+    /// (lower case; a project's own dictionary).
+    pub spelling: Option<&'a dyn Fn(&str) -> bool>,
     /// The room around the pages or the column, in screen points; `None`
     /// for the usual (24 around pages, 32 around a column). A phone wants
     /// less, so that the lines get the width.
@@ -85,6 +88,9 @@ pub struct EditorOutput {
     pub link: Option<String>,
     /// Ctrl and the wheel asked to zoom by this factor.
     pub zoom: Option<f32>,
+    /// A word to add to the dictionary (lower case), from the spelling
+    /// menu.
+    pub learn: Option<String>,
 }
 
 /// A heading of the shown documents.
@@ -162,6 +168,11 @@ pub struct Editor {
     glide: CaretGlide,
     /// The caret in a table cell, while it is in one.
     cell: Option<CellCaret>,
+    /// The spelling menu of the word last pressed with the secondary
+    /// button: its document, its range and what it may have meant.
+    spell_menu: Option<(usize, Range<usize>, Vec<String>)>,
+    /// Words this sitting takes as right (Ignore All).
+    ignored: std::collections::HashSet<String>,
     /// Changes are recorded as made by this author on this date (track
     /// changes), while set.
     tracking: Option<sue_model::changes::Change>,
@@ -214,6 +225,8 @@ impl Editor {
             left_cell: None,
             tracking: None,
             delete_forward: false,
+            spell_menu: None,
+            ignored: std::collections::HashSet::new(),
         }
     }
 
@@ -1199,6 +1212,99 @@ impl Editor {
         }
     }
 
+    /// `true` if `word` is spelled right for `view` (its dictionary and the
+    /// words ignored this sitting).
+    fn spelled_right(&self, view: &EditorView<'_>, word: &str) -> bool {
+        let Some(also) = view.spelling else {
+            return true;
+        };
+        crate::spell::is_correct(word, &|lower| also(lower) || self.ignored.contains(lower))
+    }
+
+    /// The menu a secondary press on a misspelled word opens: what it may
+    /// have meant, Ignore All and Add to Dictionary. Returns `true` if it
+    /// changed the text.
+    fn spelling_menu(
+        &mut self,
+        ui: &Ui,
+        cx: &mut AppletContext<'_>,
+        response: &egui::Response,
+        view: &EditorView<'_>,
+        output: &mut EditorOutput,
+    ) -> bool {
+        if view.spelling.is_none() {
+            return false;
+        }
+        if response.secondary_clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            let caret = self.hit(pos);
+            let text = self.doc_text(caret.doc).to_owned();
+            self.spell_menu = crate::spell::words(&text)
+                .into_iter()
+                .find(|range| range.start <= caret.offset && caret.offset <= range.end)
+                .filter(|range| !self.spelled_right(view, &text[range.clone()]))
+                .map(|range| {
+                    let suggestions = crate::spell::suggest(&text[range.clone()], 6);
+                    (caret.doc, range, suggestions)
+                });
+        }
+        let Some((doc, range, suggestions)) = self.spell_menu.clone() else {
+            return false;
+        };
+        let word = self
+            .doc_text(doc)
+            .get(range.clone())
+            .unwrap_or("")
+            .to_owned();
+        let mut pick: Option<String> = None;
+        let mut learn = false;
+        let mut ignore = false;
+        response.context_menu(|ui| {
+            if suggestions.is_empty() {
+                ui.label(tr!("no-suggestions"));
+            }
+            for suggestion in &suggestions {
+                if ui.button(suggestion).clicked() {
+                    pick = Some(suggestion.clone());
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui.button(tr!("ignore-all")).clicked() {
+                ignore = true;
+                ui.close();
+            }
+            if ui.button(tr!("add-to-dictionary")).clicked() {
+                learn = true;
+                ui.close();
+            }
+        });
+        let lower = word.to_lowercase().replace('\u{2019}', "'");
+        if ignore {
+            self.ignored.insert(lower.clone());
+            self.spell_menu = None;
+        }
+        if learn {
+            output.learn = Some(lower);
+            self.spell_menu = None;
+        }
+        let Some(pick) = pick else {
+            let _ = ui;
+            return false;
+        };
+        self.spell_menu = None;
+        self.anchor = Caret {
+            doc,
+            offset: range.start,
+        };
+        self.caret = Caret {
+            doc,
+            offset: range.end,
+        };
+        self.replace_selection(cx, &pick, None)
+    }
+
     /// The heading a table of contents' entry under a point on screen
     /// leads to, if there is one.
     fn hit_entry(&self, pos: Pos2) -> Option<Caret> {
@@ -1507,6 +1613,11 @@ impl Editor {
         self.pointer(ui, &response, output);
         if let Some(mut left) = self.left_cell.take() {
             left.commit(cx);
+        }
+        if !view.read_only && self.spelling_menu(ui, cx, &response, view, output) {
+            output.changed = true;
+            let docs = self.docs.clone();
+            self.prepare(&ctx, cx, &docs, view);
         }
         let focused = ctx.memory(|memory| memory.has_focus(self.id));
         if focused && resized && self.had_focus {
@@ -2172,7 +2283,7 @@ impl Editor {
             }
             if !kept.is_empty() {
                 let value = change.value();
-                edit::reformat(cx, doc, "Delete", |_, marks| {
+                edit::reformat(cx, doc, &tr!("delete"), |_, marks| {
                     for part in kept {
                         marks.set(part, kind::DELETED, Some(value.clone()));
                     }
@@ -2628,6 +2739,15 @@ impl Editor {
             painter
                 .with_clip_rect(clip.intersect(self.viewport))
                 .galley(galley_at, block.galley.clone(), view.ink.text);
+            if view.spelling.is_some() {
+                self.paint_spelling(
+                    &painter.with_clip_rect(clip.intersect(self.viewport)),
+                    view,
+                    block,
+                    galley_at,
+                    focused,
+                );
+            }
             if piece.rows.start == 0
                 && let Some(label) = &block.label
             {
@@ -2665,6 +2785,55 @@ impl Editor {
             );
             let galley = ui.ctx().fonts_mut(|fonts| fonts.layout_job(job));
             painter.galley(caret.min, galley, view.ink.text);
+        }
+    }
+
+    /// Red waves under the misspelled words of `block`, but not under the
+    /// word being typed.
+    fn paint_spelling(
+        &self,
+        painter: &egui::Painter,
+        view: &EditorView<'_>,
+        block: &Block,
+        galley_at: Pos2,
+        focused: bool,
+    ) {
+        let Some(text) = self.texts.get(block.doc) else {
+            return;
+        };
+        let body = &text[block.range.clone()];
+        let typing = (focused && self.caret.doc == block.doc).then_some(self.caret.offset);
+        let wave = Stroke::new(1.0, Color32::from_rgb(0xd0, 0x30, 0x30));
+        for range in crate::spell::words(body) {
+            let word = &body[range.clone()];
+            let at = block.range.start + range.start..block.range.start + range.end;
+            if typing.is_some_and(|caret| caret == at.end) || self.spelled_right(view, word) {
+                continue;
+            }
+            let cursor = |chars: usize| CCursor {
+                index: CharIndex(chars),
+                prefer_next_row: false,
+            };
+            let start = body[..range.start].chars().count();
+            let end = start + word.chars().count();
+            let from = block.galley.pos_from_cursor(cursor(start));
+            let to = block.galley.pos_from_cursor(cursor(end));
+            if (from.min.y - to.min.y).abs() > 0.5 {
+                continue;
+            }
+            let y = galley_at.y + from.max.y - 1.0;
+            let mut points = Vec::new();
+            let mut x = galley_at.x + from.min.x;
+            let right = galley_at.x + to.min.x;
+            let mut up = false;
+            while x < right {
+                points.push(pos2(x, if up { y - 1.5 } else { y }));
+                x += 2.0;
+                up = !up;
+            }
+            if points.len() > 1 {
+                painter.add(egui::Shape::line(points, wave));
+            }
         }
     }
 

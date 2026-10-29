@@ -237,8 +237,8 @@ of work is by how much people miss each one (the plan at the end).
 
 | Feature | Source | Sue | Notes |
 | --- | --- | --- | --- |
-| Spelling as you type | WL | missing | Belongs to all of Sue |
-| Spelling dialog, add to dictionary, ignore | WL | missing | |
+| Spelling as you type | WL | done | Shared `sue_type::spell`; English only |
+| Spelling dialog, add to dictionary, ignore | WL | partial | Right-click menu and F7; no dialog |
 | Grammar checking | WL | missing | |
 | Thesaurus | WL | missing | |
 | Hyphenation dictionaries | WL | missing | |

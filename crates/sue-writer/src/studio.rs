@@ -24,6 +24,9 @@ use crate::project;
 pub const ID: &str = "sue-writer";
 
 /// The studio's applet id.
+/// The rice key that turns spelling as you type on and off.
+pub(crate) const SPELL_CHECK: &str = "sue_writer.spell_check";
+
 pub(crate) fn me() -> AppletId {
     AppletId::new(ID).expect("a valid id")
 }
@@ -788,6 +791,71 @@ impl SueWriter {
         let _ = cx.apply(ArenaEdit(step));
     }
 
+    /// `true` while misspelled words are underlined.
+    pub(crate) fn spell_check(&self, cx: &AppletContext<'_>) -> bool {
+        cx.rice().get_bool(SPELL_CHECK).unwrap_or(true)
+    }
+
+    /// The words the project's (or the open file's) own dictionary holds.
+    pub(crate) fn own_words(&self, cx: &AppletContext<'_>) -> std::collections::HashSet<String> {
+        sue_type::spell::word_set(
+            self.project
+                .or(self.editor.current())
+                .and_then(|id| cx.arena().get_by_id(id).ok())
+                .and_then(|entity| entity.property(sue_type::spell::WORDS)),
+        )
+    }
+
+    /// Adds `word` to the project's (or the open file's) dictionary.
+    pub(crate) fn learn(&mut self, cx: &mut AppletContext<'_>, word: &str) {
+        let Some(target) = self.project.or(self.editor.current()) else {
+            return;
+        };
+        let mut words: Vec<String> = self.own_words(cx).into_iter().collect();
+        if words.iter().any(|known| known == word) {
+            return;
+        }
+        words.push(word.to_owned());
+        words.sort();
+        let value = Value::List(words.into_iter().map(Value::Text).collect());
+        let step = sue_core::txn::Batch::new(tr!("add-to-dictionary")).then(project::set(
+            target,
+            sue_type::spell::WORDS,
+            Some(value),
+        ));
+        if cx.apply(ArenaEdit(step)).is_ok() {
+            cx.notify(tr!("added-to-dictionary", word = word.to_owned()));
+        }
+    }
+
+    /// Selects the next misspelled word after the caret, in the documents
+    /// shown.
+    pub(crate) fn next_misspelling(&mut self, cx: &mut AppletContext<'_>) {
+        let own = self.own_words(cx);
+        let also = |word: &str| own.contains(word);
+        let docs = self.editor.docs().to_vec();
+        let here = (self.editor.caret().doc, self.editor.selection().end);
+        let mut first = None;
+        for (index, doc) in docs.iter().enumerate() {
+            let text = sue_type::edit::text_of(cx.arena(), *doc).unwrap_or("");
+            for range in sue_type::spell::misspelled(text, &also) {
+                if (index, range.start) >= here {
+                    self.editor.select(*doc, range);
+                    self.editor.focus();
+                    return;
+                }
+                first.get_or_insert((*doc, range));
+            }
+        }
+        match first {
+            Some((doc, range)) => {
+                self.editor.select(doc, range);
+                self.editor.focus();
+            }
+            None => cx.notify(tr!("no-misspellings")),
+        }
+    }
+
     /// `true` while the project (or the open file) records its changes.
     pub(crate) fn tracking(&self, cx: &AppletContext<'_>) -> bool {
         self.project
@@ -1005,6 +1073,14 @@ impl SueWriter {
                     self.dialog = Some(Dialog::Comment(String::new()));
                 }
             }
+            "review.spelling" => {
+                let on = !self.spell_check(cx);
+                let _ = cx.edit_rice(sue_rice::SetRiceValue::new(
+                    SPELL_CHECK,
+                    sue_rice::RiceValue::Bool(on),
+                ));
+            }
+            "review.next_misspelling" => self.next_misspelling(cx),
             "review.track" => {
                 let target = self.project.or(self.editor.current());
                 if let Some(target) = target {
@@ -1646,6 +1722,7 @@ impl SueWriter {
             (alt, Key::F, "insert.footnote"),
             (alt, Key::C, "review.comment"),
             (shift, Key::C, "review.track"),
+            (Modifiers::NONE, Key::F7, "review.next_misspelling"),
             (command, Key::Enter, "insert.page_break"),
             (command, Key::K, "insert.link"),
             (command, Key::F, "edit.find"),
@@ -1804,6 +1881,11 @@ impl SueApplet for SueWriter {
                 "sue_writer.dark_paper",
                 RiceParameter::Bool { value: false },
                 "Show the page in the theme's dark colors instead of white paper",
+            ),
+            RiceDeclaration::new(
+                SPELL_CHECK,
+                RiceParameter::Bool { value: true },
+                "Underline misspelled words while typing",
             ),
         ]
         .into_iter()

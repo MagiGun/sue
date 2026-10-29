@@ -1691,6 +1691,21 @@ print with ruled cells and repeated heading rows; Word (`w:tbl`, a repeated
 widths), HTML and EPUB (`thead` and `tbody`), RTF (`\trowd` rows, `\trhdr`),
 Markdown (pipe tables) and plain text (tab-separated rows) write them.
 
+**Spelling (`sue-type::spell`).** Every studio that sets text checks
+spelling the same way. English ships inside Sue: the public-domain Moby
+word list (deflated and front-coded, about 165,000 words with their break
+points, which hyphenation can use) and a supplement of modern words, both
+by way of WordCraft (`crates/sue-type/data/spelling/ATTRIBUTION.md`), whose
+reader and inflection rules (plurals, `-ed`, `-ing`, doubled consonants, a
+few prefixes) are adapted from its MIT or Apache 2.0 proofing crate.
+`is_correct` takes numbers, abbreviations and hyphenated compounds of known
+words, and a caller's own words (`sue.spelling.words`, a project's
+dictionary); `misspelled` lists a text's wrong words, `suggest` the nearest
+words by edit distance, inflected like the word asked about. The editor
+draws a red wave under each wrong word but the one being typed
+(`EditorView::spelling`), and a secondary press opens a menu of
+suggestions, Ignore All and Add to Dictionary (`EditorOutput::learn`).
+
 **Comments (`sue-model::comments`).** A comment is an entity of class
 `sue.comment`: its text in its `StringBuffer`, `sue.comment.author`,
 `sue.comment.date` and `sue.comment.resolved` as properties; a `comment`

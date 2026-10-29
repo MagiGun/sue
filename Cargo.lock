@@ -3373,6 +3373,7 @@ name = "sue-type"
 version = "0.0.3"
 dependencies = [
  "egui",
+ "miniz_oxide 0.8.9",
  "regex",
  "sue-core",
  "sue-io",

@@ -13,6 +13,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Spelling as you type in Sue Writer: misspelled words are underlined;
+  right-click for suggestions, Ignore All or Add to Dictionary, and `F7`
+  goes to the next one. English ships with Sue.
 - Track changes in Sue Writer (Review, Track Changes): typed text is
   underlined, deleted text struck through, until each change is accepted
   or rejected. Word files keep the changes with their authors.

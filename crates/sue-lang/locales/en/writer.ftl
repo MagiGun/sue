@@ -454,6 +454,14 @@ by = By { $value }
 your-comment = Your comment
 add-comment = Add Comment
 
+## Spelling
+
+check-spelling = Check Spelling While Typing
+next-misspelling = Next Misspelling
+no-misspellings = No misspelled words
+add-to-dictionary = Add to Dictionary
+added-to-dictionary = Added { $word } to the project's dictionary
+
 ## Track changes
 
 track-changes = Track Changes

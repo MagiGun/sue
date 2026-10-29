@@ -246,6 +246,8 @@ sue_writer-smart_quotes = Smart quotes
     .description = Turn straight quotes into curly ones while typing
 sue_writer-dark_paper = Dark paper
     .description = Show the page in the theme's dark colors instead of white paper
+sue_writer-spell_check = Spell check
+    .description = Underline misspelled words while typing
 sue_writer-language = Language
     .description = Language: sue follows Sue's language, a language tag sets this one apart
 
@@ -487,6 +489,8 @@ sue_writer_keys-review_comment = Review comment
     .description = New Comment
 sue_writer_keys-review_track = Review track
     .description = Record Changes
+sue_writer_keys-review_next_misspelling = Review next misspelling
+    .description = Next Misspelling
 
 ## [image_viewer_keys]
 

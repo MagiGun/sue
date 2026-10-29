@@ -122,6 +122,7 @@ shadow = "#141414"             # Shadow under floating surfaces
 theme = "sue-theme"            # {sue-theme|gray|void|graphite|paper} Sue Writer's colors: Sue's own theme (follows it) or a preset
 smart_quotes = true            # Turn straight quotes into curly ones while typing
 dark_paper = false             # Show the page in the theme's dark colors instead of white paper
+spell_check = true             # Underline misspelled words while typing
 language = "sue"              # @text Language: sue follows Sue's language, a language tag sets this one apart
 
 [image_viewer]
@@ -233,6 +234,7 @@ style_body = "Ctrl+Alt+0"      # @keybind Body Text
 insert_footnote = "Ctrl+Alt+F" # @keybind Footnote
 review_comment = "Ctrl+Alt+C"  # @keybind New Comment
 review_track = "Ctrl+Shift+C"  # @keybind Record Changes
+review_next_misspelling = "F7"  # @keybind Next Misspelling
 insert_page_break = "Ctrl+Enter" # @keybind Page Break
 insert_link = "Ctrl+K"         # @keybind Link
 edit_find = "Ctrl+F"           # @keybind Find

@@ -74,3 +74,7 @@ case-toggle = tOGGLE cASE
 
 new-comment = New Comment
 delete-comment = Delete Comment
+delete = Delete
+no-suggestions = No suggestions
+ignore-all = Ignore All
+add-to-dictionary = Add to Dictionary

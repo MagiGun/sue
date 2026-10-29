@@ -423,6 +423,7 @@ impl SueWriter {
             "view.inspector" => ItemState::check(self.inspector && !self.comments),
             "review.comments" => ItemState::check(self.inspector && self.comments),
             "review.track" => ItemState::check(self.tracking(cx)),
+            "review.spelling" => ItemState::check(self.spell_check(cx)),
             "project.include" => ItemState {
                 enabled: self.selected.is_some(),
                 checked: self
@@ -1437,7 +1438,11 @@ impl SueWriter {
             .rice()
             .get_bool("sue_writer.smart_quotes")
             .unwrap_or(true);
+        let own_words = self.own_words(cx);
+        let also = |word: &str| own_words.contains(word);
+        let spelling = self.spell_check(cx) && !composing;
         let view = EditorView {
+            spelling: spelling.then_some(&also as &dyn Fn(&str) -> bool),
             mode,
             page: &page,
             zoom,
@@ -1466,6 +1471,9 @@ impl SueWriter {
         if let Some(factor) = output.zoom {
             self.fit = false;
             self.zoom = (zoom * factor).clamp(0.25, 4.0);
+        }
+        if let Some(word) = output.learn.clone() {
+            self.learn(cx, &word);
         }
         if let Some(link) = output.link {
             cx.request(ShellRequest::Command(format!("open-url:{link}")));

@@ -19,6 +19,7 @@
 //!   laid out, broken across pages, painted and typed in.
 //! - [`contents`]: tables of contents made from the headings, with pages.
 //! - [`case`]: changing text to capitals, small letters or sentence case.
+//! - [`spell`]: spelling: which words are wrong, and what was meant.
 //! - [`find`]: finding and replacing, by plain text or regular expression.
 //! - [`edit`]: the edits it makes, in place in the arena with their undo.
 //! - [`typeset`]: the same text set on pages for print, from the font files
@@ -40,6 +41,7 @@ pub mod editor;
 pub mod find;
 pub mod layout;
 pub mod raster;
+pub mod spell;
 pub mod style;
 pub mod tables;
 pub mod typeset;
