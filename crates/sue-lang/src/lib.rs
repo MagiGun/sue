@@ -697,6 +697,28 @@ pub fn generation() -> u64 {
     GENERATION.load(Ordering::Relaxed)
 }
 
+/// Tells a part of Sue that keeps text (a studio's menus) when to build it
+/// again: when the language it reads in, or the messages, changed since it
+/// last asked.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Watch {
+    seen: Option<(String, u64)>,
+}
+
+impl Watch {
+    /// `true` the first time, and whenever the current language or the
+    /// messages changed since the last call.
+    pub fn changed(&mut self) -> bool {
+        let now = (current(), generation());
+        if self.seen.as_ref() == Some(&now) {
+            false
+        } else {
+            self.seen = Some(now);
+            true
+        }
+    }
+}
+
 // ----- Languages ---------------------------------------------------------------
 
 /// A language Sue has.

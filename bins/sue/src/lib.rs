@@ -4,6 +4,11 @@
 //! The executable is [`cli`]; phones and tablets start [`run_window`] from
 //! their platform entry (`crates/sue-platform/android` on Android).
 
+/// Text from the language database's `sue` namespace (the window, files and projects).
+macro_rules! tr {
+    ($($arg:tt)*) => { sue_lang::tr!("sue", $($arg)*) };
+}
+
 mod applets;
 mod convert;
 mod desktop;

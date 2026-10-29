@@ -240,6 +240,12 @@ impl Bound {
             .collect();
     }
 
+    /// Makes the next [`Self::refresh`] write the keys into the menus
+    /// again (after the menus were built anew, in another language).
+    pub fn invalidate(&mut self) {
+        self.revision = None;
+    }
+
     /// Every chord the shortcuts use (their defaults until the first
     /// refresh).
     #[must_use]

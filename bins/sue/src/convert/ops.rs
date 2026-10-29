@@ -3,6 +3,11 @@
 //! chosen format. Pure functions of their inputs, so they run on a
 //! background thread and are tested on their own.
 
+/// Text from the language database's `convert` namespace (the Converter).
+macro_rules! tr {
+    ($($arg:tt)*) => { sue_lang::tr!("convert", $($arg)*) };
+}
+
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -32,12 +37,23 @@ impl Kind {
 
     /// How the Converter names files of this kind.
     #[must_use]
-    pub fn plural(self) -> &'static str {
+    pub fn plural(self) -> String {
         match self {
-            Self::Picture => "Pictures",
-            Self::Sound => "Sounds",
-            Self::Text => "Text files",
-            Self::Data => "Other files",
+            Self::Picture => tr!("kind-pictures"),
+            Self::Sound => tr!("kind-sounds"),
+            Self::Text => tr!("kind-text-files"),
+            Self::Data => tr!("kind-other-files"),
+        }
+    }
+
+    /// How the Converter names one file of this kind.
+    #[must_use]
+    pub fn singular(self) -> String {
+        match self {
+            Self::Picture => tr!("kind-picture"),
+            Self::Sound => tr!("kind-sound"),
+            Self::Text => tr!("kind-text-file"),
+            Self::Data => tr!("kind-other-file"),
         }
     }
 }
@@ -120,22 +136,22 @@ impl Target {
     #[must_use]
     pub fn label(self) -> String {
         match self {
-            Self::Png => "PNG picture".to_owned(),
-            Self::Jpeg => "JPEG picture".to_owned(),
-            Self::Jxl => "JPEG XL picture (lossless)".to_owned(),
-            Self::Picture(format) => format!("{} picture", format.name()),
-            Self::Wav => "WAV sound".to_owned(),
-            Self::Flac => "FLAC sound (lossless)".to_owned(),
-            Self::Aiff => "AIFF sound".to_owned(),
-            Self::Text => "Text (tidied)".to_owned(),
-            Self::Html => "HTML page (from Markdown)".to_owned(),
-            Self::Csv => "CSV table".to_owned(),
-            Self::Tsv => "TSV table".to_owned(),
+            Self::Png => tr!("png-picture"),
+            Self::Jpeg => tr!("jpeg-picture"),
+            Self::Jxl => tr!("jpeg-xl-picture-lossless"),
+            Self::Picture(format) => tr!("picture", format = format.name()),
+            Self::Wav => tr!("wav-sound"),
+            Self::Flac => tr!("flac-sound-lossless"),
+            Self::Aiff => tr!("aiff-sound"),
+            Self::Text => tr!("text-tidied"),
+            Self::Html => tr!("html-page-from-markdown"),
+            Self::Csv => tr!("csv-table"),
+            Self::Tsv => tr!("tsv-table"),
             Self::Json => "JSON".to_owned(),
-            Self::Base64 => "Base64 text".to_owned(),
-            Self::Hex => "Hex dump".to_owned(),
-            Self::ByteMap => "Byte map picture (PNG)".to_owned(),
-            Self::Copy => "A copy, unchanged".to_owned(),
+            Self::Base64 => tr!("base64-text"),
+            Self::Hex => tr!("hex-dump"),
+            Self::ByteMap => tr!("byte-map-picture-png"),
+            Self::Copy => tr!("a-copy-unchanged"),
         }
     }
 
@@ -215,13 +231,19 @@ pub enum Filter {
 }
 
 impl Filter {
-    /// Every filter, with its name.
-    pub const ALL: [(Self, &'static str); 4] = [
-        (Self::Lanczos, "Lanczos (sharpest)"),
-        (Self::Bicubic, "Bicubic"),
-        (Self::Bilinear, "Bilinear (soft)"),
-        (Self::Nearest, "Nearest (pixel art)"),
-    ];
+    /// Every filter.
+    pub const ALL: [Self; 4] = [Self::Lanczos, Self::Bicubic, Self::Bilinear, Self::Nearest];
+
+    /// Its name, in the language in use.
+    #[must_use]
+    pub fn label(self) -> String {
+        match self {
+            Self::Lanczos => tr!("filter-lanczos"),
+            Self::Bicubic => tr!("filter-bicubic"),
+            Self::Bilinear => tr!("filter-bilinear"),
+            Self::Nearest => tr!("filter-nearest"),
+        }
+    }
 
     fn support(self) -> f32 {
         match self {
@@ -444,14 +466,14 @@ pub fn read_picture(path: &Path, bytes: &[u8]) -> Result<RasterTile2D, String> {
 /// # Errors
 /// If it holds float pixels.
 pub fn rgba(tile: &RasterTile2D) -> Result<RasterTile2D, String> {
-    let bytes = tile.bytes().ok_or("the picture has no pixels")?;
+    let bytes = tile.bytes().ok_or(tr!("the-picture-has-no-pixels"))?;
     let pixels = match tile.format() {
         PixelFormat::Rgba8 => return Ok(tile.clone()),
         PixelFormat::Gray8 => bytes
             .iter()
             .flat_map(|&gray| [gray, gray, gray, 255])
             .collect(),
-        PixelFormat::RgbaF32 => return Err("float pictures are not converted yet".to_owned()),
+        PixelFormat::RgbaF32 => return Err(tr!("float-pictures-are-not-converted-yet")),
     };
     RasterTile2D::from_bytes(tile.width(), tile.height(), PixelFormat::Rgba8, pixels)
         .map_err(|error| error.to_string())
@@ -687,7 +709,10 @@ pub fn transform_picture(
 ) -> Result<RasterTile2D, String> {
     let tile = rgba(tile)?;
     let mut size = (tile.width(), tile.height());
-    let mut pixels = tile.bytes().ok_or("the picture has no pixels")?.to_vec();
+    let mut pixels = tile
+        .bytes()
+        .ok_or(tr!("the-picture-has-no-pixels"))?
+        .to_vec();
     let mut new_size = resized(size.0, size.1, options.resize);
     // Icons and the like have a largest size: fit into it.
     if let Target::Picture(format) = target
@@ -738,12 +763,12 @@ pub fn write_picture(
             .encode_layers(&[tile], options.jxl_effort.clamp(1, 9))
             .map_err(|error| match error {
                 JxlError::CodecUnavailable { .. } => {
-                    "JPEG XL writing is not in this build".to_owned()
+                    tr!("jpeg-xl-writing-not-build")
                 }
                 other => other.to_string(),
             }),
         Target::Picture(format) => encode_picture(tile, format),
-        other => Err(format!("a picture does not become {}", other.label())),
+        other => Err(tr!("a-picture-does-not-become", label = other.label())),
     }
 }
 
@@ -863,7 +888,7 @@ pub fn transform_sound(pcm: &PCMFloat1D, options: &SoundOptions) -> Result<PCMFl
         }
     }
     if samples.is_empty() {
-        return Err("trimming left no sound".to_owned());
+        return Err(tr!("trimming-left-no-sound"));
     }
     PCMFloat1D::new(out_rate, out_channels as u16, samples).map_err(|error| error.to_string())
 }
@@ -881,7 +906,7 @@ pub fn write_sound(
         Target::Wav => Ok(encode_wav_as(pcm, depth)),
         Target::Flac => encode_flac(pcm, depth),
         Target::Aiff => Ok(encode_aiff(pcm, depth)),
-        other => Err(format!("a sound does not become {}", other.label())),
+        other => Err(tr!("a-sound-does-not-become", label = other.label())),
     }
 }
 
@@ -1343,23 +1368,27 @@ pub fn convert(
         Target::Copy => Ok((bytes, "copied".to_owned())),
         Target::Base64 => Ok((
             base64(&bytes, options.text.base64_wrap).into_bytes(),
-            "Base64".to_owned(),
+            tr!("base64"),
         )),
         Target::Hex => Ok((
             hex_dump(&bytes, options.text.hex_width).into_bytes(),
-            "hex dump".to_owned(),
+            tr!("hex-dump-2"),
         )),
         Target::ByteMap => {
             let tile = sue_io::byte_map_tile(bytes, options.text.map_width.max(1))
                 .map_err(|error| error.to_string())?;
-            let note = format!("{} by {} byte map", tile.width(), tile.height());
+            let note = tr!("by-byte-map", width = tile.width(), height = tile.height());
             Ok((encode_png(&tile)?, note))
         }
         _ => match kind {
             Kind::Picture => {
                 let tile = read_picture(path, &bytes)?;
                 let changed = transform_picture(&tile, &options.picture, target)?;
-                let note = format!("{} by {} pixels", changed.width(), changed.height());
+                let note = tr!(
+                    "by-pixels",
+                    width = changed.width(),
+                    height = changed.height()
+                );
                 Ok((write_picture(&changed, target, &options.picture)?, note))
             }
             Kind::Sound => {
@@ -1367,17 +1396,16 @@ pub fn convert(
                 let (decoded, _) =
                     decode_audio(bytes, Some(&extension)).map_err(|(error, _)| error)?;
                 let changed = transform_sound(&decoded.pcm, &options.sound)?;
-                let note = format!(
-                    "{:.1} s, {} Hz, {} channels",
-                    changed.duration_seconds(),
-                    changed.sample_rate(),
-                    changed.channels()
+                let note = tr!(
+                    "s-hz-channels",
+                    duration_seconds = sue_lang::number(changed.duration_seconds(), 1),
+                    sample_rate = changed.sample_rate(),
+                    channels = changed.channels()
                 );
                 Ok((write_sound(&changed, target, options.sound.depth)?, note))
             }
             Kind::Text | Kind::Data => {
-                let text =
-                    String::from_utf8(bytes).map_err(|_| "this file is not text".to_owned())?;
+                let text = String::from_utf8(bytes).map_err(|_| tr!("this-file-is-not-text"))?;
                 let source = extension(path);
                 let separator = if source == "tsv" { '\t' } else { ',' };
                 let out = match target {
@@ -1399,7 +1427,7 @@ pub fn convert(
                     ),
                     Target::Csv => write_table(&table(&text, separator), ','),
                     Target::Tsv => write_table(&table(&text, separator), '\t'),
-                    other => return Err(format!("text does not become {}", other.label())),
+                    other => return Err(tr!("text-does-not-become", label = other.label())),
                 };
                 Ok((
                     tidy(
@@ -1444,7 +1472,7 @@ mod tests {
     #[test]
     fn resizing_keeps_flat_colors_and_turning_moves_pixels() {
         let flat = [10_u8, 200, 30, 255].repeat(16 * 16);
-        for (filter, _) in Filter::ALL {
+        for filter in Filter::ALL {
             let small = resize(&flat, (16, 16), (5, 7), filter);
             assert_eq!(small.len(), 5 * 7 * 4);
             assert!(

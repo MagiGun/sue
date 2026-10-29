@@ -6,6 +6,11 @@
 //! an undoable rice transaction; a slider previews live while dragged and
 //! records one undo step when released.
 
+/// Text from the language database's `settings` namespace (the Settings window).
+macro_rules! tr {
+    ($($arg:tt)*) => { sue_lang::tr!("settings", $($arg)*) };
+}
+
 use std::collections::HashMap;
 
 use egui::{Align, Layout, RichText, ScrollArea, Sense, Stroke, Ui, vec2};
@@ -94,7 +99,7 @@ pub fn all_pages(catalog: &Catalog, rice: &RiceSchema) -> Vec<SettingsPage> {
     if !other.is_empty() {
         pages.push(SettingsPage::new(
             "other",
-            "Other",
+            tr!("other"),
             other
                 .into_iter()
                 .map(|section| {
@@ -345,12 +350,12 @@ impl Settings {
                     for (index, chord) in value.chords().iter().enumerate() {
                         let on = recording == Some(Some(index));
                         let text = if on {
-                            "Press keys...".to_owned()
+                            tr!("press-keys-ellipsis")
                         } else {
                             chord.to_string()
                         };
                         if chip(ui, text, on)
-                            .on_hover_text("Click, then press the shortcut to put here")
+                            .on_hover_text(tr!("click-then-press-shortcut-put-here"))
                             .clicked()
                         {
                             self.recording = Some((path.clone(), Some(index)));
@@ -361,7 +366,7 @@ impl Settings {
                                     .frame(false)
                                     .small(),
                             )
-                            .on_hover_text("Take this shortcut away")
+                            .on_hover_text(tr!("take-this-shortcut-away"))
                             .clicked()
                         {
                             let mut next = value.clone();
@@ -370,14 +375,14 @@ impl Settings {
                         }
                     }
                     if value.is_empty() && recording.is_none() {
-                        ui.label(RichText::new("None").color(theme.muted));
+                        ui.label(RichText::new(tr!("none")).color(theme.muted));
                     }
                     let adding = recording == Some(None);
                     if adding {
-                        chip(ui, "Press keys...".to_owned(), true);
+                        chip(ui, tr!("press-keys-ellipsis"), true);
                     } else if ui
                         .add(egui::Button::new(RichText::new("+").color(theme.text)).small())
-                        .on_hover_text("Add another shortcut for this (as many as you like)")
+                        .on_hover_text(tr!("add-another-shortcut-as-many-as"))
                         .clicked()
                     {
                         self.recording = Some((path.clone(), None));
@@ -606,7 +611,8 @@ fn slider_edit(
 
 impl SueApplet for Settings {
     fn manifest(&self) -> AppletManifest {
-        let mut manifest = AppletManifest::new(ID, "Settings", AppletRole::Window, "\u{2699}");
+        let mut manifest = AppletManifest::new(ID, "Settings", AppletRole::Window, "\u{2699}")
+            .localized("settings");
         manifest.summary = "Every setting and every rice parameter.".to_owned();
         manifest
     }
@@ -672,7 +678,7 @@ impl SueApplet for Settings {
         right.add(
             egui::TextEdit::singleline(&mut self.filter)
                 .id(egui::Id::unique("sue-settings-filter"))
-                .hint_text("Filter settings...")
+                .hint_text(tr!("filter-settings-ellipsis"))
                 .desired_width(f32::INFINITY),
         );
         right.add_space(theme.padding);
@@ -682,7 +688,7 @@ impl SueApplet for Settings {
                 .get(self.page)
                 .map_or_else(String::new, |page| page.title.clone())
         } else {
-            format!("Results for \"{}\"", self.filter.trim())
+            tr!("results-for", filter = self.filter.trim())
         };
         right.label(
             RichText::new(title)

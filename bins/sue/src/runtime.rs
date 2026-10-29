@@ -250,7 +250,7 @@ impl Runtime {
             && let Some(Err(error)) = self.persist()
         {
             self.shell
-                .notify(format!("Could not save the rice: {error}"), true);
+                .notify(tr!("could-not-save-the-rice", error = error), true);
         }
     }
 
@@ -276,19 +276,21 @@ impl Runtime {
                         .inner_margin(egui::Margin::same(16))
                         .show(ui, |ui| {
                             ui.label(
-                                RichText::new("Quit Sue?")
+                                RichText::new(tr!("quit-sue"))
                                     .size(theme.heading_size)
                                     .color(theme.text),
                             );
                             ui.label(
-                                RichText::new("Your settings are saved first.").color(theme.muted),
+                                RichText::new(tr!("your-settings-are-saved-first"))
+                                    .color(theme.muted),
                             );
                             ui.add_space(theme.padding);
                             ui.horizontal(|ui| {
-                                if widgets::pill_button(ui, "Quit", true, &theme).clicked() {
+                                if widgets::pill_button(ui, &tr!("quit"), true, &theme).clicked() {
                                     answer = Some(true);
                                 }
-                                if widgets::pill_button(ui, "Cancel", false, &theme).clicked() {
+                                if widgets::pill_button(ui, &tr!("cancel"), false, &theme).clicked()
+                                {
                                     answer = Some(false);
                                 }
                             });
@@ -326,7 +328,8 @@ impl Runtime {
         }
         self.applied_revision = revision;
         if let Err(error) = self.engine.refresh_config() {
-            self.shell.notify(format!("Settings: {error}"), true);
+            self.shell
+                .notify(tr!("settings-error", error = error), true);
             return;
         }
         if self.interactive {
@@ -531,7 +534,8 @@ impl Runtime {
                 } else if let Some(path) = other.strip_prefix("reveal-file:") {
                     self.reveal_file(Path::new(path));
                 } else {
-                    self.shell.notify(format!("Unknown command {other}"), true);
+                    self.shell
+                        .notify(tr!("unknown-command", other = other), true);
                 }
             }
         }
@@ -539,26 +543,24 @@ impl Runtime {
 
     fn reveal(&mut self, dir: &Path) {
         if !self.interactive {
-            self.shell
-                .notify(format!("Folder: {}", dir.display()), false);
+            self.shell.notify(tr!("folder", dir = dir.display()), false);
             return;
         }
         if let Err(error) = sue_platform::reveal_folder(dir) {
             self.shell
-                .notify(format!("Cannot open the folder: {error}"), true);
+                .notify(tr!("cannot-open-the-folder", error = error), true);
         }
     }
 
     /// Shows a file selected in the system file manager.
     fn reveal_file(&mut self, path: &Path) {
         if !self.interactive {
-            self.shell
-                .notify(format!("File: {}", path.display()), false);
+            self.shell.notify(tr!("file", path = path.display()), false);
             return;
         }
         if let Err(error) = sue_platform::reveal_file(path) {
             self.shell
-                .notify(format!("Cannot show the file: {error}"), true);
+                .notify(tr!("cannot-show-the-file", error = error), true);
         }
     }
 
@@ -569,7 +571,7 @@ impl Runtime {
             .push(ShellRequest::PickFile(FilePick::open(
                 None,
                 "open",
-                "Open File",
+                &tr!("open-file"),
             )));
     }
 
@@ -586,20 +588,22 @@ impl Runtime {
             "open" => self.open_path(path, textures, now),
             "save-project" => {
                 if let Err(error) = self.save_project_to(path) {
-                    self.shell
-                        .notify(format!("Cannot save {}: {error}", file_name(path)), true);
+                    self.shell.notify(
+                        tr!("cannot-save", value = file_name(path), error = error),
+                        true,
+                    );
                 }
             }
             "export-rice" => {
                 let text = self.engine.world.rice.to_suerice();
                 match write_atomic(path, text.as_bytes()) {
                     Ok(()) => self.shell.notify_saved(path, "rice"),
-                    Err(error) => self.shell.notify(format!("Export failed: {error}"), true),
+                    Err(error) => self.shell.notify(tr!("export-failed", error = error), true),
                 }
             }
             other => self
                 .shell
-                .notify(format!("Nothing asked for a file to {other}"), true),
+                .notify(tr!("nothing-asked-file", other = other), true),
         }
     }
 
@@ -610,7 +614,7 @@ impl Runtime {
     fn pick_with_system_dialog(&mut self, pick: FilePick) {
         if !self.interactive {
             self.shell
-                .notify("Choosing files needs the desktop window", false);
+                .notify(tr!("choosing-files-needs-desktop-window"), false);
             self.pending_pick = Some(pick);
             return;
         }
@@ -638,7 +642,7 @@ impl Runtime {
             Picking::Waiting => self.waiting_pick = Some(pick),
             Picking::Failed(why) => self
                 .shell
-                .notify(format!("Cannot choose a file: {why}"), true),
+                .notify(tr!("cannot-choose-a-file", why = why), true),
         }
     }
 
@@ -716,16 +720,23 @@ impl Runtime {
                     .and_then(|path| path.parent().map(Path::to_path_buf))
                     .unwrap_or_else(|| self.engine.paths.home_dir.clone());
                 self.engine.requests.push(ShellRequest::PickFile(
-                    FilePick::save(None, "save-project", "Save Project", "Untitled.sue")
-                        .types(vec![sue_wm::FileType::new("Sue project", &["sue"])])
-                        .starting_in(Some(start)),
+                    FilePick::save(
+                        None,
+                        "save-project",
+                        &tr!("save-project"),
+                        &tr!("untitled-sue"),
+                    )
+                    .types(vec![sue_wm::FileType::new(&tr!("sue-project"), &["sue"])])
+                    .starting_in(Some(start)),
                 ));
                 return;
             }
         };
         if let Err(error) = self.save_project_to(&path) {
-            self.shell
-                .notify(format!("Cannot save {}: {error}", file_name(&path)), true);
+            self.shell.notify(
+                tr!("cannot-save", value = file_name(&path), error = error),
+                true,
+            );
         }
     }
 
@@ -761,7 +772,7 @@ impl Runtime {
         self.project = Some(path.to_path_buf());
         self.project_file = file;
         self.shell
-            .notify(format!("Opened {}", file_name(path)), false);
+            .notify(tr!("opened", value = file_name(path)), false);
         Ok(())
     }
 
@@ -799,10 +810,11 @@ impl Runtime {
             .unwrap_or(u64::MAX)
             .saturating_mul(1024 * 1024);
         let bytes = match std::fs::metadata(path) {
-            Ok(metadata) if metadata.is_dir() => Err("it is a folder".to_owned()),
-            Ok(metadata) if metadata.len() > limit => Err(format!(
-                "it is {}, over the {limit_mib} MiB limit (io.max_ingest_mib)",
-                human_bytes(metadata.len())
+            Ok(metadata) if metadata.is_dir() => Err(tr!("it-is-a-folder")),
+            Ok(metadata) if metadata.len() > limit => Err(tr!(
+                "over-mib-limit-io-max-ingest",
+                value = human_bytes(metadata.len()),
+                limit_mib = limit_mib
             )),
             Ok(_) => std::fs::read(path).map_err(|error| error.to_string()),
             Err(error) => Err(error.to_string()),
@@ -811,14 +823,14 @@ impl Runtime {
             Ok(bytes) => bytes,
             Err(reason) => {
                 self.shell
-                    .notify(format!("Cannot open {name}: {reason}"), true);
+                    .notify(tr!("cannot-open", name = name, reason = reason), true);
                 return;
             }
         };
         if SueFile::sniff(&bytes) {
             if let Err(reason) = self.open_project(path, &bytes) {
                 self.shell
-                    .notify(format!("Cannot open {name}: {reason}"), true);
+                    .notify(tr!("cannot-open", name = name, reason = reason), true);
             }
             self.serve_requests(textures, now);
             return;
@@ -842,7 +854,7 @@ impl Runtime {
             Ok(ingested) => ingested,
             Err(error) => {
                 self.shell
-                    .notify(format!("Cannot open {name}: {error}"), true);
+                    .notify(tr!("cannot-open", name = name, reason = error), true);
                 return;
             }
         };
@@ -862,7 +874,7 @@ impl Runtime {
             // Nothing shows it: it does not stay in the project unseen.
             let _ = self.engine.world.arena.despawn(ingested.handle);
             self.shell
-                .notify(format!("No studio or tool opens {name} yet"), true);
+                .notify(tr!("no-studio-tool-opens-yet", name = name), true);
             return;
         };
         if let Some(note) = ingested.note {
@@ -874,7 +886,7 @@ impl Runtime {
     /// Opens (or reopens) the audio output with the riced device and format.
     fn open_audio(&mut self) {
         if !self.interactive {
-            self.engine.audio_error = Some("there is no audio device in this mode".to_owned());
+            self.engine.audio_error = Some(tr!("there-no-audio-device-mode"));
             self.engine.rebuild_catalog();
             return;
         }
@@ -901,7 +913,7 @@ impl Runtime {
                     .set_playing(playing, self.engine.audio.as_deref_mut());
             }
             Err(error) => {
-                self.shell.notify(format!("Audio: {error}"), true);
+                self.shell.notify(tr!("audio", error = error), true);
                 self.engine.audio_error = Some(error.to_string());
             }
         }
@@ -915,8 +927,10 @@ impl Runtime {
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
             Err(error) => {
-                self.shell
-                    .notify(format!("Cannot read {}: {error}", path.display()), true);
+                self.shell.notify(
+                    tr!("cannot-read", path = path.display(), error = error),
+                    true,
+                );
                 return;
             }
         };
@@ -924,7 +938,7 @@ impl Runtime {
             Ok(disk) => disk,
             Err(error) => {
                 self.shell
-                    .notify(format!("The rice file has an error: {error}"), true);
+                    .notify(tr!("rice-file-has-error", error = error), true);
                 return;
             }
         };
@@ -939,11 +953,11 @@ impl Runtime {
             .collect();
         if changes.is_empty() {
             self.shell
-                .notify("The rice file matches what Sue shows", false);
+                .notify(tr!("rice-file-matches-what-sue-shows"), false);
             return;
         }
         let count = changes.len();
-        let txn = SetRiceValues::new("Reload default.suerice", changes);
+        let txn = SetRiceValues::new(tr!("reload-default-suerice"), changes);
         self.typing.flush(&mut self.engine.history);
         match self
             .engine
@@ -952,8 +966,8 @@ impl Runtime {
         {
             Ok(_) => self
                 .shell
-                .notify(format!("Reloaded {count} values from disk"), false),
-            Err(error) => self.shell.notify(format!("Reload failed: {error}"), true),
+                .notify(tr!("reloaded-values-from-disk", count = count), false),
+            Err(error) => self.shell.notify(tr!("reload-failed", error = error), true),
         }
         self.refresh_rice();
     }
@@ -962,7 +976,7 @@ impl Runtime {
         // The system's dialog asks where; `picked` writes it.
         let start = self.engine.paths.home_dir.clone();
         self.engine.requests.push(ShellRequest::PickFile(
-            FilePick::save(None, "export-rice", "Export Rice", "my.suerice")
+            FilePick::save(None, "export-rice", &tr!("export-rice"), "my.suerice")
                 .extensions(&["suerice"])
                 .starting_in(Some(start)),
         ));
