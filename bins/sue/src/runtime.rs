@@ -1347,6 +1347,116 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_stories_add_step_through_delete_and_export_pages() {
+        let (mut runtime, root) = runtime("paint-story");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        step(&mut runtime, Vec::new());
+        let command = |runtime: &mut Runtime, name: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: name.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let current = |runtime: &Runtime| {
+            runtime
+                .applets
+                .get(&paint)
+                .and_then(|applet| applet.studio_focus())
+        };
+        let first = current(&runtime).unwrap();
+        let pages = |runtime: &Runtime| {
+            let arena = &runtime.engine.world.arena;
+            sue_paint::story::story_of(arena, first)
+                .map(|story| sue_paint::story::pages(arena, story))
+                .unwrap_or_default()
+        };
+
+        // Add Page makes the picture a story and opens the new second page.
+        command(&mut runtime, "story.add");
+        step(&mut runtime, Vec::new());
+        assert_eq!(pages(&runtime).len(), 2);
+        assert_eq!(current(&runtime), Some(pages(&runtime)[1]));
+        // Insert Page goes before the current one.
+        command(&mut runtime, "story.insert");
+        step(&mut runtime, Vec::new());
+        let now_pages = pages(&runtime);
+        assert_eq!(now_pages.len(), 3);
+        assert_eq!(current(&runtime), Some(now_pages[1]));
+        // Stepping through.
+        command(&mut runtime, "story.last");
+        assert_eq!(current(&runtime), Some(now_pages[2]));
+        command(&mut runtime, "story.first");
+        assert_eq!(current(&runtime), Some(first));
+        command(&mut runtime, "story.next");
+        assert_eq!(current(&runtime), Some(now_pages[1]));
+        // Delete Page opens the next one; undo brings the page back.
+        let depth = runtime.engine.history.depth();
+        command(&mut runtime, "story.delete");
+        step(&mut runtime, Vec::new());
+        assert_eq!(pages(&runtime).len(), 2);
+        assert_eq!(current(&runtime), Some(now_pages[2]));
+        assert_eq!(runtime.engine.history.depth(), depth + 1);
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        assert_eq!(pages(&runtime), now_pages);
+
+        // Export All Pages writes one numbered file per page.
+        std::fs::create_dir_all(&root).unwrap();
+        runtime.request(
+            ShellRequest::Picked {
+                pick: FilePick::save(
+                    Some(paint.clone()),
+                    "story-pages",
+                    "Export All Pages",
+                    "Book.png",
+                ),
+                path: root.join("Book.png"),
+            },
+            &mut NoTextures,
+            start,
+        );
+        for number in 1..=3 {
+            let path = root.join(format!("Book-{number:03}.png"));
+            assert!(path.exists(), "{} was written", path.display());
+        }
+
+        // The story lives in the project, its pages in order.
+        let project = root.join("story.sue");
+        runtime.save_project_to(&project).unwrap();
+        let bytes = std::fs::read(&project).unwrap();
+        runtime.open_project(&project, &bytes).unwrap();
+        assert_eq!(pages(&runtime), now_pages);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_saves_as_a_project_or_any_picture_type() {
         let (mut runtime, root) = runtime("paint-save-as");
         let ctx = egui::Context::default();

@@ -230,6 +230,8 @@ pub struct SuePaint {
     pub(crate) viewport: Rect,
     pub(crate) pointer: Option<Pos2>,
     pub(crate) thumbs: HashMap<EntityId, (u64, Vec<u8>, [u32; 2])>,
+    /// Page thumbnails for the Page Manager, by page.
+    pub(crate) page_thumbs: HashMap<EntityId, (u64, Vec<u8>, [u32; 2])>,
     pub(crate) preview: Option<(u64, Vec<u8>)>,
     pub(crate) last_dir: Option<PathBuf>,
     /// An encoded export waiting for the File Manager to say where it goes.
@@ -287,6 +289,7 @@ impl Default for SuePaint {
             viewport: Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)),
             pointer: None,
             thumbs: HashMap::new(),
+            page_thumbs: HashMap::new(),
             preview: None,
             last_dir: None,
             transparent: false,
@@ -431,6 +434,20 @@ fn implemented(command: &str) -> bool {
             | "file.shortcuts"
             | "file.pressure"
             | "edit.transform.puppet"
+            | "story.manager"
+            | "story.order"
+            | "story.open_page"
+            | "story.work_settings"
+            | "story.first"
+            | "story.previous"
+            | "story.next"
+            | "story.last"
+            | "story.add"
+            | "story.insert"
+            | "story.duplicate_page"
+            | "story.delete"
+            | "story.export_page"
+            | "story.export_pages"
     ) || TOOL_KEYS.iter().any(|(known, _, _)| *known == command)
 }
 
@@ -1189,6 +1206,11 @@ impl SuePaint {
     }
 
     /// Puts a picture on the canvas as a card (one undo step of its own).
+    pub(crate) fn place_picture(cx: &mut AppletContext<'_>, picture: EntityId) {
+        Self::place(cx, picture);
+    }
+
+    /// Puts a picture on the canvas as a card (one undo step of its own).
     fn place(cx: &mut AppletContext<'_>, picture: EntityId) {
         if let Some(entity) = cx.world.arena.handle_of(picture) {
             cx.request(ShellRequest::Place {
@@ -1427,6 +1449,9 @@ impl SuePaint {
     /// Runs a command of the menus, the command bar or a shortcut.
     #[allow(clippy::too_many_lines, reason = "one arm per command")]
     pub(crate) fn run(&mut self, command: &str, cx: &mut AppletContext<'_>) {
+        if command.starts_with("story.") && self.story_command(command, cx) {
+            return;
+        }
         if !self.state(command, &cx.world.arena, cx.history).enabled {
             return;
         }
@@ -2473,6 +2498,7 @@ impl SueApplet for SuePaint {
                 }
             }
             "save-as" => self.save_as_to(cx, path),
+            "story-pages" => self.export_pages(cx, path),
             "subview" => self.add_reference(path, cx),
             "colorset-import" => match std::fs::read_to_string(path) {
                 Ok(text) => {
@@ -2597,6 +2623,10 @@ impl SueApplet for SuePaint {
         match target {
             "dialog/new" => {
                 self.dialog = Some(Dialog::New(NewDialog::new(&NewPicture::default())));
+                true
+            }
+            "dialog/pages" => {
+                self.dialog = Some(Dialog::Pages(crate::dialogs::PagesDialog { chosen: 0 }));
                 true
             }
             "dialog/pressure" => {

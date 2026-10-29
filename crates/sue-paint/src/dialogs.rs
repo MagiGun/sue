@@ -87,9 +87,24 @@ pub(crate) fn new_presets() -> PresetLibrary {
     library
 }
 
+/// What a new work is (the New dialog's Project row).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Project {
+    /// One picture.
+    #[default]
+    Illustration,
+    /// A story of pages.
+    Comic,
+}
+
 /// The New dialog's fields.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct NewDialog {
+    pub project: Project,
+    /// Pages of a comic.
+    pub pages: u32,
+    /// A comic read right to left (manga).
+    pub right_bound: bool,
     pub name: String,
     pub width: u32,
     pub height: u32,
@@ -104,6 +119,9 @@ pub(crate) struct NewDialog {
 impl NewDialog {
     pub(crate) fn new(spec: &NewPicture) -> Self {
         Self {
+            project: Project::Illustration,
+            pages: 8,
+            right_bound: true,
             name: spec.name.clone(),
             width: spec.width,
             height: spec.height,
@@ -287,6 +305,12 @@ impl PressureDialog {
     }
 }
 
+/// The Page Manager: the story's pages as spreads, one chosen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PagesDialog {
+    pub chosen: usize,
+}
+
 /// An open dialog.
 #[derive(Clone, Debug)]
 pub(crate) enum Dialog {
@@ -294,10 +318,11 @@ pub(crate) enum Dialog {
     Filter(FilterDialog),
     Shortcuts,
     Pressure(PressureDialog),
+    Pages(PagesDialog),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Outcome {
+pub(crate) enum Outcome {
     Open,
     Cancel,
     Ok,
@@ -350,6 +375,7 @@ impl SuePaint {
             Dialog::New(_) => ("New", vec2(560.0, 560.0)),
             Dialog::Filter(filter) => (filter.filter.label(), vec2(400.0, 250.0)),
             Dialog::Shortcuts => ("Keyboard Shortcuts", vec2(470.0, 560.0)),
+            Dialog::Pages(_) => ("Page Manager", vec2(820.0, 620.0)),
             Dialog::Pressure(pressure) => (
                 "Adjust pen pressure",
                 vec2(560.0, if pressure.show_graph { 520.0 } else { 330.0 }),
@@ -391,6 +417,7 @@ impl SuePaint {
                             Dialog::Pressure(pressure) => {
                                 outcome = pressure_ui(ui, pressure, theme)
                             }
+                            Dialog::Pages(pages) => outcome = self.pages_ui(ui, pages, cx, theme),
                             Dialog::Shortcuts => {
                                 egui::ScrollArea::vertical().max_height(size.y - 90.0).show(
                                     ui,
@@ -456,7 +483,10 @@ impl SuePaint {
             outcome = Outcome::Cancel;
         } else if enter
             && !ctx.text_edit_focused()
-            && !matches!(dialog, Dialog::Shortcuts | Dialog::Pressure(_))
+            && !matches!(
+                dialog,
+                Dialog::Shortcuts | Dialog::Pressure(_) | Dialog::Pages(_)
+            )
         {
             outcome = Outcome::Ok;
         }
@@ -510,7 +540,12 @@ impl SuePaint {
             }
             (Dialog::New(new), Outcome::Ok) => {
                 let spec = new.spec();
-                self.make_picture(cx, &spec);
+                match new.project {
+                    Project::Illustration => self.make_picture(cx, &spec),
+                    Project::Comic => {
+                        self.make_story(cx, &spec, new.pages as usize, new.right_bound);
+                    }
+                }
             }
             (Dialog::Pressure(pressure), Outcome::Ok) => {
                 let text = pressure.curve.to_string();
@@ -520,7 +555,7 @@ impl SuePaint {
                 }
             }
             (
-                Dialog::New(_) | Dialog::Shortcuts | Dialog::Pressure(_),
+                Dialog::New(_) | Dialog::Shortcuts | Dialog::Pressure(_) | Dialog::Pages(_),
                 Outcome::Cancel | Outcome::Ok,
             ) => {}
         }
@@ -695,16 +730,29 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
     ui.horizontal(|ui| {
         label(ui, "Project:", theme);
         let kinds = [
-            (Icon::Paper, "Illustration", true),
-            (Icon::Frame, "Webtoon", false),
-            (Icon::Duplicate, "Comic", false),
-            (Icon::Open, "Fanzine print", false),
-            (Icon::NewFolder, "Show all comic settings", false),
-            (Icon::Play, "Animation", false),
+            (Icon::Paper, "Illustration", Some(Project::Illustration)),
+            (Icon::Frame, "Webtoon", None),
+            (Icon::Duplicate, "Comic", Some(Project::Comic)),
+            (Icon::Open, "Fanzine print", None),
+            (Icon::NewFolder, "Show all comic settings", None),
+            (Icon::Play, "Animation", None),
         ];
-        for (icon, tip, enabled) in kinds {
+        for (icon, tip, project) in kinds {
+            let enabled = project.is_some();
             let (rect, response) = ui.allocate_exact_size(vec2(38.0, 34.0), Sense::click());
-            let fill = if enabled { theme.active } else { theme.pill };
+            if let Some(project) = project
+                && response.clicked()
+            {
+                new.project = project;
+            }
+            let chosen = project == Some(new.project);
+            let fill = if chosen {
+                theme.active
+            } else if enabled && response.hovered() {
+                theme.hover
+            } else {
+                theme.pill
+            };
             ui.painter().rect_filled(rect, theme.control_radius, fill);
             icons::paint(
                 ui.painter(),
@@ -730,6 +778,18 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
             label(ui, "File name:", theme);
             ui.add(egui::TextEdit::singleline(&mut new.name).desired_width(260.0));
             ui.end_row();
+
+            if new.project == Project::Comic {
+                label(ui, "Pages:", theme);
+                ui.add(egui::DragValue::new(&mut new.pages).range(1..=500));
+                ui.end_row();
+                label(ui, "Binding:", theme);
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut new.right_bound, true, "Right (manga, right to left)");
+                    ui.selectable_value(&mut new.right_bound, false, "Left (left to right)");
+                });
+                ui.end_row();
+            }
 
             label(ui, "Preset:", theme);
             ui.horizontal(|ui| {

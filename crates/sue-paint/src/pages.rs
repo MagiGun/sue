@@ -1,0 +1,471 @@
+//! Sue Paint's side of stories (Clip Studio Paint's Story menu): making a
+//! comic of pages, stepping through them, the Page Manager with its spreads,
+//! and exporting every page.
+
+use std::path::Path;
+
+use egui::{Rect, RichText, Sense, Ui, pos2, vec2};
+use sue_core::EntityId;
+use sue_platform::write_atomic;
+use sue_wm::{AppletContext, FilePick, FileType, ShellRequest, Theme};
+
+use crate::composite::{self, RenderOptions};
+use crate::dialogs::{Outcome, PagesDialog};
+use crate::doc::{self, NewPicture};
+use crate::story;
+use crate::studio::{SuePaint, texture_key};
+
+impl SuePaint {
+    /// The current picture's story, its pages and where the picture is
+    /// among them.
+    pub(crate) fn story_here(
+        &self,
+        arena: &sue_core::Arena,
+    ) -> Option<(EntityId, Vec<EntityId>, usize)> {
+        let picture = self.picture()?;
+        let story = story::story_of(arena, picture)?;
+        let pages = story::pages(arena, story);
+        let index = pages.iter().position(|page| *page == picture)?;
+        Some((story, pages, index))
+    }
+
+    /// Makes a comic of `count` pages like `spec` and opens its first page.
+    pub(crate) fn make_story(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        spec: &NewPicture,
+        count: usize,
+        right_bound: bool,
+    ) {
+        match story::create(spec, count, &spec.name, right_bound) {
+            Ok((edit, _, pages)) => {
+                // Only the first page opens; the rest wait in the Page Manager.
+                self.closed.extend(pages.iter().skip(1).copied());
+                if Self::apply(cx, edit)
+                    && let Some(first) = pages.first()
+                {
+                    self.activate(&cx.world.arena, *first);
+                    Self::place_picture(cx, *first);
+                }
+            }
+            Err(error) => cx.fail(error),
+        }
+    }
+
+    /// The current picture's story, making it the first page of a new one
+    /// if it has none.
+    fn ensure_story(&mut self, cx: &mut AppletContext<'_>) -> Option<EntityId> {
+        let picture = self.picture()?;
+        if let Some(story) = story::story_of(&cx.world.arena, picture) {
+            return Some(story);
+        }
+        let (edit, story) = story::begin(&cx.world.arena, picture);
+        Self::apply(cx, edit).then_some(story)
+    }
+
+    /// Shows `page` in place of the current page's tab (other pictures keep
+    /// theirs).
+    pub(crate) fn go_to_page(&mut self, cx: &mut AppletContext<'_>, page: EntityId) {
+        if let Some(current) = self.picture()
+            && current != page
+            && story::story_of(&cx.world.arena, current).is_some()
+            && story::story_of(&cx.world.arena, current) == story::story_of(&cx.world.arena, page)
+        {
+            self.closed.insert(current);
+            self.docs.retain(|doc| doc.picture != current);
+        }
+        self.activate(&cx.world.arena, page);
+    }
+
+    /// Runs a Story menu command; `false` if `command` is not one.
+    pub(crate) fn story_command(&mut self, command: &str, cx: &mut AppletContext<'_>) -> bool {
+        match command {
+            "story.manager" | "story.order" | "story.open_page" | "story.work_settings" => {
+                let chosen = self
+                    .story_here(&cx.world.arena)
+                    .map_or(0, |(_, _, index)| index);
+                self.dialog = Some(crate::dialogs::Dialog::Pages(PagesDialog { chosen }));
+            }
+            "story.first" | "story.previous" | "story.next" | "story.last" => {
+                let Some((_, pages, index)) = self.story_here(&cx.world.arena) else {
+                    cx.notify("This canvas is one picture: Story, Add Page makes it a story");
+                    return true;
+                };
+                let to = match command {
+                    "story.first" => 0,
+                    "story.previous" => index.saturating_sub(1),
+                    "story.next" => (index + 1).min(pages.len() - 1),
+                    _ => pages.len() - 1,
+                };
+                if to != index {
+                    self.go_to_page(cx, pages[to]);
+                }
+            }
+            "story.add" | "story.insert" => {
+                let Some(picture) = self.picture() else {
+                    return true;
+                };
+                let Some(story) = self.ensure_story(cx) else {
+                    return true;
+                };
+                let index = story::pages(&cx.world.arena, story)
+                    .iter()
+                    .position(|page| *page == picture)
+                    .unwrap_or(0);
+                let at = if command == "story.add" {
+                    index + 1
+                } else {
+                    index
+                };
+                match story::add_page(&cx.world.arena, story, picture, at) {
+                    Ok((edit, page)) => {
+                        self.closed.insert(page);
+                        if Self::apply(cx, edit) {
+                            self.go_to_page(cx, page);
+                        }
+                    }
+                    Err(error) => cx.fail(error),
+                }
+            }
+            "story.duplicate_page" => {
+                let Some(picture) = self.picture() else {
+                    return true;
+                };
+                let Some(story) = self.ensure_story(cx) else {
+                    return true;
+                };
+                match story::duplicate_page(&cx.world.arena, story, picture) {
+                    Ok((edit, page)) => {
+                        self.closed.insert(page);
+                        if Self::apply(cx, edit) {
+                            self.go_to_page(cx, page);
+                        }
+                    }
+                    Err(error) => cx.fail(error),
+                }
+            }
+            "story.delete" => {
+                let Some((_, pages, index)) = self.story_here(&cx.world.arena) else {
+                    cx.fail("Delete Page works on a story's pages");
+                    return true;
+                };
+                if pages.len() < 2 {
+                    cx.fail("A story keeps at least one page");
+                    return true;
+                }
+                let next = if index + 1 < pages.len() {
+                    pages[index + 1]
+                } else {
+                    pages[index - 1]
+                };
+                let edit = story::delete_page(&cx.world.arena, pages[index]);
+                if Self::apply(cx, edit) {
+                    self.closed.remove(&next);
+                    self.activate(&cx.world.arena, next);
+                }
+            }
+            "story.export_page" => self.run("file.export.png", cx),
+            "story.export_pages" => self.ask_export_pages(cx),
+            _ => return false,
+        }
+        true
+    }
+
+    /// Asks where to export every page, and as what.
+    fn ask_export_pages(&mut self, cx: &mut AppletContext<'_>) {
+        let Some((story, _, _)) = self.story_here(&cx.world.arena) else {
+            cx.fail("Export All Pages works on a story");
+            return;
+        };
+        let name = cx
+            .world
+            .arena
+            .get_by_id(story)
+            .map_or_else(|_| "Story".to_owned(), |entity| entity.name().to_owned());
+        let types = sue_io::PICTURE_SAVE_TYPES
+            .iter()
+            .map(|(what, extensions)| FileType::new(what, extensions))
+            .collect();
+        let start = self.last_dir.clone();
+        cx.request(ShellRequest::PickFile(
+            FilePick::save(
+                Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
+                "story-pages",
+                "Export All Pages",
+                &format!("{name}.png"),
+            )
+            .types(types)
+            .starting_in(start),
+        ));
+    }
+
+    /// Writes every page of the current story next to `path`, numbered
+    /// (`Name-001.png`, `Name-002.png`), in the format of its extension.
+    pub(crate) fn export_pages(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let Some((_, pages, _)) = self.story_here(&cx.world.arena) else {
+            return;
+        };
+        let extension = path.extension().map_or_else(
+            || "png".to_owned(),
+            |ext| ext.to_string_lossy().to_ascii_lowercase(),
+        );
+        let stem = path.file_stem().map_or_else(
+            || "Page".to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        );
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let quality = cx
+            .rice()
+            .get_i64("io.jpeg_quality")
+            .and_then(|value| u8::try_from(value).ok())
+            .unwrap_or(90);
+        let effort = cx
+            .rice()
+            .get_i64("io.jxl_effort")
+            .and_then(|value| u8::try_from(value).ok())
+            .unwrap_or(7);
+        let options = RenderOptions {
+            paper: true,
+            drafts: false,
+        };
+        let mut written = 0;
+        for (index, page) in pages.iter().enumerate() {
+            let Some(flat) = composite::flatten(&cx.world.arena, *page, options) else {
+                continue;
+            };
+            let target = dir.join(format!("{stem}-{:03}.{extension}", index + 1));
+            match sue_io::encode_as(&flat, &extension, quality, effort)
+                .and_then(|bytes| write_atomic(&target, &bytes).map_err(|error| error.to_string()))
+            {
+                Ok(()) => written += 1,
+                Err(error) => {
+                    cx.fail(format!("Cannot export page {}: {error}", index + 1));
+                    return;
+                }
+            }
+        }
+        self.last_dir = Some(dir.clone());
+        cx.notify(format!("Exported {written} pages to {}", dir.display()));
+    }
+
+    /// The Page Manager: the binding, the page buttons and the spreads.
+    pub(crate) fn pages_ui(
+        &mut self,
+        ui: &mut Ui,
+        pages_dialog: &mut PagesDialog,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) -> Outcome {
+        let mut outcome = Outcome::Open;
+        let story = self.story_here(&cx.world.arena);
+        let pages = story.as_ref().map_or_else(
+            || self.picture().into_iter().collect(),
+            |(_, pages, _)| pages.clone(),
+        );
+        pages_dialog.chosen = pages_dialog.chosen.min(pages.len().saturating_sub(1));
+        let right = story
+            .as_ref()
+            .is_some_and(|(story, _, _)| story::bound_right(&cx.world.arena, *story));
+        let mut command: Option<&'static str> = None;
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Binding").color(theme.muted));
+            let mut now = right;
+            ui.selectable_value(&mut now, true, "Right (manga)");
+            ui.selectable_value(&mut now, false, "Left");
+            if now != right {
+                if let Some((story, _, _)) = &story {
+                    let edit = doc::set(*story, story::BINDING, if now { "right" } else { "left" });
+                    Self::apply(cx, edit);
+                } else {
+                    cx.notify("Add a page first: then this picture becomes a story");
+                }
+            }
+            ui.separator();
+            for (label, name) in [
+                ("Add", "story.add"),
+                ("Insert", "story.insert"),
+                ("Duplicate", "story.duplicate_page"),
+                ("Delete", "story.delete"),
+            ] {
+                if ui.button(label).clicked() {
+                    command = Some(name);
+                }
+            }
+            ui.separator();
+            if ui.button("Move Earlier").clicked() {
+                command = Some("earlier");
+            }
+            if ui.button("Move Later").clicked() {
+                command = Some("later");
+            }
+            if ui.button("Open").clicked() {
+                command = Some("open");
+            }
+        });
+        ui.label(
+            RichText::new("Click a page to choose it; double-click to open it.")
+                .size(theme.small_size)
+                .color(theme.muted),
+        );
+        ui.separator();
+        let mut opened = None;
+        egui::ScrollArea::vertical()
+            .max_height(ui.available_height() - 40.0)
+            .show(ui, |ui| {
+                let spreads = story::spreads(pages.len(), right);
+                let page_size = vec2(110.0, 150.0);
+                let spread_size = vec2(page_size.x * 2.0, page_size.y + 18.0);
+                let gap = vec2(28.0, 18.0);
+                let columns = ((ui.available_width() + gap.x) / (spread_size.x + gap.x))
+                    .floor()
+                    .max(1.0) as usize;
+                for row in spreads.chunks(columns) {
+                    let (area, _) = ui.allocate_exact_size(
+                        vec2(ui.available_width(), spread_size.y + gap.y),
+                        Sense::hover(),
+                    );
+                    for (column, spread) in row.iter().enumerate() {
+                        let left = area.left() + column as f32 * (spread_size.x + gap.x);
+                        for (side, slot) in spread.iter().enumerate() {
+                            let Some(index) = *slot else {
+                                continue;
+                            };
+                            let page = pages[index];
+                            let paper = Rect::from_min_size(
+                                pos2(left + side as f32 * page_size.x, area.top()),
+                                page_size,
+                            );
+                            let response = ui.interact(
+                                paper,
+                                ui.scope_id().with(("page", page.to_u128())),
+                                Sense::click(),
+                            );
+                            self.page_thumbnail(ui, paper, page, cx, theme);
+                            let chosen = index == pages_dialog.chosen;
+                            ui.painter().rect_stroke(
+                                paper,
+                                0.0,
+                                if chosen {
+                                    egui::Stroke::new(2.0, theme.border_active)
+                                } else {
+                                    theme.hairline()
+                                },
+                                egui::StrokeKind::Inside,
+                            );
+                            let here = self.picture() == Some(page);
+                            ui.painter().text(
+                                pos2(paper.center().x, paper.bottom() + 9.0),
+                                egui::Align2::CENTER_CENTER,
+                                if here {
+                                    format!("{} (open)", index + 1)
+                                } else {
+                                    (index + 1).to_string()
+                                },
+                                egui::FontId::proportional(theme.small_size),
+                                if chosen { theme.text } else { theme.muted },
+                            );
+                            if response.clicked() {
+                                pages_dialog.chosen = index;
+                            }
+                            if response.double_clicked() {
+                                opened = Some(page);
+                            }
+                        }
+                    }
+                }
+            });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Max), |ui| {
+            if ui.button("Close").clicked() {
+                outcome = Outcome::Cancel;
+            }
+        });
+        let chosen_page = pages.get(pages_dialog.chosen).copied();
+        match command {
+            Some("open") => opened = chosen_page,
+            Some("earlier" | "later") => {
+                if let (Some((story, _, _)), Some(page)) = (&story, chosen_page) {
+                    let to = if command == Some("earlier") {
+                        pages_dialog.chosen.saturating_sub(1)
+                    } else {
+                        (pages_dialog.chosen + 1).min(pages.len() - 1)
+                    };
+                    if let Some(edit) = story::move_page(&cx.world.arena, *story, page, to) {
+                        Self::apply(cx, edit);
+                        pages_dialog.chosen = to;
+                    }
+                }
+            }
+            Some(name) => {
+                // The page buttons work on the chosen page.
+                if let Some(page) = chosen_page {
+                    self.go_to_page(cx, page);
+                }
+                self.story_command(name, cx);
+                if let Some((_, pages, index)) = self.story_here(&cx.world.arena) {
+                    pages_dialog.chosen = index.min(pages.len().saturating_sub(1));
+                }
+                // story_command may have opened another dialog; this one stays.
+                if matches!(self.dialog, Some(crate::dialogs::Dialog::Pages(_))) {
+                    self.dialog = None;
+                }
+            }
+            None => {}
+        }
+        if let Some(page) = opened {
+            self.go_to_page(cx, page);
+            outcome = Outcome::Cancel;
+        }
+        outcome
+    }
+
+    /// One page's thumbnail, from the composited page, kept until the page
+    /// changes.
+    fn page_thumbnail(
+        &mut self,
+        ui: &Ui,
+        rect: Rect,
+        page: EntityId,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        let signature = composite::signature(&cx.world.arena, page);
+        let version = signature
+            .iter()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, (id, revision)| {
+                (hash ^ (id.to_u128() as u64) ^ revision).wrapping_mul(0x0100_0000_01b3)
+            });
+        if self
+            .page_thumbs
+            .get(&page)
+            .is_none_or(|(known, _, _)| *known != version)
+            && let Some((pixels, size)) = composite::preview(&cx.world.arena, page, [220, 300])
+        {
+            self.page_thumbs.insert(page, (version, pixels, size));
+        }
+        ui.painter().rect_filled(rect, 0.0, theme.void);
+        let Some((version, pixels, size)) = self.page_thumbs.get(&page) else {
+            return;
+        };
+        if let Some(texture) = cx.textures.texture(
+            texture_key(page, 0x5041_4745),
+            *version,
+            *size,
+            4,
+            pixels,
+            false,
+        ) {
+            let aspect = size[0] as f32 / size[1].max(1) as f32;
+            let fit = if aspect > rect.width() / rect.height() {
+                vec2(rect.width(), rect.width() / aspect)
+            } else {
+                vec2(rect.height() * aspect, rect.height())
+            };
+            ui.painter().image(
+                texture,
+                Rect::from_center_size(rect.center(), fit),
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+    }
+}

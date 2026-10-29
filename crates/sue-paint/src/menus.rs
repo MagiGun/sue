@@ -198,6 +198,13 @@ pub fn menus() -> Vec<Menu> {
         Menu::new(
             "Story",
             vec![
+                act("Page Manager...", "story.manager"),
+                SEP,
+                act("First Page", "story.first"),
+                act("Previous Page", "story.previous"),
+                act("Next Page", "story.next"),
+                act("Last Page", "story.last"),
+                SEP,
                 act("Add Page...", "story.add"),
                 act("Insert Page...", "story.insert"),
                 act("Delete Page", "story.delete"),
@@ -218,6 +225,7 @@ pub fn menus() -> Vec<Menu> {
                         act("Open Page", "story.open_page"),
                         act("Duplicate Page", "story.duplicate_page"),
                         act("Export Page as File...", "story.export_page"),
+                        act("Export All Pages...", "story.export_pages"),
                     ],
                 ),
             ],

@@ -531,6 +531,28 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         }
         shoot(&mut runtime, &mut camera, name)?;
     }
+    // 13c. The Page Manager of a manga of five pages.
+    for command in [
+        "story.add",
+        "story.add",
+        "story.add",
+        "story.add",
+        "story.first",
+    ] {
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: studio.clone(),
+                command: command.to_owned(),
+            },
+            &mut camera.painter,
+            camera.now,
+        );
+    }
+    if let Some(applet) = runtime.applets.get_mut(&studio) {
+        applet.navigate("dialog/close");
+        applet.navigate("dialog/pages");
+    }
+    shoot(&mut runtime, &mut camera, "13c-sue-paint-pages")?;
     if let Some(applet) = runtime.applets.get_mut(&studio) {
         applet.navigate("dialog/close");
     }
