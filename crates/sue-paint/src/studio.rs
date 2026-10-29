@@ -2707,7 +2707,11 @@ mod tests {
             assert!(command.contains('.'));
         }
         assert!(named.iter().filter(|command| implemented(command)).count() > 60);
-        assert!(!implemented("story.add"), "pages are not built yet");
+        assert!(implemented("story.add"), "pages are built");
+        assert!(
+            !implemented("story.combine"),
+            "spreads as one page are not built yet"
+        );
     }
 
     #[test]
