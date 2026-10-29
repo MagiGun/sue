@@ -593,9 +593,9 @@ impl Engine {
                     .into_iter()
                     .map(|codec| {
                         vec![
-                            codec.format.to_owned(),
-                            codec.abilities.to_owned(),
-                            codec.library.to_owned(),
+                            sue_lang::translate("io", codec.format),
+                            sue_lang::translate("io", codec.abilities),
+                            sue_lang::translate("io", codec.library),
                         ]
                     })
                     .collect(),

@@ -257,4 +257,15 @@ mod language_tests {
             .collect();
         assert!(missing.is_empty(), "paint.ftl lacks: {missing:?}");
     }
+
+    /// The blend modes Paint offers read from model.ftl.
+    #[test]
+    fn every_blend_mode_is_in_the_language_database() {
+        let missing: Vec<&str> = sue_model::BlendMode::ALL
+            .iter()
+            .map(|mode| mode.label())
+            .filter(|label| !sue_lang::has_english("model", label))
+            .collect();
+        assert!(missing.is_empty(), "model.ftl lacks: {missing:?}");
+    }
 }

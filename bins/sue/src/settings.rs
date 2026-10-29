@@ -736,6 +736,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_codec_table_reads_from_the_language_database() {
+        for codec in sue_io::builtin_codecs() {
+            assert!(
+                sue_lang::has_english("io", codec.abilities),
+                "io.ftl lacks {}",
+                codec.abilities
+            );
+        }
+    }
+
+    #[test]
     fn choices_read_like_words() {
         assert_eq!(choice_label("high-refresh"), "High refresh");
     }

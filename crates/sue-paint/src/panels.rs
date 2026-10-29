@@ -3103,7 +3103,7 @@ impl SuePaint {
                 .map_or(BlendMode::Normal, |info| info.style.blend);
             ui.add_enabled_ui(raster, |ui| {
                 egui::ComboBox::from_id_salt("sue-paint-blend")
-                    .selected_text(blend.label())
+                    .selected_text(sue_lang::translate("model", blend.label()))
                     .width(108.0)
                     .height(420.0)
                     .show_ui(ui, |ui| {
@@ -3113,7 +3113,12 @@ impl SuePaint {
                                 ui.separator();
                                 group = mode.group();
                             }
-                            if ui.selectable_label(mode == blend, mode.label()).clicked()
+                            if ui
+                                .selectable_label(
+                                    mode == blend,
+                                    sue_lang::translate("model", mode.label()),
+                                )
+                                .clicked()
                                 && let Some(info) = &current
                             {
                                 Self::apply(cx, doc::set(info.id, picture::BLEND, mode.name()));
@@ -3401,9 +3406,9 @@ impl SuePaint {
                     let top_line = match info.kind {
                         LayerKind::Paper => tr!("paper-2"),
                         _ => format!(
-                            "{:.0} % {}",
-                            info.style.opacity * 100.0,
-                            info.style.blend.label()
+                            "{} % {}",
+                            sue_lang::number(f64::from(info.style.opacity) * 100.0, 0),
+                            sue_lang::translate("model", info.style.blend.label())
                         ),
                     };
                     ui.painter().text(
