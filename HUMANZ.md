@@ -1276,6 +1276,16 @@ back into the selection. The Selection Launcher, under any selection, holds
 Deselect, Invert, Expand, Shrink, Clear, Clear Outside, Fill, Scale/Rotate
 and Crop.
 
+**Colors and layers.** The color palette has Clip Studio Paint's
+Intermediate Color (a grid blending four corner colors, each set to the
+drawing color by a click, in 2 to 24 steps) and Approximate Color (a 9 by 9
+grid round the drawing color, changing hue, saturation or brightness
+across and down, over a range). Set as Reference Layer marks a layer
+(`layer.reference`) that the fill and auto select can refer to alone (the
+Refer row's Reference layer, rendered with every other layer hidden).
+Rasterize swaps a vector layer for a raster layer in its place with its
+pixels, name, properties and folder, as one step.
+
 **Layer effects and right-click menus.** Layer Property has Clip Studio
 Paint's effects, each a layer property the compositor applies as it draws,
 leaving the pixels alone (`sue_paint::effects`): Border effect (a rim of

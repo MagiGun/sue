@@ -448,6 +448,13 @@ familiar:
   from: pick the layer, then Register Selected Layer.
   File, Export Animation saves an animated GIF, a movie or every frame as a
   picture.
+- **More color palettes:** **Intermediate Color** blends four colors you set
+  at its corners, and **Approximate Color** shows the shades near your
+  color, as in Clip Studio Paint.
+- **Reference layers** (Layer, Layer Settings, Set as Reference Layer): the
+  fill and auto select can look only at them, so you fill on one layer
+  between the lines of another. **Rasterize** turns a vector layer into an
+  ordinary one.
 - **Selections:** the Selection tool also has **Polyline**, **Selection
   pen** and **Erase selection** (paint what to select or leave out). The
   Select menu grows, shrinks and softens a selection, selects by color,

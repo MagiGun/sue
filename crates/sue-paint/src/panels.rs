@@ -1143,6 +1143,7 @@ impl SuePaint {
                     ui.label(small("Refer"));
                     ui.selectable_value(&mut sub.mode, 0, "Editing layer");
                     ui.selectable_value(&mut sub.mode, 1, "All layers");
+                    ui.selectable_value(&mut sub.mode, 2, "Reference layer");
                 });
                 if tool == Tool::Fill {
                     ui.horizontal(|ui| {
@@ -1803,17 +1804,216 @@ impl SuePaint {
     // ----- Color ---------------------------------------------------------------------
 
     pub(crate) fn color_panel(&mut self, ui: &mut Ui, rect: Rect, theme: &Theme) {
-        let tabs = [("Color Wheel", true), ("Color Slider", true)];
+        let tabs = [
+            ("Color Wheel", true),
+            ("Color Slider", true),
+            ("Intermediate Color", true),
+            ("Approximate Color", true),
+        ];
         let (body, clicked) = header(ui, rect, &tabs, self.color_tab, theme);
         if let Some(tab) = clicked {
             self.color_tab = tab;
         }
         let body = body.shrink(8.0);
-        if self.color_tab == 0 {
-            self.color_wheel(ui, body, theme);
-        } else {
-            let mut inner = child(ui, body, "color-sliders");
-            self.color_sliders(&mut inner, theme);
+        match self.color_tab {
+            0 => self.color_wheel(ui, body, theme),
+            2 => self.intermediate_colors(ui, body, theme),
+            3 => self.approximate_colors(ui, body, theme),
+            _ => {
+                let mut inner = child(ui, body, "color-sliders");
+                self.color_sliders(&mut inner, theme);
+            }
+        }
+    }
+
+    /// A grid of `colors(column, row)`, `columns` by `rows` in `area`; a
+    /// click picks a color. The cell picked, if any.
+    fn color_grid(
+        ui: &mut Ui,
+        area: Rect,
+        columns: u32,
+        rows: u32,
+        id: &str,
+        colors: impl Fn(u32, u32) -> [u8; 3],
+    ) -> Option<[u8; 3]> {
+        let cell = vec2(area.width() / columns as f32, area.height() / rows as f32);
+        for row in 0..rows {
+            for column in 0..columns {
+                let [r, g, b] = colors(column, row);
+                let rect = Rect::from_min_size(
+                    area.min + vec2(column as f32 * cell.x, row as f32 * cell.y),
+                    cell,
+                );
+                ui.painter()
+                    .rect_filled(rect.shrink(0.5), 0.0, Color32::from_rgb(r, g, b));
+            }
+        }
+        let response = ui.interact(
+            area,
+            Id::unique(("sue-paint-color-grid", id)),
+            Sense::click(),
+        );
+        let at = response
+            .interact_pointer_pos()
+            .filter(|_| response.clicked())?;
+        let column = (((at.x - area.left()) / cell.x) as u32).min(columns - 1);
+        let row = (((at.y - area.top()) / cell.y) as u32).min(rows - 1);
+        Some(colors(column, row))
+    }
+
+    /// Clip Studio Paint's Intermediate Color palette: the colors between
+    /// four corners; a click on a corner sets it to the drawing color.
+    fn intermediate_colors(&mut self, ui: &mut Ui, body: Rect, theme: &Theme) {
+        let (corners, steps) = self.intermediate;
+        let steps = steps.clamp(2, 24);
+        let corner = 16.0;
+        let side = (body.width() - corner * 2.0)
+            .min(body.height() - corner * 2.0 - 30.0)
+            .max(40.0);
+        let area = Rect::from_min_size(
+            pos2(body.center().x - side / 2.0, body.top() + corner),
+            vec2(side, side),
+        );
+        let mix = |a: [u8; 3], b: [u8; 3], t: f32| {
+            [0, 1, 2].map(|channel| {
+                (f32::from(a[channel]) + (f32::from(b[channel]) - f32::from(a[channel])) * t)
+                    .round() as u8
+            })
+        };
+        let picked = Self::color_grid(ui, area, steps, steps, "intermediate", |column, row| {
+            let (u, v) = (
+                column as f32 / (steps - 1) as f32,
+                row as f32 / (steps - 1) as f32,
+            );
+            mix(
+                mix(corners[0], corners[1], u),
+                mix(corners[2], corners[3], u),
+                v,
+            )
+        });
+        if let Some(rgb) = picked {
+            self.set_drawing_color(rgb);
+            self.transparent = false;
+        }
+        // The corners: click one to give it the drawing color.
+        let drawing = self.drawing_color();
+        for (index, at) in [
+            area.left_top() - vec2(corner, corner),
+            area.right_top() + vec2(0.0, -corner),
+            area.left_bottom() + vec2(-corner, 0.0),
+            area.right_bottom(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let rect = Rect::from_min_size(at, vec2(corner, corner));
+            let [r, g, b] = corners[index];
+            ui.painter()
+                .rect_filled(rect, 2.0, Color32::from_rgb(r, g, b));
+            ui.painter()
+                .rect_stroke(rect, 2.0, theme.hairline(), StrokeKind::Inside);
+            let response = ui.interact(
+                rect,
+                Id::unique(("sue-paint-intermediate-corner", index)),
+                Sense::click(),
+            );
+            if response.on_hover_text("Set to the drawing color").clicked() {
+                self.intermediate.0[index] = drawing;
+            }
+        }
+        let mut steps = self.intermediate.1 as f32;
+        let mut inner = child(
+            ui,
+            Rect::from_min_max(pos2(body.left(), area.bottom() + corner + 4.0), body.max),
+            "intermediate-steps",
+        );
+        if slider_row(
+            &mut inner,
+            "Steps",
+            &mut steps,
+            2.0..=24.0,
+            "",
+            false,
+            theme,
+        ) {
+            self.intermediate.1 = steps.round() as u32;
+        }
+    }
+
+    /// Clip Studio Paint's Approximate Color palette: colors near the
+    /// drawing color, changing one way across and another down.
+    fn approximate_colors(&mut self, ui: &mut Ui, body: Rect, theme: &Theme) {
+        let (across, down, reach) = self.approximate;
+        let base = Hsv::from_rgb(color::unit(self.drawing_color()));
+        let steps = 9_u32;
+        let side = body.width().min(body.height() - 64.0).max(40.0);
+        let area = Rect::from_min_size(
+            pos2(body.center().x - side / 2.0, body.top()),
+            vec2(side, side),
+        );
+        let shift = |hsv: Hsv, axis: u8, t: f32| {
+            let mut hsv = hsv;
+            match axis {
+                0 => hsv.h = (hsv.h + t * reach * 180.0).rem_euclid(360.0),
+                1 => hsv.s = (hsv.s + t * reach).clamp(0.0, 1.0),
+                _ => hsv.v = (hsv.v - t * reach).clamp(0.0, 1.0),
+            }
+            hsv
+        };
+        let picked = Self::color_grid(ui, area, steps, steps, "approximate", |column, row| {
+            let (u, v) = (
+                column as f32 / (steps - 1) as f32 * 2.0 - 1.0,
+                row as f32 / (steps - 1) as f32 * 2.0 - 1.0,
+            );
+            color::bytes(shift(shift(base, across, u), down, v).to_rgb())
+        });
+        if let Some(rgb) = picked {
+            self.set_drawing_color(rgb);
+            self.transparent = false;
+        }
+        let mut inner = child(
+            ui,
+            Rect::from_min_max(pos2(body.left(), area.bottom() + 6.0), body.max),
+            "approximate-axes",
+        );
+        let names = ["Hue", "Saturation", "Brightness"];
+        inner.horizontal(|ui| {
+            ui.label(
+                RichText::new("Across")
+                    .size(theme.small_size)
+                    .color(theme.muted),
+            );
+            egui::ComboBox::from_id_salt("sue-paint-approximate-across")
+                .selected_text(names[usize::from(across.min(2))])
+                .show_ui(ui, |ui| {
+                    for (index, name) in names.iter().enumerate() {
+                        ui.selectable_value(&mut self.approximate.0, index as u8, *name);
+                    }
+                });
+            ui.label(
+                RichText::new("Down")
+                    .size(theme.small_size)
+                    .color(theme.muted),
+            );
+            egui::ComboBox::from_id_salt("sue-paint-approximate-down")
+                .selected_text(names[usize::from(down.min(2))])
+                .show_ui(ui, |ui| {
+                    for (index, name) in names.iter().enumerate() {
+                        ui.selectable_value(&mut self.approximate.1, index as u8, *name);
+                    }
+                });
+        });
+        let mut spread = reach * 100.0;
+        if slider_row(
+            &mut inner,
+            "Range",
+            &mut spread,
+            5.0..=100.0,
+            " %",
+            false,
+            theme,
+        ) {
+            self.approximate.2 = spread / 100.0;
         }
     }
 
@@ -2955,10 +3155,13 @@ impl SuePaint {
                         }
                         self.renaming = Some((info.id, name));
                     } else {
-                        let name = if info.style.draft {
-                            format!("{} (draft)", info.name)
-                        } else {
-                            info.name.clone()
+                        let name = match (
+                            info.style.draft,
+                            doc::is_reference(&cx.world.arena, info.id),
+                        ) {
+                            (true, _) => format!("{} (draft)", info.name),
+                            (false, true) => format!("{} (reference)", info.name),
+                            _ => info.name.clone(),
                         };
                         ui.painter().text(
                             pos2(text_left, row.top() + 31.0),

@@ -368,6 +368,12 @@ pub struct SuePaint {
     pub(crate) pen_curve: sue_model::Response,
     pub(crate) panels: Panels,
     pub(crate) color_tab: u8,
+    /// The Intermediate Color palette's corner colors (top left, top right,
+    /// bottom left, bottom right) and how many steps it blends them in.
+    pub(crate) intermediate: ([[u8; 3]; 4], u32),
+    /// The Approximate Color palette's axes (across, down: 0 hue, 1
+    /// saturation, 2 brightness) and how far it reaches, 0 to 1.
+    pub(crate) approximate: (u8, u8, f32),
     pub(crate) set_tab: u8,
     pub(crate) tool_tab: u8,
     pub(crate) layer_tab: u8,
@@ -444,6 +450,16 @@ impl Default for SuePaint {
             pen_curve: sue_model::Response::LINEAR,
             panels: Panels::default(),
             color_tab: 0,
+            intermediate: (
+                [
+                    [220, 60, 60],
+                    [250, 220, 70],
+                    [60, 110, 220],
+                    [255, 255, 255],
+                ],
+                6,
+            ),
+            approximate: (0, 2, 0.5),
             set_tab: 0,
             tool_tab: 1,
             layer_tab: 0,
@@ -672,6 +688,8 @@ fn implemented(command: &str) -> bool {
             | "anim.frame.insert"
             | "anim.frame.delete"
             | "anim.onion"
+            | "window.intermediate"
+            | "window.approximate"
             | "edit.material.image"
             | "select.expand"
             | "select.shrink"
@@ -683,6 +701,8 @@ fn implemented(command: &str) -> bool {
             | "select.quick_mask"
             | "select.launcher"
             | "edit.material.paste"
+            | "layer.toggle.reference"
+            | "layer.rasterize"
             | "window.material"
             | "anim.layer.camera"
             | "anim.camera.key"
@@ -2267,6 +2287,13 @@ impl SuePaint {
                 None => ItemState::off(),
             },
             "layer.toggle.draft" => info.map_or(ItemState::off(), |info| flag(info.style.draft)),
+            "layer.rasterize" => when(
+                info.as_ref()
+                    .is_some_and(|info| crate::vector::is_vector(arena, info.id)),
+            ),
+            "layer.toggle.reference" => info.map_or(ItemState::off(), |info| {
+                flag(doc::is_reference(arena, info.id))
+            }),
             "layer.toggle.lock" => info.map_or(ItemState::off(), |info| flag(info.locked)),
             "view.grid" => flag(self.grid),
             "file.timelapse.record" => self.doc().map_or(ItemState::off(), |doc| {
@@ -2310,6 +2337,8 @@ impl SuePaint {
             "window.brush_size" => flag(self.panels.brush_size),
             "window.color_wheel" => flag(self.panels.color && self.color_tab == 0),
             "window.color_slider" => flag(self.panels.color && self.color_tab == 1),
+            "window.intermediate" => flag(self.panels.color && self.color_tab == 2),
+            "window.approximate" => flag(self.panels.color && self.color_tab == 3),
             "window.color_set" => flag(self.panels.color_set && self.set_tab == 0),
             "window.material" => flag(self.panels.color_set && self.set_tab == 2),
             "window.color_history" => flag(self.panels.color_set && self.set_tab == 1),
@@ -2906,6 +2935,27 @@ impl SuePaint {
                 }
             }
             "layer.toggle.visible" => self.toggle_layer(cx, picture::VISIBLE, true),
+            "layer.rasterize" => {
+                let (Some(picture), Some(layer)) = (self.picture(), self.layer()) else {
+                    return;
+                };
+                match doc::rasterize(&cx.world.arena, picture, layer) {
+                    Ok((edit, id)) => {
+                        if Self::apply(cx, edit)
+                            && let Some(doc) = self.doc_mut()
+                        {
+                            doc.layer = Some(id);
+                        }
+                    }
+                    Err(error) => cx.fail(error),
+                }
+            }
+            "layer.toggle.reference" => {
+                if let Some(layer) = self.layer() {
+                    let on = doc::is_reference(&cx.world.arena, layer);
+                    Self::apply(cx, doc::set(layer, doc::REFERENCE, !on));
+                }
+            }
             "layer.toggle.clip" => self.toggle_layer(cx, picture::CLIP, false),
             "layer.mask.outside" | "layer.mask.inside" => {
                 let Some(layer) = self.layer() else {
@@ -3278,8 +3328,16 @@ impl SuePaint {
             "window.sub_tool" => self.panels.sub_tool = !self.panels.sub_tool,
             "window.tool_property" => self.panels.tool_property = !self.panels.tool_property,
             "window.brush_size" => self.panels.brush_size = !self.panels.brush_size,
-            "window.color_wheel" | "window.color_slider" => {
-                let tab = u8::from(command == "window.color_slider");
+            "window.color_wheel"
+            | "window.color_slider"
+            | "window.intermediate"
+            | "window.approximate" => {
+                let tab = match command {
+                    "window.color_slider" => 1,
+                    "window.intermediate" => 2,
+                    "window.approximate" => 3,
+                    _ => 0,
+                };
                 if self.panels.color && self.color_tab == tab {
                     self.panels.color = false;
                 } else {

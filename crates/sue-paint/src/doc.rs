@@ -783,6 +783,54 @@ pub fn add_layer_pixels(
     ))
 }
 
+/// The edit that turns vector `layer` into a raster layer in its place
+/// (Rasterize): its pixels, name, properties and folder kept, its lines
+/// let go. Returns the new layer too.
+///
+/// # Errors
+/// If `layer` is not a vector layer with pixels.
+pub fn rasterize(
+    arena: &Arena,
+    picture: EntityId,
+    layer: EntityId,
+) -> Result<(Edit, EntityId), String> {
+    if !crate::vector::is_vector(arena, layer) {
+        return Err("Only vector layers rasterize".to_owned());
+    }
+    let entity = arena.get_by_id(layer).map_err(|error| error.to_string())?;
+    let raster = raster(arena, layer)
+        .ok_or("The layer has no pixels")?
+        .clone();
+    let mut fresh = Entity::new(entity.name(), raster).with_class(class::LAYER);
+    for (key, value) in entity.properties().iter() {
+        fresh = fresh.with_property(key, value.clone());
+    }
+    let id = fresh.id();
+    let order = key_above(arena, picture, Some(layer));
+    let mut edit = Edit::new("Rasterize").then(
+        SpawnEntity::new(fresh).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
+    );
+    if let Some(folder) = folder_of(arena, layer) {
+        edit = edit.then(Relate::new(Relation::new(folder, MEMBER, id)));
+    }
+    Ok((edit.then(delete(layer)), id))
+}
+
+/// A layer the fill and auto select can refer to (Set as Reference Layer,
+/// `Bool`).
+pub const REFERENCE: &str = "layer.reference";
+
+/// `true` if `layer` is a reference layer.
+#[must_use]
+pub fn is_reference(arena: &Arena, layer: EntityId) -> bool {
+    arena
+        .get_by_id(layer)
+        .ok()
+        .and_then(|entity| entity.property(REFERENCE))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
 /// A new vector layer right above `below` (or at the top): clear pixels
 /// and no lines yet.
 ///
@@ -902,6 +950,7 @@ pub fn label(key: &str, value: &Value) -> String {
         crate::effects::COLOR => pick("Layer Color", "No Layer Color"),
         crate::effects::COLOR_VALUE => "Layer Color".to_owned(),
         crate::effects::EXPRESSION | crate::effects::THRESHOLD => "Expression Color".to_owned(),
+        REFERENCE => pick("Set as Reference Layer", "Unset Reference Layer"),
         other => format!("Set {other}"),
     }
 }
@@ -1267,6 +1316,55 @@ mod tests {
             move_shapes("10,20 30,40;e:1,2,3,4", [5.0, -5.0], [2.0, 2.0]),
             "30,30 70,70;e:12,-6,16,-2"
         );
+    }
+
+    #[test]
+    fn vector_layers_rasterize_in_place_and_reference_layers_are_marked() {
+        let mut arena = Arena::new();
+        let (mut edit, picture) = create(&NewPicture {
+            width: 8,
+            height: 8,
+            ..NewPicture::default()
+        })
+        .unwrap();
+        sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        let below = layers(&arena, picture).last().map(|info| info.id);
+        let (mut spawn, vector) =
+            add_vector_layer(&arena, picture, below, "Ink".to_owned()).unwrap();
+        sue_core::ReversibleTransaction::apply(&mut spawn, &mut arena).unwrap();
+        let mut opacity = set(vector, picture::OPACITY, 0.5);
+        sue_core::ReversibleTransaction::apply(&mut opacity, &mut arena).unwrap();
+        let before: Vec<String> = layers(&arena, picture)
+            .into_iter()
+            .map(|info| info.name)
+            .collect();
+        let (mut edit, raster_layer) = rasterize(&arena, picture, vector).unwrap();
+        sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        let after = layers(&arena, picture);
+        assert_eq!(
+            after
+                .iter()
+                .map(|info| info.name.clone())
+                .collect::<Vec<_>>(),
+            before,
+            "in the same place"
+        );
+        assert!(!crate::vector::is_vector(&arena, raster_layer));
+        assert!(
+            (after.last().unwrap().style.opacity - 0.5).abs() < 1e-6,
+            "its properties kept"
+        );
+        assert!(rasterize(&arena, picture, raster_layer).is_err());
+        sue_core::ReversibleTransaction::revert(&mut edit, &mut arena).unwrap();
+        assert!(
+            crate::vector::is_vector(&arena, vector),
+            "undo brings the vector layer back"
+        );
+        // Set as Reference Layer.
+        assert!(!is_reference(&arena, vector));
+        let mut mark = set(vector, REFERENCE, true);
+        sue_core::ReversibleTransaction::apply(&mut mark, &mut arena).unwrap();
+        assert!(is_reference(&arena, vector));
     }
 
     #[test]
