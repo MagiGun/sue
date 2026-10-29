@@ -68,6 +68,12 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
             "Interface scale on top of the system scale",
         ),
         declare(
+            "display.interface",
+            choice("auto", &["auto", "desktop", "tablet", "phone"]),
+            "Layout: auto follows the device (touch layouts on tablets and phones); pick one to switch",
+        )
+        .labeled("Interface"),
+        declare(
             "display.gpu_preference",
             choice("auto", &["auto", "integrated", "discrete"]),
             "GPU that draws the window; auto uses the display's GPU (applies after a restart)",
@@ -457,6 +463,8 @@ pub struct WmConfig {
     pub frame_rate_cap: u32,
     /// Interface scale.
     pub ui_scale: f32,
+    /// `display.interface`: `auto`, `desktop`, `tablet` or `phone`.
+    pub interface: String,
     /// Global shortcuts.
     pub keymap: Keymap,
     /// `profile.hardware`.
@@ -538,6 +546,10 @@ impl WmConfig {
                 .and_then(|cap| u32::try_from(cap).ok())
                 .ok_or(WmError::MissingRice("display.frame_rate_cap"))?,
             ui_scale: number("display.ui_scale")?,
+            interface: schema
+                .get_str("display.interface")
+                .unwrap_or("auto")
+                .to_owned(),
             keymap: Keymap {
                 toggle_left_drawer: key("keys.toggle_left_drawer")?,
                 toggle_right_drawer: key("keys.toggle_right_drawer")?,

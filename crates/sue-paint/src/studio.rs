@@ -349,6 +349,8 @@ pub struct SuePaint {
     pub(crate) bar_extra: Vec<String>,
     /// Rulers along the canvas's top and left (View, Ruler Bar).
     pub(crate) ruler_bar: bool,
+    /// `display.interface` as the rice has it (for the Interface menu).
+    pub(crate) interface: String,
     /// Strokes near a grid line follow it (View, Snap to Grid).
     pub(crate) snap_grid: bool,
     /// A page's crop marks and inner border show (View, Crop Frame).
@@ -368,6 +370,16 @@ pub struct SuePaint {
     pub(crate) proof_cache: Option<(u64, usize, Vec<u8>)>,
     /// The tone area mask and the version it was made for.
     pub(crate) tone_cache: Option<(u64, [u32; 2], Vec<u8>)>,
+    /// The sheet the phone layout shows, if any.
+    pub(crate) sheet: Option<crate::phone::Sheet>,
+    /// The layout the studio was last drawn in, to lay the palettes out
+    /// again when it changes.
+    pub(crate) laid_for: Option<sue_platform::FormFactor>,
+    /// The fingers on the canvas: each touch's id and where it is.
+    pub(crate) touches: Vec<(u64, Pos2)>,
+    /// A touch gesture in progress: when it began, the most fingers it had
+    /// and how far they moved, for two- and three-finger taps.
+    pub(crate) touch_gesture: Option<(f64, usize, f32)>,
     pub(crate) hue: f32,
     pub(crate) recent: History,
     pub(crate) docs: Vec<Doc>,
@@ -507,6 +519,7 @@ impl Default for SuePaint {
             bar_hidden: HashSet::new(),
             bar_extra: Vec::new(),
             ruler_bar: false,
+            interface: "auto".to_owned(),
             snap_grid: false,
             crop_frame: true,
             bleed: true,
@@ -516,6 +529,10 @@ impl Default for SuePaint {
             proof_profile: 0,
             proof_cache: None,
             tone_cache: None,
+            sheet: None,
+            laid_for: None,
+            touches: Vec::new(),
+            touch_gesture: None,
             docs: Vec::new(),
             active: 0,
             closed: HashSet::new(),
@@ -881,6 +898,10 @@ fn implemented(command: &str) -> bool {
             | "story.editor"
             | "story.import_text"
             | "edit.transform.mesh"
+            | "window.interface.auto"
+            | "window.interface.desktop"
+            | "window.interface.tablet"
+            | "window.interface.phone"
             | "canvas.rotate_left"
             | "canvas.rotate_right"
             | "edit.paste_here"
@@ -3479,6 +3500,9 @@ impl SuePaint {
             "window.cels" => flag(self.panels.layer && self.layer_tab == 3),
             "window.tile" => flag(self.tiled),
             "view.ruler_bar" => flag(self.ruler_bar),
+            interface if interface.starts_with("window.interface.") => {
+                flag(self.interface == interface["window.interface.".len()..])
+            }
             "view.snap_grid" => flag(self.snap_grid),
             "view.crop_frame" => flag(self.crop_frame),
             "view.bleed" => flag(self.bleed),
@@ -4863,6 +4887,18 @@ impl SuePaint {
             "view.fit" => self.with_view(cx, |view, rect, size| view.fit(rect, size)),
             "view.grid" => self.grid = !self.grid,
             "view.ruler_bar" => self.ruler_bar = !self.ruler_bar,
+            interface if interface.starts_with("window.interface.") => {
+                let chosen = interface["window.interface.".len()..].to_owned();
+                match cx.edit_rice(sue_rice::SetRiceValue::new(
+                    "display.interface",
+                    sue_rice::RiceValue::Text(chosen),
+                )) {
+                    Ok(_) => {
+                        cx.notify("The interface changes now; Window, Interface changes it back")
+                    }
+                    Err(error) => cx.fail(format!("Cannot change the interface: {error}")),
+                }
+            }
             "view.snap_grid" => self.snap_grid = !self.snap_grid,
             "view.crop_frame" => self.crop_frame = !self.crop_frame,
             "view.bleed" => self.bleed = !self.bleed,
@@ -5179,6 +5215,27 @@ impl SuePaint {
         }
         let theme = cx.theme.clone();
         let full = ui.max_rect();
+        self.interface = cx
+            .rice()
+            .get_str("display.interface")
+            .unwrap_or("auto")
+            .to_owned();
+        let form = cx.view.form_factor;
+        if self.laid_for != Some(form) {
+            self.lay_out_for(form);
+        }
+        if form == sue_platform::FormFactor::Mobile {
+            self.phone_frame(ui, full, cx, &theme);
+            if self.ready {
+                self.dialog_ui(&ctx, cx, &theme);
+            }
+            return;
+        }
+        if form == sue_platform::FormFactor::Tablet {
+            // Bigger targets for fingers and pens.
+            ui.spacing_mut().interact_size.y = 32.0;
+            ui.spacing_mut().button_padding = vec2(8.0, 6.0);
+        }
 
         // The menu bar, with the way back to the canvas at its right. While
         // the studio comes in or goes out, every palette slides in from or
@@ -5224,6 +5281,36 @@ impl SuePaint {
         }
         if self.ready {
             self.dialog_ui(&ctx, cx, &theme);
+        }
+    }
+
+    /// Puts the palettes where `form`'s layout wants them, once, when the
+    /// studio first shows in it or the interface changes: a tablet keeps the
+    /// tool strip and the layers docked and the rest as icons beside the
+    /// canvas, ready to pop out over it.
+    fn lay_out_for(&mut self, form: sue_platform::FormFactor) {
+        use crate::dock::Palette;
+        self.laid_for = Some(form);
+        self.sheet = None;
+        match form {
+            sue_platform::FormFactor::Tablet => {
+                self.dock = crate::dock::Dock::default();
+                for palette in [
+                    Palette::SubTool,
+                    Palette::BrushSize,
+                    Palette::Color,
+                    Palette::ColorSet,
+                    Palette::Navigator,
+                ] {
+                    self.dock.iconize(palette);
+                }
+            }
+            sue_platform::FormFactor::Desktop => {
+                if self.dock.iconized.len() >= 4 {
+                    self.dock = crate::dock::Dock::default();
+                }
+            }
+            sue_platform::FormFactor::Mobile => {}
         }
     }
 

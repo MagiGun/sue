@@ -145,6 +145,70 @@ impl SuePaint {
         self.status_strip(ui, status, Some(size), cx, theme);
     }
 
+    /// Keeps track of the fingers on the canvas. A second finger takes back
+    /// the stroke the first one began (the fingers move the view instead);
+    /// a quick tap of two fingers undoes, of three redoes, as in Clip
+    /// Studio Paint on tablets.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one touch event and where it lands"
+    )]
+    fn track_touch(
+        &mut self,
+        id: u64,
+        phase: TouchPhase,
+        pos: Pos2,
+        time: f64,
+        viewport: Rect,
+        size: [u32; 2],
+        cx: &mut AppletContext<'_>,
+    ) {
+        match phase {
+            TouchPhase::Start => {
+                if self.touches.is_empty() {
+                    self.touch_gesture = Some((time, 1, 0.0));
+                }
+                self.touches.retain(|(known, _)| *known != id);
+                self.touches.push((id, pos));
+                if let Some((_, most, _)) = self.touch_gesture.as_mut() {
+                    *most = (*most).max(self.touches.len());
+                }
+                if self.touches.len() == 2 && matches!(self.gesture, Some(Gesture::Stroke { .. })) {
+                    // The first finger was not drawing after all.
+                    self.release(viewport, size, cx);
+                    let _ = cx.undo(false);
+                }
+                if self.touches.len() >= 2 {
+                    self.gesture = None;
+                }
+            }
+            TouchPhase::Move => {
+                if let Some((_, at)) = self.touches.iter_mut().find(|(known, _)| *known == id) {
+                    let moved = at.distance(pos);
+                    *at = pos;
+                    if let Some((_, _, travel)) = self.touch_gesture.as_mut() {
+                        *travel += moved;
+                    }
+                }
+            }
+            TouchPhase::End | TouchPhase::Cancel => {
+                self.touches.retain(|(known, _)| *known != id);
+                if self.touches.is_empty()
+                    && let Some((began, most, travel)) = self.touch_gesture.take()
+                    && phase == TouchPhase::End
+                    && time - began < 0.35
+                    && travel < 24.0
+                {
+                    match most {
+                        2 => self.run("edit.undo", cx),
+                        3 => self.run("edit.redo", cx),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
     /// View, Tone Area: screen tone layers tinted blue over the picture.
     fn tone_overlay(
         &mut self,
@@ -711,15 +775,24 @@ impl SuePaint {
         self.pointer = response.hover_pos();
         for event in events {
             match event {
-                Event::Touch { phase, force, .. } => match phase {
-                    TouchPhase::Start | TouchPhase::Move => {
-                        if let Some(force) = force {
-                            // Through the pen pressure curve every tool shares.
-                            self.pressure = Some(self.pen_curve.eval(force.clamp(0.0, 1.0)));
+                Event::Touch {
+                    id,
+                    phase,
+                    pos,
+                    force,
+                    ..
+                } => {
+                    self.track_touch(id.0, phase, pos, time, viewport, size, cx);
+                    match phase {
+                        TouchPhase::Start | TouchPhase::Move => {
+                            if let Some(force) = force {
+                                // Through the pen pressure curve every tool shares.
+                                self.pressure = Some(self.pen_curve.eval(force.clamp(0.0, 1.0)));
+                            }
                         }
+                        TouchPhase::End | TouchPhase::Cancel => self.pressure = None,
                     }
-                    TouchPhase::End | TouchPhase::Cancel => self.pressure = None,
-                },
+                }
                 Event::PointerButton {
                     pos,
                     button,
@@ -761,7 +834,22 @@ impl SuePaint {
                 _ => {}
             }
         }
-        if response.hovered() && !blocked {
+        // Two fingers or more move, zoom and turn the view.
+        let pinch = ctx.input(egui::InputState::multi_touch);
+        if let Some(touch) = pinch.filter(|_| !blocked)
+            && let Some(doc) = self.docs.get_mut(self.active)
+        {
+            doc.view.pan += touch.translation_delta;
+            if (touch.zoom_delta - 1.0).abs() > 1e-4 {
+                doc.view
+                    .zoom_at(viewport, size, touch.center_pos, touch.zoom_delta);
+            }
+            if touch.rotation_delta.abs() > 1e-4 {
+                doc.view
+                    .rotate_by(viewport, size, touch.rotation_delta.to_degrees());
+            }
+        }
+        if response.hovered() && !blocked && pinch.is_none() {
             let (scroll, zoom, shift) = ctx.input(|input| {
                 (
                     input.smooth_scroll_delta,

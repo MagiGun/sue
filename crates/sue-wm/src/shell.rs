@@ -593,7 +593,7 @@ impl Shell {
             timeline_open: self.timeline_open,
             playhead: self.timeline.playhead,
             timeline_playing: self.timeline.playing,
-            form_factor: self.form_factor,
+            form_factor: self.form_factor.chosen(&self.config.interface),
             profile: self.profile,
             now,
             dt,
@@ -1702,7 +1702,7 @@ impl Shell {
         let layout = solve_layout(&LayoutRequest {
             viewport: root.max_rect(),
             safe_area: self.safe_area,
-            form_factor: self.form_factor,
+            form_factor: self.form_factor.chosen(&self.config.interface),
             left_reveal: self.left.reveal.position(),
             right_reveal: self.right.reveal.position(),
             timeline_reveal: self.timeline_reveal.position(),
@@ -3024,9 +3024,19 @@ impl Shell {
             self.set_hub(false);
         }
         let places = Self::hub_places(io.applets);
-        let card = vec2(220.0, 168.0);
         let gap = theme.padding * 2.0;
-        let fit = ((screen.width() - 96.0 + gap) / (card.x + gap))
+        // A phone gets two columns of smaller cards, so all fit.
+        let narrow = screen.width() < 560.0;
+        let card = if narrow {
+            vec2(
+                ((screen.width() - 32.0 - theme.padding * 4.0 - gap) / 2.0).max(120.0),
+                132.0,
+            )
+        } else {
+            vec2(220.0, 168.0)
+        };
+        let margin = if narrow { 24.0 } else { 96.0 };
+        let fit = ((screen.width() - margin + gap) / (card.x + gap))
             .floor()
             .max(1.0) as usize;
         let columns = fit.clamp(1, places.len().max(1));
@@ -3038,7 +3048,9 @@ impl Shell {
         let width = columns as f32 * card.x + (columns as f32 - 1.0) * gap + theme.padding * 4.0;
         let at = pos2(
             screen.center().x - width / 2.0,
-            screen.top() + (screen.height() * 0.22).min(180.0) + (1.0 - appear) * 22.0,
+            screen.top()
+                + (screen.height() * if narrow { 0.08 } else { 0.22 }).min(180.0)
+                + (1.0 - appear) * 22.0,
         );
         let mut picked = None;
         egui::Area::new(Id::unique("sue-hub"))

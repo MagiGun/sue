@@ -92,6 +92,25 @@ impl FormFactor {
         }
     }
 
+    /// The layout people chose in Settings (`display.interface`):
+    /// `desktop`, `tablet` or `phone`, or this device's own for `auto`
+    /// and anything else.
+    #[must_use]
+    pub fn chosen(self, interface: &str) -> Self {
+        match interface {
+            "desktop" => Self::Desktop,
+            "tablet" => Self::Tablet,
+            "phone" => Self::Mobile,
+            _ => self,
+        }
+    }
+
+    /// `true` for the touch layouts (tablets and phones).
+    #[must_use]
+    pub const fn is_touch(self) -> bool {
+        matches!(self, Self::Tablet | Self::Mobile)
+    }
+
     /// Display name.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -238,6 +257,15 @@ impl HardwareCapabilities {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn people_can_choose_another_layout_than_their_devices() {
+        assert_eq!(FormFactor::Mobile.chosen("desktop"), FormFactor::Desktop);
+        assert_eq!(FormFactor::Desktop.chosen("phone"), FormFactor::Mobile);
+        assert_eq!(FormFactor::Tablet.chosen("auto"), FormFactor::Tablet);
+        assert_eq!(FormFactor::Mobile.chosen("nonsense"), FormFactor::Mobile);
+        assert!(FormFactor::Tablet.is_touch() && !FormFactor::Desktop.is_touch());
+    }
 
     #[test]
     fn classifies_form_factors() {

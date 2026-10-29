@@ -482,8 +482,8 @@ impl Engine {
                         params(&["display.frame_rate_cap", "motion.settle_grace_ms"]),
                     ),
                     group(
-                        "Scale",
-                        params(&["display.ui_scale", "input.wheel_line_px"]),
+                        "Interface and Scale",
+                        params(&["display.interface", "display.ui_scale", "input.wheel_line_px"]),
                     ),
                     group("Motion", vec![section("motion")]),
                 ],

@@ -645,6 +645,15 @@ pub fn menus() -> Vec<Menu> {
                         act("Manage Workspaces...", "window.workspace.manage"),
                     ],
                 ),
+                sub(
+                    "Interface",
+                    vec![
+                        act("Automatic (follows the device)", "window.interface.auto"),
+                        act("Desktop", "window.interface.desktop"),
+                        act("Tablet", "window.interface.tablet"),
+                        act("Phone", "window.interface.phone"),
+                    ],
+                ),
                 act("Hide All Palettes", "window.hide_all"),
                 act("Hide Menu Bar", "window.hide_menus"),
                 act("Reset Palette Layout", "window.workspace.reset"),
