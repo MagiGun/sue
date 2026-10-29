@@ -207,7 +207,10 @@ fn blend(
 
 /// Draws one glyph with its origin (on the baseline) at `origin`; returns
 /// its box.
-#[allow(clippy::too_many_arguments, reason = "a glyph, where, and the pixels it lands on")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "a glyph, where, and the pixels it lands on"
+)]
 fn glyph(
     face: &Face<'_>,
     id: ttf_parser::GlyphId,

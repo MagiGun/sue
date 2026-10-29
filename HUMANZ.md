@@ -990,7 +990,10 @@ each as SVG (the source), PNG and JPEG XL at 1024 pixels, and a Windows
 `.ico` with six sizes, plus inverted and black versions. `sue_wm::brand`
 reads the `.ico` sizes: the app icon is the window's and the taskbar's
 (`DesktopOptions::icon`), and `brand::mark` draws the silhouette, white on
-clear, tinted to the theme's text color, on the Sue button and the Hub.
+clear, tinted to the theme's text color, on the Sue button and the Hub. On
+Windows, `bins/sue/build.rs` copies the icon's sizes into a compiled
+resource file the MSVC linker takes, so `sue.exe` itself carries the icon
+(plain Rust reading Cargo's target variables, no resource compiler).
 
 **Going in and out of a studio.** Opening a studio, the shell finds the card
 it will work on (the selected node, if the studio `accepts` its entity, else
@@ -1183,6 +1186,53 @@ again starts from untouched pixels. On release the tiles become one
 `RasterEdit`. Each pen and brush sub tool ships with its own stabilization,
 correction, tapers, flick and mixing, all editable in Tool Property; an ignored
 test (`stroke_sheet`) paints a sheet of simulated strokes for tuning by eye.
+
+**Transform.** Scale/Rotate (Ctrl+T) and Free Transform (Ctrl+Shift+T)
+lift the selected part of the current layer, or all of it
+(`sue_paint::transform::lift`), and draw it onto a quad with one projective
+mapping (a homography from the piece's rectangle, worked backwards with
+premultiplied bilinear sampling). Scale/Rotate keeps the quad a turned,
+scaled rectangle (center, scale, angle; corners keep the aspect unless
+Shift, edges stretch, inside moves, outside turns); Free Transform moves
+each corner. OK records one `RasterEdit` and moves the selection along.
+
+**Layer folders.** A folder is a `sue.folder` entity in the picture's stack,
+right above its layers, and each layer in it is linked by a
+`sue.paint.member` relation, so layers stay where every edit already finds
+them. The compositor passes folders through, folding in their visibility
+and opacity (Clip Studio Paint's Through); the palette indents members and
+hides those of closed folders; moving a layer past its folder's top or
+bottom takes it out, onto a folder puts it in, and a folder moves with its
+layers.
+
+**Layer masks.** A mask is an RGBA raster entity (`sue.paint.layer_mask`)
+linked from its layer by `sue.paint.mask`; its alpha multiplies the layer's
+in the compositor, and the picture's signature includes it, so its edits
+recomposite. Strokes go to the mask while it is being edited: the pen
+shows, the eraser hides, one `RasterEdit` each.
+
+**Canvas.** Change Canvas Size moves every layer by the anchor and cuts or
+widens it to the new canvas, Crop is the same to the selection's bounds,
+and Change Image Resolution resamples every layer (averaged when shrinking,
+bilinear when growing, premultiplied); frame panels and balloons move and
+scale with them. Each is one `Batch` of `ReplaceComponent`s and properties.
+
+**Symmetry.** The symmetrical ruler (the Ruler tool) has a center, an angle,
+a number of turns and Line symmetry; a stroke paints once through each of
+its copies (`brush::symmetry`, affine maps) into the one stroke's coverage,
+so copies never stack and the stroke stays one undo step.
+
+**Text.** A text layer (`sue.paint.text`) keeps its words, font, size, ink,
+placement, centering and vertical setting and draws them again after every
+edit with `sue_type::raster::draw_text`, which lays lines across or columns
+down and right to left and fills glyph outlines (read with ttf-parser from
+the shared font library) with an accumulation rasterizer after font-rs.
+Clicked inside a balloon, the Text tool centers the words in it.
+
+**Tonal corrections.** Tone Curve (a `Response` for RGB and each channel, run
+through a table per channel), Level Correction, Color Balance (shadows,
+midtones and highlights weighted by brightness) and Gradient Map join the
+filters, each previewed in place and recorded as one step.
 
 **Puppet warp.** Edit, Transform, Puppet Warp puts pins on the current
 layer: dragging one bends the layer around the others by rigid moving least
@@ -1682,7 +1732,8 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.6 Studios beyond Sue Paint (DAW, video, 3D and CAD, IDE, game engine) | Planned; they arrive as studio applets, the way Sue Paint did | n/a |
 | §3.7 Sue Paint: layout, every menu, tools and sub tools, brush engine with pressure and stabilization, fills, gradients, figures, selections, layers, 26 blend modes, edits and filters, open and export, canvas cards | **Implemented**; an end-to-end test drives it with egui events (New, a pressure stroke, a layer, undo, save and reopen), the self-check paints, undoes, saves and exports, and three snapshots show it | `sue-paint`, `bins/sue/src/runtime.rs`, `selfcheck.rs`, `snapshot.rs` |
 | §3.7 Sue Paint: pen pressure curves and dynamics, starting and ending modes, color jitter, puppet warp, stories and the Page Manager, frame borders, balloons, focus and speed lines, screentone, animation timelines with onion skin and GIF export | **Implemented**; end-to-end tests drive puppet warp, stories, manga and animation with egui events, and snapshots show the pressure dialog, the Page Manager and the Timeline | `sue-paint`, `bins/sue/src/runtime.rs`, `snapshot.rs` |
-| §3.7 Sue Paint: vector and text layers, layer folders and masks, correction layers, scale and free transform, canvas size and resolution changes, rulers, materials, balloon text, the camera folder, light table and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
+| §3.7 Sue Paint: scale and free transform, layer folders, layer masks, canvas size, crop and resolution, the symmetrical ruler, text layers and balloon text, tone curve, levels, color balance and gradient maps | **Implemented**; end-to-end tests drive each with egui events (Ctrl+T, Ctrl+G and the folder moves, crop, a mirrored stroke, a mask erased, words written and edited) | `sue-paint`, `sue-type/src/raster.rs`, `bins/sue/src/runtime.rs` |
+| §3.7 Sue Paint: vector layers, correction layers, perspective rulers, materials, the camera folder, light table and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |

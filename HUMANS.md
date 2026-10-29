@@ -367,6 +367,26 @@ familiar:
   length, thinning the line, fading it or both, longer when you draw fast.
   Color jitter changes the color of every dab (brushes that stamp) or of
   each whole stroke.
+- **Transform** (Ctrl+T, Ctrl+Shift+T): the selection, or the whole layer,
+  in a box. Drag a corner to scale (Shift frees the shape), an edge to
+  stretch, inside to move and outside to turn, or type the size and angle;
+  Free Transform moves each corner on its own. Enter keeps it.
+- **Folders** (Ctrl+G puts the current layer in a new folder): hide or fade
+  a folder and everything in it follows; its arrow opens and closes it.
+  Moving a layer up or down past a folder's edge takes it out or puts it in.
+- **Masks** (Layer, Layer Mask): hide part of a layer without erasing it.
+  Click the mask beside the layer to paint on it: the pen shows, the eraser
+  hides.
+- **Canvas** (Edit): change the canvas size around a reference point,
+  change the image resolution, or crop to the selection.
+- **Symmetry:** the Ruler tool lays a symmetrical ruler; everything you draw
+  appears on the other side too, or turned around its middle as many times
+  as you set. Ctrl+2 turns it off and on.
+- **Text** (T): click and type, in any font on your computer, across or in
+  vertical columns; click inside a balloon and the words sit in its middle.
+  Click the words again to change them.
+- **Tone Curve, Levels, Color Balance, Gradient Map** (Edit, Tonal
+  Correction): shape the curve by dragging its points, with a live preview.
 - **Puppet warp** (Edit, Transform): click to put pins on a layer, drag one
   and the drawing bends around the others while keeping its shape; Alt and
   click takes a pin away. OK (or Enter) keeps it, Cancel (or Esc) does not.
