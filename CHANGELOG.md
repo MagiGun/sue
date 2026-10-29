@@ -13,6 +13,16 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Headers and footers in Sue Writer (Insert, Header and Footer): left,
+  middle and right parts with the page number, page count, title, author
+  and date, and a different first page. They print in PDFs and go into
+  Word, OpenDocument and RTF as live page numbers.
+- Tables in Sue Writer: Table, Insert Table (`Ctrl+F12`), then type in the
+  cells; `Tab` moves on and adds a row at the end. Insert and delete rows
+  and columns, a heading row that repeats on every page, and text to table
+  and back. Tables print in PDFs and go into Word, OpenDocument, EPUB, web
+  pages, RTF, Markdown and plain text.
+
 - The Hub is Sue's home page: a box for every studio (Sue Paint, Sue
   Writer) and every tool (the Image Viewer, the Converter). The pin at a
   box's bottom right makes Sue open straight into it; one pin at a time,
@@ -33,6 +43,11 @@ follow [Semantic Versioning](https://semver.org/).
   Unsaved Work brings it back (Recover) or throws it away (Discard, which
   asks once more). Opening another project keeps the unsaved work it
   replaces there too. Settings, General sets how often, or turns it off.
+- Typing in Sue Writer feels smooth: the caret glides to its new place
+  instead of jumping, as you type, delete, move with the keys or click, and
+  as lines and pages wrap. It blinks only while it rests. Settings, Display
+  & Graphics, Motion has Smooth Caret to turn it off and Caret Glide Time
+  for its speed.
 
 ### Changed
 

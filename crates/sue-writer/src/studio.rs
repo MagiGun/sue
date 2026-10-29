@@ -9,6 +9,7 @@ use sue_core::{Entity, EntityId, Value};
 use sue_model::manuscript::{self, role};
 use sue_model::{class, mark_kind as kind, picture};
 use sue_rice::{RiceDeclaration, RiceParameter};
+use sue_type::editor::TableEdit;
 use sue_type::{Editor, Fonts, PageSetup, StyleSheet};
 use sue_wm::{
     AppletContext, AppletId, AppletManifest, AppletRole, ArenaEdit, FilePick, Menu, MenuBar,
@@ -61,8 +62,15 @@ pub(crate) struct Settings {
     pub size: f32,
     pub target: i64,
     pub session: i64,
-    pub header: String,
     pub font_filter: String,
+}
+
+/// The header and footer dialog's fields.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Furniture {
+    pub header: sue_model::Running,
+    pub footer: sue_model::Running,
+    pub different_first: bool,
 }
 
 /// A dialog over the studio.
@@ -78,6 +86,14 @@ pub(crate) enum Dialog {
     Link(String),
     /// A footnote on the selection.
     Footnote(String),
+    /// The running header and footer.
+    Furniture(Furniture),
+    /// A new table: rows, columns, and whether the first row is headings.
+    Table {
+        rows: u32,
+        columns: u32,
+        heading: bool,
+    },
     /// Words written, by day.
     Statistics,
     /// The keyboard shortcuts.
@@ -276,8 +292,16 @@ impl SueWriter {
         PageSetup {
             size: [size[0] as f32, size[1] as f32],
             margins: [margin; 4],
-            numbers: true,
-            header: self.project_text(cx, project::HEADER, ""),
+            header: sue_model::Running::parse(&self.project_text(cx, project::HEADER, "")),
+            footer: sue_model::Running::parse(&self.project_text(cx, project::FOOTER, "{page}")),
+            different_first: self
+                .project_entity(cx)
+                .and_then(|entity| entity.property(project::DIFFERENT_FIRST))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            title: self.title(cx),
+            author: self.project_text(cx, manuscript::AUTHOR, ""),
+            date: project::today(),
         }
     }
 
@@ -657,9 +681,9 @@ impl SueWriter {
     }
 
     /// The project's look for compiling.
-    pub(crate) fn look(&self, cx: &AppletContext<'_>) -> compile::Look {
-        let title = self
-            .project_entity(cx)
+    /// The project's title (an open file's name without one).
+    pub(crate) fn title(&self, cx: &AppletContext<'_>) -> String {
+        self.project_entity(cx)
             .map(|entity| {
                 entity
                     .property(manuscript::TITLE)
@@ -673,11 +697,14 @@ impl SueWriter {
                     .and_then(|id| cx.arena().get_by_id(id).ok())
                     .map(|entity| entity.name().to_owned())
             })
-            .unwrap_or_else(|| "Untitled".to_owned());
+            .unwrap_or_else(|| "Untitled".to_owned())
+    }
+
+    pub(crate) fn look(&self, cx: &AppletContext<'_>) -> compile::Look {
         compile::Look {
             sheet: self.sheet(cx),
             page: self.page(cx),
-            title,
+            title: self.title(cx),
             author: self.project_text(cx, manuscript::AUTHOR, ""),
         }
     }
@@ -773,8 +800,15 @@ impl SueWriter {
                     size: fonts.size,
                     target: self.project_number(cx, manuscript::TARGET, 0.0) as i64,
                     session: self.project_number(cx, project::SESSION_TARGET, 500.0) as i64,
-                    header: self.project_text(cx, project::HEADER, ""),
                     font_filter: String::new(),
+                }));
+            }
+            "insert.header_footer" => {
+                let page = self.page(cx);
+                self.dialog = Some(Dialog::Furniture(Furniture {
+                    header: page.header,
+                    footer: page.footer,
+                    different_first: page.different_first,
                 }));
             }
             "project.statistics" => self.dialog = Some(Dialog::Statistics),
@@ -823,10 +857,64 @@ impl SueWriter {
             "edit.find_next" => self.find_next(cx, false),
             "edit.find_previous" => self.find_next(cx, true),
             "edit.undo" => {
+                self.editor.commit(cx);
                 let _ = cx.undo(false);
             }
             "edit.redo" => {
+                self.editor.commit(cx);
                 let _ = cx.undo(true);
+            }
+            "table.insert" => {
+                self.dialog = Some(Dialog::Table {
+                    rows: 3,
+                    columns: 3,
+                    heading: true,
+                });
+            }
+            size if size.starts_with("table.insert.") => {
+                // `table.insert.3x4`: three rows of four columns at once,
+                // as a size picker asks.
+                let size = &size["table.insert.".len()..];
+                let Some((rows, columns)) = size
+                    .split_once('x')
+                    .and_then(|(rows, columns)| Some((rows.parse().ok()?, columns.parse().ok()?)))
+                else {
+                    return false;
+                };
+                self.editor.insert_table(cx, rows, columns, 0);
+                self.editor.focus();
+            }
+            "table.row_above"
+            | "table.row_below"
+            | "table.column_left"
+            | "table.column_right"
+            | "table.delete_row"
+            | "table.delete_column"
+            | "table.delete"
+            | "table.header" => {
+                let edit = match command {
+                    "table.row_above" => TableEdit::RowAbove,
+                    "table.row_below" => TableEdit::RowBelow,
+                    "table.column_left" => TableEdit::ColumnLeft,
+                    "table.column_right" => TableEdit::ColumnRight,
+                    "table.delete_row" => TableEdit::DeleteRow,
+                    "table.delete_column" => TableEdit::DeleteColumn,
+                    "table.delete" => TableEdit::DeleteTable,
+                    _ => TableEdit::HeaderRow,
+                };
+                if self.editor.cell().is_none() {
+                    cx.notify("Click in a table first");
+                } else {
+                    self.editor.edit_table(cx, edit);
+                }
+            }
+            "table.to_text" => {
+                if !self.editor.table_to_text(cx) {
+                    cx.notify("Click in a table first");
+                }
+            }
+            "table.from_text" => {
+                self.editor.text_to_table(cx);
             }
             "format.bold" => self.editor.toggle(cx, kind::BOLD, "Bold"),
             "format.italic" => self.editor.toggle(cx, kind::ITALIC, "Italic"),

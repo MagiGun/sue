@@ -2,8 +2,9 @@
 //! same styles and marks the editor shows, broken into lines with each
 //! font's own widths, justified, paginated (headings kept with what
 //! follows, no lone first lines at the foot of a page), with lists,
-//! pictures, links, footnotes gathered as notes at the end, page numbers
-//! and a running head, then handed to the PDF writer in `sue-io`.
+//! pictures, tables (broken between rows, their heading rows repeated),
+//! links, footnotes gathered as notes at the end, page numbers and a
+//! running head, then handed to the PDF writer in `sue-io`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,6 +17,7 @@ use crate::layout::PageSetup;
 use crate::style::{
     Align, ListKind, ParagraphLook, StyleSheet, marks_by_paragraph, paragraph_look, runs,
 };
+use crate::tables::TableSource;
 
 /// One document to print.
 pub struct PrintDoc<'a> {
@@ -166,6 +168,128 @@ enum Block {
         size: [f32; 2],
         look: ParagraphLook,
     },
+    Table {
+        look: ParagraphLook,
+        /// Column edges across, from the table's left.
+        edges: Vec<f32>,
+        /// Each row: its height and each cell's lines.
+        rows: Vec<SetRow>,
+        header_rows: usize,
+    },
+}
+
+/// A table row set: its height and each cell's lines.
+type SetRow = (f32, Vec<Vec<Line>>);
+
+/// The room between a table cell's edge and its text, in points.
+const CELL_PAD: f32 = 4.0;
+
+/// Sets a table's cells into lines across `width` points.
+fn set_table(
+    faces: &mut Faces,
+    source: &TableSource,
+    look: &ParagraphLook,
+    width: f32,
+) -> (Vec<f32>, Vec<SetRow>) {
+    let mut edges = vec![0.0];
+    for share in &source.shares {
+        let last = edges.last().copied().unwrap_or(0.0);
+        edges.push(last + share * width);
+    }
+    let plain = Arc::new(Look {
+        color: INK,
+        slant: false,
+        embolden: false,
+        underline: false,
+        strike: false,
+        highlight: None,
+        link: None,
+    });
+    let mut rows = Vec::with_capacity(source.cells.len());
+    for (row, cells) in source.cells.iter().enumerate() {
+        let format = CharFormat {
+            bold: row < source.header_rows,
+            ..CharFormat::default()
+        };
+        let (_, fake_bold, _) = faces
+            .get(&look.font, look.bold || format.bold, look.italic)
+            .unwrap_or((0, false, false));
+        let run = Arc::new(Look {
+            embolden: fake_bold,
+            ..(*plain).clone()
+        });
+        let mut tallest = 0.0_f32;
+        let mut set = Vec::with_capacity(cells.len());
+        for (column, text) in cells.iter().enumerate().take(source.shares.len()) {
+            let room = (edges[column + 1] - edges[column] - CELL_PAD * 2.0).max(12.0);
+            let mut lines = Vec::new();
+            for paragraph in text.split('\n') {
+                let mut glyphs = shaped(
+                    faces, paragraph, &look.font, look.size, &format, look, 0.0, &run,
+                );
+                if glyphs.is_empty() {
+                    glyphs = shaped(faces, " ", &look.font, look.size, &format, look, 0.0, &run);
+                }
+                lines.extend(break_lines(
+                    faces,
+                    glyphs,
+                    room,
+                    0.0,
+                    look.line_spacing.min(crate::tables::CELL_SPACING),
+                ));
+            }
+            tallest = tallest.max(lines.iter().map(|line| line.height).sum());
+            set.push(lines);
+        }
+        rows.push((tallest + CELL_PAD * 2.0, set));
+    }
+    (edges, rows)
+}
+
+/// Draws one table row with its top left at `(x, y)` on the page.
+fn draw_row(
+    items: &mut Vec<PdfItem>,
+    faces: &Faces,
+    edges: &[f32],
+    row: &SetRow,
+    heading: bool,
+    x: f32,
+    y: f32,
+) {
+    let (height, cells) = row;
+    let right = x + edges.last().copied().unwrap_or(0.0);
+    if heading {
+        items.push(PdfItem::Rect {
+            rect: [x, y, right - x, *height],
+            color: [0xee, 0xee, 0xee],
+        });
+    }
+    for (column, lines) in cells.iter().enumerate() {
+        let mut top = y + CELL_PAD;
+        for line in lines {
+            let baseline = top + line.ascent;
+            let at = x + edges[column] + CELL_PAD;
+            let placed: Vec<(Glyph, f32)> = line
+                .glyphs
+                .iter()
+                .map(|(glyph, offset)| (glyph.clone(), at + offset))
+                .collect();
+            decorate(items, &placed, baseline, faces);
+            push_runs(items, placed.into_iter(), baseline);
+            top += line.height;
+        }
+    }
+    let rule = |from: [f32; 2], to: [f32; 2]| PdfItem::Line {
+        from,
+        to,
+        width: 0.5,
+        color: [0x44, 0x44, 0x44],
+    };
+    items.push(rule([x, y], [right, y]));
+    items.push(rule([x, y + height], [right, y + height]));
+    for edge in edges {
+        items.push(rule([x + edge, y], [x + edge, y + height]));
+    }
 }
 
 const INK: [u8; 3] = [0x18, 0x18, 0x18];
@@ -310,6 +434,7 @@ pub fn typeset(
     sheet: &StyleSheet,
     page: &PageSetup,
     figures: &dyn Fn(EntityId) -> Option<PdfImage>,
+    tables: &dyn Fn(EntityId) -> Option<TableSource>,
     title: &str,
     author: &str,
 ) -> PdfDocument {
@@ -327,6 +452,30 @@ pub fn typeset(
             let body =
                 range.start..range.end - usize::from(doc.text[range.clone()].ends_with('\n'));
             let content = &doc.text[body.clone()];
+            let embed = (content == sue_model::OBJECT.to_string())
+                .then(|| {
+                    own.iter()
+                        .find(|mark| mark.kind == kind::EMBED)
+                        .and_then(|mark| match mark.value {
+                            Value::Entity(id) => Some(id),
+                            _ => None,
+                        })
+                })
+                .flatten();
+            if let Some(source) = embed.and_then(tables) {
+                let room = (width - look.indent - look.indent_right).max(36.0);
+                let (edges, rows) = set_table(&mut faces, &source, &look, room);
+                blocks.push((
+                    doc_index,
+                    Block::Table {
+                        look,
+                        edges,
+                        rows,
+                        header_rows: source.header_rows,
+                    },
+                ));
+                continue;
+            }
             if content == sue_model::OBJECT.to_string()
                 && let Some(id) =
                     own.iter()
@@ -598,6 +747,52 @@ pub fn typeset(
             new_page(&mut pages, &mut y);
         }
         match &blocks[index].1 {
+            Block::Table {
+                look,
+                edges,
+                rows,
+                header_rows,
+            } => {
+                if y > 0.0 {
+                    y += look.space_before.max(crate::tables::TABLE_SPACE);
+                }
+                let headings = (*header_rows).min(rows.len());
+                let repeat: f32 = rows[..headings].iter().map(|(height, _)| height).sum();
+                let x = left + look.indent;
+                for (row_index, row) in rows.iter().enumerate() {
+                    if y + row.0 > height + 0.5 && y > 0.0 {
+                        new_page(&mut pages, &mut y);
+                        // The heading rows again at the top of the page.
+                        if row_index >= headings && repeat + row.0 <= height {
+                            for heading in &rows[..headings] {
+                                let page_index = pages.len() - 1;
+                                draw_row(
+                                    &mut pages[page_index].items,
+                                    &faces,
+                                    edges,
+                                    heading,
+                                    true,
+                                    x,
+                                    top + y,
+                                );
+                                y += heading.0;
+                            }
+                        }
+                    }
+                    let page_index = pages.len() - 1;
+                    draw_row(
+                        &mut pages[page_index].items,
+                        &faces,
+                        edges,
+                        row,
+                        row_index < headings,
+                        x,
+                        top + y,
+                    );
+                    y += row.0;
+                }
+                y += look.space_after.max(crate::tables::TABLE_SPACE);
+            }
             Block::Picture { image, size, look } => {
                 if y > 0.0 {
                     y += look.space_before;
@@ -634,6 +829,7 @@ pub fn typeset(
                             lines.first().map_or(0.0, |line| line.height) + look.space_before
                         }
                         Some(Block::Picture { size, .. }) => size[1],
+                        Some(Block::Table { rows, .. }) => rows.first().map_or(0.0, |row| row.0),
                         None => 0.0,
                     };
                     if y + total + next > height && total + next <= height {
@@ -733,7 +929,7 @@ pub fn typeset(
             }
         }
     }
-    // Page numbers and the running head.
+    // The running header and footer.
     let numbers_look = paragraph_look_of(sheet, "body");
     let plain = Arc::new(Look {
         color: [0x55, 0x55, 0x55],
@@ -747,16 +943,18 @@ pub fn typeset(
     let count = pages.len();
     for (index, pdf_page) in pages.iter_mut().enumerate() {
         let mut furniture = Vec::new();
-        if page.numbers && count > 1 {
-            furniture.push((
-                (index + 1).to_string(),
-                page.size[1] - page.margins[2] / 2.0,
-            ));
+        let [header, footer] = page.furniture(index, count);
+        for (parts, baseline) in [
+            (header, page.margins[0] / 2.0),
+            (footer, page.size[1] - page.margins[2] / 2.0),
+        ] {
+            for (part, text) in parts.into_iter().flatten().enumerate() {
+                if !text.is_empty() {
+                    furniture.push((text, part, baseline));
+                }
+            }
         }
-        if index > 0 && !page.header.is_empty() {
-            furniture.push((page.header.clone(), page.margins[0] / 2.0));
-        }
-        for (text, baseline) in furniture {
+        for (text, part, baseline) in furniture {
             let glyphs = shaped(
                 &mut faces,
                 &text,
@@ -768,7 +966,11 @@ pub fn typeset(
                 &plain,
             );
             let width: f32 = glyphs.iter().map(|glyph| glyph.advance).sum();
-            let mut x = (page.size[0] - width) / 2.0;
+            let mut x = match part {
+                0 => page.margins[3],
+                1 => (page.size[0] - width) / 2.0,
+                _ => page.size[0] - page.margins[1] - width,
+            };
             let placed: Vec<(Glyph, f32)> = glyphs
                 .into_iter()
                 .map(|glyph| {
@@ -932,7 +1134,7 @@ mod tests {
             marks: &marks,
             new_page: false,
         }];
-        let pdf = typeset(&docs, &sheet, &page, &|_| None, "Book", "Me");
+        let pdf = typeset(&docs, &sheet, &page, &|_| None, &|_| None, "Book", "Me");
         assert!(pdf.pages.len() >= 2, "{} pages", pdf.pages.len());
         assert_eq!(pdf.bookmarks[0].title, "Chapter One");
         assert!(!pdf.fonts.is_empty());

@@ -4,24 +4,30 @@
 //! the arena. It draws its own caret and selection, so pages, styles,
 //! lists and pictures stay exact, and takes the keyboard, the mouse, the
 //! clipboard (keeping formatting between Sue's own documents) and input
-//! methods. Edits go through [`crate::edit`], so undo covers them.
+//! methods. Edits go through [`crate::edit`], so undo covers them. The
+//! caret glides to its new place and blinks at rest ([`crate::caret`]).
 
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use egui::text::{CCursor, CharIndex, LayoutJob, TextFormat};
 use egui::{Color32, Event, Id, Key, Modifiers, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use sue_core::{EntityId, Value};
 use sue_model::{TextMarks, mark_kind as kind};
-use sue_wm::AppletContext;
+use sue_wm::{AppletContext, ArenaEdit};
 
+use crate::caret::{self, CaretGlide, CaretMotion};
 use crate::edit;
 use crate::layout::{
     Block, Ink, Laid, PX_PER_PT, PageSetup, Setting, Source, ViewMode, byte_of_char, char_of_byte,
     lay_document, paginate,
 };
 use crate::style::{CharFormat, ParagraphLook, StyleSheet, char_format, paragraph_look};
+pub use crate::tables::TableEdit;
+use crate::tables::{CellCaret, TableSource, paint_table};
 
 /// A place in the shown documents: which one, and a byte offset in it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -100,6 +106,8 @@ struct DocKey {
     scale: u32,
     fonts: usize,
     ink: [u8; 4],
+    /// The revisions of the tables it shows.
+    embeds: u64,
 }
 
 struct Cached {
@@ -149,6 +157,13 @@ pub struct Editor {
     /// The editor had the keyboard last frame.
     had_focus: bool,
     scroll_target: Option<Caret>,
+    /// How the caret glides and blinks, from the rice and the hardware.
+    motion: CaretMotion,
+    glide: CaretGlide,
+    /// The caret in a table cell, while it is in one.
+    cell: Option<CellCaret>,
+    /// A cell the caret left this frame, its typing still to record.
+    left_cell: Option<CellCaret>,
 }
 
 impl std::fmt::Debug for Editor {
@@ -188,6 +203,10 @@ impl Editor {
             hold: false,
             had_focus: false,
             scroll_target: None,
+            motion: CaretMotion::STILL,
+            glide: CaretGlide::default(),
+            cell: None,
+            left_cell: None,
         }
     }
 
@@ -466,13 +485,249 @@ impl Editor {
     /// Puts an embedded entity (a picture) in a paragraph of its own at the
     /// caret.
     pub fn insert_embed(&mut self, cx: &mut AppletContext<'_>, entity: EntityId) {
+        self.embed(cx, entity, "Insert Picture");
+    }
+
+    /// Puts a new table of `rows` by `columns` in a paragraph of its own at
+    /// the caret, its first `header_rows` rows headings, and the caret in
+    /// its first cell. Returns the table's entity.
+    pub fn insert_table(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        rows: u32,
+        columns: u32,
+        header_rows: u32,
+    ) -> Option<EntityId> {
+        let entity = crate::tables::new_table(rows.max(1), columns.max(1), header_rows);
+        self.place_table(cx, entity, self.selection())
+    }
+
+    /// Spawns table `entity` and sets it over `range` of the current
+    /// document, with the caret in its first cell.
+    fn place_table(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        entity: sue_core::Entity,
+        range: Range<usize>,
+    ) -> Option<EntityId> {
+        self.commit(cx);
+        self.current()?;
+        let id = entity.id();
+        cx.apply(ArenaEdit(sue_core::txn::SpawnEntity::new(entity)))
+            .ok()?;
+        self.anchor = Caret {
+            doc: self.caret.doc,
+            offset: range.start,
+        };
+        self.caret = Caret {
+            doc: self.caret.doc,
+            offset: range.end,
+        };
+        self.embed(cx, id, "Insert Table");
+        self.enter_cell(id, 0, 0);
+        Some(id)
+    }
+
+    /// Changes the table the caret is in. Returns `false` if the caret is
+    /// in none, or nothing changed.
+    pub fn edit_table(&mut self, cx: &mut AppletContext<'_>, edit: TableEdit) -> bool {
+        use sue_core::ReversibleTransaction;
+        use sue_model::Reshape;
+        self.commit(cx);
+        let Some(cell) = self.cell.clone() else {
+            return false;
+        };
+        let (rows, columns) = crate::tables::size_of(cx.arena(), cell.table);
+        let (row, column) = (cell.row as u32, cell.column as u32);
+        let fill = Some(Value::Text(String::new()));
+        let id = cell.table;
+        let widths = cx
+            .arena()
+            .get_by_id(id)
+            .ok()
+            .and_then(|entity| entity.property(sue_model::WIDTHS))
+            .is_some();
+        let reshape = |reshape: Reshape| {
+            let batch = sue_core::txn::Batch::new(reshape.label()).then(reshape);
+            if widths {
+                // New columns make every column even again.
+                batch.then(sue_core::txn::SetProperty::remove(id, sue_model::WIDTHS))
+            } else {
+                batch
+            }
+        };
+        let (step, moved) = match edit {
+            TableEdit::RowAbove => (
+                reshape(Reshape::insert_rows(id, row, 1, fill)),
+                (row, column),
+            ),
+            TableEdit::RowBelow => (
+                reshape(Reshape::insert_rows(id, row + 1, 1, fill)),
+                (row + 1, column),
+            ),
+            TableEdit::ColumnLeft => (
+                reshape(Reshape::insert_columns(id, column, 1, fill)),
+                (row, column),
+            ),
+            TableEdit::ColumnRight => (
+                reshape(Reshape::insert_columns(id, column + 1, 1, fill)),
+                (row, column + 1),
+            ),
+            TableEdit::DeleteRow if rows > 1 => (
+                reshape(Reshape::remove_rows(id, row, 1)),
+                (row.min(rows as u32 - 2), column),
+            ),
+            TableEdit::DeleteColumn if columns > 1 => (
+                reshape(Reshape::remove_columns(id, column, 1)),
+                (row, column.min(columns as u32 - 2)),
+            ),
+            TableEdit::HeaderRow => {
+                let now = cx
+                    .arena()
+                    .get_by_id(id)
+                    .ok()
+                    .and_then(|entity| entity.property(sue_model::HEADER_ROWS))
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                let step =
+                    sue_core::txn::Batch::new("Heading Row").then(sue_core::txn::SetProperty::new(
+                        id,
+                        sue_model::HEADER_ROWS,
+                        Value::Int(i64::from(now == 0)),
+                    ));
+                (step, (row, column))
+            }
+            TableEdit::DeleteRow | TableEdit::DeleteColumn | TableEdit::DeleteTable => {
+                return self.delete_table(cx);
+            }
+        };
+        if cx.apply(ArenaEdit(step)).is_err() {
+            return false;
+        }
+        if let Some(cell) = self.cell.as_mut() {
+            cell.row = moved.0 as usize;
+            cell.column = moved.1 as usize;
+            cell.offset = 0;
+        }
+        true
+    }
+
+    /// Takes the table the caret is in out of the text.
+    fn delete_table(&mut self, cx: &mut AppletContext<'_>) -> bool {
+        let Some(cell) = self.cell.take() else {
+            return false;
+        };
+        let Some(index) = self.table_block(cell.doc, cell.table) else {
+            return false;
+        };
+        let Some(doc) = self.docs.get(cell.doc).copied() else {
+            return false;
+        };
+        let range = self.laid.blocks[index].range.clone();
+        let text = self.doc_text(cell.doc);
+        let end = range.end + usize::from(text.as_bytes().get(range.end) == Some(&b'\n'));
+        cx.typing.flush(cx.history);
+        if edit::replace(cx, doc, range.start..end, "", None, &[]).is_none() {
+            return false;
+        }
+        cx.typing.flush(cx.history);
+        self.set_caret(
+            Caret {
+                doc: cell.doc,
+                offset: range.start,
+            },
+            false,
+        );
+        self.sync_text(cx);
+        true
+    }
+
+    /// Turns the table the caret is in into text: a paragraph for each
+    /// row, its cells parted by tabs.
+    pub fn table_to_text(&mut self, cx: &mut AppletContext<'_>) -> bool {
+        self.commit(cx);
+        let Some(cell) = self.cell.clone() else {
+            return false;
+        };
+        let Some(source) = TableSource::read(cx.arena(), cell.table) else {
+            return false;
+        };
+        let lines: Vec<String> = source
+            .cells
+            .iter()
+            .map(|row| row.join("\t").replace('\n', " "))
+            .collect();
+        let Some(index) = self.table_block(cell.doc, cell.table) else {
+            return false;
+        };
+        let Some(doc) = self.docs.get(cell.doc).copied() else {
+            return false;
+        };
+        let range = self.laid.blocks[index].range.clone();
+        self.cell = None;
+        cx.typing.flush(cx.history);
+        let Some(end) = edit::replace(cx, doc, range, &lines.join("\n"), None, &[]) else {
+            return false;
+        };
+        cx.typing.flush(cx.history);
+        self.set_caret(
+            Caret {
+                doc: cell.doc,
+                offset: end,
+            },
+            false,
+        );
+        self.sync_text(cx);
+        true
+    }
+
+    /// Turns the selected paragraphs into a table: a row for each, cut
+    /// into cells at its tabs (or, without tabs, at its commas).
+    pub fn text_to_table(&mut self, cx: &mut AppletContext<'_>) -> Option<EntityId> {
+        let range = self.paragraph_span();
+        let text = self.doc_text(self.caret.doc)[range.clone()].to_owned();
+        let tabs = text.contains('\t');
+        let cells: Vec<Vec<String>> = text
+            .lines()
+            .map(|line| {
+                if tabs {
+                    line.split('\t').map(str::to_owned).collect()
+                } else {
+                    line.split(',').map(|cell| cell.trim().to_owned()).collect()
+                }
+            })
+            .collect();
+        if cells.is_empty() {
+            return None;
+        }
+        let entity = crate::tables::table_of(&cells, 0);
+        self.place_table(cx, entity, range)
+    }
+
+    /// The selected paragraphs, without the last one's newline.
+    fn paragraph_span(&self) -> Range<usize> {
+        let text = self.doc_text(self.caret.doc);
+        let selection = self.selection();
+        let paragraphs = sue_model::paragraphs(text);
+        let first = sue_model::paragraph_at(text, selection.start);
+        let last = sue_model::paragraph_at(text, selection.end);
+        let start = paragraphs.get(first).map_or(0, |range| range.start);
+        let end = paragraphs.get(last).map_or(text.len(), |range| {
+            range.end - usize::from(text[range.clone()].ends_with('\n'))
+        });
+        start..end.max(start)
+    }
+
+    /// Puts `entity` in a paragraph of its own over the selection, as one
+    /// edit labeled `label`.
+    fn embed(&mut self, cx: &mut AppletContext<'_>, entity: EntityId, label: &str) {
         let Some(doc) = self.current() else {
             return;
         };
         let at = self.selection().start;
         let text = self.text().to_owned();
         let starts_line = at == 0 || text.as_bytes().get(at - 1) == Some(&b'\n');
-        let ends_line = text.as_bytes().get(at) == Some(&b'\n');
+        let ends_line = text.as_bytes().get(self.selection().end) == Some(&b'\n');
         let mut insert = String::new();
         if !starts_line {
             insert.push('\n');
@@ -486,7 +741,7 @@ impl Editor {
             return;
         };
         let object = object_at..object_at + sue_model::OBJECT.len_utf8();
-        edit::reformat(cx, doc, "Insert Picture", |_, marks| {
+        edit::reformat(cx, doc, label, |_, marks| {
             marks.set(object, kind::EMBED, Some(Value::Entity(entity)));
         });
         self.set_caret(
@@ -524,6 +779,18 @@ impl Editor {
             }
         }
         self.prepare(&ctx, cx, docs, view);
+        let rice = cx.rice();
+        self.motion = CaretMotion::new(
+            rice.get_bool(sue_wm::SMOOTH_CARET_KEY).unwrap_or(true),
+            rice.get_i64(sue_wm::CARET_GLIDE_KEY)
+                .unwrap_or(caret::GLIDE_MS),
+            cx.view.profile.budget().spring_physics,
+            &ui.visuals().text_cursor,
+        );
+        if !ctx.input(|input| input.focused) {
+            // The window is in the background: a lit caret, no frames.
+            self.motion.blink = None;
+        }
         let mut output = EditorOutput {
             pages: self.laid.pages,
             ..EditorOutput::default()
@@ -575,11 +842,22 @@ impl Editor {
         let mut blocks = Vec::new();
         let mut starts = Vec::with_capacity(docs.len());
         let figure_size = |id: EntityId| (view.figures)(id).map(|(_, size)| size);
+        let arena = cx.arena();
+        let tables = |id: EntityId| TableSource::read(arena, id);
         for (index, id) in docs.iter().enumerate() {
-            let revision = cx
-                .arena()
-                .get_by_id(*id)
-                .map_or(0, sue_core::Entity::revision);
+            let revision = arena.get_by_id(*id).map_or(0, sue_core::Entity::revision);
+            let embeds = self.marks[index]
+                .marks()
+                .iter()
+                .filter(|mark| mark.kind == kind::EMBED)
+                .filter_map(|mark| match mark.value {
+                    Value::Entity(embedded) => arena.get_by_id(embedded).ok(),
+                    _ => None,
+                })
+                .filter(|entity| entity.class() == sue_model::TEXT_TABLE)
+                .fold(0_u64, |hash, entity| {
+                    hash.rotate_left(7) ^ entity.revision()
+                });
             let key = DocKey {
                 revision,
                 sheet,
@@ -587,6 +865,7 @@ impl Editor {
                 scale: scale.to_bits(),
                 fonts,
                 ink,
+                embeds,
             };
             let fresh = self.cache.get(id).is_some_and(|cached| cached.key == key);
             if !fresh {
@@ -600,6 +879,7 @@ impl Editor {
                     text: &self.texts[index],
                     marks: &self.marks[index],
                     figure_size: &figure_size,
+                    tables: &tables,
                 };
                 let laid = lay_document(ctx, index, &source, &setting);
                 self.cache.insert(*id, Cached { key, blocks: laid });
@@ -632,6 +912,303 @@ impl Editor {
         }
         self.caret = self.clamp(self.caret);
         self.anchor = self.clamp(self.anchor);
+        self.keep_cell(cx);
+    }
+
+    /// Keeps the cell caret in a cell of a table still shown, or lets it go.
+    fn keep_cell(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(cell) = &mut self.cell else {
+            return;
+        };
+        let table = self
+            .laid
+            .blocks
+            .iter()
+            .filter(|block| block.doc == cell.doc)
+            .find_map(|block| {
+                block
+                    .table
+                    .as_ref()
+                    .filter(|table| table.entity == cell.table)
+            });
+        match table {
+            Some(table) if !table.rows.is_empty() && table.columns() > 0 => {
+                cell.row = cell.row.min(table.rows.len() - 1);
+                cell.column = cell.column.min(table.columns() - 1);
+                let text = &table.texts[cell.row][cell.column];
+                cell.offset = cell.offset.min(text.len());
+                while !text.is_char_boundary(cell.offset) {
+                    cell.offset -= 1;
+                }
+            }
+            _ => {
+                if let Some(mut gone) = self.cell.take() {
+                    gone.commit(cx);
+                }
+            }
+        }
+    }
+
+    /// The table block holding `table` in shown document `doc`.
+    fn table_block(&self, doc: usize, table: EntityId) -> Option<usize> {
+        self.laid.blocks.iter().position(|block| {
+            block.doc == doc
+                && block
+                    .table
+                    .as_ref()
+                    .is_some_and(|laid| laid.entity == table)
+        })
+    }
+
+    /// Where row `row` of table block `index` is drawn: the top left of the
+    /// table for the piece showing that row.
+    fn table_origin(&self, index: usize, row: usize) -> Option<Pos2> {
+        let block = &self.laid.blocks[index];
+        let pieces = self.pieces_of.get(index)?.clone();
+        let piece = pieces
+            .clone()
+            .find(|piece| self.laid.pieces[*piece].rows.contains(&row))
+            .or(pieces.clone().next())?;
+        let (galley, _) = self.piece_place(piece);
+        let left = self.text_origin(self.laid.pieces[piece].page).x + block.indent;
+        Some(pos2(left, galley.y))
+    }
+
+    /// The caret's rectangle on screen, in a cell or in the text.
+    fn shown_caret(&self) -> Option<Rect> {
+        match &self.cell {
+            Some(cell) => {
+                let index = self.table_block(cell.doc, cell.table)?;
+                let table = self.laid.blocks[index].table.as_ref()?;
+                let origin = self.table_origin(index, cell.row)?;
+                let rect = table.caret(cell.row, cell.column, cell.offset)?;
+                Some(rect.translate(origin.to_vec2()))
+            }
+            None => self.caret_rect(self.caret),
+        }
+    }
+
+    /// The table cell under a point on screen, if any.
+    fn hit_cell(&self, pos: Pos2) -> Option<CellCaret> {
+        for (index, piece) in self.laid.pieces.iter().enumerate() {
+            let block = &self.laid.blocks[piece.block];
+            let Some(table) = &block.table else {
+                continue;
+            };
+            let (galley, clip) = self.piece_place(index);
+            let repeat = if piece.rows.start >= table.header_rows.max(1) {
+                table.repeat_height()
+            } else {
+                0.0
+            };
+            if pos.y < clip.top() - repeat || pos.y > clip.bottom() {
+                continue;
+            }
+            let left = self.text_origin(piece.page).x + block.indent;
+            let origin = pos2(left, galley.y);
+            let mut local = pos - origin;
+            if pos.y < clip.top() {
+                // In the heading rows repeated above this page's rows.
+                local.y = pos.y - (clip.top() - repeat) + table.rows[0].0;
+            }
+            if let Some((row, column, offset)) = table.hit(local) {
+                return Some(CellCaret::new(block.doc, table.entity, row, column, offset));
+            }
+        }
+        None
+    }
+
+    /// Records the typing in the cell the caret is in as one undo step; a
+    /// studio calls it before undo, redo and its own edits of the table.
+    pub fn commit(&mut self, cx: &mut AppletContext<'_>) {
+        if let Some(mut left) = self.left_cell.take() {
+            left.commit(cx);
+        }
+        if let Some(cell) = &mut self.cell {
+            cell.commit(cx);
+        }
+    }
+
+    /// The table and the cell (row, column) the caret is in.
+    #[must_use]
+    pub fn cell(&self) -> Option<(EntityId, usize, usize)> {
+        self.cell
+            .as_ref()
+            .map(|cell| (cell.table, cell.row, cell.column))
+    }
+
+    /// Puts the caret in cell `(row, column)` of table `table` in the
+    /// current document.
+    pub fn enter_cell(&mut self, table: EntityId, row: usize, column: usize) {
+        if self.left_cell.is_none() {
+            self.left_cell = self.cell.take();
+        }
+        self.cell = Some(CellCaret::new(self.caret.doc, table, row, column, 0));
+        self.follow = true;
+    }
+
+    /// Leaves the table the caret is in, for the paragraph after it (or
+    /// before it, with `up`).
+    pub fn leave_table(&mut self, up: bool) {
+        let Some(cell) = self.cell.take() else {
+            return;
+        };
+        let doc = cell.doc;
+        if let Some(index) = self.table_block(doc, cell.table) {
+            let range = self.laid.blocks[index].range.clone();
+            let text = self.doc_text(doc);
+            let offset = if up {
+                range.start.saturating_sub(1)
+            } else if range.end < self.last_offset(doc) {
+                range.end + usize::from(text.as_bytes().get(range.end) == Some(&b'\n'))
+            } else {
+                range.end
+            };
+            self.set_caret(Caret { doc, offset }, false);
+        }
+        if self.left_cell.is_none() {
+            self.left_cell = Some(cell);
+        }
+    }
+
+    /// Keys and text while the caret is in a cell. Returns `true` if the
+    /// table changed.
+    fn cell_keyboard(&mut self, ui: &Ui, cx: &mut AppletContext<'_>) -> bool {
+        let events = ui.input(|input| input.events.clone());
+        let mut changed = false;
+        for event in events {
+            let Some(cell) = self.cell.as_mut() else {
+                break;
+            };
+            let at = cell.offset;
+            match event {
+                Event::Text(text) if !text.chars().all(char::is_control) => {
+                    changed |= cell.replace(cx, at..at, &text);
+                }
+                Event::Ime(egui::ImeEvent::Preedit { text, .. }) => {
+                    self.preedit = (!text.is_empty()).then_some(text);
+                }
+                Event::Ime(egui::ImeEvent::Commit(text)) => {
+                    self.preedit = None;
+                    changed |= cell.replace(cx, at..at, &text);
+                }
+                Event::Paste(text) => {
+                    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+                    changed |= cell.replace(cx, at..at, text.trim_end_matches('\n'));
+                }
+                Event::Copy | Event::Cut => {
+                    ui.ctx().copy_text(cell.text(cx.arena()));
+                }
+                Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } => changed |= self.cell_key(cx, key, modifiers),
+                _ => {}
+            }
+        }
+        if changed {
+            self.follow = true;
+        }
+        changed
+    }
+
+    /// One key in a cell. Returns `true` if the table changed.
+    fn cell_key(&mut self, cx: &mut AppletContext<'_>, key: Key, modifiers: Modifiers) -> bool {
+        let Some(cell) = self.cell.as_mut() else {
+            return false;
+        };
+        let text = cell.text(cx.arena());
+        let (rows, columns) = crate::tables::size_of(cx.arena(), cell.table);
+        let columns = columns.max(1);
+        let at = cell.offset.min(text.len());
+        let place = cell.row * columns + cell.column;
+        match key {
+            Key::Backspace if at > 0 => {
+                let from = prev_boundary(&text, at);
+                cell.replace(cx, from..at, "")
+            }
+            Key::Delete if at < text.len() => {
+                let to = next_boundary(&text, at);
+                cell.replace(cx, at..to, "")
+            }
+            Key::Enter => cell.replace(cx, at..at, "\n"),
+            Key::ArrowLeft if at > 0 => {
+                cell.offset = prev_boundary(&text, at);
+                false
+            }
+            Key::ArrowRight if at < text.len() => {
+                cell.offset = next_boundary(&text, at);
+                false
+            }
+            Key::ArrowLeft | Key::ArrowRight => {
+                let forward = key == Key::ArrowRight;
+                if forward && place + 1 < rows * columns {
+                    cell.move_to(cx, (place + 1) / columns, (place + 1) % columns, false);
+                } else if !forward && place > 0 {
+                    cell.move_to(cx, (place - 1) / columns, (place - 1) % columns, true);
+                } else {
+                    self.leave_table(!forward);
+                }
+                false
+            }
+            Key::Home => {
+                cell.offset = 0;
+                false
+            }
+            Key::End => {
+                cell.offset = text.len();
+                false
+            }
+            Key::Tab if modifiers.shift => {
+                if place > 0 {
+                    cell.move_to(cx, (place - 1) / columns, (place - 1) % columns, true);
+                }
+                false
+            }
+            Key::Tab if place + 1 < rows * columns => {
+                cell.move_to(cx, (place + 1) / columns, (place + 1) % columns, true);
+                false
+            }
+            Key::Tab => {
+                // Tab in the last cell adds a row, as in every word processor.
+                cell.commit(cx);
+                let table = cell.table;
+                let grown = cx
+                    .apply(ArenaEdit(sue_model::Reshape::insert_rows(
+                        table,
+                        rows as u32,
+                        1,
+                        Some(Value::Text(String::new())),
+                    )))
+                    .is_ok();
+                if grown && let Some(cell) = self.cell.as_mut() {
+                    cell.row = rows;
+                    cell.column = 0;
+                    cell.offset = 0;
+                }
+                grown
+            }
+            Key::ArrowUp | Key::ArrowDown => {
+                let down = key == Key::ArrowDown;
+                if down && cell.row + 1 < rows {
+                    let (row, column) = (cell.row + 1, cell.column);
+                    cell.move_to(cx, row, column, false);
+                } else if !down && cell.row > 0 {
+                    let (row, column) = (cell.row - 1, cell.column);
+                    cell.move_to(cx, row, column, false);
+                } else {
+                    self.leave_table(!down);
+                }
+                false
+            }
+            Key::Escape => {
+                self.leave_table(false);
+                false
+            }
+            _ => false,
+        }
     }
 
     /// Keeps a place inside the shown documents, before their last newline.
@@ -685,6 +1262,9 @@ impl Editor {
             }
         }
         self.pointer(ui, &response, output);
+        if let Some(mut left) = self.left_cell.take() {
+            left.commit(cx);
+        }
         let focused = ctx.memory(|memory| memory.has_focus(self.id));
         if focused && resized && self.had_focus {
             self.follow = true;
@@ -704,25 +1284,35 @@ impl Editor {
             });
             // The shell and the studios treat Sue's text fields as typing.
             egui::text_edit::TextEditState::default().store(&ctx, self.id);
-            if !view.read_only && self.keyboard(ui, cx, view) {
+            let typed = !view.read_only
+                && if self.cell.is_some() {
+                    self.cell_keyboard(ui, cx)
+                } else {
+                    self.keyboard(ui, cx, view)
+                };
+            if let Some(mut left) = self.left_cell.take() {
+                left.commit(cx);
+            }
+            if typed {
                 output.changed = true;
                 let docs = self.docs.clone();
                 self.prepare(&ctx, cx, &docs, view);
             }
         }
-        self.paint(ui, view, focused);
+        let caret = self.caret_look(ui, view, focused, response.dragged());
+        self.paint(ui, view, focused, caret);
         if let Some(target) = self.scroll_target.take() {
             self.caret = self.clamp(target);
             self.follow = true;
         }
         if self.follow
-            && let Some(caret) = self.caret_rect(self.caret)
+            && let Some(caret) = self.shown_caret()
         {
             let align = view.typewriter.then_some(egui::Align::Center);
             ui.scroll_to_rect(caret.expand2(vec2(48.0, 36.0)), align);
             self.follow = false;
         }
-        if focused && let Some(caret) = self.caret_rect(self.caret) {
+        if focused && let Some(caret) = self.shown_caret() {
             let to_global = ctx
                 .layer_transform_to_global(ui.layer_id())
                 .unwrap_or_default();
@@ -1051,6 +1641,30 @@ impl Editor {
                 1
             };
             self.clicks = (time, pos, count);
+            if let Some(hit) = self.hit_cell(pos) {
+                // A press in a table puts the caret in that cell.
+                let same = self.cell.as_ref().is_some_and(|old| {
+                    (old.table, old.row, old.column) == (hit.table, hit.row, hit.column)
+                });
+                if same {
+                    if let Some(cell) = self.cell.as_mut() {
+                        cell.offset = hit.offset;
+                    }
+                } else {
+                    if self.left_cell.is_none() {
+                        self.left_cell = self.cell.take();
+                    }
+                    self.cell = Some(hit);
+                }
+                self.h_pos = None;
+                self.follow = true;
+                self.pending.clear();
+                return;
+            }
+            if self.cell.is_some() && self.left_cell.is_none() {
+                self.left_cell = self.cell.take();
+            }
+            self.cell = None;
             let caret = self.hit(pos);
             self.h_pos = None;
             match count {
@@ -1090,7 +1704,7 @@ impl Editor {
                 }
             }
             self.pending.clear();
-        } else if response.dragged() && self.clicks.2 == 1 {
+        } else if response.dragged() && self.clicks.2 == 1 && self.cell.is_none() {
             let mut caret = self.hit(pos);
             // Selections stay in one document.
             if caret.doc != self.anchor.doc {
@@ -1486,7 +2100,9 @@ impl Editor {
 
     // ----- Painting -----------------------------------------------------------------
 
-    fn paint(&self, ui: &Ui, view: &EditorView<'_>, focused: bool) {
+    /// Draws the desk, the pages, the text, the selection and `caret` (on
+    /// screen, from [`Self::caret_look`]).
+    fn paint(&self, ui: &Ui, view: &EditorView<'_>, focused: bool, caret: Option<Rect>) {
         let painter = ui.painter();
         let paged = matches!(view.mode, ViewMode::Page);
         painter.rect_filled(self.viewport, 0.0, view.desk);
@@ -1505,29 +2121,27 @@ impl Editor {
                 painter.rect_filled(rect, 0.0, view.ink.paper);
                 let small =
                     egui::FontId::new((9.0 * scale).max(6.0), egui::FontFamily::Proportional);
-                if view.page.numbers {
-                    painter.text(
-                        pos2(
-                            rect.center().x,
-                            rect.bottom() - view.page.margins[2] * scale * 0.5,
-                        ),
-                        egui::Align2::CENTER_CENTER,
-                        (page + 1).to_string(),
-                        small.clone(),
-                        view.ink.soft,
-                    );
-                }
-                if page > 0 && !view.page.header.is_empty() {
-                    painter.text(
-                        pos2(
-                            rect.center().x,
-                            rect.top() + view.page.margins[0] * scale * 0.5,
-                        ),
-                        egui::Align2::CENTER_CENTER,
-                        &view.page.header,
-                        small,
-                        view.ink.soft,
-                    );
+                let [margin_top, margin_right, margin_bottom, margin_left] =
+                    view.page.margins.map(|margin| margin * scale);
+                let furniture = view.page.furniture(page, self.laid.pages);
+                let rows = [
+                    rect.top() + margin_top * 0.5,
+                    rect.bottom() - margin_bottom * 0.5,
+                ];
+                for (parts, y) in furniture.into_iter().zip(rows) {
+                    let Some(parts) = parts else {
+                        continue;
+                    };
+                    let places = [
+                        (rect.left() + margin_left, egui::Align2::LEFT_CENTER),
+                        (rect.center().x, egui::Align2::CENTER_CENTER),
+                        (rect.right() - margin_right, egui::Align2::RIGHT_CENTER),
+                    ];
+                    for (text, (x, align)) in parts.iter().zip(places) {
+                        if !text.is_empty() {
+                            painter.text(pos2(x, y), align, text, small.clone(), view.ink.soft);
+                        }
+                    }
                 }
             }
         } else {
@@ -1600,6 +2214,18 @@ impl Editor {
             if selecting && self.caret.doc == block.doc {
                 self.paint_selection(painter, block, piece, galley_at, &selection, select_color);
             }
+            if let Some(table) = &block.table {
+                let origin = pos2(text_left + block.indent, galley_at.y);
+                paint_table(
+                    painter,
+                    table,
+                    piece.rows.clone(),
+                    origin,
+                    view.ink.text,
+                    view.ink.shade,
+                );
+                continue;
+            }
             if let Some((entity, size)) = block.figure {
                 let rect = Rect::from_min_size(
                     pos2(
@@ -1643,30 +2269,110 @@ impl Editor {
                 painter.galley(at, label.clone(), view.ink.text);
             }
         }
-        if focused && let Some(caret) = self.caret_rect(self.caret) {
+        if let Some(bar) = caret {
             let width = (1.5 * view.zoom).clamp(1.0, 3.0);
-            if let Some(preedit) = &self.preedit {
-                let size = caret.height() * 0.75;
-                let job = LayoutJob::single_section(
-                    preedit.clone(),
-                    TextFormat {
-                        font_id: egui::FontId::proportional(size),
-                        color: view.ink.text,
-                        background: view.ink.paper,
-                        underline: Stroke::new(1.0, view.ink.text),
-                        ..TextFormat::default()
-                    },
-                );
-                let galley = ui.ctx().fonts_mut(|fonts| fonts.layout_job(job));
-                painter.galley(caret.min, galley, view.ink.text);
-            } else {
-                painter.rect_filled(
-                    Rect::from_min_max(caret.min, pos2(caret.min.x + width, caret.max.y)),
-                    0.0,
-                    view.ink.text,
-                );
-            }
+            painter.rect_filled(
+                Rect::from_min_max(bar.min, pos2(bar.min.x + width, bar.max.y)),
+                0.0,
+                view.ink.text,
+            );
         }
+        if focused
+            && let Some(preedit) = &self.preedit
+            && let Some(caret) = self.caret_rect(self.caret)
+        {
+            let size = caret.height() * 0.75;
+            let job = LayoutJob::single_section(
+                preedit.clone(),
+                TextFormat {
+                    font_id: egui::FontId::proportional(size),
+                    color: view.ink.text,
+                    background: view.ink.paper,
+                    underline: Stroke::new(1.0, view.ink.text),
+                    ..TextFormat::default()
+                },
+            );
+            let galley = ui.ctx().fonts_mut(|fonts| fonts.layout_job(job));
+            painter.galley(caret.min, galley, view.ink.text);
+        }
+    }
+
+    /// Where to draw the caret this frame, on screen: gliding to its place
+    /// and blinking at rest ([`crate::caret`]). `None` while the blink has
+    /// it dark, or when it is not drawn (no keyboard, or an input method
+    /// composing in its place). Asks for the frames that need it and no
+    /// others.
+    fn caret_look(
+        &mut self,
+        ui: &Ui,
+        view: &EditorView<'_>,
+        focused: bool,
+        dragging: bool,
+    ) -> Option<Rect> {
+        let target = self.shown_caret();
+        let shown = focused && self.preedit.is_none() && target.is_some();
+        let offset = self.origin.to_vec2();
+        let frame = caret::Frame {
+            target: target.unwrap_or(Rect::NOTHING).translate(-offset),
+            cause: self.caret_cause(),
+            view: self.view_key(view),
+            shown,
+            viewport: self.viewport.translate(-offset),
+            now: ui.input(|input| input.time),
+            dragging,
+        };
+        let look = self.glide.frame(frame, self.motion);
+        if look.moving {
+            ui.ctx().request_repaint();
+        } else if shown
+            && let Some(wake) = look
+                .wake
+                .and_then(|wake| Duration::try_from_secs_f64(wake).ok())
+        {
+            ui.ctx().request_repaint_after(wake);
+        }
+        let target = target?;
+        // At rest the caret's own bar is drawn, untouched.
+        let bar = if look.moving {
+            look.bar.translate(offset)
+        } else {
+            target
+        };
+        (shown && look.lit).then_some(bar)
+    }
+
+    /// What puts the caret where it is: its place and its document's
+    /// revision. It glides when this changes.
+    fn caret_cause(&self) -> u64 {
+        let revision = self
+            .docs
+            .get(self.caret.doc)
+            .and_then(|id| self.cache.get(id))
+            .map_or(0, |cached| cached.key.revision);
+        let mut hasher = DefaultHasher::new();
+        (self.caret.doc, self.caret.offset, revision).hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// How the documents are shown: which ones, the zoom, the page and
+    /// where it sits. The caret never glides across a change of these.
+    fn view_key(&self, view: &EditorView<'_>) -> u64 {
+        let mode = match view.mode {
+            ViewMode::Page => 0,
+            ViewMode::Draft { width } => width.to_bits(),
+        };
+        let mut hasher = DefaultHasher::new();
+        (
+            &self.docs,
+            mode,
+            view.zoom.to_bits(),
+            self.laid.page.x.to_bits(),
+            self.laid.page.y.to_bits(),
+            self.page_x.to_bits(),
+            self.gap.to_bits(),
+        )
+            .hash(&mut hasher);
+        hasher.finish()
     }
 
     fn paint_selection(

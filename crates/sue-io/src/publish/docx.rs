@@ -238,7 +238,17 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
             false,
         ),
     ];
-    if book.page_numbers {
+    let has_header = !book.header.is_empty();
+    let has_footer = !book.footer.is_empty();
+    if has_header {
+        relations.push((
+            "rIdHeader".into(),
+            "header".into(),
+            "header1.xml".into(),
+            false,
+        ));
+    }
+    if has_footer {
         relations.push((
             "rIdFooter".into(),
             "footer".into(),
@@ -323,6 +333,11 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
             if let Some(align) = &para.align {
                 let _ = write!(props, "<w:jc w:val=\"{}\"/>", jc(align));
             }
+            if let Some(table) = book.table(&para) {
+                let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+                body.push_str(&table_xml(table, width));
+                continue;
+            }
             let _ = write!(body, "<w:p><w:pPr>{props}</w:pPr>");
             if let Some(id) = para.embed
                 && let Some(figure) = book.figures.get(&id)
@@ -365,14 +380,21 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
         }
     }
     let [top, right, bottom, left] = book.margins;
-    let footer = if book.page_numbers {
-        "<w:footerReference w:type=\"default\" r:id=\"rIdFooter\"/>"
+    let mut references = String::new();
+    if has_header {
+        references.push_str("<w:headerReference w:type=\"default\" r:id=\"rIdHeader\"/>");
+    }
+    if has_footer {
+        references.push_str("<w:footerReference w:type=\"default\" r:id=\"rIdFooter\"/>");
+    }
+    let title_page = if book.different_first {
+        "<w:titlePg/>"
     } else {
         ""
     };
     let _ = write!(
         body,
-        "<w:sectPr>{footer}<w:pgSz w:w=\"{}\" w:h=\"{}\"/><w:pgMar w:top=\"{}\" w:right=\"{}\" w:bottom=\"{}\" w:left=\"{}\" w:header=\"720\" w:footer=\"720\" w:gutter=\"0\"/></w:sectPr>",
+        "<w:sectPr>{references}<w:pgSz w:w=\"{}\" w:h=\"{}\"/><w:pgMar w:top=\"{}\" w:right=\"{}\" w:bottom=\"{}\" w:left=\"{}\" w:header=\"720\" w:footer=\"720\" w:gutter=\"0\"/>{title_page}</w:sectPr>",
         twips(book.page[0]),
         twips(book.page[1]),
         twips(top),
@@ -450,9 +472,9 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
     let settings = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:settings xmlns:w=\"{W}\"><w:defaultTabStop w:val=\"720\"/><w:compat><w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"15\"/></w:compat></w:settings>"
     );
-    let footer = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:ftr xmlns:w=\"{W}\"><w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType=\"end\"/></w:r></w:p></w:ftr>"
-    );
+    let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+    let header = running_xml(book, &book.header, "w:hdr", width);
+    let footer = running_xml(book, &book.footer, "w:ftr", width);
 
     let mut rels = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
@@ -475,7 +497,13 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
     let mut types = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"png\" ContentType=\"image/png\"/><Override PartName=\"/word/document.xml\" ContentType=\"{main}.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"{main}.styles+xml\"/><Override PartName=\"/word/numbering.xml\" ContentType=\"{main}.numbering+xml\"/><Override PartName=\"/word/footnotes.xml\" ContentType=\"{main}.footnotes+xml\"/><Override PartName=\"/word/settings.xml\" ContentType=\"{main}.settings+xml\"/><Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/><Override PartName=\"/docProps/app.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.extended-properties+xml\"/>"
     );
-    if book.page_numbers {
+    if has_header {
+        let _ = write!(
+            types,
+            "<Override PartName=\"/word/header1.xml\" ContentType=\"{main}.header+xml\"/>"
+        );
+    }
+    if has_footer {
         let _ = write!(
             types,
             "<Override PartName=\"/word/footer1.xml\" ContentType=\"{main}.footer+xml\"/>"
@@ -501,7 +529,10 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
     zip.add_text("word/numbering.xml", &numbering);
     zip.add_text("word/footnotes.xml", &footnotes);
     zip.add_text("word/settings.xml", &settings);
-    if book.page_numbers {
+    if has_header {
+        zip.add_text("word/header1.xml", &header);
+    }
+    if has_footer {
         zip.add_text("word/footer1.xml", &footer);
     }
     zip.add_text("word/_rels/document.xml.rels", &rels);
@@ -824,9 +855,120 @@ pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
     Ok((text, marks))
 }
 
+/// A running header (`w:hdr`) or footer (`w:ftr`) part: one paragraph with
+/// a centered and a right tab stop across `width` points, its page fields
+/// Word's own `PAGE` and `NUMPAGES`.
+fn running_xml(book: &Book, running: &sue_model::Running, tag: &str, width: f32) -> String {
+    use crate::publish::Live;
+    let mut out = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<{tag} xmlns:w=\"{W}\"><w:p><w:pPr><w:tabs><w:tab w:val=\"center\" w:pos=\"{}\"/><w:tab w:val=\"right\" w:pos=\"{}\"/></w:tabs><w:rPr><w:sz w:val=\"18\"/></w:rPr></w:pPr>",
+        twips(width / 2.0),
+        twips(width)
+    );
+    for (index, part) in book.live(running).iter().enumerate() {
+        if index > 0 {
+            out.push_str("<w:r><w:tab/></w:r>");
+        }
+        for piece in part {
+            match piece {
+                Live::Text(text) if !text.is_empty() => {
+                    let _ = write!(
+                        out,
+                        "<w:r><w:rPr><w:sz w:val=\"18\"/></w:rPr>{}</w:r>",
+                        run_text(text)
+                    );
+                }
+                Live::Text(_) => {}
+                Live::Page | Live::Pages => {
+                    let code = if *piece == Live::Page {
+                        "PAGE"
+                    } else {
+                        "NUMPAGES"
+                    };
+                    let _ = write!(
+                        out,
+                        "<w:fldSimple w:instr=\" {code} \"><w:r><w:rPr><w:sz w:val=\"18\"/></w:rPr><w:t>1</w:t></w:r></w:fldSimple>"
+                    );
+                }
+            }
+        }
+    }
+    let _ = write!(out, "</w:p></{tag}>");
+    out
+}
+
+/// A table as WordprocessingML, `width` points across: a grid of the
+/// column widths, single borders, the heading rows marked to repeat.
+fn table_xml(table: &crate::publish::PublishTable, width: f32) -> String {
+    let columns = table.columns().max(1);
+    let widths: Vec<i32> = (0..columns)
+        .map(|column| twips(width * table.share(column)))
+        .collect();
+    let mut out =
+        String::from("<w:tbl><w:tblPr><w:tblW w:w=\"5000\" w:type=\"pct\"/><w:tblBorders>");
+    for side in ["top", "left", "bottom", "right", "insideH", "insideV"] {
+        let _ = write!(
+            out,
+            "<w:{side} w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>"
+        );
+    }
+    out.push_str("</w:tblBorders><w:tblLayout w:type=\"fixed\"/></w:tblPr><w:tblGrid>");
+    for width in &widths {
+        let _ = write!(out, "<w:gridCol w:w=\"{width}\"/>");
+    }
+    out.push_str("</w:tblGrid>");
+    for (row, cells) in table.cells.iter().enumerate() {
+        let heading = row < table.header_rows;
+        out.push_str("<w:tr>");
+        if heading {
+            out.push_str("<w:trPr><w:tblHeader/></w:trPr>");
+        }
+        for (column, width) in widths.iter().enumerate() {
+            let _ = write!(
+                out,
+                "<w:tc><w:tcPr><w:tcW w:w=\"{width}\" w:type=\"dxa\"/></w:tcPr>"
+            );
+            let text = cells.get(column).map_or("", String::as_str);
+            for line in text.split('\n') {
+                out.push_str("<w:p>");
+                if !line.is_empty() {
+                    let bold = if heading { "<w:rPr><w:b/></w:rPr>" } else { "" };
+                    let _ = write!(out, "<w:r>{bold}{}</w:r>", run_text(line));
+                }
+                out.push_str("</w:p>");
+            }
+            out.push_str("</w:tc>");
+        }
+        out.push_str("</w:tr>");
+    }
+    out.push_str("</w:tbl>");
+    out
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn word_headers_and_footers_carry_live_page_fields() {
+        let mut book = sample();
+        book.header = sue_model::Running::parse("{title}\t\tPage {page} of {pages}");
+        book.different_first = true;
+        let bytes = to_docx(&book);
+        let files: HashMap<String, Vec<u8>> = read_zip(&bytes).unwrap().into_iter().collect();
+        let header = String::from_utf8(files["word/header1.xml"].clone()).unwrap();
+        assert!(header.contains("My Story"), "{header}");
+        assert!(header.contains("w:instr=\" PAGE \""));
+        assert!(header.contains("w:instr=\" NUMPAGES \""));
+        assert_eq!(header.matches("<w:tab/>").count(), 2);
+        assert!(files.contains_key("word/footer1.xml"));
+        let document = String::from_utf8(files["word/document.xml"].clone()).unwrap();
+        assert!(document.contains("<w:headerReference w:type=\"default\" r:id=\"rIdHeader\"/>"));
+        assert!(document.contains("<w:titlePg/></w:sectPr>"));
+        let rels = String::from_utf8(files["word/_rels/document.xml.rels"].clone()).unwrap();
+        assert!(rels.contains("header1.xml"));
+    }
+
     use super::super::tests::sample;
+    use super::super::tests::with_table;
     use super::*;
 
     #[test]
@@ -884,5 +1026,22 @@ mod tests {
             .unwrap();
         assert_eq!(note.value.as_str(), Some("Or so they say."));
         assert!(from_docx(b"nope").is_err());
+    }
+
+    #[test]
+    fn word_tables_have_their_grid_borders_and_heading_row() {
+        let bytes = to_docx(&with_table());
+        let files: HashMap<String, Vec<u8>> = read_zip(&bytes).unwrap().into_iter().collect();
+        let xml = String::from_utf8(files["word/document.xml"].clone()).unwrap();
+        assert_eq!(
+            xml.matches("<w:tc>").count(),
+            xml.matches("</w:tc>").count()
+        );
+        assert!(xml.contains("<w:tbl>"), "{xml}");
+        assert_eq!(xml.matches("<w:gridCol ").count(), 2);
+        assert_eq!(xml.matches("<w:tr>").count(), 2);
+        assert_eq!(xml.matches("<w:tblHeader/>").count(), 1);
+        assert!(xml.contains("Count &amp; size"));
+        assert!(xml.contains("Bolt &lt;M8&gt;"));
     }
 }

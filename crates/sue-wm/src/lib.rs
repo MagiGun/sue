@@ -49,7 +49,9 @@ pub use catalog::{
     SettingsItem, SettingsPage,
 };
 pub use color_pick::{ColorPick, alpha_bar, color_button, color_wheel, hsv_of, rgb_of, swatch};
-pub use config::{Keymap, WmConfig, register_rice, rice_declarations};
+pub use config::{
+    CARET_GLIDE_KEY, Keymap, SMOOTH_CARET_KEY, WmConfig, register_rice, rice_declarations,
+};
 pub use error::WmError;
 pub use launchpad::{AppletFactory, Applets, Launchpad};
 pub use layout::{LayoutMetrics, LayoutRequest, LayoutSolution, bar_height, solve_layout};

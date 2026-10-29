@@ -51,6 +51,11 @@ pub fn to_rtf(book: &Book) -> String {
         for para in paragraphs(&section.text, &section.marks) {
             let style = book.style(&para.style);
             let base = font(&style.font);
+            if let Some(table) = book.table(&para) {
+                let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+                body.push_str(&table_rtf(table, width, base, style.size));
+                continue;
+            }
             let _ = write!(
                 body,
                 "\\pard\\plain\\f{base}\\fs{}",
@@ -182,19 +187,97 @@ pub fn to_rtf(book: &Book) -> String {
         twips(bottom),
         twips(left)
     );
-    if book.page_numbers {
-        out.push_str(
-            "{\\footer\\pard\\qc\\plain\\fs20 {\\field{\\*\\fldinst PAGE}{\\fldrslt 1}}\\par}\n",
-        );
+    let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+    if book.different_first {
+        out.push_str("\\titlepg{\\headerf\\pard\\par}{\\footerf\\pard\\par}\n");
+    }
+    for (running, group) in [(&book.header, "header"), (&book.footer, "footer")] {
+        if !running.is_empty() {
+            out.push_str(&running_rtf(book, running, group, width));
+        }
     }
     out.push_str(&body);
     out.push_str("}\n");
     out
 }
 
+/// A running header or footer group (`header` or `footer`): its parts
+/// parted by tabs at a centered and a right tab stop, its page fields
+/// RTF's own.
+fn running_rtf(book: &Book, running: &sue_model::Running, group: &str, width: f32) -> String {
+    use crate::publish::Live;
+    let mut out = format!(
+        "{{\\{group}\\pard\\plain\\tqc\\tx{}\\tqr\\tx{}\\fs18 ",
+        twips(width / 2.0),
+        twips(width)
+    );
+    for (index, part) in book.live(running).iter().enumerate() {
+        if index > 0 {
+            out.push_str("\\tab ");
+        }
+        for piece in part {
+            match piece {
+                Live::Text(text) => out.push_str(&escape(text)),
+                Live::Page => out.push_str("{\\field{\\*\\fldinst PAGE}{\\fldrslt 1}}"),
+                Live::Pages => out.push_str("{\\field{\\*\\fldinst NUMPAGES}{\\fldrslt 1}}"),
+            }
+        }
+    }
+    out.push_str("\\par}\n");
+    out
+}
+
+/// A table as RTF rows, `width` points across, in font `font` at `size`.
+fn table_rtf(table: &crate::publish::PublishTable, width: f32, font: usize, size: f32) -> String {
+    let columns = table.columns().max(1);
+    let mut out = String::new();
+    for (row, cells) in table.cells.iter().enumerate() {
+        out.push_str("\\trowd\\trgaph72");
+        if row < table.header_rows {
+            out.push_str("\\trhdr");
+        }
+        let mut right = 0.0;
+        for column in 0..columns {
+            right += width * table.share(column);
+            for side in ["t", "l", "b", "r"] {
+                let _ = write!(out, "\\clbrdr{side}\\brdrs\\brdrw10");
+            }
+            let _ = write!(out, "\\cellx{}", twips(right));
+        }
+        out.push('\n');
+        for column in 0..columns {
+            let text = cells.get(column).map_or("", String::as_str);
+            let _ = writeln!(
+                out,
+                "\\pard\\intbl\\plain\\f{font}\\fs{}{} {}\\cell",
+                (size * 2.0).round() as i32,
+                if row < table.header_rows { "\\b" } else { "" },
+                escape(text).replace('\n', "\\line ")
+            );
+        }
+        out.push_str("\\row\n");
+    }
+    out.push_str("\\pard\n");
+    out
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rtf_headers_and_footers_carry_live_page_fields() {
+        let mut book = sample();
+        book.header = sue_model::Running::parse("{title}");
+        book.footer = sue_model::Running::parse("\t\t{page} of {pages}");
+        book.different_first = true;
+        let rtf = to_rtf(&book);
+        assert!(rtf.contains("{\\header\\pard"), "{rtf}");
+        assert!(rtf.contains("\\tab My Story\\tab"));
+        assert!(rtf.contains("\\fldinst NUMPAGES"));
+        assert!(rtf.contains("\\titlepg"));
+    }
+
     use super::super::tests::sample;
+    use super::super::tests::with_table;
     use super::*;
 
     #[test]
@@ -206,5 +289,13 @@ mod tests {
         assert!(rtf.contains("\\bullet\\tab"));
         assert_eq!(rtf.matches('{').count(), rtf.matches('}').count());
         assert_eq!(escape("é{"), "\\u233?\\{");
+    }
+
+    #[test]
+    fn rtf_tables_are_rows_of_cells() {
+        let rtf = to_rtf(&with_table());
+        assert_eq!(rtf.matches("\\row").count(), 2, "{rtf}");
+        assert_eq!(rtf.matches("\\trhdr").count(), 1);
+        assert_eq!(rtf.matches("\\cell\n").count(), 4);
     }
 }

@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use sue_core::{EntityId, Value};
-use sue_model::{CharFormat, TextMarks, mark_kind as kind};
+use sue_model::{CharFormat, Running, RunningPiece, TextMarks, mark_kind as kind, running_pieces};
 
 pub use docx::{from_docx, to_docx};
 pub use epub::to_epub;
@@ -166,6 +166,45 @@ pub struct Figure {
     pub height: u32,
 }
 
+/// A table a book shows (its `embed` marks name the entity).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PublishTable {
+    /// Each cell's text, row by row (a cell's lines part at newlines).
+    pub cells: Vec<Vec<String>>,
+    /// Rows at the top that are headings.
+    pub header_rows: usize,
+    /// Each column's share of the width, adding up to one.
+    pub shares: Vec<f32>,
+}
+
+impl PublishTable {
+    /// The number of columns.
+    #[must_use]
+    pub fn columns(&self) -> usize {
+        self.shares
+            .len()
+            .max(self.cells.iter().map(Vec::len).max().unwrap_or(0))
+    }
+
+    /// Column `column`'s share of the width.
+    #[must_use]
+    pub fn share(&self, column: usize) -> f32 {
+        self.shares
+            .get(column)
+            .copied()
+            .unwrap_or(1.0 / self.columns().max(1) as f32)
+    }
+
+    /// Cell `(row, column)`'s text (empty where a row is short).
+    #[must_use]
+    pub fn cell(&self, row: usize, column: usize) -> &str {
+        self.cells
+            .get(row)
+            .and_then(|cells| cells.get(column))
+            .map_or("", String::as_str)
+    }
+}
+
 /// What a publishing format writes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Book {
@@ -183,12 +222,53 @@ pub struct Book {
     pub styles: Vec<PublishStyle>,
     /// The pictures.
     pub figures: HashMap<EntityId, Figure>,
+    /// The tables.
+    pub tables: HashMap<EntityId, PublishTable>,
     /// The page size.
     pub page: [f32; 2],
     /// Top, right, bottom and left margins.
     pub margins: [f32; 4],
-    /// Page numbers in the footer.
-    pub page_numbers: bool,
+    /// The running header, in the top margin.
+    pub header: Running,
+    /// The running footer (the page number in the middle by default).
+    pub footer: Running,
+    /// No header or footer on the first page.
+    pub different_first: bool,
+    /// The date a `{date}` field shows.
+    pub date: String,
+}
+
+/// A piece of a running header or footer as a format writes it: text, or
+/// a field the reader's program fills in on each page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Live {
+    /// Text.
+    Text(String),
+    /// The page's number.
+    Page,
+    /// The number of pages.
+    Pages,
+}
+
+impl Book {
+    /// The left, middle and right parts of `running`, with the book's own
+    /// title, author and date filled in and the page fields left live.
+    pub(crate) fn live(&self, running: &Running) -> [Vec<Live>; 3] {
+        [&running.left, &running.center, &running.right].map(|part| {
+            running_pieces(part)
+                .into_iter()
+                .map(|piece| match piece {
+                    RunningPiece::Text(text) => Live::Text(text.to_owned()),
+                    RunningPiece::Field("page") => Live::Page,
+                    RunningPiece::Field("pages") => Live::Pages,
+                    RunningPiece::Field("title") => Live::Text(self.title.clone()),
+                    RunningPiece::Field("author") => Live::Text(self.author.clone()),
+                    RunningPiece::Field("date") => Live::Text(self.date.clone()),
+                    RunningPiece::Field(other) => Live::Text(format!("{{{other}}}")),
+                })
+                .collect()
+        })
+    }
 }
 
 impl Book {
@@ -209,10 +289,20 @@ impl Book {
             }],
             styles: PublishStyle::defaults(),
             figures: HashMap::new(),
+            tables: HashMap::new(),
             page: [612.0, 792.0],
             margins: [72.0; 4],
-            page_numbers: true,
+            header: Running::default(),
+            footer: Running::parse("{page}"),
+            different_first: false,
+            date: String::new(),
         }
+    }
+
+    /// The table paragraph `para` shows, if it shows one.
+    #[must_use]
+    pub fn table(&self, para: &Para) -> Option<&PublishTable> {
+        para.embed.and_then(|id| self.tables.get(&id))
     }
 
     /// The style `key`, else body text.
@@ -365,6 +455,13 @@ pub fn to_text(book: &Book) -> String {
             out.push('\n');
         }
         for para in paragraphs(&section.text, &section.marks) {
+            if let Some(table) = book.table(&para) {
+                for row in &table.cells {
+                    out.push_str(&row.join("\t").replace('\n', " "));
+                    out.push('\n');
+                }
+                continue;
+            }
             if para.embed.is_some() {
                 continue;
             }
@@ -413,6 +510,41 @@ mod tests {
         let mut book = Book::single("My Story", text, &marks);
         book.author = "A. Writer".to_owned();
         book
+    }
+
+    /// A book holding a table between two paragraphs.
+    pub(crate) fn with_table() -> Book {
+        let text = format!("Parts\n{}\nThe end.\n", sue_model::OBJECT);
+        let mut marks = TextMarks::new();
+        let at = text.find(sue_model::OBJECT).unwrap_or(0);
+        let id = EntityId::new();
+        marks.set(
+            at..at + sue_model::OBJECT.len_utf8(),
+            kind::EMBED,
+            Some(Value::Entity(id)),
+        );
+        let mut book = Book::single("Parts", &text, &marks);
+        book.tables.insert(
+            id,
+            PublishTable {
+                cells: vec![
+                    vec!["Item".to_owned(), "Count & size".to_owned()],
+                    vec!["Bolt <M8>".to_owned(), "40".to_owned()],
+                ],
+                header_rows: 1,
+                shares: vec![0.7, 0.3],
+            },
+        );
+        book
+    }
+
+    #[test]
+    fn tables_go_into_plain_text_by_rows() {
+        let plain = to_text(&with_table());
+        assert!(
+            plain.contains("Item\tCount & size\nBolt <M8>\t40\n"),
+            "{plain}"
+        );
     }
 
     #[test]

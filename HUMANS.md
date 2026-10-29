@@ -511,6 +511,14 @@ screenplay, Enter and Tab move between scene headings, action, characters,
 parentheticals and dialogue, each at its proper indent, typed in capitals
 where it should be. Quotes turn curly as you type (Settings, Studios).
 
+Typing feels smooth: the caret glides to its new place instead of jumping,
+whether you type, delete, move with the arrow keys, Home and End, click
+somewhere else, or the text wraps to a new line or page. It blinks only while
+it rests, and after ten seconds without a move it stays lit, so an idle
+window draws nothing. **Smooth Caret** (Settings, Display & Graphics, Motion)
+turns the glide off, and **Caret Glide Time** sets how fast it is; older
+machines skip it.
+
 For long work it is also a writing studio:
 
 - **The binder** on the left holds your chapters and scenes, research and a
@@ -527,6 +535,24 @@ For long work it is also a writing studio:
 - **Composition mode** (`F11`) leaves nothing but your words on a dark page,
   the line you are on kept in the middle. `Esc` comes back.
 - **Find and replace** across one scene or the whole project.
+
+**Tables** come from Table, Insert Table (`Ctrl+F12`): choose the columns
+and rows, and whether the first row is a heading. Click in a cell and type;
+`Tab` goes to the next cell and, in the last one, adds a row; `Shift+Tab`
+goes back, and the arrow keys move between cells and out of the table. The
+Table menu inserts rows and columns, deletes them or the whole table, turns
+the heading row on and off, and converts text with tabs or commas into a
+table and back. A table that runs onto the next page breaks between rows and
+repeats its heading row at the top. Tables go into every format you compile
+to, PDF and Word included.
+
+**Headers and footers** come from Insert, Header and Footer: each has a
+left, a middle and a right part, and the buttons below put in the page
+number, the page count, the title, the author or the date, which every page
+fills in (`Page {page} of {pages}`). The footer holds the page number until
+you change it. **Different first page** leaves a title page without them.
+They show on the pages as you write, print in PDFs, and go into Word,
+OpenDocument and RTF files as live page numbers.
 
 When you are done, **Compile** (`Ctrl+Shift+E`) puts the book together, with
 chapter titles from your folders, scene breaks and a title page, and saves it
