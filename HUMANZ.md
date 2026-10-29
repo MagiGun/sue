@@ -1218,9 +1218,31 @@ bilinear when growing, premultiplied); frame panels and balloons move and
 scale with them. Each is one `Batch` of `ReplaceComponent`s and properties.
 
 **Symmetry.** The symmetrical ruler (the Ruler tool) has a center, an angle,
-a number of turns and Line symmetry; a stroke paints once through each of
-its copies (`brush::symmetry`, affine maps) into the one stroke's coverage,
-so copies never stack and the stroke stays one undo step.
+a number of lines (counting the mirrored ones, as Clip Studio Paint does)
+and Line symmetry; a stroke paints once through each of its copies
+(`brush::symmetry`, affine maps) into the one stroke's coverage, so copies
+never stack and the stroke stays one undo step.
+
+**Rulers.** A picture keeps its rulers as text properties
+(`sue_paint::rulers`): `ruler.linear` (two ends), `ruler.special` (parallel
+lines at an angle, radial lines or concentric circles about a center),
+`ruler.perspective` (one to three vanishing points, the first two on the eye
+level) and `ruler.symmetry`, so each is undone, saved and opened with the
+picture. The Ruler tool has Clip Studio Paint's sub tools: Linear Ruler,
+Special Ruler, Perspective Ruler (Add vanishing point: two dragged lines
+cross at the new point; Delete vanishing point; Fix eye level) and
+Symmetrical Ruler; dragging a vanishing point, the eye level or a linear
+ruler's end moves it, shown live and recorded as one `SetProperty` on
+release. Create Perspective Ruler lays one, two or three points as Clip
+Studio Paint does (the middle, the left and right edges at mid height, and
+one far below). A stroke follows them through `rulers::Snap`: one near the
+linear ruler goes onto it at once (Snap to Ruler); otherwise the guides
+through its first point (toward each vanishing point, level and upright
+for one point, upright for two, the special ruler's line or circle) wait
+until the pen has moved 4 screen pixels, the one running most like the pen
+is chosen, and every sample, stabilized point and catch-up point after is
+projected onto it, with post correction and flicks off so the line stays
+exact (Snap to Special Ruler).
 
 **Text.** A text layer (`sue.paint.text`) keeps its words, font, size, ink,
 placement, centering and vertical setting and draws them again after every
@@ -1753,7 +1775,8 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: pen pressure curves and dynamics, starting and ending modes, color jitter, puppet warp, stories and the Page Manager, frame borders, balloons, focus and speed lines, screentone, animation timelines with onion skin and GIF export | **Implemented**; end-to-end tests drive puppet warp, stories, manga and animation with egui events, and snapshots show the pressure dialog, the Page Manager and the Timeline | `sue-paint`, `bins/sue/src/runtime.rs`, `snapshot.rs` |
 | §3.7 Sue Paint: scale and free transform, layer folders, layer masks, canvas size, crop and resolution, the symmetrical ruler, text layers and balloon text, tone curve, levels, color balance and gradient maps | **Implemented**; end-to-end tests drive each with egui events (Ctrl+T, Ctrl+G and the folder moves, crop, a mirrored stroke, a mask erased, words written and edited) | `sue-paint`, `sue-type/src/raster.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: Close gap and Area scaling, the Blend tool (Blur, Finger Tip, Liquify) and correction layers | **Implemented**; unit tests for a fill held in a broken ring, every dab kind and every correction read back from its text; end-to-end runs that liquify a stroke and add, undo and cancel correction layers | `sue-paint/src/fill.rs`, `blend.rs`, `composite.rs`, `bins/sue/src/runtime.rs` |
-| §3.7 Sue Paint: vector layers, perspective rulers, materials, the camera folder, light table and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
+| §3.7 Sue Paint: rulers (linear, parallel and radial lines, concentric circles, 1, 2 and 3-point perspective, symmetry), saved on the picture | **Implemented**; unit tests for their text, the guide a stroke chooses, and vanishing points made and moved; an end-to-end run that creates a 2-point ruler, holds a drifting stroke upright (and not with snapping off), adds a third point from two lines, and deletes and undoes | `sue-paint/src/rulers.rs`, `canvas.rs`, `bins/sue/src/runtime.rs` |
+| §3.7 Sue Paint: vector layers, curve rulers, materials, the camera folder, light table and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |

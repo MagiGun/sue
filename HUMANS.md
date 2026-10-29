@@ -298,8 +298,8 @@ familiar:
 
 - **Menus along the top:** File, Edit, Story, Animation, Layer, Select, View,
   Filter, Window and Help. Everything Sue Paint can do is in them. Items shown
-  in gray are planned but not built yet (vector layers, perspective rulers,
-  materials and a few more), so you can see what is coming.
+  in gray are planned but not built yet (vector layers, materials and a few
+  more), so you can see what is coming.
 - **Tools on the left:** pen, pencil, brush, airbrush, eraser, fill bucket,
   gradient, shapes, selections, eyedropper, hand and zoom. Each tool has
   ready-made **sub tools** (a G-pen, a mapping pen, a watercolor brush, a soft
@@ -379,9 +379,19 @@ familiar:
   hides.
 - **Canvas** (Edit): change the canvas size around a reference point,
   change the image resolution, or crop to the selection.
-- **Symmetry:** the Ruler tool lays a symmetrical ruler; everything you draw
+- **Symmetry:** the Ruler tool's Symmetrical Ruler; everything you draw
   appears on the other side too, or turned around its middle as many times
   as you set. Ctrl+2 turns it off and on.
+- **Rulers** (the Ruler tool, and Layer, Ruler/Frame): a **Linear Ruler**
+  keeps lines that start near it straight along it (Ctrl+1 turns it off and
+  on); a **Special Ruler** makes every line parallel, run toward a middle,
+  or go round it in circles; a **Perspective Ruler** makes lines run toward
+  its vanishing points. Create Perspective Ruler lays one with 1, 2 or 3
+  points; or drag along two edges of your drawing that meet in the distance
+  and Sue puts a vanishing point where they cross. Drag a point or the eye
+  level to move it. Your line picks the direction it starts in, and stays
+  exactly on it. Delete Ruler takes them away, Show Ruler hides them, and
+  they are saved with the picture.
 - **Text** (T): click and type, in any font on your computer, across or in
   vertical columns; click inside a balloon and the words sit in its middle.
   Click the words again to change them.

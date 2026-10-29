@@ -811,11 +811,13 @@ impl SuePaint {
         if tool.paints() {
             self.stroke_preview(&mut inner, cx, theme);
         }
-        egui::ScrollArea::vertical()
+        let command = egui::ScrollArea::vertical()
             .id_salt("sue-paint-props")
-            .show(&mut inner, |ui| {
-                self.tool_properties(ui, tool, theme);
-            });
+            .show(&mut inner, |ui| self.tool_properties(ui, tool, theme))
+            .inner;
+        if let Some(command) = command {
+            self.run(command, cx);
+        }
     }
 
     /// A sample stroke drawn with the current brush.
@@ -899,16 +901,16 @@ impl SuePaint {
         Some(shown)
     }
 
-    /// The settings of the current sub tool.
+    /// The settings of the current sub tool, and a command they ask for.
     #[allow(clippy::too_many_lines, reason = "one block per tool")]
-    fn tool_properties(&mut self, ui: &mut Ui, tool: Tool, theme: &Theme) {
+    fn tool_properties(&mut self, ui: &mut Ui, tool: Tool, theme: &Theme) -> Option<&'static str> {
         ui.spacing_mut().item_spacing.y = 6.0;
         let small = |text: &str| {
             RichText::new(text)
                 .size(theme.small_size + 0.5)
                 .color(theme.muted)
         };
-        let mut remove_ruler = false;
+        let mut command = None;
         let sub = self.toolbox.current_mut();
         match tool {
             tool if tool.paints() => {
@@ -1171,27 +1173,84 @@ impl SuePaint {
                 ui.label(small("Drag to move the current layer"));
             }
             Tool::Ruler => {
-                ui.label(small(
-                    "Drag on the canvas to lay the ruler: strokes draw on both sides",
-                ));
-                let mut lines = sub.lines as f32;
-                if slider_row(
-                    ui,
-                    "Number of lines",
-                    &mut lines,
-                    1.0..=16.0,
-                    "",
-                    false,
-                    theme,
-                ) {
-                    sub.lines = lines.round() as u32;
+                match sub.mode {
+                    5 => {
+                        ui.label(small(
+                            "Drag to lay a straight ruler. Strokes that start near it follow it; Shift keeps it to 45 degrees",
+                        ));
+                        ui.label(small("Ctrl+1 (Snap to Ruler) turns it on and off"));
+                    }
+                    2 => {
+                        ui.horizontal(|ui| {
+                            ui.label(small("Special ruler"));
+                            egui::ComboBox::from_id_salt("sue-paint-special-ruler")
+                                .selected_text(
+                                    crate::rulers::Special::NAMES[usize::from(sub.kind.min(2))],
+                                )
+                                .show_ui(ui, |ui| {
+                                    for (kind, name) in
+                                        crate::rulers::Special::NAMES.iter().enumerate()
+                                    {
+                                        ui.selectable_value(&mut sub.kind, kind as u8, *name);
+                                    }
+                                });
+                        });
+                        ui.label(small(match sub.kind {
+                            0 => "Drag to set the lines' direction: every stroke runs that way",
+                            1 => "Click the middle: every stroke runs toward it",
+                            _ => "Click the middle: every stroke goes round it",
+                        }));
+                        ui.label(small("Ctrl+2 (Snap to Special Ruler) turns it on and off"));
+                    }
+                    1 => {
+                        ui.horizontal(|ui| {
+                            ui.label(small("Process"));
+                            egui::ComboBox::from_id_salt("sue-paint-perspective-process")
+                                .selected_text(if sub.kind == 1 {
+                                    "Delete vanishing point"
+                                } else {
+                                    "Add vanishing point"
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut sub.kind, 0, "Add vanishing point");
+                                    ui.selectable_value(&mut sub.kind, 1, "Delete vanishing point");
+                                });
+                        });
+                        ui.checkbox(&mut sub.fix_eye_level, small("Fix eye level"))
+                            .on_hover_text("Vanishing points slide along the eye level");
+                        ui.label(small(if sub.kind == 1 {
+                            "Click a vanishing point to take it away"
+                        } else {
+                            "Drag along two edges that meet in the distance: where they cross becomes a vanishing point. Drag a point or the eye level to move it"
+                        }));
+                        if ui.button("Create Perspective Ruler...").clicked() {
+                            command = Some("layer.ruler.perspective");
+                        }
+                    }
+                    _ => {
+                        ui.label(small(
+                            "Drag on the canvas to lay the ruler: strokes draw on both sides",
+                        ));
+                        let mut lines = sub.lines as f32;
+                        if slider_row(
+                            ui,
+                            "Number of lines",
+                            &mut lines,
+                            2.0..=32.0,
+                            "",
+                            false,
+                            theme,
+                        ) {
+                            sub.lines = lines.round() as u32;
+                        }
+                        ui.checkbox(&mut sub.mirror, small("Line symmetry"))
+                            .on_hover_text("Every other line is mirrored, as in Clip Studio Paint");
+                        ui.label(small("Ctrl+2 (Snap to Special Ruler) turns it on and off"));
+                    }
                 }
-                ui.checkbox(&mut sub.mirror, small("Line symmetry"))
-                    .on_hover_text("Mirror across the ruler as well as turning around its middle");
-                if ui.button("Remove the ruler").clicked() {
-                    remove_ruler = true;
+                if ui.button("Delete Ruler").clicked() {
+                    command = Some("layer.ruler.delete");
                 }
-                ui.label(small("Ctrl+2 (Snap to Special Ruler) turns it on and off"));
             }
             Tool::Blend => {
                 slider_row(
@@ -1246,9 +1305,7 @@ impl SuePaint {
                 ui.label(small("This tool arrives in a later Sue Paint"));
             }
         }
-        if remove_ruler && let Some(doc) = self.doc_mut() {
-            doc.ruler = None;
-        }
+        command
     }
 
     fn select_ops(&mut self, ui: &mut Ui, theme: &Theme) {

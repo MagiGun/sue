@@ -45,6 +45,7 @@ pub mod manga;
 mod menus;
 mod pages;
 mod panels;
+pub mod rulers;
 pub mod select;
 pub mod story;
 mod studio;

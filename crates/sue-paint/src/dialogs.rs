@@ -366,6 +366,8 @@ pub(crate) enum Dialog {
     /// correction, its setting when the dialog opened, and whether the
     /// layer was just made (Cancel takes it away again).
     Correction(EntityId, Filter, String, bool),
+    /// Create Perspective Ruler: how many vanishing points, 1 to 3.
+    Perspective(u32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -437,6 +439,7 @@ impl SuePaint {
             Dialog::Canvas(_) => ("Change Canvas Size", vec2(380.0, 300.0)),
             Dialog::Resolution(_) => ("Change Image Resolution", vec2(380.0, 250.0)),
             Dialog::Text(..) => ("Text", vec2(440.0, 380.0)),
+            Dialog::Perspective(_) => ("Create Perspective Ruler", vec2(320.0, 190.0)),
             Dialog::Correction(_, filter, ..) => (
                 filter.label(),
                 vec2(
@@ -492,6 +495,26 @@ impl SuePaint {
                             Dialog::Pages(pages) => outcome = self.pages_ui(ui, pages, cx, theme),
                             Dialog::Frame(frame) => outcome = frame_ui(ui, frame, theme),
                             Dialog::Text(_, lettering) => outcome = text_ui(ui, lettering, theme),
+                            Dialog::Perspective(count) => {
+                                ui.horizontal(|ui| {
+                                    label(ui, "Type:", theme);
+                                    ui.vertical(|ui| {
+                                        for (points, name) in [
+                                            (1, "1-point perspective"),
+                                            (2, "2-point perspective"),
+                                            (3, "3-point perspective"),
+                                        ] {
+                                            ui.radio_value(count, points, name);
+                                        }
+                                    });
+                                });
+                                ui.label(
+                                    RichText::new("Strokes run toward the vanishing points while Snap to Special Ruler is on")
+                                        .size(theme.small_size)
+                                        .color(theme.muted),
+                                );
+                                ok_cancel(ui, &mut outcome);
+                            }
                             Dialog::Correction(_, filter, ..) => {
                                 filter_params(ui, filter, theme);
                                 ui.label(
@@ -639,6 +662,7 @@ impl SuePaint {
             }
             (Dialog::Frame(frame), Outcome::Ok) => self.add_frame_layer(cx, frame),
             (Dialog::Text(layer, lettering), Outcome::Ok) => self.put_text(cx, layer, &lettering),
+            (Dialog::Perspective(count), Outcome::Ok) => self.make_perspective(cx, count),
             (Dialog::Correction(layer, filter, before, made), outcome) => {
                 let text = filter.to_text().unwrap_or_default();
                 // The setting shows live while the dialog is open.
@@ -720,7 +744,8 @@ impl SuePaint {
                 | Dialog::Resolution(_)
                 | Dialog::Text(..),
                 Outcome::Cancel | Outcome::Ok,
-            ) => {}
+            )
+            | (Dialog::Perspective(_), Outcome::Cancel) => {}
         }
     }
 }

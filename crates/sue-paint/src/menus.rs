@@ -337,8 +337,11 @@ pub fn menus() -> Vec<Menu> {
                 sub(
                     "Ruler/Frame",
                     vec![
+                        act("Delete Ruler", "layer.ruler.delete"),
+                        act("Show Ruler", "layer.ruler.show"),
+                        SEP,
                         act("Create Perspective Ruler...", "layer.ruler.perspective"),
-                        act("Create Symmetrical Ruler...", "layer.ruler.symmetry"),
+                        act("Create Symmetrical Ruler", "layer.ruler.symmetry"),
                         act("Create Concentric Circle Ruler", "layer.ruler.circle"),
                     ],
                 ),

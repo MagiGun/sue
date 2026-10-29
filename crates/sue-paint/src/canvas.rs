@@ -544,15 +544,25 @@ impl SuePaint {
                 let mut stroke = BrushStroke::new(target, tip, rgb, locked);
                 let other = if self.sub_active { self.main } else { self.sub };
                 stroke.set_sub_color(color::unit(other));
-                if let Some((center, angle)) = doc.ruler.filter(|_| doc.ruler_on) {
-                    // The symmetrical ruler: a copy through every turn and
-                    // mirror, in the layer's pixels.
-                    let ruler = self.toolbox.of(Tool::Ruler);
-                    let center = [center[0] - offset[0] as f32, center[1] - offset[1] as f32];
+                // The picture's rulers, in the layer's pixels.
+                let rulers = if doc.show_rulers {
+                    crate::rulers::Rulers::of(&cx.world.arena, doc.picture)
+                        .shifted([-(offset[0] as f32), -(offset[1] as f32)])
+                } else {
+                    crate::rulers::Rulers::default()
+                };
+                if let Some((center, angle)) = rulers.symmetry.filter(|_| doc.ruler_on)
+                    && let Some(ruler) = self
+                        .toolbox
+                        .subs(Tool::Ruler)
+                        .iter()
+                        .find(|sub| sub.mode == 0)
+                {
+                    // The symmetrical ruler: a copy through every line.
                     stroke.set_copies(crate::brush::symmetry(
                         center,
                         angle,
-                        ruler.lines,
+                        crate::rulers::turns(ruler.lines, ruler.mirror),
                         ruler.mirror,
                     ));
                 }
@@ -562,6 +572,15 @@ impl SuePaint {
                     .filter(|_| offset != [0, 0])
                     .map(|selection| selection.shifted(offset));
                 let local = [p.x - offset[0] as f32, p.y - offset[1] as f32];
+                // A stroke that starts near the linear ruler goes onto it.
+                let snap = crate::rulers::Snap::begin(
+                    &rulers,
+                    local,
+                    doc.snap_ruler,
+                    doc.ruler_on,
+                    24.0 / doc.view.zoom.max(0.01),
+                );
+                let local = snap.as_ref().map_or(local, |snap| snap.project(local));
                 let mut stabilizer = Stabilizer::new(sub.stabilization, sub.adjust_by_speed);
                 let start = stabilizer.sample(local, doc.view.zoom, self.clock.1);
                 let pressure = self.pressure.unwrap_or(1.0);
@@ -580,6 +599,7 @@ impl SuePaint {
                     correction: sub.correction,
                     flick: sub.flick,
                     line: modifiers.shift,
+                    snap,
                 });
             }
             Tool::Text => self.text_at(p, cx),
@@ -607,7 +627,56 @@ impl SuePaint {
                     label: sub.name.clone(),
                 });
             }
-            Tool::Frame | Tool::Balloon | Tool::Ruler => {
+            Tool::Ruler => {
+                let picture = doc.picture;
+                let rulers = crate::rulers::Rulers::of(&cx.world.arena, picture);
+                let reach = 9.0 / doc.view.zoom.max(0.01);
+                let hit = doc
+                    .show_rulers
+                    .then(|| rulers.handle_at([p.x, p.y], reach, size))
+                    .flatten();
+                match hit {
+                    Some(crate::rulers::Handle::Vanishing(index))
+                        if sub.mode == 1 && sub.kind == 1 =>
+                    {
+                        // Delete vanishing point.
+                        let mut points = rulers
+                            .perspective
+                            .map(|ruler| ruler.points)
+                            .unwrap_or_default();
+                        if index < points.len() {
+                            points.remove(index);
+                        }
+                        let text = (!points.is_empty())
+                            .then(|| crate::rulers::Perspective { points }.to_text());
+                        Self::apply(
+                            cx,
+                            crate::rulers::edit(
+                                picture,
+                                crate::rulers::PERSPECTIVE,
+                                text,
+                                "Delete Vanishing Point",
+                            ),
+                        );
+                    }
+                    Some(handle) => {
+                        self.gesture = Some(Gesture::RulerHandle {
+                            handle,
+                            before: rulers.text(handle.key()),
+                        });
+                    }
+                    None => {
+                        self.gesture = Some(Gesture::Shape {
+                            tool,
+                            sub: Box::new(sub),
+                            op,
+                            from: p,
+                            to: p,
+                        });
+                    }
+                }
+            }
+            Tool::Frame | Tool::Balloon => {
                 self.gesture = Some(Gesture::Shape {
                     tool,
                     sub: Box::new(sub),
@@ -674,6 +743,103 @@ impl SuePaint {
                 });
             }
             other => cx.notify(format!("{} arrives in a later Sue Paint", other.label())),
+        }
+    }
+
+    /// A Ruler tool drag from `from` to `to` (picture pixels): lays the
+    /// sub tool's ruler, as Clip Studio Paint's Create ruler tools do.
+    fn ruler_drag(&mut self, from: Pos2, to: Pos2, sub: &SubTool, cx: &mut AppletContext<'_>) {
+        use crate::rulers::{self, Rulers, Special};
+        use std::f32::consts::{FRAC_PI_2, FRAC_PI_4};
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let (dx, dy) = (to.x - from.x, to.y - from.y);
+        let length = dx.hypot(dy);
+        let dragged = length >= 4.0;
+        // Shift keeps the line to every 45 degrees (Snap angle).
+        let angle = if self.modifiers.shift {
+            (dy.atan2(dx) / FRAC_PI_4).round() * FRAC_PI_4
+        } else {
+            dy.atan2(dx)
+        };
+        let end = [from.x + angle.cos() * length, from.y + angle.sin() * length];
+        let (key, text, label) = match sub.mode {
+            5 => {
+                if !dragged {
+                    return;
+                }
+                let ruler = Rulers {
+                    linear: Some([[from.x, from.y], end]),
+                    ..Rulers::default()
+                };
+                (
+                    rulers::LINEAR,
+                    ruler.text(rulers::LINEAR),
+                    "Create Linear Ruler",
+                )
+            }
+            2 => {
+                let special = match sub.kind {
+                    0 => Special::Parallel(if dragged { angle } else { 0.0 }),
+                    1 => Special::Radial([from.x, from.y]),
+                    _ => Special::Concentric([from.x, from.y]),
+                };
+                (
+                    rulers::SPECIAL,
+                    Some(special.to_text()),
+                    "Create Special Ruler",
+                )
+            }
+            1 => {
+                // Add vanishing point: two lines along edges that meet in
+                // the distance; where they cross is the point.
+                if !dragged {
+                    return;
+                }
+                let line = [[from.x, from.y], end];
+                let Some(first) = self.vanishing_line.take() else {
+                    self.vanishing_line = Some(line);
+                    return;
+                };
+                let Some(point) = rulers::crossing(first, line) else {
+                    cx.notify("Those lines run side by side, so they never meet: draw two that do");
+                    return;
+                };
+                let current = Rulers::of(&cx.world.arena, picture).perspective;
+                let Some(ruler) = rulers::Perspective::with_point(current.as_ref(), point) else {
+                    cx.fail("A perspective ruler has at most three vanishing points");
+                    return;
+                };
+                (
+                    rulers::PERSPECTIVE,
+                    Some(ruler.to_text()),
+                    "Add Vanishing Point",
+                )
+            }
+            _ => {
+                // Through where the drag began, along it (upright for a
+                // click).
+                let ruler = Rulers {
+                    symmetry: Some(([from.x, from.y], if dragged { angle } else { FRAC_PI_2 })),
+                    ..Rulers::default()
+                };
+                (
+                    rulers::SYMMETRY,
+                    ruler.text(rulers::SYMMETRY),
+                    "Create Symmetrical Ruler",
+                )
+            }
+        };
+        if Self::apply(cx, rulers::edit(picture, key, text, label))
+            && let Some(doc) = self.doc_mut()
+        {
+            doc.show_rulers = true;
+            if sub.mode == 5 {
+                doc.snap_ruler = true;
+            } else {
+                doc.ruler_on = true;
+            }
         }
     }
 
@@ -774,6 +940,32 @@ impl SuePaint {
             self.transform_preview(cx);
             return;
         }
+        if let Some(Gesture::RulerHandle { handle, .. }) = self.gesture {
+            let Some(doc) = self.docs.get(self.active) else {
+                return;
+            };
+            let p = doc.view.to_picture(viewport, size, pos);
+            let picture = doc.picture;
+            let fix = self
+                .toolbox
+                .subs(Tool::Ruler)
+                .iter()
+                .find(|sub| sub.mode == 1)
+                .is_none_or(|sub| sub.fix_eye_level);
+            let rulers = crate::rulers::Rulers::of(&cx.world.arena, picture).moved(
+                handle,
+                [p.x, p.y],
+                fix,
+                size,
+            );
+            if let Some(text) = rulers.text(handle.key())
+                && let Ok(entity) = cx.world.arena.get_by_id_mut(picture)
+            {
+                // Shown as it moves; one undo step when it is let go.
+                entity.properties_mut().set(handle.key(), text);
+            }
+            return;
+        }
         if let Some(Gesture::Pin { index }) = self.gesture {
             let Some(view) = self.docs.get(self.active).map(|doc| doc.view) else {
                 return;
@@ -803,9 +995,18 @@ impl SuePaint {
                 shifted,
                 trail,
                 line,
+                snap,
                 ..
             } => {
-                let local = [p.x - offset[0] as f32, p.y - offset[1] as f32];
+                let mut local = [p.x - offset[0] as f32, p.y - offset[1] as f32];
+                if let Some(snap) = snap.as_mut() {
+                    // Following a ruler: nothing is drawn until the pen
+                    // shows which way it goes.
+                    match snap.follow(local, 4.0 / doc.view.zoom.max(0.01)) {
+                        Some(on) => local = on,
+                        None => return,
+                    }
+                }
                 *raw = local;
                 if *line {
                     // A straight line waits for the release.
@@ -816,6 +1017,7 @@ impl SuePaint {
                     trail.drain(..trail.len() - 64);
                 }
                 let smooth = stabilizer.sample(local, doc.view.zoom, step);
+                let smooth = snap.as_ref().map_or(smooth, |snap| snap.project(smooth));
                 // Fast is 2000 screen points a second (velocity dynamics).
                 stroke.set_speed(stabilizer.speed() / 2000.0);
                 let selection = shifted.as_ref().or(doc.selection.as_ref());
@@ -863,7 +1065,8 @@ impl SuePaint {
             Gesture::Pick { .. }
             | Gesture::Pin { .. }
             | Gesture::Transform { .. }
-            | Gesture::Blend { .. } => {}
+            | Gesture::Blend { .. }
+            | Gesture::RulerHandle { .. } => {}
         }
     }
 
@@ -886,11 +1089,14 @@ impl SuePaint {
                 correction,
                 flick,
                 line,
+                snap,
             } => {
                 let Some(doc) = self.docs.get_mut(self.active) else {
                     return;
                 };
-                let (correction, flick) = if line {
+                // A line along a ruler stays exactly on it.
+                let snapped = snap.as_ref().is_some_and(crate::rulers::Snap::chosen);
+                let (correction, flick) = if line || snapped {
                     (0, false)
                 } else {
                     (correction, flick)
@@ -921,6 +1127,7 @@ impl SuePaint {
                         stroke.to(raster, raw, last, selection);
                     } else {
                         for point in stabilizer.catch_up(raw) {
+                            let point = snap.as_ref().map_or(point, |snap| snap.project(point));
                             stroke.to(raster, point, last, selection);
                         }
                     }
@@ -990,23 +1197,31 @@ impl SuePaint {
                 Tool::Figure => self.figure(from, to, &sub, size, cx),
                 Tool::Gradient => self.gradient(from, to, &sub, cx),
                 Tool::Frame => self.frame_drag(from, to, &sub, cx),
-                Tool::Ruler => {
-                    // The ruler runs through where the drag began, along it
-                    // (straight up and down for a click).
-                    let (dx, dy) = (to.x - from.x, to.y - from.y);
-                    let angle = if dx.hypot(dy) < 4.0 {
-                        std::f32::consts::FRAC_PI_2
-                    } else {
-                        dy.atan2(dx)
-                    };
-                    if let Some(doc) = self.docs.get_mut(self.active) {
-                        doc.ruler = Some(([from.x, from.y], angle));
-                        doc.ruler_on = true;
-                    }
-                }
+                Tool::Ruler => self.ruler_drag(from, to, &sub, cx),
                 Tool::Balloon => self.balloon_drag(from, to, &sub, cx),
                 _ => {}
             },
+            Gesture::RulerHandle { handle, before } => {
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                let key = handle.key();
+                let after = crate::rulers::Rulers::of(&cx.world.arena, picture).text(key);
+                // Back as it was, then the move as one undo step.
+                if let Ok(entity) = cx.world.arena.get_by_id_mut(picture) {
+                    match &before {
+                        Some(text) => {
+                            entity.properties_mut().set(key, text.clone());
+                        }
+                        None => {
+                            entity.properties_mut().remove(key);
+                        }
+                    }
+                }
+                if after != before {
+                    Self::apply(cx, crate::rulers::edit(picture, key, after, "Move Ruler"));
+                }
+            }
             Gesture::Lasso { op, points } => {
                 if let Some(doc) = self.docs.get_mut(self.active) {
                     let mut selection = doc
@@ -1744,26 +1959,24 @@ impl SuePaint {
             }
             _ => {}
         }
-        // The symmetrical ruler: its lines through the middle.
-        if let Some((center, angle)) = doc.ruler {
-            let ruler = self.toolbox.of(Tool::Ruler);
-            let lines = ruler.lines.max(1);
-            let reach = (size[0] + size[1]) as f32;
-            let color = if doc.ruler_on {
-                Color32::from_rgb(170, 120, 255)
-            } else {
-                Color32::from_rgb(170, 120, 255).gamma_multiply(0.35)
-            };
-            for line in 0..lines {
-                let theta = angle + line as f32 * std::f32::consts::PI / lines as f32;
-                let (dx, dy) = (theta.cos() * reach, theta.sin() * reach);
-                let ends = [
-                    screen([center[0] - dx, center[1] - dy]),
-                    screen([center[0] + dx, center[1] + dy]),
-                ];
-                painter.add(Shape::dashed_line(&ends, Stroke::new(1.5, color), 8.0, 5.0));
-            }
-            painter.circle_stroke(screen(center), 5.0, Stroke::new(1.5, color));
+        if doc.show_rulers {
+            let turns = self
+                .toolbox
+                .subs(Tool::Ruler)
+                .iter()
+                .find(|sub| sub.mode == 0)
+                .map_or(1, |sub| crate::rulers::turns(sub.lines, sub.mirror));
+            let rulers = crate::rulers::Rulers::of(&cx.world.arena, doc.picture);
+            ruler_overlay(
+                &painter,
+                &rulers,
+                self.vanishing_line,
+                [doc.ruler_on, doc.snap_ruler],
+                turns,
+                size,
+                view.zoom,
+                &screen,
+            );
         }
         // The brush outline under the pointer.
         let tool = self.toolbox.tool();
@@ -1916,5 +2129,166 @@ impl SuePaint {
             }
         });
         let _ = Align2::LEFT_CENTER;
+    }
+}
+
+/// Draws `rulers` (picture pixels, `screen` maps them) in Clip Studio
+/// Paint's violet, faint while their snapping (`[special, linear]`) is off,
+/// with the first line of a vanishing point still to be drawn dashed.
+#[allow(clippy::too_many_arguments, reason = "the rulers and how they show")]
+#[allow(clippy::too_many_lines, reason = "one block per ruler")]
+fn ruler_overlay(
+    painter: &egui::Painter,
+    rulers: &crate::rulers::Rulers,
+    vanishing_line: Option<[[f32; 2]; 2]>,
+    snapping: [bool; 2],
+    turns: u32,
+    size: [u32; 2],
+    zoom: f32,
+    screen: &dyn Fn([f32; 2]) -> Pos2,
+) {
+    use crate::rulers::Special;
+    let violet = Color32::from_rgb(170, 120, 255);
+    let tone = |on: bool| {
+        if on {
+            violet
+        } else {
+            violet.gamma_multiply(0.35)
+        }
+    };
+    let (special, linear) = (tone(snapping[0]), tone(snapping[1]));
+    let (w, h) = (size[0] as f32, size[1] as f32);
+    let diagonal = w.hypot(h);
+    let reach = diagonal * 4.0;
+    let middle = [w / 2.0, h / 2.0];
+    // A whole line through `at` along `direction`.
+    let across = |at: [f32; 2], direction: [f32; 2], stroke: Stroke| {
+        painter.line_segment(
+            [
+                screen([at[0] - direction[0] * reach, at[1] - direction[1] * reach]),
+                screen([at[0] + direction[0] * reach, at[1] + direction[1] * reach]),
+            ],
+            stroke,
+        );
+    };
+    if let Some((center, angle)) = rulers.symmetry {
+        let turns = turns.max(1);
+        for line in 0..turns {
+            let theta = angle + line as f32 * std::f32::consts::PI / turns as f32;
+            let (dx, dy) = (theta.cos() * reach, theta.sin() * reach);
+            let ends = [
+                screen([center[0] - dx, center[1] - dy]),
+                screen([center[0] + dx, center[1] + dy]),
+            ];
+            painter.add(Shape::dashed_line(
+                &ends,
+                Stroke::new(1.5, special),
+                8.0,
+                5.0,
+            ));
+        }
+        painter.circle_stroke(screen(center), 5.0, Stroke::new(1.5, special));
+    }
+    if let Some(perspective) = &rulers.perspective {
+        // Lines from every vanishing point to the canvas edge, all round.
+        let corners = [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]];
+        let rim: Vec<[f32; 2]> = (0..4)
+            .flat_map(|side| {
+                let (a, b) = (corners[side], corners[(side + 1) % 4]);
+                (0..4).map(move |step| {
+                    let t = step as f32 / 4.0;
+                    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+                })
+            })
+            .collect();
+        let faint = Stroke::new(1.0, special.gamma_multiply(0.4));
+        for point in &perspective.points {
+            for target in &rim {
+                painter.line_segment([screen(*point), screen(*target)], faint);
+            }
+        }
+        let (origin, direction) = perspective.eye_level();
+        across(origin, direction, Stroke::new(1.5, special));
+        let upright = [-direction[1], direction[0]];
+        match perspective.points.len() {
+            1 => across(origin, upright, faint),
+            2 => {
+                if let Some(at) = rulers.eye_handle(size) {
+                    across(at, upright, faint);
+                }
+            }
+            _ => {}
+        }
+        for point in &perspective.points {
+            painter.circle_stroke(screen(*point), 5.0, Stroke::new(1.5, special));
+            painter.circle_filled(screen(*point), 1.5, special);
+        }
+        if let Some(at) = rulers.eye_handle(size) {
+            painter.rect_stroke(
+                Rect::from_center_size(screen(at), vec2(8.0, 8.0)),
+                0.0,
+                Stroke::new(1.5, special),
+                egui::StrokeKind::Middle,
+            );
+        }
+    }
+    match rulers.special {
+        Some(Special::Parallel(angle)) => {
+            let direction = [angle.cos(), angle.sin()];
+            let normal = [-direction[1], direction[0]];
+            for step in -6..=6 {
+                let away = step as f32 * diagonal / 12.0;
+                across(
+                    [middle[0] + normal[0] * away, middle[1] + normal[1] * away],
+                    direction,
+                    Stroke::new(1.0, special),
+                );
+            }
+        }
+        Some(Special::Radial(center)) => {
+            for step in 0..24 {
+                let theta = step as f32 * std::f32::consts::TAU / 24.0;
+                painter.line_segment(
+                    [
+                        screen(center),
+                        screen([
+                            center[0] + theta.cos() * reach,
+                            center[1] + theta.sin() * reach,
+                        ]),
+                    ],
+                    Stroke::new(1.0, special),
+                );
+            }
+            painter.circle_stroke(screen(center), 5.0, Stroke::new(1.5, special));
+        }
+        Some(Special::Concentric(center)) => {
+            for step in 1..=12 {
+                let radius = step as f32 * diagonal / 12.0 * zoom;
+                painter.circle_stroke(screen(center), radius, Stroke::new(1.0, special));
+            }
+            painter.circle_stroke(screen(center), 5.0, Stroke::new(1.5, special));
+        }
+        None => {}
+    }
+    if let Some([a, b]) = rulers.linear {
+        painter.line_segment([screen(a), screen(b)], Stroke::new(2.0, linear));
+        for end in [a, b] {
+            painter.circle_filled(screen(end), 3.5, linear);
+        }
+    }
+    if let Some([a, b]) = vanishing_line {
+        let direction = [b[0] - a[0], b[1] - a[1]];
+        let length = direction[0].hypot(direction[1]).max(1e-3);
+        let direction = [direction[0] / length, direction[1] / length];
+        let ends = [
+            screen([a[0] - direction[0] * reach, a[1] - direction[1] * reach]),
+            screen([a[0] + direction[0] * reach, a[1] + direction[1] * reach]),
+        ];
+        painter.add(Shape::dashed_line(
+            &ends,
+            Stroke::new(1.5, violet),
+            8.0,
+            5.0,
+        ));
     }
 }

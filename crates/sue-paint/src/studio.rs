@@ -52,11 +52,13 @@ pub(crate) struct Doc {
     pub track: usize,
     /// Playing since then, from that frame.
     pub playing: Option<(std::time::Instant, u32)>,
-    /// The symmetrical ruler: its center and angle (radians), in picture
-    /// pixels.
-    pub ruler: Option<([f32; 2], f32)>,
-    /// Strokes follow the ruler (Snap to Special Ruler).
+    /// Strokes follow the special, perspective and symmetrical rulers
+    /// (Snap to Special Ruler).
     pub ruler_on: bool,
+    /// Strokes that start near the linear ruler follow it (Snap to Ruler).
+    pub snap_ruler: bool,
+    /// The rulers show, and strokes follow them (Show Ruler).
+    pub show_rulers: bool,
     /// Drawing edits the current layer's mask, not its pixels.
     pub mask_edit: bool,
     pub selection: Option<Selection>,
@@ -74,8 +76,9 @@ impl Doc {
             frame: 0,
             track: 0,
             playing: None,
-            ruler: None,
             ruler_on: true,
+            snap_ruler: true,
+            show_rulers: true,
             mask_edit: false,
             selection: None,
             last_selection: None,
@@ -114,6 +117,13 @@ pub(crate) enum Gesture {
         flick: bool,
         /// Shift and drag: one straight line, drawn on release.
         line: bool,
+        /// The ruler the stroke follows.
+        snap: Option<crate::rulers::Snap>,
+    },
+    /// Dragging a ruler's handle: the ruler's text from before.
+    RulerHandle {
+        handle: crate::rulers::Handle,
+        before: Option<String>,
     },
     /// Dragging puppet warp pin `index`.
     Pin { index: usize },
@@ -250,6 +260,9 @@ pub struct SuePaint {
     pub(crate) gesture: Option<Gesture>,
     /// Puppet warp, while it is on.
     pub(crate) warp: Option<WarpSession>,
+    /// The first of the two lines that make a vanishing point (Perspective
+    /// Ruler, Add vanishing point), in picture pixels.
+    pub(crate) vanishing_line: Option<[[f32; 2]; 2]>,
     /// Scale/Rotate or Free Transform, while it is on.
     pub(crate) transform: Option<crate::transform_ui::TransformSession>,
     /// The keys held this frame (Shift frees a transform's aspect).
@@ -318,6 +331,7 @@ impl Default for SuePaint {
             dialog: None,
             gesture: None,
             warp: None,
+            vanishing_line: None,
             transform: None,
             modifiers: egui::Modifiers::NONE,
             onion: false,
@@ -518,6 +532,12 @@ fn implemented(command: &str) -> bool {
             | "edit.resolution"
             | "edit.crop"
             | "view.snap_special"
+            | "view.snap_ruler"
+            | "layer.ruler.perspective"
+            | "layer.ruler.symmetry"
+            | "layer.ruler.circle"
+            | "layer.ruler.delete"
+            | "layer.ruler.show"
             | "layer.new.text"
             | "layer.correction.brightness"
             | "layer.correction.levels"
@@ -664,6 +684,51 @@ impl SuePaint {
 
     pub(crate) fn doc_mut(&mut self) -> Option<&mut Doc> {
         self.docs.get_mut(self.active)
+    }
+
+    /// Picks the Ruler tool's sub tool of `mode`.
+    pub(crate) fn pick_ruler(&mut self, mode: u8) {
+        use crate::tools::Tool;
+        self.toolbox.pick(Tool::Ruler);
+        if let Some(index) = self
+            .toolbox
+            .subs(Tool::Ruler)
+            .iter()
+            .position(|sub| sub.mode == mode)
+        {
+            self.toolbox.pick_sub(Tool::Ruler, index);
+        }
+    }
+
+    /// Lays a perspective ruler of `count` vanishing points on the
+    /// picture, as Create Perspective Ruler does.
+    pub(crate) fn make_perspective(&mut self, cx: &mut AppletContext<'_>, count: u32) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let Some(size) = cx
+            .world
+            .arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(picture::size)
+        else {
+            return;
+        };
+        let ruler = crate::rulers::Perspective::new(count, size);
+        let edit = crate::rulers::edit(
+            picture,
+            crate::rulers::PERSPECTIVE,
+            Some(ruler.to_text()),
+            "Create Perspective Ruler",
+        );
+        if Self::apply(cx, edit) {
+            self.pick_ruler(1);
+            if let Some(doc) = self.doc_mut() {
+                doc.ruler_on = true;
+                doc.show_rulers = true;
+            }
+        }
     }
 
     pub(crate) fn picture(&self) -> Option<EntityId> {
@@ -1636,6 +1701,19 @@ impl SuePaint {
             "layer.toggle.draft" => info.map_or(ItemState::off(), |info| flag(info.style.draft)),
             "layer.toggle.lock" => info.map_or(ItemState::off(), |info| flag(info.locked)),
             "view.grid" => flag(self.grid),
+            "view.snap_special" => self
+                .doc()
+                .map_or(ItemState::off(), |doc| flag(doc.ruler_on)),
+            "view.snap_ruler" => self
+                .doc()
+                .map_or(ItemState::off(), |doc| flag(doc.snap_ruler)),
+            "layer.ruler.show" => self
+                .doc()
+                .map_or(ItemState::off(), |doc| flag(doc.show_rulers)),
+            "layer.ruler.delete" => when(
+                self.doc()
+                    .is_some_and(|doc| !crate::rulers::Rulers::of(arena, doc.picture).is_empty()),
+            ),
             "view.pixel_grid" => flag(self.pixel_grid),
             "view.selection" => flag(self.show_selection),
             "view.flip_h" => self
@@ -1983,6 +2061,82 @@ impl SuePaint {
             "view.snap_special" => {
                 if let Some(doc) = self.doc_mut() {
                     doc.ruler_on = !doc.ruler_on;
+                }
+            }
+            "view.snap_ruler" => {
+                if let Some(doc) = self.doc_mut() {
+                    doc.snap_ruler = !doc.snap_ruler;
+                }
+            }
+            "layer.ruler.show" => {
+                if let Some(doc) = self.doc_mut() {
+                    doc.show_rulers = !doc.show_rulers;
+                }
+            }
+            "layer.ruler.perspective" => {
+                if self.picture().is_some() {
+                    self.dialog = Some(Dialog::Perspective(2));
+                }
+            }
+            "layer.ruler.symmetry" | "layer.ruler.circle" => {
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                let Some(size) = cx
+                    .world
+                    .arena
+                    .get_by_id(picture)
+                    .ok()
+                    .and_then(picture::size)
+                else {
+                    return;
+                };
+                let middle = [size[0] as f32 / 2.0, size[1] as f32 / 2.0];
+                let (key, text, label, mode) = if command == "layer.ruler.symmetry" {
+                    let rulers = crate::rulers::Rulers {
+                        symmetry: Some((middle, std::f32::consts::FRAC_PI_2)),
+                        ..crate::rulers::Rulers::default()
+                    };
+                    (
+                        crate::rulers::SYMMETRY,
+                        rulers.text(crate::rulers::SYMMETRY),
+                        "Create Symmetrical Ruler",
+                        0,
+                    )
+                } else {
+                    let special = crate::rulers::Special::Concentric(middle);
+                    (
+                        crate::rulers::SPECIAL,
+                        Some(special.to_text()),
+                        "Create Concentric Circle Ruler",
+                        2,
+                    )
+                };
+                if Self::apply(cx, crate::rulers::edit(picture, key, text, label)) {
+                    self.pick_ruler(mode);
+                    if mode == 2 {
+                        self.toolbox.current_mut().kind = 2;
+                    }
+                    if let Some(doc) = self.doc_mut() {
+                        doc.ruler_on = true;
+                        doc.show_rulers = true;
+                    }
+                }
+            }
+            "layer.ruler.delete" => {
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                let rulers = crate::rulers::Rulers::of(&cx.world.arena, picture);
+                let mut edit = doc::Edit::new("Delete Ruler");
+                for key in crate::rulers::ALL {
+                    if rulers.text(key).is_some() {
+                        edit = edit.then(SetProperty::remove(picture, key));
+                    }
+                }
+                self.vanishing_line = None;
+                if !edit.is_empty() {
+                    Self::apply(cx, edit);
                 }
             }
             "edit.canvas_size" | "edit.resolution" => {

@@ -427,7 +427,16 @@ impl Tool {
                     SubTool::new(self, "Balloon Tail", 1, outline),
                 ]
             }
-            Self::Ruler => vec![plain("Symmetrical Ruler", 0)],
+            // Clip Studio Paint's Create ruler group, in its order.
+            Self::Ruler => vec![
+                plain("Linear Ruler", 5),
+                plain("Special Ruler", 2),
+                plain("Perspective Ruler", 1),
+                SubTool {
+                    lines: 2,
+                    ..plain("Symmetrical Ruler", 0)
+                },
+            ],
             Self::Text => vec![plain("Text", 0)],
             Self::Blend => {
                 let soft = tip(60.0, |t| {
@@ -471,7 +480,8 @@ pub struct SubTool {
     pub flick: bool,
     /// How different a color may be and still be filled or selected, 0 to 1.
     pub tolerance: f32,
-    /// A symmetrical ruler's turns around its center, 1 to 32.
+    /// A symmetrical ruler's number of lines, 1 to 32, counting the
+    /// mirrored ones as Clip Studio Paint does.
     pub lines: u32,
     /// A symmetrical ruler mirrors across its line (Line symmetry).
     pub mirror: bool,
@@ -479,6 +489,13 @@ pub struct SubTool {
     pub gap: u32,
     /// A fill's Area scaling, in pixels under the lines.
     pub spread: u32,
+    /// What a ruler sub tool lays or does: the Special Ruler's kind
+    /// (`rulers::Special::NAMES`) or the Perspective Ruler's process (0
+    /// add a vanishing point, 1 delete one).
+    pub kind: u8,
+    /// A perspective ruler keeps its eye level where it is while its
+    /// vanishing points move (Fix eye level).
+    pub fix_eye_level: bool,
 }
 
 impl SubTool {
@@ -499,6 +516,8 @@ impl SubTool {
             mirror: true,
             gap: 0,
             spread: 0,
+            kind: 0,
+            fix_eye_level: true,
         }
     }
 
