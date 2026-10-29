@@ -62,7 +62,8 @@ created through its safe API, so `sue-platform` keeps the lint too. Native FFI
 is relaxed only in its two small entry crates, each item approved by the
 maintainer: `crates/sue-platform/android` (the native activity's entry and the
 two raw JNI pointers it wraps) and `crates/sue-platform/ios` (UIKit's
-document picker); `sue-platform` calls Java through `jni`'s safe API.
+document picker and keyboard notifications); `sue-platform` calls Java
+through `jni`'s safe API.
 
 ---
 
@@ -777,6 +778,20 @@ event loop can be made once per process. The host:
 - keeps config and data in the app sandbox (`internal_data_path`).
 
 iOS uses the ordinary executable in an app bundle; its sandbox is `HOME`.
+egui lays out over the whole window there (`egui-winit` takes winit's outer
+size), and the host shrinks `raw.screen_rect` from the bottom by
+`sue_ios::keyboard_inset()`, the points the on-screen keyboard covers. That
+crate observes `UIKeyboardWillChangeFrameNotification` and
+`UIKeyboardWillHideNotification` on the main queue with blocks (approved by
+the maintainer on 2026-10-29), keeps the keyboard's end frame in screen
+coordinates, and converts it into the key window's coordinates when asked,
+so a window that does not fill the screen (Slide Over, Stage Manager) loses
+only the part the keyboard really covers. A keyboard that floats or is split
+on an iPad, or does not reach the window's bottom edge, covers nothing, as
+UIKit's keyboard layout guide counts it (`cover.rs`, tested on every
+system). The keyboard moves with no winit event, so `about_to_wait` compares
+the inset with the last frame's (`SurfaceInfo::safe_area.bottom`) and
+redraws when it changed.
 
 **File pickers on phones and tablets.** Desktops show `rfd`'s dialogs, which
 block until they close. Android and iOS show the system's own picker beside
@@ -1701,11 +1716,13 @@ and an on-screen keyboard:
 | Binder, inspector | each covers the page when asked for; picking a document closes the binder |
 | Status bar | the words and the page |
 
-Two rules keep the line being written in sight. The Android host redraws
-when the activity's content rectangle moves (the keyboard comes up or goes
-away; winit passes no event for it) and lays the window out above the
-keyboard, and the editor scrolls the caret back into view whenever its view
-changes size while it has the keyboard. A press on the Writer's own bars
+Two rules keep the line being written in sight. The host lays the window
+out above the keyboard and redraws when the keyboard comes up, goes away or
+changes height (winit passes no event for it): on Android when the
+activity's content rectangle moves, on iPhone and iPad when UIKit's keyboard
+notifications move the keyboard's frame (§3.1). And the editor scrolls the
+caret back into view whenever its view changes size while it has the
+keyboard. A press on the Writer's own bars
 calls `Editor::keep_focus`, so the editor keeps egui's focus (and the IME
 its keyboard) through the tap, and a formatting command from a menu gives
 the keyboard back to the text (`run_typing`).
@@ -2031,7 +2048,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.8 Installed fonts | **Implemented** (a background scan; faces installed into egui on first use) | `sue-wm/src/fonts.rs`, `sue-platform/src/paths.rs` |
 | §3.8 Rich text editor, styles, page layout, typesetting | **Implemented**; the caret glides and blinks at rest (`sue-type/src/caret.rs`) | `sue-type` |
 | §3.8 Publishing formats and PDF | **Implemented** (Word both ways; OpenDocument, EPUB, HTML, RTF, Markdown, text out; HTML and Markdown in; fonts embedded whole, not subset) | `sue-io/src/publish`, `pdf.rs`, `zip.rs` |
-| §3.8 Sue Writer | **Implemented**; on a phone laid out for a thumb and an on-screen keyboard (text reflowed to the screen, formatting above the keyboard, the caret kept in sight); snapshots show the phone with and without the keyboard | `sue-writer`, `sue-type/src/editor.rs`, `sue-platform/src/desktop.rs` |
+| §3.8 Sue Writer | **Implemented**; on a phone laid out for a thumb and an on-screen keyboard (text reflowed to the screen, formatting above the keyboard, the caret kept in sight); snapshots show the phone with and without the keyboard | `sue-writer`, `sue-type/src/editor.rs`, `sue-platform/src/desktop.rs`, `crates/sue-platform/ios/src/keyboard.rs` |
 | §2.1 Three-tier sniffer | **Implemented** | `sue-io/src/sniff.rs` |
 | §2.2 JXL probe (boxes + `SizeHeader`) | **Implemented** | `sue-io/src/jxl.rs` |
 | §2.2 JXL pixel decode and JPEG reconstruction | **Implemented** with `jxl-oxide` (no CMYK yet; the DC preview and pass targets come from a full decode until a streaming decoder lands) | `sue-io/src/jxl.rs` |
@@ -2047,6 +2064,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.1 Frame pacing: application and egui repaint requests combined in `about_to_wait`, timed wakes, close confirmation | **Implemented**; the self-check asserts that neither the runtime nor egui asks for frames once idle | `sue-platform/src/desktop.rs`, `bins/sue/src/runtime.rs` |
 | §3.1 Native open, save and folder dialogs, system browser, file manager | **Implemented** with `rfd` and `open` (web addresses limited to `http` and `https`) on desktops | `sue-platform/src/os.rs` |
 | §3.1 The system's own file pickers on Android and iOS (staged copies handed back) | **Implemented**; the engine is tested headless with a stand-in system; Android's picker is tried on an emulator; the iOS picker is type-checked but not yet run on a device | `sue-platform/src/picks.rs`, `android.rs`, `ios.rs`, `crates/sue-platform/ios`, `packaging/android/java` |
+| §3.1 Layout above the on-screen keyboard on Android and iOS | **Implemented**; Android reads the activity's content rectangle; iOS watches UIKit's keyboard notifications, type-checked but not yet run on a device (the geometry is tested on every system) | `sue-platform/src/desktop.rs`, `crates/sue-platform/ios/src/keyboard.rs`, `cover.rs` |
 | §3.1 Native mobile hosts (Android, iOS) | Planned (the mobile topologies already run on `HeadlessHost`) | n/a |
 | §3.2 to 3.4 Form factors, layout, springs, scheduler | **Implemented** | `sue-wm` |
 | §3.4 Painting with egui (`egui-wgpu`), arena images as native textures | **Implemented**; the self-check renders a frame on the GPU and counts tinted pixels (zero) | `sue-platform/src/paint.rs` |

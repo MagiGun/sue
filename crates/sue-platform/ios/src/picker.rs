@@ -10,9 +10,7 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_foundation::{NSArray, NSString, NSURL};
-use objc2_ui_kit::{
-    UIApplication, UIDocumentPickerViewController, UIViewController, UIWindowScene,
-};
+use objc2_ui_kit::{UIDocumentPickerViewController, UIViewController};
 
 use audited::Delegate;
 
@@ -106,18 +104,7 @@ fn present(
 
 /// The view controller on top of the key window of Sue's scene.
 fn top_controller(mtm: MainThreadMarker) -> Option<Retained<UIViewController>> {
-    let app = UIApplication::sharedApplication(mtm);
-    let window = app
-        .connectedScenes()
-        .allObjects()
-        .iter()
-        .find_map(|scene| scene.downcast::<UIWindowScene>().ok()?.keyWindow());
-    #[allow(
-        deprecated,
-        reason = "the one key window, for a scene that has none yet"
-    )]
-    let window = window.or_else(|| app.keyWindow())?;
-    let mut top = window.rootViewController()?;
+    let mut top = crate::window::key_window(mtm)?.rootViewController()?;
     while let Some(next) = top.presentedViewController() {
         top = next;
     }

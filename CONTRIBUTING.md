@@ -167,8 +167,8 @@ Android needs the SDK with the NDK, a Java development kit (`javac` and
 Sue starts there as a native activity from `crates/sue-platform/android`,
 the one place that exports a symbol for the system to call; its one Java
 class, `packaging/android/java/com/magigun/sue/SueActivity.java`, adds the
-system's file pickers. On iOS the picker's Objective-C calls live in
-`crates/sue-platform/ios`. Those two crates are the only ones where
+system's file pickers. On iOS the Objective-C calls for the picker and
+the on-screen keyboard live in `crates/sue-platform/ios`. Those two crates are the only ones where
 `unsafe` is relaxed, item by item, with the maintainer's approval.
 
 ## Branches and commits

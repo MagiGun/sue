@@ -64,6 +64,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Sue Writer no longer crashes on a page narrower than about 543 points,
   such as a phone's.
+- On iPhone and iPad the on-screen keyboard no longer covers the bottom of
+  Sue: Sue fits itself above the keyboard, as on Android, so the line you
+  are writing in Sue Writer stays in sight.
 
 ## [0.0.3] - 2026-10-29
 
