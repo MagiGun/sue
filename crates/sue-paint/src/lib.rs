@@ -24,6 +24,17 @@
 //! functions over pixels with their own tests; the studio ([`SuePaint`])
 //! ties them to the interface.
 
+/// Text from the language database's `paint` namespace (Sue Paint).
+macro_rules! tr {
+    ($($arg:tt)*) => { sue_lang::tr!("paint", $($arg)*) };
+}
+
+/// `text`, kept in English in a table or in data (a tool's default name),
+/// in the language in use; a name someone typed stays theirs.
+pub(crate) fn localize(text: &str) -> String {
+    sue_lang::translate("paint", text)
+}
+
 pub mod anim;
 mod anim_ui;
 pub mod blend;
@@ -182,4 +193,68 @@ pub fn sample_picture(cx: &mut AppletContext<'_>, width: u32, height: u32) -> Op
         paint_path(cx, ink, pen, [0.08, 0.08, 0.1], &ring, "G-Pen");
     }
     Some(picture)
+}
+
+#[cfg(test)]
+mod language_tests {
+    /// Every name Sue Paint keeps in English in its tables and in what it
+    /// saves has an English message, so `localize` shows it in the
+    /// language in use.
+    #[test]
+    fn every_name_kept_in_english_is_in_the_language_database() {
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        let mut names: Vec<String> = Vec::new();
+        for tool in crate::tools::Tool::ALL {
+            names.extend(tool.sub_tools().into_iter().map(|sub| sub.name));
+        }
+        names.extend(
+            crate::materials::library(None)
+                .into_iter()
+                .map(|material| material.name),
+        );
+        let tables: [&[&str]; 8] = [
+            &crate::anim::Onion::MODES,
+            &crate::vector::Erase::NAMES,
+            &crate::rulers::Special::NAMES,
+            &crate::correct::Widen::NAMES,
+            &crate::materials::Kind::NAMES,
+            &crate::effects::EXPRESSIONS,
+            &crate::three::STYLES,
+            &crate::three::SHAPES,
+        ];
+        names.extend(
+            tables
+                .iter()
+                .flat_map(|table| table.iter().map(|&name| name.to_owned())),
+        );
+        names.extend(crate::print::PAPERS.iter().map(|paper| paper.0.to_owned()));
+        names.extend(
+            crate::manga::LAYOUTS
+                .iter()
+                .map(|layout| layout.0.to_owned()),
+        );
+        names.extend(
+            crate::proof::PROFILES
+                .iter()
+                .map(|profile| profile.0.to_owned()),
+        );
+        names.extend(crate::dialogs::SIZES.iter().map(|size| size.0.to_owned()));
+        names.extend(
+            crate::dialogs::MODIFIERS
+                .iter()
+                .map(|modifier| modifier.1.to_owned()),
+        );
+        for (what, how) in crate::dialogs::GESTURES {
+            names.push(what.to_owned());
+            names.push(how.to_owned());
+        }
+        for group in crate::panels::BAR_GROUPS {
+            names.extend(group.iter().map(|(_, _, tip)| (*tip).to_owned()));
+        }
+        let missing: Vec<String> = names
+            .into_iter()
+            .filter(|name| !sue_lang::has_english("paint", name))
+            .collect();
+        assert!(missing.is_empty(), "paint.ftl lacks: {missing:?}");
+    }
 }

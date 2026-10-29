@@ -11,6 +11,7 @@ license-file.workspace = true
 [dependencies]
 egui.workspace = true
 sue-core.workspace = true
+sue-lang.workspace = true
 sue-io.workspace = true
 sue-model.workspace = true
 sue-platform.workspace = true

@@ -236,6 +236,40 @@ impl Database {
         (!english_only).then_some(first)
     }
 
+    /// The key of the message of `namespace` whose English (without
+    /// variables) reads `text`.
+    fn english_key(&self, namespace: &str, text: &str) -> Option<String> {
+        let mut index = ENGLISH_INDEX.lock().unwrap_or_else(PoisonError::into_inner);
+        let generation = generation();
+        if index.0 != generation {
+            *index = (generation, HashMap::new());
+        }
+        let keys = index.1.entry(namespace.to_owned()).or_insert_with(|| {
+            let mut keys = HashMap::new();
+            let Some(english) = self.language(ENGLISH) else {
+                return keys;
+            };
+            let Some(space) = english.namespaces.get(namespace) else {
+                return keys;
+            };
+            for source in &space.sources {
+                let Ok(parsed) = fluent_syntax::parser::parse(source.as_str()) else {
+                    continue;
+                };
+                for entry in parsed.body {
+                    if let fluent_syntax::ast::Entry::Message(message) = entry
+                        && let Some(value) = english.format(namespace, message.id.name, &[])
+                    {
+                        keys.entry(value)
+                            .or_insert_with(|| message.id.name.to_owned());
+                    }
+                }
+            }
+            keys
+        });
+        keys.get(text).cloned()
+    }
+
     fn format(&self, tag: &str, namespace: &str, key: &str, args: &[(&str, Arg)]) -> String {
         self.chain(tag)
             .into_iter()
@@ -307,6 +341,13 @@ static DATABASE: LazyLock<RwLock<Database>> = LazyLock::new(|| RwLock::new(Datab
 
 /// Bumped whenever the global language or the messages change.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Each namespace's English texts and their keys, for [`translate`], as of
+/// a generation.
+type EnglishIndex = (u64, HashMap<String, HashMap<String, String>>);
+
+static ENGLISH_INDEX: LazyLock<std::sync::Mutex<EnglishIndex>> =
+    LazyLock::new(|| std::sync::Mutex::new((u64::MAX, HashMap::new())));
 
 fn read() -> RwLockReadGuard<'static, Database> {
     DATABASE.read().unwrap_or_else(PoisonError::into_inner)
@@ -571,6 +612,27 @@ pub fn text_or(namespace: &str, key: &str, fallback: &str) -> String {
         .into_iter()
         .find_map(|language| language.format(namespace, key, &[]))
         .unwrap_or_else(|| fallback.to_owned())
+}
+
+/// `text` (English, as code or data keeps it) in the language in use: the
+/// message of `namespace` whose English reads `text`, else `text` as it
+/// is. For labels kept in English in tables and files (a tool's default
+/// name): a name someone typed stays theirs.
+#[must_use]
+pub fn translate(namespace: &str, text: &str) -> String {
+    let tag = current();
+    let database = read();
+    let Some(key) = database.english_key(namespace, text) else {
+        return text.to_owned();
+    };
+    database.format(&tag, namespace, &key, &[])
+}
+
+/// `true` if `text` is the English of a message of `namespace`, so
+/// [`translate`] finds it.
+#[must_use]
+pub fn has_english(namespace: &str, text: &str) -> bool {
+    read().english_key(namespace, text).is_some()
 }
 
 /// `true` if English has message `key` in `namespace`.

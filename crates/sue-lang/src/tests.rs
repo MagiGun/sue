@@ -394,3 +394,16 @@ fn every_key_the_code_reads_is_in_english_with_its_variables() {
             });
     assert!(!namespaces.is_empty(), "the scan found the code's lookups");
 }
+
+#[test]
+fn english_text_kept_as_data_reads_in_the_language_in_use() {
+    add_resource("en", "test-translate", "pen = G-pen\nshade = Shade\n").expect("parses");
+    add_resource("uu-test", "test-translate", "pen = G-Feder\n").expect("parses");
+    let _uu = scope("uu-test");
+    assert_eq!(translate("test-translate", "G-pen"), "G-Feder");
+    // English where the language lacks it, and a typed name as it is.
+    assert_eq!(translate("test-translate", "Shade"), "Shade");
+    assert_eq!(translate("test-translate", "My own pen"), "My own pen");
+    assert!(has_english("test-translate", "G-pen"));
+    assert!(!has_english("test-translate", "My own pen"));
+}

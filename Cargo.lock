@@ -3282,6 +3282,7 @@ dependencies = [
  "egui",
  "sue-core",
  "sue-io",
+ "sue-lang",
  "sue-model",
  "sue-platform",
  "sue-rice",

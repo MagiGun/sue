@@ -156,7 +156,7 @@ pub fn import(
         .and_then(picture::size)
         .unwrap_or([psd.width, psd.height]);
     if width == 0 || height == 0 {
-        return Err("The picture has no size".to_owned());
+        return Err(tr!("the-picture-has-no-size"));
     }
     let mut records = psd.layers.clone();
     if records.is_empty() {
@@ -188,7 +188,7 @@ pub fn import(
         key
     };
     let outer = below.and_then(|below| doc::folder_of(arena, below));
-    let mut edit = Edit::new("Import Layers");
+    let mut edit = Edit::new(tr!("import-layers"));
     // The folders open while walking up: their members so far.
     let mut open: Vec<Vec<EntityId>> = vec![Vec::new()];
     for record in &records {

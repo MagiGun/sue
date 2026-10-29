@@ -145,7 +145,7 @@ pub(crate) fn text_layer(
         .content
         .lines()
         .next()
-        .unwrap_or("Text")
+        .unwrap_or(&tr!("text"))
         .chars()
         .take(24)
         .collect();
@@ -170,11 +170,11 @@ pub(crate) fn retext(
     lettering.content = content.to_owned();
     let (pixels, covered) = lettering.draw(width, height);
     let raster = RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels).ok()?;
-    let mut edit = Edit::new("Edit Text");
+    let mut edit = Edit::new(tr!("edit-text"));
     for (key, value) in lettering.properties(covered) {
         edit = edit.then(SetProperty::new(layer, key, value));
     }
-    Some(edit.then(ReplaceComponent::new(layer, raster, "Edit Text")))
+    Some(edit.then(ReplaceComponent::new(layer, raster, tr!("edit-text"))))
 }
 
 /// Where a text layer's text is.
@@ -267,13 +267,13 @@ impl SuePaint {
                 else {
                     return;
                 };
-                let mut edit = Edit::new("Edit Text");
+                let mut edit = Edit::new(tr!("edit-text"));
                 for (key, value) in properties {
                     edit = edit.then(SetProperty::new(layer, key, value));
                 }
                 Self::apply(
                     cx,
-                    edit.then(ReplaceComponent::new(layer, raster, "Edit Text")),
+                    edit.then(ReplaceComponent::new(layer, raster, tr!("edit-text"))),
                 );
             }
             None => {
@@ -281,7 +281,7 @@ impl SuePaint {
                     .content
                     .lines()
                     .next()
-                    .unwrap_or("Text")
+                    .unwrap_or(&tr!("text"))
                     .chars()
                     .take(24)
                     .collect();

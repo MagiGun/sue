@@ -109,7 +109,7 @@ impl SuePaint {
         let Some((rect, piece, rest)) =
             transform::lift(&before, size[0], size[1], selection.as_ref())
         else {
-            cx.notify("Nothing to transform here");
+            cx.notify(tr!("nothing-to-transform-here"));
             return;
         };
         let mut session = TransformSession {
@@ -191,9 +191,9 @@ impl SuePaint {
             return;
         }
         let label = if session.free {
-            "Free Transform"
+            tr!("free-transform")
         } else {
-            "Scale/Rotate"
+            tr!("scale-rotate")
         };
         if let Some(patch) =
             doc::diff_patch(&session.before, &after, session.size[0], session.size[1])
@@ -421,9 +421,9 @@ impl SuePaint {
                     ui.horizontal(|ui| {
                         ui.label(
                             RichText::new(if free {
-                                "Free Transform"
+                                tr!("free-transform")
                             } else {
-                                "Scale/Rotate"
+                                tr!("scale-rotate")
                             })
                             .color(theme.text),
                         );
@@ -434,7 +434,7 @@ impl SuePaint {
                                         .suffix(" %")
                                         .range(1.0..=2000.0),
                                 )
-                                .on_hover_text("Width")
+                                .on_hover_text(tr!("width-2"))
                                 .changed();
                             typed |= ui
                                 .add(
@@ -442,21 +442,21 @@ impl SuePaint {
                                         .suffix(" %")
                                         .range(1.0..=2000.0),
                                 )
-                                .on_hover_text("Height")
+                                .on_hover_text(tr!("height-2"))
                                 .changed();
                             typed |= ui
                                 .add(
                                     egui::DragValue::new(&mut degrees)
-                                        .suffix(" deg")
+                                        .suffix(tr!("deg"))
                                         .range(-360.0..=360.0),
                                 )
-                                .on_hover_text("Angle")
+                                .on_hover_text(tr!("angle"))
                                 .changed();
                         }
-                        if ui.button("Reset").clicked() {
+                        if ui.button(tr!("reset")).clicked() {
                             action = Some(0);
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr!("cancel")).clicked() {
                             action = Some(1);
                         }
                         if ui.button("OK").clicked() {

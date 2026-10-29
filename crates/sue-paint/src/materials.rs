@@ -144,7 +144,7 @@ pub fn library(folder: Option<&Path>) -> Vec<Material> {
         files.sort();
         out.extend(files.into_iter().map(|path| Material {
             name: path.file_stem().map_or_else(
-                || "Material".to_owned(),
+                || tr!("material"),
                 |stem| stem.to_string_lossy().into_owned(),
             ),
             kind: Kind::Image,
@@ -253,7 +253,7 @@ pub fn tiled(tile: &RasterTile2D, size: [u32; 2]) -> Option<RasterTile2D> {
 pub fn register(folder: &Path, name: &str, tile: &RasterTile2D) -> Result<PathBuf, String> {
     let bytes = tile
         .bytes()
-        .ok_or("only RGBA layers register as materials")?;
+        .ok_or(tr!("only-rgba-layers-register-as-materials"))?;
     let (w, h) = (tile.width(), tile.height());
     let (mut min, mut max) = ([u32::MAX; 2], [0_u32; 2]);
     for y in 0..h {
@@ -265,7 +265,7 @@ pub fn register(folder: &Path, name: &str, tile: &RasterTile2D) -> Result<PathBu
         }
     }
     if min[0] > max[0] {
-        return Err("The layer is empty: draw something to register first".to_owned());
+        return Err(tr!("layer-empty-draw-something-register-first"));
     }
     let (cw, ch) = (max[0] - min[0] + 1, max[1] - min[1] + 1);
     let mut cut = Vec::with_capacity((cw * ch * 4) as usize);
@@ -285,7 +285,7 @@ pub fn register(folder: &Path, name: &str, tile: &RasterTile2D) -> Result<PathBu
         })
         .collect();
     let safe = if safe.trim().is_empty() {
-        "Material".to_owned()
+        tr!("material")
     } else {
         safe.trim().to_owned()
     };

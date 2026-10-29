@@ -84,7 +84,7 @@ pub(crate) fn decode(path: &Path) -> Result<([u32; 2], Vec<u8>), String> {
             .iter()
             .flat_map(|&gray| [gray, gray, gray, 255])
             .collect(),
-        _ => return Err("this picture's pixels cannot be shown".to_owned()),
+        _ => return Err(tr!("pictures-pixels-cannot-shown")),
     };
     Ok(([tile.width(), tile.height()], pixels))
 }
@@ -124,7 +124,7 @@ impl SuePaint {
         view.shown = None;
         view.list = false;
         if let Err(error) = decode(path) {
-            cx.fail(format!("Cannot show {}: {error}", path.display()));
+            cx.fail(tr!("cannot-show", path = path.display(), error = error));
         }
     }
 
@@ -256,29 +256,34 @@ impl SuePaint {
                     .max_decimals(1)
                     .suffix("x"),
             )
-            .on_hover_text("Zoom the reference");
+            .on_hover_text(tr!("zoom-the-reference"));
             ui.add(
                 egui::Slider::new(&mut view.rotation, -180.0..=180.0)
                     .max_decimals(0)
                     .suffix(" \u{b0}"),
             )
-            .on_hover_text("Turn the reference");
+            .on_hover_text(tr!("turn-the-reference"));
         });
         let row = inner.available_rect_before_wrap();
         let count = view.images.len();
         let buttons: [(Icon, &str, bool, bool); 7] = [
-            (Icon::Open, "Import a picture", true, false),
-            (Icon::Prev, "Previous picture", count > 1, false),
-            (Icon::Next, "Next picture", count > 1, false),
-            (Icon::List, "Every picture", count > 0, view.list),
+            (Icon::Open, &tr!("import-a-picture"), true, false),
+            (Icon::Prev, &tr!("previous-picture"), count > 1, false),
+            (Icon::Next, &tr!("next-picture"), count > 1, false),
+            (Icon::List, &tr!("every-picture"), count > 0, view.list),
             (
                 Icon::Eyedropper,
-                "Pick colors from the picture",
+                &tr!("pick-colors-from-the-picture"),
                 true,
                 view.eyedropper,
             ),
-            (Icon::Fit, "Fit, untilted", count > 0, false),
-            (Icon::Delete, "Take this picture away", count > 0, false),
+            (Icon::Fit, &tr!("fit-untilted"), count > 0, false),
+            (
+                Icon::Delete,
+                &tr!("take-this-picture-away"),
+                count > 0,
+                false,
+            ),
         ];
         let mut clicked = None;
         for (index, (icon, tip, enabled, active)) in buttons.into_iter().enumerate() {
@@ -295,7 +300,7 @@ impl SuePaint {
                 FilePick::open(
                     Some(AppletId::new(crate::studio::ID).expect("a valid id")),
                     "subview",
-                    "Import a Reference Picture",
+                    &tr!("import-a-reference-picture"),
                 )
                 .extensions(&[
                     "png", "jpg", "jpeg", "jxl", "webp", "bmp", "gif", "tif", "tiff", "tga", "qoi",

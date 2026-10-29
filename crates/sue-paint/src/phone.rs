@@ -88,7 +88,7 @@ impl SuePaint {
                 tool_icon(*tool),
                 tool.available(),
                 *tool == current,
-                tool.label(),
+                &tool.label(),
                 theme,
             ) {
                 if *tool == current {
@@ -112,7 +112,7 @@ impl SuePaint {
             Icon::List,
             true,
             others || self.sheet == Some(Sheet::Tools),
-            "Every tool",
+            &tr!("every-tool"),
             theme,
         ) {
             self.toggle_sheet(Sheet::Tools);
@@ -129,7 +129,7 @@ impl SuePaint {
         );
         if ui
             .interact(chip, Id::unique("sue-paint-phone-color"), Sense::click())
-            .on_hover_text("Color")
+            .on_hover_text(tr!("color-2"))
             .clicked()
         {
             self.toggle_sheet(Sheet::Color);
@@ -228,7 +228,7 @@ impl SuePaint {
                         tool_icon(*tool),
                         tool.available(),
                         *tool == current,
-                        tool.label(),
+                        &tool.label(),
                         theme,
                     ) {
                         self.toolbox.pick(*tool);
@@ -249,12 +249,12 @@ impl SuePaint {
                 let menus = self.menus.clone();
                 // The layout first, so switching to the desktop one is a tap away.
                 inner.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Interface").color(theme.muted));
+                    ui.label(egui::RichText::new(tr!("interface")).color(theme.muted));
                     for (label, choice) in [
-                        ("Phone", "phone"),
-                        ("Tablet", "tablet"),
-                        ("Desktop", "desktop"),
-                        ("Automatic", "auto"),
+                        (tr!("phone"), "phone"),
+                        (tr!("tablet"), "tablet"),
+                        (tr!("desktop"), "desktop"),
+                        (tr!("automatic"), "auto"),
                     ] {
                         if ui
                             .selectable_label(self.interface == choice, label)
@@ -303,7 +303,7 @@ fn menu_items(
             sue_wm::MenuItem::Action { label, command, .. } => {
                 let now = state(command);
                 let text = match now.checked {
-                    Some(true) => format!("{label}  (on)"),
+                    Some(true) => tr!("on-2", label = label),
                     _ => label.clone(),
                 };
                 if ui
@@ -357,7 +357,7 @@ impl SuePaint {
             Icon::Menu,
             true,
             self.sheet == Some(Sheet::Menu),
-            "Menus",
+            &tr!("menus-2"),
             theme,
         ) {
             self.toggle_sheet(Sheet::Menu);
@@ -368,7 +368,7 @@ impl SuePaint {
             Icon::Undo,
             history.0,
             false,
-            "Undo (two-finger tap)",
+            &tr!("undo-two-finger-tap"),
             theme,
         ) {
             run = Some("edit.undo".to_owned());
@@ -379,16 +379,16 @@ impl SuePaint {
             Icon::Redo,
             history.1,
             false,
-            "Redo (three-finger tap)",
+            &tr!("redo-three-finger-tap"),
             theme,
         ) {
             run = Some("edit.redo".to_owned());
         }
         let right = [
-            (Icon::Layers, Sheet::Layers, "Layers"),
-            (Icon::Wheel, Sheet::Color, "Color"),
-            (Icon::Wrench, Sheet::ToolSettings, "Tool settings"),
-            (Icon::Play, Sheet::Timeline, "Timeline"),
+            (Icon::Layers, Sheet::Layers, tr!("layers-3")),
+            (Icon::Wheel, Sheet::Color, tr!("color-2")),
+            (Icon::Wrench, Sheet::ToolSettings, tr!("tool-settings")),
+            (Icon::Play, Sheet::Timeline, tr!("timeline")),
         ];
         let fits = ((bar.width() - 3.0 * (BUTTON + 2.0) - 8.0) / (BUTTON + 2.0))
             .floor()
