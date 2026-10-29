@@ -1,0 +1,54 @@
+# Sends each published release to winget as a pull request to
+# microsoft/winget-pkgs, so `winget install MagiGun.Sue` installs it.
+#
+# Needs the WINGET_TOKEN secret: a classic personal access token with the
+# public_repo scope, from the GitHub account the pull requests come from
+# (wingetcreate forks winget-pkgs there). Without it the workflow only says
+# so. The first pull request adds Sue to winget and waits for a winget
+# moderator; later ones add each new version.
+#
+# It runs when a release is published on GitHub (a draft from the Release
+# workflow, once you publish it). A release published by a tag push does not
+# start it, since GitHub runs nothing for what a workflow did itself: run it
+# by hand with the release's tag (Actions, winget, Run workflow).
+name: winget
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The published release to send, such as v0.0.3"
+        required: true
+
+jobs:
+  winget:
+    # Previews (pre-releases) stay off winget unless sent by hand.
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
+    runs-on: windows-latest
+    env:
+      TOKEN: ${{ secrets.WINGET_TOKEN }}
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Without a token, nothing to send
+        if: env.TOKEN == ''
+        run: echo "::notice::There is no WINGET_TOKEN secret, so nothing went to winget. The top of .github/workflows/winget.yml says how to add one."
+      - uses: actions/checkout@v4
+        if: env.TOKEN != ''
+      - name: Manifests from the release's installers
+        if: env.TOKEN != ''
+        run: |
+          gh release download $env:TAG --repo ${{ github.repository }} --pattern "*.msi" --dir release
+          powershell -File packaging/winget/manifests.ps1 -Tag $env:TAG -Folder release -Out manifests
+      - name: Pull request to winget-pkgs
+        if: env.TOKEN != ''
+        env:
+          # wingetcreate reads the token here (not from its command line,
+          # where it could reach the log) and runs on any newer .NET.
+          WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          DOTNET_ROLL_FORWARD: Major
+        run: |
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          .\wingetcreate.exe submit --no-open manifests

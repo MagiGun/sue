@@ -127,6 +127,15 @@ shows each), and the Release workflow does when the repository has the
 right away; SmartScreen's "Windows protected your PC" fades as the
 certificate builds a reputation through downloads.
 
+Two Windows package managers install Sue without that warning. Every
+release carries `sue.json`, a Scoop manifest
+(`packaging/scoop/manifest.py` writes it), so `scoop install` from the
+latest release's link always gets the newest Sue. The winget workflow
+sends each published release to `microsoft/winget-pkgs` as a pull request
+(`packaging/winget/manifests.ps1` writes the manifests) when the
+repository has the `WINGET_TOKEN` secret; the top of
+`.github/workflows/winget.yml` says what token it needs.
+
 Flathub and the AUR are hosted, so publishing there is a step of its own.
 Flathub reviews a pull request to `flathub/flathub` with a manifest that
 builds from source (`packaging/flatpak/io.github.MagiGun.Sue.yml` is the

@@ -109,6 +109,24 @@ sue-core      ──► nothing                              (leaf)
 sue-platform  ──► winit, wgpu, egui, egui-winit, egui-wgpu, arboard, pollster, cpal, audio_thread_priority, rfd, open   (no engine crates)
 ```
 
+## Install
+
+Every [release](https://github.com/MagiGun/sue/releases) has a package for
+each system. On Windows the `-setup.exe` is the easiest (the `.msi` is the
+same installer for managed PCs, and the `-portable.zip` runs from any
+folder), or install with [Scoop](https://scoop.sh):
+
+```bash
+scoop install https://github.com/MagiGun/sue/releases/latest/download/sue.json
+```
+
+Sue is not code-signed yet, so Windows may say "Windows protected your PC" or
+"Unknown publisher" for a download. Choose **More info**, then **Run
+anyway**. Before extracting the portable zip, right-click it, choose
+**Properties** and tick **Unblock**, or Windows asks again for every program
+inside. Scoop installs without the warning, and `scoop update sue` keeps Sue
+current.
+
 ## Quick start
 
 ```bash

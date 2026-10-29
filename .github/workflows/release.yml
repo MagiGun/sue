@@ -331,15 +331,32 @@ jobs:
     if: ${{ !cancelled() && needs.windows.result == 'success' && needs.linux.result == 'success' && needs.macos.result == 'success' && needs.android.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      # sue.json: `scoop install` from the latest release's link.
+      - name: Scoop manifest
+        run: python3 packaging/scoop/manifest.py --tag ${{ needs.version.outputs.tag }} --dist dist
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          # Comes before the notes GitHub writes from the changes.
+          body: |
+            ## Installing
+
+            **Windows:** `Sue-${{ needs.version.outputs.version }}-windows-x64-setup.exe` is the easiest (`x86` for 32-bit PCs, `arm64` for ARM ones). The `.msi` is the same installer for managed PCs, and the `-portable.zip` runs from any folder. Or install with [Scoop](https://scoop.sh):
+
+            ```
+            scoop install https://github.com/MagiGun/sue/releases/latest/download/sue.json
+            ```
+
+            Sue is not code-signed yet, so Windows may say "Windows protected your PC" or "Unknown publisher". Choose **More info**, then **Run anyway**. Before extracting the portable zip, right-click it, choose **Properties** and tick **Unblock**, or Windows asks again for every program inside. Scoop installs without the warning.
+
+            **macOS:** the `.dmg`. **Linux:** the AppImage runs almost anywhere; there are also a Flatpak, `.deb`, `.rpm`, an Arch package and a tarball. **Android:** the `.apk`. **FreeBSD** and **iPhone and iPad** (to sign with your own Apple account) have packages too. More at https://magigun.github.io/sue/.
           # A tag push names the release; a run by hand names it with its
           # version and tags the commit it ran on.
           tag_name: ${{ needs.version.outputs.tag }}

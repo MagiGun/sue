@@ -663,7 +663,11 @@ setup program (`-setup.exe`, the easiest), the same installer as an `.msi`
 Flatpak, a `.deb` (Debian, Ubuntu, Mint), an `.rpm` (Fedora, openSUSE), a
 `.pkg.tar.zst` (Arch, CachyOS, Manjaro: `sudo pacman -U` it) or a tarball;
 one APK for every Android phone and tablet, and a package for iPhone and iPad
-to sign with your own Apple account. On Android, to open your own pictures
+to sign with your own Apple account. Sue is not code-signed yet, so Windows
+may warn before running a download ("Windows protected your PC"): More info,
+then Run anyway; or install it with Scoop (`scoop install
+https://github.com/MagiGun/sue/releases/latest/download/sue.json`), which
+does not warn. On Android, to open your own pictures
 (say, ones you sent to the device's Download folder), allow Sue to manage files
 once: Settings, Apps, Sue, Permissions, Files and media.
 
