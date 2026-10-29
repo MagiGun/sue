@@ -341,6 +341,10 @@ jobs:
         run: python3 packaging/scoop/manifest.py --tag ${{ needs.version.outputs.tag }} --dist dist
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS.txt
+      # GitHub will not let this workflow tag a commit whose workflow files
+      # differ from the default branch's newest ones: a change pushed under
+      # .github/workflows while a release builds makes this step fail with
+      # 403 "Resource not accessible by integration". Run the release again.
       - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
