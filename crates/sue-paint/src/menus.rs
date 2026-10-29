@@ -3,6 +3,45 @@
 
 use sue_wm::{Menu, MenuItem};
 
+/// The Open Recent items for `files` (newest first), then Clear Recent
+/// Files.
+#[must_use]
+pub fn recent_items(files: &[std::path::PathBuf]) -> Vec<MenuItem> {
+    let mut items: Vec<MenuItem> = files
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let name = path.file_name().map_or_else(
+                || path.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            );
+            act(&name, &format!("file.recent.open.{index}"))
+        })
+        .collect();
+    if !items.is_empty() {
+        items.push(SEP);
+    }
+    items.push(act("Clear Recent Files", "file.recent.clear"));
+    items
+}
+
+/// Puts `items` in the Open Recent submenu of `menus`.
+pub fn set_recent(menus: &mut [Menu], items: Vec<MenuItem>) {
+    for menu in menus.iter_mut().filter(|menu| menu.title == "File") {
+        for item in &mut menu.items {
+            if let MenuItem::Sub {
+                label,
+                items: inside,
+            } = item
+                && label == "Open Recent"
+            {
+                *inside = items;
+                return;
+            }
+        }
+    }
+}
+
 fn act(label: &str, command: &str) -> MenuItem {
     MenuItem::action(label, command)
 }

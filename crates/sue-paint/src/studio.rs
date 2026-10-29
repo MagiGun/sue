@@ -321,6 +321,13 @@ pub struct SuePaint {
     /// Each picture's version when last saved or opened, for the tabs'
     /// modified dot.
     pub(crate) clean: HashMap<EntityId, u64>,
+    /// Where in the undo history each picture was last saved or opened
+    /// (File, Revert goes back there).
+    pub(crate) saved_at: HashMap<EntityId, sue_core::NodeId>,
+    /// The files opened lately, newest first (File, Open Recent).
+    pub(crate) recent_files: Vec<PathBuf>,
+    /// The recent files were read from Sue Paint's data folder.
+    pub(crate) recent_loaded: bool,
     pub(crate) hue: f32,
     pub(crate) recent: History,
     pub(crate) docs: Vec<Doc>,
@@ -449,6 +456,9 @@ impl Default for SuePaint {
             sub_active: false,
             hue: 0.0,
             recent: History::default(),
+            saved_at: HashMap::new(),
+            recent_files: Vec::new(),
+            recent_loaded: false,
             docs: Vec::new(),
             active: 0,
             closed: HashSet::new(),
@@ -748,6 +758,22 @@ fn implemented(command: &str) -> bool {
             | "layer.new.3d"
             | "file.import.3d"
             | "filter.line_extraction"
+            | "filter.motion_blur"
+            | "filter.radial_blur"
+            | "filter.zoom_blur"
+            | "filter.smooth"
+            | "filter.dust"
+            | "filter.line_width"
+            | "filter.wave"
+            | "filter.pinch"
+            | "filter.polar"
+            | "filter.ripple"
+            | "filter.fisheye"
+            | "filter.aberration"
+            | "filter.retro"
+            | "filter.perlin"
+            | "filter.clouds"
+            | "filter.unsharp"
             | "filter.lines_tones"
             | "file.export.pdf"
             | "file.export.epub"
@@ -767,7 +793,19 @@ fn implemented(command: &str) -> bool {
             | "anim.prev"
             | "file.export.gif"
             | "file.export.sequence"
-    ) || TOOL_KEYS.iter().any(|(known, _, _)| *known == command)
+            | "file.export.bmp"
+            | "file.export.tif"
+            | "file.export.tga"
+            | "file.export.psd"
+            | "file.export.psb"
+            | "file.import.layers"
+            | "file.import.vector"
+            | "file.import.movie"
+            | "file.import.pattern"
+            | "file.recent.clear"
+            | "file.revert"
+    ) || command.starts_with("file.recent.open.")
+        || TOOL_KEYS.iter().any(|(known, _, _)| *known == command)
 }
 
 /// Puppet warp on one layer: its pixels from before, the pins, and what
@@ -2201,15 +2239,12 @@ impl SuePaint {
         }
     }
 
-    /// Writes the flattened picture as `ext` (png, jpg or jxl).
+    /// Writes the flattened picture as `ext` (png, jpg, jxl, bmp, tif or tga).
     fn export(&mut self, cx: &mut AppletContext<'_>, ext: &str) {
         let Some(picture) = self.picture() else {
             return;
         };
         let arena = &cx.world.arena;
-        let name = arena
-            .get_by_id(picture)
-            .map_or_else(|_| "Picture".to_owned(), |entity| entity.name().to_owned());
         let options = RenderOptions {
             paper: true,
             drafts: false,
@@ -2226,6 +2261,35 @@ impl SuePaint {
                 return;
             }
         };
+        self.export_bytes(cx, bytes, ext);
+    }
+
+    /// Layered Photoshop document export (`.psd`, or `.psb` when `big`).
+    fn export_psd(&mut self, cx: &mut AppletContext<'_>, big: bool) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let Some(psd) = crate::psd_io::to_psd(&cx.world.arena, picture) else {
+            cx.fail("This picture has no size");
+            return;
+        };
+        match sue_io::psd::encode_psd(&psd, big) {
+            Ok(bytes) => self.export_bytes(cx, bytes, if big { "psb" } else { "psd" }),
+            Err(error) => cx.fail(format!("Export failed: {error}")),
+        }
+    }
+
+    /// Asks where to write the exported `bytes` (`ext` files), or writes
+    /// them to the exports folder when nobody is there to ask.
+    fn export_bytes(&mut self, cx: &mut AppletContext<'_>, bytes: Vec<u8>, ext: &str) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let name = cx
+            .world
+            .arena
+            .get_by_id(picture)
+            .map_or_else(|_| "Picture".to_owned(), |entity| entity.name().to_owned());
         let file = format!("{name}.{ext}");
         if cx.view.interactive {
             // The File Manager asks where; `picked` writes it.
@@ -2395,7 +2459,9 @@ impl SuePaint {
         };
         cx.request(ShellRequest::PickFile(
             FilePick::open(Some(AppletId::new(ID).expect("a valid id")), purpose, title)
-                .extensions(&["png", "jpg", "jpeg", "jxl"])
+                .extensions(&[
+                    "png", "jpg", "jpeg", "jxl", "psd", "psb", "webp", "tif", "tiff", "bmp",
+                ])
                 .starting_in(start),
         ));
     }
@@ -2406,11 +2472,14 @@ impl SuePaint {
             self.last_dir = Some(dir.to_path_buf());
         }
         match std::fs::read(path) {
-            Ok(bytes) => {
-                if let Err(error) = self.open_bytes(cx, path, &bytes, as_layer) {
-                    cx.fail(error);
+            Ok(bytes) => match self.open_bytes(cx, path, &bytes, as_layer) {
+                Ok(()) => {
+                    if !as_layer {
+                        self.remember_recent(cx, path);
+                    }
                 }
-            }
+                Err(error) => cx.fail(error),
+            },
             Err(error) => cx.fail(format!("Cannot read {}: {error}", path.display())),
         }
     }
@@ -2434,6 +2503,9 @@ impl SuePaint {
         let file = path
             .file_name()
             .map_or_else(String::new, |file| file.to_string_lossy().into_owned());
+        if bytes.starts_with(b"8BPS") {
+            return self.open_psd(cx, &name, &file, bytes, as_layer);
+        }
         let formats = sue_io::formats(sue_model::registry());
         let bundle = formats
             .import(bytes, &file, &Properties::new())
@@ -2477,11 +2549,228 @@ impl SuePaint {
                     );
                 if Self::apply(cx, edit) {
                     self.activate(&cx.world.arena, picture_id);
+                    self.saved_at.insert(picture_id, cx.history.cursor());
                     Self::place(cx, picture_id);
                 }
             }
         }
         Ok(())
+    }
+
+    /// Opens a Photoshop document with its layers and folders kept: as a
+    /// new canvas, or into the current one above the current layer.
+    fn open_psd(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        name: &str,
+        file: &str,
+        bytes: &[u8],
+        as_layer: bool,
+    ) -> Result<(), String> {
+        let psd = sue_io::psd::decode_psd(bytes)
+            .map_err(|error| format!("Cannot open {file}: {error}"))?;
+        if let Some(picture) = self.picture().filter(|_| as_layer) {
+            let below = self.doc().and_then(|doc| doc.layer);
+            let edit = crate::psd_io::import(&cx.world.arena, picture, below, &psd)?;
+            Self::apply(cx, edit);
+            return Ok(());
+        }
+        let image = Entity::empty(name.to_owned(), class::IMAGE)
+            .with_property(picture::WIDTH, i64::from(psd.width))
+            .with_property(picture::HEIGHT, i64::from(psd.height))
+            .with_property(picture::DPI, 72.0);
+        let picture = image.id();
+        let layers = crate::psd_io::import(&cx.world.arena, picture, None, &psd)?;
+        let edit = Batch::new(format!("Open {file}"))
+            .then(SpawnEntity::new(image))
+            .then(layers);
+        if Self::apply(cx, edit) {
+            self.activate(&cx.world.arena, picture);
+            self.saved_at.insert(picture, cx.history.cursor());
+            if let Some(top) = doc::layers(&cx.world.arena, picture)
+                .iter()
+                .rev()
+                .find(|info| !doc::is_folder(&cx.world.arena, info.id))
+                .map(|info| info.id)
+                && let Some(doc) = self.doc_mut()
+            {
+                doc.layer = Some(top);
+            }
+            Self::place(cx, picture);
+        }
+        Ok(())
+    }
+
+    /// File, Import, Vector, Movie or Pattern from Image: the file at
+    /// `path` as a vector layer, as cels of a new animation folder, or
+    /// tiled over a new layer.
+    fn import_file(&mut self, cx: &mut AppletContext<'_>, purpose: &str, path: &Path) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        let name = path.file_stem().map_or_else(
+            || "Imported".to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        );
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                cx.fail(format!("Cannot read {}: {error}", path.display()));
+                return;
+            }
+        };
+        let arena = &cx.world.arena;
+        let below = self.doc().and_then(|doc| doc.layer);
+        let size = arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(picture::size)
+            .unwrap_or([1, 1]);
+        let made: Result<(doc::Edit, Option<EntityId>), String> = match purpose {
+            "import-vector" => String::from_utf8(bytes)
+                .map_err(|_| "The file is not text".to_owned())
+                .and_then(|text| sue_io::svg::parse_svg(&text))
+                .and_then(|drawing| {
+                    let lines = crate::vector::from_svg(&drawing, size);
+                    if lines.is_empty() {
+                        return Err("The drawing has no lines".to_owned());
+                    }
+                    let (spawn, id) =
+                        doc::add_vector_lines(arena, picture, below, name.clone(), &lines)?;
+                    Ok((
+                        doc::Edit::new(format!("Import Vector {name}")).then(spawn),
+                        Some(id),
+                    ))
+                }),
+            "import-movie" => sue_io::decode_frames(&bytes).and_then(|(frames, fps)| {
+                let (edit, track) =
+                    crate::anim::import_frames(arena, picture, below, &name, &frames, fps)?;
+                if let Some(doc) = self.doc_mut() {
+                    doc.track = track;
+                }
+                Ok((edit, None))
+            }),
+            _ => sue_io::decode_picture(&bytes, None)
+                .map(|tile| to_rgba(&tile))
+                .and_then(|tile| {
+                    crate::materials::tiled(&tile, size)
+                        .ok_or_else(|| "The picture has no pixels".to_owned())
+                })
+                .and_then(|raster| {
+                    let (spawn, id) =
+                        doc::add_layer_pixels(arena, picture, below, name.clone(), raster)?;
+                    Ok((
+                        doc::Edit::new(format!("Pattern from {name}")).then(spawn),
+                        Some(id),
+                    ))
+                }),
+        };
+        match made {
+            Ok((edit, layer)) => {
+                if Self::apply(cx, edit) {
+                    if purpose == "import-movie" {
+                        self.panels.timeline = true;
+                    }
+                    if let Some(layer) = layer
+                        && let Some(doc) = self.doc_mut()
+                    {
+                        doc.layer = Some(layer);
+                    }
+                }
+            }
+            Err(error) => cx.fail(format!("Cannot import {name}: {error}")),
+        }
+    }
+
+    /// Goes back to where the picture was last saved or opened (File,
+    /// Revert), as undoing step by step would; Redo brings the changes
+    /// back.
+    fn revert(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let Some(saved) = self.saved_at.get(&picture).copied() else {
+            cx.fail("Save the picture first: Revert goes back to the last save");
+            return;
+        };
+        let mut steps = 0;
+        let mut at = cx.history.cursor();
+        while at != saved {
+            let Some(parent) = cx.history.parent(at) else {
+                cx.fail("The last save is on another branch of the history; pick it in the History palette");
+                return;
+            };
+            at = parent;
+            steps += 1;
+        }
+        if steps == 0 {
+            cx.notify("Nothing changed since the last save");
+            return;
+        }
+        for _ in 0..steps {
+            if let Err(error) = cx.undo(false) {
+                cx.fail(format!("Cannot revert: {error}"));
+                return;
+            }
+        }
+        self.sync_docs(&cx.world.arena);
+        cx.notify(format!("Reverted {steps} changes; Redo brings them back"));
+    }
+
+    /// Reads the recent files from Sue Paint's data folder, once.
+    fn load_recent(&mut self, cx: &AppletContext<'_>) {
+        if self.recent_loaded {
+            return;
+        }
+        self.recent_loaded = true;
+        if let Some(text) = crate::colorsets::folder(cx)
+            .and_then(|folder| std::fs::read_to_string(folder.join("recent.txt")).ok())
+        {
+            self.recent_files = text
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(PathBuf::from)
+                .collect();
+        }
+        crate::menus::set_recent(
+            &mut self.menus,
+            crate::menus::recent_items(&self.recent_files),
+        );
+    }
+
+    /// Puts `path` first among the recent files.
+    fn remember_recent(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        self.load_recent(cx);
+        let path = path.to_path_buf();
+        self.recent_files.retain(|known| *known != path);
+        self.recent_files.insert(0, path);
+        self.recent_files.truncate(10);
+        self.save_recent(cx);
+    }
+
+    /// Writes the recent files and shows them in Open Recent.
+    fn save_recent(&mut self, cx: &mut AppletContext<'_>) {
+        crate::menus::set_recent(
+            &mut self.menus,
+            crate::menus::recent_items(&self.recent_files),
+        );
+        let Some(folder) = crate::colorsets::folder(cx) else {
+            return;
+        };
+        let text: String = self
+            .recent_files
+            .iter()
+            .map(|path| format!("{}\n", path.display()))
+            .collect();
+        if std::fs::create_dir_all(&folder)
+            .and_then(|()| std::fs::write(folder.join("recent.txt"), text))
+            .is_err()
+        {
+            cx.fail("Cannot remember the recent files");
+        }
     }
 
     /// Creates a picture from the New dialog, makes it current and puts
@@ -2949,6 +3238,80 @@ impl SuePaint {
             "file.save" => {
                 cx.request(ShellRequest::Command("file.save".to_owned()));
                 self.mark_clean();
+                let at = cx.history.cursor();
+                for doc in &self.docs {
+                    self.saved_at.insert(doc.picture, at);
+                }
+            }
+            "file.revert" => self.revert(cx),
+            "file.recent.clear" => {
+                self.recent_files.clear();
+                self.save_recent(cx);
+            }
+            recent if recent.starts_with("file.recent.open.") => {
+                let index = recent["file.recent.open.".len()..].parse::<usize>().ok();
+                if let Some(path) = index
+                    .and_then(|index| self.recent_files.get(index))
+                    .cloned()
+                {
+                    if path.exists() {
+                        self.open_picked(cx, &path, false);
+                    } else {
+                        cx.fail(format!("{} is gone", path.display()));
+                        self.recent_files.retain(|known| *known != path);
+                        self.save_recent(cx);
+                    }
+                }
+            }
+            "file.import.vector" | "file.import.movie" | "file.import.pattern" => {
+                if self.picture().is_none() {
+                    cx.fail("Open or make a canvas first");
+                    return;
+                }
+                let (purpose, title, extensions): (&str, &str, &[&str]) = match command {
+                    "file.import.vector" => ("import-vector", "Import Vector", &["svg"]),
+                    "file.import.movie" => (
+                        "import-movie",
+                        "Import Movie",
+                        &["gif", "png", "apng", "webp", "avi"],
+                    ),
+                    _ => (
+                        "import-pattern",
+                        "Pattern from Image",
+                        &["png", "jpg", "jpeg", "jxl", "webp", "bmp", "tif", "tiff"],
+                    ),
+                };
+                let start = self
+                    .last_dir
+                    .clone()
+                    .or_else(|| cx.catalog.folders.get("home").cloned());
+                cx.request(ShellRequest::PickFile(
+                    FilePick::open(Some(me_id()), purpose, title)
+                        .extensions(extensions)
+                        .starting_in(start),
+                ));
+            }
+            "file.export.bmp" => self.export(cx, "bmp"),
+            "file.export.tif" => self.export(cx, "tif"),
+            "file.export.tga" => self.export(cx, "tga"),
+            "file.export.psd" => self.export_psd(cx, false),
+            "file.export.psb" => self.export_psd(cx, true),
+            "file.import.layers" => {
+                let start = self
+                    .last_dir
+                    .clone()
+                    .or_else(|| cx.catalog.folders.get("home").cloned());
+                cx.request(ShellRequest::PickFile(
+                    FilePick::open(
+                        Some(me_id()),
+                        "import-layers",
+                        "Import Image as Separate Layers",
+                    )
+                    .extensions(&[
+                        "psd", "psb", "png", "jpg", "jpeg", "jxl", "webp", "tif", "tiff", "bmp",
+                    ])
+                    .starting_in(start),
+                ));
             }
             "file.save_as" => self.save_as(cx),
             "file.export.png" => self.export(cx, "png"),
@@ -3087,6 +3450,59 @@ impl SuePaint {
                 },
             ),
             "filter.lines_tones" => self.lines_and_tones(cx),
+            "filter.motion_blur" => self.filter_dialog(
+                cx,
+                Filter::MotionBlur {
+                    angle: 0.0,
+                    distance: 20.0,
+                },
+            ),
+            "filter.radial_blur" => self.filter_dialog(cx, Filter::RadialBlur { angle: 10.0 }),
+            "filter.zoom_blur" => self.filter_dialog(cx, Filter::ZoomBlur { amount: 0.3 }),
+            "filter.smooth" => self.filter_now(cx, Filter::Smooth),
+            "filter.dust" => self.filter_dialog(cx, Filter::Dust { size: 10 }),
+            "filter.line_width" => self.filter_dialog(cx, Filter::LineWidth { by: 1.0 }),
+            "filter.wave" => self.filter_dialog(
+                cx,
+                Filter::Wave {
+                    amplitude: 8.0,
+                    wavelength: 80.0,
+                },
+            ),
+            "filter.pinch" => self.filter_dialog(cx, Filter::Pinch { amount: 0.5 }),
+            "filter.polar" => self.filter_dialog(cx, Filter::Polar { inverse: false }),
+            "filter.ripple" => self.filter_dialog(
+                cx,
+                Filter::Ripple {
+                    amplitude: 6.0,
+                    wavelength: 40.0,
+                },
+            ),
+            "filter.fisheye" => self.filter_dialog(cx, Filter::Fisheye { amount: 0.6 }),
+            "filter.aberration" => self.filter_dialog(cx, Filter::Aberration { shift: 6.0 }),
+            "filter.retro" => self.filter_dialog(cx, Filter::Retro { amount: 0.6 }),
+            "filter.perlin" => self.filter_dialog(
+                cx,
+                Filter::PerlinNoise {
+                    scale: 60.0,
+                    contrast: 1.0,
+                },
+            ),
+            "filter.clouds" => self.filter_now(
+                cx,
+                Filter::Clouds {
+                    from: self.main,
+                    to: self.sub,
+                },
+            ),
+            "filter.unsharp" => self.filter_dialog(
+                cx,
+                Filter::Unsharp {
+                    radius: 3.0,
+                    amount: 1.0,
+                    threshold: 0.0,
+                },
+            ),
             "filter.noise" => self.filter_dialog(cx, Filter::Noise { amount: 0.2 }),
             "filter.curve" => self.filter_dialog(
                 cx,
@@ -4492,6 +4908,7 @@ impl SueApplet for SuePaint {
     }
 
     fn studio_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        self.load_recent(cx);
         self.frame(ui, cx);
     }
 
@@ -4592,6 +5009,10 @@ impl SueApplet for SuePaint {
         match pick.purpose.as_str() {
             "open" => self.open_picked(cx, path, false),
             "layer" => self.open_picked(cx, path, true),
+            "import-layers" => self.open_picked(cx, path, true),
+            "import-vector" | "import-movie" | "import-pattern" => {
+                self.import_file(cx, pick.purpose.as_str(), path)
+            }
             "export" => {
                 if let Some(bytes) = self.pending_export.take() {
                     self.write_export(cx, path, &bytes);

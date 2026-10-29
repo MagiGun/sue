@@ -776,6 +776,20 @@ impl SuePaint {
                             | Filter::Sharpen { .. }
                             | Filter::Mosaic { .. }
                             | Filter::LineExtraction { .. }
+                            | Filter::MotionBlur { .. }
+                            | Filter::RadialBlur { .. }
+                            | Filter::ZoomBlur { .. }
+                            | Filter::LineWidth { .. }
+                            | Filter::Wave { .. }
+                            | Filter::Pinch { .. }
+                            | Filter::Polar { .. }
+                            | Filter::Ripple { .. }
+                            | Filter::Fisheye { .. }
+                            | Filter::Aberration { .. }
+                            | Filter::Retro { .. }
+                            | Filter::PerlinNoise { .. }
+                            | Filter::Unsharp { .. }
+                            | Filter::Dust { .. }
                     );
                     if wanted != filter.shown && (cheap || !pointer_down) {
                         let pixels = match wanted {
@@ -1743,6 +1757,56 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
                     .text("Block size"),
             );
         }
+        Filter::MotionBlur { angle, distance } => {
+            ui.add(egui::Slider::new(angle, 0.0..=360.0).text("Angle"));
+            ui.add(egui::Slider::new(distance, 1.0..=200.0).text("Distance"));
+        }
+        Filter::RadialBlur { angle } => {
+            ui.add(egui::Slider::new(angle, 1.0..=90.0).text("Angle"));
+        }
+        Filter::ZoomBlur { amount } | Filter::Fisheye { amount } | Filter::Retro { amount } => {
+            ui.add(egui::Slider::new(amount, 0.0..=1.0).text("Amount"));
+        }
+        Filter::Pinch { amount } => {
+            ui.add(egui::Slider::new(amount, -1.0..=1.0).text("Amount"));
+        }
+        Filter::Dust { size } => {
+            ui.add(egui::Slider::new(size, 1..=100).text("Dust size"));
+        }
+        Filter::LineWidth { by } => {
+            ui.add(egui::Slider::new(by, -10.0..=10.0).text("Width"));
+        }
+        Filter::Wave {
+            amplitude,
+            wavelength,
+        }
+        | Filter::Ripple {
+            amplitude,
+            wavelength,
+        } => {
+            ui.add(egui::Slider::new(amplitude, 0.0..=50.0).text("Amplitude"));
+            ui.add(egui::Slider::new(wavelength, 2.0..=400.0).text("Wavelength"));
+        }
+        Filter::Polar { inverse } => {
+            ui.radio_value(inverse, false, "Rectangular to polar");
+            ui.radio_value(inverse, true, "Polar to rectangular");
+        }
+        Filter::Aberration { shift } => {
+            ui.add(egui::Slider::new(shift, 0.0..=40.0).text("Shift"));
+        }
+        Filter::PerlinNoise { scale, contrast } => {
+            ui.add(egui::Slider::new(scale, 2.0..=500.0).text("Scale"));
+            ui.add(egui::Slider::new(contrast, 0.0..=2.0).text("Contrast"));
+        }
+        Filter::Unsharp {
+            radius,
+            amount,
+            threshold,
+        } => {
+            ui.add(egui::Slider::new(radius, 0.5..=50.0).text("Radius"));
+            ui.add(egui::Slider::new(amount, 0.0..=5.0).text("Amount"));
+            ui.add(egui::Slider::new(threshold, 0.0..=1.0).text("Threshold"));
+        }
         Filter::LineExtraction {
             sensitivity,
             black,
@@ -1888,7 +1952,11 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
             ui.add(egui::Slider::new(cell, 3.0..=60.0).text("Dot spacing (px)"));
             ui.add(egui::Slider::new(angle, 0.0..=90.0).text("Angle"));
         }
-        Filter::Invert | Filter::Recolor { .. } | Filter::BrightnessToOpacity { .. } => {}
+        Filter::Invert
+        | Filter::Smooth
+        | Filter::Clouds { .. }
+        | Filter::Recolor { .. }
+        | Filter::BrightnessToOpacity { .. } => {}
     }
 }
 

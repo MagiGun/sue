@@ -24,9 +24,11 @@ mod ingest;
 mod jxl;
 pub mod pdf;
 mod pictures;
+pub mod psd;
 pub mod publish;
 mod raster;
 mod sniff;
+pub mod svg;
 mod tile_cache;
 mod video;
 pub mod zip;
@@ -57,7 +59,7 @@ pub use sniff::{
     sniff_stream,
 };
 pub use tile_cache::{TileCache, TileCacheStats, TileKey};
-pub use video::MjpegAvi;
+pub use video::{MAX_FRAMES, MjpegAvi, decode_frames};
 
 /// One codec compiled into this build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

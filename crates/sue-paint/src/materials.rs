@@ -190,6 +190,13 @@ pub fn layer(material: &Material, size: [u32; 2], color: [u8; 3]) -> Option<Rast
         return picture(material, size, color);
     }
     let tile = picture(material, size, color)?;
+    fitted(&tile, size)
+}
+
+/// `tile` (straight RGBA8) made to fit inside `size` keeping its shape,
+/// never larger than it is, in the middle of a clear picture of `size`.
+#[must_use]
+pub fn fitted(tile: &RasterTile2D, size: [u32; 2]) -> Option<RasterTile2D> {
     let from = [tile.width(), tile.height()];
     let scale = (f64::from(size[0]) / f64::from(from[0]))
         .min(f64::from(size[1]) / f64::from(from[1]))
@@ -214,6 +221,26 @@ pub fn layer(material: &Material, size: [u32; 2], color: [u8; 3]) -> Option<Rast
         let at = (((top + y) * size[0] + left) * 4) as usize;
         out[at..at + (to[0] * 4) as usize]
             .copy_from_slice(&fitted[row..row + (to[0] * 4) as usize]);
+    }
+    RasterTile2D::from_bytes(size[0], size[1], PixelFormat::Rgba8, out).ok()
+}
+
+/// `tile` (straight RGBA8) repeated over a clear picture of `size` from
+/// its top left corner (File, Import, Pattern from Image).
+#[must_use]
+pub fn tiled(tile: &RasterTile2D, size: [u32; 2]) -> Option<RasterTile2D> {
+    let (w, h) = (tile.width(), tile.height());
+    if w == 0 || h == 0 || tile.format() != PixelFormat::Rgba8 {
+        return None;
+    }
+    let bytes = tile.bytes()?;
+    let mut out = vec![0_u8; (size[0] * size[1] * 4) as usize];
+    for y in 0..size[1] {
+        for x in 0..size[0] {
+            let from = (((y % h) * w + x % w) * 4) as usize;
+            let to = ((y * size[0] + x) * 4) as usize;
+            out[to..to + 4].copy_from_slice(&bytes[from..from + 4]);
+        }
     }
     RasterTile2D::from_bytes(size[0], size[1], PixelFormat::Rgba8, out).ok()
 }

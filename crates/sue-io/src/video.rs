@@ -161,6 +161,123 @@ impl MjpegAvi {
     }
 }
 
+/// The most frames [`decode_frames`] reads from one file.
+pub const MAX_FRAMES: usize = 3_000;
+
+/// The frames of a movie or an animated picture, each a straight RGBA8
+/// tile, and its frames per second: animated GIF, animated PNG, animated
+/// WebP and Motion JPEG AVI (as Sue writes it). At most [`MAX_FRAMES`].
+///
+/// # Errors
+/// If the file is none of these or cannot be read.
+pub fn decode_frames(bytes: &[u8]) -> Result<(Vec<RasterTile2D>, f64), String> {
+    use image::AnimationDecoder;
+    use std::io::Cursor;
+    let collect = |frames: image::Frames<'_>| -> Result<(Vec<RasterTile2D>, f64), String> {
+        let mut tiles = Vec::new();
+        let mut total_ms = 0.0;
+        for frame in frames.take(MAX_FRAMES) {
+            let frame = frame.map_err(|error| error.to_string())?;
+            let (numer, denom) = frame.delay().numer_denom_ms();
+            total_ms += f64::from(numer) / f64::from(denom.max(1));
+            let buffer = frame.into_buffer();
+            let (width, height) = buffer.dimensions();
+            tiles.push(
+                RasterTile2D::from_bytes(
+                    width,
+                    height,
+                    sue_core::PixelFormat::Rgba8,
+                    buffer.into_raw(),
+                )
+                .map_err(|error| error.to_string())?,
+            );
+        }
+        if tiles.is_empty() {
+            return Err("the file has no frames".to_owned());
+        }
+        let each = total_ms / tiles.len() as f64;
+        let fps = if each > 0.0 {
+            (1000.0 / each).clamp(1.0, 120.0)
+        } else {
+            12.0
+        };
+        Ok((tiles, fps))
+    };
+    if bytes.starts_with(b"GIF8") {
+        let decoder = image::codecs::gif::GifDecoder::new(Cursor::new(bytes))
+            .map_err(|error| error.to_string())?;
+        return collect(decoder.into_frames());
+    }
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        let decoder = image::codecs::png::PngDecoder::new(Cursor::new(bytes))
+            .map_err(|error| error.to_string())?;
+        if decoder.is_apng().map_err(|error| error.to_string())? {
+            let frames = decoder
+                .apng()
+                .map_err(|error| error.to_string())?
+                .into_frames();
+            return collect(frames);
+        }
+        let tile = crate::decode_png(bytes)?.tile;
+        return Ok((vec![tile], 12.0));
+    }
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        let decoder = image::codecs::webp::WebPDecoder::new(Cursor::new(bytes))
+            .map_err(|error| error.to_string())?;
+        return collect(decoder.into_frames());
+    }
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"AVI ") {
+        return avi_frames(bytes);
+    }
+    Err("Sue reads movies as animated GIF, PNG or WebP, or Motion JPEG AVI".to_owned())
+}
+
+/// The JPEG frames of a Motion JPEG AVI and its frame rate.
+fn avi_frames(bytes: &[u8]) -> Result<(Vec<RasterTile2D>, f64), String> {
+    let read = |at: usize| -> Option<u32> {
+        Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
+    };
+    let mut fps = 12.0;
+    if let Some(avih) = bytes.windows(4).position(|tag| tag == b"avih")
+        && let Some(micros) = read(avih + 8).filter(|micros| *micros > 0)
+    {
+        fps = (1_000_000.0 / f64::from(micros)).clamp(1.0, 120.0);
+    }
+    let movi = bytes
+        .windows(4)
+        .position(|tag| tag == b"movi")
+        .ok_or("the AVI has no frames")?;
+    let mut at = movi + 4;
+    let mut tiles = Vec::new();
+    while at + 8 <= bytes.len() && tiles.len() < MAX_FRAMES {
+        let tag = &bytes[at..at + 4];
+        if tag == b"idx1" {
+            break;
+        }
+        let size = read(at + 4).ok_or("the AVI is cut short")? as usize;
+        let body = bytes
+            .get(at + 8..at + 8 + size)
+            .ok_or("the AVI is cut short")?;
+        if tag == b"LIST" {
+            // A list of chunks: step inside it.
+            at += 12;
+            continue;
+        }
+        if tag[2..] == *b"dc" || tag[2..] == *b"db" {
+            if body.starts_with(&[0xFF, 0xD8]) {
+                tiles.push(crate::decode_jpeg(body)?.tile);
+            } else {
+                return Err("only Motion JPEG AVI movies are read".to_owned());
+            }
+        }
+        at += 8 + size + size % 2;
+    }
+    if tiles.is_empty() {
+        return Err("the AVI has no frames".to_owned());
+    }
+    Ok((tiles, fps))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +285,32 @@ mod tests {
 
     fn read(bytes: &[u8], at: usize) -> u32 {
         u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
+    }
+
+    #[test]
+    fn movies_and_animations_read_back_frame_by_frame() {
+        let frame = |shade: u8| {
+            RasterTile2D::from_bytes(
+                8,
+                6,
+                PixelFormat::Rgba8,
+                [shade, shade, shade, 255].repeat(48),
+            )
+            .unwrap()
+        };
+        let mut video = MjpegAvi::new(8, 6, 10);
+        for shade in [0_u8, 255] {
+            video.push_frame(&frame(shade), 95).unwrap();
+        }
+        let (frames, fps) = decode_frames(&video.finish()).unwrap();
+        assert_eq!(frames.len(), 2);
+        assert!((fps - 10.0).abs() < 0.01);
+        assert!(frames[1].bytes().unwrap()[0] > 200, "the white frame");
+        let gif = crate::encode_gif_animation(&[frame(0), frame(255), frame(0)], 50).unwrap();
+        let (frames, fps) = decode_frames(&gif).unwrap();
+        assert_eq!(frames.len(), 3);
+        assert!((fps - 20.0).abs() < 0.5);
+        assert!(decode_frames(b"not a movie").is_err());
     }
 
     #[test]

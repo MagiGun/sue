@@ -54,6 +54,97 @@ pub enum Filter {
         /// Block side in pixels.
         size: u32,
     },
+    /// Motion Blur: smeared along a direction.
+    MotionBlur {
+        /// The direction, degrees.
+        angle: f32,
+        /// How far, pixels.
+        distance: f32,
+    },
+    /// Radial Blur: spun round the middle.
+    RadialBlur {
+        /// How far round, degrees.
+        angle: f32,
+    },
+    /// Zoom Blur: streaked toward the middle.
+    ZoomBlur {
+        /// How far, 0 to 1 of the way.
+        amount: f32,
+    },
+    /// Smooth: jagged edges softened.
+    Smooth,
+    /// Remove Dust: specks no larger than `size` cleared.
+    Dust {
+        /// The largest speck, pixels.
+        size: u32,
+    },
+    /// Line Width: lines thickened (or, below 0, thinned) by pixels.
+    LineWidth {
+        /// Pixels; negative thins.
+        by: f32,
+    },
+    /// Wave: rows and columns shifted along a wave.
+    Wave {
+        /// How far, pixels.
+        amplitude: f32,
+        /// How long a wave is, pixels.
+        wavelength: f32,
+    },
+    /// Pinch: drawn into the middle, or (below 0) swelled out.
+    Pinch {
+        /// -1 to 1.
+        amount: f32,
+    },
+    /// Polar Coordinates: rows wrapped round the middle (or back again).
+    Polar {
+        /// Back from round to straight.
+        inverse: bool,
+    },
+    /// Ripple: rings spreading from the middle.
+    Ripple {
+        /// How far, pixels.
+        amplitude: f32,
+        /// How far apart, pixels.
+        wavelength: f32,
+    },
+    /// Fisheye: bulged like a wide lens.
+    Fisheye {
+        /// 0 to 1.
+        amount: f32,
+    },
+    /// Chromatic Aberration: red and blue pulled apart toward the edges.
+    Aberration {
+        /// Pixels at the edge.
+        shift: f32,
+    },
+    /// Retro: faded, warm, darker toward the edges, with grain.
+    Retro {
+        /// 0 to 1.
+        amount: f32,
+    },
+    /// Perlin Noise: smooth noise in gray.
+    PerlinNoise {
+        /// How large, pixels.
+        scale: f32,
+        /// How strong the contrast, 0 to 2.
+        contrast: f32,
+    },
+    /// Clouds: smooth noise between two colors.
+    Clouds {
+        /// The dark color.
+        from: [u8; 3],
+        /// The light color.
+        to: [u8; 3],
+    },
+    /// Unsharp Mask: edges sharpened by a blurred copy.
+    Unsharp {
+        /// Blur radius, pixels.
+        radius: f32,
+        /// How much, 0 to 5.
+        amount: f32,
+        /// Differences smaller than this stay, 0 to 1.
+        threshold: f32,
+    },
     /// Line Extraction: the lines of a photo or scan as black line art on
     /// clear, from a difference of gaussians, with dark areas filled.
     LineExtraction {
@@ -180,6 +271,22 @@ impl Filter {
             Self::Sharpen { .. } => "Sharpen",
             Self::Mosaic { .. } => "Mosaic",
             Self::LineExtraction { .. } => "Line Extraction",
+            Self::MotionBlur { .. } => "Motion Blur",
+            Self::RadialBlur { .. } => "Radial Blur",
+            Self::ZoomBlur { .. } => "Zoom Blur",
+            Self::Smooth => "Smooth",
+            Self::Dust { .. } => "Remove Dust",
+            Self::LineWidth { .. } => "Line Width",
+            Self::Wave { .. } => "Wave",
+            Self::Pinch { .. } => "Pinch",
+            Self::Polar { .. } => "Polar Coordinates",
+            Self::Ripple { .. } => "Ripple",
+            Self::Fisheye { .. } => "Fisheye",
+            Self::Aberration { .. } => "Chromatic Aberration",
+            Self::Retro { .. } => "Retro",
+            Self::PerlinNoise { .. } => "Perlin Noise",
+            Self::Clouds { .. } => "Clouds",
+            Self::Unsharp { .. } => "Unsharp Mask",
             Self::Noise { .. } => "Add Noise",
             Self::Recolor { .. } => "Change Color to Drawing Color",
             Self::BrightnessToOpacity { .. } => "Convert Brightness to Opacity",
@@ -220,6 +327,214 @@ impl Filter {
                 black,
                 smooth,
             } => extract_lines(pixels, width, height, sensitivity, black, smooth),
+            Self::MotionBlur { angle, distance } => {
+                let (sin, cos) = angle.to_radians().sin_cos();
+                let steps = distance.round().max(1.0) as i32;
+                along(pixels, width, height, steps, |x, y, t| {
+                    (x + cos * t * distance / 2.0, y + sin * t * distance / 2.0)
+                });
+            }
+            Self::RadialBlur { angle } => {
+                let (cx, cy) = (width as f32 / 2.0, height as f32 / 2.0);
+                let steps = (angle * 2.0).round().clamp(2.0, 64.0) as i32;
+                along(pixels, width, height, steps, |x, y, t| {
+                    let (sin, cos) = (angle.to_radians() / 2.0 * t).sin_cos();
+                    let (dx, dy) = (x - cx, y - cy);
+                    (cx + dx * cos - dy * sin, cy + dx * sin + dy * cos)
+                });
+            }
+            Self::ZoomBlur { amount } => {
+                let (cx, cy) = (width as f32 / 2.0, height as f32 / 2.0);
+                along(pixels, width, height, 24, |x, y, t| {
+                    let scale = 1.0 - amount.clamp(0.0, 1.0) * 0.5 * (t + 1.0) / 2.0;
+                    (cx + (x - cx) * scale, cy + (y - cy) * scale)
+                });
+            }
+            Self::Smooth => blur(pixels, width, height, 0.7),
+            Self::Dust { size } => {
+                crate::correct::remove_dust(
+                    pixels,
+                    width,
+                    height,
+                    [0, 0, width, height],
+                    size.max(1),
+                );
+            }
+            Self::LineWidth { by } => line_width(pixels, width, height, by),
+            Self::Wave {
+                amplitude,
+                wavelength,
+            } => {
+                let k = std::f32::consts::TAU / wavelength.max(1.0);
+                remap(pixels, width, height, |x, y| {
+                    (x + (y * k).sin() * amplitude, y + (x * k).sin() * amplitude)
+                });
+            }
+            Self::Pinch { amount } => {
+                let (cx, cy, r) = (
+                    width as f32 / 2.0,
+                    height as f32 / 2.0,
+                    width.min(height) as f32 / 2.0,
+                );
+                remap(pixels, width, height, |x, y| {
+                    let (dx, dy) = (x - cx, y - cy);
+                    let d = dx.hypot(dy) / r.max(1.0);
+                    if d >= 1.0 {
+                        return (x, y);
+                    }
+                    let scale = (d.powf(1.0 - amount.clamp(-1.0, 1.0) * 0.6)) / d.max(1e-4);
+                    (cx + dx * scale, cy + dy * scale)
+                });
+            }
+            Self::Polar { inverse } => {
+                let (w, h) = (width as f32, height as f32);
+                let (cx, cy) = (w / 2.0, h / 2.0);
+                let reach = cx.hypot(cy);
+                remap(pixels, width, height, |x, y| {
+                    if inverse {
+                        // A straight picture from a round one.
+                        let theta = x / w * std::f32::consts::TAU;
+                        let r = (1.0 - y / h) * reach;
+                        (cx + theta.sin() * r, cy - theta.cos() * r)
+                    } else {
+                        let (dx, dy) = (x - cx, y - cy);
+                        let theta = dx.atan2(-dy).rem_euclid(std::f32::consts::TAU);
+                        (
+                            theta / std::f32::consts::TAU * w,
+                            (1.0 - dx.hypot(dy) / reach) * h,
+                        )
+                    }
+                });
+            }
+            Self::Ripple {
+                amplitude,
+                wavelength,
+            } => {
+                let (cx, cy) = (width as f32 / 2.0, height as f32 / 2.0);
+                let k = std::f32::consts::TAU / wavelength.max(1.0);
+                remap(pixels, width, height, |x, y| {
+                    let (dx, dy) = (x - cx, y - cy);
+                    let d = dx.hypot(dy).max(1e-4);
+                    let push = (d * k).sin() * amplitude;
+                    (x + dx / d * push, y + dy / d * push)
+                });
+            }
+            Self::Fisheye { amount } => {
+                let (cx, cy, r) = (
+                    width as f32 / 2.0,
+                    height as f32 / 2.0,
+                    (width.min(height) as f32 / 2.0).max(1.0),
+                );
+                remap(pixels, width, height, |x, y| {
+                    let (dx, dy) = ((x - cx) / r, (y - cy) / r);
+                    let d = dx.hypot(dy);
+                    let scale = 1.0 - amount.clamp(0.0, 1.0) * 0.5 * (1.0 - d * d).max(0.0);
+                    (cx + dx * scale * r, cy + dy * scale * r)
+                });
+            }
+            Self::Aberration { shift } => {
+                let source = pixels.to_vec();
+                let (cx, cy) = (width as f32 / 2.0, height as f32 / 2.0);
+                let reach = cx.hypot(cy).max(1.0);
+                for y in 0..height {
+                    for x in 0..width {
+                        let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                        let (dx, dy) = ((px - cx) / reach, (py - cy) / reach);
+                        let at = ((y * width + x) * 4) as usize;
+                        let red = crate::warp::sample(
+                            &source,
+                            width,
+                            height,
+                            px + dx * shift,
+                            py + dy * shift,
+                        );
+                        let blue = crate::warp::sample(
+                            &source,
+                            width,
+                            height,
+                            px - dx * shift,
+                            py - dy * shift,
+                        );
+                        pixels[at] = red[0];
+                        pixels[at + 2] = blue[2];
+                    }
+                }
+            }
+            Self::Retro { amount } => {
+                let a = amount.clamp(0.0, 1.0);
+                let (cx, cy) = (width as f32 / 2.0, height as f32 / 2.0);
+                let reach = cx.hypot(cy).max(1.0);
+                for y in 0..height {
+                    for x in 0..width {
+                        let at = ((y * width + x) * 4) as usize;
+                        let [r, g, b] = [pixels[at], pixels[at + 1], pixels[at + 2]]
+                            .map(|v| f32::from(v) / 255.0);
+                        let l = 0.299 * r + 0.587 * g + 0.114 * b;
+                        // Toward sepia, faded, darker at the edges, grainy.
+                        let sepia = [l * 1.07 + 0.08, l * 0.95 + 0.03, l * 0.75];
+                        let fade = 0.12 * a;
+                        let edge = ((x as f32 + 0.5 - cx).hypot(y as f32 + 0.5 - cy) / reach)
+                            .powi(2)
+                            * 0.45
+                            * a;
+                        let grain = (noise2(x as f32 * 0.9, y as f32 * 0.9, 7) - 0.5) * 0.12 * a;
+                        let out = [r, g, b].into_iter().zip(sepia).map(|(c, s)| {
+                            ((c + (s - c) * a) * (1.0 - fade) + fade - edge + grain).clamp(0.0, 1.0)
+                        });
+                        for (channel, value) in out.enumerate() {
+                            pixels[at + channel] = (value * 255.0).round() as u8;
+                        }
+                    }
+                }
+            }
+            Self::PerlinNoise { scale, contrast } => {
+                for y in 0..height {
+                    for x in 0..width {
+                        let n = fbm(x as f32 / scale.max(1.0), y as f32 / scale.max(1.0), 4);
+                        let value = (((n - 0.5) * contrast.max(0.0)) + 0.5).clamp(0.0, 1.0);
+                        let byte = (value * 255.0).round() as u8;
+                        pixels[((y * width + x) * 4) as usize..][..4]
+                            .copy_from_slice(&[byte, byte, byte, 255]);
+                    }
+                }
+            }
+            Self::Clouds { from, to } => {
+                let scale = (width.max(height) as f32 / 4.0).max(8.0);
+                for y in 0..height {
+                    for x in 0..width {
+                        let t = fbm(x as f32 / scale, y as f32 / scale, 6).clamp(0.0, 1.0);
+                        let mix = |a: u8, b: u8| {
+                            (f32::from(a) + (f32::from(b) - f32::from(a)) * t).round() as u8
+                        };
+                        pixels[((y * width + x) * 4) as usize..][..4].copy_from_slice(&[
+                            mix(from[0], to[0]),
+                            mix(from[1], to[1]),
+                            mix(from[2], to[2]),
+                            255,
+                        ]);
+                    }
+                }
+            }
+            Self::Unsharp {
+                radius,
+                amount,
+                threshold,
+            } => {
+                let mut soft = pixels.to_vec();
+                blur(&mut soft, width, height, radius.max(0.5));
+                let limit = threshold.clamp(0.0, 1.0) * 255.0;
+                for (index, (pixel, soft)) in pixels.iter_mut().zip(&soft).enumerate() {
+                    if index % 4 == 3 {
+                        continue;
+                    }
+                    let difference = f32::from(*pixel) - f32::from(*soft);
+                    if difference.abs() >= limit {
+                        *pixel = (f32::from(*pixel) + difference * amount)
+                            .round()
+                            .clamp(0.0, 255.0) as u8;
+                    }
+                }
+            }
             Self::ToneCurve {
                 rgb,
                 red,
@@ -534,12 +849,168 @@ impl Filter {
             | Self::Sharpen { .. }
             | Self::Mosaic { .. }
             | Self::LineExtraction { .. }
+            | Self::MotionBlur { .. }
+            | Self::RadialBlur { .. }
+            | Self::ZoomBlur { .. }
+            | Self::Smooth
+            | Self::Dust { .. }
+            | Self::LineWidth { .. }
+            | Self::Wave { .. }
+            | Self::Pinch { .. }
+            | Self::Polar { .. }
+            | Self::Ripple { .. }
+            | Self::Fisheye { .. }
+            | Self::Aberration { .. }
+            | Self::Retro { .. }
+            | Self::PerlinNoise { .. }
+            | Self::Clouds { .. }
+            | Self::Unsharp { .. }
             | Self::FocusLines { .. }
             | Self::SpeedLines { .. }
             | Self::Tone { .. } => rgb,
         };
         [byte(out[0]), byte(out[1]), byte(out[2]), a]
     }
+}
+
+/// `pixels` drawn again from where `from(x, y)` (picture pixel centers)
+/// says each one looks, bilinear.
+fn remap(pixels: &mut [u8], width: u32, height: u32, from: impl Fn(f32, f32) -> (f32, f32)) {
+    let source = pixels.to_vec();
+    for y in 0..height {
+        for x in 0..width {
+            let (sx, sy) = from(x as f32 + 0.5, y as f32 + 0.5);
+            let at = ((y * width + x) * 4) as usize;
+            let inside = sx >= 0.0 && sy >= 0.0 && sx <= width as f32 && sy <= height as f32;
+            let value = if inside {
+                crate::warp::sample(&source, width, height, sx, sy)
+            } else {
+                [0; 4]
+            };
+            pixels[at..at + 4].copy_from_slice(&value);
+        }
+    }
+}
+
+/// Each pixel the average (premultiplied) of `steps` samples along
+/// `at(x, y, t)` for `t` from -1 to 1 (the directional blurs).
+fn along(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    steps: i32,
+    at: impl Fn(f32, f32, f32) -> (f32, f32),
+) {
+    let source = pixels.to_vec();
+    let steps = steps.max(1);
+    for y in 0..height {
+        for x in 0..width {
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            let mut sum = [0.0_f32; 4];
+            for step in -steps..=steps {
+                let (sx, sy) = at(px, py, step as f32 / steps as f32);
+                let sample = crate::warp::sample(&source, width, height, sx, sy);
+                let alpha = f32::from(sample[3]) / 255.0;
+                for channel in 0..3 {
+                    sum[channel] += f32::from(sample[channel]) * alpha;
+                }
+                sum[3] += alpha;
+            }
+            let count = (steps * 2 + 1) as f32;
+            let index = ((y * width + x) * 4) as usize;
+            if sum[3] > 0.0 {
+                for channel in 0..3 {
+                    pixels[index + channel] =
+                        (sum[channel] / sum[3]).round().clamp(0.0, 255.0) as u8;
+                }
+            }
+            pixels[index + 3] = (sum[3] / count * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+}
+
+/// Lines `by` pixels thicker (or, below 0, thinner): the layer's alpha
+/// grown or drawn in round, new pixels taking the color of the lines.
+fn line_width(pixels: &mut [u8], width: u32, height: u32, by: f32) {
+    let alpha = |inverted: bool| {
+        let values: Vec<f32> = pixels
+            .chunks(4)
+            .map(|p| {
+                let a = f32::from(p[3]) / 255.0;
+                if inverted { 1.0 - a } else { a }
+            })
+            .collect();
+        move |x: i64, y: i64| {
+            if x < 0 || y < 0 || x >= i64::from(width) || y >= i64::from(height) {
+                if inverted { 1.0 } else { 0.0 }
+            } else {
+                values[(y as u32 * width + x as u32) as usize]
+            }
+        }
+    };
+    if by >= 0.0 {
+        // The color of the lines: the average of the opaque pixels.
+        let (mut sum, mut count) = ([0.0_f32; 3], 0.0_f32);
+        for p in pixels.chunks(4).filter(|p| p[3] > 128) {
+            for channel in 0..3 {
+                sum[channel] += f32::from(p[channel]);
+            }
+            count += 1.0;
+        }
+        let ink = sum.map(|value| (value / count.max(1.0)).round() as u8);
+        let grown = crate::effects::Edge::build(alpha(false), [0, 0, width, height], by);
+        for (index, pixel) in pixels.chunks_mut(4).enumerate() {
+            let cover =
+                (grown.at(index as u32 % width, index as u32 / width) * 255.0).round() as u8;
+            if cover > pixel[3] {
+                if pixel[3] == 0 {
+                    pixel[..3].copy_from_slice(&ink);
+                }
+                pixel[3] = cover;
+            }
+        }
+    } else {
+        let gaps = crate::effects::Edge::build(alpha(true), [0, 0, width, height], -by);
+        for (index, pixel) in pixels.chunks_mut(4).enumerate() {
+            let keep = 1.0 - gaps.at(index as u32 % width, index as u32 / width);
+            pixel[3] = (f32::from(pixel[3]) * keep).round() as u8;
+        }
+    }
+}
+
+/// A steady value from 0 to 1 for a lattice point.
+fn noise2(x: f32, y: f32, salt: u32) -> f32 {
+    let mut h = (x.floor() as i32 as u32).wrapping_mul(0x8DA6_B343)
+        ^ (y.floor() as i32 as u32).wrapping_mul(0xD816_3841)
+        ^ salt.wrapping_mul(0xCB1A_B31F);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0x5BD1_E995);
+    h ^= h >> 15;
+    (h & 0xFFFF) as f32 / 65_535.0
+}
+
+/// Smooth value noise at `(x, y)`, 0 to 1.
+fn smooth_noise(x: f32, y: f32, salt: u32) -> f32 {
+    let (x0, y0) = (x.floor(), y.floor());
+    let (fx, fy) = (x - x0, y - y0);
+    let ease = |t: f32| t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+    let (u, v) = (ease(fx), ease(fy));
+    let corner = |dx: f32, dy: f32| noise2(x0 + dx, y0 + dy, salt);
+    let top = corner(0.0, 0.0) + (corner(1.0, 0.0) - corner(0.0, 0.0)) * u;
+    let bottom = corner(0.0, 1.0) + (corner(1.0, 1.0) - corner(0.0, 1.0)) * u;
+    top + (bottom - top) * v
+}
+
+/// Layers of smooth noise, each half the size and strength of the last.
+fn fbm(x: f32, y: f32, octaves: u32) -> f32 {
+    let (mut sum, mut weight, mut total, mut scale) = (0.0, 1.0, 0.0, 1.0);
+    for octave in 0..octaves {
+        sum += smooth_noise(x * scale, y * scale, octave) * weight;
+        total += weight;
+        weight *= 0.5;
+        scale *= 2.0;
+    }
+    sum / total
 }
 
 /// The brightness of each pixel over white, 0 to 1.
@@ -707,6 +1178,115 @@ fn mosaic(pixels: &mut [u8], width: u32, height: u32, size: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blurs_distortions_and_generators_change_the_picture_as_meant() {
+        let (w, h) = (40_u32, 40_u32);
+        // A black dot in the middle of white.
+        let dot = || {
+            let mut pixels = vec![255_u8; (w * h * 4) as usize];
+            for y in 18..22 {
+                for x in 18..22 {
+                    pixels[((y * w + x) * 4) as usize..][..3].copy_from_slice(&[0, 0, 0]);
+                }
+            }
+            pixels
+        };
+        let gray = |pixels: &[u8], x: u32, y: u32| pixels[((y * w + x) * 4) as usize];
+        let run = |filter: Filter| {
+            let mut pixels = dot();
+            filter.apply(&mut pixels, w, h, None, [0, 0]);
+            pixels
+        };
+        // Motion blur smears the dot sideways, not up.
+        let smeared = run(Filter::MotionBlur {
+            angle: 0.0,
+            distance: 12.0,
+        });
+        assert!(gray(&smeared, 24, 20) < 230 && gray(&smeared, 20, 26) > 250);
+        assert!(gray(&run(Filter::RadialBlur { angle: 30.0 }), 20, 20) < 255);
+        assert!(gray(&run(Filter::ZoomBlur { amount: 0.5 }), 20, 20) < 255);
+        assert_ne!(run(Filter::Smooth), dot());
+        // Distortions move the dot; Polar there and back is close.
+        assert_ne!(
+            run(Filter::Wave {
+                amplitude: 3.0,
+                wavelength: 10.0
+            }),
+            dot()
+        );
+        assert_ne!(
+            run(Filter::Ripple {
+                amplitude: 2.0,
+                wavelength: 6.0
+            }),
+            dot()
+        );
+        assert!(
+            gray(&run(Filter::Pinch { amount: -0.8 }), 23, 20) < 128,
+            "swelled out"
+        );
+        assert!(
+            gray(&run(Filter::Fisheye { amount: 1.0 }), 23, 20) < 128,
+            "bulged"
+        );
+        assert_ne!(run(Filter::Polar { inverse: false }), dot());
+        let aberrated = run(Filter::Aberration { shift: 3.0 });
+        assert_ne!(aberrated, dot());
+        let retro = run(Filter::Retro { amount: 1.0 });
+        assert!(retro[0] != retro[2], "warm, not gray");
+        // Generators fill the layer.
+        let noise = run(Filter::PerlinNoise {
+            scale: 8.0,
+            contrast: 1.0,
+        });
+        let values: std::collections::HashSet<u8> = noise.chunks(4).map(|p| p[0]).collect();
+        assert!(values.len() > 20, "varied");
+        let clouds = run(Filter::Clouds {
+            from: [0, 0, 255],
+            to: [255, 255, 255],
+        });
+        assert!(
+            clouds.chunks(4).all(|p| p[2] == 255 && p[3] == 255),
+            "between the two colors"
+        );
+        // Unsharp mask brightens the gray beside a darker dot.
+        let mut sharp: Vec<u8> = dot()
+            .iter()
+            .map(|v| if *v == 255 { 160 } else { 80 })
+            .collect();
+        for p in sharp.chunks_mut(4) {
+            p[3] = 255;
+        }
+        Filter::Unsharp {
+            radius: 2.0,
+            amount: 1.5,
+            threshold: 0.0,
+        }
+        .apply(&mut sharp, w, h, None, [0, 0]);
+        assert!(gray(&sharp, 23, 20) > 160 && gray(&sharp, 19, 20) < 80);
+        // Line width: an ink line on clear grows and thins.
+        let mut line = vec![0_u8; (w * h * 4) as usize];
+        for x in 5..35 {
+            line[((20 * w + x) * 4) as usize..][..4].copy_from_slice(&[0, 0, 0, 255]);
+        }
+        let mut thick = line.clone();
+        Filter::LineWidth { by: 2.0 }.apply(&mut thick, w, h, None, [0, 0]);
+        let cover = |pixels: &[u8], y: u32| pixels[((y * w + 20) * 4 + 3) as usize];
+        assert_eq!(cover(&thick, 21), 255, "thicker");
+        assert!(
+            cover(&thick, 22) > 0 && cover(&thick, 24) == 0,
+            "by two pixels"
+        );
+        let mut thin = thick.clone();
+        Filter::LineWidth { by: -2.0 }.apply(&mut thin, w, h, None, [0, 0]);
+        assert_eq!(thin[((22 * w + 20) * 4 + 3) as usize], 0, "thin again");
+        // Remove Dust: a lone speck goes.
+        let mut specks = vec![0_u8; (w * h * 4) as usize];
+        specks[((5 * w + 5) * 4 + 3) as usize] = 255;
+        Filter::Dust { size: 3 }.apply(&mut specks, w, h, None, [0, 0]);
+        assert!(specks.chunks(4).all(|p| p[3] == 0));
+    }
 
     #[test]
     fn line_extraction_finds_the_lines_of_a_picture() {

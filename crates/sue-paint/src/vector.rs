@@ -151,6 +151,60 @@ fn texts<'a>(geometry: &'a Geometry, domain: Domain, name: &str) -> Option<&'a [
     }
 }
 
+/// The shapes of an SVG `drawing` as lines: each stroked shape along its
+/// outline in its stroke color and width, each filled one along its
+/// outline in its fill color, made smaller to fit `size` when larger.
+#[must_use]
+pub fn from_svg(drawing: &sue_io::svg::SvgDrawing, size: [u32; 2]) -> Vec<Line> {
+    let scale = if drawing.width > 0.0 && drawing.height > 0.0 {
+        (size[0] as f32 / drawing.width)
+            .min(size[1] as f32 / drawing.height)
+            .min(1.0)
+    } else {
+        1.0
+    };
+    drawing
+        .shapes
+        .iter()
+        .filter_map(|shape| {
+            let color = shape.stroke.or(shape.fill)?;
+            let rgb = color.map(|channel| f32::from(channel) / 255.0);
+            let width = if shape.stroke.is_some() {
+                shape.width
+            } else {
+                1.0
+            };
+            let mut points = shape.points.clone();
+            if shape.closed
+                && let Some(first) = points.first().copied()
+            {
+                points.push(first);
+            }
+            let samples = points
+                .into_iter()
+                .map(|[x, y]| Sample {
+                    at: [x * scale, y * scale],
+                    pressure: 1.0,
+                    speed: 0.0,
+                    width: 1.0,
+                    alpha: 1.0,
+                })
+                .collect();
+            Some(Line {
+                samples,
+                tip: Tip {
+                    size: (width * scale).max(1.0),
+                    ..Tip::default()
+                },
+                colors: [rgb, rgb],
+                finish: Finish::default(),
+                copies: Vec::new(),
+                marks: Vec::new(),
+            })
+        })
+        .collect()
+}
+
 /// The lines kept in `geometry`.
 #[must_use]
 pub fn lines(geometry: &Geometry) -> Vec<Line> {
@@ -603,6 +657,26 @@ mod tests {
             copies: vec![SAME],
             marks: Vec::new(),
         }
+    }
+
+    #[test]
+    fn an_svg_drawing_becomes_lines_that_fit_the_canvas() {
+        let drawing = sue_io::svg::parse_svg(
+            r##"<svg width="200" height="100"><path d="M0 0 L200 100" stroke="#ff0000" stroke-width="4"/>
+            <rect x="10" y="10" width="20" height="20" fill="blue"/></svg>"##,
+        )
+        .unwrap();
+        let lines = from_svg(&drawing, [100, 100]);
+        assert_eq!(lines.len(), 2);
+        let last = lines[0].samples.last().unwrap().at;
+        assert!(
+            (last[0] - 100.0).abs() < 1e-3 && (last[1] - 50.0).abs() < 1e-3,
+            "halved to fit"
+        );
+        assert!((lines[0].tip.size - 2.0).abs() < 1e-3);
+        assert_eq!(lines[0].colors[0], [1.0, 0.0, 0.0]);
+        assert_eq!(lines[1].samples.len(), 5, "the square closes");
+        assert!(render(&lines, 100, 100).is_some());
     }
 
     #[test]

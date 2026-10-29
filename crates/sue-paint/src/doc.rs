@@ -899,6 +899,31 @@ pub fn add_vector_layer(
     ))
 }
 
+/// A new vector layer right above `below` (or at the top) holding
+/// `lines`, drawn (File, Import, Vector).
+///
+/// # Errors
+/// If the picture has no size.
+pub fn add_vector_lines(
+    arena: &Arena,
+    picture: EntityId,
+    below: Option<EntityId>,
+    name: String,
+    lines: &[crate::vector::Line],
+) -> Result<(SpawnEntity, EntityId), String> {
+    let [width, height] = size_of(arena, picture)?;
+    let raster = crate::vector::render(lines, width, height).ok_or("The lines cannot be drawn")?;
+    let layer = Entity::new(name, raster)
+        .with_class(crate::vector::CLASS)
+        .with_ext(crate::vector::to_geometry(lines));
+    let id = layer.id();
+    let order = key_above(arena, picture, below);
+    Ok((
+        SpawnEntity::new(layer).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
+        id,
+    ))
+}
+
 /// A paper layer under every other layer.
 #[must_use]
 pub fn add_paper(arena: &Arena, picture: EntityId, color: Color) -> (SpawnEntity, EntityId) {

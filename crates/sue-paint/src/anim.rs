@@ -603,6 +603,65 @@ pub fn new_timeline(picture: EntityId, fps: u32, length: u32) -> Edit {
         .then(SetProperty::new(picture, LENGTH, i64::from(length.max(1))))
 }
 
+/// The edit that brings `frames` (a movie's) into `picture` as cels of a
+/// new animation folder named `name`, one frame each from the start, at
+/// `fps` when the picture has no timeline yet (File, Import, Movie). Each
+/// frame is made to fit the canvas. Returns the folder's track too.
+///
+/// # Errors
+/// If there are no frames or the picture has no size.
+pub fn import_frames(
+    arena: &Arena,
+    picture: EntityId,
+    below: Option<EntityId>,
+    name: &str,
+    frames: &[sue_core::RasterTile2D],
+    fps: f64,
+) -> Result<(Edit, usize), String> {
+    if frames.is_empty() {
+        return Err("The movie has no frames".to_owned());
+    }
+    let size = arena
+        .get_by_id(picture)
+        .ok()
+        .and_then(sue_model::picture::size)
+        .ok_or("The picture has no size")?;
+    let cels: Vec<(String, sue_core::RasterTile2D)> = frames
+        .iter()
+        .enumerate()
+        .filter_map(|(index, frame)| {
+            let tile = if [frame.width(), frame.height()] == size {
+                frame.clone()
+            } else {
+                crate::materials::fitted(frame, size)?
+            };
+            Some((format!("{name} {}", index + 1), tile))
+        })
+        .collect();
+    let count = cels.len() as u32;
+    let (spawns, ids) = crate::doc::add_layers_pixels(arena, picture, below, cels)?;
+    let (sequence, length) = match timeline(arena, picture) {
+        Some(sequence) => (sequence.clone(), length(arena, picture).max(count)),
+        None => (
+            Sequence::new(Rate::new(fps.round().clamp(1.0, 120.0) as u32, 1), MIX_RATE),
+            count,
+        ),
+    };
+    let mut sequence = with_folder(&sequence, name);
+    let track = sequence.tracks.len() - 1;
+    for (frame, cel) in ids.iter().enumerate() {
+        sequence = assign(&sequence, track, frame as u32, Some(*cel), picture, length);
+    }
+    let mut edit = Edit::new(format!("Import Movie {name}"));
+    for spawn in spawns {
+        edit = edit.then(spawn);
+    }
+    let edit = edit
+        .then(SetExtension::set(picture, sequence))
+        .then(SetProperty::new(picture, LENGTH, i64::from(length)));
+    Ok((edit, track))
+}
+
 /// The edit that sets `picture`'s timeline to `sequence`.
 #[must_use]
 pub fn set(picture: EntityId, sequence: Sequence, label: &str) -> Edit {
@@ -613,6 +672,51 @@ pub fn set(picture: EntityId, sequence: Sequence, label: &str) -> Edit {
 mod tests {
     use super::*;
     use sue_core::{Entity, ReversibleTransaction};
+
+    #[test]
+    fn a_movie_comes_in_as_cels_one_frame_each() {
+        let mut arena = Arena::new();
+        let (mut edit, picture) = crate::doc::create(&crate::doc::NewPicture {
+            name: "Walk".to_owned(),
+            width: 8,
+            height: 8,
+            ..crate::doc::NewPicture::default()
+        })
+        .unwrap();
+        edit.apply(&mut arena).unwrap();
+        // Three frames, the last a different size (fitted in).
+        let frame = |w: u32, h: u32, shade: u8| {
+            sue_core::RasterTile2D::from_bytes(
+                w,
+                h,
+                sue_core::PixelFormat::Rgba8,
+                [shade, 0, 0, 255].repeat((w * h) as usize),
+            )
+            .unwrap()
+        };
+        let frames = [frame(8, 8, 10), frame(8, 8, 20), frame(16, 8, 30)];
+        let (mut edit, track) =
+            import_frames(&arena, picture, None, "Clip", &frames, 12.0).unwrap();
+        edit.apply(&mut arena).unwrap();
+        let sequence = timeline(&arena, picture).unwrap().clone();
+        assert_eq!(fps(&sequence), 12.0);
+        assert_eq!(length(&arena, picture), 3);
+        let cels: Vec<EntityId> = (0..3)
+            .filter_map(|f| cel_at(&sequence.tracks[track], sequence.rate, f))
+            .collect();
+        assert_eq!(cels.len(), 3);
+        let shade = |cel: EntityId, y: usize| {
+            crate::doc::raster(&arena, cel).unwrap().bytes().unwrap()[y * 8 * 4]
+        };
+        assert_eq!(shade(cels[1], 4), 20);
+        assert_eq!(shade(cels[2], 0), 0, "the wide frame is letterboxed");
+        assert_eq!(shade(cels[2], 4), 30);
+        edit.revert(&mut arena).unwrap();
+        assert!(
+            timeline(&arena, picture).is_none(),
+            "undo takes it all away"
+        );
+    }
 
     #[test]
     fn audio_tracks_import_move_mix_and_go() {
