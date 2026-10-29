@@ -1173,6 +1173,8 @@ clean without the brush feeling slow. A stroke passes through these stages:
 | Painting live | Pen-like tips paint a continuous tapered capsule between consecutive samples: each pixel's coverage comes from its exact distance to the segment (four anti-aliasing widths, hardness falloff), so there are no gaps, ridges or beads at any speed, and lines thinner than a pixel stay unbroken as lighter ink. Airbrushes and mixing brushes stamp dabs at a tight spacing instead, because their dabs add up. The start taper grows the line from a point. |
 | Finishing on lift | The hooks a pen leaves when it touches down and lifts are trimmed; the samples become a centripetal Catmull-Rom spline (no loops or overshoot), so even a fast mouse that reported a few points ends as a curve; *post correction* (0 to 10) resamples the path evenly, finds deliberate corners (a turn of more than about 65 degrees over arms a brush wide, on a lightly smoothed copy) and smooths everything between them with a gaussian along the path that grows with the level and the brush; a quick *flick* (over 700 points per second) carries the line on along the pen's momentum. The stroke is then painted again from the finished path with its end tapered, the flick thinning to a point. |
 | Color mixing | Mixing brushes pick up the color under them and are reloaded with their own paint, both per distance travelled, so a stroke settles at the mix amount of the canvas color whatever the spacing. |
+| Starting and ending | Measured as Clip Studio Paint's How to specify offers: in pixels, as percentages of the whole stroke (exact once the pen lifts and the stroke is painted again), or Fade (gone by a length however long the stroke); they thin the brush, fade the paint or both, and with *by speed* quicker strokes get longer ones. |
+| Color jitter | Per dab for brushes that stamp (hue, saturation, luminosity, toward the sub color) and per stroke for any brush, from steady chances along the path, so a repainted stroke keeps its colors. |
 
 A stroke never stacks on itself: each touched 64-pixel tile keeps its pixels
 from before and a coverage mask, and every pixel is recomputed from the two, so
@@ -1181,6 +1183,44 @@ again starts from untouched pixels. On release the tiles become one
 `RasterEdit`. Each pen and brush sub tool ships with its own stabilization,
 correction, tapers, flick and mixing, all editable in Tool Property; an ignored
 test (`stroke_sheet`) paints a sheet of simulated strokes for tuning by eye.
+
+**Puppet warp.** Edit, Transform, Puppet Warp puts pins on the current
+layer: dragging one bends the layer around the others by rigid moving least
+squares (`sue_paint::warp`, after Schaefer, McPhail and Warren, 2006), so
+shapes turn and move without smearing; the preview is worked out on an 8
+pixel grid and filled in between, OK bends it on a 2 pixel grid as one
+`RasterEdit`, Cancel puts the layer back.
+
+**Stories.** A comic or manga is an entity of class `sue.paint.story`
+(`sue_paint::story`) whose pages are ordinary pictures, its ordered
+`sue.child` relations, with its binding (`story.binding`, right for manga).
+Pages are added, inserted, duplicated with their layers, deleted with their
+layers and moved, each one undo step; the Page Manager lays them out as
+spreads facing each other by binding, and Export All Pages writes them
+numbered in any picture type.
+
+**Manga.** A frame border layer (class `sue.paint.frame`) keeps its panels,
+convex polygons, in `frame.panels` with its border and gutter, and draws
+them clear inside, inked at the edge and paper-colored in the gutters, so the
+layers under it show only inside the panels; layouts make the panels, the
+Frame Border tool adds rectangles and divides a panel along a dragged line
+by clipping it with two half-planes a gutter apart. A balloon layer
+(`sue.paint.balloon`) keeps ellipses and tails in `balloon.shapes` and draws
+their union white with one outline. Each edit is one step that holds the
+shapes and the drawing together (`SetProperty` with `ReplaceComponent`).
+Focus lines, speed lines and screentone are filters; the lines are inked with
+the brush engine itself as pressure-tapered pen strokes.
+
+**Animation.** A picture's timeline is the shared `Sequence` on the picture
+(`sue_paint::anim`): its rate is the frame rate, each track of kind
+`sue.paint.cels` is an animation folder, and each clip is a key that shows
+one cel, a layer of the picture by id, until the next key (a blank key shows
+nothing); `anim.length` holds the length in frames. At a frame the
+compositor takes a `FrameView` that hides the cels no folder shows and draws
+the cels before and after tinted blue and green at a third of their opacity
+(onion skin). Playback advances by the frame rate, and moving to a frame makes
+its cel the current layer. Animations export as an animated GIF
+(`sue_io::encode_gif_animation`) or a numbered picture sequence.
 
 **Other edits.** Fill floods the current layer or all layers within a
 tolerance and grows one pixel under anti-aliased lines; gradients run linear or
@@ -1641,7 +1681,8 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.6 Studio role, data-driven menu bars with grayed items | **Implemented** | `sue-wm/src/applet.rs`, `shell.rs`, `menubar.rs` |
 | §3.6 Studios beyond Sue Paint (DAW, video, 3D and CAD, IDE, game engine) | Planned; they arrive as studio applets, the way Sue Paint did | n/a |
 | §3.7 Sue Paint: layout, every menu, tools and sub tools, brush engine with pressure and stabilization, fills, gradients, figures, selections, layers, 26 blend modes, edits and filters, open and export, canvas cards | **Implemented**; an end-to-end test drives it with egui events (New, a pressure stroke, a layer, undo, save and reopen), the self-check paints, undoes, saves and exports, and three snapshots show it | `sue-paint`, `bins/sue/src/runtime.rs`, `selfcheck.rs`, `snapshot.rs` |
-| §3.7 Sue Paint: vector and text layers, layer folders and masks, correction layers, transform, canvas size and resolution changes, rulers, materials, pages, animation and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
+| §3.7 Sue Paint: pen pressure curves and dynamics, starting and ending modes, color jitter, puppet warp, stories and the Page Manager, frame borders, balloons, focus and speed lines, screentone, animation timelines with onion skin and GIF export | **Implemented**; end-to-end tests drive puppet warp, stories, manga and animation with egui events, and snapshots show the pressure dialog, the Page Manager and the Timeline | `sue-paint`, `bins/sue/src/runtime.rs`, `snapshot.rs` |
+| §3.7 Sue Paint: vector and text layers, layer folders and masks, correction layers, scale and free transform, canvas size and resolution changes, rulers, materials, balloon text, the camera folder, light table and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |

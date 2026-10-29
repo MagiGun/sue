@@ -362,8 +362,31 @@ familiar:
   so. `F1` or `Alt+I` lists them all. In Sue Paint the command palette is the
   Command button in the status bar, since `Tab` belongs to the palettes.
 - **Tabs** show a dot when a picture changed since it was opened or saved.
-  The timeline and Animation Cels already carry their buttons, waiting for
-  animation.
+- **Starting and ending, color jitter:** under Tool Property, the start and
+  end of a line can be in pixels, a share of the line, or a fade by a
+  length, thinning the line, fading it or both, longer when you draw fast.
+  Color jitter changes the color of every dab (brushes that stamp) or of
+  each whole stroke.
+- **Puppet warp** (Edit, Transform): click to put pins on a layer, drag one
+  and the drawing bends around the others while keeping its shape; Alt and
+  click takes a pin away. OK (or Enter) keeps it, Cancel (or Esc) does not.
+- **Comics and manga:** File, New, Comic makes a story of pages, bound on the
+  right for manga or on the left. The Story menu adds, inserts, duplicates
+  and deletes pages and steps through them, and the **Page Manager** shows
+  them side by side as spreads: click one to choose it, double-click to open
+  it, move it earlier or later. Export All Pages saves every page.
+- **Panels, balloons and effects:** Layer, New Layer, Frame Border Folder
+  lays out panels with gutters; what you draw on layers under it shows only
+  inside the panels. The Frame Border tool draws more panels, or divides one
+  when you drag a line across it. The Balloon tool draws speech balloons and
+  their tails as one outlined shape. Filter, Render has focus lines, speed
+  lines and screentone, and Layer, New Layer, Tone makes a layer of tone.
+- **Animation:** File, New, Animation (or New Animation Cel on any picture)
+  starts a timeline. The Timeline palette makes folders and cels, plays and
+  stops (with loop), steps frame by frame and sets the frame rate and length.
+  Click a frame to go there; double-click to show the current layer from
+  there. Onion skin shows the drawing before in blue and after in green.
+  File, Export Animation saves an animated GIF or every frame as a picture.
 
 `Ctrl+N` makes a new canvas: pick a preset or a paper size, a unit, a
 resolution and a paper color. `Ctrl+O` opens a PNG, JPEG or JPEG XL picture,

@@ -116,7 +116,7 @@ pub fn signed_distance(polygon: &[[f32; 2]], p: [f32; 2]) -> f32 {
     out
 }
 
-/// A convex polygon cut to where `normal · p >= offset`.
+/// A convex polygon cut to where `dot(normal, p) >= offset`.
 fn clip(polygon: &[[f32; 2]], normal: [f32; 2], offset: f32) -> Panel {
     let side = |p: [f32; 2]| p[0] * normal[0] + p[1] * normal[1] - offset;
     let mut out = Vec::new();
