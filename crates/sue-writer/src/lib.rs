@@ -47,6 +47,13 @@ pub fn sample_project(cx: &mut AppletContext<'_>) -> Option<EntityId> {
         Some(Value::Text("A. Writer".into())),
     )))
     .ok()?;
+    // A manuscript's running head: author, title and page at the right.
+    cx.apply(ArenaEdit(project::set(
+        root,
+        project::HEADER,
+        Some(Value::Text("		Writer / {title} / {page}".into())),
+    )))
+    .ok()?;
     let draft = manuscript::folder(cx.arena(), root, role::DRAFT)?;
     let chapters = manuscript::children(cx.arena(), draft);
     let scenes: Vec<EntityId> = chapters

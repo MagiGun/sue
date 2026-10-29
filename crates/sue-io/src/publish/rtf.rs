@@ -187,13 +187,43 @@ pub fn to_rtf(book: &Book) -> String {
         twips(bottom),
         twips(left)
     );
-    if book.page_numbers {
-        out.push_str(
-            "{\\footer\\pard\\qc\\plain\\fs20 {\\field{\\*\\fldinst PAGE}{\\fldrslt 1}}\\par}\n",
-        );
+    let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+    if book.different_first {
+        out.push_str("\\titlepg{\\headerf\\pard\\par}{\\footerf\\pard\\par}\n");
+    }
+    for (running, group) in [(&book.header, "header"), (&book.footer, "footer")] {
+        if !running.is_empty() {
+            out.push_str(&running_rtf(book, running, group, width));
+        }
     }
     out.push_str(&body);
     out.push_str("}\n");
+    out
+}
+
+/// A running header or footer group (`header` or `footer`): its parts
+/// parted by tabs at a centered and a right tab stop, its page fields
+/// RTF's own.
+fn running_rtf(book: &Book, running: &sue_model::Running, group: &str, width: f32) -> String {
+    use crate::publish::Live;
+    let mut out = format!(
+        "{{\\{group}\\pard\\plain\\tqc\\tx{}\\tqr\\tx{}\\fs18 ",
+        twips(width / 2.0),
+        twips(width)
+    );
+    for (index, part) in book.live(running).iter().enumerate() {
+        if index > 0 {
+            out.push_str("\\tab ");
+        }
+        for piece in part {
+            match piece {
+                Live::Text(text) => out.push_str(&escape(text)),
+                Live::Page => out.push_str("{\\field{\\*\\fldinst PAGE}{\\fldrslt 1}}"),
+                Live::Pages => out.push_str("{\\field{\\*\\fldinst NUMPAGES}{\\fldrslt 1}}"),
+            }
+        }
+    }
+    out.push_str("\\par}\n");
     out
 }
 
@@ -233,6 +263,19 @@ fn table_rtf(table: &crate::publish::PublishTable, width: f32, font: usize, size
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rtf_headers_and_footers_carry_live_page_fields() {
+        let mut book = sample();
+        book.header = sue_model::Running::parse("{title}");
+        book.footer = sue_model::Running::parse("\t\t{page} of {pages}");
+        book.different_first = true;
+        let rtf = to_rtf(&book);
+        assert!(rtf.contains("{\\header\\pard"), "{rtf}");
+        assert!(rtf.contains("\\tab My Story\\tab"));
+        assert!(rtf.contains("\\fldinst NUMPAGES"));
+        assert!(rtf.contains("\\titlepg"));
+    }
+
     use super::super::tests::sample;
     use super::super::tests::with_table;
     use super::*;

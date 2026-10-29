@@ -80,6 +80,7 @@ pub fn menus() -> Vec<Menu> {
                 item("Page Break", "insert.page_break").key("Ctrl+Enter"),
                 item("Scene Break", "insert.scene_break"),
                 item("Footnote...", "insert.footnote").key("Ctrl+Alt+F"),
+                item("Header and Footer...", "insert.header_footer"),
                 item("Link...", "insert.link").key("Ctrl+K"),
                 item("Picture...", "insert.picture"),
                 item("Today's Date", "insert.date"),

@@ -514,6 +514,14 @@ table and back. A table that runs onto the next page breaks between rows and
 repeats its heading row at the top. Tables go into every format you compile
 to, PDF and Word included.
 
+**Headers and footers** come from Insert, Header and Footer: each has a
+left, a middle and a right part, and the buttons below put in the page
+number, the page count, the title, the author or the date, which every page
+fills in (`Page {page} of {pages}`). The footer holds the page number until
+you change it. **Different first page** leaves a title page without them.
+They show on the pages as you write, print in PDFs, and go into Word,
+OpenDocument and RTF files as live page numbers.
+
 When you are done, **Compile** (`Ctrl+Shift+E`) puts the book together, with
 chapter titles from your folders, scene breaks and a title page, and saves it
 as a PDF (set in your fonts, with bookmarks and page numbers), a Word

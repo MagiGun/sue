@@ -62,8 +62,15 @@ pub(crate) struct Settings {
     pub size: f32,
     pub target: i64,
     pub session: i64,
-    pub header: String,
     pub font_filter: String,
+}
+
+/// The header and footer dialog's fields.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Furniture {
+    pub header: sue_model::Running,
+    pub footer: sue_model::Running,
+    pub different_first: bool,
 }
 
 /// A dialog over the studio.
@@ -79,6 +86,8 @@ pub(crate) enum Dialog {
     Link(String),
     /// A footnote on the selection.
     Footnote(String),
+    /// The running header and footer.
+    Furniture(Furniture),
     /// A new table: rows, columns, and whether the first row is headings.
     Table {
         rows: u32,
@@ -283,8 +292,16 @@ impl SueWriter {
         PageSetup {
             size: [size[0] as f32, size[1] as f32],
             margins: [margin; 4],
-            numbers: true,
-            header: self.project_text(cx, project::HEADER, ""),
+            header: sue_model::Running::parse(&self.project_text(cx, project::HEADER, "")),
+            footer: sue_model::Running::parse(&self.project_text(cx, project::FOOTER, "{page}")),
+            different_first: self
+                .project_entity(cx)
+                .and_then(|entity| entity.property(project::DIFFERENT_FIRST))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            title: self.title(cx),
+            author: self.project_text(cx, manuscript::AUTHOR, ""),
+            date: project::today(),
         }
     }
 
@@ -664,9 +681,9 @@ impl SueWriter {
     }
 
     /// The project's look for compiling.
-    pub(crate) fn look(&self, cx: &AppletContext<'_>) -> compile::Look {
-        let title = self
-            .project_entity(cx)
+    /// The project's title (an open file's name without one).
+    pub(crate) fn title(&self, cx: &AppletContext<'_>) -> String {
+        self.project_entity(cx)
             .map(|entity| {
                 entity
                     .property(manuscript::TITLE)
@@ -680,11 +697,14 @@ impl SueWriter {
                     .and_then(|id| cx.arena().get_by_id(id).ok())
                     .map(|entity| entity.name().to_owned())
             })
-            .unwrap_or_else(|| "Untitled".to_owned());
+            .unwrap_or_else(|| "Untitled".to_owned())
+    }
+
+    pub(crate) fn look(&self, cx: &AppletContext<'_>) -> compile::Look {
         compile::Look {
             sheet: self.sheet(cx),
             page: self.page(cx),
-            title,
+            title: self.title(cx),
             author: self.project_text(cx, manuscript::AUTHOR, ""),
         }
     }
@@ -780,8 +800,15 @@ impl SueWriter {
                     size: fonts.size,
                     target: self.project_number(cx, manuscript::TARGET, 0.0) as i64,
                     session: self.project_number(cx, project::SESSION_TARGET, 500.0) as i64,
-                    header: self.project_text(cx, project::HEADER, ""),
                     font_filter: String::new(),
+                }));
+            }
+            "insert.header_footer" => {
+                let page = self.page(cx);
+                self.dialog = Some(Dialog::Furniture(Furniture {
+                    header: page.header,
+                    footer: page.footer,
+                    different_first: page.different_first,
                 }));
             }
             "project.statistics" => self.dialog = Some(Dialog::Statistics),

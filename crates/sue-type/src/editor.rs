@@ -2121,29 +2121,27 @@ impl Editor {
                 painter.rect_filled(rect, 0.0, view.ink.paper);
                 let small =
                     egui::FontId::new((9.0 * scale).max(6.0), egui::FontFamily::Proportional);
-                if view.page.numbers {
-                    painter.text(
-                        pos2(
-                            rect.center().x,
-                            rect.bottom() - view.page.margins[2] * scale * 0.5,
-                        ),
-                        egui::Align2::CENTER_CENTER,
-                        (page + 1).to_string(),
-                        small.clone(),
-                        view.ink.soft,
-                    );
-                }
-                if page > 0 && !view.page.header.is_empty() {
-                    painter.text(
-                        pos2(
-                            rect.center().x,
-                            rect.top() + view.page.margins[0] * scale * 0.5,
-                        ),
-                        egui::Align2::CENTER_CENTER,
-                        &view.page.header,
-                        small,
-                        view.ink.soft,
-                    );
+                let [margin_top, margin_right, margin_bottom, margin_left] =
+                    view.page.margins.map(|margin| margin * scale);
+                let furniture = view.page.furniture(page, self.laid.pages);
+                let rows = [
+                    rect.top() + margin_top * 0.5,
+                    rect.bottom() - margin_bottom * 0.5,
+                ];
+                for (parts, y) in furniture.into_iter().zip(rows) {
+                    let Some(parts) = parts else {
+                        continue;
+                    };
+                    let places = [
+                        (rect.left() + margin_left, egui::Align2::LEFT_CENTER),
+                        (rect.center().x, egui::Align2::CENTER_CENTER),
+                        (rect.right() - margin_right, egui::Align2::RIGHT_CENTER),
+                    ];
+                    for (text, (x, align)) in parts.iter().zip(places) {
+                        if !text.is_empty() {
+                            painter.text(pos2(x, y), align, text, small.clone(), view.ink.soft);
+                        }
+                    }
                 }
             }
         } else {

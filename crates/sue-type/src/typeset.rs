@@ -230,7 +230,13 @@ fn set_table(
                 if glyphs.is_empty() {
                     glyphs = shaped(faces, " ", &look.font, look.size, &format, look, 0.0, &run);
                 }
-                lines.extend(break_lines(faces, glyphs, room, 0.0, look.line_spacing.min(crate::tables::CELL_SPACING)));
+                lines.extend(break_lines(
+                    faces,
+                    glyphs,
+                    room,
+                    0.0,
+                    look.line_spacing.min(crate::tables::CELL_SPACING),
+                ));
             }
             tallest = tallest.max(lines.iter().map(|line| line.height).sum());
             set.push(lines);
@@ -923,7 +929,7 @@ pub fn typeset(
             }
         }
     }
-    // Page numbers and the running head.
+    // The running header and footer.
     let numbers_look = paragraph_look_of(sheet, "body");
     let plain = Arc::new(Look {
         color: [0x55, 0x55, 0x55],
@@ -937,16 +943,18 @@ pub fn typeset(
     let count = pages.len();
     for (index, pdf_page) in pages.iter_mut().enumerate() {
         let mut furniture = Vec::new();
-        if page.numbers && count > 1 {
-            furniture.push((
-                (index + 1).to_string(),
-                page.size[1] - page.margins[2] / 2.0,
-            ));
+        let [header, footer] = page.furniture(index, count);
+        for (parts, baseline) in [
+            (header, page.margins[0] / 2.0),
+            (footer, page.size[1] - page.margins[2] / 2.0),
+        ] {
+            for (part, text) in parts.into_iter().flatten().enumerate() {
+                if !text.is_empty() {
+                    furniture.push((text, part, baseline));
+                }
+            }
         }
-        if index > 0 && !page.header.is_empty() {
-            furniture.push((page.header.clone(), page.margins[0] / 2.0));
-        }
-        for (text, baseline) in furniture {
+        for (text, part, baseline) in furniture {
             let glyphs = shaped(
                 &mut faces,
                 &text,
@@ -958,7 +966,11 @@ pub fn typeset(
                 &plain,
             );
             let width: f32 = glyphs.iter().map(|glyph| glyph.advance).sum();
-            let mut x = (page.size[0] - width) / 2.0;
+            let mut x = match part {
+                0 => page.margins[3],
+                1 => (page.size[0] - width) / 2.0,
+                _ => page.size[0] - page.margins[1] - width,
+            };
             let placed: Vec<(Glyph, f32)> = glyphs
                 .into_iter()
                 .map(|glyph| {

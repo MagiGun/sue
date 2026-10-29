@@ -30,8 +30,15 @@ pub const HISTORY: &str = "sue_writer.history";
 /// `true` for a single document shown without its binder, as a word
 /// processor shows a file.
 pub const SIMPLE: &str = "sue_writer.simple";
-/// A running head on printed pages (`Text`).
+/// The running header on printed pages (`Text`: left, middle and right
+/// parts parted by tabs, with fields such as `{page}`; see
+/// [`sue_model::Running`]).
 pub const HEADER: &str = "sue_writer.header";
+/// The running footer, as the header (`Text`; the page number in the
+/// middle without it).
+pub const FOOTER: &str = "sue_writer.footer";
+/// `true`: no header or footer on the first page (`Bool`).
+pub const DIFFERENT_FIRST: &str = "sue_writer.different_first";
 /// The relation from a document to its snapshots.
 pub const SNAPSHOT: &str = "sue_writer.snapshot";
 /// When a snapshot was taken, as text (`Text`).

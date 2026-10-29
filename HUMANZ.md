@@ -1617,6 +1617,23 @@ print with ruled cells and repeated heading rows; Word (`w:tbl`, a repeated
 widths), HTML and EPUB (`thead` and `tbody`), RTF (`\trowd` rows, `\trhdr`),
 Markdown (pipe tables) and plain text (tab-separated rows) write them.
 
+**Running headers and footers (`sue-model::layout`).** `Running` holds a
+header's or footer's left, middle and right parts, stored as one text parted
+by tabs; each part is text with fields in braces (`FIELDS`: `{page}`,
+`{pages}`, `{title}`, `{author}`, `{date}`). `fill` sets them for one page
+(`PageFields`), and `running_pieces` hands formats the fields to write as
+their own live ones. `sue-type`'s `PageSetup` carries a header, a footer
+(the page number in the middle by default), `different_first` and the
+document fields; `PageSetup::furniture` gives each page what its margins
+show, which the editor paints and the typesetter sets. A `Book` carries the
+same: Word writes a header and a footer part with `PAGE` and `NUMPAGES`
+fields at a centered and a right tab stop (`w:titlePg` for a title page),
+OpenDocument a master page's `style:header` and `style:footer` with
+`text:page-number` and `text:page-count` (and `style:header-first`), RTF
+`\header` and `\footer` groups with `PAGE` and `NUMPAGES` fields
+(`\titlepg`). Sue Writer keeps them on the project
+(`sue_writer.header`, `sue_writer.footer`, `sue_writer.different_first`).
+
 **Manuscripts (`sue-model::manuscript`).** A long work is an entity of class
 `sue.manuscript` whose ordered `sue.child` relations make a binder of folders
 and documents. Its top folders have a `manuscript.role`: `draft` (what is

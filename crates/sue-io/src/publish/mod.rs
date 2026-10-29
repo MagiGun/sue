@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use sue_core::{EntityId, Value};
-use sue_model::{CharFormat, TextMarks, mark_kind as kind};
+use sue_model::{CharFormat, Running, RunningPiece, TextMarks, mark_kind as kind, running_pieces};
 
 pub use docx::{from_docx, to_docx};
 pub use epub::to_epub;
@@ -228,8 +228,47 @@ pub struct Book {
     pub page: [f32; 2],
     /// Top, right, bottom and left margins.
     pub margins: [f32; 4],
-    /// Page numbers in the footer.
-    pub page_numbers: bool,
+    /// The running header, in the top margin.
+    pub header: Running,
+    /// The running footer (the page number in the middle by default).
+    pub footer: Running,
+    /// No header or footer on the first page.
+    pub different_first: bool,
+    /// The date a `{date}` field shows.
+    pub date: String,
+}
+
+/// A piece of a running header or footer as a format writes it: text, or
+/// a field the reader's program fills in on each page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Live {
+    /// Text.
+    Text(String),
+    /// The page's number.
+    Page,
+    /// The number of pages.
+    Pages,
+}
+
+impl Book {
+    /// The left, middle and right parts of `running`, with the book's own
+    /// title, author and date filled in and the page fields left live.
+    pub(crate) fn live(&self, running: &Running) -> [Vec<Live>; 3] {
+        [&running.left, &running.center, &running.right].map(|part| {
+            running_pieces(part)
+                .into_iter()
+                .map(|piece| match piece {
+                    RunningPiece::Text(text) => Live::Text(text.to_owned()),
+                    RunningPiece::Field("page") => Live::Page,
+                    RunningPiece::Field("pages") => Live::Pages,
+                    RunningPiece::Field("title") => Live::Text(self.title.clone()),
+                    RunningPiece::Field("author") => Live::Text(self.author.clone()),
+                    RunningPiece::Field("date") => Live::Text(self.date.clone()),
+                    RunningPiece::Field(other) => Live::Text(format!("{{{other}}}")),
+                })
+                .collect()
+        })
+    }
 }
 
 impl Book {
@@ -253,7 +292,10 @@ impl Book {
             tables: HashMap::new(),
             page: [612.0, 792.0],
             margins: [72.0; 4],
-            page_numbers: true,
+            header: Running::default(),
+            footer: Running::parse("{page}"),
+            different_first: false,
+            date: String::new(),
         }
     }
 

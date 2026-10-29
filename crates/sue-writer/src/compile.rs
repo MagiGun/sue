@@ -356,7 +356,10 @@ pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>,
         styles: publish_styles(&look.sheet),
         page: look.page.size,
         margins: look.page.margins,
-        page_numbers: look.page.numbers,
+        header: look.page.header.clone(),
+        footer: look.page.footer.clone(),
+        different_first: look.page.different_first,
+        date: look.page.date.clone(),
     };
     use sue_io::publish as p;
     Ok(match options.format.as_str() {
