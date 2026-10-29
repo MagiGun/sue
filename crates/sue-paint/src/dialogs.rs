@@ -378,6 +378,12 @@ pub(crate) enum Dialog {
     Timelapse(crate::timelapse::Export),
     /// Register Material, Image: its name.
     Material(String),
+    /// Expand (0), Shrink (1) or Blur the border of (2) the selection, by
+    /// pixels.
+    SelectBy(u8, f32),
+    /// Select Color Gamut: the tolerance and whether it looks at every
+    /// layer.
+    Gamut(f32, bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -453,6 +459,15 @@ impl SuePaint {
             Dialog::Onion(_) => ("Onion Skin Settings", vec2(360.0, 330.0)),
             Dialog::Timelapse(_) => ("Export Timelapse", vec2(360.0, 230.0)),
             Dialog::Material(_) => ("Register Material", vec2(360.0, 160.0)),
+            Dialog::SelectBy(kind, _) => (
+                match kind {
+                    0 => "Expand Selected Area",
+                    1 => "Shrink Selected Area",
+                    _ => "Blur Border",
+                },
+                vec2(320.0, 140.0),
+            ),
+            Dialog::Gamut(..) => ("Select Color Gamut", vec2(340.0, 170.0)),
             Dialog::Correction(_, filter, ..) => (
                 filter.label(),
                 vec2(
@@ -509,6 +524,29 @@ impl SuePaint {
                             Dialog::Frame(frame) => outcome = frame_ui(ui, frame, theme),
                             Dialog::Text(_, lettering) => outcome = text_ui(ui, lettering, theme),
                             Dialog::Onion(onion) => outcome = onion_ui(ui, onion, theme),
+                            Dialog::SelectBy(kind, amount) => {
+                                ui.horizontal(|ui| {
+                                    label(ui, if *kind == 2 { "Blur width:" } else { "Width:" }, theme);
+                                    ui.add(egui::Slider::new(amount, 1.0..=100.0).suffix(" px"));
+                                });
+                                ok_cancel(ui, &mut outcome);
+                            }
+                            Dialog::Gamut(tolerance, all) => {
+                                ui.label(
+                                    RichText::new("Selects the colors near the drawing color")
+                                        .size(theme.small_size)
+                                        .color(theme.muted),
+                                );
+                                ui.horizontal(|ui| {
+                                    label(ui, "Color margin:", theme);
+                                    let mut percent = *tolerance * 100.0;
+                                    if ui.add(egui::Slider::new(&mut percent, 0.0..=100.0).suffix(" %")).changed() {
+                                        *tolerance = percent / 100.0;
+                                    }
+                                });
+                                ui.checkbox(all, "Refer to all layers");
+                                ok_cancel(ui, &mut outcome);
+                            }
                             Dialog::Material(name) => {
                                 ui.horizontal(|ui| {
                                     label(ui, "Material name:", theme);
@@ -726,6 +764,19 @@ impl SuePaint {
             (Dialog::Perspective(count), Outcome::Ok) => self.make_perspective(cx, count),
             (Dialog::Timelapse(export), Outcome::Ok) => self.ask_export_timelapse(cx, export),
             (Dialog::Material(name), Outcome::Ok) => self.register_material(cx, &name),
+            (Dialog::SelectBy(kind, amount), Outcome::Ok) => {
+                if let Some(doc) = self.doc_mut()
+                    && let Some(selection) = doc.selection.clone()
+                {
+                    let changed = match kind {
+                        0 => selection.expanded(amount),
+                        1 => selection.shrunk(amount),
+                        _ => selection.blurred(amount),
+                    };
+                    doc.set_selection(Some(changed));
+                }
+            }
+            (Dialog::Gamut(tolerance, all), Outcome::Ok) => self.select_gamut(cx, tolerance, all),
             (Dialog::Onion(onion), Outcome::Ok) => {
                 if let Some(picture) = self.picture() {
                     let edit = doc::Edit::new("Onion Skin Settings").then(
@@ -827,7 +878,9 @@ impl SuePaint {
                 Dialog::Perspective(_)
                 | Dialog::Onion(_)
                 | Dialog::Timelapse(_)
-                | Dialog::Material(_),
+                | Dialog::Material(_)
+                | Dialog::SelectBy(..)
+                | Dialog::Gamut(..),
                 Outcome::Cancel,
             ) => {}
         }

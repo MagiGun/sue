@@ -1262,6 +1262,20 @@ pressure. Each drag paints the layer again from its lines and records one
 step. Remove dust clears specks no larger than the dust size from a raster
 layer, in a dragged box or all of it.
 
+**Selections.** Beside rectangles, ellipses and lassos, the Selection tool
+has Polyline (clicked corners, closed on the first or with Enter), Selection
+pen and Erase selection (soft discs painted into or out of the mask along
+the drag). Expand and Shrink Selected Area grow the mask (or what is not
+selected, counting past the canvas edge as unselected) by an exact distance
+transform; Blur Border runs three box blurs. Select Color Gamut selects the
+pixels near the drawing color, of the layer or of the picture as shown.
+Convert to Selection Layer keeps the selection as a green draft layer, and
+Add Selection and Remove Selection take a layer's alpha back into it. Quick
+Mask turns the selection into a red draft layer to paint on, and that layer
+back into the selection. The Selection Launcher, under any selection, holds
+Deselect, Invert, Expand, Shrink, Clear, Clear Outside, Fill, Scale/Rotate
+and Crop.
+
 **Layer effects and right-click menus.** Layer Property has Clip Studio
 Paint's effects, each a layer property the compositor applies as it draws,
 leaving the pixels alone (`sue_paint::effects`): Border effect (a rim of
@@ -1884,6 +1898,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: camera folders with keyframed position, zoom and rotation | **Implemented**; unit tests for the camera's map and frame, keyframes in between, deleted and undone, and a dot rendered four times larger through the camera | `sue-paint/src/camera.rs`, `composite.rs`, `anim_ui.rs` |
 | §3.7 Sue Paint: the Material palette, built-in tones and patterns, Register Material, Image | **Implemented**; a unit test for a tone's coverage and color and a picture registered, cut, read back and placed; an end-to-end run registers a drawing and pastes it as a layer | `sue-paint/src/materials.rs`, `panels.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: Layer Property effects (border, tone, layer color, expression color) and right-click menus | **Implemented**; unit tests for the border's reach, rim and roundness, each effect's color, a tone's coverage, a border rendered round a dot with the pixels kept, and sub tools duplicated, reset and deleted | `sue-paint/src/effects.rs`, `composite.rs`, `panels.rs`, `tools.rs`, `sue-wm/src/menubar.rs` |
+| §3.7 Sue Paint: Polyline, Selection pen and Erase selection; expand, shrink and blur selections; Select Color Gamut; selection layers; Quick Mask; the Selection Launcher | **Implemented**; a unit test for growing, shrinking, blurring, painting and picking colors, and an end-to-end run that shrinks a full selection, keeps it as a layer and turns Quick Mask on and off | `sue-paint/src/select.rs`, `canvas.rs`, `studio.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: brush tip materials | Planned; the menu item is present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |

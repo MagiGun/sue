@@ -1203,6 +1203,27 @@ impl SuePaint {
                     sub.tip.opacity = opacity / 100.0;
                 }
             }
+            Tool::Select if matches!(sub.mode, 4 | 5) => {
+                slider_row(
+                    ui,
+                    "Brush Size",
+                    &mut sub.tip.size,
+                    1.0..=500.0,
+                    " px",
+                    true,
+                    theme,
+                );
+                ui.label(small(if sub.mode == 4 {
+                    "Paint what to select"
+                } else {
+                    "Paint what to leave out"
+                }));
+            }
+            Tool::Select if sub.mode == 3 => {
+                ui.label(small(
+                    "Click the corners; click the first again or press Enter to close",
+                ));
+            }
             Tool::Select => {
                 ui.horizontal(|ui| {
                     ui.label(small("Shape"));

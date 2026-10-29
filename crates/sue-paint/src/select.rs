@@ -135,6 +135,148 @@ impl Selection {
         bounds
     }
 
+    /// The coverage, one byte a pixel, row by row.
+    #[must_use]
+    pub fn mask(&self) -> &[u8] {
+        &self.mask
+    }
+
+    /// The selection grown by `by` pixels all round, with round corners
+    /// (Expand Selected Area).
+    #[must_use]
+    pub fn expanded(&self, by: f32) -> Self {
+        self.grown(by, 0.0)
+    }
+
+    /// The selection grown by `by` pixels, counting what lies past the
+    /// picture's edge as `outside` (0 out, 1 in).
+    fn grown(&self, by: f32, outside: f32) -> Self {
+        let (width, height) = (i64::from(self.width), i64::from(self.height));
+        let edge = crate::effects::Edge::build(
+            |x, y| {
+                if x < 0 || y < 0 || x >= width || y >= height {
+                    outside
+                } else {
+                    self.at(x as u32, y as u32)
+                }
+            },
+            [0, 0, self.width, self.height],
+            by.max(0.0),
+        );
+        let mut out = self.clone();
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let at = (y * self.width + x) as usize;
+                let grown = (edge.at(x, y) * 255.0).round() as u8;
+                out.mask[at] = out.mask[at].max(grown);
+            }
+        }
+        out
+    }
+
+    /// The selection drawn in by `by` pixels all round (Shrink Selected
+    /// Area).
+    #[must_use]
+    pub fn shrunk(&self, by: f32) -> Self {
+        // What is not selected grows in, from past the edge too.
+        let mut outside = self.clone();
+        outside.invert();
+        let mut out = outside.grown(by, 1.0);
+        out.invert();
+        out
+    }
+
+    /// The selection's border softened over `radius` pixels (Blur Border):
+    /// three box blurs, as near a gaussian as needs be.
+    #[must_use]
+    pub fn blurred(&self, radius: f32) -> Self {
+        let r = (radius / 1.7).round().max(1.0) as usize;
+        let (w, h) = (self.width as usize, self.height as usize);
+        let mut values: Vec<f32> = self.mask.iter().map(|value| f32::from(*value)).collect();
+        let mut line = Vec::new();
+        for _ in 0..3 {
+            for (count, stride, step) in [(h, w, 1_usize), (w, 1, w)] {
+                let length = if step == 1 { w } else { h };
+                for lane in 0..count {
+                    let start = lane * stride;
+                    line.clear();
+                    line.extend((0..length).map(|i| values[start + i * step]));
+                    let mut sum: f32 = line.iter().take(r + 1).sum::<f32>() + line[0] * r as f32;
+                    for i in 0..length {
+                        values[start + i * step] = sum / (2 * r + 1) as f32;
+                        let add = line[(i + r + 1).min(length - 1)];
+                        let drop = line[i.saturating_sub(r)];
+                        sum += add - drop;
+                    }
+                }
+            }
+        }
+        Self {
+            width: self.width,
+            height: self.height,
+            mask: values
+                .iter()
+                .map(|value| value.round().clamp(0.0, 255.0) as u8)
+                .collect(),
+        }
+    }
+
+    /// Paints a soft-edged disc into the selection, or out of it (the
+    /// Selection pen and Erase selection).
+    pub fn disc(&mut self, center: [f32; 2], radius: f32, add: bool) {
+        let reach = radius + 1.0;
+        let clamp = |value: f32, top: u32| (value.max(0.0) as u32).min(top);
+        let (x0, x1) = (
+            clamp(center[0] - reach, self.width),
+            clamp(center[0] + reach + 1.0, self.width),
+        );
+        let (y0, y1) = (
+            clamp(center[1] - reach, self.height),
+            clamp(center[1] + reach + 1.0, self.height),
+        );
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let away = (x as f32 + 0.5 - center[0]).hypot(y as f32 + 0.5 - center[1]);
+                let cover = ((radius - away + 0.5).clamp(0.0, 1.0) * 255.0).round() as u8;
+                let at = (y * self.width + x) as usize;
+                self.mask[at] = if add {
+                    self.mask[at].max(cover)
+                } else {
+                    ((u16::from(self.mask[at]) * (255 - u16::from(cover)) + 127) / 255) as u8
+                };
+            }
+        }
+    }
+
+    /// The pixels of `pixels` (RGBA8, `width` by `height`) within
+    /// `tolerance` (0 to 1) of `color` (Select Color Gamut).
+    #[must_use]
+    pub fn of_color(
+        pixels: &[u8],
+        width: u32,
+        height: u32,
+        color: [u8; 3],
+        tolerance: f32,
+    ) -> Self {
+        let limit = (tolerance.clamp(0.0, 1.0) * 255.0).round() as i32;
+        let mask = pixels
+            .chunks(4)
+            .take((width * height) as usize)
+            .map(|pixel| {
+                let near = pixel[3] > 0
+                    && (0..3).all(|channel| {
+                        (i32::from(pixel[channel]) - i32::from(color[channel])).abs() <= limit
+                    });
+                if near { 255 } else { 0 }
+            })
+            .collect();
+        Self {
+            width,
+            height,
+            mask,
+        }
+    }
+
     /// Selects everything that was not, and the other way round.
     pub fn invert(&mut self) {
         for value in &mut self.mask {
@@ -293,6 +435,38 @@ impl Selection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selections_grow_shrink_soften_paint_and_pick_colors() {
+        let mut square = Selection::new(40, 40);
+        square.rect([10, 10, 30, 30], Op::Replace);
+        let grown = square.expanded(4.0);
+        assert_eq!(grown.at(7, 20), 1.0, "three pixels out");
+        assert_eq!(grown.at(3, 20), 0.0, "past the growth");
+        assert!(grown.at(7, 7) < 1.0, "round at the corners");
+        let shrunk = square.shrunk(4.0);
+        assert_eq!(shrunk.at(15, 20), 1.0);
+        assert_eq!(shrunk.at(11, 20), 0.0, "drawn in");
+        assert!(!shrunk.is_empty());
+        let soft = square.blurred(4.0);
+        let edge = soft.at(10, 20);
+        assert!(edge > 0.2 && edge < 0.8, "{edge}");
+        assert_eq!(soft.at(20, 20), 1.0);
+        // The selection pen and its eraser.
+        let mut painted = Selection::new(40, 40);
+        painted.disc([20.0, 20.0], 5.0, true);
+        assert_eq!(painted.at(20, 20), 1.0);
+        assert_eq!(painted.at(30, 20), 0.0);
+        painted.disc([20.0, 20.0], 2.0, false);
+        assert_eq!(painted.at(20, 20), 0.0, "erased in the middle");
+        assert_eq!(painted.at(23, 20), 1.0);
+        // Select Color Gamut: the red pixels, near enough.
+        let mut pixels = vec![255_u8; 4 * 4 * 4];
+        pixels[..4].copy_from_slice(&[250, 10, 0, 255]);
+        let red = Selection::of_color(&pixels, 4, 4, [255, 0, 0], 0.1);
+        assert_eq!(red.at(0, 0), 1.0);
+        assert_eq!(red.at(1, 0), 0.0);
+    }
 
     #[test]
     fn shapes_combine_and_invert() {

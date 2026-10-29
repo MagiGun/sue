@@ -2609,6 +2609,74 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_selections_shrink_become_layers_and_quick_masks() {
+        let (mut runtime, root) = runtime("paint-selection");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.studio_focus())
+            .unwrap();
+        let command = |runtime: &mut Runtime, command: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: command.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let named = |runtime: &Runtime, name: &str| {
+            sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+                .into_iter()
+                .find(|info| info.name == name)
+        };
+        // Select All, Shrink Selected Area by 4, Convert to Selection Layer:
+        // the layer holds the selection, 4 pixels in from every edge.
+        command(&mut runtime, "select.all");
+        command(&mut runtime, "select.shrink");
+        step(&mut runtime, Vec::new());
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        command(&mut runtime, "select.to_layer");
+        let layer = named(&runtime, "Selection").expect("a selection layer");
+        assert!(layer.style.draft, "left out of exports");
+        let raster = sue_paint::doc::raster(&runtime.engine.world.arena, layer.id).unwrap();
+        let selection = sue_paint::select::Selection::from_alpha(raster);
+        let (w, h) = (raster.width(), raster.height());
+        assert_eq!(selection.at(4, 4), 1.0);
+        assert_eq!(selection.at(w - 5, h - 5), 1.0);
+        assert_eq!(selection.at(2, 2), 0.0, "drawn in from the edge");
+        assert_eq!(selection.at(w - 3, h / 2), 0.0);
+        // Quick Mask: a red layer to paint the selection on, and back.
+        command(&mut runtime, "select.quick_mask");
+        assert!(named(&runtime, "Quick Mask").is_some());
+        command(&mut runtime, "select.quick_mask");
+        assert!(named(&runtime, "Quick Mask").is_none(), "gone again");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_masks_hide_without_erasing_the_layer() {
         let (mut runtime, root) = runtime("paint-mask");
         let ctx = egui::Context::default();

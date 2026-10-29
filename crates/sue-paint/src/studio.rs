@@ -61,6 +61,8 @@ pub(crate) struct Doc {
     pub show_rulers: bool,
     /// Drawing edits the current layer's mask, not its pixels.
     pub mask_edit: bool,
+    /// The Quick Mask layer while Quick Mask is on.
+    pub quick_mask: Option<EntityId>,
     pub selection: Option<Selection>,
     pub last_selection: Option<Selection>,
     pub edges: Option<Vec<[[f32; 2]; 2]>>,
@@ -80,6 +82,7 @@ impl Doc {
             snap_ruler: true,
             show_rulers: true,
             mask_edit: false,
+            quick_mask: None,
             selection: None,
             last_selection: None,
             edges: None,
@@ -178,6 +181,9 @@ pub(crate) enum Gesture {
         base: crate::camera::Camera,
         mode: u8,
     },
+    /// Painting the selection with the Selection pen (or out of it with
+    /// Erase selection): where the pen last was (picture pixels).
+    SelectPaint { add: bool, last: [f32; 2] },
     /// Dragging a ruler's handle: the ruler's text from before.
     RulerHandle {
         handle: crate::rulers::Handle,
@@ -326,6 +332,10 @@ pub struct SuePaint {
     pub(crate) picked_lines: Option<(EntityId, Vec<usize>)>,
     /// The points of a curve ruler being placed (picture pixels).
     pub(crate) curve_points: Vec<[f32; 2]>,
+    /// The corners of a polyline selection being clicked out.
+    pub(crate) polyline: Vec<[f32; 2]>,
+    /// The Selection Launcher shows under the selection.
+    pub(crate) launcher: bool,
     /// A camera being set up and not keyed yet: its folder, the frame and
     /// where it stands.
     pub(crate) camera_pending: Option<(EntityId, u32, crate::camera::Camera)>,
@@ -416,6 +426,8 @@ impl Default for SuePaint {
             vanishing_line: None,
             picked_lines: None,
             curve_points: Vec::new(),
+            polyline: Vec::new(),
+            launcher: true,
             camera_pending: None,
             material_kind: 0,
             material_pick: None,
@@ -661,6 +673,15 @@ fn implemented(command: &str) -> bool {
             | "anim.frame.delete"
             | "anim.onion"
             | "edit.material.image"
+            | "select.expand"
+            | "select.shrink"
+            | "select.feather"
+            | "select.gamut"
+            | "select.add_layer"
+            | "select.subtract_layer"
+            | "select.to_layer"
+            | "select.quick_mask"
+            | "select.launcher"
             | "edit.material.paste"
             | "window.material"
             | "anim.layer.camera"
@@ -1086,6 +1107,125 @@ impl SuePaint {
                 ) && let Some(doc) = self.doc_mut()
                 {
                     doc.layer = Some(id);
+                }
+            }
+            Err(error) => cx.fail(error),
+        }
+    }
+
+    /// Select Color Gamut: the pixels near the drawing color, of the current
+    /// layer or (with `all`) of every layer as shown.
+    pub(crate) fn select_gamut(&mut self, cx: &mut AppletContext<'_>, tolerance: f32, all: bool) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let color = self.drawing_color();
+        let found = if all {
+            composite::flatten(&cx.world.arena, picture, RenderOptions::default()).and_then(
+                |tile| {
+                    Some(Selection::of_color(
+                        tile.bytes()?,
+                        tile.width(),
+                        tile.height(),
+                        color,
+                        tolerance,
+                    ))
+                },
+            )
+        } else {
+            self.layer()
+                .and_then(|layer| doc::raster(&cx.world.arena, layer))
+                .and_then(|raster| {
+                    let offset = self
+                        .layer_info(&cx.world.arena)
+                        .map_or([0, 0], |info| info.style.offset);
+                    let found = Selection::of_color(
+                        raster.bytes()?,
+                        raster.width(),
+                        raster.height(),
+                        color,
+                        tolerance,
+                    );
+                    Some(found.shifted([-offset[0], -offset[1]]))
+                })
+        };
+        match found.filter(|selection| !selection.is_empty()) {
+            Some(selection) => {
+                if let Some(doc) = self.doc_mut() {
+                    doc.set_selection(Some(selection));
+                }
+            }
+            None => cx.notify("No pixels of that color there"),
+        }
+    }
+
+    /// Quick Mask: the selection becomes a red layer to paint on, and back.
+    pub(crate) fn toggle_quick_mask(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        if let Some(layer) = self.doc().and_then(|doc| doc.quick_mask) {
+            let selection = doc::raster(&cx.world.arena, layer).map(Selection::from_alpha);
+            if Self::apply(cx, doc::Edit::new("Quick Mask").then(doc::delete(layer)))
+                && let Some(doc) = self.doc_mut()
+            {
+                doc.quick_mask = None;
+                doc.set_selection(selection);
+                doc.layer = doc::layers(&cx.world.arena, picture)
+                    .last()
+                    .map(|info| info.id);
+            }
+            return;
+        }
+        let Some(size) = cx
+            .world
+            .arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(picture::size)
+        else {
+            return;
+        };
+        let alpha: Vec<u8> = self
+            .doc()
+            .and_then(|doc| doc.selection.as_ref())
+            .map_or_else(
+                || vec![0; (size[0] * size[1]) as usize],
+                |selection| selection.mask().to_vec(),
+            );
+        let pixels: Vec<u8> = alpha
+            .iter()
+            .flat_map(|alpha| [230, 40, 40, *alpha])
+            .collect();
+        let Ok(raster) = sue_core::RasterTile2D::from_bytes(
+            size[0],
+            size[1],
+            sue_core::PixelFormat::Rgba8,
+            pixels,
+        ) else {
+            return;
+        };
+        let top = doc::layers(&cx.world.arena, picture)
+            .last()
+            .map(|info| info.id);
+        match doc::add_layer_pixels(
+            &cx.world.arena,
+            picture,
+            top,
+            "Quick Mask".to_owned(),
+            raster,
+        ) {
+            Ok((spawn, id)) => {
+                let edit = doc::Edit::new("Quick Mask")
+                    .then(spawn)
+                    .then(SetProperty::new(id, picture::DRAFT, true))
+                    .then(SetProperty::new(id, picture::OPACITY, 0.5));
+                if Self::apply(cx, edit)
+                    && let Some(doc) = self.doc_mut()
+                {
+                    doc.quick_mask = Some(id);
+                    doc.layer = Some(id);
+                    doc.set_selection(None);
                 }
             }
             Err(error) => cx.fail(error),
@@ -2060,6 +2200,14 @@ impl SuePaint {
             "edit.paste" => when(has_doc && self.clipboard.is_some()),
             "edit.clear_outside" | "select.none" | "select.invert" => when(selection),
             "select.again" => when(self.doc().is_some_and(|doc| doc.last_selection.is_some())),
+            "select.expand" | "select.shrink" | "select.feather" | "select.to_layer" => {
+                when(selection)
+            }
+            "select.add_layer" | "select.subtract_layer" => when(raster),
+            "select.quick_mask" => self
+                .doc()
+                .map_or(ItemState::off(), |doc| flag(doc.quick_mask.is_some())),
+            "select.launcher" => flag(self.launcher),
             "layer.from_selection" => when(selection && raster),
             "edit.cut"
             | "edit.copy"
@@ -2949,6 +3097,90 @@ impl SuePaint {
                     doc.set_selection(Some(selection));
                 }
             }
+            "select.expand" | "select.shrink" | "select.feather" => {
+                let kind = match command {
+                    "select.expand" => 0,
+                    "select.shrink" => 1,
+                    _ => 2,
+                };
+                if self.doc().is_some_and(|doc| doc.selection.is_some()) {
+                    self.dialog = Some(Dialog::SelectBy(kind, 4.0));
+                }
+            }
+            "select.gamut" => {
+                if self.picture().is_some() {
+                    self.dialog = Some(Dialog::Gamut(0.1, false));
+                }
+            }
+            "select.add_layer" | "select.subtract_layer" => {
+                let Some(raster) = self
+                    .layer()
+                    .and_then(|layer| doc::raster(&cx.world.arena, layer))
+                else {
+                    return;
+                };
+                let from = Selection::from_alpha(raster);
+                let op = if command == "select.add_layer" {
+                    Op::Add
+                } else {
+                    Op::Subtract
+                };
+                if let Some(doc) = self.doc_mut() {
+                    let [width, height] = from.size();
+                    let mut selection = doc
+                        .selection
+                        .clone()
+                        .unwrap_or_else(|| Selection::new(width, height));
+                    selection.apply_mask(from.mask(), op);
+                    doc.set_selection(Some(selection));
+                }
+            }
+            "select.to_layer" => {
+                let (Some(picture), Some(selection)) = (
+                    self.picture(),
+                    self.doc().and_then(|doc| doc.selection.clone()),
+                ) else {
+                    return;
+                };
+                // A selection layer: the selection in green, left out of
+                // exports; Add Selection takes it back.
+                let [width, height] = selection.size();
+                let pixels: Vec<u8> = selection
+                    .mask()
+                    .iter()
+                    .flat_map(|alpha| [60, 200, 90, *alpha])
+                    .collect();
+                let Ok(raster) = sue_core::RasterTile2D::from_bytes(
+                    width,
+                    height,
+                    sue_core::PixelFormat::Rgba8,
+                    pixels,
+                ) else {
+                    return;
+                };
+                match doc::add_layer_pixels(
+                    &cx.world.arena,
+                    picture,
+                    self.layer(),
+                    "Selection".to_owned(),
+                    raster,
+                ) {
+                    Ok((spawn, id)) => {
+                        let edit = doc::Edit::new("Convert to Selection Layer")
+                            .then(spawn)
+                            .then(SetProperty::new(id, picture::DRAFT, true))
+                            .then(SetProperty::new(id, picture::OPACITY, 0.5));
+                        if Self::apply(cx, edit)
+                            && let Some(doc) = self.doc_mut()
+                        {
+                            doc.layer = Some(id);
+                        }
+                    }
+                    Err(error) => cx.fail(error),
+                }
+            }
+            "select.quick_mask" => self.toggle_quick_mask(cx),
+            "select.launcher" => self.launcher = !self.launcher,
             "select.from_layer" => {
                 let arena = &cx.world.arena;
                 let Some(info) = self.layer_info(arena) else {

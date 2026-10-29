@@ -448,6 +448,13 @@ familiar:
   from: pick the layer, then Register Selected Layer.
   File, Export Animation saves an animated GIF, a movie or every frame as a
   picture.
+- **Selections:** the Selection tool also has **Polyline**, **Selection
+  pen** and **Erase selection** (paint what to select or leave out). The
+  Select menu grows, shrinks and softens a selection, selects by color,
+  keeps a selection as a layer and takes it back, and has **Quick Mask**
+  (paint the selection in red, then turn it back). A bar of handy buttons
+  (the Selection Launcher) sits under every selection, as in Clip Studio
+  Paint.
 - **Layer Property effects:** give a layer a **Border effect** (an outline
   of any thickness and color round what is on it), a **Tone** (halftone
   dots at the frequency and angle you choose), a **Layer color**, or show it

@@ -167,10 +167,24 @@ impl Tool {
             Self::Zoom => vec![plain("Zoom In", 0), plain("Zoom Out", 1)],
             Self::Hand => vec![plain("Hand", 0), plain("Rotate", 1)],
             Self::MoveLayer => vec![plain("Move Layer", 0)],
+            // Clip Studio Paint's Selection area sub tools.
             Self::Select => vec![
                 plain("Rectangle", 0),
                 plain("Ellipse", 1),
                 plain("Lasso", 2),
+                plain("Polyline", 3),
+                SubTool::new(
+                    self,
+                    "Selection pen",
+                    4,
+                    tip(20.0, |t| t.size_by.pressure = false),
+                ),
+                SubTool::new(
+                    self,
+                    "Erase selection",
+                    5,
+                    tip(20.0, |t| t.size_by.pressure = false),
+                ),
             ],
             Self::AutoSelect => vec![
                 plain("Refer Only Editing Layer", 0).tolerance(0.1),

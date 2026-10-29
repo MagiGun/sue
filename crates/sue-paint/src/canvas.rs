@@ -103,6 +103,20 @@ impl SuePaint {
         self.draw_picture(ui, viewport, size, cx, theme);
         self.overlays(ui, viewport, size, &response, cx, theme);
         self.warp_ui(ui, viewport, size, cx, theme);
+        self.selection_launcher(ui, viewport, size, cx, theme);
+        if !self.polyline.is_empty() {
+            let (enter, escape) = ui.input(|input| {
+                (
+                    input.key_pressed(Key::Enter),
+                    input.key_pressed(Key::Escape),
+                )
+            });
+            if enter && self.polyline.len() >= 3 {
+                self.finish_polyline(self.select_op);
+            } else if escape || self.toolbox.tool() != Tool::Select {
+                self.polyline.clear();
+            }
+        }
         if !self.curve_points.is_empty() {
             // Enter lays the curve ruler, Esc drops it.
             let (enter, escape) = ui.input(|input| {
@@ -780,6 +794,38 @@ impl SuePaint {
                     to: p,
                 });
             }
+            Tool::Select if sub.mode == 3 => {
+                // Polyline: each click a corner; the first one again (or
+                // Enter) closes it.
+                let near_first = self.polyline.first().is_some_and(|first| {
+                    doc.view
+                        .to_screen(viewport, size, pos2(first[0], first[1]))
+                        .distance(pos)
+                        <= 8.0
+                });
+                if near_first && self.polyline.len() >= 3 {
+                    self.finish_polyline(op);
+                } else {
+                    self.polyline.push([p.x, p.y]);
+                }
+            }
+            Tool::Select if matches!(sub.mode, 4 | 5) => {
+                let add = sub.mode == 4;
+                let radius = (sub.tip.size / 2.0).max(0.5);
+                if let Some(doc) = self.docs.get_mut(self.active) {
+                    let mut selection = doc
+                        .selection
+                        .clone()
+                        .unwrap_or_else(|| Selection::new(size[0], size[1]));
+                    selection.disc([p.x, p.y], radius, add);
+                    doc.selection = Some(selection);
+                    doc.edges = None;
+                }
+                self.gesture = Some(Gesture::SelectPaint {
+                    add,
+                    last: [p.x, p.y],
+                });
+            }
             Tool::Select => {
                 self.gesture = Some(if sub.mode == 2 {
                     Gesture::Lasso {
@@ -1065,6 +1111,94 @@ impl SuePaint {
         if let Some(doc) = self.docs.get_mut(self.active) {
             doc.compositor
                 .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+        }
+    }
+
+    /// Closes the polyline selection clicked out so far, combined as `op`.
+    fn finish_polyline(&mut self, op: Op) {
+        let points = std::mem::take(&mut self.polyline);
+        let Some(doc) = self.docs.get_mut(self.active) else {
+            return;
+        };
+        let size = doc.compositor.display().1;
+        let mut selection = doc
+            .selection
+            .clone()
+            .filter(|_| op != Op::Replace)
+            .unwrap_or_else(|| Selection::new(size[0], size[1]));
+        selection.polygon(&points, op);
+        doc.set_selection(Some(selection));
+    }
+
+    /// Clip Studio Paint's Selection Launcher: the commands for a selection,
+    /// in a bar under it.
+    fn selection_launcher(
+        &mut self,
+        ui: &mut Ui,
+        viewport: Rect,
+        size: [u32; 2],
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        if !self.launcher || self.gesture.is_some() {
+            return;
+        }
+        let Some(doc) = self.docs.get(self.active) else {
+            return;
+        };
+        let Some([x0, y0, x1, y1]) = doc.selection.as_ref().and_then(Selection::bounds) else {
+            return;
+        };
+        let view = doc.view;
+        let corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+            .map(|[x, y]| view.to_screen(viewport, size, pos2(x as f32, y as f32)));
+        let bottom = corners
+            .iter()
+            .map(|corner| corner.y)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let middle = corners.iter().map(|corner| corner.x).sum::<f32>() / 4.0;
+        let buttons: [(Icon, &str, &str); 9] = [
+            (Icon::Deselect, "Deselect", "select.none"),
+            (Icon::Reset, "Invert selected area", "select.invert"),
+            (Icon::ZoomIn, "Expand selected area", "select.expand"),
+            (Icon::ZoomOut, "Shrink selected area", "select.shrink"),
+            (Icon::Clear, "Clear", "edit.clear"),
+            (
+                Icon::ClearOutside,
+                "Clear outside selection",
+                "edit.clear_outside",
+            ),
+            (Icon::FillSelection, "Fill", "edit.fill"),
+            (Icon::Fit, "Scale/Rotate", "edit.transform.scale"),
+            (Icon::Frame, "Crop", "edit.crop"),
+        ];
+        let width = buttons.len() as f32 * 26.0 + 8.0;
+        let bar = Rect::from_min_size(pos2(middle - width / 2.0, bottom + 10.0), vec2(width, 30.0));
+        let bar = bar.translate(vec2(
+            (viewport.left() + 4.0 - bar.left()).max(0.0)
+                + (viewport.right() - 4.0 - bar.right()).min(0.0),
+            (viewport.bottom() - 4.0 - bar.bottom()).min(0.0),
+        ));
+        ui.painter()
+            .rect_filled(bar, theme.control_radius, theme.panel);
+        ui.painter().rect_stroke(
+            bar,
+            theme.control_radius,
+            theme.hairline(),
+            egui::StrokeKind::Inside,
+        );
+        let mut run = None;
+        for (index, (icon, tip, command)) in buttons.iter().enumerate() {
+            let at = Rect::from_min_size(
+                pos2(bar.left() + 4.0 + index as f32 * 26.0, bar.top() + 4.0),
+                vec2(22.0, 22.0),
+            );
+            if icon_button(ui, at, *icon, true, false, tip, theme) {
+                run = Some(*command);
+            }
+        }
+        if let Some(command) = run {
+            self.run(command, cx);
         }
     }
 
@@ -1634,6 +1768,30 @@ impl SuePaint {
                     .set_rotation(viewport, size, *rotation + (now - *start));
             }
             Gesture::Shape { to, .. } => *to = p,
+            Gesture::SelectPaint { add, last } => {
+                let radius = (self.toolbox.current().tip.size / 2.0).max(0.5);
+                let to = [p.x, p.y];
+                let length = (to[0] - last[0]).hypot(to[1] - last[1]);
+                let count = (length / (radius * 0.5).max(0.5)).ceil().max(1.0) as usize;
+                let mut selection = doc
+                    .selection
+                    .clone()
+                    .unwrap_or_else(|| Selection::new(size[0], size[1]));
+                for n in 1..=count {
+                    let t = n as f32 / count as f32;
+                    selection.disc(
+                        [
+                            last[0] + (to[0] - last[0]) * t,
+                            last[1] + (to[1] - last[1]) * t,
+                        ],
+                        radius,
+                        *add,
+                    );
+                }
+                doc.selection = Some(selection);
+                doc.edges = None;
+                *last = to;
+            }
             Gesture::RulerPen { points } => {
                 if points.last().is_none_or(|last| {
                     (last[0] - p.x).hypot(last[1] - p.y) > 2.0 / doc.view.zoom.max(0.01)
@@ -1977,6 +2135,14 @@ impl SuePaint {
                 // Keyed at this frame, as one step.
                 if self.camera_pending.is_some() {
                     self.run("anim.camera.key", cx);
+                }
+            }
+            Gesture::SelectPaint { .. } => {
+                // Keep what is selected (nothing selected is no selection).
+                if let Some(doc) = self.docs.get_mut(self.active)
+                    && let Some(selection) = doc.selection.take()
+                {
+                    doc.set_selection(Some(selection));
                 }
             }
             Gesture::RulerHandle { handle, before } => {
