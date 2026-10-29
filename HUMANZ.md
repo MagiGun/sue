@@ -1262,6 +1262,19 @@ pressure. Each drag paints the layer again from its lines and records one
 step. Remove dust clears specks no larger than the dust size from a raster
 layer, in a dragged box or all of it.
 
+**Camera folders.** A camera folder (Animation, New Animation Layer, Camera
+Folder) is a layer folder flagged `folder.camera` whose camera keyframes are
+the shared `Animation` on it, a curve each for `camera.x`, `camera.y` (the
+middle of its view), `camera.scale` and `camera.angle`, keyed linearly
+(`sue_paint::camera`). At each frame the frame view carries every camera's
+affine map from the canvas to what it sees, and the compositor samples the
+folder's layers through it (bilinear, premultiplied; masks to the nearest
+pixel), on screen and in every animation export. With the Object tool on a
+camera folder, the layers show as they are with the camera's frame over
+them: dragging inside moves it, a corner zooms, outside turns it, and Tool
+Property sets position, scale and rotation and adds, updates or deletes the
+keyframe at the frame shown.
+
 **Timelapse.** A picture that records (`timelapse.record`, set from New or
 File, Timelapse) keeps a frame each time its composite settles after a
 change, between strokes: a JPEG at most 1280 pixels on its longest side in
@@ -1842,7 +1855,8 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: Correct Line (control points, pinch, simplify, connect, adjust line width, redraw, redraw width) and Remove dust | **Implemented**; unit tests for every operation and dust removal, and the vector end-to-end run pinches a line and undoes it | `sue-paint/src/correct.rs`, `vector.rs`, `brush.rs`, `canvas.rs` |
 | §3.7 Sue Paint: the Operation tool (Object for vector lines, Select layer), curve, figure and pen rulers | **Implemented**; a unit test for path rulers read back and holding strokes on a curve and round a rectangle's corner; the vector end-to-end run moves a line with Object, deletes and undoes it | `sue-paint/src/rulers.rs`, `canvas.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: timelapse recording and export, and movies of animations (Motion JPEG AVI) | **Implemented**; unit tests for the AVI's headers and index and for frames kept, fitted and timed; an end-to-end run records a frame a stroke, exports a video and stops | `sue-io/src/video.rs`, `sue-paint/src/timelapse.rs`, `bins/sue/src/runtime.rs` |
-| §3.7 Sue Paint: materials and the camera folder | Planned; their menu items and tools are present and grayed out | n/a |
+| §3.7 Sue Paint: camera folders with keyframed position, zoom and rotation | **Implemented**; unit tests for the camera's map and frame, keyframes in between, deleted and undone, and a dot rendered four times larger through the camera | `sue-paint/src/camera.rs`, `composite.rs`, `anim_ui.rs` |
+| §3.7 Sue Paint: materials | Planned; their menu items are present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |

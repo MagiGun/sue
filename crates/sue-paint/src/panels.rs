@@ -813,7 +813,9 @@ impl SuePaint {
         }
         let command = egui::ScrollArea::vertical()
             .id_salt("sue-paint-props")
-            .show(&mut inner, |ui| self.tool_properties(ui, tool, theme))
+            .show(&mut inner, |ui| {
+                self.tool_properties(ui, tool, &cx.world.arena, theme)
+            })
             .inner;
         if let Some(command) = command {
             self.run(command, cx);
@@ -903,7 +905,18 @@ impl SuePaint {
 
     /// The settings of the current sub tool, and a command they ask for.
     #[allow(clippy::too_many_lines, reason = "one block per tool")]
-    fn tool_properties(&mut self, ui: &mut Ui, tool: Tool, theme: &Theme) -> Option<&'static str> {
+    fn tool_properties(
+        &mut self,
+        ui: &mut Ui,
+        tool: Tool,
+        arena: &sue_core::Arena,
+        theme: &Theme,
+    ) -> Option<&'static str> {
+        if tool == Tool::Operation
+            && let Some(folder) = self.camera_folder(arena)
+        {
+            return self.camera_properties(ui, folder, arena, theme);
+        }
         ui.spacing_mut().item_spacing.y = 6.0;
         let small = |text: &str| {
             RichText::new(text)
@@ -1472,6 +1485,97 @@ impl SuePaint {
                 ui.label(small("This tool arrives in a later Sue Paint"));
             }
         }
+        command
+    }
+
+    /// The Object tool's settings for a camera folder: where its camera
+    /// stands at this frame, and its keyframes.
+    fn camera_properties(
+        &mut self,
+        ui: &mut Ui,
+        folder: sue_core::EntityId,
+        arena: &sue_core::Arena,
+        theme: &Theme,
+    ) -> Option<&'static str> {
+        let small = |text: &str| {
+            RichText::new(text)
+                .size(theme.small_size + 0.5)
+                .color(theme.muted)
+        };
+        let (frame, time) = self.frame_time(arena);
+        let mut camera = self.camera_now(arena, folder);
+        let before = camera;
+        ui.label(small(&format!("Camera at frame {}", frame + 1)));
+        egui::Grid::new("sue-paint-camera")
+            .num_columns(2)
+            .spacing(vec2(10.0, 6.0))
+            .show(ui, |ui| {
+                ui.label(small("Position X"));
+                ui.add(egui::DragValue::new(&mut camera.center[0]).suffix(" px"));
+                ui.end_row();
+                ui.label(small("Position Y"));
+                ui.add(egui::DragValue::new(&mut camera.center[1]).suffix(" px"));
+                ui.end_row();
+                ui.label(small("Scale"));
+                let mut percent = camera.scale * 100.0;
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut percent)
+                            .range(1.0..=2000.0)
+                            .suffix(" %"),
+                    )
+                    .changed()
+                {
+                    camera.scale = percent / 100.0;
+                }
+                ui.end_row();
+                ui.label(small("Rotation"));
+                let mut degrees = camera.angle.to_degrees();
+                if ui
+                    .add(egui::DragValue::new(&mut degrees).suffix(" deg"))
+                    .changed()
+                {
+                    camera.angle = degrees.to_radians();
+                }
+                ui.end_row();
+            });
+        if camera != before {
+            self.camera_pending = Some((folder, frame, camera));
+        }
+        let keys = crate::camera::keys(arena, folder);
+        let keyed = keys.contains(&time);
+        let mut command = None;
+        ui.horizontal(|ui| {
+            if ui
+                .button(if keyed {
+                    "Update Keyframe"
+                } else {
+                    "Add Keyframe"
+                })
+                .clicked()
+            {
+                command = Some("anim.camera.key");
+            }
+            if keyed && ui.button("Delete Keyframe").clicked() {
+                command = Some("anim.camera.unkey");
+            }
+        });
+        let rate = self
+            .picture()
+            .and_then(|picture| crate::anim::timeline(arena, picture))
+            .map_or(sue_core::Rate::new(24, 1), |sequence| sequence.rate);
+        let frames: Vec<String> = keys
+            .iter()
+            .map(|time| (time.frame(rate) + 1).to_string())
+            .collect();
+        ui.label(small(&if frames.is_empty() {
+            "No keyframes yet: the camera shows the canvas as it is".to_owned()
+        } else {
+            format!("Keyframes at frames {}", frames.join(", "))
+        }));
+        ui.label(small(
+            "Drag inside the frame to move the camera, a corner to zoom, outside to turn it",
+        ));
         command
     }
 

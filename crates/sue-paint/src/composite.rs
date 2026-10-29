@@ -38,6 +38,9 @@ pub struct FrameView {
     pub hidden: HashSet<EntityId>,
     /// Cels shown anyway.
     pub onion: Vec<Skin>,
+    /// Camera folders and what each canvas point sees through them (an
+    /// affine map, `camera::Camera::map`).
+    pub cameras: Vec<(EntityId, [f32; 6])>,
 }
 
 /// A hidden cel shown anyway: in a color, faintly.
@@ -109,18 +112,72 @@ struct Layer<'a> {
     tint: Option<([f32; 3], f32)>,
     /// The layer mask, the layer's size: its alpha is how much shows.
     mask: Option<&'a RasterTile2D>,
+    /// Seen through a camera: where each picture pixel looks on the layer.
+    warp: Option<[f32; 6]>,
 }
 
 impl Layer<'_> {
-    /// The layer's straight RGBA at picture pixel `(x, y)`.
+    /// The layer's straight RGBA at picture pixel `(x, y)`, through its
+    /// camera when it has one.
     fn sample(&self, x: u32, y: u32) -> [f32; 4] {
+        let Some(m) = self.warp else {
+            return self.texel(i64::from(x), i64::from(y));
+        };
+        if !matches!(self.source, Source::Raster { .. }) {
+            return self.texel(i64::from(x), i64::from(y));
+        }
+        // Bilinear, premultiplied, at the point the camera sees.
+        let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+        let (wx, wy) = (
+            m[0] * px + m[1] * py + m[4] - 0.5,
+            m[2] * px + m[3] * py + m[5] - 0.5,
+        );
+        let (x0, y0) = (wx.floor(), wy.floor());
+        let (tx, ty) = (wx - x0, wy - y0);
+        let mut sum = [0.0_f32; 4];
+        for (dx, dy, weight) in [
+            (0, 0, (1.0 - tx) * (1.0 - ty)),
+            (1, 0, tx * (1.0 - ty)),
+            (0, 1, (1.0 - tx) * ty),
+            (1, 1, tx * ty),
+        ] {
+            let p = self.texel(x0 as i64 + dx, y0 as i64 + dy);
+            for channel in 0..3 {
+                sum[channel] += p[channel] * p[3] * weight;
+            }
+            sum[3] += p[3] * weight;
+        }
+        if sum[3] <= 0.0 {
+            return [0.0; 4];
+        }
+        [
+            sum[0] / sum[3],
+            sum[1] / sum[3],
+            sum[2] / sum[3],
+            sum[3].min(1.0),
+        ]
+    }
+
+    /// Where on the layer picture pixel `(x, y)` looks, to the nearest
+    /// pixel (for its mask).
+    fn seen(&self, x: u32, y: u32) -> Option<(u32, u32)> {
+        let Some(m) = self.warp else {
+            return Some((x, y));
+        };
+        let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+        let (wx, wy) = (m[0] * px + m[1] * py + m[4], m[2] * px + m[3] * py + m[5]);
+        (wx >= 0.0 && wy >= 0.0).then_some((wx as u32, wy as u32))
+    }
+
+    /// The layer's straight RGBA at picture pixel `(x, y)`, as it is.
+    fn texel(&self, x: i64, y: i64) -> [f32; 4] {
         match &self.source {
             Source::Paper(rgb) => [rgb[0], rgb[1], rgb[2], 1.0],
             // A correction has no pixels of its own.
             Source::Correction(_) => [0.0; 4],
             Source::Raster { raster, offset } => {
-                let lx = i64::from(x) - offset[0];
-                let ly = i64::from(y) - offset[1];
+                let lx = x - offset[0];
+                let ly = y - offset[1];
                 if lx < 0
                     || ly < 0
                     || lx >= i64::from(raster.width())
@@ -217,11 +274,23 @@ fn gather_view<'a>(
                 .filter(|_| crate::doc::mask_on(arena, entity.id()))
                 .and_then(|mask| arena.get_by_id(mask).ok())
                 .and_then(|mask| mask.component(ComponentKind::RasterTile2D)?.as_raster());
+            // Seen through the innermost camera folder around it.
+            let warp = view.and_then(|view| {
+                crate::doc::folders_around(arena, entity.id())
+                    .into_iter()
+                    .find_map(|folder| {
+                        view.cameras
+                            .iter()
+                            .find(|(id, _)| *id == folder)
+                            .map(|(_, map)| *map)
+                    })
+            });
             Some(Layer {
                 source,
                 style,
                 tint,
                 mask,
+                warp,
             })
         })
         .collect()
@@ -265,7 +334,9 @@ fn pixel(layers: &[Layer<'_>], x: u32, y: u32) -> [f32; 4] {
         }
         let mut source = layer.sample(x, y);
         if let Some(mask) = layer.mask {
-            source[3] *= mask_at(mask, layer.style.offset, x, y);
+            source[3] *= layer
+                .seen(x, y)
+                .map_or(0.0, |(sx, sy)| mask_at(mask, layer.style.offset, sx, sy));
         }
         if let Some((color, amount)) = layer.tint {
             for channel in 0..3 {
@@ -593,6 +664,7 @@ pub fn thumbnail(arena: &Arena, layer: EntityId, max: [u32; 2]) -> Option<(Vec<u
         style: LayerStyle::default(),
         tint: None,
         mask: None,
+        warp: None,
     };
     let scale = (max[0] as f32 / size[0].max(1) as f32).min(max[1] as f32 / size[1].max(1) as f32);
     let out = [

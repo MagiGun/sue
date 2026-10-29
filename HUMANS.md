@@ -448,6 +448,12 @@ familiar:
   from: pick the layer, then Register Selected Layer.
   File, Export Animation saves an animated GIF, a movie or every frame as a
   picture.
+- **Camera folder** (Animation, New Animation Layer, Camera Folder): the
+  layers in it are filmed by a camera that can move, zoom and turn over the
+  timeline. With the Object tool (O) on it, drag its red frame (inside to
+  move, a corner to zoom, outside to turn) or type its position, scale and
+  rotation, and add a keyframe; between keyframes it glides. Playback and
+  exports show the animation through it.
 - **Timelapse** (File, Timelapse, or Record timelapse in New): while it
   records, Sue keeps a picture of the canvas after every change. Export
   Timelapse makes a video (or a GIF) of how you drew it, fitted to the

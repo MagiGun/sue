@@ -807,6 +807,35 @@ impl SuePaint {
                 });
             }
             Tool::Operation if sub.mode == 1 => self.pick_layer_at(&cx.world.arena, p),
+            Tool::Operation if self.camera_folder(&cx.world.arena).is_some() => {
+                // The camera frame: inside moves it, a corner zooms, outside
+                // turns it.
+                let Some(folder) = self.camera_folder(&cx.world.arena) else {
+                    return;
+                };
+                let base = self.camera_now(&cx.world.arena, folder);
+                let corners = base.frame(size);
+                let near_corner = corners.iter().any(|corner| {
+                    doc.view
+                        .to_screen(viewport, size, pos2(corner[0], corner[1]))
+                        .distance(pos)
+                        <= 10.0
+                });
+                let inside = crate::camera::inside(&corners, [p.x, p.y]);
+                let mode = if near_corner {
+                    1
+                } else if inside {
+                    0
+                } else {
+                    2
+                };
+                self.gesture = Some(Gesture::Camera {
+                    folder,
+                    start: [p.x, p.y],
+                    base,
+                    mode,
+                });
+            }
             Tool::Operation => {
                 // Object: click a vector line to pick it (Shift adds or
                 // takes away), drag to move what is picked.
@@ -1429,6 +1458,39 @@ impl SuePaint {
             }
             return;
         }
+        if let Some(Gesture::Camera {
+            folder,
+            start,
+            base,
+            mode,
+        }) = self.gesture
+        {
+            let Some(doc) = self.docs.get(self.active) else {
+                return;
+            };
+            let p = doc.view.to_picture(viewport, size, pos);
+            let frame = doc.frame;
+            let mut camera = base;
+            let center = base.center;
+            match mode {
+                0 => {
+                    camera.center = [center[0] + p.x - start[0], center[1] + p.y - start[1]];
+                }
+                1 => {
+                    // Corners further out see more: the camera zooms out.
+                    let from = (start[0] - center[0]).hypot(start[1] - center[1]).max(1.0);
+                    let to = (p.x - center[0]).hypot(p.y - center[1]).max(1.0);
+                    camera.scale = (base.scale * from / to).clamp(0.01, 20.0);
+                }
+                _ => {
+                    let from = (start[1] - center[1]).atan2(start[0] - center[0]);
+                    let to = (p.y - center[1]).atan2(p.x - center[0]);
+                    camera.angle = base.angle + (to - from);
+                }
+            }
+            self.camera_pending = Some((folder, frame, camera));
+            return;
+        }
         if let Some(Gesture::Correct { offset, .. }) = &self.gesture {
             let offset = *offset;
             let Some(view) = self.docs.get(self.active).map(|doc| doc.view) else {
@@ -1590,7 +1652,8 @@ impl SuePaint {
             | Gesture::RulerHandle { .. }
             | Gesture::VectorErase { .. }
             | Gesture::Correct { .. }
-            | Gesture::MoveLines { .. } => {}
+            | Gesture::MoveLines { .. }
+            | Gesture::Camera { .. } => {}
         }
     }
 
@@ -1890,6 +1953,12 @@ impl SuePaint {
                         &points, 1.0,
                     ));
                     self.add_ruler_path(cx, path, "Create Ruler");
+                }
+            }
+            Gesture::Camera { .. } => {
+                // Keyed at this frame, as one step.
+                if self.camera_pending.is_some() {
+                    self.run("anim.camera.key", cx);
                 }
             }
             Gesture::RulerHandle { handle, before } => {
@@ -2731,6 +2800,37 @@ impl SuePaint {
                 let points: Vec<Pos2> = path.iter().map(|(at, _)| shift(*at)).collect();
                 painter.add(Shape::line(points, Stroke::new(1.5, violet)));
             }
+        }
+        if tool == Tool::Operation
+            && let Some(folder) = doc
+                .layer
+                .filter(|layer| crate::camera::is_camera(&cx.world.arena, *layer))
+        {
+            // The camera's frame on the layers it sees.
+            let (frame, time) = {
+                let rate = crate::anim::timeline(&cx.world.arena, doc.picture)
+                    .map_or(sue_core::Rate::new(24, 1), |sequence| sequence.rate);
+                (doc.frame, crate::camera::time_of(doc.frame, rate))
+            };
+            let camera = match self.camera_pending {
+                Some((pending, at, camera)) if pending == folder && at == frame => camera,
+                _ => crate::camera::Camera::of(&cx.world.arena, folder, Some(time), size),
+            };
+            let corners = camera.frame(size).map(&screen);
+            let red = Color32::from_rgb(235, 90, 90);
+            painter.add(Shape::closed_line(corners.to_vec(), Stroke::new(2.0, red)));
+            for corner in corners {
+                painter.rect_filled(Rect::from_center_size(corner, vec2(8.0, 8.0)), 0.0, red);
+            }
+            let middle = screen(camera.center);
+            painter.line_segment(
+                [middle - vec2(8.0, 0.0), middle + vec2(8.0, 0.0)],
+                Stroke::new(1.5, red),
+            );
+            painter.line_segment(
+                [middle - vec2(0.0, 8.0), middle + vec2(0.0, 8.0)],
+                Stroke::new(1.5, red),
+            );
         }
         if tool == Tool::Operation
             && let Some((layer, picked)) = &self.picked_lines

@@ -170,6 +170,14 @@ pub(crate) enum Gesture {
     },
     /// Drawing a ruler with the Ruler Pen (picture pixels).
     RulerPen { points: Vec<[f32; 2]> },
+    /// The Object tool on a camera folder: where the drag began (picture
+    /// pixels), the camera then, and whether it moves, zooms or turns.
+    Camera {
+        folder: EntityId,
+        start: [f32; 2],
+        base: crate::camera::Camera,
+        mode: u8,
+    },
     /// Dragging a ruler's handle: the ruler's text from before.
     RulerHandle {
         handle: crate::rulers::Handle,
@@ -318,6 +326,9 @@ pub struct SuePaint {
     pub(crate) picked_lines: Option<(EntityId, Vec<usize>)>,
     /// The points of a curve ruler being placed (picture pixels).
     pub(crate) curve_points: Vec<[f32; 2]>,
+    /// A camera being set up and not keyed yet: its folder, the frame and
+    /// where it stands.
+    pub(crate) camera_pending: Option<(EntityId, u32, crate::camera::Camera)>,
     /// Each recording picture's compositor version at its last timelapse
     /// frame, the version it is waiting to settle on, and its next frame
     /// number.
@@ -399,6 +410,7 @@ impl Default for SuePaint {
             vanishing_line: None,
             picked_lines: None,
             curve_points: Vec::new(),
+            camera_pending: None,
             timelapse: HashMap::new(),
             timelapse_export: crate::timelapse::Export::default(),
             transform: None,
@@ -639,6 +651,9 @@ fn implemented(command: &str) -> bool {
             | "anim.frame.insert"
             | "anim.frame.delete"
             | "anim.onion"
+            | "anim.layer.camera"
+            | "anim.camera.key"
+            | "anim.camera.unkey"
             | "anim.onion_settings"
             | "anim.light_table"
             | "anim.light_table.register"
@@ -967,6 +982,39 @@ impl SuePaint {
             }
             Err(error) => cx.fail(format!("Cannot export the timelapse: {error}")),
         }
+    }
+
+    /// The current layer when it is a camera folder.
+    pub(crate) fn camera_folder(&self, arena: &Arena) -> Option<EntityId> {
+        self.layer()
+            .filter(|layer| crate::camera::is_camera(arena, *layer))
+    }
+
+    /// The frame shown and the time it is at, by the timeline's rate.
+    pub(crate) fn frame_time(&self, arena: &Arena) -> (u32, sue_core::Time) {
+        let frame = self.doc().map_or(0, |doc| doc.frame);
+        let rate = self
+            .picture()
+            .and_then(|picture| crate::anim::timeline(arena, picture))
+            .map_or(sue_core::Rate::new(24, 1), |sequence| sequence.rate);
+        (frame, crate::camera::time_of(frame, rate))
+    }
+
+    /// Where `folder`'s camera stands at the frame shown, set up or keyed.
+    pub(crate) fn camera_now(&self, arena: &Arena, folder: EntityId) -> crate::camera::Camera {
+        let (frame, time) = self.frame_time(arena);
+        if let Some((pending, at, camera)) = self.camera_pending
+            && pending == folder
+            && at == frame
+        {
+            return camera;
+        }
+        let size = self
+            .picture()
+            .and_then(|picture| arena.get_by_id(picture).ok())
+            .and_then(picture::size)
+            .unwrap_or([0, 0]);
+        crate::camera::Camera::of(arena, folder, Some(time), size)
     }
 
     /// Picks the Ruler tool's sub tool of `mode`.

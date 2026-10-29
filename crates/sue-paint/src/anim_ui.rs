@@ -142,6 +142,30 @@ impl SuePaint {
             Vec::new()
         };
         let opacity = self.light_opacity;
+        // The camera folders at the frame shown.
+        let (arena, picture) = (&cx.world.arena, self.picture());
+        let size = picture
+            .and_then(|picture| arena.get_by_id(picture).ok())
+            .and_then(sue_model::picture::size)
+            .unwrap_or([0, 0]);
+        let rate = sequence.rate;
+        // The camera being set up shows its layers as they are, with its
+        // frame over them, as in Clip Studio Paint.
+        let editing = (self.toolbox.tool() == crate::tools::Tool::Operation)
+            .then(|| self.camera_folder(arena))
+            .flatten();
+        let cameras_at = |frame: u32| {
+            picture.map_or_else(Vec::new, |picture| {
+                let mut views = crate::camera::views(
+                    arena,
+                    picture,
+                    Some(crate::camera::time_of(frame, rate)),
+                    size,
+                );
+                views.retain(|(folder, _)| Some(*folder) != editing);
+                views
+            })
+        };
         if let Some(doc) = self.doc_mut() {
             let playing = doc.playing.is_some();
             let mut view = anim::view(
@@ -149,6 +173,7 @@ impl SuePaint {
                 doc.frame,
                 (onion && !playing).then_some(&settings),
             );
+            view.cameras = cameras_at(doc.frame);
             if !playing {
                 view = view.with_light_table(&traced, opacity);
             }
@@ -171,6 +196,33 @@ impl SuePaint {
                 } else {
                     Self::apply(cx, anim::new_timeline(picture, 24, 24));
                     self.panels.timeline = true;
+                }
+            }
+            "anim.layer.camera" => {
+                let (edit, folder) =
+                    crate::camera::new_camera(&cx.world.arena, picture, self.layer());
+                if Self::apply(cx, edit)
+                    && let Some(doc) = self.doc_mut()
+                {
+                    doc.layer = Some(folder);
+                }
+            }
+            "anim.camera.key" => {
+                if let Some(folder) = self.camera_folder(&cx.world.arena) {
+                    let camera = self.camera_now(&cx.world.arena, folder);
+                    let (_, time) = self.frame_time(&cx.world.arena);
+                    let edit = crate::camera::key(&cx.world.arena, folder, time, camera);
+                    Self::apply(cx, edit);
+                    self.camera_pending = None;
+                }
+            }
+            "anim.camera.unkey" => {
+                if let Some(folder) = self.camera_folder(&cx.world.arena) {
+                    let (_, time) = self.frame_time(&cx.world.arena);
+                    if let Some(edit) = crate::camera::delete_key(&cx.world.arena, folder, time) {
+                        Self::apply(cx, edit);
+                    }
+                    self.camera_pending = None;
                 }
             }
             "anim.layer.folder" => {
@@ -410,12 +462,19 @@ impl SuePaint {
         };
         let frames = (0..length)
             .filter_map(|frame| {
-                composite::flatten_view(
+                let mut view = anim::view(&sequence, frame, None);
+                // Seen through the camera folders, as the animation plays.
+                view.cameras = crate::camera::views(
                     arena,
                     picture,
-                    options,
-                    Some(&anim::view(&sequence, frame, None)),
-                )
+                    Some(crate::camera::time_of(frame, sequence.rate)),
+                    arena
+                        .get_by_id(picture)
+                        .ok()
+                        .and_then(sue_model::picture::size)
+                        .unwrap_or([0, 0]),
+                );
+                composite::flatten_view(arena, picture, options, Some(&view))
             })
             .collect();
         Some((frames, anim::fps(&sequence)))

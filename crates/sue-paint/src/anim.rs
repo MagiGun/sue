@@ -300,6 +300,7 @@ pub fn view(sequence: &Sequence, frame: u32, onion: Option<&Onion>) -> FrameView
     FrameView {
         hidden: cels.difference(&shown).copied().collect(),
         onion: faint,
+        cameras: Vec::new(),
     }
 }
 
