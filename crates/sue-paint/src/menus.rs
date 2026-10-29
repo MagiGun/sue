@@ -315,6 +315,7 @@ pub fn menus() -> Vec<Menu> {
                         act("Gradient Map...", "layer.correction.gradient_map"),
                     ],
                 ),
+                act("Create Folder and Insert Layer", "layer.folder_insert").key("Ctrl+G"),
                 act("New Layer Folder", "layer.new.folder"),
                 act("New Layer from Selection", "layer.from_selection"),
                 SEP,

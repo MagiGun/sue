@@ -1873,6 +1873,74 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_folders_take_layers_in_and_out_as_csp_does() {
+        let (mut runtime, root) = runtime("paint-folders");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        let command = egui::Modifiers::COMMAND;
+        step(&mut runtime, vec![key(egui::Key::N, command)]);
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.studio_focus())
+            .unwrap();
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, command | egui::Modifiers::SHIFT)],
+        );
+        let stack = |runtime: &Runtime| -> Vec<sue_core::EntityId> {
+            sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+                .into_iter()
+                .map(|info| info.id)
+                .collect()
+        };
+        let [_, first, second] = stack(&runtime)[..] else {
+            panic!("paper and two layers");
+        };
+        // Ctrl+G: a folder over the second layer, holding it.
+        step(&mut runtime, vec![key(egui::Key::G, command)]);
+        let folder = stack(&runtime)[3];
+        let folder_of = |runtime: &Runtime, layer| {
+            sue_paint::doc::folder_of(&runtime.engine.world.arena, layer)
+        };
+        assert_eq!(folder_of(&runtime, second), Some(folder));
+        // Back to the second layer (Alt+[), then up past the folder: out.
+        step(
+            &mut runtime,
+            vec![key(egui::Key::OpenBracket, egui::Modifiers::ALT)],
+        );
+        step(&mut runtime, vec![key(egui::Key::CloseBracket, command)]);
+        assert_eq!(folder_of(&runtime, second), None);
+        assert_eq!(stack(&runtime)[1..], [first, folder, second]);
+        // Down onto the folder: in, as its top layer.
+        step(&mut runtime, vec![key(egui::Key::OpenBracket, command)]);
+        assert_eq!(folder_of(&runtime, second), Some(folder));
+        assert_eq!(stack(&runtime)[1..], [first, second, folder]);
+        // Down past its bottom: out, staying put.
+        step(&mut runtime, vec![key(egui::Key::OpenBracket, command)]);
+        assert_eq!(folder_of(&runtime, second), None);
+        assert_eq!(stack(&runtime)[1..], [first, second, folder]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_saves_as_a_project_or_any_picture_type() {
         let (mut runtime, root) = runtime("paint-save-as");
         let ctx = egui::Context::default();

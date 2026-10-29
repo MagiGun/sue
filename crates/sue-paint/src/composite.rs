@@ -110,6 +110,15 @@ fn gather_view<'a>(
         .filter_map(|id| arena.get_by_id(id).ok())
         .filter_map(|entity| {
             let mut style = LayerStyle::of(entity);
+            // Folders pass their layers through: hidden with them, and
+            // as see-through as each folder around them.
+            for folder in crate::doc::folders_around(arena, entity.id()) {
+                if let Ok(folder) = arena.get_by_id(folder) {
+                    let outer = LayerStyle::of(folder);
+                    style.visible &= outer.visible;
+                    style.opacity *= outer.opacity;
+                }
+            }
             let mut tint = None;
             if let Some(view) = view
                 && view.hidden.contains(&entity.id())

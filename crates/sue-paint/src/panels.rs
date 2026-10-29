@@ -2080,20 +2080,35 @@ impl SuePaint {
         let mut pick = None;
         let mut toggle = None;
         let mut rename_done = None;
+        let mut fold = None;
         egui::ScrollArea::vertical()
             .id_salt("sue-paint-layers")
             .show(&mut list_ui, |ui| {
                 for info in stack.iter().rev() {
-                    let (row, response) =
+                    // Layers in a closed folder stay out of sight; layers in
+                    // folders sit indented under them.
+                    let around = doc::folders_around(&cx.world.arena, info.id);
+                    if around
+                        .iter()
+                        .any(|folder| !doc::is_open(&cx.world.arena, *folder))
+                    {
+                        continue;
+                    }
+                    let is_folder = doc::is_folder(&cx.world.arena, info.id);
+                    let (full, response) =
                         ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::click());
+                    let row = Rect::from_min_max(
+                        full.min + vec2(around.len() as f32 * 14.0, 0.0),
+                        full.max,
+                    );
                     let chosen = Some(info.id) == self.layer();
                     if chosen {
-                        ui.painter().rect_filled(row, 0.0, theme.active);
+                        ui.painter().rect_filled(full, 0.0, theme.active);
                     } else if response.hovered() {
-                        ui.painter().rect_filled(row, 0.0, theme.hover);
+                        ui.painter().rect_filled(full, 0.0, theme.hover);
                     }
                     ui.painter()
-                        .hline(row.x_range(), row.bottom(), theme.hairline());
+                        .hline(full.x_range(), full.bottom(), theme.hairline());
                     // Visibility.
                     let eye = Rect::from_min_size(row.min + vec2(4.0, 13.0), vec2(20.0, 20.0));
                     let eye_response = ui.interact(
@@ -2128,10 +2143,56 @@ impl SuePaint {
                             Stroke::new(2.0, theme.border_active),
                         );
                     }
-                    // Thumbnail.
+                    // Thumbnail, or a folder and its open and close arrow.
                     let thumb_rect =
                         Rect::from_min_size(row.min + vec2(50.0, 5.0), vec2(48.0, 36.0));
-                    self.layer_thumbnail(ui, thumb_rect, info, cx, theme);
+                    if is_folder {
+                        let open = doc::is_open(&cx.world.arena, info.id);
+                        let arrow =
+                            Rect::from_min_size(thumb_rect.min + vec2(0.0, 8.0), vec2(18.0, 20.0));
+                        let arrow_response = ui.interact(
+                            arrow,
+                            Id::unique(("sue-paint-fold", info.id.to_u128())),
+                            Sense::click(),
+                        );
+                        let c = arrow.center();
+                        let points = if open {
+                            vec![
+                                c + vec2(-5.0, -3.0),
+                                c + vec2(5.0, -3.0),
+                                c + vec2(0.0, 4.0),
+                            ]
+                        } else {
+                            vec![
+                                c + vec2(-3.0, -5.0),
+                                c + vec2(4.0, 0.0),
+                                c + vec2(-3.0, 5.0),
+                            ]
+                        };
+                        ui.painter().add(egui::Shape::convex_polygon(
+                            points,
+                            theme.text,
+                            Stroke::NONE,
+                        ));
+                        if arrow_response
+                            .on_hover_text(if open {
+                                "Close the folder"
+                            } else {
+                                "Open the folder"
+                            })
+                            .clicked()
+                        {
+                            fold = Some((info.id, !open));
+                        }
+                        icons::paint(
+                            ui.painter(),
+                            Rect::from_min_size(thumb_rect.min + vec2(20.0, 6.0), vec2(24.0, 24.0)),
+                            Icon::NewFolder,
+                            theme.text,
+                        );
+                    } else {
+                        self.layer_thumbnail(ui, thumb_rect, info, cx, theme);
+                    }
                     // Text.
                     let text_left = thumb_rect.right() + 8.0;
                     let top_line = match info.kind {
@@ -2204,6 +2265,9 @@ impl SuePaint {
         }
         if let Some((id, visible)) = toggle {
             Self::apply(cx, doc::set(id, picture::VISIBLE, visible));
+        }
+        if let Some((id, open)) = fold {
+            Self::apply(cx, doc::set(id, doc::OPEN, open));
         }
         if let Some((id, name, cancelled)) = rename_done {
             self.renaming = None;

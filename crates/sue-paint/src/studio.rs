@@ -493,6 +493,8 @@ fn implemented(command: &str) -> bool {
             | "layer.new.tone"
             | "layer.new.frame"
             | "layer.new.balloon"
+            | "layer.folder_insert"
+            | "layer.new.folder"
             | "anim.timeline.new"
             | "anim.layer.folder"
             | "anim.cel.new"
@@ -667,6 +669,12 @@ impl SuePaint {
         match info.kind {
             LayerKind::Raster => {}
             LayerKind::Paper => return Err("The paper layer cannot be drawn on".to_owned()),
+            LayerKind::Other if doc::is_folder(arena, info.id) => {
+                return Err(format!(
+                    "{} is a folder: pick a layer in it to draw on",
+                    info.name
+                ));
+            }
             LayerKind::Other => return Err(format!("{} cannot be drawn on yet", info.name)),
         }
         if info.locked {
@@ -1346,6 +1354,105 @@ impl SuePaint {
     }
 
     /// Moves the current layer to `index` (0 is the bottom).
+    /// Moves the current layer up or down as Clip Studio Paint's layer
+    /// palette does with folders: a folder moves with everything in it, a
+    /// layer leaves its folder past the folder's top or bottom and joins a
+    /// folder it moves into. Returns `false` when a plain move does.
+    fn move_in_folders(&mut self, cx: &mut AppletContext<'_>, up: bool) -> bool {
+        let (Some(picture), Some(layer)) = (self.picture(), self.layer()) else {
+            return false;
+        };
+        let arena = &cx.world.arena;
+        let stack: Vec<EntityId> = doc::layers(arena, picture)
+            .into_iter()
+            .map(|info| info.id)
+            .collect();
+        let Some(at) = stack.iter().position(|id| *id == layer) else {
+            return false;
+        };
+        if doc::is_folder(arena, layer) {
+            // The folder and its layers move as one block, past one layer.
+            let members = doc::members(arena, picture, layer);
+            let low = stack
+                .iter()
+                .position(|id| members.contains(id))
+                .map_or(at, |first| first.min(at));
+            let neighbor = if up {
+                stack.get(at + 1)
+            } else {
+                low.checked_sub(1).and_then(|below| stack.get(below))
+            };
+            let Some(&neighbor) = neighbor else {
+                return true;
+            };
+            let to = if up { low } else { at };
+            if let Some(edit) = doc::reorder(arena, picture, neighbor, to) {
+                Self::apply(cx, edit);
+            }
+            return true;
+        }
+        let folder = doc::folder_of(arena, layer);
+        if up {
+            let Some(&above) = stack.get(at + 1) else {
+                return false;
+            };
+            if Some(above) == folder {
+                // Out past the top of its folder.
+                let edit = doc::reorder(arena, picture, layer, at + 1);
+                let out = doc::set_folder(arena, layer, doc::folder_of(arena, above));
+                for edit in [edit, out].into_iter().flatten() {
+                    Self::apply(cx, edit);
+                }
+                return true;
+            }
+            let joins = if doc::is_folder(arena, above) && doc::folder_of(arena, above) == folder {
+                // Right under an empty folder.
+                doc::members(arena, picture, above)
+                    .is_empty()
+                    .then_some(above)
+            } else {
+                doc::folder_of(arena, above).filter(|outer| {
+                    Some(*outer) != folder && !doc::folders_around(arena, *outer).contains(&layer)
+                })
+            };
+            if let Some(into) = joins
+                && let Some(edit) = doc::set_folder(arena, layer, Some(into))
+            {
+                // Into the folder from below, staying put.
+                Self::apply(cx, edit);
+                return true;
+            }
+            false
+        } else {
+            let below = at
+                .checked_sub(1)
+                .and_then(|index| stack.get(index))
+                .copied();
+            if let Some(folder) = folder
+                && below.is_none_or(|below| !doc::folders_around(arena, below).contains(&folder))
+            {
+                // Out past the bottom of its folder, staying put.
+                if let Some(edit) = doc::set_folder(arena, layer, doc::folder_of(arena, folder)) {
+                    Self::apply(cx, edit);
+                }
+                return true;
+            }
+            if let Some(below) = below
+                && doc::is_folder(arena, below)
+                && doc::folder_of(arena, below) == folder
+            {
+                // Down into the folder under it, as its top layer.
+                let edit = doc::reorder(arena, picture, layer, at - 1);
+                let into = doc::set_folder(arena, layer, Some(below));
+                for edit in [edit, into].into_iter().flatten() {
+                    Self::apply(cx, edit);
+                }
+                return true;
+            }
+            false
+        }
+    }
+
     fn move_layer_to(&mut self, cx: &mut AppletContext<'_>, index: usize) {
         let (Some(picture), Some(layer)) = (self.picture(), self.layer()) else {
             return;
@@ -1789,6 +1896,11 @@ impl SuePaint {
             }
             "layer.delete" => {
                 if let (Some(picture), Some(layer)) = (self.picture(), self.layer()) {
+                    if doc::is_folder(&cx.world.arena, layer) {
+                        let edit = doc::delete_folder(&cx.world.arena, picture, layer);
+                        Self::apply(cx, edit);
+                        return;
+                    }
                     if doc::layers(&cx.world.arena, picture).len() <= 1 {
                         cx.fail("A picture keeps at least one layer");
                         return;
@@ -1826,6 +1938,27 @@ impl SuePaint {
                     doc.layer = Some(next);
                 }
             }
+            "layer.folder_insert" | "layer.new.folder" => {
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                let layer = self
+                    .layer()
+                    .filter(|layer| !doc::is_folder(&cx.world.arena, *layer));
+                let (edit, folder) = doc::new_folder(
+                    &cx.world.arena,
+                    picture,
+                    layer.or(self.layer()),
+                    command == "layer.folder_insert",
+                );
+                if Self::apply(cx, edit)
+                    && let Some(doc) = self.doc_mut()
+                {
+                    doc.layer = Some(folder);
+                }
+            }
+            "layer.order.up" | "layer.order.down"
+                if self.move_in_folders(cx, command == "layer.order.up") => {}
             "layer.order.front" | "layer.order.up" | "layer.order.down" | "layer.order.back" => {
                 let Some(picture) = self.picture() else {
                     return;
@@ -2355,7 +2488,7 @@ fn shortcuts() -> Vec<(Modifiers, Key, &'static str)> {
         (none, Key::Backspace, "edit.clear"),
         // Layer.
         (command | alt, Key::G, "layer.toggle.clip"),
-        (command, Key::G, "layer.new.folder"),
+        (command, Key::G, "layer.folder_insert"),
         (shifted, Key::E, "layer.merge_visible"),
         (shift | alt, Key::E, "layer.merge_selected"),
         (command, Key::E, "layer.merge_down"),
