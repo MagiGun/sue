@@ -914,6 +914,21 @@ impl SuePaint {
         let sub = self.toolbox.current_mut();
         match tool {
             tool if tool.paints() => {
+                if tool == Tool::Eraser {
+                    // How it erases lines on vector layers.
+                    ui.horizontal(|ui| {
+                        ui.label(small("Vector"));
+                        egui::ComboBox::from_id_salt("sue-paint-vector-eraser")
+                            .selected_text(
+                                crate::vector::Erase::NAMES[usize::from(sub.kind.min(2))],
+                            )
+                            .show_ui(ui, |ui| {
+                                for (kind, name) in crate::vector::Erase::NAMES.iter().enumerate() {
+                                    ui.selectable_value(&mut sub.kind, kind as u8, *name);
+                                }
+                            });
+                    });
+                }
                 let tip = &mut sub.tip;
                 let (mut screen_size, mut at_least_one) = (tip.screen_size, tip.at_least_one);
                 dynamic_row(

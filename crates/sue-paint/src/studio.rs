@@ -119,6 +119,22 @@ pub(crate) enum Gesture {
         line: bool,
         /// The ruler the stroke follows.
         snap: Option<crate::rulers::Snap>,
+        /// On a vector layer: the stroke is kept as a line too.
+        vector: bool,
+    },
+    /// The eraser on a vector layer: its pixels and lines from before, the
+    /// lines now, and where the eraser last was (layer pixels).
+    VectorErase {
+        layer: EntityId,
+        before: Vec<u8>,
+        geometry: sue_model::Geometry,
+        lines: Vec<crate::vector::Line>,
+        last: [f32; 2],
+        radius: f32,
+        mode: crate::vector::Erase,
+        offset: [i64; 2],
+        changed: bool,
+        label: String,
     },
     /// Dragging a ruler's handle: the ruler's text from before.
     RulerHandle {
@@ -539,6 +555,7 @@ fn implemented(command: &str) -> bool {
             | "edit.crop"
             | "view.snap_special"
             | "view.snap_ruler"
+            | "layer.new.vector"
             | "layer.ruler.perspective"
             | "layer.ruler.symmetry"
             | "layer.ruler.circle"
@@ -777,7 +794,21 @@ impl SuePaint {
     }
 
     /// The current layer if brushes may paint on it, or why not.
+    /// The current layer if raster tools can work on it: not a vector
+    /// layer, which only pens, brushes and erasers draw on.
     pub(crate) fn paintable(&self, arena: &Arena) -> Result<doc::LayerInfo, String> {
+        let info = self.drawable(arena)?;
+        if crate::vector::is_vector(arena, info.id) {
+            return Err(format!(
+                "{} is a vector layer: draw on it with pens and brushes, or pick a raster layer",
+                info.name
+            ));
+        }
+        Ok(info)
+    }
+
+    /// The current layer if pens and brushes can draw on it.
+    pub(crate) fn drawable(&self, arena: &Arena) -> Result<doc::LayerInfo, String> {
         let info = self
             .layer_info(arena)
             .ok_or("Pick a layer to draw on first")?;
@@ -2224,6 +2255,22 @@ impl SuePaint {
                     [rgb[0], rgb[1], rgb[2], 255]
                 });
                 match doc::add_raster_layer(arena, picture, self.layer(), name, fill) {
+                    Ok((spawn, id)) => {
+                        if Self::apply(cx, spawn)
+                            && let Some(doc) = self.doc_mut()
+                        {
+                            doc.layer = Some(id);
+                        }
+                    }
+                    Err(error) => cx.fail(error),
+                }
+            }
+            "layer.new.vector" => {
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                let name = doc::new_layer_name(&cx.world.arena, picture);
+                match doc::add_vector_layer(&cx.world.arena, picture, self.layer(), name) {
                     Ok((spawn, id)) => {
                         if Self::apply(cx, spawn)
                             && let Some(doc) = self.doc_mut()

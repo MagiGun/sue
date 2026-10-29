@@ -352,6 +352,162 @@ pub struct Tip {
     pub mix: f32,
 }
 
+impl Tip {
+    /// The tip as text, `key=value` pairs joined by semicolons, for a
+    /// vector line to keep its brush. [`Self::from_text`] skips keys it
+    /// does not know and leaves out ones it misses at their defaults.
+    #[must_use]
+    pub fn to_text(&self) -> String {
+        let flag = |on: bool| if on { "1" } else { "0" }.to_owned();
+        let mut out = vec![
+            ("size".to_owned(), self.size.to_string()),
+            ("opacity".to_owned(), self.opacity.to_string()),
+            ("hardness".to_owned(), self.hardness.to_string()),
+            ("aa".to_owned(), (self.aa as u8).to_string()),
+            ("spacing".to_owned(), self.spacing.to_string()),
+            ("build_up".to_owned(), flag(self.build_up)),
+            ("flow".to_owned(), self.flow.to_string()),
+            ("grain".to_owned(), self.grain.to_string()),
+            ("screen_size".to_owned(), flag(self.screen_size)),
+            ("at_least_one".to_owned(), flag(self.at_least_one)),
+            ("eraser".to_owned(), flag(self.eraser)),
+            ("taper_start".to_owned(), self.taper_start.to_string()),
+            ("taper_end".to_owned(), self.taper_end.to_string()),
+            ("taper_mode".to_owned(), (self.taper_mode as u8).to_string()),
+            ("taper_size".to_owned(), flag(self.taper_size)),
+            ("taper_opacity".to_owned(), flag(self.taper_opacity)),
+            ("taper_by_speed".to_owned(), flag(self.taper_by_speed)),
+            ("mix".to_owned(), self.mix.to_string()),
+            ("jitter.tip".to_owned(), flag(self.jitter.tip)),
+            ("jitter.hue".to_owned(), self.jitter.hue.to_string()),
+            (
+                "jitter.saturation".to_owned(),
+                self.jitter.saturation.to_string(),
+            ),
+            ("jitter.value".to_owned(), self.jitter.value.to_string()),
+            ("jitter.sub".to_owned(), self.jitter.sub.to_string()),
+            ("jitter.stroke".to_owned(), flag(self.jitter.stroke)),
+            (
+                "jitter.stroke_hue".to_owned(),
+                self.jitter.stroke_hue.to_string(),
+            ),
+            (
+                "jitter.stroke_saturation".to_owned(),
+                self.jitter.stroke_saturation.to_string(),
+            ),
+            (
+                "jitter.stroke_value".to_owned(),
+                self.jitter.stroke_value.to_string(),
+            ),
+        ];
+        for (name, by) in [("size_by", &self.size_by), ("opacity_by", &self.opacity_by)] {
+            out.extend([
+                (format!("{name}.pressure"), flag(by.pressure)),
+                (format!("{name}.pressure_min"), by.pressure_min.to_string()),
+                (
+                    format!("{name}.pressure_curve"),
+                    by.pressure_curve.to_string(),
+                ),
+                (format!("{name}.velocity"), flag(by.velocity)),
+                (format!("{name}.velocity_min"), by.velocity_min.to_string()),
+                (
+                    format!("{name}.velocity_curve"),
+                    by.velocity_curve.to_string(),
+                ),
+                (format!("{name}.random"), flag(by.random)),
+                (format!("{name}.random_min"), by.random_min.to_string()),
+            ]);
+        }
+        out.iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join(";")
+    }
+
+    /// A tip read back from [`Self::to_text`].
+    #[must_use]
+    pub fn from_text(text: &str) -> Self {
+        let values: std::collections::HashMap<&str, &str> = text
+            .split(';')
+            .filter_map(|pair| pair.split_once('='))
+            .collect();
+        let number = |key: &str, into: &mut f32| {
+            if let Some(value) = values.get(key).and_then(|value| value.parse().ok()) {
+                *into = value;
+            }
+        };
+        let flag = |key: &str, into: &mut bool| {
+            if let Some(value) = values.get(key) {
+                *into = *value == "1";
+            }
+        };
+        let curve = |key: &str, into: &mut Response| {
+            if let Some(value) = values.get(key).and_then(|value| value.parse().ok()) {
+                *into = value;
+            }
+        };
+        let index = |key: &str| values.get(key).and_then(|value| value.parse::<u8>().ok());
+        let mut tip = Self::default();
+        number("size", &mut tip.size);
+        number("opacity", &mut tip.opacity);
+        number("hardness", &mut tip.hardness);
+        if let Some(aa) = index("aa") {
+            tip.aa = match aa {
+                0 => AntiAlias::None,
+                1 => AntiAlias::Weak,
+                2 => AntiAlias::Medium,
+                _ => AntiAlias::Strong,
+            };
+        }
+        number("spacing", &mut tip.spacing);
+        flag("build_up", &mut tip.build_up);
+        number("flow", &mut tip.flow);
+        number("grain", &mut tip.grain);
+        flag("screen_size", &mut tip.screen_size);
+        flag("at_least_one", &mut tip.at_least_one);
+        flag("eraser", &mut tip.eraser);
+        number("taper_start", &mut tip.taper_start);
+        number("taper_end", &mut tip.taper_end);
+        if let Some(mode) = index("taper_mode") {
+            tip.taper_mode = match mode {
+                0 => TaperMode::Length,
+                1 => TaperMode::Percent,
+                _ => TaperMode::Fade,
+            };
+        }
+        flag("taper_size", &mut tip.taper_size);
+        flag("taper_opacity", &mut tip.taper_opacity);
+        flag("taper_by_speed", &mut tip.taper_by_speed);
+        number("mix", &mut tip.mix);
+        flag("jitter.tip", &mut tip.jitter.tip);
+        number("jitter.hue", &mut tip.jitter.hue);
+        number("jitter.saturation", &mut tip.jitter.saturation);
+        number("jitter.value", &mut tip.jitter.value);
+        number("jitter.sub", &mut tip.jitter.sub);
+        flag("jitter.stroke", &mut tip.jitter.stroke);
+        number("jitter.stroke_hue", &mut tip.jitter.stroke_hue);
+        number(
+            "jitter.stroke_saturation",
+            &mut tip.jitter.stroke_saturation,
+        );
+        number("jitter.stroke_value", &mut tip.jitter.stroke_value);
+        for (name, by) in [
+            ("size_by", &mut tip.size_by),
+            ("opacity_by", &mut tip.opacity_by),
+        ] {
+            flag(&format!("{name}.pressure"), &mut by.pressure);
+            number(&format!("{name}.pressure_min"), &mut by.pressure_min);
+            curve(&format!("{name}.pressure_curve"), &mut by.pressure_curve);
+            flag(&format!("{name}.velocity"), &mut by.velocity);
+            number(&format!("{name}.velocity_min"), &mut by.velocity_min);
+            curve(&format!("{name}.velocity_curve"), &mut by.velocity_curve);
+            flag(&format!("{name}.random"), &mut by.random);
+            number(&format!("{name}.random_min"), &mut by.random_min);
+        }
+        tip
+    }
+}
+
 impl Default for Tip {
     fn default() -> Self {
         Self {
@@ -500,6 +656,8 @@ pub struct Stroke {
     dirty: Option<[u32; 4]>,
     speed: f32,
     seed: u32,
+    /// The color it began with, before jitter.
+    base: [f32; 3],
     sub: [f32; 3],
     end_speeds: Option<(f32, f32)>,
     copies: Vec<Copy2D>,
@@ -526,6 +684,7 @@ impl Stroke {
             dirty: None,
             speed: 0.0,
             seed: 0,
+            base: color,
             sub: [1.0; 3],
             end_speeds: None,
             copies: vec![SAME],
@@ -546,6 +705,19 @@ impl Stroke {
     /// The sub color, for color jitter that blends toward it.
     pub fn set_sub_color(&mut self, sub: [f32; 3]) {
         self.sub = sub;
+    }
+
+    /// The color the stroke was started with and its sub color, before
+    /// any jitter: what paints it again the same.
+    #[must_use]
+    pub const fn colors(&self) -> ([f32; 3], [f32; 3]) {
+        (self.base, self.sub)
+    }
+
+    /// The copies the stroke paints through.
+    #[must_use]
+    pub fn copies(&self) -> &[Copy2D] {
+        &self.copies
     }
 
     /// How fast the pen moved as the stroke began and as it ended (the

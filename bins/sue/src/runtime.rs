@@ -2295,6 +2295,138 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_vector_layers_keep_lines_and_erase_up_to_intersections() {
+        let (mut runtime, root) = runtime("paint-vector");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.studio_focus())
+            .unwrap();
+        let command = |runtime: &mut Runtime, command: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: command.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        // Layer, New Layer, Vector Layer.
+        command(&mut runtime, "layer.new.vector");
+        let layer = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+            .last()
+            .unwrap()
+            .id;
+        assert!(sue_paint::vector::is_vector(
+            &runtime.engine.world.arena,
+            layer
+        ));
+        let lines = |runtime: &Runtime| {
+            sue_paint::vector::lines(&sue_paint::vector::geometry(
+                &runtime.engine.world.arena,
+                layer,
+            ))
+        };
+        // How far right the ink on the layer reaches.
+        let right = |runtime: &Runtime| {
+            let raster = sue_paint::doc::raster(&runtime.engine.world.arena, layer).unwrap();
+            let (w, bytes) = (raster.width(), raster.bytes().unwrap());
+            (0..raster.height())
+                .flat_map(|y| (0..w).map(move |x| (x, y)))
+                .filter(|(x, y)| bytes[((y * w + x) * 4 + 3) as usize] > 0)
+                .map(|(x, _)| x)
+                .max()
+                .unwrap_or(0)
+        };
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let drag = |runtime: &mut Runtime,
+                    step: &mut dyn FnMut(&mut Runtime, Vec<egui::Event>),
+                    from: egui::Pos2,
+                    to: egui::Pos2| {
+            step(
+                runtime,
+                vec![egui::Event::PointerMoved(from), press(from, true)],
+            );
+            for part in 1..=8 {
+                let at = from + (to - from) * (part as f32 / 8.0);
+                step(runtime, vec![egui::Event::PointerMoved(at)]);
+            }
+            step(runtime, vec![press(to, false)]);
+        };
+        // A level line crossed by an upright one: two lines, each one step.
+        let middle = runtime.shell.canvas_rect().center();
+        step(&mut runtime, vec![key(egui::Key::P, plain)]);
+        drag(
+            &mut runtime,
+            &mut step,
+            middle + vec2(-120.0, 0.0),
+            middle + vec2(120.0, 0.0),
+        );
+        drag(
+            &mut runtime,
+            &mut step,
+            middle + vec2(0.0, -120.0),
+            middle + vec2(0.0, 120.0),
+        );
+        assert_eq!(lines(&runtime).len(), 2);
+        let full = right(&runtime);
+        command(&mut runtime, "edit.undo");
+        assert_eq!(lines(&runtime).len(), 1, "undo takes the line away");
+        command(&mut runtime, "edit.redo");
+        assert_eq!(lines(&runtime).len(), 2);
+        // The Vector eraser (up to intersection) on the level line's right
+        // end takes it away up to the upright.
+        step(&mut runtime, vec![key(egui::Key::E, plain)]);
+        for _ in 0..3 {
+            step(&mut runtime, vec![key(egui::Key::Period, plain)]);
+        }
+        let at = middle + vec2(80.0, 0.0);
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(at), press(at, true)],
+        );
+        step(&mut runtime, vec![press(at, false)]);
+        assert_eq!(lines(&runtime).len(), 2, "the left part and the upright");
+        let cut = right(&runtime);
+        let upright = lines(&runtime)[1].samples[0].at[0] as u32;
+        assert!(
+            cut < full && cut <= upright + 12,
+            "{cut} against {full}, upright at {upright}"
+        );
+        command(&mut runtime, "edit.undo");
+        assert_eq!(right(&runtime), full, "undo brings the line back");
+        assert_eq!(lines(&runtime).len(), 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_masks_hide_without_erasing_the_layer() {
         let (mut runtime, root) = runtime("paint-mask");
         let ctx = egui::Context::default();

@@ -53,6 +53,7 @@ mod subview;
 pub mod tools;
 pub mod transform;
 mod transform_ui;
+pub mod vector;
 pub mod view;
 pub mod warp;
 

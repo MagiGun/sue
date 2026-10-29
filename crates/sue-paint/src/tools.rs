@@ -392,6 +392,20 @@ impl Tool {
                     }),
                 )
                 .stabilization(2),
+                // Clip Studio Paint's Vector eraser: up to intersection.
+                SubTool {
+                    kind: 1,
+                    ..SubTool::new(
+                        self,
+                        "Vector",
+                        0,
+                        tip(10.0, |t| {
+                            t.eraser = true;
+                            t.size_by.pressure = false;
+                        }),
+                    )
+                    .stabilization(2)
+                },
             ],
             Self::Fill => vec![
                 plain("Refer Only Editing Layer", 0).tolerance(0.1),
@@ -491,7 +505,8 @@ pub struct SubTool {
     pub spread: u32,
     /// What a ruler sub tool lays or does: the Special Ruler's kind
     /// (`rulers::Special::NAMES`) or the Perspective Ruler's process (0
-    /// add a vanishing point, 1 delete one).
+    /// add a vanishing point, 1 delete one); for an eraser, how it erases
+    /// vector lines (`vector::Erase::NAMES`).
     pub kind: u8,
     /// A perspective ruler keeps its eye level where it is while its
     /// vanishing points move (Fix eye level).

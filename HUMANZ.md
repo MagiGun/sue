@@ -1223,6 +1223,24 @@ and Line symmetry; a stroke paints once through each of its copies
 (`brush::symmetry`, affine maps) into the one stroke's coverage, so copies
 never stack and the stroke stays one undo step.
 
+**Vector layers.** A vector layer is a raster layer of class
+`sue.paint.vector` (its pixels composite like any layer's) whose `Geometry`
+keeps its lines (`sue_paint::vector`): a polyline a line over the pen's
+samples as drawn, with pressure and speed per point, and per primitive the
+brush (`Tip::to_text`, `key=value` pairs that skip unknown keys), the start
+and sub colors, the finish (post correction and flick) and the symmetry
+copies. A stroke on one is painted live as usual and kept as a line when the
+pen lifts, both in one undo step: the `RasterEdit` and a `SetExtension`
+holding the geometry from before, recorded after the new geometry is put in
+place. Painting a line again from its samples gives the same pixels, since
+strokes take their chances from their own path. The eraser on a vector
+layer takes lines away as its Vector setting says (Erase touched area cuts
+the line where the eraser meets it, Erase up to intersection cuts it at the
+nearest crossings with other lines either side, Whole line takes it all),
+paints the layer again from the lines left, and records one step on
+release. Raster-only tools (fill, gradient, blend, filters, transform) say
+so on a vector layer.
+
 **Rulers.** A picture keeps its rulers as text properties
 (`sue_paint::rulers`): `ruler.linear` (two ends), `ruler.special` (parallel
 lines at an angle, radial lines or concentric circles about a center),
@@ -1784,7 +1802,8 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: Close gap and Area scaling, the Blend tool (Blur, Finger Tip, Liquify) and correction layers | **Implemented**; unit tests for a fill held in a broken ring, every dab kind and every correction read back from its text; end-to-end runs that liquify a stroke and add, undo and cancel correction layers | `sue-paint/src/fill.rs`, `blend.rs`, `composite.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: rulers (linear, parallel and radial lines, concentric circles, 1, 2 and 3-point perspective, symmetry), saved on the picture | **Implemented**; unit tests for their text, the guide a stroke chooses, and vanishing points made and moved; an end-to-end run that creates a 2-point ruler, holds a drifting stroke upright (and not with snapping off), adds a third point from two lines, and deletes and undoes | `sue-paint/src/rulers.rs`, `canvas.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: Onion Skin Settings and the light table | **Implemented**; a unit test for as many cels as asked fading a step each, color modes and light table layers, and the animation end-to-end run keeps the settings and registers, refuses and undoes a light table layer | `sue-paint/src/anim.rs`, `anim_ui.rs`, `bins/sue/src/runtime.rs` |
-| §3.7 Sue Paint: vector layers, curve rulers, materials, the camera folder and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
+| §3.7 Sue Paint: vector layers with the Vector eraser (touched area, up to intersection, whole line) | **Implemented**; unit tests for a brush and lines read back, a line painted again to the same pixels, and each eraser mode; an end-to-end run that draws two crossing lines, undoes and redoes one, erases up to the crossing and undoes it | `sue-paint/src/vector.rs`, `brush.rs`, `canvas.rs`, `bins/sue/src/runtime.rs` |
+| §3.7 Sue Paint: vector line editing (Correct Line, moving lines), curve rulers, materials, the camera folder and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |

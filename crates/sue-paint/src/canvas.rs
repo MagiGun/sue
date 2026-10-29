@@ -513,7 +513,7 @@ impl SuePaint {
                 self.gesture = Some(Gesture::Pick { mode: sub.mode });
             }
             Tool::Pen | Tool::Pencil | Tool::Brush | Tool::Airbrush | Tool::Eraser => {
-                let info = match self.paintable(&cx.world.arena) {
+                let info = match self.drawable(&cx.world.arena) {
                     Ok(info) => info,
                     Err(error) => {
                         cx.fail(error);
@@ -537,9 +537,35 @@ impl SuePaint {
                     .mask_edit
                     .then(|| doc::mask_of(&cx.world.arena, info.id))
                     .flatten();
+                let vector = target.is_none() && crate::vector::is_vector(&cx.world.arena, info.id);
+                if vector && tip.eraser {
+                    // The eraser takes vector lines away, as its Vector
+                    // setting says.
+                    let Some(before) = doc::raster(&cx.world.arena, info.id)
+                        .and_then(|raster| raster.bytes())
+                        .map(<[u8]>::to_vec)
+                    else {
+                        return;
+                    };
+                    let geometry = crate::vector::geometry(&cx.world.arena, info.id);
+                    self.gesture = Some(Gesture::VectorErase {
+                        layer: info.id,
+                        before,
+                        lines: crate::vector::lines(&geometry),
+                        geometry,
+                        last: [p.x - offset[0] as f32, p.y - offset[1] as f32],
+                        radius: (tip.size / 2.0).max(0.5),
+                        mode: crate::vector::Erase::of(sub.kind),
+                        offset,
+                        changed: false,
+                        label: sub.name.clone(),
+                    });
+                    self.vector_erase_drag(pos, viewport, size, cx);
+                    return;
+                }
                 let (target, rgb, locked) = match target {
                     Some(mask) => (mask, [1.0; 3], false),
-                    None => (info.id, rgb, info.alpha_locked && !tip.eraser),
+                    None => (info.id, rgb, info.alpha_locked && !tip.eraser && !vector),
                 };
                 let mut stroke = BrushStroke::new(target, tip, rgb, locked);
                 let other = if self.sub_active { self.main } else { self.sub };
@@ -584,7 +610,10 @@ impl SuePaint {
                 let mut stabilizer = Stabilizer::new(sub.stabilization, sub.adjust_by_speed);
                 let start = stabilizer.sample(local, doc.view.zoom, self.clock.1);
                 let pressure = self.pressure.unwrap_or(1.0);
-                let selection = shifted.as_ref().or(doc.selection.as_ref());
+                // Vector lines are kept whole, not cut by the selection.
+                let selection = (!vector)
+                    .then(|| shifted.as_ref().or(doc.selection.as_ref()))
+                    .flatten();
                 if let Some(raster) = doc::raster_mut(&mut cx.world.arena, target) {
                     stroke.to(raster, start, pressure, selection);
                 }
@@ -600,6 +629,7 @@ impl SuePaint {
                     flick: sub.flick,
                     line: modifiers.shift,
                     snap,
+                    vector,
                 });
             }
             Tool::Text => self.text_at(p, cx),
@@ -743,6 +773,67 @@ impl SuePaint {
                 });
             }
             other => cx.notify(format!("{} arrives in a later Sue Paint", other.label())),
+        }
+    }
+
+    /// The eraser on a vector layer dragged to `pos`: every line it passes
+    /// over goes as its Vector setting says, and the layer is painted again
+    /// from the lines left.
+    fn vector_erase_drag(
+        &mut self,
+        pos: Pos2,
+        viewport: Rect,
+        size: [u32; 2],
+        cx: &mut AppletContext<'_>,
+    ) {
+        let Some(view) = self.docs.get(self.active).map(|doc| doc.view) else {
+            return;
+        };
+        let p = view.to_picture(viewport, size, pos);
+        let Some(Gesture::VectorErase {
+            layer,
+            lines,
+            last,
+            radius,
+            mode,
+            offset,
+            changed,
+            ..
+        }) = self.gesture.as_mut()
+        else {
+            return;
+        };
+        let to = [p.x - offset[0] as f32, p.y - offset[1] as f32];
+        let step = (*radius * 0.5).max(0.5);
+        let length = (to[0] - last[0]).hypot(to[1] - last[1]);
+        let count = (length / step).ceil().max(1.0) as usize;
+        let mut erased = false;
+        for n in 1..=count {
+            let t = n as f32 / count as f32;
+            let at = [
+                last[0] + (to[0] - last[0]) * t,
+                last[1] + (to[1] - last[1]) * t,
+            ];
+            if let Some(left) = crate::vector::erase(lines, at, *radius, *mode) {
+                *lines = left;
+                erased = true;
+            }
+        }
+        *last = to;
+        if !erased {
+            return;
+        }
+        *changed = true;
+        let layer = *layer;
+        if let Some(raster) = doc::raster_mut(&mut cx.world.arena, layer)
+            && let Some(painted) = crate::vector::render(lines, raster.width(), raster.height())
+            && let (Some(into), Some(from)) = (raster.bytes_mut(), painted.bytes())
+        {
+            into.copy_from_slice(from);
+        }
+        if let Some(doc) = self.docs.get_mut(self.active) {
+            doc.compositor
+                .refresh(&cx.world.arena, [0, 0, size[0], size[1]]);
         }
     }
 
@@ -927,6 +1018,10 @@ impl SuePaint {
             self.blend_drag(pos, viewport, size, cx);
             return;
         }
+        if matches!(self.gesture, Some(Gesture::VectorErase { .. })) {
+            self.vector_erase_drag(pos, viewport, size, cx);
+            return;
+        }
         if matches!(self.gesture, Some(Gesture::Transform { .. })) {
             let Some(view) = self.docs.get(self.active).map(|doc| doc.view) else {
                 return;
@@ -996,6 +1091,7 @@ impl SuePaint {
                 trail,
                 line,
                 snap,
+                vector,
                 ..
             } => {
                 let mut local = [p.x - offset[0] as f32, p.y - offset[1] as f32];
@@ -1020,7 +1116,9 @@ impl SuePaint {
                 let smooth = snap.as_ref().map_or(smooth, |snap| snap.project(smooth));
                 // Fast is 2000 screen points a second (velocity dynamics).
                 stroke.set_speed(stabilizer.speed() / 2000.0);
-                let selection = shifted.as_ref().or(doc.selection.as_ref());
+                let selection = (!*vector)
+                    .then(|| shifted.as_ref().or(doc.selection.as_ref()))
+                    .flatten();
                 if let Some(raster) = doc::raster_mut(&mut cx.world.arena, stroke.layer()) {
                     stroke.to(raster, smooth, pressure, selection);
                 }
@@ -1066,7 +1164,8 @@ impl SuePaint {
             | Gesture::Pin { .. }
             | Gesture::Transform { .. }
             | Gesture::Blend { .. }
-            | Gesture::RulerHandle { .. } => {}
+            | Gesture::RulerHandle { .. }
+            | Gesture::VectorErase { .. } => {}
         }
     }
 
@@ -1090,6 +1189,7 @@ impl SuePaint {
                 flick,
                 line,
                 snap,
+                vector,
             } => {
                 let Some(doc) = self.docs.get_mut(self.active) else {
                     return;
@@ -1102,7 +1202,9 @@ impl SuePaint {
                     (correction, flick)
                 };
                 let layer = stroke.layer();
-                let selection = shifted.as_ref().or(doc.selection.as_ref());
+                let selection = (!vector)
+                    .then(|| shifted.as_ref().or(doc.selection.as_ref()))
+                    .flatten();
                 // The pen's velocity over its last few hundredths of a
                 // second, for a flick.
                 let velocity = trail.last().and_then(|&(end, at)| {
@@ -1122,6 +1224,7 @@ impl SuePaint {
                     .samples()
                     .last()
                     .map_or(pressure, |sample| sample.pressure);
+                let mut drawn = None;
                 if let Some(raster) = doc::raster_mut(&mut cx.world.arena, layer) {
                     if line {
                         stroke.to(raster, raw, last, selection);
@@ -1131,6 +1234,8 @@ impl SuePaint {
                             stroke.to(raster, point, last, selection);
                         }
                     }
+                    // A vector line keeps the samples as drawn.
+                    drawn = vector.then(|| stroke.samples().to_vec());
                     stroke.end(raster, finish, selection);
                 }
                 if let Some([x0, y0, x1, y1]) = stroke.take_dirty() {
@@ -1146,10 +1251,31 @@ impl SuePaint {
                     );
                 }
                 let eraser = stroke.tip().eraser;
+                let kept = drawn.map(|samples| crate::vector::Line::of(&stroke, samples, finish));
                 if let Some(raster) = doc::raster(&cx.world.arena, layer) {
                     let edit = stroke.finish(raster, &label);
                     if !edit.is_empty() {
-                        cx.record(ArenaEdit(edit));
+                        match kept {
+                            Some(kept) => {
+                                // The line stays on the vector layer, in
+                                // the same undo step as its pixels.
+                                let old = crate::vector::geometry(&cx.world.arena, layer);
+                                let mut lines = crate::vector::lines(&old);
+                                lines.push(kept);
+                                let edit = crate::vector::keep(
+                                    &mut cx.world.arena,
+                                    layer,
+                                    old,
+                                    &lines,
+                                    Some(edit),
+                                    &label,
+                                );
+                                cx.record(ArenaEdit(edit));
+                            }
+                            None => {
+                                cx.record(ArenaEdit(edit));
+                            }
+                        }
                         if !eraser {
                             self.recent.push(self.drawing_color());
                         }
@@ -1201,6 +1327,37 @@ impl SuePaint {
                 Tool::Balloon => self.balloon_drag(from, to, &sub, cx),
                 _ => {}
             },
+            Gesture::VectorErase {
+                layer,
+                before,
+                geometry,
+                lines,
+                changed,
+                label,
+                ..
+            } => {
+                if !changed {
+                    return;
+                }
+                let pixels = doc::raster(&cx.world.arena, layer).and_then(|raster| {
+                    let patch =
+                        doc::diff_patch(&before, raster.bytes()?, raster.width(), raster.height())?;
+                    Some(sue_core::txn::RasterEdit::new(
+                        layer,
+                        label.clone(),
+                        vec![patch],
+                    ))
+                });
+                let edit = crate::vector::keep(
+                    &mut cx.world.arena,
+                    layer,
+                    geometry,
+                    &lines,
+                    pixels,
+                    &label,
+                );
+                cx.record(ArenaEdit(edit));
+            }
             Gesture::RulerHandle { handle, before } => {
                 let Some(picture) = self.picture() else {
                     return;

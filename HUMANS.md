@@ -298,8 +298,8 @@ familiar:
 
 - **Menus along the top:** File, Edit, Story, Animation, Layer, Select, View,
   Filter, Window and Help. Everything Sue Paint can do is in them. Items shown
-  in gray are planned but not built yet (vector layers, materials and a few
-  more), so you can see what is coming.
+  in gray are planned but not built yet (correcting vector lines,
+  materials and a few more), so you can see what is coming.
 - **Tools on the left:** pen, pencil, brush, airbrush, eraser, fill bucket,
   gradient, shapes, selections, eyedropper, hand and zoom. Each tool has
   ready-made **sub tools** (a G-pen, a mapping pen, a watercolor brush, a soft
@@ -371,6 +371,11 @@ familiar:
   in a box. Drag a corner to scale (Shift frees the shape), an edge to
   stretch, inside to move and outside to turn, or type the size and angle;
   Free Transform moves each corner on its own. Enter keeps it.
+- **Vector layers** (Layer, New Layer, Vector Layer, or the button beside
+  New Raster Layer): lines drawn on one are kept as lines. The eraser's
+  **Vector** setting decides what it takes: only where it touches, the
+  piece of a line up to where it crosses other lines (the Vector eraser
+  does this, so cleaning up crossing lines is one tap), or whole lines.
 - **Folders** (Ctrl+G puts the current layer in a new folder): hide or fade
   a folder and everything in it follows; its arrow opens and closes it.
   Moving a layer up or down past a folder's edge takes it out or puts it in.
