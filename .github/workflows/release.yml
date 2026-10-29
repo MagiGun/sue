@@ -131,7 +131,19 @@ jobs:
       - name: Cross compiler and RISC-V libraries
         run: |
           sudo dpkg --add-architecture riscv64
-          sudo sed -i 's/^deb http/deb [arch=amd64] http/' /etc/apt/sources.list
+          # The runner's own sources (plain, mirror+file: or deb822) stay
+          # amd64 only, since their mirrors have no RISC-V packages; those
+          # come from Ubuntu's ports mirror.
+          for list in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+            if [ -f "$list" ]; then
+              sudo sed -i -E '/^deb .*arch=/b; s/^deb \[/deb [arch=amd64 /; t; s/^deb /deb [arch=amd64] /' "$list"
+            fi
+          done
+          for list in /etc/apt/sources.list.d/*.sources; do
+            if [ -f "$list" ] && ! grep -q '^Architectures:' "$list"; then
+              sudo sed -i '/^Types:/a Architectures: amd64' "$list"
+            fi
+          done
           printf 'deb [arch=riscv64] http://ports.ubuntu.com/ubuntu-ports jammy main universe\ndeb [arch=riscv64] http://ports.ubuntu.com/ubuntu-ports jammy-updates main universe\n' | sudo tee /etc/apt/sources.list.d/riscv64.list
           sudo apt-get update
           sudo apt-get install -y gcc-riscv64-linux-gnu libasound2-dev:riscv64 rpm
