@@ -105,6 +105,7 @@ save-to = Save to
 next-to-each-file = Next to each file
 this-folder = This folder:
 choose-where-converted-files-go = Choose Where Converted Files Go
+picked-copies-ask-for-a-folder = Sue works on copies of files you pick one by one, so Convert first asks which folder the results go to.
 change = Change
 open = Open
 file-name = File name

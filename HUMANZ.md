@@ -670,6 +670,7 @@ the `PlatformHost` trait and the portable services next to it:
 | `pick_open_file`, `pick_save_file`, `pick_folder` | The system's own open, save and folder dialogs: every file Sue asks for goes through them. Each answers a `Picking`: `Chosen(path)`, `Cancelled`, `Failed(why)`, or `Waiting` on phones and tablets (below) |
 | `poll_picks`, `deliver_picked_files`, `picks_busy` | The answers of pickers that run beside Sue (`PickNews`), the hand-back of files written to the paths they chose, and whether to keep polling; no-ops on desktops |
 | `shown_place`, `shown_path`, `file_manager` | How to name a path to people: what they chose for a staged path (`ShownPlace`, a name and, where the system says it, a folder), else the path itself; and the file manager `reveal_file` shows files in (`Explorer`, `Finder`), `None` on phones and tablets, which hide "show it" actions |
+| `stays_in_cache` | `true` for a path under the staging folder that stands for nothing people chose (beside an opened document's copy), so a write there never leaves Sue's cache; always `false` on desktops |
 
 Path resolution is a pure function of the OS and an injected environment lookup,
 so it can be tested without touching the real environment:
@@ -823,7 +824,13 @@ stand-in:
   (`primary:Download/Comics/a.png` is in `Download/Comics`, `home:` is
   Documents) and the Download folder; other apps' documents have none. An
   iOS place is in the folder that holds it, unless that is the top of a
-  place in Files.
+  place in Files;
+- every other path under the staging folder stands for nothing people chose
+  (a new file beside an opened document's copy: Android granted only that
+  document, and iOS's copy is Sue's own), so writes there stay in the cache.
+  `stays_in_cache` says so, and what would write there asks for a folder
+  first: the Converter's "Next to each file" picks one through `FilePick`
+  before it converts such copies.
 
 | | Android (`android::Documents`) | iOS (`ios::Files`) |
 | --- | --- | --- |
@@ -1230,7 +1237,7 @@ register its own:
 | Sue Paint | Studio | Picture: Illustration, Print A4, Full HD, Square Post, Sprite, Custom... | The painting studio (§3.7) |
 | Sue Writer | Studio | Writing: Blank Document, Novel, Short Story, Screenplay and the other project templates (§3.8) | The writing and publishing studio (§3.8) |
 | Image Viewer | Tool | n/a | One picture filling its page: fit, 100% and wheel zoom, panning, the project's next and previous pictures; simple edits (turn, mirror, crop, resize, brightness and contrast, saturation and hue, grayscale, invert), each one undo step on the same entity (`ReplaceComponent`); menus File (Open Picture, Save As in any picture format, Save Over, a lossless JPEG XL re-encode, Show in Folder, Back to the Hub), Image, View and Send (the Converter, Sue Paint and Sue Writer by `EntityId`), and a toolbar under them |
-| Converter | Tool | n/a | Any file in (Add Files, Add a Folder, the project's pictures and sounds, or Send To from any studio or tool); a target per kind (pictures: PNG, JPEG, JPEG XL, WebP, TIFF, BMP, GIF, TGA, QOI, ICO, PPM; sounds: FLAC, WAV, AIFF; text: tidied, Markdown to HTML, CSV, TSV, JSON; anything: Base64, hex dump, byte map, copy); picture resizing with Lanczos, bicubic, bilinear or nearest in premultiplied alpha, turns, mirrors, brightness, contrast, saturation, grays, flattening; sound trimming, channels, Lanczos resampling, speed, reverse, gain or normalizing, fades, depth; text tidying; output folder, name pattern and keep or replace (never the source); files convert on a background thread; menus File and Convert (`Ctrl+Enter`) |
+| Converter | Tool | n/a | Any file in (Add Files, Add a Folder, the project's pictures and sounds, or Send To from any studio or tool); a target per kind (pictures: PNG, JPEG, JPEG XL, WebP, TIFF, BMP, GIF, TGA, QOI, ICO, PPM; sounds: FLAC, WAV, AIFF; text: tidied, Markdown to HTML, CSV, TSV, JSON; anything: Base64, hex dump, byte map, copy); picture resizing with Lanczos, bicubic, bilinear or nearest in premultiplied alpha, turns, mirrors, brightness, contrast, saturation, grays, flattening; sound trimming, channels, Lanczos resampling, speed, reverse, gain or normalizing, fades, depth; text tidying; output folder ("Next to each file" asks for one first where a result beside its file would stay in Sue's cache, `stays_in_cache`), name pattern and keep or replace (never the source); files convert on a background thread; menus File and Convert (`Ctrl+Enter`) |
 | Settings | Window | n/a | Preferences by category (§4.3) |
 
 ### 3.7 Sue Paint (`sue-paint`)

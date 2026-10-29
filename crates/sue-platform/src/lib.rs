@@ -69,7 +69,7 @@ pub use locale::{normalize_language, system_languages};
 pub use os::{
     FileFilter, PickNews, Picking, ShownPlace, copy_text, deliver_picked_files, file_manager,
     open_document, open_url, pick_folder, pick_open_file, pick_save_file, picks_busy, poll_picks,
-    reveal_file, reveal_folder, shown_path, shown_place, web_url,
+    reveal_file, reveal_folder, shown_path, shown_place, stays_in_cache, web_url,
 };
 pub use paint::{EguiPainter, NoTextures, TextureUpload};
 pub use paths::{PlatformPaths, font_dirs, system_font_dirs};

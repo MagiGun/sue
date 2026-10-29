@@ -238,6 +238,13 @@ impl Staging {
         })
     }
 
+    /// `true` for a path under the staging root that stands for nothing
+    /// people chose, such as a new file beside an opened document's copy:
+    /// nothing written there is handed back.
+    fn strands(&self, path: &Path) -> bool {
+        path.starts_with(&self.root) && self.shown(path).is_none()
+    }
+
     /// The files right inside a folder, without hidden ones (a write in
     /// progress is a hidden temporary file, see `write_atomic`).
     fn files_in(dir: &Path) -> Vec<PathBuf> {
@@ -561,6 +568,12 @@ impl<S: System> Picker<S> {
         self.staging.shown(path)
     }
 
+    /// `true` for a path in Sue's cache that stands for nothing people
+    /// chose, so what is written there stays in the cache.
+    pub(crate) fn strands(&self, path: &Path) -> bool {
+        self.staging.strands(path)
+    }
+
     /// Hands every staged file written since last time back to the place
     /// the person chose. Call it after writing.
     pub(crate) fn deliver(&mut self) {
@@ -799,6 +812,18 @@ pub(crate) fn native_shown(path: &Path) -> Option<ShownPlace> {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .shown(path)
+}
+
+/// Whether a write to `path` stays in Sue's cache (see
+/// [`Picker::strands`]). A picker that was never used staged nothing.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) fn native_strands(path: &Path) -> bool {
+    PICKER.get().is_some_and(|picker| {
+        picker
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .strands(path)
+    })
 }
 
 #[cfg(target_os = "android")]
@@ -1213,6 +1238,81 @@ mod tests {
         assert_eq!(picker.shown(copy.parent().unwrap()), None);
         assert_eq!(picker.shown(&staged.join("sub").join("a.png")), None);
         assert_eq!(picker.shown(&picture), None);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn files_beside_an_opened_copy_stay_in_the_cache() {
+        let dir = scratch("strands");
+        let documents = dir.join("documents");
+        let picture = documents.join("Picture.png");
+        fs::write(&picture, b"pixels").unwrap();
+        let mut picker = Picker::new(Android::default(), dir.join("cache"));
+
+        // A document opened on its own grants only itself: a new file
+        // beside its copy goes nowhere, and the engine says so.
+        picker.show(Kind::Open, &[], "");
+        picker
+            .system
+            .0
+            .answer_with(Answer::Chosen(picture.to_string_lossy().into_owned()));
+        let copy = chosen(&settle(&mut picker));
+        let beside = copy.with_file_name("Picture.jxl");
+        assert!(!picker.strands(&copy));
+        assert!(picker.strands(copy.parent().unwrap()));
+        assert!(picker.strands(&beside));
+        write(&beside, "converted");
+        picker.deliver();
+        assert!(settle(&mut picker).is_empty());
+        assert!(!documents.join("Picture.jxl").exists());
+
+        // A chosen folder takes new files, named as they were written.
+        picker.show(Kind::Folder, &[], "");
+        picker
+            .system
+            .0
+            .answer_with(Answer::Chosen(documents.to_string_lossy().into_owned()));
+        let staged = chosen(&settle(&mut picker));
+        let result = staged.join("Picture.jxl");
+        assert!(!picker.strands(&staged));
+        assert!(!picker.strands(&result));
+        assert!(picker.strands(&staged.join("sub").join("a.png")));
+        write(&result, "converted");
+        picker.deliver();
+        assert!(settle(&mut picker).is_empty());
+        assert_eq!(
+            fs::read(documents.join("Picture.jxl")).unwrap(),
+            b"converted"
+        );
+
+        // Paths outside Sue's cache are none of its business.
+        assert!(!picker.strands(&picture));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ios_copies_strand_what_is_written_beside_them() {
+        let dir = scratch("ios-strands");
+        let mut picker = Picker::new(Ios::default(), dir.join("cache"));
+        let song = dir.join("documents").join("Song.wav");
+        fs::write(&song, b"samples").unwrap();
+        picker.show(Kind::Open, &[], "");
+        picker
+            .system
+            .0
+            .answer_with(Answer::Chosen(song.to_string_lossy().into_owned()));
+        let copy = chosen(&settle(&mut picker));
+        assert!(picker.strands(&copy), "an opened file is only a copy there");
+        assert!(picker.strands(&copy.with_file_name("Song.flac")));
+
+        // A chosen folder is a path Sue writes in directly.
+        picker.show(Kind::Folder, &[], "");
+        picker
+            .system
+            .0
+            .answer_with(Answer::Chosen("/Files/Exports".to_owned()));
+        let folder = chosen(&picker.poll());
+        assert!(!picker.strands(&folder.join("Song.flac")));
         let _ = fs::remove_dir_all(dir);
     }
 

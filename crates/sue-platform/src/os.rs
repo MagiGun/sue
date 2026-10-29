@@ -212,6 +212,25 @@ pub fn shown_path(path: &Path) -> String {
     shown_place(path).map_or_else(|| path.display().to_string(), |shown| shown.to_string())
 }
 
+/// `true` for a path among the files a system picker staged in Sue's
+/// cache (phones and tablets) that stands for nothing people chose, such
+/// as a new file beside the copy of a document opened on its own: what is
+/// written there stays in the cache, where people never see it. A new
+/// file in a chosen folder is not one, as it goes to that folder. Always
+/// `false` on desktops.
+#[must_use]
+pub fn stays_in_cache(path: &Path) -> bool {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        crate::picks::native_strands(path)
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let _ = path;
+        false
+    }
+}
+
 /// A file-type filter for the native dialogs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileFilter {

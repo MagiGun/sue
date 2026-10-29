@@ -172,7 +172,10 @@ they are named (`{name}-small`, say), and whether to keep both or replace a
 file of the same name; the file being converted is never written over. Click
 Convert (or `Ctrl+Enter`): big files convert in the background, the list says
 where each one went (click it to see it in Explorer, or Finder on a Mac), and
-the status bar names the folder.
+the status bar names the folder. On a phone or tablet, Sue works on a copy of
+a file you pick one by one, and nothing can be put next to that copy where
+you would see it, so "Next to each file" asks which folder the results go
+to before it converts; they land there, named as the status bar says.
 
 ### Opening and saving files
 
