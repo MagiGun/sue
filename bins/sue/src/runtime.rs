@@ -1230,6 +1230,123 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_puppet_warp_bends_a_stroke_in_one_undo_step() {
+        let (mut runtime, root) = runtime("paint-warp");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        step(&mut runtime, Vec::new());
+        let arena = &runtime.engine.world.arena;
+        let picture = arena
+            .iter()
+            .find(|(_, entity)| sue_model::picture::is_picture(entity))
+            .map(|(_, entity)| entity.id())
+            .unwrap();
+        let layer = sue_paint::doc::layers(arena, picture).last().unwrap().id;
+        let ink = |runtime: &Runtime, x: u32, rows: std::ops::Range<u32>| {
+            let raster = sue_paint::doc::raster(&runtime.engine.world.arena, layer).unwrap();
+            rows.map(|y| {
+                u32::from(raster.bytes().unwrap()[((y * raster.width() + x) * 4 + 3) as usize])
+            })
+            .sum::<u32>()
+        };
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        // A mouse stroke across the middle, from x = 800 to past 990.
+        let from = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let to = from + vec2(100.0, 0.0);
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(from), press(from, true)],
+        );
+        step(
+            &mut runtime,
+            vec![
+                egui::Event::PointerMoved(from + vec2(50.0, 0.0)),
+                egui::Event::PointerMoved(to),
+            ],
+        );
+        step(&mut runtime, vec![press(to, false)]);
+        assert!(ink(&runtime, 960, 580..620) > 0, "the stroke is there");
+        let depth = runtime.engine.history.depth();
+
+        // Puppet warp: pin the start, drag the end up.
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: paint,
+                command: "edit.transform.puppet".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        step(&mut runtime, Vec::new());
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(from), press(from, true)],
+        );
+        step(&mut runtime, vec![press(from, false)]);
+        let end = to - vec2(8.0, 0.0);
+        let up = end + vec2(0.0, -60.0);
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(end), press(end, true)],
+        );
+        step(
+            &mut runtime,
+            vec![
+                egui::Event::PointerMoved(end + vec2(0.0, -30.0)),
+                egui::Event::PointerMoved(up),
+            ],
+        );
+        step(&mut runtime, vec![press(up, false)]);
+        assert_eq!(
+            runtime.engine.history.depth(),
+            depth,
+            "a preview, not history yet"
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        step(&mut runtime, Vec::new());
+        assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
+        assert_eq!(ink(&runtime, 960, 580..620), 0, "the end left the middle");
+        assert!(ink(&runtime, 960, 440..580) > 0, "and went up");
+        assert!(ink(&runtime, 810, 580..620) > 0, "the pinned start stayed");
+
+        // Undo puts the stroke back as it was.
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        assert!(ink(&runtime, 960, 580..620) > 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_saves_as_a_project_or_any_picture_type() {
         let (mut runtime, root) = runtime("paint-save-as");
         let ctx = egui::Context::default();

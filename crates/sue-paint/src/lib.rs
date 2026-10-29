@@ -43,6 +43,7 @@ mod studio;
 mod subview;
 pub mod tools;
 pub mod view;
+pub mod warp;
 
 pub use card::{CARD_ID, PictureCard};
 pub use menus::menus;

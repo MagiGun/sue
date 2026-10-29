@@ -162,6 +162,7 @@ pub fn menus() -> Vec<Menu> {
                         act("Distort", "edit.transform.distort"),
                         act("Perspective", "edit.transform.perspective"),
                         act("Mesh Transformation", "edit.transform.mesh"),
+                        act("Puppet Warp...", "edit.transform.puppet"),
                         SEP,
                         act("Flip Horizontal", "edit.flip_h"),
                         act("Flip Vertical", "edit.flip_v"),

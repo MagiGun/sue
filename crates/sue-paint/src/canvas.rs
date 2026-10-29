@@ -102,6 +102,7 @@ impl SuePaint {
         self.canvas_input(ui, viewport, &response, size, cx);
         self.draw_picture(ui, viewport, size, cx, theme);
         self.overlays(ui, viewport, size, &response, cx, theme);
+        self.warp_ui(ui, viewport, size, cx, theme);
         self.status_strip(ui, status, Some(size), cx, theme);
     }
 
@@ -432,6 +433,34 @@ impl SuePaint {
             });
             return;
         }
+        if !space && self.warp.is_some() {
+            // Puppet warp: a pin under the pointer is dragged (Alt takes
+            // it away), anywhere else a new pin goes in.
+            let view = doc.view;
+            let Some(warp) = self.warp.as_mut() else {
+                return;
+            };
+            let local = [p.x - warp.offset[0] as f32, p.y - warp.offset[1] as f32];
+            let offset = warp.offset;
+            let hit = warp.pins.iter().position(|pin| {
+                let at = pos2(pin.to[0] + offset[0] as f32, pin.to[1] + offset[1] as f32);
+                view.to_screen(viewport, size, at).distance(pos) <= 9.0
+            });
+            match hit {
+                Some(index) if modifiers.alt => {
+                    warp.pins.remove(index);
+                    self.warp_preview(cx);
+                }
+                Some(index) => self.gesture = Some(Gesture::Pin { index }),
+                None => {
+                    warp.pins.push(crate::warp::Pin::at(local));
+                    self.gesture = Some(Gesture::Pin {
+                        index: warp.pins.len() - 1,
+                    });
+                }
+            }
+            return;
+        }
         if space {
             tool = Tool::Hand;
         } else if modifiers.alt && tool.paints() && tool != Tool::Eraser && tool != Tool::Figure {
@@ -588,6 +617,19 @@ impl SuePaint {
             self.pick(pos, mode, viewport, size, cx);
             return;
         }
+        if let Some(Gesture::Pin { index }) = self.gesture {
+            let Some(view) = self.docs.get(self.active).map(|doc| doc.view) else {
+                return;
+            };
+            let p = view.to_picture(viewport, size, pos);
+            if let Some(warp) = self.warp.as_mut()
+                && let Some(pin) = warp.pins.get_mut(index)
+            {
+                pin.to = [p.x - warp.offset[0] as f32, p.y - warp.offset[1] as f32];
+            }
+            self.warp_preview(cx);
+            return;
+        }
         let pressure = self.pressure.unwrap_or(1.0);
         let (time, step) = self.clock;
         let (Some(gesture), Some(doc)) = (self.gesture.as_mut(), self.docs.get_mut(self.active))
@@ -661,7 +703,7 @@ impl SuePaint {
                     entity.properties_mut().set(picture::Y, origin[1] + dy);
                 }
             }
-            Gesture::Pick { .. } => {}
+            Gesture::Pick { .. } | Gesture::Pin { .. } => {}
         }
     }
 
@@ -825,6 +867,7 @@ impl SuePaint {
             Gesture::Pan { .. }
             | Gesture::Rotate { .. }
             | Gesture::Pick { .. }
+            | Gesture::Pin { .. }
             | Gesture::BrushSize { .. } => {}
         }
     }
@@ -1240,6 +1283,118 @@ impl SuePaint {
     }
 
     #[allow(clippy::too_many_lines, reason = "every overlay of the canvas")]
+    /// Puppet warp's pins, the mesh they bend, and its bar (Reset, Cancel,
+    /// OK; Enter keeps the bend and Esc puts the layer back).
+    fn warp_ui(
+        &mut self,
+        ui: &mut Ui,
+        viewport: Rect,
+        size: [u32; 2],
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        let Some(warp) = self.warp.as_ref() else {
+            return;
+        };
+        let Some(view) = self.docs.get(self.active).map(|doc| doc.view) else {
+            return;
+        };
+        let offset = [warp.offset[0] as f32, warp.offset[1] as f32];
+        let screen =
+            |p: [f32; 2]| view.to_screen(viewport, size, pos2(p[0] + offset[0], p[1] + offset[1]));
+        let painter = ui.painter().with_clip_rect(viewport);
+        // The mesh over the layer's pixels, bent as the pins bend them.
+        if let Some([x0, y0, x1, y1]) = warp.bounds {
+            let cells = 10;
+            let (w, h) = ((x1 - x0) as f32, (y1 - y0) as f32);
+            let at = |i: u32, j: u32| {
+                let point = [
+                    x0 as f32 + w * i as f32 / cells as f32,
+                    y0 as f32 + h * j as f32 / cells as f32,
+                ];
+                screen(crate::warp::forward(point, &warp.pins))
+            };
+            let stroke = Stroke::new(1.0, theme.muted.gamma_multiply(0.7));
+            for j in 0..=cells {
+                painter.add(Shape::line((0..=cells).map(|i| at(i, j)).collect(), stroke));
+            }
+            for i in 0..=cells {
+                painter.add(Shape::line((0..=cells).map(|j| at(i, j)).collect(), stroke));
+            }
+        }
+        let held = match self.gesture {
+            Some(Gesture::Pin { index }) => Some(index),
+            _ => None,
+        };
+        for (index, pin) in warp.pins.iter().enumerate() {
+            let at = screen(pin.to);
+            let fill = if held == Some(index) {
+                theme.border_active
+            } else {
+                theme.text
+            };
+            painter.circle_filled(at, 5.5, fill);
+            painter.circle_stroke(at, 5.5, Stroke::new(1.5, Color32::BLACK));
+        }
+        // The bar.
+        let pins = warp.pins.len();
+        let mut action = None;
+        egui::Area::new(Id::unique("sue-paint-warp-bar"))
+            .fade_in(false)
+            .order(egui::Order::Foreground)
+            .fixed_pos(viewport.center_top() + vec2(-200.0, 10.0))
+            .show(ui.ctx(), |ui| {
+                sue_wm::widgets::pill_frame(theme).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Puppet warp").color(theme.text));
+                        ui.label(
+                            RichText::new(match pins {
+                                0 => "Click to put pins".to_owned(),
+                                1 => "1 pin".to_owned(),
+                                count => format!("{count} pins"),
+                            })
+                            .color(theme.muted),
+                        );
+                        if ui
+                            .button("Reset")
+                            .on_hover_text("Take every pin away")
+                            .clicked()
+                        {
+                            action = Some(0);
+                        }
+                        if ui.button("Cancel").clicked() {
+                            action = Some(1);
+                        }
+                        if ui.button("OK").clicked() {
+                            action = Some(2);
+                        }
+                    });
+                });
+            });
+        let (enter, escape) = ui.input(|input| {
+            (
+                input.key_pressed(Key::Enter),
+                input.key_pressed(Key::Escape),
+            )
+        });
+        if enter {
+            action = Some(2);
+        } else if escape {
+            action = Some(1);
+        }
+        match action {
+            Some(0) => {
+                if let Some(warp) = self.warp.as_mut() {
+                    warp.pins.clear();
+                }
+                self.warp_preview(cx);
+            }
+            Some(1) => self.finish_warp(cx, false),
+            Some(2) => self.finish_warp(cx, true),
+            _ => {}
+        }
+    }
+
     fn overlays(
         &mut self,
         ui: &mut Ui,

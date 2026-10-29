@@ -96,6 +96,8 @@ pub(crate) enum Gesture {
         /// Shift and drag: one straight line, drawn on release.
         line: bool,
     },
+    /// Dragging puppet warp pin `index`.
+    Pin { index: usize },
     /// Scrolling the view.
     Pan { last: Pos2 },
     /// Ctrl+Alt and drag: the brush size follows the pointer across.
@@ -207,6 +209,8 @@ pub struct SuePaint {
     pub(crate) menubar: MenuBar,
     pub(crate) dialog: Option<Dialog>,
     pub(crate) gesture: Option<Gesture>,
+    /// Puppet warp, while it is on.
+    pub(crate) warp: Option<WarpSession>,
     pub(crate) pressure: Option<f32>,
     /// The pen pressure curve every tool uses (Pen Pressure Settings).
     pub(crate) pen_curve: sue_model::Response,
@@ -264,6 +268,7 @@ impl Default for SuePaint {
             menubar: MenuBar::new(),
             dialog: None,
             gesture: None,
+            warp: None,
             pressure: None,
             pen_curve: sue_model::Response::LINEAR,
             panels: Panels::default(),
@@ -425,10 +430,108 @@ fn implemented(command: &str) -> bool {
             | "help.about"
             | "file.shortcuts"
             | "file.pressure"
+            | "edit.transform.puppet"
     ) || TOOL_KEYS.iter().any(|(known, _, _)| *known == command)
 }
 
+/// Puppet warp on one layer: its pixels from before, the pins, and what
+/// the preview last showed.
+#[derive(Clone, Debug)]
+pub(crate) struct WarpSession {
+    pub layer: EntityId,
+    pub size: [u32; 2],
+    pub before: Vec<u8>,
+    pub pins: Vec<crate::warp::Pin>,
+    pub shown: Vec<crate::warp::Pin>,
+    /// Where the layer's pixels are, for the mesh drawn over them.
+    pub bounds: Option<[u32; 4]>,
+    /// The layer's offset in the picture.
+    pub offset: [i64; 2],
+}
+
 impl SuePaint {
+    // ----- Puppet warp ------------------------------------------------------
+
+    /// Starts puppet warp on the current layer.
+    pub(crate) fn start_warp(&mut self, cx: &mut AppletContext<'_>) {
+        if self.warp.is_some() {
+            return;
+        }
+        let info = match self.paintable(&cx.world.arena) {
+            Ok(info) => info,
+            Err(error) => {
+                cx.fail(error);
+                return;
+            }
+        };
+        let Some(raster) = doc::raster(&cx.world.arena, info.id) else {
+            return;
+        };
+        let Some(before) = raster.bytes().map(<[u8]>::to_vec) else {
+            return;
+        };
+        let size = [raster.width(), raster.height()];
+        self.warp = Some(WarpSession {
+            layer: info.id,
+            size,
+            bounds: crate::warp::bounds(&before, size[0], size[1]),
+            before,
+            pins: Vec::new(),
+            shown: Vec::new(),
+            offset: info.style.offset,
+        });
+        cx.notify(
+            "Puppet warp: click to put pins, drag one to bend, Alt+click one to take it away",
+        );
+    }
+
+    /// Shows the layer bent by the pins as they are now.
+    pub(crate) fn warp_preview(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(warp) = self.warp.as_mut() else {
+            return;
+        };
+        if warp.pins == warp.shown {
+            return;
+        }
+        let pixels = crate::warp::warp(&warp.before, warp.size[0], warp.size[1], &warp.pins, 8);
+        if let Some(bytes) = doc::raster_mut(&mut cx.world.arena, warp.layer)
+            .and_then(RasterTile2D::bytes_mut)
+            .filter(|bytes| bytes.len() == pixels.len())
+        {
+            bytes.copy_from_slice(&pixels);
+        }
+        warp.shown = warp.pins.clone();
+    }
+
+    /// Ends puppet warp: keeps the bend as one undo step, or puts the
+    /// layer back.
+    pub(crate) fn finish_warp(&mut self, cx: &mut AppletContext<'_>, keep: bool) {
+        let Some(warp) = self.warp.take() else {
+            return;
+        };
+        self.gesture = None;
+        let after = if keep {
+            crate::warp::warp(&warp.before, warp.size[0], warp.size[1], &warp.pins, 2)
+        } else {
+            warp.before.clone()
+        };
+        if let Some(bytes) = doc::raster_mut(&mut cx.world.arena, warp.layer)
+            .and_then(RasterTile2D::bytes_mut)
+            .filter(|bytes| bytes.len() == after.len())
+        {
+            bytes.copy_from_slice(&after);
+        }
+        if keep
+            && let Some(patch) = doc::diff_patch(&warp.before, &after, warp.size[0], warp.size[1])
+        {
+            cx.record(ArenaEdit(sue_core::txn::RasterEdit::new(
+                warp.layer,
+                "Puppet Warp",
+                vec![patch],
+            )));
+        }
+    }
+
     // ----- Reading the state ------------------------------------------------
 
     /// `true` while the studio slides away.
@@ -1349,6 +1452,7 @@ impl SuePaint {
             "file.export.jxl" => self.export(cx, "jxl"),
             "file.preferences" => cx.request(ShellRequest::OpenSettings(None)),
             "file.shortcuts" => cx.request(ShellRequest::OpenSettings(Some("keymaps".to_owned()))),
+            "edit.transform.puppet" => self.start_warp(cx),
             "file.pressure" => {
                 self.dialog = Some(Dialog::Pressure(PressureDialog::new(self.pen_curve)));
             }
@@ -1789,7 +1893,12 @@ impl SuePaint {
     /// The studio's shortcuts (the shell already took undo, redo, save,
     /// open, Settings and the command palette).
     pub(crate) fn keys(&mut self, ctx: &egui::Context, cx: &mut AppletContext<'_>) {
-        if ctx.text_edit_focused() || self.dialog.is_some() || self.menubar.is_open() {
+        // Puppet warp keeps Enter and Esc for itself.
+        if ctx.text_edit_focused()
+            || self.dialog.is_some()
+            || self.menubar.is_open()
+            || self.warp.is_some()
+        {
             return;
         }
         // The shortcuts as Settings has them (Clip Studio Paint's unless
