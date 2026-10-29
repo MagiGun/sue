@@ -739,6 +739,48 @@ Classification follows Android's resource-qualifier convention: on a mobile OS, 
 smallest screen side of **at least 600 dp** is a tablet (`FormFactor::classify`).
 Desktop operating systems are `Desktop`.
 
+People can override it: `display.interface` (`auto`, `desktop`, `tablet`,
+`phone`) goes through `FormFactor::chosen` before the shell lays out or hands
+`ShellView::form_factor` to applets, so a phone can run the desktop layout and
+a desktop the touch ones. On a phone an open studio gets the whole width
+(`LayoutRequest::studio_open` leaves the rails out). Sue Paint draws its own
+phone layout (`phone.rs`: top and bottom bars of 44 point buttons, palettes and
+menus as bottom sheets) and, on tablets, docks the tool strip and layers and
+iconizes the rest. Two-finger pan, pinch and turn come from egui's
+`multi_touch`; a second finger takes back the stroke the first began (the
+stroke is finished and undone, so no half stroke stays), and short two- and
+three-finger taps undo and redo.
+
+**Phones and tablets.** `sue-platform` builds for Android and iOS with the
+desktop-only crates (`arboard`, `rfd`, `open`, `audio_thread_priority`) left
+out by target. On Android, `crates/sue-platform/android` is a `cdylib` whose
+only item is the exported `android_main` (the one place the `unsafe_code` lint
+is relaxed, from `forbid` to `deny` with a single audited `allow`); it hands the
+`AndroidApp` to `sue_platform::android` and runs `sue::run_window`, the same
+app the desktop executable runs, then ends the process, because a window's
+event loop can be made once per process. The host:
+
+- lays egui out in the content rectangle Android reports (`raw.screen_rect`),
+  so nothing hides under the system bars (the app theme opts out of forced edge
+  to edge);
+- tries Vulkan alone and then OpenGL ES alone, since an Android window takes
+  only one graphics API;
+- drops the surface on `suspended` and makes a new one on `resumed`, skipping
+  resizes in between;
+- keeps config and data in the app sandbox (`internal_data_path`) and starts
+  the file picker in shared storage.
+
+iOS uses the ordinary executable in an app bundle; its sandbox is `HOME`.
+
+**Packages.** `packaging/` has a script per system: a Windows zip; a Linux
+tarball, `.deb`, `.rpm` and AppImage (also buildable in Docker from any
+system); a universal macOS app and disk image; an unsigned iOS `.ipa` and a
+simulator build; and an Android APK for arm64, armv7 and x86_64 linked,
+aligned and signed with the SDK's own tools (no Gradle). The CI workflow runs
+the four checks on Windows, macOS and Linux and builds Android and iOS; the
+Release workflow builds every package on a `v*` tag and publishes them with
+checksums.
+
 ### 3.3 Layout solver
 
 `solve_layout(&LayoutRequest) -> LayoutSolution` is a pure function. It names
@@ -1502,6 +1544,29 @@ while a stroke is drawn and everything when the arena changes behind it (undo,
 a property, a new layer), detected by the layers' revisions; large areas are
 split into bands of rows on every core. Exports (PNG, JPEG over white, JPEG XL)
 flatten the paper and leave draft layers out.
+
+**Every menu item works** (a test fails if one is left grayed). The last ones
+built on shared pieces: `sue-io` gained a layered Photoshop codec (`psd`: PSD
+and PSB, PackBits, folders as section dividers, blend keys, opacity,
+visibility, clipping, Unicode names), an SVG shape reader (`svg`: every path
+command, the basic shapes, transforms and the view box) and `decode_frames`
+(animated GIF, PNG and WebP, Motion JPEG AVI), each with round trip or read
+back tests. Sue Paint maps them onto layers (`psd_io`), vector lines
+(`vector::from_svg`) and animation cels (`anim::import_frames`). Convert Layer
+traces raster pixels to vector center lines (`vector::trace`: Zhang and Suen
+thinning, chains walked between ends and joins, widths from a chamfer distance,
+Ramer, Douglas and Peucker simplification). Brush tips can be pictures
+(`brush::TipShape`, registered by name so a vector line keeps its tip).
+Rotating the canvas a quarter turn moves rasters, masks and vector lines
+together in one edit; Merge Selected Layers composites the picked layers with
+their blend modes into the lowest. Story gained Combine and Separate Pages
+(re-parenting layers between page pictures), page settings, story
+information, the Story Editor and batch text import; View gained page frames,
+a ruler bar, snap to grid, the tone area and a CMYK soft proof (`proof.rs`:
+separation with an ink limit, dot gain and inks laid over the paper's color).
+Print lays pages on paper as a PDF (`print.rs`) handed to the system viewer
+through `sue_platform::open_document`. Auto Actions, the Item Bank and
+registered workspaces are plain text files in Sue Paint's data folder.
 
 ---
 

@@ -638,6 +638,30 @@ the same files and the same tools on each.
 - **On a phone**, the drawers slide in from the edges and the timeline becomes a
   **sheet** you pull up from the bottom, within reach of your thumb.
 
+**Sue Paint on a tablet** keeps the menus, the tool strip and the Layer
+palette, and folds the other palettes into icons at the right edge: tap one to
+pop it over the canvas. **On a phone** the canvas fills the screen. The top bar
+has the menus, Undo and Redo, then the timeline, the tool settings, the color,
+the layers and the way back; the bottom bar has the tools you reach for most,
+**More** for every tool, and your color. Palettes come up from the bottom as
+sheets, one at a time; tap above a sheet to put it away.
+
+Everywhere, **two fingers** move, zoom and turn the canvas, a quick
+**two-finger tap undoes** and a **three-finger tap redoes**, as in Clip Studio
+Paint.
+
+**Switching layouts.** Settings, Display, **Interface** chooses Automatic (the
+device decides), Desktop, Tablet or Phone. Sue Paint's Window, Interface menu
+does the same, and on a phone the row at the top of the menus does too. So a
+phone can use the full desktop layout, and a computer can try the touch ones.
+
+**Getting Sue.** Each release has a package for every system: a zip for
+Windows, a `.dmg` for macOS, an AppImage, `.deb`, `.rpm` or tarball for Linux,
+one APK for every Android phone and tablet, and a package for iPhone and iPad
+to sign with your own Apple account. On Android, to open your own pictures
+(say, ones you sent to the device's Download folder), allow Sue to manage files
+once: Settings, Apps, Sue, Permissions, Files and media.
+
 ---
 
 ## Built-in package and offline AI manager
