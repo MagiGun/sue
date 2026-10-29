@@ -100,7 +100,10 @@ Each system has a script in `packaging/`, and the Release workflow runs
 them all when a `v*` tag is pushed or when it is run by hand with a
 version. Every package lands in `dist/`. The version comes from
 `SUE_VERSION` when it is set (the workflow sets it from the version typed
-or the tag), else from `Cargo.toml`; Sue reports the same one.
+or the tag), else from `Cargo.toml`; Sue reports the same one. The CI
+workflow's builds between releases are named after the latest release and
+the commits since it, such as `0.0.1+dev.4`. After publishing a release,
+set `Cargo.toml`'s version to it so local builds match.
 
 | System | Command | Makes |
 | --- | --- | --- |

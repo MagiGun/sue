@@ -3137,7 +3137,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "sue"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "egui",
  "sue-ai",
@@ -3155,7 +3155,7 @@ dependencies = [
 
 [[package]]
 name = "sue-ai"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "sue-core",
  "sue-platform",
@@ -3163,7 +3163,7 @@ dependencies = [
 
 [[package]]
 name = "sue-android"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "sue",
  "sue-platform",
@@ -3171,11 +3171,11 @@ dependencies = [
 
 [[package]]
 name = "sue-core"
-version = "1.0.0"
+version = "0.0.1"
 
 [[package]]
 name = "sue-io"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "flacenc",
  "image",
@@ -3194,14 +3194,14 @@ dependencies = [
 
 [[package]]
 name = "sue-model"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "sue-core",
 ]
 
 [[package]]
 name = "sue-paint"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "egui",
  "sue-core",
@@ -3215,7 +3215,7 @@ dependencies = [
 
 [[package]]
 name = "sue-pkg"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "ed25519-dalek",
  "semver",
@@ -3224,7 +3224,7 @@ dependencies = [
 
 [[package]]
 name = "sue-platform"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "arboard",
  "audio_thread_priority",
@@ -3241,7 +3241,7 @@ dependencies = [
 
 [[package]]
 name = "sue-rice"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "sue-core",
  "sue-platform",
@@ -3249,7 +3249,7 @@ dependencies = [
 
 [[package]]
 name = "sue-type"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "egui",
  "sue-core",
@@ -3261,7 +3261,7 @@ dependencies = [
 
 [[package]]
 name = "sue-wm"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "egui",
  "sue-core",
@@ -3275,7 +3275,7 @@ dependencies = [
 
 [[package]]
 name = "sue-writer"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "egui",
  "sue-core",

@@ -44,7 +44,7 @@ pub(crate) fn guide() -> Vec<String> {
 #[must_use]
 pub(crate) fn updates() -> Vec<String> {
     vec![
-        format!("This is Sue {}.", env!("CARGO_PKG_VERSION")),
+        format!("This is Sue {}.", sue_core::SUE_VERSION),
         "New versions are published as releases, for Windows, macOS, Linux (AppImage and packages), Android and iOS:".to_owned(),
         "https://github.com/MagiGun/sue/releases".to_owned(),
         "Sue never downloads or installs anything by itself.".to_owned(),
