@@ -13,6 +13,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A table of contents in Sue Writer (Insert, Table of Contents): the
+  headings with their pages, kept up as you write; click an entry to go
+  there. It prints in PDFs and goes into Word, OpenDocument, web pages,
+  e-books, RTF, Markdown and plain text.
 - Find and Replace in Sue Writer takes regular expressions, and the
   replacement can put back what a group caught (`$1`).
 - Change Case in Sue Writer (Format, Text): Sentence case, lowercase,

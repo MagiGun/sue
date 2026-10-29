@@ -9,6 +9,7 @@ use std::sync::Arc;
 use egui::text::{ByteIndex, LayoutJob, LayoutSection, TextFormat};
 use egui::{Color32, FontFamily, FontId, Galley, Stroke, Vec2, vec2};
 use sue_core::{EntityId, Value};
+use sue_model::contents::Contents;
 use sue_model::{Mark, PageFields, Running, TextMarks, mark_kind as kind};
 
 use crate::style::{
@@ -160,6 +161,10 @@ pub struct Block {
     pub figure: Option<(EntityId, Vec2)>,
     /// An embedded table filling the paragraph; its rows are the block's.
     pub table: Option<Arc<TableBlock>>,
+    /// A table of contents filling the paragraph: its entity and settings
+    /// (its entries, in `table`, come with the pages,
+    /// [`crate::contents::fill`]).
+    pub contents: Option<(EntityId, Contents)>,
     /// Each row's top and bottom, in galley pixels.
     pub rows: Vec<(f32, f32)>,
     /// Space above and below, in pixels.
@@ -225,6 +230,8 @@ pub struct Source<'a> {
     pub figure_size: &'a dyn Fn(EntityId) -> Option<Vec2>,
     /// Tables it shows ([`crate::tables`]).
     pub tables: &'a dyn Fn(EntityId) -> Option<TableSource>,
+    /// Tables of contents it shows ([`crate::contents`]).
+    pub contents: &'a dyn Fn(EntityId) -> Option<Contents>,
 }
 
 /// What a paragraph's text is laid out with.
@@ -386,11 +393,14 @@ pub fn lay_document(
             let source = (source.tables)(id)?;
             Some(Arc::new(lay_table(ctx, id, &source, &look, setting, width)))
         });
-        let figure = embed.filter(|_| table.is_none()).and_then(|id| {
-            let size = (source.figure_size)(id)? * setting.scale;
-            let fit = (width / size.x.max(1.0)).min(1.0);
-            Some((id, size * fit))
-        });
+        let contents = embed.and_then(|id| Some((id, (source.contents)(id)?)));
+        let figure = embed
+            .filter(|_| table.is_none() && contents.is_none())
+            .and_then(|id| {
+                let size = (source.figure_size)(id)? * setting.scale;
+                let fit = (width / size.x.max(1.0)).min(1.0);
+                Some((id, size * fit))
+            });
         let mut job = LayoutJob::default();
         job.wrap.max_width = width;
         job.halign = match look.align {
@@ -468,6 +478,7 @@ pub fn lay_document(
             label,
             figure,
             table,
+            contents,
             rows,
         });
     }
@@ -636,6 +647,7 @@ mod tests {
                         .find(|(known, _)| *known == id)
                         .map(|(_, table)| table.clone())
                 },
+                contents: &|_| None,
             };
             out.blocks = lay_document(ui.ctx(), 0, &source, &setting);
             out.doc_starts = vec![0];

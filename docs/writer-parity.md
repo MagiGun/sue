@@ -198,8 +198,8 @@ of work is by how much people miss each one (the plan at the end).
 
 | Feature | Source | Sue | Notes |
 | --- | --- | --- | --- |
-| Table of contents | WL | partial | In EPUB, Word and OpenDocument exports, not in the text |
-| Update and remove table of contents | WL | missing | |
+| Table of contents | WL | done | Live in the text with pages; Word's own TOC field, OpenDocument's index |
+| Update and remove table of contents | WL | done | Always up to date; deleted like any object |
 | Alphabetical index, mark entry | WL | missing | |
 | Table of figures, tables, objects | WL | missing | |
 | Table of authorities | W | missing | |

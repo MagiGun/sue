@@ -1663,6 +1663,20 @@ print with ruled cells and repeated heading rows; Word (`w:tbl`, a repeated
 widths), HTML and EPUB (`thead` and `tbody`), RTF (`\trowd` rows, `\trhdr`),
 Markdown (pipe tables) and plain text (tab-separated rows) write them.
 
+**Tables of contents (`sue-model::contents`, `sue-type::contents`).** A
+table of contents is an entity of class `sue.text_contents` shown by an
+`embed` mark; it keeps only its settings (`sue.contents.title`,
+`sue.contents.levels`), and its entries are the headings of the text it is
+in, made at every layout, so it never goes stale. The editor lays it out as
+a read-only `TableBlock` with a `Listing` (each entry set in by level, its
+page at the right, a dotted leader): once to paginate, then again with each
+heading's page; a press on an entry moves the caret to its heading. The
+typesetter sets the book twice when it holds contents (`Embeds`), the second
+time with the pages the first found. Word gets a `TOC` field over the
+headings with `w:updateFields`, so Word fills in the pages on opening;
+OpenDocument a `text:table-of-content` over the outline levels; HTML and
+EPUB a `nav` list; RTF, Markdown and plain text the headings, set in.
+
 **Running headers and footers (`sue-model::layout`).** `Running` holds a
 header's or footer's left, middle and right parts, stored as one text parted
 by tabs; each part is text with fields in braces (`FIELDS`: `{page}`,

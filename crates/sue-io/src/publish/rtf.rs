@@ -56,6 +56,26 @@ pub fn to_rtf(book: &Book) -> String {
                 body.push_str(&table_rtf(table, width, base, style.size));
                 continue;
             }
+            if let Some(contents) = book.contents_of(&para) {
+                let size = (style.size * 2.0).round() as i32;
+                if !contents.title.is_empty() {
+                    let _ = writeln!(
+                        body,
+                        "\\pard\\plain\\f{base}\\fs{}\\b {}\\par",
+                        (style.size * 2.6).round() as i32,
+                        escape(&contents.title)
+                    );
+                }
+                for (level, title) in book.headings(contents) {
+                    let _ = writeln!(
+                        body,
+                        "\\pard\\plain\\f{base}\\fs{size}\\li{} {}\\par",
+                        twips(f32::from(level.saturating_sub(1)) * 18.0),
+                        escape(&title)
+                    );
+                }
+                continue;
+            }
             let _ = write!(
                 body,
                 "\\pard\\plain\\f{base}\\fs{}",

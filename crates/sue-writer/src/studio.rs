@@ -89,6 +89,8 @@ pub(crate) enum Dialog {
     Footnote(String),
     /// The running header and footer.
     Furniture(Furniture),
+    /// A new table of contents.
+    Contents(sue_model::contents::Contents),
     /// A new table: rows, columns, and whether the first row is headings.
     Table {
         rows: u32,
@@ -804,6 +806,9 @@ impl SueWriter {
                     session: self.project_number(cx, project::SESSION_TARGET, 500.0) as i64,
                     font_filter: String::new(),
                 }));
+            }
+            "insert.contents" => {
+                self.dialog = Some(Dialog::Contents(sue_model::contents::Contents::default()));
             }
             "insert.header_footer" => {
                 let page = self.page(cx);

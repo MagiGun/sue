@@ -553,6 +553,14 @@ table and back. A table that runs onto the next page breaks between rows and
 repeats its heading row at the top. Tables go into every format you compile
 to, PDF and Word included.
 
+A **table of contents** comes from Insert, Table of Contents: give it a
+title and how many heading levels it lists. It shows every heading with its
+page and a dotted leader, set in by level, and it keeps up by itself as you
+write, so there is nothing to update. Click an entry to go to its heading. It
+prints in PDFs with the right page numbers, and goes into Word (as Word's
+own table of contents, which Word fills in when it opens), OpenDocument, web
+pages, e-books, RTF, Markdown and plain text.
+
 **Headers and footers** come from Insert, Header and Footer: each has a
 left, a middle and a right part, and the buttons below put in the page
 number, the page count, the title, the author or the date, which every page

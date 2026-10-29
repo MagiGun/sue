@@ -162,6 +162,14 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
                 }
                 open_list = list;
             }
+            if let Some(contents) = book.contents_of(&para) {
+                if open_list.take().is_some() {
+                    body.push_str("</text:list>");
+                }
+                tables += 1;
+                body.push_str(&contents_xml(book, contents, tables));
+                continue;
+            }
             if let Some(table) = book.table(&para) {
                 if open_list.take().is_some() {
                     body.push_str("</text:list>");
@@ -364,6 +372,32 @@ fn running_xml(book: &Book, running: &sue_model::Running) -> String {
     out
 }
 
+/// A table of contents as OpenDocument's own, over the outline levels it
+/// lists, its body the book's headings.
+fn contents_xml(book: &Book, contents: &sue_model::contents::Contents, number: usize) -> String {
+    let name = format!("Contents{number}");
+    let title = escape(&contents.title);
+    let mut out = format!(
+        "<text:table-of-content text:protected=\"true\" text:name=\"{name}\"><text:table-of-content-source text:outline-level=\"{}\"><text:index-title-template text:style-name=\"Contents_20_Heading\">{title}</text:index-title-template></text:table-of-content-source><text:index-body>",
+        contents.levels
+    );
+    if !contents.title.is_empty() {
+        let _ = write!(
+            out,
+            "<text:index-title text:name=\"{name}_Head\"><text:p text:style-name=\"Contents_20_Heading\">{title}</text:p></text:index-title>"
+        );
+    }
+    for (level, heading) in book.headings(contents) {
+        let _ = write!(
+            out,
+            "<text:p text:style-name=\"Contents_20_{level}\">{}</text:p>",
+            escape(&heading)
+        );
+    }
+    out.push_str("</text:index-body></text:table-of-content>");
+    out
+}
+
 /// Table number `number` as OpenDocument, `width` points across: its
 /// automatic styles (the width of the table and each column, cell borders)
 /// and the table, heading rows repeated.
@@ -422,6 +456,22 @@ fn table_xml(table: &crate::publish::PublishTable, number: usize, width: f32) ->
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn opendocument_contents_are_an_index_of_the_outline() {
+        let files = read_zip(&to_odt(&super::super::tests::with_contents())).unwrap();
+        let content = files
+            .iter()
+            .find(|(name, _)| name == "content.xml")
+            .unwrap();
+        let xml = String::from_utf8(content.1.clone()).unwrap();
+        assert!(
+            xml.contains("<text:table-of-content-source text:outline-level=\"2\">"),
+            "{xml}"
+        );
+        assert!(xml.contains("<text:p text:style-name=\"Contents_20_2\">Two</text:p>"));
+        assert!(!xml.contains("Contents_20_3"));
+    }
+
     #[test]
     fn opendocument_headers_and_footers_carry_live_page_fields() {
         let mut book = sample();

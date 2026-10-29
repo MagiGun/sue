@@ -8,10 +8,11 @@ use std::collections::HashMap;
 
 use sue_core::{Arena, ComponentKind, EntityId, Value};
 use sue_io::publish::{Book, Figure, PublishStyle, PublishTable, Section};
+use sue_model::contents::Contents;
 use sue_model::manuscript;
 use sue_model::{TextMarks, mark_kind as kind, picture};
 use sue_type::tables::TableSource;
-use sue_type::typeset::{PrintDoc, typeset};
+use sue_type::typeset::{Embeds, PrintDoc, typeset};
 use sue_type::{PageSetup, StyleSheet};
 
 /// A format a project compiles to: key, name, file extension.
@@ -301,6 +302,22 @@ fn tables(arena: &Arena, sections: &[Section]) -> HashMap<EntityId, PublishTable
     out
 }
 
+/// The tables of contents the sections show, for the publishing formats.
+fn contents(arena: &Arena, sections: &[Section]) -> HashMap<EntityId, Contents> {
+    let mut out = HashMap::new();
+    for section in sections {
+        for mark in section.marks.marks() {
+            if mark.kind == kind::EMBED
+                && let Value::Entity(id) = mark.value
+                && let Some(contents) = arena.get_by_id(id).ok().and_then(Contents::read)
+            {
+                out.insert(id, contents);
+            }
+        }
+    }
+    out
+}
+
 /// Compiles with `options` into the bytes of a file.
 ///
 /// # Errors
@@ -334,12 +351,17 @@ pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>,
                 .collect();
             Some(sue_io::pdf::PdfImage { width, height, rgb })
         };
+        let contents = |id: EntityId| arena.get_by_id(id).ok().and_then(Contents::read);
+        let embeds = Embeds {
+            figures: &pictures,
+            tables: &|id| TableSource::read(arena, id),
+            contents: &contents,
+        };
         let pdf = typeset(
             &docs,
             &look.sheet,
             &look.page,
-            &pictures,
-            &|id| TableSource::read(arena, id),
+            &embeds,
             &look.title,
             &look.author,
         );
@@ -352,6 +374,7 @@ pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>,
         identifier: format!("urn:sue:{}", options.from),
         figures: figures(arena, &sections),
         tables: tables(arena, &sections),
+        contents: contents(arena, &sections),
         sections,
         styles: publish_styles(&look.sheet),
         page: look.page.size,

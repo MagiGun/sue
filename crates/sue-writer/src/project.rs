@@ -577,9 +577,9 @@ pub fn empty_trash(arena: &Arena, root: EntityId) -> Option<Batch<Arena>> {
     Some(batch)
 }
 
-/// Copies of the tables `marks` shows, the marks pointing at the copies
-/// now: a copied document owns its tables, so editing one copy leaves the
-/// other alone.
+/// Copies of the tables (and tables of contents) `marks` shows, the marks
+/// pointing at the copies now: a copied document owns its tables, so
+/// editing one copy leaves the other alone.
 fn copy_tables(arena: &Arena, marks: &mut TextMarks) -> Vec<Entity> {
     let shown: Vec<(std::ops::Range<usize>, EntityId)> = marks
         .marks()
@@ -595,13 +595,13 @@ fn copy_tables(arena: &Arena, marks: &mut TextMarks) -> Vec<Entity> {
         let Ok(table) = arena.get_by_id(id) else {
             continue;
         };
-        if table.class() != sue_model::TEXT_TABLE {
-            continue;
-        }
-        let Some(cells) = table.ext::<sue_model::Table>() else {
-            continue;
+        let mut copy = match (table.class(), table.ext::<sue_model::Table>()) {
+            (sue_model::TEXT_TABLE, Some(cells)) => {
+                Entity::empty(table.name(), table.class()).with_ext(cells.clone())
+            }
+            (sue_model::contents::CONTENTS, _) => Entity::empty(table.name(), table.class()),
+            _ => continue,
         };
-        let mut copy = Entity::empty(table.name(), table.class()).with_ext(cells.clone());
         for (key, value) in table.properties().iter() {
             copy = copy.with_property(key, value.clone());
         }
