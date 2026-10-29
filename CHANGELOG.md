@@ -74,6 +74,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Sue Writer no longer crashes on a page narrower than about 543 points,
   such as a phone's.
+- On Android, a file you chose in the system's picker is named as you know
+  it, such as "Picture.png in Download", in the status bar, the Image
+  Viewer and the Converter, instead of a path inside Sue's cache. Phones
+  and tablets no longer offer to show files in Explorer.
 
 ## [0.0.3] - 2026-10-29
 

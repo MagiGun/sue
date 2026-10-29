@@ -64,9 +64,9 @@ pub use input::{
     ScreenEdge, StylusSample, SwipeDirection, TouchGesture, WindowEvent,
 };
 pub use os::{
-    FileFilter, PickNews, Picking, copy_text, deliver_picked_files, open_document, open_url,
-    pick_folder, pick_open_file, pick_save_file, picks_busy, poll_picks, reveal_file,
-    reveal_folder, web_url,
+    FileFilter, PickNews, Picking, ShownPlace, copy_text, deliver_picked_files, file_manager,
+    open_document, open_url, pick_folder, pick_open_file, pick_save_file, picks_busy, poll_picks,
+    reveal_file, reveal_folder, shown_path, shown_place, web_url,
 };
 pub use paint::{EguiPainter, NoTextures, TextureUpload};
 pub use paths::{PlatformPaths, font_dirs, system_font_dirs};

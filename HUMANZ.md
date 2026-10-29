@@ -667,6 +667,7 @@ the `PlatformHost` trait and the portable services next to it:
 | `open_url`, `reveal_folder` | The system browser (only `http` and `https`, validated by `web_url`) and file manager |
 | `pick_open_file`, `pick_save_file`, `pick_folder` | The system's own open, save and folder dialogs: every file Sue asks for goes through them. Each answers a `Picking`: `Chosen(path)`, `Cancelled`, `Failed(why)`, or `Waiting` on phones and tablets (below) |
 | `poll_picks`, `deliver_picked_files`, `picks_busy` | The answers of pickers that run beside Sue (`PickNews`), the hand-back of files written to the paths they chose, and whether to keep polling; no-ops on desktops |
+| `shown_place`, `shown_path`, `file_manager` | How to name a path to people: what they chose for a staged path (`ShownPlace`, a name and, where the system says it, a folder), else the path itself; and the file manager `reveal_file` shows files in (`Explorer`, `Finder`), `None` on phones and tablets, which hide "show it" actions |
 
 Path resolution is a pure function of the OS and an injected environment lookup,
 so it can be tested without touching the real environment:
@@ -797,7 +798,16 @@ stand-in:
   file back on a worker thread; hidden files (`write_atomic`'s temporaries)
   are skipped, and a failure comes back as `PickNews::Failed`;
 - the staging folder is emptied when Sue starts, since what it held stood for
-  places of the last run.
+  places of the last run;
+- each staged path whose writes reach a place (Android's documents and
+  folders, iOS's exports) remembers what people chose, a name and a folder
+  (`System::folder`), and a file made in a chosen folder is in that folder.
+  `shown_place` answers it, so messages never print Sue's cache. Android's
+  folder is read from the content URI alone: the device's storage
+  (`primary:Download/Comics/a.png` is in `Download/Comics`, `home:` is
+  Documents) and the Download folder; other apps' documents have none. An
+  iOS place is in the folder that holds it, unless that is the top of a
+  place in Files.
 
 | | Android (`android::Documents`) | iOS (`ios::Files`) |
 | --- | --- | --- |
@@ -924,7 +934,9 @@ A file written anywhere (`cx.saved(path, note)`, `ShellRequest::Saved`) is
 reported with its name, a note and its folder for at least ten seconds; a
 click on that message runs `reveal-file:<path>`, which shows the file
 selected in Explorer or Finder (`sue_platform::reveal_file`), or its folder
-elsewhere.
+elsewhere. A staged file reads as what people chose (`shown_place`), and
+where there is no file manager (`file_manager()` is `None`) the message
+is not clickable.
 
 ### 3.5 Real-time audio thread isolation
 
