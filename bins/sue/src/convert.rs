@@ -379,9 +379,28 @@ impl Convert {
         options
     }
 
+    /// `true` when results put next to their files would stay in Sue's
+    /// cache, where nobody sees them: a phone's picker gives Sue a copy of
+    /// a file chosen on its own, and the place it came from takes no new
+    /// files. `stays` is [`sue_platform::stays_in_cache`] outside tests.
+    fn strands_next_to(&self, stays: impl Fn(&Path) -> bool) -> bool {
+        self.output.folder.is_none()
+            && self.inputs.iter().any(|input| {
+                input.status != Status::Working
+                    && matches!(&input.source, Source::File(path)
+                        if path.parent().is_some_and(&stays))
+            })
+    }
+
     /// Converts every waiting file: those on disk on a background thread,
     /// the project's own at once.
     fn run(&mut self, cx: &mut AppletContext<'_>) {
+        // Results that would stay in the cache need a folder first; the
+        // run goes on once one is chosen.
+        if self.strands_next_to(sue_platform::stays_in_cache) {
+            Self::pick(cx, "run", "Choose Where Converted Files Go", true);
+            return;
+        }
         let options = self.settled_options();
         let fallback = crate::util::export_dir(cx);
         let mut jobs = Vec::new();
@@ -1120,6 +1139,18 @@ impl Convert {
                 Self::pick(cx, "folder", "Choose Where Converted Files Go", true);
             }
         });
+        if self.strands_next_to(sue_platform::stays_in_cache) {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(
+                        "Sue works on copies of files you pick one by one, so Convert first asks which folder the results go to.",
+                    )
+                    .size(theme.small_size)
+                    .color(theme.muted),
+                )
+                .wrap(),
+            );
+        }
         if let Some(folder) = self.output.folder.clone() {
             ui.horizontal_wrapped(|ui| {
                 ui.add(
@@ -1404,16 +1435,20 @@ impl SueApplet for Convert {
         cx.request(ShellRequest::Open(me()));
     }
 
-    fn picked(&mut self, pick: &FilePick, path: &Path, _cx: &mut AppletContext<'_>) {
+    fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
         match pick.purpose.as_str() {
             "add" => self.add_path(path),
-            "folder" => {
+            "folder" | "run" => {
                 let folder = if path.is_dir() {
                     path.to_path_buf()
                 } else {
                     path.parent().map(Path::to_path_buf).unwrap_or_default()
                 };
                 self.output.folder = Some(folder);
+                // Convert asked for it: carry on converting.
+                if pick.purpose == "run" && !self.busy() {
+                    self.run(cx);
+                }
             }
             _ => {}
         }
@@ -1458,5 +1493,44 @@ mod tests {
             dir.join("out").join("photo-small.png")
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn copies_of_picked_files_ask_where_their_results_go() {
+        // A stand-in for a phone's cache: the copy of a file picked on its
+        // own is in `picked/1`, a chosen folder's files are in `picked/2`.
+        let stays = |path: &Path| path == Path::new("picked/1");
+        let input = |source| Input {
+            source,
+            name: "Picture.png".to_owned(),
+            kind: Kind::Picture,
+            size: 1,
+            status: Status::Waiting,
+        };
+        let mut convert = Convert::default();
+        convert
+            .inputs
+            .push(input(Source::File(PathBuf::from("picked/2/Song.wav"))));
+        convert
+            .inputs
+            .push(input(Source::Entity(AssetHandle::new(1, 1))));
+        assert!(!convert.strands_next_to(stays), "these land where they are");
+
+        convert
+            .inputs
+            .push(input(Source::File(PathBuf::from("picked/1/Picture.png"))));
+        assert!(convert.strands_next_to(stays));
+        assert!(
+            !convert.strands_next_to(sue_platform::stays_in_cache),
+            "a desktop writes next to every file"
+        );
+        // Already on its way, it asks nothing.
+        convert.inputs[2].status = Status::Working;
+        assert!(!convert.strands_next_to(stays));
+        convert.inputs[2].status = Status::Done(PathBuf::new(), String::new());
+        assert!(convert.strands_next_to(stays));
+        // With a folder chosen, every result goes there.
+        convert.output.folder = Some(PathBuf::from("picked/3"));
+        assert!(!convert.strands_next_to(stays));
     }
 }

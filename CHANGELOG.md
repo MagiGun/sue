@@ -104,6 +104,10 @@ follow [Semantic Versioning](https://semver.org/).
   Viewer, the Converter and the Hub, instead of a path inside Sue's
   cache. There the Image Viewer and the Converter no longer offer to
   show files in Explorer, which a phone does not have.
+- On Android, the Converter no longer loses what it makes from a file you
+  picked on its own: "Next to each file" asks which folder the results go
+  to first, and the status bar names them there, such as "Picture.jxl in
+  Download". On iPhone and iPad it asks too.
 
 ## [0.0.3] - 2026-10-29
 
