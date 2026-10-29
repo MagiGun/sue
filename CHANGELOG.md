@@ -96,6 +96,9 @@ follow [Semantic Versioning](https://semver.org/).
 - Studios and tools wear their own colors again: with a light Sue theme
   (Paper), Sue Paint in Gray showed white fields and buttons with dark text
   on its gray panels.
+- On iPhone and iPad the on-screen keyboard no longer covers the bottom of
+  Sue: Sue fits itself above the keyboard, as on Android, so the line you
+  are writing in Sue Writer stays in sight.
 
 ## [0.0.3] - 2026-10-29
 

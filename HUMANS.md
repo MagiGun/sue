@@ -583,8 +583,9 @@ buttons at the bottom (style, bold, italic, underline, alignment, lists,
 indents, font, size and colors; swipe it sideways for the rest), so it sits
 right above the keyboard while you type, and tapping one keeps the keyboard
 up. When the keyboard comes up, the line you are writing moves into sight
-above it. The binder covers the page when you open it and closes when you
-pick a scene. **On a tablet** the toolbar's buttons are larger, for fingers.
+above it, on Android phones and on iPhones alike. The binder covers the
+page when you open it and closes when you pick a scene. **On a tablet** the
+toolbar's buttons are larger, for fingers.
 
 Sue Writer works with the rest of Sue. Pictures from Sue Paint go straight
 into your text with the Sue menu's Send To. Open a Word, Markdown, HTML or
@@ -648,6 +649,11 @@ status bar at the bottom.
   a pen gets pressure-sensitive strokes.
 - **On a phone**, the top bar is taller still, for your thumb, and the Hub
   shows its boxes two by two with big pins.
+
+On phones and tablets the on-screen keyboard never covers Sue: when it comes
+up, Sue fits itself into the space above it, and takes the whole screen back
+when it goes away. On an iPad, a floating or split keyboard leaves Sue as it
+is.
 
 **Sue Paint on a tablet** keeps the menus, the tool strip and the Layer
 palette, and folds the other palettes into icons at the right edge: tap one to

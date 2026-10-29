@@ -261,6 +261,14 @@ impl DesktopHost {
         ))
     }
 
+    /// `true` when iOS's on-screen keyboard moved since the last frame: it
+    /// came up, went away or changed height, which reaches winit with no
+    /// event of its own.
+    #[cfg(target_os = "ios")]
+    fn ios_keyboard_moved(&self) -> bool {
+        (sue_ios::keyboard_inset() - self.info.safe_area.bottom).abs() > 0.5
+    }
+
     /// Makes the window's surface again, for a window the system gave back.
     fn renew_surface(&mut self) -> Result<(), PlatformError> {
         let surface = self
@@ -421,12 +429,20 @@ impl DesktopHost {
 
     /// Builds, paints and presents one frame.
     fn frame<A: DesktopApp>(&mut self, app: &mut A) {
-        #[cfg_attr(not(target_os = "android"), allow(unused_mut))]
+        #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(unused_mut))]
         let mut raw = self.egui.take_egui_input(&self.window);
         #[cfg(target_os = "android")]
         if let Some(safe) = self.android_safe_rect() {
             // Lay everything out between the status and navigation bars.
             raw.screen_rect = Some(safe);
+        }
+        #[cfg(target_os = "ios")]
+        if let Some(screen) = raw.screen_rect.as_mut() {
+            // Lay everything out above the on-screen keyboard; the safe
+            // area's bottom is what it covers, as on Android.
+            let keyboard = sue_ios::keyboard_inset();
+            self.info.safe_area.bottom = keyboard;
+            screen.max.y = (screen.max.y - keyboard).max(screen.min.y);
         }
         let ctx = self.ctx.clone();
         let output = ctx.run_ui(raw, |ui| app.ui(ui, self));
@@ -651,6 +667,10 @@ impl<A: DesktopApp> ApplicationHandler for Runner<A> {
         // soon as it comes up or goes away.
         #[cfg(target_os = "android")]
         if host.android_content_moved() {
+            host.window.request_redraw();
+        }
+        #[cfg(target_os = "ios")]
+        if host.ios_keyboard_moved() {
             host.window.request_redraw();
         }
         let now = Instant::now();
