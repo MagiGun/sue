@@ -164,6 +164,18 @@ re-encoded JPEG XL, an exported rice), the status bar says the file's name and
 the folder it went to. Click that message to see the file, selected, in your
 system's file manager.
 
+**On a phone or tablet** the system's own picker slides over Sue: on Android
+the Files picker, which also reaches Google Drive and other apps' storage,
+and on iPhone and iPad the Files browser. Sue works on a copy of a file you
+open. On Android, saving that file writes your changes back to the
+original, and saving somewhere new asks where first, then every save
+(`Ctrl+S` too) goes there. A folder you choose on Android works both
+ways: Sue reads the files in it (the Converter's Add a Folder) and each
+file Sue makes in it lands there (the Converter's results; Android lets
+you choose any folder but the top of Download). iPhone and iPad save
+first and then ask where in Files the file goes, each time you save; a
+folder you choose there is written to directly.
+
 ### The command palette
 
 Press **Tab** (or `/`) for the **command palette**: start typing and it finds
@@ -593,9 +605,8 @@ to sign with your own Apple account. Sue is not code-signed yet, so Windows
 may warn before running a download ("Windows protected your PC"): More info,
 then Run anyway; or install it with Scoop (`scoop install
 https://github.com/MagiGun/sue/releases/latest/download/sue.json`), which
-does not warn. On Android, to open your own pictures
-(say, ones you sent to the device's Download folder), allow Sue to manage files
-once: Settings, Apps, Sue, Permissions, Files and media.
+does not warn. Opening and saving on Android and iOS go through the
+system's own picker, which needs no permission.
 
 ---
 

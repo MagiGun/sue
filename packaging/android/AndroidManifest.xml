@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Sue as a native activity: no Java code, the window and input come from
-     the Rust library libsue_android.so (crates/sue-platform/android). -->
+<!-- Sue as a native activity: the window and input come from the Rust
+     library libsue_android.so (crates/sue-platform/android). Its one Java
+     class, SueActivity (packaging/android/java), adds the system's own
+     file pickers. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.magigun.sue"
     android:versionCode="@VERSION_CODE@"
@@ -20,13 +22,13 @@
     <application
         android:label="Sue"
         android:icon="@mipmap/ic_launcher"
-        android:hasCode="false"
+        android:hasCode="true"
         android:extractNativeLibs="true"
         android:requestLegacyExternalStorage="true"
         android:resizeableActivity="true"
         android:theme="@style/Sue">
         <activity
-            android:name="android.app.NativeActivity"
+            android:name="com.magigun.sue.SueActivity"
             android:exported="true"
             android:launchMode="singleTask"
             android:screenOrientation="unspecified"

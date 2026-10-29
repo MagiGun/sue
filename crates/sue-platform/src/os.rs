@@ -1,5 +1,6 @@
 //! Hand-offs to the operating system: the default web browser, the file
-//! manager, native open and save dialogs, and the clipboard.
+//! manager, the system's own open, save and folder dialogs, and the
+//! clipboard.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -161,14 +162,36 @@ pub struct FileFilter {
     pub extensions: Vec<String>,
 }
 
-/// Asks the user for a file to open with the native dialog. Blocks until the
-/// dialog closes; `None` if it was cancelled.
+/// How a system file dialog answered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Picking {
+    /// The person chose this path.
+    Chosen(PathBuf),
+    /// The dialog closed without a choice.
+    Cancelled,
+    /// The dialog is open beside Sue (phones and tablets); its answer
+    /// comes from [`poll_picks`].
+    Waiting,
+    /// The system could not show the dialog or hand the file over.
+    Failed(String),
+}
+
+/// News from the system's file dialogs on phones and tablets.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PickNews {
+    /// The dialog that said [`Picking::Waiting`] closed with this answer.
+    Answered(Picking),
+    /// A file written to a chosen path could not reach the place the
+    /// person chose; what people should read.
+    Failed(String),
+}
+
+/// Asks the person for a file to open with the system's own dialog.
+/// Desktops block until it closes; phones and tablets answer
+/// [`Picking::Waiting`] and copy the chosen document into Sue's cache,
+/// where writes go back to it ([`deliver_picked_files`]).
 #[must_use]
-pub fn pick_open_file(
-    title: &str,
-    start: Option<&Path>,
-    filters: &[FileFilter],
-) -> Option<PathBuf> {
+pub fn pick_open_file(title: &str, start: Option<&Path>, filters: &[FileFilter]) -> Picking {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let mut dialog = rfd::FileDialog::new().set_title(title);
@@ -178,44 +201,50 @@ pub fn pick_open_file(
         for filter in filters {
             dialog = dialog.add_filter(filter.name.clone(), &filter.extensions);
         }
-        dialog.pick_file()
+        dialog
+            .pick_file()
+            .map_or(Picking::Cancelled, Picking::Chosen)
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
-        // No system dialog is wired up on phones and tablets yet.
-        let _ = (title, start, filters);
-        None
+        let _ = (title, start);
+        crate::picks::native().show(crate::picks::Kind::Open, &extensions(filters), "")
     }
 }
 
-/// Asks the user for a folder with the native dialog. Blocks until the
-/// dialog closes; `None` if it was cancelled.
+/// Asks the person for a folder with the system's own dialog. Desktops
+/// block until it closes; phones and tablets answer [`Picking::Waiting`].
 #[must_use]
-pub fn pick_folder(title: &str, start: Option<&Path>) -> Option<PathBuf> {
+pub fn pick_folder(title: &str, start: Option<&Path>) -> Picking {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let mut dialog = rfd::FileDialog::new().set_title(title);
         if let Some(start) = start.filter(|start| start.is_dir()) {
             dialog = dialog.set_directory(start);
         }
-        dialog.pick_folder()
+        dialog
+            .pick_folder()
+            .map_or(Picking::Cancelled, Picking::Chosen)
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = (title, start);
-        None
+        crate::picks::native().show(crate::picks::Kind::Folder, &[], "")
     }
 }
 
-/// Asks the user where to save a file with the native dialog. Blocks until
-/// the dialog closes; `None` if it was cancelled.
+/// Asks the person where to save a file with the system's own dialog.
+/// Desktops block until it closes. Android asks first and answers
+/// [`Picking::Waiting`]; iOS answers a path in Sue's cache at once and
+/// asks where to export it once it is written. Either way, call
+/// [`deliver_picked_files`] after writing.
 #[must_use]
 pub fn pick_save_file(
     title: &str,
     start: Option<&Path>,
     file_name: &str,
     filters: &[FileFilter],
-) -> Option<PathBuf> {
+) -> Picking {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let mut dialog = rfd::FileDialog::new()
@@ -227,12 +256,66 @@ pub fn pick_save_file(
         for filter in filters {
             dialog = dialog.add_filter(filter.name.clone(), &filter.extensions);
         }
-        dialog.save_file()
+        dialog
+            .save_file()
+            .map_or(Picking::Cancelled, Picking::Chosen)
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
-        let _ = (title, start, file_name, filters);
-        None
+        let _ = (title, start);
+        crate::picks::native().show(crate::picks::Kind::Save, &extensions(filters), file_name)
+    }
+}
+
+/// Every extension the filters take, for the mobile pickers, which offer
+/// one list of kinds.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn extensions(filters: &[FileFilter]) -> Vec<String> {
+    let mut all: Vec<String> = Vec::new();
+    for extension in filters.iter().flat_map(|filter| &filter.extensions) {
+        let extension = extension.trim_start_matches('.').to_ascii_lowercase();
+        if !extension.is_empty() && !all.contains(&extension) {
+            all.push(extension);
+        }
+    }
+    all
+}
+
+/// Answers of dialogs that said [`Picking::Waiting`], and files that
+/// could not reach the place chosen for them. Always empty on desktops.
+#[must_use]
+pub fn poll_picks() -> Vec<PickNews> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        crate::picks::native().poll()
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        Vec::new()
+    }
+}
+
+/// Hands files written to chosen paths over to the place the person
+/// chose, where the system keeps that place apart from Sue (Android's
+/// documents, iOS's Files). Call it after writing; it only looks at the
+/// files picks staged, and does nothing on desktops.
+pub fn deliver_picked_files() {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    crate::picks::native().deliver();
+}
+
+/// `true` while a system dialog is open beside Sue or a picked file is
+/// being copied, so the caller keeps calling [`poll_picks`]. Never on
+/// desktops.
+#[must_use]
+pub fn picks_busy() -> bool {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        crate::picks::native().busy()
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        false
     }
 }
 

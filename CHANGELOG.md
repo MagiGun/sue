@@ -20,6 +20,11 @@ follow [Semantic Versioning](https://semver.org/).
 - The Sue menu, under the Sue button at the window's top left: the Hub,
   every studio and tool, New, Open File, projects, Send To, the pin, the
   command palette and Settings.
+- Opening and saving work on phones and tablets again, through the
+  system's own picker: Android's Files picker (Google Drive too) and the
+  Files browser on iPhone and iPad. On Android, saving a file you opened
+  writes back to the original, and a folder you choose is read and
+  written (the Converter's Add a Folder and its output folder).
 
 ### Changed
 

@@ -50,15 +50,19 @@ sue-platform  ──► winit, wgpu, egui, egui-winit, egui-wgpu, arboard, polls
 The graph is acyclic by construction. `sue-core` and `sue-platform` are leaves
 among the engine crates, so the data kernel never depends on an operating
 system, and the OS layer never depends on the data model. `winit` (windows and
-OS input), `cpal` (audio devices), `rfd` (native dialogs) and `open` (the
-system browser and file manager), `arboard` (the clipboard), `egui-winit` (OS
-input for egui) and `egui-wgpu` (egui's painter) are used only by
-`sue-platform`. `egui` itself is a portable, immediate-mode widget library with
+OS input), `cpal` (audio devices), `rfd` (native dialogs on desktops), `jni`
+(Android's file pickers, in Java), `objc2-ui-kit` (iOS's, in `sue-ios`) and
+`open` (the system browser and file manager), `arboard` (the clipboard),
+`egui-winit` (OS input for egui) and `egui-wgpu` (egui's painter) are used only
+by `sue-platform`. `egui` itself is a portable, immediate-mode widget library with
 no OS bindings: `sue-wm` builds the whole shell with it, and the platform host
 paints what it produces. `unsafe` code is forbidden workspace-wide
 (`[workspace.lints] rust.unsafe_code = "forbid"`). The `wgpu` window surface is
 created through its safe API, so `sue-platform` keeps the lint too. Native FFI
-added to `sue-platform` later MUST relax it for that crate only.
+is relaxed only in its two small entry crates, each item approved by the
+maintainer: `crates/sue-platform/android` (the native activity's entry and the
+two raw JNI pointers it wraps) and `crates/sue-platform/ios` (UIKit's
+document picker); `sue-platform` calls Java through `jni`'s safe API.
 
 ---
 
@@ -661,7 +665,8 @@ the `PlatformHost` trait and the portable services next to it:
 | `copy_text` | The system clipboard (`arboard`) for buttons such as Copy All; text fields copy and paste through `egui-winit` |
 | `EguiPainter`, `TextureUpload` | Paints egui frames with `egui-wgpu` into the window or an offscreen texture; uploads image pixels the caller borrows from the arena straight into GPU textures (rule 5) |
 | `open_url`, `reveal_folder` | The system browser (only `http` and `https`, validated by `web_url`) and file manager |
-| `pick_open_file`, `pick_save_file`, `pick_folder` | The system's own open, save and folder dialogs (`rfd`): every file Sue asks for goes through them. None is wired up on Android and iOS yet, so a pick there comes back empty |
+| `pick_open_file`, `pick_save_file`, `pick_folder` | The system's own open, save and folder dialogs: every file Sue asks for goes through them. Each answers a `Picking`: `Chosen(path)`, `Cancelled`, `Failed(why)`, or `Waiting` on phones and tablets (below) |
+| `poll_picks`, `deliver_picked_files`, `picks_busy` | The answers of pickers that run beside Sue (`PickNews`), the hand-back of files written to the paths they chose, and whether to keep polling; no-ops on desktops |
 
 Path resolution is a pure function of the OS and an injected environment lookup,
 so it can be tested without touching the real environment:
@@ -753,10 +758,12 @@ three-finger taps undo and redo.
 **Phones and tablets.** `sue-platform` builds for Android and iOS with the
 desktop-only crates (`arboard`, `rfd`, `open`, `audio_thread_priority`) left
 out by target. On Android, `crates/sue-platform/android` is a `cdylib` whose
-only item is the exported `android_main` (the one place the `unsafe_code` lint
-is relaxed, from `forbid` to `deny` with a single audited `allow`, approved by
-the maintainer on 2026-10-28 for that entry alone); it hands the
-`AndroidApp` to `sue_platform::android` and runs `sue::run_window`, the same
+items are the exported `android_main` and `java` (the `unsafe_code` lint is
+relaxed there from `forbid` to `deny`, with an audited `allow` on each,
+approved by the maintainer on 2026-10-28 for the entry and on 2026-10-29 for
+`java`, which wraps the raw JNI pointers of Java's VM and the activity once);
+it hands the `AndroidApp`, the VM and a global reference to the activity to
+`sue_platform::android` and runs `sue::run_window`, the same
 app the desktop executable runs, then ends the process, because a window's
 event loop can be made once per process. The host:
 
@@ -770,6 +777,34 @@ event loop can be made once per process. The host:
 - keeps config and data in the app sandbox (`internal_data_path`).
 
 iOS uses the ordinary executable in an app bundle; its sandbox is `HOME`.
+
+**File pickers on phones and tablets.** Desktops show `rfd`'s dialogs, which
+block until they close. Android and iOS show the system's own picker beside
+Sue: it answers later, and the place chosen is not a path Sue can write.
+`sue-platform/src/picks.rs` bridges both with one engine, `Picker<S: System>`,
+over a small `System` trait (show, answer, name, copy in, copy out, make a
+document in a folder, export), so the whole flow runs headless in tests with a
+stand-in:
+
+- a pick answers `Picking::Waiting`; the runtime keeps the `FilePick`, wakes
+  every 200 ms while `picks_busy`, and turns the answer from `poll_picks` into
+  `ShellRequest::Picked`, the same request a desktop dialog makes;
+- a chosen file is *staged* under `<cache>/picked/<n>/<name>`, keeping the
+  name the system shows (it says the format): an opened document is copied
+  there on a worker thread and that copy's path is the answer;
+- `deliver_picked_files` (after every `serve_requests`) compares each staged
+  file's size and time of change with the last hand-back and copies a written
+  file back on a worker thread; hidden files (`write_atomic`'s temporaries)
+  are skipped, and a failure comes back as `PickNews::Failed`;
+- the staging folder is emptied when Sue starts, since what it held stood for
+  places of the last run.
+
+| | Android (`android::Documents`) | iOS (`ios::Files`) |
+| --- | --- | --- |
+| Reached through | `SueActivity` (`packaging/android/java`), a `NativeActivity` subclass with no native methods, called with `jni` 0.21's safe API on a `GlobalRef` the launcher makes: `showPicker`, `takePicked`, `displayName`, `copyIn`, `copyOut`, `createIn` and `listIn`, strings in and out (approved by the maintainer on 2026-10-29) | `sue-ios` (`crates/sue-platform/ios`): a `UIDocumentPickerDelegate` class and the calls that show the picker over the key window's topmost view controller |
+| Open | `ACTION_OPEN_DOCUMENT` (MIME types from the extensions, any file when one is unknown); the copy's writes go back to the document | `initForOpeningContentTypes:asCopy:` with `UTType`s from the extensions; the copy is Sue's own |
+| Save | `ACTION_CREATE_DOCUMENT` asks first; every write to the staged path (`Ctrl+S` too) goes to the document (`"wt"`, else `"w"`) | The staged path is the answer at once; once written, `initForExportingURLs:asCopy:` asks where it goes, each time |
+| Folder | `ACTION_OPEN_DOCUMENT_TREE`; the tree's top-level files are copied in first on a worker thread (`listIn`, at most 500, hidden ones left out) and each written back to its own document; each new file written in the staged folder becomes a document in the tree (`createDocument`), then is updated in place | The folder's own path, with security-scoped access started |
 
 **Packages.** `packaging/` has a script per system: for Windows a portable
 zip, an `.msi` (WiX, with Sue's icon on its pages and its Start menu
@@ -1984,7 +2019,8 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.1 Native desktop host (`winit` window, `wgpu` surface, egui input, IME, clipboard, file drops) | **Implemented** (one window; tested on Windows) | `sue-platform/src/desktop.rs`, `gpu.rs`, `paint.rs` |
 | §3.1 GPU choice (`display.gpu_preference`: auto, integrated, discrete) | **Implemented**; `auto` draws on the display GPU, which a device test checks on Windows | `sue-platform/src/gpu.rs`, `bins/sue/src/desktop.rs` |
 | §3.1 Frame pacing: application and egui repaint requests combined in `about_to_wait`, timed wakes, close confirmation | **Implemented**; the self-check asserts that neither the runtime nor egui asks for frames once idle | `sue-platform/src/desktop.rs`, `bins/sue/src/runtime.rs` |
-| §3.1 Native open, save and folder dialogs, system browser, file manager | **Implemented** with `rfd` and `open` (web addresses limited to `http` and `https`) on desktops; no system file dialog on Android and iOS yet | `sue-platform/src/os.rs` |
+| §3.1 Native open, save and folder dialogs, system browser, file manager | **Implemented** with `rfd` and `open` (web addresses limited to `http` and `https`) on desktops | `sue-platform/src/os.rs` |
+| §3.1 The system's own file pickers on Android and iOS (staged copies handed back) | **Implemented**; the engine is tested headless with a stand-in system; Android's picker is tried on an emulator; the iOS picker is type-checked but not yet run on a device | `sue-platform/src/picks.rs`, `android.rs`, `ios.rs`, `crates/sue-platform/ios`, `packaging/android/java` |
 | §3.1 Native mobile hosts (Android, iOS) | Planned (the mobile topologies already run on `HeadlessHost`) | n/a |
 | §3.2 to 3.4 Form factors, layout, springs, scheduler | **Implemented** | `sue-wm` |
 | §3.4 Painting with egui (`egui-wgpu`), arena images as native textures | **Implemented**; the self-check renders a frame on the GPU and counts tinted pixels (zero) | `sue-platform/src/paint.rs` |

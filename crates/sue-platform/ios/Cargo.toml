@@ -1,0 +1,41 @@
+[package]
+name = "sue-ios"
+description = "Sue on iOS: the audited Objective-C calls that show UIKit's document picker for sue-platform."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+license-file.workspace = true
+
+# The same Objective-C crates winit uses on iOS, with the parts of
+# Foundation and UIKit the document picker needs.
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSObject", "NSSet", "NSString", "NSURL"] }
+objc2-ui-kit = { workspace = true, features = [
+    "std",
+    "block2",
+    "UIApplication",
+    "UIDocumentPickerViewController",
+    "UIResponder",
+    "UIScene",
+    "UIView",
+    "UIViewController",
+    "UIWindow",
+    "UIWindowScene",
+] }
+
+# Talking to Objective-C is unsafe in Rust: this crate (part of
+# sue-platform, backbone rule 6) relaxes the workspace's `forbid` to
+# `deny` so that audited items may allow it. Approved by the maintainer
+# on 2026-10-29 for the document picker's delegate and the calls that
+# show the picker; any other unsafe code here needs its own approval.
+[lints.rust]
+unsafe_code = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"

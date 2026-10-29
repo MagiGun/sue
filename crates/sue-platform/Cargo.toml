@@ -31,9 +31,16 @@ audio_thread_priority.workspace = true
 open.workspace = true
 rfd.workspace = true
 
-# Android starts Sue as a native activity.
+# Android starts Sue as a native activity; the system's file pickers are
+# reached in Java, through Sue's activity.
 [target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
 winit = { workspace = true, features = ["android-native-activity"] }
+
+# iOS's document picker, through the audited Objective-C calls in
+# crates/sue-platform/ios.
+[target.'cfg(target_os = "ios")'.dependencies]
+sue-ios = { path = "ios" }
 
 [lints]
 workspace = true

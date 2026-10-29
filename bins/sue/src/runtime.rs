@@ -15,7 +15,10 @@ use std::time::{Duration, Instant};
 use egui::{Align2, Id, Order, RichText, Sense};
 use sue_core::{SueFile, UndoStack};
 use sue_io::{IngestOptions, NativeJxlPipeline, ingest_bytes, meta};
-use sue_platform::{AudioConfig, AudioOutput, AudioSink, FramePacing, TextureUpload, write_atomic};
+use sue_platform::{
+    AudioConfig, AudioOutput, AudioSink, FramePacing, PickNews, Picking, TextureUpload,
+    write_atomic,
+};
 use sue_rice::{RiceSchema, SetRiceValues};
 use sue_wm::{
     Applets, FilePick, RiceEdit, Shell, ShellIo, ShellRequest, Theme, Transport, Typing, widgets,
@@ -26,6 +29,9 @@ use crate::util::{file_name, human_bytes};
 
 /// How often the audio queue is topped up while something plays.
 const FEED_INTERVAL: Duration = Duration::from_millis(40);
+/// How often a file dialog open beside Sue (phones and tablets) is asked
+/// for its answer.
+const PICK_POLL: Duration = Duration::from_millis(200);
 
 /// Frame-rate telemetry for the status bar.
 #[derive(Debug, Default)]
@@ -128,6 +134,12 @@ pub struct Runtime {
     /// A file dialog a headless run could not show, kept for scripted runs
     /// to answer ([`Runtime::answer_pick`]).
     pending_pick: Option<FilePick>,
+    /// A file dialog open beside Sue (phones and tablets), whose answer
+    /// comes later ([`sue_platform::poll_picks`]).
+    waiting_pick: Option<FilePick>,
+    /// When to ask the system's file pickers for news again, while one is
+    /// open or a picked file is being copied.
+    next_pick_poll: Option<Instant>,
     /// Where the open project lives, once saved or opened.
     project: Option<PathBuf>,
     /// The open project file, so chunks this build does not know survive.
@@ -171,6 +183,8 @@ impl Runtime {
             interactive: false,
             booted: false,
             pending_pick: None,
+            waiting_pick: None,
+            next_pick_poll: None,
             project: None,
             project_file: SueFile::new(),
         })
@@ -208,6 +222,7 @@ impl Runtime {
             let mut io = shell_io!(self, textures);
             self.shell.boot(&mut io);
         }
+        self.poll_system_dialogs(textures, now);
         {
             let mut io = shell_io!(self, textures);
             self.shell.ui(ui, &mut io, now);
@@ -341,6 +356,7 @@ impl Runtime {
                 .then_some(self.next_feed.unwrap_or(now)),
             self.typing.deadline(),
             self.next_tick,
+            self.next_pick_poll,
         ]
         .into_iter()
         .flatten()
@@ -352,6 +368,7 @@ impl Runtime {
     /// redrawn.
     pub fn timer(&mut self, textures: &mut dyn TextureUpload, now: Instant) -> bool {
         let mut redraw = self.shell.expire(now);
+        redraw |= self.poll_system_dialogs(textures, now);
         if self.typing.flush_if_paused(&mut self.engine.history, now) {
             redraw = true;
         }
@@ -436,7 +453,7 @@ impl Runtime {
         for _ in 0..8 {
             let requests = std::mem::take(&mut self.engine.requests);
             if requests.is_empty() {
-                return;
+                break;
             }
             for request in requests {
                 let leftover = {
@@ -455,6 +472,15 @@ impl Runtime {
                     Some(_) | None => {}
                 }
             }
+        }
+        // Files just written to paths a dialog chose go on to the place
+        // the person chose, where the system keeps it apart (phones and
+        // tablets).
+        sue_platform::deliver_picked_files();
+        if sue_platform::picks_busy() {
+            self.next_pick_poll.get_or_insert(now + PICK_POLL);
+        } else {
+            self.next_pick_poll = None;
         }
     }
 
@@ -563,8 +589,9 @@ impl Runtime {
     }
 
     /// Shows the system's open, save or folder dialog for `pick`; the
-    /// chosen path comes back as [`ShellRequest::Picked`]. A headless run
-    /// keeps the pick for a script to answer.
+    /// chosen path comes back as [`ShellRequest::Picked`], at once on
+    /// desktops and later on phones and tablets. A headless run keeps the
+    /// pick for a script to answer.
     fn pick_with_system_dialog(&mut self, pick: FilePick) {
         if !self.interactive {
             self.shell
@@ -577,16 +604,52 @@ impl Runtime {
             .start
             .clone()
             .unwrap_or_else(|| self.engine.paths.home_dir.clone());
-        let path = match &pick.save_as {
+        let answer = match &pick.save_as {
             Some(name) => sue_platform::pick_save_file(&pick.title, Some(&start), name, &filters),
             None if pick.folders => sue_platform::pick_folder(&pick.title, Some(&start)),
             None => sue_platform::pick_open_file(&pick.title, Some(&start), &filters),
         };
-        if let Some(path) = path {
-            self.engine
+        self.answered(pick, answer);
+    }
+
+    /// Carries out a system dialog's answer to `pick`.
+    fn answered(&mut self, pick: FilePick, answer: Picking) {
+        match answer {
+            Picking::Chosen(path) => self
+                .engine
                 .requests
-                .push(ShellRequest::Picked { pick, path });
+                .push(ShellRequest::Picked { pick, path }),
+            Picking::Cancelled => {}
+            Picking::Waiting => self.waiting_pick = Some(pick),
+            Picking::Failed(why) => self
+                .shell
+                .notify(format!("Cannot choose a file: {why}"), true),
         }
+    }
+
+    /// Takes the answers of file dialogs open beside Sue (phones and
+    /// tablets) and serves them. Returns `true` if any came.
+    fn poll_system_dialogs(&mut self, textures: &mut dyn TextureUpload, now: Instant) -> bool {
+        if self.next_pick_poll.is_none() {
+            return false;
+        }
+        let news = sue_platform::poll_picks();
+        self.next_pick_poll = sue_platform::picks_busy().then_some(now + PICK_POLL);
+        if news.is_empty() {
+            return false;
+        }
+        for news in news {
+            match news {
+                PickNews::Answered(answer) => {
+                    if let Some(pick) = self.waiting_pick.take() {
+                        self.answered(pick, answer);
+                    }
+                }
+                PickNews::Failed(why) => self.shell.notify(why, true),
+            }
+        }
+        self.serve_requests(textures, now);
+        true
     }
 
     /// The file dialog a headless run could not show, if any (tests).
