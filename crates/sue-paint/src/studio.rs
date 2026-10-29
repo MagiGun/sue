@@ -136,6 +136,26 @@ pub(crate) enum Gesture {
         changed: bool,
         label: String,
     },
+    /// A Correct Line drag on vector `layer`: its pixels and lines from
+    /// before, the lines as the drag began and now, the control point or
+    /// place it holds (line, sample, distance along), where it began and
+    /// last was (layer pixels), the path traced with its pressure, and the
+    /// lines Process whole line has done.
+    Correct {
+        layer: EntityId,
+        before: Vec<u8>,
+        geometry: sue_model::Geometry,
+        base: Vec<crate::vector::Line>,
+        lines: Vec<crate::vector::Line>,
+        grab: Option<(usize, usize, f32)>,
+        start: [f32; 2],
+        last: [f32; 2],
+        path: Vec<([f32; 2], f32)>,
+        done: Vec<usize>,
+        offset: [i64; 2],
+        changed: bool,
+        label: String,
+    },
     /// Dragging a ruler's handle: the ruler's text from before.
     RulerHandle {
         handle: crate::rulers::Handle,

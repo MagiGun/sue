@@ -74,7 +74,15 @@ pub struct Line {
     pub finish: Finish,
     /// The copies it paints through (symmetry).
     pub copies: Vec<Copy2D>,
+    /// A flag a sample ([`CONTROL`], [`CORNER`]) for Correct Line, or none
+    /// to find the control points from the path.
+    pub marks: Vec<u8>,
 }
+
+/// A sample that is a control point (Correct Line).
+pub const CONTROL: u8 = 1;
+/// A control point that is a corner.
+pub const CORNER: u8 = 2;
 
 impl Line {
     /// The line a finished `stroke` drew from `samples` (its samples
@@ -88,6 +96,7 @@ impl Line {
             colors: [color, sub],
             finish,
             copies: stroke.copies().to_vec(),
+            marks: Vec::new(),
         }
     }
 
@@ -98,15 +107,17 @@ impl Line {
         stroke.set_copies(self.copies.clone());
         for sample in &self.samples {
             stroke.set_speed(sample.speed);
+            stroke.set_shape(sample.width, sample.alpha);
             stroke.to(raster, sample.at, sample.pressure, None);
         }
         stroke.end(raster, self.finish, None);
     }
 
     /// The same line along other samples.
-    fn along(&self, samples: Vec<Sample>, keep_flick: bool) -> Self {
+    pub(crate) fn along(&self, samples: Vec<Sample>, keep_flick: bool) -> Self {
         Self {
             samples,
+            marks: Vec::new(),
             finish: Finish {
                 flick: self.finish.flick.filter(|_| keep_flick),
                 ..self.finish
@@ -147,6 +158,8 @@ pub fn lines(geometry: &Geometry) -> Vec<Line> {
     let count = points.len();
     let pressure = floats(geometry, Domain::Point, "pressure", 1).filter(|v| v.len() == count);
     let speed = floats(geometry, Domain::Point, "speed", 1).filter(|v| v.len() == count);
+    let width = floats(geometry, Domain::Point, "width", 1).filter(|v| v.len() == count);
+    let alpha = floats(geometry, Domain::Point, "alpha", 1).filter(|v| v.len() == count);
     let prims = geometry.prims().len();
     let per = |name: &str, width: u8| {
         floats(geometry, Domain::Primitive, name, width)
@@ -157,6 +170,7 @@ pub fn lines(geometry: &Geometry) -> Vec<Line> {
     let flicked = ints(geometry, Domain::Primitive, "flicked").filter(|v| v.len() == prims);
     let single = ints(geometry, Domain::Primitive, "single").filter(|v| v.len() == prims);
     let tips = texts(geometry, Domain::Primitive, "tip").filter(|v| v.len() == prims);
+    let marks = ints(geometry, Domain::Point, "mark").filter(|v| v.len() == count);
     let copies = texts(geometry, Domain::Primitive, "copies").filter(|v| v.len() == prims);
     let three = |values: Option<&[f32]>, at: usize, or: [f32; 3]| {
         values.map_or(or, |values| {
@@ -178,11 +192,26 @@ pub fn lines(geometry: &Geometry) -> Vec<Line> {
                         at: [x as f32, y as f32],
                         pressure: pressure.map_or(1.0, |values| values[index]),
                         speed: speed.map_or(0.0, |values| values[index]),
+                        width: width.map_or(1.0, |values| values[index]),
+                        alpha: alpha.map_or(1.0, |values| values[index]),
                     }
                 })
                 .collect();
+            let mut flags: Vec<u8> = marks
+                .map(|values| {
+                    geometry
+                        .prim_points(prim)
+                        .iter()
+                        .map(|&point| values[point as usize].clamp(0, 255) as u8)
+                        .collect()
+                })
+                .unwrap_or_default();
             if single.is_some_and(|values| values[at] == 1) {
                 samples.truncate(1);
+                flags.truncate(1);
+            }
+            if flags.iter().all(|flag| *flag == 0) {
+                flags.clear();
             }
             let copies = copies
                 .map(|values| {
@@ -211,6 +240,7 @@ pub fn lines(geometry: &Geometry) -> Vec<Line> {
                         .map(|(_, values)| [values[at * 2], values[at * 2 + 1]]),
                 },
                 copies,
+                marks: flags,
             }
         })
         .collect()
@@ -221,25 +251,35 @@ pub fn lines(geometry: &Geometry) -> Vec<Line> {
 pub fn to_geometry(lines: &[Line]) -> Geometry {
     let mut geometry = Geometry::new();
     let (mut pressure, mut speed) = (Vec::new(), Vec::new());
+    let (mut width, mut alpha) = (Vec::new(), Vec::new());
+    let mut marks: Vec<i32> = Vec::new();
     let (mut colors, mut subs, mut flicks) = (Vec::new(), Vec::new(), Vec::new());
     let (mut corrections, mut flicked, mut single) = (Vec::new(), Vec::new(), Vec::new());
     let (mut tips, mut copies) = (Vec::new(), Vec::new());
     for line in lines.iter().filter(|line| !line.samples.is_empty()) {
+        marks.extend(
+            (0..line.samples.len()).map(|at| i32::from(line.marks.get(at).copied().unwrap_or(0))),
+        );
         let mut indices: Vec<u32> = line
             .samples
             .iter()
             .map(|sample| {
                 pressure.push(sample.pressure);
                 speed.push(sample.speed);
+                width.push(sample.width);
+                alpha.push(sample.alpha);
                 geometry.add_point([f64::from(sample.at[0]), f64::from(sample.at[1]), 0.0])
             })
             .collect();
         // A dot is one sample: a polyline needs two points, so it doubles.
         let dot = indices.len() == 1;
         if dot {
+            marks.push(0);
             let sample = line.samples[0];
             pressure.push(sample.pressure);
             speed.push(sample.speed);
+            width.push(sample.width);
+            alpha.push(sample.alpha);
             indices.push(geometry.add_point([
                 f64::from(sample.at[0]),
                 f64::from(sample.at[1]),
@@ -275,6 +315,9 @@ pub fn to_geometry(lines: &[Line]) -> Geometry {
     for (domain, name, data) in [
         (Domain::Point, "pressure", float(1, pressure)),
         (Domain::Point, "speed", float(1, speed)),
+        (Domain::Point, "width", float(1, width)),
+        (Domain::Point, "alpha", float(1, alpha)),
+        (Domain::Point, "mark", int(marks)),
         (Domain::Primitive, "color", float(3, colors)),
         (Domain::Primitive, "sub", float(3, subs)),
         (Domain::Primitive, "flick", float(2, flicks)),
@@ -336,7 +379,7 @@ fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
 }
 
 /// The distances along `samples` of each of them.
-fn arcs(samples: &[Sample]) -> Vec<f32> {
+pub(crate) fn arcs(samples: &[Sample]) -> Vec<f32> {
     let mut total = 0.0;
     let mut out = Vec::with_capacity(samples.len());
     for (index, sample) in samples.iter().enumerate() {
@@ -350,7 +393,7 @@ fn arcs(samples: &[Sample]) -> Vec<f32> {
 
 /// How far along `samples` the point nearest `at` is, when it is within
 /// `reach`.
-fn touch(samples: &[Sample], arcs: &[f32], at: [f32; 2], reach: f32) -> Option<f32> {
+pub(crate) fn touch(samples: &[Sample], arcs: &[f32], at: [f32; 2], reach: f32) -> Option<f32> {
     if samples.len() == 1 {
         return (distance(samples[0].at, at) <= reach).then_some(0.0);
     }
@@ -374,7 +417,7 @@ fn touch(samples: &[Sample], arcs: &[f32], at: [f32; 2], reach: f32) -> Option<f
 }
 
 /// The sample `along` the line, between its samples.
-fn at_arc(samples: &[Sample], arcs: &[f32], along: f32) -> Sample {
+pub(crate) fn at_arc(samples: &[Sample], arcs: &[f32], along: f32) -> Sample {
     let index = arcs
         .partition_point(|arc| *arc < along)
         .clamp(1, samples.len() - 1);
@@ -390,11 +433,13 @@ fn at_arc(samples: &[Sample], arcs: &[f32], along: f32) -> Sample {
         at: [mix(a.at[0], b.at[0]), mix(a.at[1], b.at[1])],
         pressure: mix(a.pressure, b.pressure),
         speed: mix(a.speed, b.speed),
+        width: mix(a.width, b.width),
+        alpha: mix(a.alpha, b.alpha),
     }
 }
 
 /// The part of the line from `from` to `to` along it, cut exactly.
-fn part(samples: &[Sample], arcs: &[f32], from: f32, to: f32) -> Vec<Sample> {
+pub(crate) fn part(samples: &[Sample], arcs: &[f32], from: f32, to: f32) -> Vec<Sample> {
     let mut out = vec![at_arc(samples, arcs, from)];
     out.extend(
         samples
@@ -527,6 +572,8 @@ mod tests {
                     ],
                     pressure: 0.5 + t * 0.5,
                     speed: 0.2,
+                    width: 1.0,
+                    alpha: 1.0,
                 }
             })
             .collect();
@@ -539,6 +586,7 @@ mod tests {
             colors: [[0.0; 3], [1.0; 3]],
             finish: Finish::default(),
             copies: vec![SAME],
+            marks: Vec::new(),
         }
     }
 
@@ -595,6 +643,8 @@ mod tests {
                 at: [50.0, 50.0],
                 pressure: 1.0,
                 speed: 0.0,
+                width: 1.0,
+                alpha: 1.0,
             }],
             ..drawn.clone()
         };

@@ -376,6 +376,12 @@ familiar:
   **Vector** setting decides what it takes: only where it touches, the
   piece of a line up to where it crosses other lines (the Vector eraser
   does this, so cleaning up crossing lines is one tap), or whole lines.
+- **Correct Line** (Y), on vector layers: drag a line's control points to
+  reshape it, or add, delete, corner, widen, fade them and split the line
+  there; pinch a stretch of line into shape; brush over lines to smooth
+  them, join their ends, or make them thicker or thinner; trace over part of
+  a line to redraw it, or to give it your pen pressure. **Remove dust**
+  clears the little specks left on a raster layer.
 - **Folders** (Ctrl+G puts the current layer in a new folder): hide or fade
   a folder and everything in it follows; its arrow opens and closes it.
   Moving a layer up or down past a folder's edge takes it out or puts it in.

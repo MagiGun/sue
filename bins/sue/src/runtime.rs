@@ -2423,6 +2423,32 @@ pub(crate) mod tests {
         command(&mut runtime, "edit.undo");
         assert_eq!(right(&runtime), full, "undo brings the line back");
         assert_eq!(lines(&runtime).len(), 2);
+
+        // Correct Line (Y), Pinch vector line: dragging the level line's
+        // middle up pulls it into a curve; undo puts it back.
+        let drawn = lines(&runtime);
+        step(&mut runtime, vec![key(egui::Key::Y, plain)]);
+        step(&mut runtime, vec![key(egui::Key::Period, plain)]);
+        drag(
+            &mut runtime,
+            &mut step,
+            middle + vec2(-60.0, 0.0),
+            middle + vec2(-60.0, -40.0),
+        );
+        let pulled = lines(&runtime);
+        let lift = |line: &sue_paint::vector::Line| {
+            line.samples
+                .iter()
+                .map(|sample| sample.at[1])
+                .fold(f32::INFINITY, f32::min)
+        };
+        assert!(
+            lift(&pulled[0]) < lift(&drawn[0]) - 5.0,
+            "the line is pulled up"
+        );
+        assert_eq!(pulled[1], drawn[1], "the other line stays");
+        command(&mut runtime, "edit.undo");
+        assert_eq!(lines(&runtime), drawn);
         let _ = std::fs::remove_dir_all(&root);
     }
 

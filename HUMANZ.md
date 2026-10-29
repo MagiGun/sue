@@ -1241,6 +1241,25 @@ paints the layer again from the lines left, and records one step on
 release. Raster-only tools (fill, gradient, blend, filters, transform) say
 so on a vector layer.
 
+**Correct Line.** Every brush sample carries a width and an opacity share
+(`Sample::width`, `Sample::alpha`, 1 as drawn) that scale its dab, so a
+vector line can be made wider, narrower or fainter point by point, and keeps
+them in its geometry with flags marking control points and corners
+(`sue_paint::correct`). A line without flags finds its control points by
+simplifying its path (Douglas and Peucker). Control point moves one (the
+path to the controls either side follows smoothly), adds, deletes (the
+neighbors are joined by a Catmull-Rom curve), switches corners (straight or
+curved to the neighbors), widens and fades at one, and splits a line; Pinch
+vector line pulls a stretch of a line within its effect range, sharper by
+level, with its ends fixed or free; Simplify vector line smooths under the
+brush and can delete short lines; Connect vector lines joins the nearest
+ends; Adjust line width thickens, narrows, scales or fixes the width under
+the brush or for the whole line; Redraw vector line replaces the traced
+stretch with the trace; Redraw vector line width gives it the pen's
+pressure. Each drag paints the layer again from its lines and records one
+step. Remove dust clears specks no larger than the dust size from a raster
+layer, in a dragged box or all of it.
+
 **Rulers.** A picture keeps its rulers as text properties
 (`sue_paint::rulers`): `ruler.linear` (two ends), `ruler.special` (parallel
 lines at an angle, radial lines or concentric circles about a center),
@@ -1803,7 +1822,8 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: rulers (linear, parallel and radial lines, concentric circles, 1, 2 and 3-point perspective, symmetry), saved on the picture | **Implemented**; unit tests for their text, the guide a stroke chooses, and vanishing points made and moved; an end-to-end run that creates a 2-point ruler, holds a drifting stroke upright (and not with snapping off), adds a third point from two lines, and deletes and undoes | `sue-paint/src/rulers.rs`, `canvas.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: Onion Skin Settings and the light table | **Implemented**; a unit test for as many cels as asked fading a step each, color modes and light table layers, and the animation end-to-end run keeps the settings and registers, refuses and undoes a light table layer | `sue-paint/src/anim.rs`, `anim_ui.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: vector layers with the Vector eraser (touched area, up to intersection, whole line) | **Implemented**; unit tests for a brush and lines read back, a line painted again to the same pixels, and each eraser mode; an end-to-end run that draws two crossing lines, undoes and redoes one, erases up to the crossing and undoes it | `sue-paint/src/vector.rs`, `brush.rs`, `canvas.rs`, `bins/sue/src/runtime.rs` |
-| §3.7 Sue Paint: vector line editing (Correct Line, moving lines), curve rulers, materials, the camera folder and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
+| §3.7 Sue Paint: Correct Line (control points, pinch, simplify, connect, adjust line width, redraw, redraw width) and Remove dust | **Implemented**; unit tests for every operation and dust removal, and the vector end-to-end run pinches a line and undoes it | `sue-paint/src/correct.rs`, `vector.rs`, `brush.rs`, `canvas.rs` |
+| §3.7 Sue Paint: moving vector lines with the Object tool, curve rulers, materials, the camera folder and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |

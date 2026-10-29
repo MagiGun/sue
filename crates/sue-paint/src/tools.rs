@@ -139,7 +139,7 @@ impl Tool {
     /// `true` if it works in this build.
     #[must_use]
     pub const fn available(self) -> bool {
-        !matches!(self, Self::Decoration | Self::CorrectLine | Self::Operation)
+        !matches!(self, Self::Decoration | Self::Operation)
     }
 
     /// `true` for tools that paint with a [`Tip`].
@@ -466,7 +466,38 @@ impl Tool {
                     SubTool::new(self, "Liquify: Twirl", 5, soft),
                 ]
             }
-            Self::Decoration | Self::CorrectLine | Self::Operation => {
+            // Clip Studio Paint's Correct line group, then Remove dust.
+            Self::CorrectLine => {
+                let brush = |size: f32| {
+                    tip(size, |t| {
+                        t.size_by.pressure = false;
+                    })
+                };
+                vec![
+                    plain("Control point", 0),
+                    SubTool {
+                        level: 2,
+                        amount: 30.0,
+                        ..plain("Pinch vector line", 1)
+                    },
+                    SubTool {
+                        level: 2,
+                        ..SubTool::new(self, "Simplify vector line", 2, brush(50.0))
+                    },
+                    SubTool::new(self, "Connect vector lines", 3, brush(50.0)),
+                    SubTool {
+                        amount: 1.0,
+                        ..SubTool::new(self, "Adjust line width", 4, brush(40.0))
+                    },
+                    plain("Redraw vector line", 5).stabilization(6),
+                    SubTool::new(self, "Redraw vector line width", 6, brush(10.0)),
+                    SubTool {
+                        amount: 10.0,
+                        ..plain("Remove dust", 7)
+                    },
+                ]
+            }
+            Self::Decoration | Self::Operation => {
                 vec![plain(self.label(), 0)]
             }
         }
@@ -511,6 +542,14 @@ pub struct SubTool {
     /// A perspective ruler keeps its eye level where it is while its
     /// vanishing points move (Fix eye level).
     pub fix_eye_level: bool,
+    /// A Correct Line level, 1 to 5 (Pinch level, Simplify).
+    pub level: u32,
+    /// A Correct Line amount: Pinch's effect range and Adjust line width's
+    /// width, in pixels, or Remove dust's dust size.
+    pub amount: f32,
+    /// Adjust line width processes the whole line; Simplify vector line
+    /// deletes short lines.
+    pub whole: bool,
 }
 
 impl SubTool {
@@ -533,6 +572,9 @@ impl SubTool {
             spread: 0,
             kind: 0,
             fix_eye_level: true,
+            level: 2,
+            amount: 0.0,
+            whole: false,
         }
     }
 

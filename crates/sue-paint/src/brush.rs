@@ -605,6 +605,11 @@ pub struct Sample {
     pub pressure: f32,
     /// How fast the pen moved there, 0 (still) to 1 (fast).
     pub speed: f32,
+    /// How much of the brush's width it has there (a vector line's width
+    /// as corrected), 1 as drawn.
+    pub width: f32,
+    /// How much of the brush's opacity it has there, 0 to 1.
+    pub alpha: f32,
 }
 
 /// How a stroke is finished when the pen lifts.
@@ -656,6 +661,9 @@ pub struct Stroke {
     dirty: Option<[u32; 4]>,
     speed: f32,
     seed: u32,
+    /// The share of the width and opacity of the next points.
+    width: f32,
+    alpha: f32,
     /// The color it began with, before jitter.
     base: [f32; 3],
     sub: [f32; 3],
@@ -684,6 +692,8 @@ impl Stroke {
             dirty: None,
             speed: 0.0,
             seed: 0,
+            width: 1.0,
+            alpha: 1.0,
             base: color,
             sub: [1.0; 3],
             end_speeds: None,
@@ -744,6 +754,13 @@ impl Stroke {
         self.speed = speed.clamp(0.0, 1.0);
     }
 
+    /// The share of the brush's width and opacity the next points have
+    /// (a corrected vector line); 1 and 1 as drawn.
+    pub fn set_shape(&mut self, width: f32, alpha: f32) {
+        self.width = width.max(0.0);
+        self.alpha = alpha.clamp(0.0, 1.0);
+    }
+
     /// A steady chance from 0 to 1 for the point `s` along the stroke: the
     /// same each time the stroke is painted again (random dynamics).
     fn chance(&self, s: f32) -> f32 {
@@ -785,6 +802,8 @@ impl Stroke {
             at,
             pressure,
             speed: self.speed,
+            width: self.width,
+            alpha: self.alpha,
         };
         if self.seed == 0 {
             self.seed = (at[0].to_bits() ^ at[1].to_bits().rotate_left(16)) | 1;
@@ -991,6 +1010,8 @@ impl Stroke {
     ) {
         let (ra, sa) = self.tip.dab_at(a.pressure, a.speed, self.chance(s0));
         let (rb, sb) = self.tip.dab_at(b.pressure, b.speed, self.chance(s1));
+        let (ra, sa) = (ra * a.width, sa * a.alpha);
+        let (rb, sb) = (rb * b.width, sb * b.alpha);
         let (ta, tb) = (self.taper(s0), self.taper(s1));
         let (ra, rb) = if self.tip.taper_size {
             (ra * ta, rb * tb)
@@ -1048,6 +1069,7 @@ impl Stroke {
         let (radius, _) = self
             .tip
             .dab_at(a.pressure.max(b.pressure), a.speed.max(b.speed), 1.0);
+        let radius = radius * a.width.max(b.width);
         let step = (radius * 2.0 * self.tip.spacing).max(0.25);
         let mut along = step - self.since_dab;
         while along <= length {
@@ -1059,6 +1081,8 @@ impl Stroke {
                 ],
                 pressure: a.pressure + (b.pressure - a.pressure) * t,
                 speed: a.speed + (b.speed - a.speed) * t,
+                width: a.width + (b.width - a.width) * t,
+                alpha: a.alpha + (b.alpha - a.alpha) * t,
             };
             self.dab(raster, sample, start + along, selection);
             along += step;
@@ -1077,6 +1101,8 @@ impl Stroke {
         let (mut radius, mut strength) =
             self.tip
                 .dab_at(sample.pressure, sample.speed, self.chance(s));
+        radius *= sample.width;
+        strength *= sample.alpha;
         let taper = self.taper(s);
         if self.tip.taper_size {
             radius *= taper;
@@ -1354,6 +1380,8 @@ fn trim_hooks(samples: &[Sample], size: f32) -> Vec<Sample> {
             Some(last) if distance(last.at, sample.at) < 0.35 => {
                 last.pressure = sample.pressure;
                 last.speed = sample.speed;
+                last.width = sample.width;
+                last.alpha = sample.alpha;
             }
             _ => path.push(*sample),
         }
@@ -1422,6 +1450,8 @@ fn resample(path: &[Sample], step: f32) -> Vec<Sample> {
                 ],
                 pressure: a.pressure + (b.pressure - a.pressure) * t,
                 speed: a.speed + (b.speed - a.speed) * t,
+                width: a.width + (b.width - a.width) * t,
+                alpha: a.alpha + (b.alpha - a.alpha) * t,
             });
             along += step;
         }
@@ -1559,6 +1589,8 @@ fn flick(path: &mut Vec<Sample>, velocity: [f32; 2], size: f32) {
             ],
             pressure: last.pressure * (1.0 - 0.5 * t),
             speed: last.speed,
+            width: last.width,
+            alpha: last.alpha,
         });
     }
 }
@@ -1601,6 +1633,8 @@ fn spline(path: &[Sample], step: f32) -> Vec<Sample> {
                 at: catmull_rom([p0, p1, p2, p3], u),
                 pressure: path[i].pressure + (path[i + 1].pressure - path[i].pressure) * u,
                 speed: path[i].speed + (path[i + 1].speed - path[i].speed) * u,
+                width: path[i].width + (path[i + 1].width - path[i].width) * u,
+                alpha: path[i].alpha + (path[i + 1].alpha - path[i].alpha) * u,
             });
         }
     }
@@ -1830,6 +1864,8 @@ mod tests {
                 at: [x as f32, 50.0 + if x % 2 == 0 { 1.5 } else { -1.5 }],
                 pressure: 1.0,
                 speed: 0.0,
+                width: 1.0,
+                alpha: 1.0,
             })
             .collect();
         let calm = correct(&shaky, 5, 6.0);
@@ -1846,12 +1882,16 @@ mod tests {
                 at: [20.0, y as f32],
                 pressure: 1.0,
                 speed: 0.0,
+                width: 1.0,
+                alpha: 1.0,
             })
             .collect();
         l.extend((1..=60).map(|x| Sample {
             at: [20.0 + x as f32, 60.0],
             pressure: 1.0,
             speed: 0.0,
+            width: 1.0,
+            alpha: 1.0,
         }));
         let kept = correct(&l, 8, 6.0);
         let nearest = kept
@@ -1870,6 +1910,8 @@ mod tests {
                 at,
                 pressure: 1.0,
                 speed: 0.0,
+                width: 1.0,
+                alpha: 1.0,
             })
             .to_vec();
         let curve = spline(&sparse, 0.75);
@@ -1894,6 +1936,8 @@ mod tests {
                 at,
                 pressure: 1.0,
                 speed: 0.0,
+                width: 1.0,
+                alpha: 1.0,
             })
             .to_vec();
         let sharp = spline(&v, 0.75);
@@ -1912,6 +1956,8 @@ mod tests {
                 at: [x as f32, 10.0],
                 pressure: 1.0,
                 speed: 0.0,
+                width: 1.0,
+                alpha: 1.0,
             })
             .collect();
         // The pen slips back as it lifts.
@@ -1919,11 +1965,15 @@ mod tests {
             at: [48.0, 11.5],
             pressure: 0.4,
             speed: 0.0,
+            width: 1.0,
+            alpha: 1.0,
         });
         path.push(Sample {
             at: [47.0, 12.0],
             pressure: 0.2,
             speed: 0.0,
+            width: 1.0,
+            alpha: 1.0,
         });
         let trimmed = trim_hooks(&path, 4.0);
         assert!(

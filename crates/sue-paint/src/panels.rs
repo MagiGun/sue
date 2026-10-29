@@ -1267,6 +1267,137 @@ impl SuePaint {
                     command = Some("layer.ruler.delete");
                 }
             }
+            Tool::CorrectLine => {
+                let size = |ui: &mut Ui, sub: &mut crate::tools::SubTool| {
+                    slider_row(
+                        ui,
+                        "Brush Size",
+                        &mut sub.tip.size,
+                        1.0..=500.0,
+                        " px",
+                        true,
+                        theme,
+                    );
+                };
+                let levels = |ui: &mut Ui, name: &str, level: &mut u32| {
+                    ui.horizontal(|ui| {
+                        ui.label(small(name));
+                        for value in 1..=5 {
+                            ui.selectable_value(level, value, value.to_string());
+                        }
+                    });
+                };
+                match sub.mode {
+                    0 => {
+                        for (kind, name) in [
+                            "Move control points",
+                            "Add control point",
+                            "Delete control point",
+                            "Switch corner",
+                            "Adjust line width",
+                            "Adjust opacity",
+                            "Split line",
+                        ]
+                        .iter()
+                        .enumerate()
+                        {
+                            ui.radio_value(&mut sub.kind, kind as u8, *name);
+                        }
+                        ui.label(small(match sub.kind {
+                            1 => "Click a line to add a control point",
+                            2 => "Click a control point to delete it",
+                            3 => "Click a control point to make it a corner, or smooth again",
+                            4 => "Drag a control point up to widen the line, down to narrow it",
+                            5 => "Drag a control point up for more opacity, down for less",
+                            6 => "Click a line to split it in two there",
+                            _ => "Drag a control point to move it",
+                        }));
+                    }
+                    1 => {
+                        ui.horizontal(|ui| {
+                            ui.label(small("Fix end"));
+                            ui.selectable_value(&mut sub.kind, 0, "Both ends");
+                            ui.selectable_value(&mut sub.kind, 1, "Free");
+                        });
+                        levels(ui, "Pinch level", &mut sub.level);
+                        slider_row(
+                            ui,
+                            "Effect range",
+                            &mut sub.amount,
+                            1.0..=500.0,
+                            " px",
+                            true,
+                            theme,
+                        );
+                        ui.label(small("Drag a line to pull it into shape"));
+                    }
+                    2 => {
+                        levels(ui, "Simplify", &mut sub.level);
+                        ui.checkbox(&mut sub.whole, small("Delete short lines"));
+                        size(ui, sub);
+                    }
+                    3 => {
+                        ui.label(small("Brush over the ends of two lines to join them"));
+                        size(ui, sub);
+                    }
+                    4 => {
+                        for (kind, name) in crate::correct::Widen::NAMES.iter().enumerate() {
+                            ui.radio_value(&mut sub.kind, kind as u8, *name);
+                        }
+                        if matches!(sub.kind, 0 | 1 | 4) {
+                            slider_row(
+                                ui,
+                                "Width",
+                                &mut sub.amount,
+                                0.1..=100.0,
+                                " px",
+                                true,
+                                theme,
+                            );
+                        }
+                        ui.checkbox(&mut sub.whole, small("Process whole line"));
+                        size(ui, sub);
+                    }
+                    5 => {
+                        let mut level = sub.stabilization as f32;
+                        if slider_row(
+                            ui,
+                            "Stabilization",
+                            &mut level,
+                            0.0..=100.0,
+                            "",
+                            false,
+                            theme,
+                        ) {
+                            sub.stabilization = level.round() as u32;
+                        }
+                        ui.label(small("Trace over part of a line to draw it again that way"));
+                    }
+                    6 => {
+                        size(ui, sub);
+                        ui.label(small(
+                            "Trace over a line: its width follows your pen pressure",
+                        ));
+                    }
+                    _ => {
+                        slider_row(
+                            ui,
+                            "Dust size",
+                            &mut sub.amount,
+                            1.0..=100.0,
+                            " px",
+                            false,
+                            theme,
+                        );
+                        ui.label(small(
+                            "Drag a box to remove specks in it, or click for the whole layer",
+                        ));
+                    }
+                }
+                ui.label(small(
+                    "Correct Line works on vector layers; Remove dust on raster layers",
+                ));
+            }
             Tool::Blend => {
                 slider_row(
                     ui,
