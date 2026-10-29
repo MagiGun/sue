@@ -1,11 +1,12 @@
 //! Sue Paint on a phone (and on any device set to the phone interface):
-//! the canvas fills the screen between a top bar and a bottom bar of large
+//! the canvas fills the screen between Sue's top bar, where Sue Paint's row
+//! of large buttons follows the Sue button, and a bottom bar of large
 //! buttons, and the palettes come up as sheets from the bottom, one at a
 //! time. The tools, layers and colors are the same ones the desktop
 //! layout shows; only where they sit changes.
 
 use egui::{Align2, Color32, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
-use sue_wm::{AppletContext, ShellRequest, Theme};
+use sue_wm::{AppletContext, Theme};
 
 use crate::icons::Icon;
 use crate::panels::{icon_button, tool_icon};
@@ -46,7 +47,8 @@ const BAR_TOOLS: [Tool; 9] = [
 const BUTTON: f32 = 44.0;
 
 impl SuePaint {
-    /// The whole studio laid out for a phone.
+    /// The whole studio laid out for a phone: the canvas over a bottom bar
+    /// of large buttons. The top row is in Sue's bar ([`Self::phone_bar`]).
     pub(crate) fn phone_frame(
         &mut self,
         ui: &mut Ui,
@@ -54,80 +56,10 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        let top = Rect::from_min_size(full.min, vec2(full.width(), BUTTON + 8.0));
         let bottom = Rect::from_min_max(pos2(full.left(), full.bottom() - BUTTON - 16.0), full.max);
-        let middle = Rect::from_min_max(
-            pos2(full.left(), top.bottom()),
-            pos2(full.right(), bottom.top()),
-        );
+        let middle = Rect::from_min_max(full.min, pos2(full.right(), bottom.top()));
         self.canvas_area(ui, middle, cx, theme);
         let mut run: Option<String> = None;
-
-        // The top bar: menus, undo and redo; the palettes; the way out.
-        ui.painter().rect_filled(top, 0.0, theme.panel);
-        ui.painter()
-            .hline(top.x_range(), top.bottom(), theme.hairline());
-        let slot = |index: usize, from_right: bool| {
-            let x = if from_right {
-                top.right() - 6.0 - (index as f32 + 1.0) * (BUTTON + 2.0)
-            } else {
-                top.left() + 6.0 + index as f32 * (BUTTON + 2.0)
-            };
-            Rect::from_min_size(pos2(x, top.top() + 4.0), vec2(BUTTON, BUTTON))
-        };
-        let history = (cx.history.can_undo(), cx.history.can_redo());
-        if icon_button(
-            ui,
-            slot(0, false),
-            Icon::Menu,
-            true,
-            self.sheet == Some(Sheet::Menu),
-            "Menus",
-            theme,
-        ) {
-            self.toggle_sheet(Sheet::Menu);
-        }
-        if icon_button(
-            ui,
-            slot(1, false),
-            Icon::Undo,
-            history.0,
-            false,
-            "Undo (two-finger tap)",
-            theme,
-        ) {
-            run = Some("edit.undo".to_owned());
-        }
-        if icon_button(
-            ui,
-            slot(2, false),
-            Icon::Redo,
-            history.1,
-            false,
-            "Redo (three-finger tap)",
-            theme,
-        ) {
-            run = Some("edit.redo".to_owned());
-        }
-        let right = [
-            (Icon::Canvas, None, "Back to the canvas"),
-            (Icon::Layers, Some(Sheet::Layers), "Layers"),
-            (Icon::Wheel, Some(Sheet::Color), "Color"),
-            (Icon::Wrench, Some(Sheet::ToolSettings), "Tool settings"),
-            (Icon::Play, Some(Sheet::Timeline), "Timeline"),
-        ];
-        let fits = ((top.width() - 3.0 * (BUTTON + 2.0) - 12.0) / (BUTTON + 2.0))
-            .floor()
-            .max(1.0) as usize;
-        for (index, (icon, sheet, tip)) in right.iter().enumerate().take(fits) {
-            let active = sheet.is_some() && self.sheet == *sheet;
-            if icon_button(ui, slot(index, true), *icon, true, active, tip, theme) {
-                match sheet {
-                    Some(sheet) => self.toggle_sheet(*sheet),
-                    None => cx.request(ShellRequest::CloseStudio),
-                }
-            }
-        }
 
         // The bottom bar: the main tools, then More, the color and the size.
         ui.painter().rect_filled(bottom, 0.0, theme.panel);
@@ -395,5 +327,78 @@ fn menu_items(
                 ui.separator();
             }
         }
+    }
+}
+
+impl SuePaint {
+    /// The top row on a phone, in Sue's bar after the Sue button: the
+    /// menus as a sheet, undo and redo at the left, the palettes at the
+    /// right. Returns the command a button runs.
+    pub(crate) fn phone_bar(
+        &mut self,
+        ui: &mut Ui,
+        bar: Rect,
+        cx: &AppletContext<'_>,
+        theme: &Theme,
+    ) -> Option<String> {
+        let mut run = None;
+        let slot = |index: usize, from_right: bool| {
+            let x = if from_right {
+                bar.right() - 4.0 - (index as f32 + 1.0) * (BUTTON + 2.0)
+            } else {
+                bar.left() + 4.0 + index as f32 * (BUTTON + 2.0)
+            };
+            Rect::from_min_size(pos2(x, bar.center().y - BUTTON / 2.0), vec2(BUTTON, BUTTON))
+        };
+        let history = (cx.history.can_undo(), cx.history.can_redo());
+        if icon_button(
+            ui,
+            slot(0, false),
+            Icon::Menu,
+            true,
+            self.sheet == Some(Sheet::Menu),
+            "Menus",
+            theme,
+        ) {
+            self.toggle_sheet(Sheet::Menu);
+        }
+        if icon_button(
+            ui,
+            slot(1, false),
+            Icon::Undo,
+            history.0,
+            false,
+            "Undo (two-finger tap)",
+            theme,
+        ) {
+            run = Some("edit.undo".to_owned());
+        }
+        if icon_button(
+            ui,
+            slot(2, false),
+            Icon::Redo,
+            history.1,
+            false,
+            "Redo (three-finger tap)",
+            theme,
+        ) {
+            run = Some("edit.redo".to_owned());
+        }
+        let right = [
+            (Icon::Layers, Sheet::Layers, "Layers"),
+            (Icon::Wheel, Sheet::Color, "Color"),
+            (Icon::Wrench, Sheet::ToolSettings, "Tool settings"),
+            (Icon::Play, Sheet::Timeline, "Timeline"),
+        ];
+        let fits = ((bar.width() - 3.0 * (BUTTON + 2.0) - 8.0) / (BUTTON + 2.0))
+            .floor()
+            .max(0.0) as usize;
+        for (index, (icon, sheet, tip)) in right.iter().enumerate().take(fits) {
+            let active = self.sheet == Some(*sheet);
+            if icon_button(ui, slot(index, true), *icon, true, active, tip, theme) {
+                self.toggle_sheet(*sheet);
+            }
+        }
+        run
     }
 }

@@ -152,12 +152,6 @@ impl PlatformPaths {
         self.data_dir.join("models")
     }
 
-    /// Notes and other documents Sue saves on its own.
-    #[must_use]
-    pub fn notes_dir(&self) -> PathBuf {
-        self.data_dir.join("notes")
-    }
-
     /// Fonts Sue keeps itself (installed from a studio), searched with the
     /// system's.
     #[must_use]

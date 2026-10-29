@@ -80,19 +80,12 @@ impl SuePaint {
             self.status_strip(ui, status, None, cx, theme);
             return;
         };
-        let (hide, ready) = (self.hide, self.ready);
-        let exit_view = self.exit_view.filter(|_| self.leaving());
+        let (hide, ready, leaving) = (self.hide, self.ready, self.leaving());
         if let Some(doc) = self.doc_mut() {
-            if !ready && hide > 0.0 {
-                // Coming in, the picture shrinks from filling the window to
-                // its place; going out, it grows from the view it had back
-                // to filling the window, where its card waits.
-                let mut fitted = doc.view;
-                fitted.fit(viewport, size);
-                doc.view = match exit_view {
-                    Some(from) => from.blend(&fitted, hide),
-                    None => fitted,
-                };
+            if !ready && hide > 0.0 && !leaving {
+                // Coming in, the picture fits the room the palettes leave
+                // as they slide in; going out, it stays as it was.
+                doc.view.fit(viewport, size);
             } else if !doc.view.fitted {
                 doc.view.fit(viewport, size);
             }

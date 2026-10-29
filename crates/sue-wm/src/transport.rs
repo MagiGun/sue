@@ -1,7 +1,7 @@
-//! The audio transport shared by the Player, audio entities and the
-//! timeline. A clip plays an arena entity, or a decoded track held in a
-//! [`Shared`] buffer (the Player's library, which is not project data);
-//! each tick feeds the platform sink's ring with the next slice of the
+//! The audio transport every studio and tool shares (Sue Paint's
+//! animation sound today). A clip plays an arena entity, or a decoded track
+//! held in a [`Shared`] buffer (a mix made on the fly, which is not project
+//! data); each tick feeds the platform sink's ring with the next slice of the
 //! clip, resampled to the device rate (the ring is the device boundary,
 //! like a texture upload for images).
 
@@ -111,7 +111,7 @@ pub struct Clip {
     pub end: usize,
     /// Linear gain.
     pub gain: f32,
-    /// Who started it: `"player"`, `"timeline"` or a node.
+    /// Who started it, e.g. `"sue-paint"`.
     pub owner: String,
 }
 
@@ -300,7 +300,7 @@ mod tests {
                 start: 0,
                 end: 8_000,
                 gain: 1.0,
-                owner: "player".to_owned(),
+                owner: "mix".to_owned(),
             },
             Some(&mut sink),
         );

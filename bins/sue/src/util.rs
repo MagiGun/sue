@@ -18,17 +18,6 @@ pub fn human_bytes(bytes: u64) -> String {
     }
 }
 
-/// `3:07`, or `1:02:03` past an hour.
-pub fn clock(seconds: f64) -> String {
-    let total = seconds.max(0.0).floor() as u64;
-    let (hours, minutes, seconds) = (total / 3600, total / 60 % 60, total % 60);
-    if hours > 0 {
-        format!("{hours}:{minutes:02}:{seconds:02}")
-    } else {
-        format!("{minutes}:{seconds:02}")
-    }
-}
-
 /// `path`, or a free sibling such as `photo (2).png` when it exists.
 pub fn free_path(path: &Path) -> PathBuf {
     if !path.exists() {
@@ -75,13 +64,6 @@ mod tests {
         assert_eq!(human_bytes(96), "96 B");
         assert_eq!(human_bytes(1536), "1.5 KiB");
         assert_eq!(human_bytes(5 * 1024 * 1024), "5.0 MiB");
-    }
-
-    #[test]
-    fn clocks_read_like_players() {
-        assert_eq!(clock(0.4), "0:00");
-        assert_eq!(clock(187.9), "3:07");
-        assert_eq!(clock(3723.0), "1:02:03");
     }
 
     #[test]

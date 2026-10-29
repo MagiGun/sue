@@ -16,9 +16,8 @@ use sue_wm::{AppletContext, AppletId, ArenaEdit, ItemState, ShellRequest, Theme,
 
 use crate::compile::{FORMATS, Separator, Titles};
 use crate::project::{self, LABELS, STATUSES, TEMPLATES};
-use crate::studio::{Dialog, Figure, ID, PAGES, Settings, SueWriter, View, me};
+use crate::studio::{Dialog, Figure, ID, PAGES, Settings, SueWriter, View};
 
-const MENU_HEIGHT: f32 = 26.0;
 const TOOLBAR_HEIGHT: f32 = 36.0;
 const STATUS_HEIGHT: f32 = 24.0;
 const FIND_HEIGHT: f32 = 34.0;
@@ -41,24 +40,14 @@ impl SueWriter {
             crate::studio::KEYS_SECTION,
             crate::studio::shortcut_table(),
         );
-        let present = cx.view.studio.as_ref().map(AppletId::as_str) == Some(ID);
-        let reveal = cx.view.studio_reveal.clamp(0.0, 1.0);
+        let present = cx.view.page.as_ref().map(AppletId::as_str) == Some(ID);
+        let reveal = cx.view.reveal.clamp(0.0, 1.0);
         self.present = present;
         self.ready = present && reveal >= 0.999;
         self.reveal = reveal;
         if present && !self.shown {
             self.shown = true;
-            let selected = cx
-                .view
-                .selected
-                .and_then(|node| cx.entity(node))
-                .filter(|entity| {
-                    manuscript::is_manuscript(entity) || entity.string_buffer().is_some()
-                })
-                .map(Entity::id);
-            if let Some(id) = selected {
-                self.open_entity(cx, id);
-            } else if let Some(root) = self
+            if let Some(root) = self
                 .project
                 .filter(|root| cx.arena().get_by_id(*root).is_ok())
                 && self.session.is_none()
@@ -95,9 +84,8 @@ impl SueWriter {
         }
         let theme = cx.theme.clone();
         let full = ui.max_rect();
-        // Coming in, the page lands where the card was (see `card_frame`)
-        // and turns opaque first; the bars and panels slide in from the
-        // edges around it. Going out, the other way.
+        // Coming in, the page turns opaque first; the bars and panels slide
+        // in from the edges around it. Going out, the other way.
         let hide = 1.0 - smooth(reveal);
         let cover = smooth(reveal / 0.35);
         ui.painter()
@@ -117,26 +105,11 @@ impl SueWriter {
             center.set_opacity(cover.max(0.02));
             self.center_ui(&mut center, places.center, cx, &theme);
         }
+        // The menus are in Sue's top bar (`menu_bar`); the toolbar slides
+        // down from the page's top.
         let lift = hide * (places.body.top() - full.top());
-        // The menu bar, with the way back to the canvas at its right.
-        let bar = Rect::from_min_size(full.min - vec2(0.0, lift), vec2(full.width(), MENU_HEIGHT));
-        ui.painter().rect_filled(bar, 0.0, theme.panel);
-        let back = if bar.width() < 820.0 { 40.0 } else { 140.0 };
-        let menus_rect = Rect::from_min_max(bar.min, pos2(bar.right() - back, bar.bottom()));
-        let picked = {
-            let mut menubar = std::mem::take(&mut self.menubar);
-            let state = |command: &str| self.item_state(command, cx);
-            let mut clipped = ui.new_child(UiBuilder::new().max_rect(menus_rect));
-            clipped.set_clip_rect(menus_rect.intersect(ui.clip_rect()));
-            let picked = menubar.ui(&mut clipped, menus_rect, &self.menus, &state, &theme);
-            self.menubar = menubar;
-            picked
-        };
-        self.back_button(ui, bar, back, cx, &theme);
-        ui.painter()
-            .hline(bar.x_range(), bar.bottom(), theme.hairline());
         let toolbar = Rect::from_min_size(
-            pos2(full.left(), bar.bottom()),
+            pos2(full.left(), full.top() - lift),
             vec2(full.width(), self.toolbar_height),
         );
         self.toolbar(ui, toolbar, cx, &theme);
@@ -180,10 +153,27 @@ impl SueWriter {
         }
         let status = places.status.translate(vec2(0.0, hide * STATUS_HEIGHT));
         self.status_ui(ui, status, cx, &theme);
+        self.dialog_ui(&ctx, cx, &theme);
+    }
+
+    /// Sue Writer's menus, in Sue's top bar after the Sue button (none in
+    /// composition mode, which keeps only the text).
+    pub(crate) fn menu_bar(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        if self.composition {
+            return;
+        }
+        let theme = cx.theme.clone();
+        let rect = ui.max_rect();
+        let picked = {
+            let mut menubar = std::mem::take(&mut self.menubar);
+            let state = |command: &str| self.item_state(command, cx);
+            let picked = menubar.ui(ui, rect, &self.menus, &state, &theme);
+            self.menubar = menubar;
+            picked
+        };
         if let Some(command) = picked {
             self.run(&command, cx);
         }
-        self.dialog_ui(&ctx, cx, &theme);
     }
 
     /// Where everything goes in `full`: the bars, the binder and inspector
@@ -196,7 +186,6 @@ impl SueWriter {
         has_open: bool,
     ) -> Places {
         let top = full.top()
-            + MENU_HEIGHT
             + self.toolbar_height
             + if self.find.is_some() {
                 FIND_HEIGHT
@@ -228,38 +217,6 @@ impl SueWriter {
             inspector,
             center,
         }
-    }
-
-    /// Where the first page shows in `area` when Sue Writer opens on
-    /// `entity` (its manuscript, or a document), for the shell's zoom.
-    pub(crate) fn first_page(&self, area: Rect, entity: &Entity) -> Option<Rect> {
-        if self.view != View::Document || !self.paged || self.composition {
-            return None;
-        }
-        let simple = !manuscript::is_manuscript(entity)
-            || entity
-                .property(project::SIMPLE)
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-        let places = self.places(area, simple, manuscript::is_manuscript(entity), true);
-        let center = places.center;
-        let name = entity
-            .property(project::PAGE)
-            .and_then(Value::as_str)
-            .unwrap_or("Letter");
-        let size = sue_model::page_size(name).unwrap_or([612.0, 792.0]);
-        let across = size[0] as f32 * sue_type::PX_PER_PT;
-        let zoom = if self.fit {
-            ((center.width() - 56.0) / across).clamp(0.6, 3.0).min(1.0)
-        } else {
-            self.zoom
-        };
-        let page = vec2(across, size[1] as f32 * sue_type::PX_PER_PT) * zoom;
-        let left = ((center.width() - page.x) / 2.0).max(24.0);
-        Some(Rect::from_min_size(
-            pos2(center.left() + left, center.top() + 24.0),
-            page,
-        ))
     }
 
     /// Whether a menu item works, and its check mark.
@@ -338,43 +295,6 @@ impl SueWriter {
                 }
             }
             _ => ItemState::on(),
-        }
-    }
-
-    fn back_button(
-        &self,
-        ui: &mut Ui,
-        bar: Rect,
-        width: f32,
-        cx: &mut AppletContext<'_>,
-        theme: &Theme,
-    ) {
-        let rect = Rect::from_min_max(
-            pos2(bar.right() - width + 6.0, bar.top() + 3.0),
-            pos2(bar.right() - 6.0, bar.bottom() - 3.0),
-        );
-        let response = ui.interact(rect, Id::unique("sue-writer-back"), Sense::click());
-        if response.hovered() {
-            ui.painter()
-                .rect_filled(rect, theme.control_radius, theme.hover);
-        }
-        let text = if width > 60.0 {
-            "Back to Canvas"
-        } else {
-            "\u{2190}"
-        };
-        ui.painter().text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            text,
-            theme.font(theme.small_size + 0.5),
-            theme.text,
-        );
-        if response
-            .on_hover_text("Leave Sue Writer for the canvas (your writing stays in the project)")
-            .clicked()
-        {
-            cx.request(ShellRequest::CloseStudio);
         }
     }
 
@@ -2922,12 +2842,4 @@ fn font_picker(ui: &mut Ui, salt: &str, font: &mut String, filter: &mut String) 
                 }
             }
         });
-}
-
-/// Opens Sue Writer on `id` (for the card's button).
-pub(crate) fn open_in_writer(cx: &mut AppletContext<'_>, id: EntityId) {
-    cx.request(ShellRequest::OpenIn {
-        entity: id,
-        applet: me(),
-    });
 }

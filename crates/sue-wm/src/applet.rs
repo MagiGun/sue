@@ -1,25 +1,22 @@
-//! The applet contract every tool, utility and studio implements.
+//! The applet contract every studio, tool and window implements.
 //!
-//! Nothing in the shell names an applet. Canvas entity kinds (documents,
-//! paint layers, audio, images, hex views), drawer utilities, the Settings
-//! window and full-window studios (Sue Paint) all register at runtime and
-//! describe themselves through an [`AppletManifest`] and their
-//! [`FileTemplate`]s: the modes in the top pill, the New File wheels of the
-//! marking menu, the timeline lanes and the rail icons are all read from
-//! them.
+//! Nothing in the shell names an applet. Studios (Sue Paint, Sue Writer),
+//! tools (the Image Viewer, the Converter) and the Settings window all
+//! register at runtime and describe themselves through an
+//! [`AppletManifest`] and their [`FileTemplate`]s: the Hub's boxes, the Sue
+//! menu's Studios, Tools and New submenus and the command palette are all
+//! read from them.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use egui::{Ui, Vec2, vec2};
+use egui::Ui;
 use sue_core::{Arena, AssetHandle, CoreError, Entity, ReversibleTransaction, TxnError, UndoStack};
 use sue_platform::{AudioSink, FormFactor, TextureUpload};
 use sue_rice::{HardwareProfile, RiceDeclaration, RiceSchema, SetRiceValue};
 
-use crate::{
-    Catalog, NewEntity, NodeId, RiceEdit, SceneNode, Theme, Transport, Typing, WmError, World,
-};
+use crate::{Catalog, RiceEdit, Theme, Transport, Typing, WmError, World};
 
 /// An applet's unique id: `[a-z][a-z0-9-]*`, e.g. `paint`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -58,46 +55,31 @@ impl fmt::Display for AppletId {
     }
 }
 
-/// Broad kinds of assets, used to pick the applet that shows an opened file.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum MediaClass {
-    /// A decoded raster image.
-    Image,
-    /// UTF-8 text.
-    Text,
-    /// Decoded audio.
-    Audio,
-    /// Raw bytes.
-    Binary,
-}
-
 /// Where an applet lives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AppletRole {
-    /// Draws one kind of entity on the canvas, with a floating pill.
-    Node,
-    /// A utility in the left drawer, picked on the left rail.
-    LeftDrawer,
-    /// A utility in the right drawer, picked on the right rail.
-    RightDrawer,
-    /// A floating window over the canvas (Settings).
-    Window,
-    /// A workspace that fills the window with its own menus and panels
-    /// (Sue Paint), opened from its mode and left for the canvas again.
+    /// A whole workspace for making something (Sue Paint, Sue Writer). It
+    /// fills the page under the top bar and is listed under Studios in the
+    /// Hub.
     Studio,
+    /// A focused job on a file or an entity (the Image Viewer, the
+    /// Converter). It opens like a studio, in a page of its own, and is
+    /// listed under Tools in the Hub.
+    Tool,
+    /// A floating window over the page (Settings).
+    Window,
 }
 
-/// A mode in the top pill: switching to it frames an entity of the applet.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ModeSpec {
-    /// Button label, e.g. `Document`.
-    pub label: String,
-    /// `false` keeps it out of the top pill (it stays in the palette).
-    pub in_pill: bool,
+impl AppletRole {
+    /// `true` for the roles that fill the page: studios and tools.
+    #[must_use]
+    pub const fn is_page(self) -> bool {
+        matches!(self, Self::Studio | Self::Tool)
+    }
 }
 
-/// A kind of new file an applet makes. The marking menu's New File wheel
-/// shows the categories; each category's wheel shows its exact kinds.
+/// A kind of new file an applet makes. The Sue menu's New submenu shows
+/// the categories, and each category its exact kinds.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileTemplate {
     /// The kind of file, e.g. `Picture`.
@@ -130,7 +112,7 @@ pub struct AppletManifest {
     pub id: AppletId,
     /// Display name.
     pub name: String,
-    /// What it does, in a sentence.
+    /// What it does, in a sentence (the Hub shows it on the applet's box).
     pub summary: String,
     /// Where it lives.
     pub role: AppletRole,
@@ -138,12 +120,6 @@ pub struct AppletManifest {
     pub icon: String,
     /// Sort key among applets of the same role (lower first).
     pub order: i32,
-    /// Asset kinds the applet shows.
-    pub opens: Vec<MediaClass>,
-    /// Its mode, for node applets and studios.
-    pub mode: Option<ModeSpec>,
-    /// Its timeline lane, e.g. `Audio Track`.
-    pub lane: Option<String>,
 }
 
 impl AppletManifest {
@@ -160,9 +136,6 @@ impl AppletManifest {
             role,
             icon: icon.to_owned(),
             order: 0,
-            opens: Vec::new(),
-            mode: None,
-            lane: None,
         }
     }
 }
@@ -209,29 +182,12 @@ pub enum ShellRequest {
     Notify(String),
     /// An error for the status bar.
     Fail(String),
-    /// Read a file and put it on the canvas.
+    /// Read a file and open it in the studio or tool that takes it.
     OpenFile(PathBuf),
     /// An engine command such as `audio.start`, `file.open` or `rice.reload`.
     Command(String),
-    /// Select a node (or nothing).
-    Select(Option<NodeId>),
-    /// Switch to the node's mode and frame it.
-    Focus(NodeId),
-    /// Frame a node, optionally at a given zoom.
-    Frame {
-        /// The node.
-        node: NodeId,
-        /// Zoom in percent instead of fitting (100 shows pixels 1:1).
-        zoom_percent: Option<u32>,
-    },
-    /// Show or hide the timeline.
-    Timeline(bool),
     /// Open Settings, optionally at a page.
     OpenSettings(Option<String>),
-    /// Switch to a mode (`canvas` or a node applet id).
-    Mode(String),
-    /// Create a new entity of a node applet.
-    Spawn(AppletId),
     /// Make a new file from an applet's template.
     Create {
         /// The applet.
@@ -241,24 +197,14 @@ pub enum ShellRequest {
     },
     /// Open the command palette.
     Palette,
-    /// Frame everything.
-    ResetCamera,
-    /// Show a drawer applet.
-    ShowDrawer(AppletId),
-    /// Put an arena entity on the canvas, drawn by the applet that accepts it.
-    Place {
-        /// The entity.
-        entity: AssetHandle,
-        /// Switch to its mode and frame it.
-        focus: bool,
-    },
-    /// Fill the window with a studio applet.
-    OpenStudio(AppletId),
-    /// Leave the studio for the canvas.
-    CloseStudio,
-    /// Show or hide the Hub, the list of studios.
-    Hub(bool),
-    /// Ask for a file through the File Manager.
+    /// Fill the page with a studio or tool.
+    Open(AppletId),
+    /// Go back to the Hub.
+    Hub,
+    /// Pin a studio or tool, so Sue opens straight into it at launch, or
+    /// take the pin away (`None`: Sue opens on the Hub).
+    Pin(Option<AppletId>),
+    /// Ask for a file through the system's open or save dialog.
     PickFile(FilePick),
     /// The file a [`FilePick`] asked for.
     Picked {
@@ -267,22 +213,22 @@ pub enum ShellRequest {
         /// The chosen file (for a save, where to write it).
         path: PathBuf,
     },
-    /// Show an applet's window (its `window_ui`) floating over the screen.
+    /// Show an applet's window (its `window_ui`) floating over the page.
     OpenWindow(AppletId),
     /// Run one of an applet's commands, as the palette does.
     AppletCommand {
         /// The applet.
         applet: AppletId,
-        /// The command, e.g. `player.next`.
+        /// The command, e.g. `file.export.png`.
         command: String,
     },
-    /// Open an entity in an applet: a studio takes its card (made if the
-    /// entity has none) and opens on it; a node applet puts it on the
-    /// canvas. How work moves between studios.
+    /// Open an entity in a studio or tool (it gets the entity through
+    /// [`SueApplet::take_entity`] with the purpose `open`, then fills the
+    /// page). How work moves between studios.
     OpenIn {
         /// The entity.
         entity: sue_core::EntityId,
-        /// The studio or applet.
+        /// The studio or tool.
         applet: AppletId,
     },
     /// Hand an entity to an applet (`SueApplet::take_entity`), e.g. a
@@ -297,7 +243,7 @@ pub enum ShellRequest {
     },
     /// Open the Sue menu.
     SueMenu,
-    /// Hand a file to an applet, as if it had picked it (`Add to Player`).
+    /// Hand a file to an applet, as if it had picked it.
     SendFile {
         /// Who gets it.
         to: AppletId,
@@ -317,16 +263,16 @@ pub enum ShellRequest {
     },
 }
 
-/// A request for a file, answered by the applet that picks files (the File
-/// Manager) in a window: one to open, or where to save one.
+/// A request for a file, answered by the system's own open or save dialog:
+/// one to open, or where to save one.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FilePick {
     /// Who gets the file: an applet, or `None` for the shell and engine
-    /// (opening on the canvas, saving the project).
+    /// (opening a file, saving the project).
     pub requester: Option<AppletId>,
     /// What the file is for, handed back with it, e.g. `open` or `layer`.
     pub purpose: String,
-    /// The window's title, e.g. `Open Picture`.
+    /// The dialog's title, e.g. `Open Picture`.
     pub title: String,
     /// Extensions it takes, without the dot; empty takes any file.
     pub extensions: Vec<String>,
@@ -334,7 +280,7 @@ pub struct FilePick {
     pub save_as: Option<String>,
     /// The folder to start in.
     pub start: Option<PathBuf>,
-    /// `true` when a whole folder may be chosen too.
+    /// `true` to choose a folder instead of a file.
     pub folders: bool,
     /// The kinds of file to choose between ("save as type"), first the
     /// default. The chosen file's extension says which was picked.
@@ -397,9 +343,9 @@ impl FilePick {
         self
     }
 
-    /// The same request, also taking a whole folder.
+    /// The same request, for a folder instead of a file.
     #[must_use]
-    pub fn or_folder(mut self) -> Self {
+    pub fn folder(mut self) -> Self {
         self.folders = true;
         self
     }
@@ -432,6 +378,30 @@ impl FilePick {
         self.types.iter().find(|kind| kind.takes(path))
     }
 
+    /// The filters the system dialog offers: the kinds of file, else one
+    /// filter of every extension, else none (any file).
+    #[must_use]
+    pub fn filters(&self) -> Vec<sue_platform::FileFilter> {
+        if !self.types.is_empty() {
+            return self
+                .types
+                .iter()
+                .map(|kind| sue_platform::FileFilter {
+                    name: kind.name.clone(),
+                    extensions: kind.extensions.clone(),
+                })
+                .collect();
+        }
+        if self.extensions.is_empty() {
+            Vec::new()
+        } else {
+            vec![sue_platform::FileFilter {
+                name: "Files".to_owned(),
+                extensions: self.extensions.clone(),
+            }]
+        }
+    }
+
     /// `true` when `path` has one of the extensions (or any are taken).
     #[must_use]
     pub fn takes(&self, path: &Path) -> bool {
@@ -443,11 +413,11 @@ impl FilePick {
     }
 }
 
-/// The Sue menu's wheels every applet can add to.
-pub mod wheel {
-    /// Projects: open, save, show.
+/// The Sue menu's submenus every applet can add to.
+pub mod sue_menu {
+    /// Projects: open, save, save as.
     pub const PROJECT: &str = "Project";
-    /// Files: new, open, the File Manager.
+    /// Files: open and convert.
     pub const FILE: &str = "File";
     /// The thing in focus, into another studio or tool.
     pub const SEND_TO: &str = "Send To";
@@ -458,8 +428,8 @@ pub mod wheel {
 /// with every studio and tool, and none has to be named by the shell.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SueAction {
-    /// The wheel it sits on: one of [`wheel`], or a studio's own name.
-    pub wheel: String,
+    /// The submenu it sits in: one of [`sue_menu`], or a name of its own.
+    pub menu: String,
     /// What people read.
     pub label: String,
     /// What it asks for.
@@ -467,10 +437,10 @@ pub struct SueAction {
 }
 
 impl SueAction {
-    /// An action on `wheel`.
-    pub fn new(wheel: impl Into<String>, label: impl Into<String>, request: ShellRequest) -> Self {
+    /// An action in submenu `menu`.
+    pub fn new(menu: impl Into<String>, label: impl Into<String>, request: ShellRequest) -> Self {
         Self {
-            wheel: wheel.into(),
+            menu: menu.into(),
             label: label.into(),
             request,
         }
@@ -506,18 +476,6 @@ impl Tick {
 /// What the shell shows right now, for applets to read.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShellView {
-    /// The selected node.
-    pub selected: Option<NodeId>,
-    /// The canvas zoom (1.0 is 100%).
-    pub zoom: f32,
-    /// The active mode: `canvas` or a node applet id.
-    pub mode: String,
-    /// `true` while the timeline is open.
-    pub timeline_open: bool,
-    /// The timeline playhead, in seconds.
-    pub playhead: f64,
-    /// `true` while the timeline plays.
-    pub timeline_playing: bool,
     /// The device class.
     pub form_factor: FormFactor,
     /// The active hardware profile.
@@ -526,11 +484,12 @@ pub struct ShellView {
     pub now: Instant,
     /// Seconds since the last frame (clamped).
     pub dt: f32,
-    /// The studio filling the window, if any (`None` while one leaves).
-    pub studio: Option<AppletId>,
-    /// How far the studio has come in, 0 (the canvas) to 1 (all panels in
-    /// place). Between the two it is entering or leaving.
-    pub studio_reveal: f32,
+    /// The studio or tool filling the page, if any (`None` on the Hub and
+    /// while one leaves).
+    pub page: Option<AppletId>,
+    /// How far the page has come in, 0 (the Hub) to 1 (all in place).
+    /// Between the two it is entering or leaving.
+    pub reveal: f32,
     /// `true` in the desktop window, where native dialogs can open;
     /// `false` in headless runs.
     pub interactive: bool,
@@ -549,7 +508,7 @@ pub struct PaletteEntry {
 
 /// Everything an applet may touch during a call.
 pub struct AppletContext<'a> {
-    /// The arena, the live rice and the canvas scene.
+    /// The arena and the live rice.
     pub world: &'a mut World,
     /// The global undo tree.
     pub history: &'a mut UndoStack<World>,
@@ -582,19 +541,6 @@ impl AppletContext<'_> {
     #[must_use]
     pub fn arena(&self) -> &Arena {
         &self.world.arena
-    }
-
-    /// A node of the scene.
-    #[must_use]
-    pub fn node(&self, id: NodeId) -> Option<&SceneNode> {
-        self.world.scene.get(id)
-    }
-
-    /// The entity a node shows.
-    #[must_use]
-    pub fn entity(&self, id: NodeId) -> Option<&Entity> {
-        let node = self.world.scene.get(id)?;
-        self.world.arena.get(node.entity).ok()
     }
 
     /// Applies `txn` and records it in the global history, closing any open
@@ -693,7 +639,7 @@ impl AppletContext<'_> {
     }
 }
 
-/// The trait every tool, utility and studio implements.
+/// The trait every studio, tool and window implements.
 pub trait SueApplet: Send {
     /// Static facts about the applet.
     fn manifest(&self) -> AppletManifest;
@@ -703,24 +649,12 @@ pub trait SueApplet: Send {
         Vec::new()
     }
 
-    /// `true` if this node applet shows `entity` (for opened files), or this
-    /// studio works on it (the shell zooms into its card when the studio
-    /// opens).
+    /// `true` if this studio or tool works on `entity`: a file opened
+    /// anywhere goes to the first that takes it, and the Sue menu's Send To
+    /// offers every other one.
     fn accepts(&self, entity: &Entity) -> bool {
         let _ = entity;
         false
-    }
-
-    /// The canvas size of a node showing `entity`.
-    fn node_size(&self, entity: &Entity) -> Vec2 {
-        let _ = entity;
-        vec2(480.0, 320.0)
-    }
-
-    /// A new entity, when a mode needs one and none exists.
-    fn new_entity(&mut self, cx: &mut AppletContext<'_>) -> Option<NewEntity> {
-        let _ = cx;
-        None
     }
 
     /// The kinds of new files it makes.
@@ -728,58 +662,32 @@ pub trait SueApplet: Send {
         Vec::new()
     }
 
-    /// Makes a new file from template `key`. A node applet returns the
-    /// entity, which the shell places where the menu opened. An applet that
-    /// makes something larger (a picture with layers) makes it itself,
-    /// places it with [`ShellRequest::Place`] and returns `None`.
-    fn create(&mut self, key: &str, cx: &mut AppletContext<'_>) -> Option<NewEntity> {
+    /// Makes a new file from template `key` and opens it (asking for its
+    /// page with [`ShellRequest::Open`]).
+    fn create(&mut self, key: &str, cx: &mut AppletContext<'_>) {
         let _ = (key, cx);
+    }
+
+    /// The entity this studio or tool works on, for the Sue menu's Send To.
+    fn focus(&self) -> Option<sue_core::EntityId> {
         None
     }
 
-    /// Where in `area` (the studio's whole window) this studio shows
-    /// `entity` when it opens, so the shell's zoom lands the entity's card
-    /// exactly there and the studio's panels come in around it. `None`
-    /// fills the window with the card, 24 points in from its edges.
-    fn card_frame(&self, area: egui::Rect, entity: &Entity) -> Option<egui::Rect> {
-        let _ = (area, entity);
-        None
-    }
-
-    /// The entity a studio is working on, so the shell can zoom out of its
-    /// card when the studio closes.
-    fn studio_focus(&self) -> Option<sue_core::EntityId> {
-        None
-    }
-
-    /// Draws node `node`: `ui` covers its content area, in canvas units.
-    fn node_ui(&mut self, ui: &mut Ui, node: NodeId, cx: &mut AppletContext<'_>) {
-        let _ = (ui, node, cx);
-    }
-
-    /// Draws the tools of the floating selection pill for `node`.
-    fn pill_ui(&mut self, ui: &mut Ui, node: NodeId, cx: &mut AppletContext<'_>) {
-        let _ = (ui, node, cx);
-    }
-
-    /// How long a node lasts on the timeline, in seconds.
-    fn duration(&self, node: &SceneNode, world: &World) -> f64 {
-        let _ = (node, world);
-        4.0
-    }
-
-    /// Draws the drawer.
-    fn drawer_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+    /// Draws the applet's part of the top bar, right after the Sue button:
+    /// its menus (with a [`crate::MenuBar`]), or on a phone a row of large
+    /// buttons. `ui` covers that part of the bar.
+    fn bar_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
         let _ = (ui, cx);
     }
 
-    /// Draws the window content.
+    /// Draws a studio's or tool's page: `ui` covers everything between the
+    /// top bar and the status bar.
+    fn page_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        let _ = (ui, cx);
+    }
+
+    /// Draws a window's content.
     fn window_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
-        let _ = (ui, cx);
-    }
-
-    /// Draws a studio: `ui` covers the whole window above the status bar.
-    fn studio_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
         let _ = (ui, cx);
     }
 
@@ -811,33 +719,22 @@ pub trait SueApplet: Send {
         false
     }
 
-    /// Takes on a [`FilePick`] in its window. Returns `false` if the applet
-    /// does not pick files.
-    fn begin_pick(&mut self, pick: &FilePick) -> bool {
-        let _ = pick;
-        false
-    }
-
     /// Receives the file a [`FilePick`] this applet sent asked for.
     fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
         let _ = (pick, path, cx);
     }
 
-    /// The floating window's title, when not the applet's name.
-    fn window_title(&self) -> Option<String> {
-        None
-    }
-
     /// What the Sue menu offers from this applet for `focus` (the entity
-    /// the current studio works on, or the one selected on the canvas).
-    /// `current` is `true` when this applet is the open studio.
+    /// the open studio or tool works on). `current` is `true` when this
+    /// applet fills the page.
     fn sue_actions(&self, focus: Option<&Entity>, current: bool) -> Vec<SueAction> {
         let _ = (focus, current);
         Vec::new()
     }
 
     /// Receives an entity another applet sent with
-    /// [`ShellRequest::SendEntity`].
+    /// [`ShellRequest::SendEntity`], or one to open
+    /// ([`ShellRequest::OpenIn`], purpose `open`).
     fn take_entity(
         &mut self,
         purpose: &str,
@@ -848,9 +745,9 @@ pub trait SueApplet: Send {
     }
 
     /// `true` if this applet takes files like `path` itself when one is
-    /// opened anywhere in Sue (a word processor's documents go to it, not
-    /// onto the canvas). It gets them through [`SueApplet::picked`] with the
-    /// purpose `import`.
+    /// opened anywhere in Sue (a word processor's documents go to it as
+    /// they are, not read into the arena first). It gets them through
+    /// [`SueApplet::picked`] with the purpose `import`.
     fn opens_file(&self, path: &Path) -> bool {
         let _ = path;
         false
@@ -861,5 +758,40 @@ pub trait SueApplet: Send {
     /// do, instead of opening the command palette).
     fn reserved_keys(&self) -> Vec<sue_rice::Keybind> {
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn picks_hand_the_system_dialog_their_kinds_of_file() {
+        let any = FilePick::open(None, "open", "Open File");
+        assert!(any.filters().is_empty(), "any file");
+        assert!(any.takes(Path::new("song.flac")));
+        let project = FilePick::open(None, "open", "Open Project").extensions(&["sue"]);
+        let filters = project.filters();
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].extensions, ["sue"]);
+        assert!(!project.takes(Path::new("a.png")));
+        let save = FilePick::save(None, "save-as", "Save Picture As", "a.png").types(vec![
+            FileType::new("PNG picture", &["png"]),
+            FileType::new("JPEG picture", &["jpg", "jpeg"]),
+        ]);
+        let names: Vec<String> = save
+            .filters()
+            .into_iter()
+            .map(|filter| filter.name)
+            .collect();
+        assert_eq!(names, ["PNG picture", "JPEG picture"]);
+        assert_eq!(
+            save.type_of(Path::new("b.JPEG"))
+                .map(|kind| kind.name.as_str()),
+            Some("JPEG picture")
+        );
+        assert!(save.takes(Path::new("c.jpg")));
+        let folder = FilePick::open(None, "folder", "Choose a Folder").folder();
+        assert!(folder.folders);
     }
 }

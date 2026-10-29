@@ -1,39 +1,31 @@
 //! The runtime shared by the live window and offscreen snapshots: one egui
-//! frame of the shell, timers, engine commands, file opening and saving.
+//! frame of the shell, timers, engine commands, the system's file dialogs,
+//! and opening and saving files and projects.
 //!
 //! Pacing: frames keep coming while a spring moves (the shell asks
 //! egui for them with `request_repaint`) and for a short riced grace period
 //! after any change. Then the window sleeps at 0 FPS, waking only for timed
 //! work: the audio queue while something plays, a status message to clear,
-//! a typing burst to close into one undo step, a pending autosave.
+//! a typing burst to close into one undo step.
 
 use std::collections::VecDeque;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use egui::{Align2, Id, Order, RichText, Sense};
 use sue_core::{SueFile, UndoStack};
-use sue_io::{IngestOptions, IngestView, NativeJxlPipeline, ingest_bytes, meta};
+use sue_io::{IngestOptions, NativeJxlPipeline, ingest_bytes, meta};
 use sue_platform::{AudioConfig, AudioOutput, AudioSink, FramePacing, TextureUpload, write_atomic};
 use sue_rice::{RiceSchema, SetRiceValues};
 use sue_wm::{
     Applets, FilePick, RiceEdit, Shell, ShellIo, ShellRequest, Theme, Transport, Typing, widgets,
 };
 
-use crate::document::{KIND, KIND_CODE};
-use crate::engine::{Engine, NOTE_NAME};
+use crate::engine::Engine;
 use crate::util::{file_name, human_bytes};
 
 /// How often the audio queue is topped up while something plays.
 const FEED_INTERVAL: Duration = Duration::from_millis(40);
-
-/// Extensions opened as code in Code / Hex rather than as documents.
-const CODE_EXTENSIONS: [&str; 16] = [
-    "rs", "py", "js", "ts", "c", "h", "cpp", "hpp", "java", "go", "toml", "json", "wgsl", "sh",
-    "lua", "cs",
-];
 
 /// Frame-rate telemetry for the status bar.
 #[derive(Debug, Default)]
@@ -71,12 +63,6 @@ impl Telemetry {
             _ => 0,
         }
     }
-}
-
-fn text_hash(text: &str) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    text.hash(&mut hasher);
-    hasher.finish()
 }
 
 /// Values whose change means the Settings catalog must be rebuilt.
@@ -139,8 +125,9 @@ pub struct Runtime {
     restart: bool,
     interactive: bool,
     booted: bool,
-    note_saved: Option<u64>,
-    next_autosave: Option<Instant>,
+    /// A file dialog a headless run could not show, kept for scripted runs
+    /// to answer ([`Runtime::answer_pick`]).
+    pending_pick: Option<FilePick>,
     /// Where the open project lives, once saved or opened.
     project: Option<PathBuf>,
     /// The open project file, so chunks this build does not know survive.
@@ -164,13 +151,6 @@ impl Runtime {
         let applets = engine.launchpad.instantiate();
         let revision = engine.world.rice.revision();
         let fingerprint = catalog_fingerprint(&engine.world.rice);
-        let note = engine
-            .world
-            .arena
-            .iter()
-            .find(|(_, entity)| entity.name() == NOTE_NAME)
-            .and_then(|(_, entity)| entity.string_buffer())
-            .map(|text| text_hash(text.as_str()));
         Ok(Self {
             engine,
             shell,
@@ -190,8 +170,7 @@ impl Runtime {
             restart: false,
             interactive: false,
             booted: false,
-            note_saved: note,
-            next_autosave: None,
+            pending_pick: None,
             project: None,
             project_file: SueFile::new(),
         })
@@ -226,10 +205,8 @@ impl Runtime {
     pub fn ui(&mut self, ui: &mut egui::Ui, textures: &mut dyn TextureUpload, now: Instant) {
         if !self.booted {
             self.booted = true;
-            self.shell
-                .set_canvas(ui.max_rect().shrink2(egui::vec2(36.0, 11.0)));
             let mut io = shell_io!(self, textures);
-            self.shell.boot(&mut io, now);
+            self.shell.boot(&mut io);
         }
         {
             let mut io = shell_io!(self, textures);
@@ -245,7 +222,6 @@ impl Runtime {
         } else {
             self.telemetry.reset();
         }
-        self.track_note(now);
         if !ui.ctx().input(|input| input.pointer.any_down())
             && let Some(Err(error)) = self.persist()
         {
@@ -281,8 +257,7 @@ impl Runtime {
                                     .color(theme.text),
                             );
                             ui.label(
-                                RichText::new("Your note and settings are saved first.")
-                                    .color(theme.muted),
+                                RichText::new("Your settings are saved first.").color(theme.muted),
                             );
                             ui.add_space(theme.padding);
                             ui.horizontal(|ui| {
@@ -364,7 +339,6 @@ impl Runtime {
             self.transport
                 .is_playing()
                 .then_some(self.next_feed.unwrap_or(now)),
-            self.next_autosave,
             self.typing.deadline(),
             self.next_tick,
         ]
@@ -378,9 +352,6 @@ impl Runtime {
     /// redrawn.
     pub fn timer(&mut self, textures: &mut dyn TextureUpload, now: Instant) -> bool {
         let mut redraw = self.shell.expire(now);
-        if self.next_autosave.is_some_and(|due| due <= now) {
-            self.save_note();
-        }
         if self.typing.flush_if_paused(&mut self.engine.history, now) {
             redraw = true;
         }
@@ -420,57 +391,6 @@ impl Runtime {
         redraw
     }
 
-    /// Notices note edits and schedules an autosave.
-    fn track_note(&mut self, now: Instant) {
-        let seconds = self
-            .engine
-            .world
-            .rice
-            .get_i64("general.autosave_seconds")
-            .unwrap_or(30);
-        let current = self.note_hash();
-        if current != self.note_saved && self.next_autosave.is_none() && seconds > 0 {
-            self.next_autosave =
-                Some(now + Duration::from_secs(u64::try_from(seconds).unwrap_or(30)));
-        }
-    }
-
-    fn note_hash(&self) -> Option<u64> {
-        self.engine
-            .world
-            .arena
-            .iter()
-            .find(|(_, entity)| entity.name() == NOTE_NAME)
-            .and_then(|(_, entity)| entity.string_buffer())
-            .map(|text| text_hash(text.as_str()))
-    }
-
-    /// Writes the note if it changed since the last save.
-    pub fn save_note(&mut self) {
-        self.next_autosave = None;
-        let hash = self.note_hash();
-        if hash == self.note_saved {
-            return;
-        }
-        let Some(text) = self
-            .engine
-            .world
-            .arena
-            .iter()
-            .find(|(_, entity)| entity.name() == NOTE_NAME)
-            .and_then(|(_, entity)| entity.string_buffer())
-        else {
-            return;
-        };
-        let path = self.engine.note_path();
-        match write_atomic(&path, text.as_str().as_bytes()) {
-            Ok(()) => self.note_saved = hash,
-            Err(error) => self
-                .shell
-                .notify(format!("Could not save the note: {error}"), true),
-        }
-    }
-
     /// Asks before closing when the rice says so. Returns `true` to close.
     pub fn close_requested(&mut self) -> bool {
         if self.quit {
@@ -491,10 +411,9 @@ impl Runtime {
         true
     }
 
-    /// Saves what must survive: the note, the open typing group and the rice.
+    /// Saves what must survive: the open typing group and the rice.
     pub fn shutdown(&mut self) {
         self.typing.flush(&mut self.engine.history);
-        self.save_note();
         if let Some(Err(error)) = self.persist() {
             eprintln!("sue: could not save the rice: {error}");
         }
@@ -602,7 +521,7 @@ impl Runtime {
         }
     }
 
-    /// Asks the File Manager for a file to open on the canvas.
+    /// Asks the system's dialog for a file to open.
     fn pick_and_open(&mut self) {
         self.engine
             .requests
@@ -613,7 +532,8 @@ impl Runtime {
             )));
     }
 
-    /// Carries out a file the File Manager picked for the shell or engine.
+    /// Carries out a file the system's dialog picked for the shell or
+    /// engine.
     fn picked(
         &mut self,
         pick: &FilePick,
@@ -642,20 +562,24 @@ impl Runtime {
         }
     }
 
-    /// No applet picks files: the system dialog answers instead.
+    /// Shows the system's open, save or folder dialog for `pick`; the
+    /// chosen path comes back as [`ShellRequest::Picked`]. A headless run
+    /// keeps the pick for a script to answer.
     fn pick_with_system_dialog(&mut self, pick: FilePick) {
         if !self.interactive {
             self.shell
                 .notify("Choosing files needs the desktop window", false);
+            self.pending_pick = Some(pick);
             return;
         }
-        let filters = crate::files::filters_of(&pick);
+        let filters = pick.filters();
         let start = pick
             .start
             .clone()
             .unwrap_or_else(|| self.engine.paths.home_dir.clone());
         let path = match &pick.save_as {
             Some(name) => sue_platform::pick_save_file(&pick.title, Some(&start), name, &filters),
+            None if pick.folders => sue_platform::pick_folder(&pick.title, Some(&start)),
             None => sue_platform::pick_open_file(&pick.title, Some(&start), &filters),
         };
         if let Some(path) = path {
@@ -663,6 +587,36 @@ impl Runtime {
                 .requests
                 .push(ShellRequest::Picked { pick, path });
         }
+    }
+
+    /// The file dialog a headless run could not show, if any (tests).
+    #[cfg(test)]
+    #[must_use]
+    pub fn pending_pick(&self) -> Option<&FilePick> {
+        self.pending_pick.as_ref()
+    }
+
+    /// Answers the pending file dialog with `path`, as if it had been
+    /// chosen there (scripted runs, snapshots and tests). Returns `false`
+    /// when no dialog was waiting.
+    pub fn answer_pick(
+        &mut self,
+        path: &Path,
+        textures: &mut dyn TextureUpload,
+        now: Instant,
+    ) -> bool {
+        let Some(pick) = self.pending_pick.take() else {
+            return false;
+        };
+        self.request(
+            ShellRequest::Picked {
+                pick,
+                path: path.to_path_buf(),
+            },
+            textures,
+            now,
+        );
+        true
     }
 
     /// The open project's path, if it has one.
@@ -677,7 +631,7 @@ impl Runtime {
         let path = match (&self.project, choose) {
             (Some(path), false) => path.clone(),
             _ => {
-                // The File Manager asks where; `picked` saves.
+                // The system's dialog asks where; `picked` saves.
                 let start = self
                     .project
                     .as_ref()
@@ -726,8 +680,6 @@ impl Runtime {
         // Old steps name entities that are gone.
         self.engine.history = UndoStack::new();
         self.typing = Typing::default();
-        self.shell.select(None, &mut self.engine.world);
-        self.shell.frame_all(&self.engine.world);
         self.project = Some(path.to_path_buf());
         self.project_file = file;
         self.shell
@@ -735,10 +687,10 @@ impl Runtime {
         Ok(())
     }
 
-    /// Reads a file, puts it in the arena and places it on the canvas in the
-    /// applet that shows its content. A `.sue` project replaces the document.
-    /// A file an applet takes itself (a Word document, for Sue Writer) goes
-    /// to that applet instead.
+    /// Reads a file into the arena and opens it in the first studio or tool
+    /// that works on it. A `.sue` project replaces the document. A file an
+    /// applet takes itself (a Word document or a text file, for Sue Writer)
+    /// goes to that applet instead.
     pub fn open_path(&mut self, path: &Path, textures: &mut dyn TextureUpload, now: Instant) {
         let taker = self
             .applets
@@ -769,7 +721,7 @@ impl Runtime {
             .unwrap_or(u64::MAX)
             .saturating_mul(1024 * 1024);
         let bytes = match std::fs::metadata(path) {
-            Ok(metadata) if metadata.is_dir() => Err("folders open in the Files drawer".to_owned()),
+            Ok(metadata) if metadata.is_dir() => Err("it is a folder".to_owned()),
             Ok(metadata) if metadata.len() > limit => Err(format!(
                 "it is {}, over the {limit_mib} MiB limit (io.max_ingest_mib)",
                 human_bytes(metadata.len())
@@ -816,26 +768,29 @@ impl Runtime {
                 return;
             }
         };
-        let code = ingested.view == IngestView::Text
-            && path.extension().is_some_and(|extension| {
-                CODE_EXTENSIONS.contains(&extension.to_string_lossy().to_ascii_lowercase().as_str())
-            });
-        if let Ok(entity) = self.engine.world.arena.get_mut(ingested.handle) {
-            entity.set_meta(meta::SOURCE, path.display().to_string());
-            if code {
-                entity.set_meta(KIND, KIND_CODE);
-            }
-        }
-        let placed = {
-            let mut io = shell_io!(self, textures);
-            self.shell.place(ingested.handle, true, &mut io)
+        let Ok(entity) = self.engine.world.arena.get_mut(ingested.handle) else {
+            return;
         };
-        if placed.is_some()
-            && let Some(note) = ingested.note
-        {
+        entity.set_meta(meta::SOURCE, path.display().to_string());
+        let id = entity.id();
+        let page = self
+            .engine
+            .world
+            .arena
+            .get(ingested.handle)
+            .ok()
+            .and_then(|entity| self.applets.page_for(entity));
+        let Some(applet) = page else {
+            // Nothing shows it: it does not stay in the project unseen.
+            let _ = self.engine.world.arena.despawn(ingested.handle);
+            self.shell
+                .notify(format!("No studio or tool opens {name} yet"), true);
+            return;
+        };
+        if let Some(note) = ingested.note {
             self.shell.notify(format!("{name}: {note}"), false);
         }
-        self.serve_requests(textures, now);
+        self.request(ShellRequest::OpenIn { entity: id, applet }, textures, now);
     }
 
     /// Opens (or reopens) the audio output with the riced device and format.
@@ -926,7 +881,7 @@ impl Runtime {
     }
 
     fn export_rice(&mut self) {
-        // The File Manager asks where; `picked` writes it.
+        // The system's dialog asks where; `picked` writes it.
         let start = self.engine.paths.home_dir.clone();
         self.engine.requests.push(ShellRequest::PickFile(
             FilePick::save(None, "export-rice", "Export Rice", "my.suerice")
@@ -946,6 +901,22 @@ impl Runtime {
         let result = {
             let mut io = shell_io!(self, textures);
             self.shell.with_context(&mut io, now, work)
+        };
+        self.serve_requests(textures, now);
+        result
+    }
+
+    /// Runs `work` with the shell and everything a frame touches (scripted
+    /// runs, snapshots and tests), then serves what it asked for.
+    pub fn with_shell<R>(
+        &mut self,
+        textures: &mut dyn TextureUpload,
+        now: Instant,
+        work: impl FnOnce(&mut Shell, &mut ShellIo<'_>, Instant) -> R,
+    ) -> R {
+        let result = {
+            let mut io = shell_io!(self, textures);
+            work(&mut self.shell, &mut io, now)
         };
         self.serve_requests(textures, now);
         result
@@ -989,10 +960,13 @@ pub(crate) mod tests {
         let mut count = 0;
         let mut now = start;
         loop {
+            // egui's clock goes on from the context's last frame, so calls
+            // in a row never turn it back.
+            let time = ctx.input(|input| input.time) + 0.008;
             let raw = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, size)),
                 events: input(count),
-                time: Some(now.duration_since(start).as_secs_f64()),
+                time: Some(time),
                 ..egui::RawInput::default()
             };
             ctx.run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now))
@@ -1007,27 +981,71 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_mode_switch_glides_the_camera_and_then_sleeps() {
-        let (mut runtime, root) = runtime("mode");
+    fn a_click_on_a_hub_box_glides_its_studio_in_and_then_sleeps() {
+        let (mut runtime, root) = runtime("hub");
         let ctx = egui::Context::default();
         let start = Instant::now();
         frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
             Vec::new()
         });
-        let before = runtime.shell.camera().center();
-        runtime.request(
-            ShellRequest::Mode("document".to_owned()),
-            &mut NoTextures,
-            start,
+        assert!(runtime.shell.hub_open());
+        // Studios first, then tools, each a box with its pin.
+        let boxes: Vec<&str> = runtime
+            .shell
+            .hub_boxes()
+            .iter()
+            .map(|(id, _, _)| id.as_str())
+            .collect();
+        assert_eq!(
+            boxes,
+            [
+                sue_paint::ID,
+                sue_writer::ID,
+                crate::viewer::ID,
+                crate::convert::ID
+            ]
         );
-        let count = frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
-            Vec::new()
-        });
-        assert!(count > 10, "the camera must animate ({count} frames)");
-        assert!(runtime.shell.camera().center().distance(before) > 1.0);
-        assert_eq!(runtime.shell.mode(), "document");
-        assert!(runtime.shell.selected().is_some());
+        let (_, rect, _) = runtime.shell.hub_boxes()[0].clone();
+        let at = rect.left_top() + vec2(30.0, 30.0);
+        let count = frames(
+            &mut runtime,
+            &ctx,
+            vec2(1440.0, 900.0),
+            start,
+            |frame| match frame {
+                0 => vec![egui::Event::PointerMoved(at)],
+                1 => vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                2 => vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                _ => Vec::new(),
+            },
+        );
+        assert!(count > 10, "the page must glide in ({count} frames)");
+        assert_eq!(
+            runtime.shell.page().map(AppletId::as_str),
+            Some(sue_paint::ID)
+        );
+        assert!(runtime.shell.reveal() > 0.999);
+        assert!(!matches!(
+            runtime.pacing(start + Duration::from_secs(60)),
+            FramePacing::Animate { .. }
+        ));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Where Sue Paint's canvas has its middle in a 1440 by 900 window: the
+    /// page's middle, moved by Sue Paint's palettes.
+    fn paint_middle(runtime: &Runtime) -> Pos2 {
+        runtime.shell.page_rect().center() + vec2(17.0, -63.0)
     }
 
     /// One frame of `size` with `events`, at `now`.
@@ -1062,19 +1080,19 @@ pub(crate) mod tests {
         let ctx = egui::Context::default();
         let mut now = Instant::now();
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
         // The studio's panels slide in first.
         frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
-        assert!(runtime.shell.studio_reveal() > 0.999);
+        assert!(runtime.shell.reveal() > 0.999);
         let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
             frame_with(runtime, &ctx, now, events);
             now += Duration::from_millis(8);
         };
         assert_eq!(
-            runtime.shell.studio().map(AppletId::as_str),
+            runtime.shell.page().map(AppletId::as_str),
             Some(sue_paint::ID)
         );
         step(&mut runtime, Vec::new());
@@ -1099,19 +1117,6 @@ pub(crate) mod tests {
             Some([1600, 1200])
         );
         let layer = sue_paint::doc::layers(arena, picture).last().unwrap().id;
-        let card = runtime
-            .engine
-            .world
-            .scene
-            .iter()
-            .find(|(_, node)| node.applet.as_str() == sue_paint::CARD_ID)
-            .map(|(_, node)| node.entity);
-        assert_eq!(
-            card.and_then(|handle| arena.get(handle).ok())
-                .map(sue_core::Entity::id),
-            Some(picture),
-            "the new picture also sits on the canvas"
-        );
         let alpha = |runtime: &Runtime, x: u32, y: u32| {
             let raster = sue_paint::doc::raster(&runtime.engine.world.arena, layer).unwrap();
             raster.bytes().unwrap()[((y * raster.width() + x) * 4 + 3) as usize]
@@ -1120,9 +1125,7 @@ pub(crate) mod tests {
 
         // A pen stroke from the middle of the canvas to the right, with pen
         // pressure. The picture is fitted, so the middle is pixel (800, 600).
-        // The studio sits between the side rails, and its palettes leave the
-        // canvas 17 points right of and 50 points above the area's middle.
-        let viewport_center = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let viewport_center = paint_middle(&runtime);
         let to = viewport_center + vec2(100.0, 0.0);
         let touch = |phase, pos| egui::Event::Touch {
             device_id: egui::TouchDeviceId(1),
@@ -1236,7 +1239,7 @@ pub(crate) mod tests {
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -1275,7 +1278,7 @@ pub(crate) mod tests {
             modifiers: egui::Modifiers::NONE,
         };
         // A mouse stroke across the middle, from x = 800 to past 990.
-        let from = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let from = paint_middle(&runtime);
         let to = from + vec2(100.0, 0.0);
         step(
             &mut runtime,
@@ -1353,7 +1356,7 @@ pub(crate) mod tests {
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -1386,7 +1389,7 @@ pub(crate) mod tests {
             runtime
                 .applets
                 .get(&paint)
-                .and_then(|applet| applet.studio_focus())
+                .and_then(|applet| applet.focus())
         };
         let first = current(&runtime).unwrap();
         let pages = |runtime: &Runtime| {
@@ -1463,7 +1466,7 @@ pub(crate) mod tests {
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -1493,7 +1496,7 @@ pub(crate) mod tests {
         let picture = runtime
             .applets
             .get(&paint)
-            .and_then(|applet| applet.studio_focus())
+            .and_then(|applet| applet.focus())
             .unwrap();
         let layer_of = |runtime: &Runtime, class: &str| {
             let arena = &runtime.engine.world.arena;
@@ -1538,7 +1541,7 @@ pub(crate) mod tests {
             step(runtime, vec![egui::Event::PointerMoved(to)]);
             step(runtime, vec![press(to, false)]);
         };
-        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let middle = paint_middle(&runtime);
 
         // A frame border folder of the manga layout: five panels.
         command(&mut runtime, "layer.new.frame");
@@ -1620,7 +1623,7 @@ pub(crate) mod tests {
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -1652,7 +1655,7 @@ pub(crate) mod tests {
         let picture = runtime
             .applets
             .get(&paint)
-            .and_then(|applet| applet.studio_focus())
+            .and_then(|applet| applet.focus())
             .unwrap();
         let press = |pos, pressed| egui::Event::PointerButton {
             pos,
@@ -1660,7 +1663,7 @@ pub(crate) mod tests {
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let middle = paint_middle(&runtime);
         let mut stroke = |runtime: &mut Runtime, y: f32| {
             let (from, to) = (middle + vec2(-60.0, y), middle + vec2(60.0, y));
             step(
@@ -1849,7 +1852,7 @@ pub(crate) mod tests {
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -1871,7 +1874,7 @@ pub(crate) mod tests {
         let picture = runtime
             .applets
             .get(&paint)
-            .and_then(|applet| applet.studio_focus())
+            .and_then(|applet| applet.focus())
             .unwrap();
         let layer = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
             .last()
@@ -1890,7 +1893,7 @@ pub(crate) mod tests {
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let middle = paint_middle(&runtime);
         let (from, to) = (middle - vec2(60.0, 0.0), middle + vec2(60.0, 0.0));
         step(
             &mut runtime,
@@ -1954,7 +1957,7 @@ pub(crate) mod tests {
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -1974,7 +1977,7 @@ pub(crate) mod tests {
         let picture = runtime
             .applets
             .get(&paint)
-            .and_then(|applet| applet.studio_focus())
+            .and_then(|applet| applet.focus())
             .unwrap();
         step(
             &mut runtime,
@@ -2022,7 +2025,7 @@ pub(crate) mod tests {
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -2044,7 +2047,7 @@ pub(crate) mod tests {
         let picture = runtime
             .applets
             .get(&paint)
-            .and_then(|applet| applet.studio_focus())
+            .and_then(|applet| applet.focus())
             .unwrap();
         let size = |runtime: &Runtime| {
             sue_model::picture::size(runtime.engine.world.arena.get_by_id(picture).unwrap())
@@ -2057,7 +2060,7 @@ pub(crate) mod tests {
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let middle = paint_middle(&runtime);
         // M picks the rectangle selection; drag a box around the middle.
         step(&mut runtime, vec![key(egui::Key::M, egui::Modifiers::NONE)]);
         let (a, b) = (middle - vec2(40.0, 30.0), middle + vec2(40.0, 30.0));
@@ -2107,7 +2110,7 @@ pub(crate) mod tests {
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -2127,7 +2130,7 @@ pub(crate) mod tests {
         let picture = runtime
             .applets
             .get(&paint)
-            .and_then(|applet| applet.studio_focus())
+            .and_then(|applet| applet.focus())
             .unwrap();
         let layer = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
             .last()
@@ -2146,7 +2149,7 @@ pub(crate) mod tests {
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let middle = paint_middle(&runtime);
         // U three times picks the Ruler tool and comma steps back round to
         // the Symmetrical Ruler; a click lays a vertical ruler.
         for _ in 0..3 {
@@ -2205,7 +2208,7 @@ pub(crate) mod tests {
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -2225,7 +2228,7 @@ pub(crate) mod tests {
         let picture = runtime
             .applets
             .get(&paint)
-            .and_then(|applet| applet.studio_focus())
+            .and_then(|applet| applet.focus())
             .unwrap();
         let layer = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
             .last()
@@ -2286,7 +2289,7 @@ pub(crate) mod tests {
         };
         // A pen stroke heading down but drifting right runs straight up
         // and down, the upright of two-point perspective.
-        let middle = runtime.shell.canvas_rect().center();
+        let middle = runtime.shell.page_rect().center();
         let (top, bottom) = (middle + vec2(-20.0, -150.0), middle + vec2(10.0, 10.0));
         step(&mut runtime, vec![key(egui::Key::P, plain)]);
         drag(&mut runtime, &mut step, top, bottom);
@@ -2339,7 +2342,7 @@ pub(crate) mod tests {
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -2359,7 +2362,7 @@ pub(crate) mod tests {
         let picture = runtime
             .applets
             .get(&paint)
-            .and_then(|applet| applet.studio_focus())
+            .and_then(|applet| applet.focus())
             .unwrap();
         let command = |runtime: &mut Runtime, command: &str| {
             runtime.request(
@@ -2419,7 +2422,7 @@ pub(crate) mod tests {
             step(runtime, vec![press(to, false)]);
         };
         // A level line crossed by an upright one: two lines, each one step.
-        let middle = runtime.shell.canvas_rect().center();
+        let middle = runtime.shell.page_rect().center();
         step(&mut runtime, vec![key(egui::Key::P, plain)]);
         drag(
             &mut runtime,
@@ -2517,7 +2520,7 @@ pub(crate) mod tests {
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -2537,7 +2540,7 @@ pub(crate) mod tests {
         let picture = runtime
             .applets
             .get(&paint)
-            .and_then(|applet| applet.studio_focus())
+            .and_then(|applet| applet.focus())
             .unwrap();
         let command = |runtime: &mut Runtime, command: &str| {
             runtime.request(
@@ -2563,7 +2566,7 @@ pub(crate) mod tests {
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        let middle = runtime.shell.canvas_rect().center();
+        let middle = runtime.shell.page_rect().center();
         step(&mut runtime, vec![key(egui::Key::P, plain)]);
         for y in [-40.0, 40.0] {
             let (a, b) = (middle + vec2(-80.0, y), middle + vec2(80.0, y));
@@ -2653,7 +2656,7 @@ pub(crate) mod tests {
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -2673,7 +2676,7 @@ pub(crate) mod tests {
         let picture = runtime
             .applets
             .get(&paint)
-            .and_then(|applet| applet.studio_focus())
+            .and_then(|applet| applet.focus())
             .unwrap();
         let command = |runtime: &mut Runtime, command: &str| {
             runtime.request(
@@ -2783,7 +2786,7 @@ pub(crate) mod tests {
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -2803,7 +2806,7 @@ pub(crate) mod tests {
         let picture = runtime
             .applets
             .get(&paint)
-            .and_then(|applet| applet.studio_focus())
+            .and_then(|applet| applet.focus())
             .unwrap();
         let command = |runtime: &mut Runtime, command: &str| {
             runtime.request(
@@ -2845,7 +2848,7 @@ pub(crate) mod tests {
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        let middle = runtime.shell.canvas_rect().center();
+        let middle = runtime.shell.page_rect().center();
         step(&mut runtime, vec![egui::Event::PointerMoved(middle)]);
         step(
             &mut runtime,
@@ -2944,7 +2947,7 @@ f 2 3 4
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -2964,7 +2967,7 @@ f 2 3 4
         let picture = runtime
             .applets
             .get(&paint)
-            .and_then(|applet| applet.studio_focus())
+            .and_then(|applet| applet.focus())
             .unwrap();
         let layer = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
             .last()
@@ -2976,7 +2979,7 @@ f 2 3 4
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let middle = paint_middle(&runtime);
         let mut drag = |runtime: &mut Runtime, before: Vec<egui::Event>, a, b| {
             step(runtime, before);
             step(runtime, vec![egui::Event::PointerMoved(a), press(a, true)]);
@@ -3046,7 +3049,7 @@ f 2 3 4
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -3066,7 +3069,7 @@ f 2 3 4
         let picture = runtime
             .applets
             .get(&paint)
-            .and_then(|applet| applet.studio_focus())
+            .and_then(|applet| applet.focus())
             .unwrap();
         let press = |pos, pressed| egui::Event::PointerButton {
             pos,
@@ -3074,7 +3077,7 @@ f 2 3 4
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let middle = paint_middle(&runtime);
         let text_layers = |runtime: &Runtime| -> Vec<sue_core::EntityId> {
             let arena = &runtime.engine.world.arena;
             sue_paint::doc::layers(arena, picture)
@@ -3162,7 +3165,7 @@ f 2 3 4
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -3182,7 +3185,7 @@ f 2 3 4
         let picture = runtime
             .applets
             .get(&paint)
-            .and_then(|applet| applet.studio_focus())
+            .and_then(|applet| applet.focus())
             .unwrap();
         let layer = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
             .last()
@@ -3201,7 +3204,7 @@ f 2 3 4
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let middle = paint_middle(&runtime);
         let mut drag = |runtime: &mut Runtime, before: Vec<egui::Event>, path: &[Pos2]| {
             step(runtime, before);
             step(
@@ -3255,7 +3258,7 @@ f 2 3 4
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -3275,7 +3278,7 @@ f 2 3 4
         let picture = runtime
             .applets
             .get(&paint)
-            .and_then(|applet| applet.studio_focus())
+            .and_then(|applet| applet.focus())
             .unwrap();
         let command = |runtime: &mut Runtime, name: &str| {
             runtime.request(
@@ -3328,7 +3331,7 @@ f 2 3 4
         let start = Instant::now();
         let mut now = start;
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             now,
         );
@@ -3389,16 +3392,16 @@ f 2 3 4
     }
 
     #[test]
-    fn studios_zoom_in_slide_in_and_glide_back_out() {
-        let (mut runtime, root) = runtime("studio-motion");
+    fn pages_slide_in_over_the_hub_and_back_out() {
+        let (mut runtime, root) = runtime("page-motion");
         let ctx = egui::Context::default();
         let size = vec2(1440.0, 900.0);
         let start = Instant::now();
         frames(&mut runtime, &ctx, size, start, |_| Vec::new());
-        let overview = runtime.shell.camera().zoom();
+        assert!(runtime.shell.hub_open());
         let paint = AppletId::new(sue_paint::ID).unwrap();
-        // New File, Picture, Square Post: a card appears and Sue Paint
-        // opens on it, first zooming into the card.
+        // New, Picture, Square Post: Sue Paint makes it and opens on it,
+        // coming in over the Hub.
         runtime.request(
             ShellRequest::Create {
                 applet: paint.clone(),
@@ -3407,50 +3410,35 @@ f 2 3 4
             &mut NoTextures,
             start,
         );
-        assert_eq!(runtime.shell.studio(), Some(&paint));
-        assert!(
-            runtime.shell.studio_reveal() < 0.01,
-            "the camera goes first"
-        );
-        let card = runtime
-            .engine
-            .world
-            .scene
-            .iter()
-            .any(|(_, node)| node.applet.as_str() == sue_paint::CARD_ID);
-        assert!(card, "the new picture sits on the canvas");
+        assert_eq!(runtime.shell.page(), Some(&paint));
+        assert!(runtime.shell.reveal() < 0.01, "it starts on the Hub");
         let opening = frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        assert!(opening > 10, "coming in takes a moment ({opening} frames)");
+        assert!(runtime.shell.reveal() > 0.999);
         assert!(
-            opening > 20,
-            "zooming and sliding in take a moment ({opening} frames)"
+            runtime.shell.hub_boxes().is_empty(),
+            "the Hub is not drawn under a page in place"
         );
-        assert!(runtime.shell.studio_reveal() > 0.999);
-        // The card's picture fills the studio's area, 24 points from its
-        // edges, as Sue Paint then shows it.
-        let content = runtime
-            .engine
-            .world
-            .scene
-            .iter()
-            .find(|(_, node)| node.applet.as_str() == sue_paint::CARD_ID)
-            .map(|(_, node)| node.rect.size() - vec2(0.0, sue_wm::NODE_TITLE))
-            .unwrap();
-        let area = runtime.shell.canvas_rect().size() - vec2(48.0, 48.0);
-        let filled = (area.x / content.x).min(area.y / content.y);
-        let zoom = runtime.shell.camera().zoom();
         assert!(
-            (zoom / filled - 1.0).abs() < 0.05 && (zoom / overview - 1.0).abs() > 0.05,
-            "zoomed into the card: {zoom} for {filled}, from {overview}"
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .any(|(_, entity)| sue_model::picture::is_picture(entity)),
+            "the picture was made"
         );
 
-        runtime.request(ShellRequest::CloseStudio, &mut NoTextures, start);
-        assert_eq!(runtime.shell.studio(), None, "leaving starts at once");
+        runtime.request(ShellRequest::Hub, &mut NoTextures, start);
+        assert!(runtime.shell.hub_open(), "leaving starts at once");
         let closing = frames(&mut runtime, &ctx, size, start, |_| Vec::new());
-        assert!(
-            closing > 20,
-            "sliding out and zooming out take a moment ({closing})"
+        assert!(closing > 10, "going out takes a moment ({closing})");
+        assert!(runtime.shell.reveal() < 0.001);
+        assert_eq!(
+            runtime.shell.hub_boxes().len(),
+            4,
+            "the Hub shows every studio and tool again"
         );
-        assert!(runtime.shell.studio_reveal() < 0.001);
 
         // With instant transitions the same trip takes a frame or two.
         runtime
@@ -3465,7 +3453,7 @@ f 2 3 4
             )
             .unwrap();
         frames(&mut runtime, &ctx, size, start, |_| Vec::new());
-        runtime.request(ShellRequest::OpenStudio(paint), &mut NoTextures, start);
+        runtime.request(ShellRequest::Open(paint), &mut NoTextures, start);
         for frame in 0..2 {
             frame_with(
                 &mut runtime,
@@ -3475,7 +3463,7 @@ f 2 3 4
             );
         }
         assert!(
-            runtime.shell.studio_reveal() > 0.999,
+            runtime.shell.reveal() > 0.999,
             "instant transitions snap in a frame or two"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -3512,7 +3500,7 @@ f 2 3 4
     }
 
     #[test]
-    fn studios_and_the_canvas_open_files_through_the_file_manager() {
+    fn files_open_through_the_system_dialog_in_the_studio_or_tool_that_takes_them() {
         let (mut runtime, root) = runtime("pick");
         std::fs::create_dir_all(&root).unwrap();
         let picture = root.join("photo.png");
@@ -3533,139 +3521,75 @@ f 2 3 4
                 .count()
         };
 
-        // Sue Paint asks; the File Manager's window answers.
+        // Sue Paint asks; the system's dialog answers (headless, the
+        // script does).
         let paint = AppletId::new(sue_paint::ID).unwrap();
-        let pick = FilePick::open(Some(paint), "open", "Open Picture").extensions(&["png"]);
+        let pick = FilePick::open(Some(paint.clone()), "open", "Open Picture").extensions(&["png"]);
         runtime.request(ShellRequest::PickFile(pick.clone()), &mut NoTextures, start);
-        assert_eq!(
-            runtime.shell.window().map(AppletId::as_str),
-            Some(crate::files::ID)
-        );
+        assert_eq!(runtime.pending_pick(), Some(&pick), "the dialog was asked");
+        assert_eq!(runtime.shell.window(), None, "no window of Sue's own");
         let before = pictures(&runtime);
-        runtime.request(
-            ShellRequest::Picked {
-                pick,
-                path: picture.clone(),
-            },
-            &mut NoTextures,
-            start,
-        );
+        assert!(runtime.answer_pick(&picture, &mut NoTextures, start));
         assert_eq!(pictures(&runtime), before + 1, "Sue Paint opened it");
-        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
-            Vec::new()
-        });
-        assert_eq!(runtime.shell.window(), None, "the window closed");
+        assert_eq!(runtime.shell.page(), Some(&paint));
+        assert!(!runtime.answer_pick(&picture, &mut NoTextures, start));
 
-        // Ctrl+O on the canvas goes the same way.
-        let nodes = runtime.engine.world.scene.len();
-        runtime.request(
-            ShellRequest::Command("file.open".to_owned()),
-            &mut NoTextures,
-            start,
-        );
-        assert_eq!(
-            runtime.shell.window().map(AppletId::as_str),
-            Some(crate::files::ID)
-        );
-        runtime.request(
-            ShellRequest::Picked {
-                pick: FilePick::open(None, "open", "Open File"),
-                path: picture,
-            },
-            &mut NoTextures,
-            start,
-        );
-        assert_eq!(
-            runtime.engine.world.scene.len(),
-            nodes + 1,
-            "it is on the canvas"
-        );
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn the_player_adds_a_folder_of_songs_and_plays_through_them() {
-        let (mut runtime, root) = runtime("player");
-        let music = root.join("music");
-        std::fs::create_dir_all(music.join("disc")).unwrap();
-        for (name, value) in [("one.wav", 0.1_f32), ("disc/two.wav", 0.2)] {
-            let pcm = sue_core::PCMFloat1D::new(8_000, 1, vec![value; 8_000]).unwrap();
-            std::fs::write(music.join(name), sue_io::encode_wav(&pcm)).unwrap();
-        }
-        let mut now = Instant::now();
-        let player = AppletId::new(crate::player::ID).unwrap();
-        // The File Manager's Add to Player, on a whole folder.
-        runtime.request(
-            ShellRequest::SendFile {
-                to: player.clone(),
-                purpose: "import".to_owned(),
-                path: music.clone(),
-            },
-            &mut NoTextures,
-            now,
-        );
-        let library = runtime.engine.catalog.folders["player"].join("library.txt");
-        let songs = move || {
-            std::fs::read_to_string(&library)
-                .map(|text| {
-                    text.lines()
-                        .filter(|line| line.starts_with("song\t"))
-                        .count()
-                })
-                .unwrap_or(0)
-        };
-        let mut wait = |runtime: &mut Runtime, until: &dyn Fn(&Runtime) -> bool| {
-            for _ in 0..400 {
-                if until(runtime) {
-                    return true;
-                }
-                runtime.timer(&mut NoTextures, now);
-                now += Duration::from_millis(50);
-                std::thread::sleep(Duration::from_millis(5));
+        // Open File (Ctrl+O on the Hub) puts a picture in the Image Viewer.
+        runtime.request(ShellRequest::Hub, &mut NoTextures, start);
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |frame| {
+            if frame == 1 {
+                vec![key(egui::Key::O, egui::Modifiers::COMMAND)]
+            } else {
+                Vec::new()
             }
-            false
-        };
-        assert!(
-            wait(&mut runtime, &|_| songs() == 2),
-            "both songs are in the library"
-        );
-
-        // Play: the song decodes in the background, then plays from its
-        // shared buffer, not from the arena.
-        let entities = runtime.engine.world.arena.len();
-        let command = |name: &str| ShellRequest::AppletCommand {
-            applet: player.clone(),
-            command: name.to_owned(),
-        };
-        runtime.request(command("player.toggle"), &mut NoTextures, Instant::now());
-        let playing_stream = |runtime: &Runtime| {
-            runtime.transport.is_playing()
-                && runtime.transport.clip().is_some_and(|clip| {
-                    clip.owner == "player" && matches!(clip.source, sue_wm::ClipSource::Stream(_))
-                })
-        };
-        assert!(wait(&mut runtime, &playing_stream), "the first song plays");
+        });
+        let asked = runtime.pending_pick().cloned().expect("Ctrl+O asked");
+        assert_eq!((asked.requester, asked.title.as_str()), (None, "Open File"));
+        assert!(runtime.answer_pick(&picture, &mut NoTextures, start));
+        let viewer = AppletId::new(crate::viewer::ID).unwrap();
+        assert_eq!(runtime.shell.page(), Some(&viewer));
+        let shown = runtime
+            .applets
+            .get(&viewer)
+            .and_then(|applet| applet.focus());
         assert_eq!(
-            runtime.engine.world.arena.len(),
-            entities,
-            "nothing went into the arena"
+            shown
+                .and_then(|id| runtime.engine.world.arena.get_by_id(id).ok())
+                .and_then(|entity| entity.meta(sue_io::meta::SOURCE)),
+            Some(picture.display().to_string().as_str()),
+            "the Image Viewer shows the file"
         );
-        let frames_of = |runtime: &Runtime| match runtime.transport.clip().map(|clip| &clip.source)
-        {
-            Some(sue_wm::ClipSource::Stream(pcm)) => pcm.samples()[0],
-            _ => 0.0,
-        };
-        let first = frames_of(&runtime);
 
-        // Next: the other song, already decoded ahead.
-        runtime.request(command("player.next"), &mut NoTextures, Instant::now());
-        assert!(wait(&mut runtime, &|runtime| playing_stream(runtime)
-            && frames_of(runtime) != first));
-        // Pause, and play again.
-        runtime.request(command("player.toggle"), &mut NoTextures, Instant::now());
-        assert!(!runtime.transport.is_playing());
-        runtime.request(command("player.toggle"), &mut NoTextures, Instant::now());
-        assert!(runtime.transport.is_playing());
+        // Text goes to Sue Writer.
+        let notes = root.join("notes.md");
+        std::fs::write(&notes, "# Hello\n\nSome *words*.\n").unwrap();
+        runtime.open_path(&notes, &mut NoTextures, start);
+        assert_eq!(
+            runtime.shell.page().map(AppletId::as_str),
+            Some(sue_writer::ID)
+        );
+
+        // Nothing opens an unknown file, and it does not stay behind.
+        let data = root.join("data.bin");
+        std::fs::write(&data, [0_u8, 1, 2, 3, 255, 254, 0, 7].repeat(64)).unwrap();
+        let entities = runtime.engine.world.arena.len();
+        runtime.open_path(&data, &mut NoTextures, start);
+        assert_eq!(runtime.engine.world.arena.len(), entities);
+        let (message, error) = runtime.shell.message().unwrap();
+        assert!(error && message.contains("data.bin"), "{message}");
+
+        // A folder is asked for as a folder.
+        let convert = AppletId::new(crate::convert::ID).unwrap();
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: convert.clone(),
+                command: "convert.folder".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        assert!(runtime.pending_pick().is_some_and(|pick| pick.folders));
+        assert_eq!(runtime.shell.page(), Some(&convert));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -3683,6 +3607,16 @@ f 2 3 4
         std::fs::write(&notes, "# Hello\n\nSome *words*.\n").unwrap();
         let mut now = Instant::now();
         let convert = AppletId::new(crate::convert::ID).unwrap();
+        // A tool, with a page of its own like a studio's.
+        assert_eq!(
+            runtime
+                .applets
+                .manifest(&convert)
+                .map(|manifest| manifest.role),
+            Some(sue_wm::AppletRole::Tool)
+        );
+        runtime.request(ShellRequest::Open(convert.clone()), &mut NoTextures, now);
+        assert_eq!(runtime.shell.page(), Some(&convert));
         for path in [&picture, &song, &notes] {
             runtime.request(
                 ShellRequest::SendFile {
@@ -3731,43 +3665,6 @@ f 2 3 4
     }
 
     #[test]
-    fn notes_open_and_save_files_and_undo_brings_the_old_note_back() {
-        let (mut runtime, root) = runtime("notes-files");
-        std::fs::create_dir_all(&root).unwrap();
-        let file = root.join("in.txt");
-        std::fs::write(&file, "from a file").unwrap();
-        let note = |runtime: &Runtime| {
-            runtime
-                .engine
-                .world
-                .arena
-                .iter()
-                .find(|(_, entity)| entity.name() == NOTE_NAME)
-                .and_then(|(_, entity)| entity.string_buffer().map(|text| text.as_str().to_owned()))
-                .unwrap_or_default()
-        };
-        let before = note(&runtime);
-        let notes = AppletId::new(crate::notes::ID).unwrap();
-        let send = |purpose: &str, path: &Path| ShellRequest::SendFile {
-            to: notes.clone(),
-            purpose: purpose.to_owned(),
-            path: path.to_path_buf(),
-        };
-        runtime.request(send("open", &file), &mut NoTextures, Instant::now());
-        assert_eq!(note(&runtime), "from a file");
-        let out = root.join("out.txt");
-        runtime.request(send("save", &out), &mut NoTextures, Instant::now());
-        assert_eq!(std::fs::read_to_string(&out).unwrap(), "from a file");
-        runtime
-            .engine
-            .history
-            .undo(&mut runtime.engine.world)
-            .unwrap();
-        assert_eq!(note(&runtime), before, "one undo brings the old note back");
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
     fn studios_keep_the_keys_they_reserve() {
         let (mut runtime, root) = runtime("reserved-keys");
         let ctx = egui::Context::default();
@@ -3775,8 +3672,7 @@ f 2 3 4
         frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
             Vec::new()
         });
-        runtime.request(ShellRequest::Hub(false), &mut NoTextures, start);
-        // On the canvas, Tab opens the command palette.
+        // On the Hub, Tab opens the command palette.
         frame_with(
             &mut runtime,
             &ctx,
@@ -3790,14 +3686,14 @@ f 2 3 4
         });
         // In Sue Paint, Tab hides the palettes, as in Clip Studio Paint.
         runtime.request(
-            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
             &mut NoTextures,
             start,
         );
         frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
             Vec::new()
         });
-        assert!(runtime.shell.studio_reveal() > 0.999);
+        assert!(runtime.shell.reveal() > 0.999);
         frame_with(
             &mut runtime,
             &ctx,
@@ -3815,62 +3711,81 @@ f 2 3 4
         let size = vec2(1440.0, 900.0);
         let start = Instant::now();
         frames(&mut runtime, &ctx, size, start, |_| Vec::new());
-        runtime.request(ShellRequest::Hub(false), &mut NoTextures, start);
 
-        // On the canvas: projects, files and the studios.
-        runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
-        assert!(runtime.shell.radial_open());
-        let first = runtime.shell.sue_menu_labels();
-        for wheel in [
-            "File \u{203a}",
-            "Project \u{203a}",
-            "Studios \u{203a}",
-            "Command Palette",
+        // The Sue button sits in the window's top left corner; a click
+        // opens the Sue menu.
+        let button = runtime.shell.sue_button();
+        assert_eq!(button.min, egui::Pos2::ZERO);
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            let at = button.center();
+            match frame {
+                0 => vec![egui::Event::PointerMoved(at)],
+                1 => vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                2 => vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                _ => Vec::new(),
+            }
+        });
+        assert!(runtime.shell.sue_menu_open());
+        let first = runtime.shell.sue_menu_labels(&[]);
+        for wanted in [
+            "Hub",
+            "Studios",
+            "Tools",
+            "New",
+            "File",
+            "Project",
+            "Command Palette (Tab)",
+            "Settings",
+            "Quit Sue",
         ] {
             assert!(
-                first.iter().any(|label| label == wheel),
-                "{wheel} in {first:?}"
+                first.iter().any(|label| label == wanted),
+                "{wanted} in {first:?}"
             );
         }
-        runtime.shell.sue_menu_open("File");
+        assert!(
+            !first.iter().any(|label| label.ends_with("at Launch")),
+            "the Hub has nothing to pin"
+        );
+        assert_eq!(
+            runtime.shell.sue_menu_labels(&["Studios"]),
+            ["Sue Paint", "Sue Writer"]
+        );
+        assert_eq!(
+            runtime.shell.sue_menu_labels(&["Tools"]),
+            ["Image Viewer", "Converter"]
+        );
+        assert_eq!(
+            runtime.shell.sue_menu_labels(&["New"]),
+            ["Picture", "Writing"]
+        );
         assert!(
             runtime
                 .shell
-                .sue_menu_labels()
+                .sue_menu_labels(&["File"])
                 .iter()
-                .any(|label| label == "File Manager")
+                .any(|label| label == "Open File...")
         );
-        runtime.shell.dismiss_overlays();
-        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
 
-        // In Sue Paint, on a new picture: its own wheel first, and Send To.
+        // New, Picture, Square Post: into Sue Paint on a new picture.
+        let picked = runtime.with_shell(&mut NoTextures, start, |shell, io, now| {
+            shell.sue_menu_pick(&["New", "Picture", "Square Post"], io, now)
+        });
+        assert!(picked);
+        assert!(!runtime.shell.sue_menu_open(), "a pick closes the menu");
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
         let paint = AppletId::new(sue_paint::ID).unwrap();
-        runtime.request(
-            ShellRequest::Create {
-                applet: paint.clone(),
-                key: "Square Post".to_owned(),
-            },
-            &mut NoTextures,
-            start,
-        );
-        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
-        assert_eq!(runtime.shell.studio(), Some(&paint));
-        runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
-        let first = runtime.shell.sue_menu_labels();
-        assert_eq!(
-            first[0], "Sue Paint \u{203a}",
-            "the open studio's wheel first: {first:?}"
-        );
-        runtime.shell.sue_menu_open("Send To");
-        let send = runtime.shell.sue_menu_labels();
-        assert!(
-            send.iter().any(|label| label == "Canvas")
-                && send.iter().any(|label| label == "Convert"),
-            "{send:?}"
-        );
-        runtime.shell.dismiss_overlays();
-
-        // The picture goes to the Converter, flattened into a PNG.
+        assert_eq!(runtime.shell.page(), Some(&paint));
         let picture = runtime
             .engine
             .world
@@ -3879,16 +3794,31 @@ f 2 3 4
             .find(|(_, entity)| sue_model::picture::is_picture(entity))
             .map(|(_, entity)| entity.id())
             .unwrap();
-        let convert = AppletId::new(crate::convert::ID).unwrap();
-        runtime.request(
-            ShellRequest::SendEntity {
-                to: convert.clone(),
-                purpose: "add".to_owned(),
-                entity: picture,
-            },
-            &mut NoTextures,
-            start,
+
+        // In Sue Paint: Send To offers the others, and the pin.
+        runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
+        let send = runtime.shell.sue_menu_labels(&["Send To"]);
+        assert!(
+            send.iter().any(|label| label == "Converter")
+                && send.iter().any(|label| label == "Sue Writer")
+                && !send.iter().any(|label| label == "Sue Paint"),
+            "{send:?}"
         );
+        assert!(
+            runtime
+                .shell
+                .sue_menu_labels(&[])
+                .iter()
+                .any(|label| label == "Open Sue Paint at Launch")
+        );
+
+        // The picture goes to the Converter, flattened into a PNG.
+        let sent = runtime.with_shell(&mut NoTextures, start, |shell, io, now| {
+            shell.sue_menu_pick(&["Send To", "Converter"], io, now)
+        });
+        assert!(sent);
+        let convert = AppletId::new(crate::convert::ID).unwrap();
+        assert_eq!(runtime.shell.page(), Some(&convert));
         runtime.request(
             ShellRequest::AppletCommand {
                 applet: convert,
@@ -3914,18 +3844,8 @@ f 2 3 4
             "the whole picture, flattened"
         );
 
-        // Send To Canvas leaves the studio; Open In goes back to it.
-        let handle = runtime.engine.world.arena.handle_of(picture).unwrap();
-        runtime.request(
-            ShellRequest::Place {
-                entity: handle,
-                focus: true,
-            },
-            &mut NoTextures,
-            start,
-        );
-        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
-        assert_eq!(runtime.shell.studio(), None);
+        // Open In goes back to Sue Paint on the very same picture; the Hub
+        // item goes home.
         runtime.request(
             ShellRequest::OpenIn {
                 entity: picture,
@@ -3934,7 +3854,126 @@ f 2 3 4
             &mut NoTextures,
             start,
         );
-        assert_eq!(runtime.shell.studio(), Some(&paint));
+        assert_eq!(runtime.shell.page(), Some(&paint));
+        assert_eq!(
+            runtime
+                .applets
+                .get(&paint)
+                .and_then(|applet| applet.focus()),
+            Some(picture)
+        );
+        runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
+        let home_picked = runtime.with_shell(&mut NoTextures, start, |shell, io, now| {
+            shell.sue_menu_pick(&["Hub"], io, now)
+        });
+        assert!(home_picked && runtime.shell.hub_open());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_pinned_studio_opens_at_launch_and_the_pin_undoes() {
+        let (host, root) = temp_host("pin");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        let mut runtime = Runtime::new(Engine::boot(&host).unwrap()).unwrap();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        assert!(runtime.shell.hub_open(), "nothing pinned: the Hub");
+        let pinned = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .rice
+                .get_str(sue_wm::PIN_KEY)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        // A click on Sue Writer's pin, at the bottom right of its box.
+        let (_, rect, pin) = runtime
+            .shell
+            .hub_boxes()
+            .iter()
+            .find(|(id, _, _)| id.as_str() == sue_writer::ID)
+            .cloned()
+            .unwrap();
+        assert!(
+            (pin.right() - rect.right()).abs() < 12.0
+                && (pin.bottom() - rect.bottom()).abs() < 12.0,
+            "the pin sits at the box's bottom right"
+        );
+        let click = |at: egui::Pos2| {
+            move |frame: usize| match frame {
+                0 => vec![egui::Event::PointerMoved(at)],
+                1 => vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                2 => vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                _ => Vec::new(),
+            }
+        };
+        frames(&mut runtime, &ctx, size, start, click(pin.center()));
+        assert_eq!(pinned(&runtime), sue_writer::ID);
+        assert!(runtime.shell.hub_open(), "pinning does not open it");
+        // One undo step, like any other change.
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]
+            } else {
+                Vec::new()
+            }
+        });
+        assert_eq!(pinned(&runtime), "");
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![key(egui::Key::Y, egui::Modifiers::COMMAND)]
+            } else {
+                Vec::new()
+            }
+        });
+        assert_eq!(pinned(&runtime), sue_writer::ID);
+        // One pin at a time: Sue Paint's pin takes it over.
+        let paint_pin = runtime
+            .shell
+            .hub_boxes()
+            .iter()
+            .find(|(id, _, _)| id.as_str() == sue_paint::ID)
+            .map(|(_, _, pin)| pin.center())
+            .unwrap();
+        frames(&mut runtime, &ctx, size, start, click(paint_pin));
+        assert_eq!(pinned(&runtime), sue_paint::ID);
+        frames(&mut runtime, &ctx, size, start, click(pin.center()));
+        assert_eq!(pinned(&runtime), sue_writer::ID);
+        // The rice file keeps it.
+        let rice = std::fs::read_to_string(runtime.engine.rice_path()).unwrap();
+        assert!(rice.contains("pinned = \"sue-writer\""), "{rice}");
+
+        // Started again, Sue opens straight into Sue Writer, already in place.
+        let mut again = Runtime::new(Engine::boot(&host).unwrap()).unwrap();
+        frame_with(&mut again, &ctx, start, Vec::new());
+        assert_eq!(
+            again.shell.page().map(AppletId::as_str),
+            Some(sue_writer::ID)
+        );
+        assert!(again.shell.reveal() > 0.999, "no trip through the Hub");
+        // Its Sue menu takes the pin away; the next start is on the Hub.
+        again.request(ShellRequest::SueMenu, &mut NoTextures, start);
+        let unpinned = again.with_shell(&mut NoTextures, start, |shell, io, now| {
+            shell.sue_menu_pick(&["Open Sue Writer at Launch"], io, now)
+        });
+        assert!(unpinned);
+        frames(&mut again, &ctx, size, start, |_| Vec::new());
+        let third = Runtime::new(Engine::boot(&host).unwrap()).unwrap();
+        let mut third = third;
+        frame_with(&mut third, &ctx, start, Vec::new());
+        assert!(third.shell.hub_open());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -3945,9 +3984,8 @@ f 2 3 4
         let size = vec2(1440.0, 900.0);
         let start = Instant::now();
         frames(&mut runtime, &ctx, size, start, |_| Vec::new());
-        runtime.request(ShellRequest::Hub(false), &mut NoTextures, start);
         let writer = AppletId::new(sue_writer::ID).unwrap();
-        // A novel from the New File wheel: made, put on the canvas, opened.
+        // A novel from the Sue menu's New: made and opened.
         runtime.request(
             ShellRequest::Create {
                 applet: writer.clone(),
@@ -3957,22 +3995,13 @@ f 2 3 4
             start,
         );
         frames(&mut runtime, &ctx, size, start, |_| Vec::new());
-        assert_eq!(runtime.shell.studio(), Some(&writer));
+        assert_eq!(runtime.shell.page(), Some(&writer));
         let arena = &runtime.engine.world.arena;
         let novel = arena
             .iter()
             .find(|(_, entity)| sue_model::manuscript::is_manuscript(entity))
             .map(|(_, entity)| entity.id())
             .expect("a manuscript");
-        assert!(
-            runtime
-                .engine
-                .world
-                .scene
-                .iter()
-                .any(|(_, node)| node.applet.as_str() == sue_writer::CARD_ID),
-            "its card is on the canvas"
-        );
         let draft = sue_model::manuscript::folder(arena, novel, sue_model::manuscript::role::DRAFT)
             .unwrap();
         let scene = sue_model::manuscript::walk(arena, draft)
@@ -4080,13 +4109,19 @@ f 2 3 4
             "the picture is in the text"
         );
 
-        // The Sue menu has Sue Writer's own wheel first.
+        // Sue Writer's menus sit in the top bar after the Sue button; the
+        // Sue menu offers the pin.
         runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
-        let first = runtime.shell.sue_menu_labels();
-        assert_eq!(first[0], "Sue Writer \u{203a}", "{first:?}");
+        let first = runtime.shell.sue_menu_labels(&[]);
+        assert!(
+            first
+                .iter()
+                .any(|label| label == "Open Sue Writer at Launch"),
+            "{first:?}"
+        );
         runtime.shell.dismiss_overlays();
 
-        // Compile to Markdown and to PDF, as the File Manager answers.
+        // Compile to Markdown and to PDF, as the system's dialog answers.
         for (format, ext) in [("md", "md"), ("pdf", "pdf"), ("docx", "docx")] {
             let home = runtime.engine.catalog.folders["home"].clone();
             std::fs::create_dir_all(&home).unwrap();
@@ -4139,38 +4174,7 @@ f 2 3 4
                 && entity.name() == "novel"),
             "with its text"
         );
-        assert_eq!(runtime.shell.studio(), Some(&writer));
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn spawned_entities_undo_and_redo_with_their_buffers() {
-        let (mut runtime, root) = runtime("spawn");
-        let ctx = egui::Context::default();
-        let start = Instant::now();
-        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
-            Vec::new()
-        });
-        let before = runtime.engine.world.scene.len();
-        runtime.request(
-            ShellRequest::Spawn(AppletId::new(crate::document::ID).unwrap()),
-            &mut NoTextures,
-            start,
-        );
-        assert_eq!(runtime.engine.world.scene.len(), before + 1);
-        runtime
-            .engine
-            .history
-            .undo(&mut runtime.engine.world)
-            .unwrap();
-        assert_eq!(runtime.engine.world.scene.len(), before);
-        // Undoing a spawn also takes the entity out of the arena.
-        runtime
-            .engine
-            .history
-            .redo(&mut runtime.engine.world)
-            .unwrap();
-        assert_eq!(runtime.engine.world.scene.len(), before + 1);
+        assert_eq!(runtime.shell.page(), Some(&writer));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -2,7 +2,7 @@ use std::fmt;
 
 use sue_core::TxnError;
 
-use crate::{AppletError, AppletId, MediaClass};
+use crate::{AppletError, AppletId};
 
 /// Window manager errors.
 #[derive(Debug)]
@@ -14,8 +14,6 @@ pub enum WmError {
     DuplicateApplet(AppletId),
     /// No applet is registered with this id.
     UnknownApplet(AppletId),
-    /// No installed Center Stage applet opens this kind of asset.
-    NothingOpens(MediaClass),
     /// A rice parameter the window manager needs is missing.
     MissingRice(&'static str),
     /// An applet failed.
@@ -30,7 +28,6 @@ impl fmt::Display for WmError {
             Self::InvalidAppletId(id) => write!(f, "`{id}` is not a valid applet id"),
             Self::DuplicateApplet(id) => write!(f, "applet `{id}` is already registered"),
             Self::UnknownApplet(id) => write!(f, "no applet named `{id}` is installed"),
-            Self::NothingOpens(class) => write!(f, "no installed applet opens {class:?} assets"),
             Self::MissingRice(path) => write!(
                 f,
                 "rice parameter `{path}` is missing; call sue_wm::register_rice"

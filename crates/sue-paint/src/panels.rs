@@ -133,47 +133,6 @@ fn header(
     )
 }
 
-/// How much of a menu bar `width` wide the way back to the canvas takes:
-/// its label, or only its icon when the window is narrow.
-pub(crate) fn back_width(width: f32) -> f32 {
-    if width < 820.0 { 34.0 } else { 146.0 }
-}
-
-/// The button at the right of the menu bar that goes back to the canvas.
-pub(crate) fn back_button(ui: &mut Ui, bar: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
-    let wide = back_width(bar.width()) > 40.0;
-    let rect = Rect::from_min_max(
-        pos2(bar.right() - back_width(bar.width()) + 6.0, bar.top() + 3.0),
-        pos2(bar.right() - 6.0, bar.bottom() - 3.0),
-    );
-    let response = ui.interact(rect, Id::unique("sue-paint-back"), Sense::click());
-    let painter = ui.painter();
-    if response.hovered() {
-        painter.rect_filled(rect, theme.control_radius, theme.hover);
-    }
-    icons::paint(
-        painter,
-        Rect::from_min_size(rect.min + vec2(6.0, 2.0), vec2(16.0, 16.0)),
-        Icon::Canvas,
-        theme.muted,
-    );
-    if wide {
-        painter.text(
-            rect.left_center() + vec2(28.0, 0.0),
-            Align2::LEFT_CENTER,
-            "Back to Canvas",
-            theme.font(theme.small_size + 0.5),
-            theme.text,
-        );
-    }
-    if response
-        .on_hover_text("Leave Sue Paint for the canvas (the picture stays in your project)")
-        .clicked()
-    {
-        cx.request(ShellRequest::CloseStudio);
-    }
-}
-
 /// A labelled horizontal slider row.
 fn slider_row(
     ui: &mut Ui,

@@ -42,7 +42,7 @@ pub use desktop::{
 pub use device::{
     FormFactor, GpuTier, GpuVendor, GraphicsApi, HardwareCapabilities, OsFamily, PowerSource,
 };
-pub use fs::{DirEntryInfo, hidden_by_os, list_dir, roots, write_atomic};
+pub use fs::{DirEntryInfo, hidden_by_os, list_dir, write_atomic};
 pub use gpu::{GpuContext, GpuPreference, WindowSurface, describe_adapter, device_kind};
 pub use host::{
     HeadlessHost, PlatformError, PlatformHost, SafeAreaInsets, SurfaceDescriptor, SurfaceId,
@@ -53,8 +53,8 @@ pub use input::{
     ScreenEdge, StylusSample, SwipeDirection, TouchGesture, WindowEvent,
 };
 pub use os::{
-    FileFilter, copy_text, open_document, open_url, pick_open_file, pick_save_file, reveal_file,
-    reveal_folder, web_url,
+    FileFilter, copy_text, open_document, open_url, pick_folder, pick_open_file, pick_save_file,
+    reveal_file, reveal_folder, web_url,
 };
 pub use paint::{EguiPainter, NoTextures, TextureUpload};
 pub use paths::{PlatformPaths, font_dirs, system_font_dirs};

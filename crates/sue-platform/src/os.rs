@@ -35,7 +35,7 @@ fn open_detached(target: &std::ffi::OsStr) -> io::Result<()> {
         let _ = target;
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
-            "this device opens files from Sue's own File Manager",
+            "this device has no system opener wired up yet",
         ))
     }
 }
@@ -182,8 +182,27 @@ pub fn pick_open_file(
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
-        // Phones and tablets use Sue's own File Manager.
+        // No system dialog is wired up on phones and tablets yet.
         let _ = (title, start, filters);
+        None
+    }
+}
+
+/// Asks the user for a folder with the native dialog. Blocks until the
+/// dialog closes; `None` if it was cancelled.
+#[must_use]
+pub fn pick_folder(title: &str, start: Option<&Path>) -> Option<PathBuf> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let mut dialog = rfd::FileDialog::new().set_title(title);
+        if let Some(start) = start.filter(|start| start.is_dir()) {
+            dialog = dialog.set_directory(start);
+        }
+        dialog.pick_folder()
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (title, start);
         None
     }
 }

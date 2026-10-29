@@ -23,7 +23,7 @@ use sue_platform::write_atomic;
 use sue_rice::{RiceDeclaration, RiceParameter};
 use sue_wm::{
     AppletContext, AppletId, AppletManifest, AppletRole, ArenaEdit, FilePick, FileType, ItemState,
-    Menu, MenuBar, ModeSpec, PaletteEntry, ShellRequest, SueApplet, World,
+    Menu, MenuBar, PaletteEntry, ShellRequest, SueApplet, World,
 };
 
 use crate::brush::{Stabilizer, Stroke};
@@ -480,7 +480,7 @@ pub struct SuePaint {
     pub(crate) page_thumbs: HashMap<EntityId, (u64, Vec<u8>, [u32; 2])>,
     pub(crate) preview: Option<(u64, Vec<u8>)>,
     pub(crate) last_dir: Option<PathBuf>,
-    /// An encoded export waiting for the File Manager to say where it goes.
+    /// An encoded export waiting for the save dialog to say where it goes.
     pub(crate) pending_export: Option<Vec<u8>>,
     pub(crate) shown: bool,
     /// The time of the pointer sample being handled and the time between
@@ -493,8 +493,6 @@ pub struct SuePaint {
     pub(crate) ready: bool,
     /// How opaque the view's ground and picture are, 0 to 1.
     pub(crate) cover: f32,
-    /// The view of the current picture as the studio started leaving.
-    pub(crate) exit_view: Option<View>,
     /// `true` while the studio is the one the shell shows (not leaving).
     pub(crate) present: bool,
 }
@@ -612,7 +610,6 @@ impl Default for SuePaint {
             hide: 0.0,
             ready: true,
             cover: 1.0,
-            exit_view: None,
             present: false,
         }
     }
@@ -2422,7 +2419,7 @@ impl SuePaint {
             .map_or_else(|_| "Picture".to_owned(), |entity| entity.name().to_owned());
         let file = format!("{name}.{ext}");
         if cx.view.interactive {
-            // The File Manager asks where; `picked` writes it.
+            // The save dialog asks where; `picked` writes it.
             let start = self.last_dir.clone().unwrap_or_else(|| export_dir(cx));
             self.pending_export = Some(bytes);
             cx.request(ShellRequest::PickFile(
@@ -2441,7 +2438,7 @@ impl SuePaint {
         }
     }
 
-    /// Save As: the File Manager asks where and as what, a Sue project or
+    /// Save As: the save dialog asks where and as what, a Sue project or
     /// any picture format (the picture flattened, as Export does).
     fn save_as(&mut self, cx: &mut AppletContext<'_>) {
         let Some(picture) = self.picture() else {
@@ -2680,7 +2677,6 @@ impl SuePaint {
                 if Self::apply(cx, edit) {
                     self.activate(&cx.world.arena, picture_id);
                     self.saved_at.insert(picture_id, cx.history.cursor());
-                    Self::place(cx, picture_id);
                 }
             }
         }
@@ -2726,7 +2722,6 @@ impl SuePaint {
             {
                 doc.layer = Some(top);
             }
-            Self::place(cx, picture);
         }
         Ok(())
     }
@@ -3073,14 +3068,12 @@ impl SuePaint {
         }
     }
 
-    /// Creates a picture from the New dialog, makes it current and puts
-    /// it on the canvas.
+    /// Creates a picture from the New dialog and makes it current.
     pub(crate) fn make_picture(&mut self, cx: &mut AppletContext<'_>, spec: &NewPicture) {
         match doc::create(spec) {
             Ok((edit, picture)) => {
                 if Self::apply(cx, edit) {
                     self.activate(&cx.world.arena, picture);
-                    Self::place(cx, picture);
                 }
             }
             Err(error) => cx.fail(error),
@@ -3093,21 +3086,6 @@ impl SuePaint {
         self.sync_docs(arena);
         if let Some(index) = self.docs.iter().position(|doc| doc.picture == picture) {
             self.active = index;
-        }
-    }
-
-    /// Puts a picture on the canvas as a card (one undo step of its own).
-    pub(crate) fn place_picture(cx: &mut AppletContext<'_>, picture: EntityId) {
-        Self::place(cx, picture);
-    }
-
-    /// Puts a picture on the canvas as a card (one undo step of its own).
-    fn place(cx: &mut AppletContext<'_>, picture: EntityId) {
-        if let Some(entity) = cx.world.arena.handle_of(picture) {
-            cx.request(ShellRequest::Place {
-                entity,
-                focus: false,
-            });
         }
     }
 
@@ -3730,7 +3708,7 @@ impl SuePaint {
             "file.pressure" => {
                 self.dialog = Some(Dialog::Pressure(PressureDialog::new(self.pen_curve)));
             }
-            "file.leave" => cx.request(ShellRequest::CloseStudio),
+            "file.leave" => cx.request(ShellRequest::Hub),
             "app.quit" => cx.request(ShellRequest::Command("app.quit".to_owned())),
             "edit.undo" | "edit.redo" => {
                 cx.typing.flush(cx.history);
@@ -5176,32 +5154,17 @@ impl SuePaint {
             .get_str(crate::dialogs::PEN_PRESSURE)
             .and_then(|text| text.parse().ok())
             .unwrap_or_default();
-        let present = cx.view.studio.as_ref().map(AppletId::as_str) == Some(ID);
-        let reveal = cx.view.studio_reveal.clamp(0.0, 1.0);
+        let present = cx.view.page.as_ref().map(AppletId::as_str) == Some(ID);
+        let reveal = cx.view.reveal.clamp(0.0, 1.0);
         self.hide = 1.0 - reveal;
         // The view's ground and picture turn opaque within the first third
-        // of the way, where they still line up with the card underneath.
+        // of the way in.
         let cover = (reveal / 0.35).clamp(0.0, 1.0);
         self.cover = cover * cover * (3.0 - 2.0 * cover);
         self.ready = present && reveal >= 0.999;
         self.present = present;
-        if self.ready {
-            self.exit_view = None;
-        } else if !present && self.exit_view.is_none() {
-            self.exit_view = self.doc().map(|doc| doc.view);
-        }
-        if !self.shown && present {
-            // Opening: show the picture selected on the canvas, if any.
+        if present {
             self.shown = true;
-            let selected = cx
-                .view
-                .selected
-                .and_then(|node| cx.entity(node))
-                .filter(|entity| picture::is_picture(entity))
-                .map(Entity::id);
-            if let Some(picture) = selected {
-                self.activate(&cx.world.arena, picture);
-            }
         }
         self.sync_docs(&cx.world.arena);
         self.animate(cx, &ui.ctx().clone());
@@ -5237,48 +5200,22 @@ impl SuePaint {
             ui.spacing_mut().button_padding = vec2(8.0, 6.0);
         }
 
-        // The menu bar, with the way back to the canvas at its right. While
-        // the studio comes in or goes out, every palette slides in from or
-        // out to its edge of the window.
-        let top_height = if self.menus_hidden {
+        // The menus are in Sue's top bar (`bar_ui`); the command bar sits
+        // at the page's top. While the studio comes in or goes out, every
+        // palette slides in from or out to its edge of the window.
+        let top_height = if self.menus_hidden || !self.panels.command_bar {
             0.0
         } else {
-            26.0 + if self.panels.command_bar { 34.0 } else { 0.0 }
+            34.0
         };
         let lift = self.hide * top_height;
-        let bar = Rect::from_min_size(full.min - vec2(0.0, lift), vec2(full.width(), 26.0));
-        let mut picked = None;
-        if !self.menus_hidden {
-            ui.painter().rect_filled(bar, 0.0, theme.panel);
-            // The menus stop short of the way back to the canvas, which
-            // shrinks to its icon when the window is narrow.
-            let back = crate::panels::back_width(bar.width());
-            let menus = Rect::from_min_max(bar.min, pos2(bar.right() - back, bar.bottom()));
-            let mut menubar = std::mem::take(&mut self.menubar);
-            picked = {
-                let arena = &cx.world.arena;
-                let history = &*cx.history;
-                let state = |command: &str| self.state(command, arena, history);
-                let mut clipped = ui.new_child(egui::UiBuilder::new().max_rect(menus));
-                clipped.set_clip_rect(menus.intersect(ui.clip_rect()));
-                menubar.ui(&mut clipped, menus, &self.menus, &state, &theme)
-            };
-            self.menubar = menubar;
-            crate::panels::back_button(ui, bar, cx, &theme);
-            ui.painter()
-                .hline(bar.x_range(), bar.bottom(), theme.hairline());
-        }
-
-        if self.panels.command_bar && !self.menus_hidden {
-            let top = bar.bottom();
+        if top_height > 0.0 {
+            let top = full.top() - lift;
             let strip = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), top + 34.0));
             self.command_bar(ui, strip, cx, &theme);
         }
         let body = Rect::from_min_max(pos2(full.left(), full.top() + top_height - lift), full.max);
         self.body(ui, body, cx, &theme);
-        if let Some(command) = picked {
-            self.run(&command, cx);
-        }
         if self.ready {
             self.dialog_ui(&ctx, cx, &theme);
         }
@@ -5551,10 +5488,6 @@ impl SueApplet for SuePaint {
             "Paint and draw illustrations in layers with pens, brushes, fills, selections and filters."
                 .to_owned();
         manifest.order = 25;
-        manifest.mode = Some(ModeSpec {
-            label: "Sue Paint".to_owned(),
-            in_pill: true,
-        });
         manifest
     }
 
@@ -5623,17 +5556,44 @@ impl SueApplet for SuePaint {
         declarations
     }
 
-    fn studio_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+    fn page_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
         self.load_recent(cx);
         self.load_extras(cx);
         self.frame(ui, cx);
+    }
+
+    fn bar_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        let theme = cx.theme.clone();
+        let rect = ui.max_rect();
+        if cx.view.form_factor == sue_platform::FormFactor::Mobile {
+            // A phone's row of large buttons: the menus as a sheet, undo,
+            // redo and the palettes.
+            if let Some(command) = self.phone_bar(ui, rect, cx, &theme) {
+                self.run(&command, cx);
+            }
+            return;
+        }
+        if self.menus_hidden {
+            return;
+        }
+        let mut menubar = std::mem::take(&mut self.menubar);
+        let picked = {
+            let arena = &cx.world.arena;
+            let history = &*cx.history;
+            let state = |command: &str| self.state(command, arena, history);
+            menubar.ui(ui, rect, &self.menus, &state, &theme)
+        };
+        self.menubar = menubar;
+        if let Some(command) = picked {
+            self.run(&command, cx);
+        }
     }
 
     fn accepts(&self, entity: &Entity) -> bool {
         picture::is_picture(entity)
     }
 
-    fn studio_focus(&self) -> Option<EntityId> {
+    fn focus(&self) -> Option<EntityId> {
         self.picture()
     }
 
@@ -5645,27 +5605,11 @@ impl SueApplet for SuePaint {
 
     fn sue_actions(&self, focus: Option<&Entity>, current: bool) -> Vec<sue_wm::SueAction> {
         let me = || AppletId::new(ID).expect("a valid id");
-        let command = |name: &str| ShellRequest::AppletCommand {
-            applet: me(),
-            command: name.to_owned(),
-        };
         if current {
-            // Sue Paint's own wheel while it is open.
-            return [
-                ("New Picture", "file.new"),
-                ("Open Picture", "file.open"),
-                ("Import as a Layer", "file.import.image"),
-                ("Export as PNG", "file.export.png"),
-                ("Export as JPEG", "file.export.jpg"),
-                ("Export as JPEG XL", "file.export.jxl"),
-                ("Reset Palette Layout", "window.workspace.reset"),
-                ("Shortcuts", "help.shortcuts"),
-            ]
-            .into_iter()
-            .map(|(label, name)| sue_wm::SueAction::new("Sue Paint", label, command(name)))
-            .collect();
+            return Vec::new();
         }
-        // A picture file on the canvas (a PNG, say) opens as a new picture.
+        // A picture file open elsewhere (a PNG in the Image Viewer, say)
+        // opens as a new picture.
         let file = focus
             .filter(|entity| !picture::is_picture(entity))
             .filter(|entity| {
@@ -5678,7 +5622,7 @@ impl SueApplet for SuePaint {
             .filter(|path| path.is_file());
         match file {
             Some(path) => vec![sue_wm::SueAction::new(
-                sue_wm::wheel::SEND_TO,
+                sue_wm::sue_menu::SEND_TO,
                 "Sue Paint",
                 ShellRequest::SendFile {
                     to: me(),
@@ -5691,11 +5635,17 @@ impl SueApplet for SuePaint {
     }
 
     fn take_entity(&mut self, purpose: &str, entity: EntityId, cx: &mut AppletContext<'_>) {
-        if purpose != "adopt" {
+        if !matches!(purpose, "open" | "adopt") {
             return;
         }
-        // A picture from the canvas becomes a layered picture whose layer is
-        // that very entity, and Sue Paint opens on it.
+        if cx.arena().get_by_id(entity).is_ok_and(picture::is_picture) {
+            // A layered picture opens as it is.
+            self.activate(&cx.world.arena, entity);
+            cx.request(ShellRequest::Open(me_id()));
+            return;
+        }
+        // Any other picture becomes a layered picture whose layer is that
+        // very entity, and Sue Paint opens on it.
         let name = cx.arena().get_by_id(entity).map_or_else(
             |_| "Picture".to_owned(),
             |found| {
@@ -5708,9 +5658,8 @@ impl SueApplet for SuePaint {
         match doc::adopt(cx.arena(), entity, &name) {
             Ok((edit, picture)) => {
                 if Self::apply(cx, edit) {
-                    Self::place(cx, picture);
                     self.activate(&cx.world.arena, picture);
-                    cx.request(ShellRequest::OpenStudio(me_id()));
+                    cx.request(ShellRequest::Open(me_id()));
                 }
             }
             Err(error) => cx.fail(error),
@@ -5719,9 +5668,9 @@ impl SueApplet for SuePaint {
 
     fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
         if matches!(pick.purpose.as_str(), "open" | "layer")
-            && cx.view.studio.as_ref().map(AppletId::as_str) != Some(ID)
+            && cx.view.page.as_ref().map(AppletId::as_str) != Some(ID)
         {
-            cx.request(ShellRequest::OpenStudio(me_id()));
+            cx.request(ShellRequest::Open(me_id()));
         }
         match pick.purpose.as_str() {
             "open" => self.open_picked(cx, path, false),
@@ -5803,27 +5752,26 @@ impl SueApplet for SuePaint {
         templates
     }
 
-    fn create(&mut self, key: &str, cx: &mut AppletContext<'_>) -> Option<sue_wm::NewEntity> {
+    fn create(&mut self, key: &str, cx: &mut AppletContext<'_>) {
         if key == "custom" {
             self.dialog = Some(Dialog::New(Self::new_dialog(cx)));
         } else {
             let library = crate::dialogs::new_presets();
-            let preset = library.get(crate::dialogs::NEW_PRESET_TARGET, key)?;
+            let Some(preset) = library.get(crate::dialogs::NEW_PRESET_TARGET, key) else {
+                return;
+            };
             let mut dialog = NewDialog::new(&NewPicture::default());
             dialog.apply_preset(preset);
             let mut spec = dialog.spec();
             spec.name = preset.name.clone();
             self.make_picture(cx, &spec);
         }
-        // Then into Sue Paint, zooming into the new card.
-        if let Ok(id) = AppletId::new(ID) {
-            cx.request(ShellRequest::OpenStudio(id));
-        }
-        None
+        // Then into Sue Paint.
+        cx.request(ShellRequest::Open(me_id()));
     }
 
     fn tick(&mut self, cx: &mut AppletContext<'_>) -> sue_wm::Tick {
-        if cx.view.studio.as_ref().map(AppletId::as_str) != Some(ID) {
+        if cx.view.page.as_ref().map(AppletId::as_str) != Some(ID) {
             self.shown = false;
             self.settle(cx);
         }
@@ -5856,10 +5804,8 @@ impl SueApplet for SuePaint {
         if !implemented(name) {
             return false;
         }
-        if cx.view.studio.as_ref().map(AppletId::as_str) != Some(ID)
-            && let Ok(id) = AppletId::new(ID)
-        {
-            cx.request(ShellRequest::OpenStudio(id));
+        if cx.view.page.as_ref().map(AppletId::as_str) != Some(ID) {
+            cx.request(ShellRequest::Open(me_id()));
         }
         self.sync_docs(&cx.world.arena);
         self.run(name, cx);

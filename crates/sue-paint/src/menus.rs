@@ -207,7 +207,7 @@ pub fn menus() -> Vec<Menu> {
                 act("Command Bar Settings...", "file.command_bar"),
                 act("Pen Pressure Settings...", "file.pressure"),
                 SEP,
-                act("Return to Canvas", "file.leave"),
+                act("Back to the Hub", "file.leave"),
                 act("Quit Sue", "app.quit").key("Ctrl+Q"),
             ],
         ),
@@ -681,7 +681,7 @@ pub fn menus() -> Vec<Menu> {
                 act("Item Bank", "window.item_bank"),
                 act("Info", "window.info"),
                 SEP,
-                act("Return to Canvas", "file.leave"),
+                act("Back to the Hub", "file.leave"),
             ],
         ),
         Menu::new(

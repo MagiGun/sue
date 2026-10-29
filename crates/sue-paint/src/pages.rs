@@ -45,7 +45,6 @@ impl SuePaint {
                     && let Some(first) = pages.first()
                 {
                     self.activate(&cx.world.arena, *first);
-                    Self::place_picture(cx, *first);
                 }
             }
             Err(error) => cx.fail(error),

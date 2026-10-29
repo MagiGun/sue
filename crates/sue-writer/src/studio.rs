@@ -12,7 +12,7 @@ use sue_rice::{RiceDeclaration, RiceParameter};
 use sue_type::{Editor, Fonts, PageSetup, StyleSheet};
 use sue_wm::{
     AppletContext, AppletId, AppletManifest, AppletRole, ArenaEdit, FilePick, Menu, MenuBar,
-    ModeSpec, PaletteEntry, ShellRequest, SueAction, SueApplet, wheel,
+    PaletteEntry, ShellRequest, SueAction, SueApplet, sue_menu,
 };
 
 use crate::compile::{self, FORMATS, Separator, Titles};
@@ -424,12 +424,6 @@ impl SueWriter {
         let (batch, root) = project::create(key, title, &fonts);
         if !self.apply(cx, batch) {
             return;
-        }
-        if let Some(handle) = cx.arena().handle_of(root) {
-            cx.request(ShellRequest::Place {
-                entity: handle,
-                focus: false,
-            });
         }
         self.open_project(cx, root, None);
         cx.notify(format!("Made {title}"));
@@ -1032,7 +1026,7 @@ impl SueWriter {
                     let _ = cx.apply(ArenaEdit(project::set(id, key, value)));
                 }
             }
-            "studio.leave" => cx.request(ShellRequest::CloseStudio),
+            "studio.leave" => cx.request(ShellRequest::Hub),
             _ => return false,
         }
         true
@@ -1391,10 +1385,6 @@ impl SueApplet for SueWriter {
         let mut manifest = AppletManifest::new(ID, "Sue Writer", AppletRole::Studio, "\u{1F4DD}");
         manifest.summary = "Write documents, novels, scripts and papers, then publish them as PDF, Word, EPUB and more.".to_owned();
         manifest.order = 26;
-        manifest.mode = Some(ModeSpec {
-            label: "Sue Writer".to_owned(),
-            in_pill: true,
-        });
         manifest
     }
 
@@ -1439,17 +1429,16 @@ impl SueApplet for SueWriter {
         manuscript::is_manuscript(entity) || manuscript::is_document(entity)
     }
 
-    fn studio_focus(&self) -> Option<EntityId> {
+    fn focus(&self) -> Option<EntityId> {
         self.project.or(self.open)
     }
 
-    fn card_frame(&self, area: egui::Rect, entity: &Entity) -> Option<egui::Rect> {
-        // The card lands on the first page, which then turns into it.
-        self.first_page(area, entity)
+    fn page_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        self.frame(ui, cx);
     }
 
-    fn studio_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
-        self.frame(ui, cx);
+    fn bar_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        self.menu_bar(ui, cx);
     }
 
     fn reserved_keys(&self) -> Vec<sue_rice::Keybind> {
@@ -1469,21 +1458,20 @@ impl SueApplet for SueWriter {
             .collect()
     }
 
-    fn create(&mut self, key: &str, cx: &mut AppletContext<'_>) -> Option<sue_wm::NewEntity> {
+    fn create(&mut self, key: &str, cx: &mut AppletContext<'_>) {
         let label = project::TEMPLATES
             .iter()
             .find(|(known, ..)| *known == key)
             .map_or("Untitled", |(_, label, _)| *label);
         self.new_project(cx, key, label);
-        cx.request(ShellRequest::OpenStudio(me()));
-        None
+        cx.request(ShellRequest::Open(me()));
     }
 
     fn tick(&mut self, cx: &mut AppletContext<'_>) -> sue_wm::Tick {
         // Looking finds the installed fonts in the background, so they are
         // there by the time anyone writes.
         let _ = sue_wm::fonts::ready();
-        if cx.view.studio.as_ref().map(AppletId::as_str) != Some(ID) && self.shown {
+        if cx.view.page.as_ref().map(AppletId::as_str) != Some(ID) && self.shown {
             self.shown = false;
             self.composition = false;
             self.end_session(cx);
@@ -1511,8 +1499,8 @@ impl SueApplet for SueWriter {
     }
 
     fn command(&mut self, name: &str, cx: &mut AppletContext<'_>) -> bool {
-        if cx.view.studio.as_ref().map(AppletId::as_str) != Some(ID) {
-            cx.request(ShellRequest::OpenStudio(me()));
+        if cx.view.page.as_ref().map(AppletId::as_str) != Some(ID) {
+            cx.request(ShellRequest::Open(me()));
         }
         self.run(name, cx)
     }
@@ -1560,26 +1548,10 @@ impl SueApplet for SueWriter {
     }
 
     fn sue_actions(&self, focus: Option<&Entity>, current: bool) -> Vec<SueAction> {
-        let command = |name: &str| ShellRequest::AppletCommand {
-            applet: me(),
-            command: name.to_owned(),
-        };
+        // Sue Writer's own commands are in its menus, right beside the Sue
+        // button.
         if current {
-            return [
-                ("New Project", "file.new"),
-                ("New Document", "binder.new_doc"),
-                ("Import a Document", "file.import"),
-                ("Compile", "compile.open"),
-                ("Export as PDF", "compile.pdf"),
-                ("Export as Word", "compile.docx"),
-                ("Export as EPUB", "compile.epub"),
-                ("Composition Mode", "view.composition"),
-                ("Writing Statistics", "project.statistics"),
-                ("Project Settings", "project.settings"),
-            ]
-            .into_iter()
-            .map(|(label, name)| SueAction::new("Sue Writer", label, command(name)))
-            .collect();
+            return Vec::new();
         }
         let Some(entity) = focus else {
             return Vec::new();
@@ -1592,7 +1564,7 @@ impl SueApplet for SueWriter {
                 .is_some_and(|_| entity.meta("kind") != Some("code"))
         {
             return vec![SueAction::new(
-                wheel::SEND_TO,
+                sue_menu::SEND_TO,
                 "Sue Writer",
                 ShellRequest::OpenIn {
                     entity: entity.id(),
@@ -1606,7 +1578,7 @@ impl SueApplet for SueWriter {
                 .is_some()
         {
             return vec![SueAction::new(
-                wheel::SEND_TO,
+                sue_menu::SEND_TO,
                 "Sue Writer",
                 ShellRequest::SendEntity {
                     to: me(),
@@ -1618,24 +1590,41 @@ impl SueApplet for SueWriter {
         Vec::new()
     }
 
-    fn take_entity(&mut self, _purpose: &str, entity: EntityId, cx: &mut AppletContext<'_>) {
-        if cx.view.studio.as_ref().map(AppletId::as_str) != Some(ID) {
-            cx.request(ShellRequest::OpenStudio(me()));
+    fn take_entity(&mut self, purpose: &str, entity: EntityId, cx: &mut AppletContext<'_>) {
+        if cx.view.page.as_ref().map(AppletId::as_str) != Some(ID) {
+            cx.request(ShellRequest::Open(me()));
         }
-        self.take(cx, entity);
+        if purpose == "open" {
+            self.open_entity(cx, entity);
+        } else {
+            self.take(cx, entity);
+        }
     }
 
     fn opens_file(&self, path: &Path) -> bool {
         path.extension()
             .map(|ext| ext.to_string_lossy().to_ascii_lowercase())
-            .is_some_and(|ext| matches!(ext.as_str(), "docx" | "fountain"))
+            .is_some_and(|ext| {
+                matches!(
+                    ext.as_str(),
+                    "docx"
+                        | "fountain"
+                        | "md"
+                        | "markdown"
+                        | "txt"
+                        | "text"
+                        | "html"
+                        | "htm"
+                        | "xhtml"
+                )
+            })
     }
 
     fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
         match pick.purpose.as_str() {
             "import" => {
-                if cx.view.studio.as_ref().map(AppletId::as_str) != Some(ID) {
-                    cx.request(ShellRequest::OpenStudio(me()));
+                if cx.view.page.as_ref().map(AppletId::as_str) != Some(ID) {
+                    cx.request(ShellRequest::Open(me()));
                 }
                 self.import(cx, path);
             }

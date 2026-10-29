@@ -53,6 +53,11 @@ fn extension(path: &Path) -> String {
         .unwrap_or_default()
 }
 
+/// Extensions of the sound files the Converter reads.
+const SOUND: [&str; 9] = [
+    "mp3", "flac", "wav", "ogg", "m4a", "aac", "opus", "aiff", "aif",
+];
+
 /// What `path` (with its first `bytes`) is.
 #[must_use]
 pub fn kind_of(path: &Path, bytes: &[u8]) -> Kind {
@@ -62,7 +67,7 @@ pub fn kind_of(path: &Path, bytes: &[u8]) -> Kind {
     {
         return Kind::Picture;
     }
-    if crate::player::library::is_audio(path) || extension == "aif" {
+    if SOUND.contains(&extension.as_str()) {
         return Kind::Sound;
     }
     if TEXT.contains(&extension.as_str())

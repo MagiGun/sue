@@ -22,7 +22,7 @@ use sue_platform::{
     EguiPainter, FramePacing, GpuContext, HeadlessHost, NoTextures, PlatformHost, SurfaceDescriptor,
 };
 use sue_rice::{DEFAULT_RICE, RiceSchema, RiceValue, SetRiceValue, SettingsTree};
-use sue_wm::{AppletRole, NodeId, RiceEdit, ShellRequest, Theme};
+use sue_wm::{AppletRole, RiceEdit, ShellRequest, Theme};
 
 use crate::runtime::Runtime;
 use crate::snapshot;
@@ -598,27 +598,6 @@ fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
     }
 }
 
-fn node_of(runtime: &Runtime, applet: &str) -> Option<NodeId> {
-    runtime
-        .engine
-        .world
-        .scene
-        .iter()
-        .find(|(_, node)| node.applet.as_str() == applet)
-        .map(|(id, _)| id)
-}
-
-fn text_of(runtime: &Runtime, node: NodeId) -> String {
-    runtime
-        .engine
-        .world
-        .scene
-        .get(node)
-        .and_then(|node| runtime.engine.world.arena.get(node.entity).ok())
-        .and_then(|entity| entity.string_buffer())
-        .map_or_else(String::new, |text| text.as_str().to_owned())
-}
-
 /// Paints one frame of the shell with the GPU and counts pixels that are
 /// not gray. `None` without an adapter.
 fn render_shell(runtime: &mut Runtime, clock: Instant) -> Result<Option<String>, String> {
@@ -681,6 +660,126 @@ fn render_shell(runtime: &mut Runtime, clock: Instant) -> Result<Option<String>,
     )))
 }
 
+/// A click at `at`, a frame each for moving there, pressing and letting
+/// go, then frames until the shell sleeps. Returns the number of frames.
+fn click_at(
+    runtime: &mut Runtime,
+    ctx: &egui::Context,
+    clock: &mut Instant,
+    at: egui::Pos2,
+) -> usize {
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    for events in [
+        vec![egui::Event::PointerMoved(at)],
+        vec![button(true)],
+        vec![button(false)],
+    ] {
+        let now = *clock;
+        ctx.run_ui(raw_input(now, events), |ui| {
+            runtime.ui(ui, &mut NoTextures, now);
+        })
+        .drop_without_applying_deltas();
+        *clock += Duration::from_millis(8);
+    }
+    3 + run_frames(runtime, ctx, clock, Vec::new())
+}
+
+/// Where the Hub drew `applet`'s box and its pin in the last frame.
+fn hub_box(runtime: &Runtime, applet: &str) -> Option<(egui::Rect, egui::Rect)> {
+    runtime
+        .shell
+        .hub_boxes()
+        .iter()
+        .find(|(id, _, _)| id.as_str() == applet)
+        .map(|(_, rect, pin)| (*rect, *pin))
+}
+
+/// The pin in the live rice.
+fn pin_of(runtime: &Runtime) -> String {
+    runtime
+        .engine
+        .world
+        .rice
+        .get_str(sue_wm::PIN_KEY)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Pins Sue Writer with a click on its pin in the Hub, then walks the pin
+/// through the global undo keys. The pin is set back afterwards whatever
+/// happens, so the self-check never leaves one in the rice.
+fn check_pin(
+    runtime: &mut Runtime,
+    ctx: &egui::Context,
+    clock: &mut Instant,
+) -> Result<(), String> {
+    let before = pin_of(runtime);
+    let outcome = (|| {
+        let (_, pin) = hub_box(runtime, sue_writer::ID).ok_or("the Hub has no Sue Writer")?;
+        click_at(runtime, ctx, clock, pin.center());
+        ensure(
+            pin_of(runtime) == sue_writer::ID,
+            "the pin did not pin Sue Writer",
+        )?;
+        ensure(
+            runtime.shell.hub_open(),
+            "the pin opened the studio instead of pinning it",
+        )?;
+        ensure(
+            sue_wm::pinned(&runtime.engine.world.rice, &runtime.applets).as_ref()
+                == Some(&sue_wm::AppletId::new(sue_writer::ID).map_err(text)?),
+            "the pinned studio is not the one Sue would open into",
+        )?;
+        run_frames(
+            runtime,
+            ctx,
+            clock,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        ensure(
+            pin_of(runtime) == before,
+            "Ctrl+Z did not take the pin away",
+        )?;
+        run_frames(
+            runtime,
+            ctx,
+            clock,
+            vec![key(egui::Key::Y, egui::Modifiers::COMMAND)],
+        );
+        ensure(
+            pin_of(runtime) == sue_writer::ID,
+            "Ctrl+Y did not pin it again",
+        )?;
+        // One pin at a time: pinning the Converter moves it.
+        let (_, pin) = hub_box(runtime, crate::convert::ID).ok_or("the Hub has no Converter")?;
+        click_at(runtime, ctx, clock, pin.center());
+        ensure(
+            pin_of(runtime) == crate::convert::ID,
+            "pinning a tool did not move the pin to it",
+        )?;
+        // A second click on the same pin takes it away.
+        click_at(runtime, ctx, clock, pin.center());
+        ensure(pin_of(runtime).is_empty(), "the pin did not come off")
+    })();
+    if pin_of(runtime) != before {
+        runtime
+            .engine
+            .history
+            .apply(
+                &mut runtime.engine.world,
+                RiceEdit(SetRiceValue::new(sue_wm::PIN_KEY, RiceValue::Text(before))),
+            )
+            .map_err(text)?;
+        run_frames(runtime, ctx, clock, Vec::new());
+    }
+    outcome
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "one scripted session through the shell"
@@ -690,49 +789,61 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
     let ctx = egui::Context::default();
     let mut clock = (*ORIGIN).max(Instant::now());
     let mut tex = NoTextures;
+    let paint = sue_wm::AppletId::new(sue_paint::ID).map_err(text)?;
+    let viewer = sue_wm::AppletId::new(crate::viewer::ID).map_err(text)?;
+    let convert = sue_wm::AppletId::new(crate::convert::ID).map_err(text)?;
 
-    // The canvas Sue boots into.
-    let kinds: Vec<String> = runtime
-        .engine
-        .world
-        .scene
-        .iter()
-        .map(|(_, node)| node.applet.as_str().to_owned())
-        .collect();
-    ensure(
-        kinds == ["document"],
-        "Sue did not boot into the Welcome document",
-    )?;
+    // Sue opens on the Hub: a box for every studio and every tool.
     let roles = |role: AppletRole| runtime.applets.with_role(role).count();
-    let (nodes, left, right, windows) = (
-        roles(AppletRole::Node),
-        roles(AppletRole::LeftDrawer),
-        roles(AppletRole::RightDrawer),
+    let (studios, tools, windows) = (
+        roles(AppletRole::Studio),
+        roles(AppletRole::Tool),
         roles(AppletRole::Window),
     );
+    ensure(
+        studios >= 2 && tools >= 2 && windows == 1,
+        "the studios, tools and Settings are not all installed",
+    )?;
     run_frames(runtime, &ctx, &mut clock, Vec::new());
     ensure(
-        runtime.shell.mode() == "canvas" && runtime.shell.hub_open(),
-        "boot did not open the Hub over the canvas",
+        runtime.shell.hub_open() && runtime.shell.page().is_none(),
+        "with nothing pinned, Sue did not open on the Hub",
     )?;
-    run_frames(
+    ensure(
+        runtime.shell.hub_boxes().len() == studios + tools,
+        "the Hub does not show a box for every studio and tool",
+    )?;
+    let sue = runtime.shell.sue_button();
+    ensure(
+        sue.min == egui::Pos2::ZERO,
+        "the Sue button is not in the window's top left corner",
+    )?;
+
+    // The pin, one at a time, through the undo keys.
+    check_pin(runtime, &ctx, &mut clock)?;
+
+    // A click on a box opens its studio, gliding in over the Hub; on
+    // legacy hardware it snaps.
+    let (paint_box, _) = hub_box(runtime, sue_paint::ID).ok_or("the Hub has no Sue Paint")?;
+    let glide = click_at(
         runtime,
         &ctx,
         &mut clock,
-        vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+        paint_box.left_top() + egui::vec2(24.0, 24.0),
     );
-    ensure(!runtime.shell.hub_open(), "Esc did not close the Hub")?;
-
-    // A drawer glides on its spring, and snaps on legacy hardware.
-    runtime.request(
-        ShellRequest::ShowDrawer(sue_wm::AppletId::new(crate::files::ID).map_err(text)?),
-        &mut tex,
-        clock,
-    );
-    let glide = run_frames(runtime, &ctx, &mut clock, Vec::new());
     ensure(
-        runtime.shell.left_reveal() > 0.999,
-        "the drawer did not open all the way",
+        runtime.shell.page() == Some(&paint) && runtime.shell.reveal() > 0.999,
+        "a click on Sue Paint's box did not open it",
+    )?;
+    ensure(
+        runtime.shell.hub_boxes().is_empty(),
+        "the Hub still shows under an open studio",
+    )?;
+    runtime.request(ShellRequest::Hub, &mut tex, clock);
+    run_frames(runtime, &ctx, &mut clock, Vec::new());
+    ensure(
+        runtime.shell.hub_open() && runtime.shell.reveal() == 0.0,
+        "Sue Paint did not go back to the Hub",
     )?;
     let profile = runtime.engine.profile;
     runtime
@@ -747,11 +858,7 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         )
         .map_err(text)?;
     run_frames(runtime, &ctx, &mut clock, Vec::new());
-    runtime.request(
-        ShellRequest::ShowDrawer(sue_wm::AppletId::new(crate::player::ID).map_err(text)?),
-        &mut tex,
-        clock,
-    );
+    runtime.request(ShellRequest::Open(paint.clone()), &mut tex, clock);
     let snap = run_frames(runtime, &ctx, &mut clock, Vec::new());
     runtime
         .engine
@@ -761,106 +868,28 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
     run_frames(runtime, &ctx, &mut clock, Vec::new());
     ensure(
         glide > snap,
-        "springs did not glide, or legacy did not snap",
+        "the page did not glide in, or legacy did not snap",
     )?;
 
-    // A mode switch frames the document on the camera spring.
-    let before = runtime.shell.camera().center();
-    runtime.request(ShellRequest::Mode("document".to_owned()), &mut tex, clock);
-    let framed = run_frames(runtime, &ctx, &mut clock, Vec::new());
-    let document = node_of(runtime, crate::document::ID).ok_or("no document")?;
+    // The Sue button opens the Sue menu over the studio: the way back to
+    // the Hub, every studio and tool, files, projects and Settings.
+    click_at(runtime, &ctx, &mut clock, sue.center());
     ensure(
-        runtime.shell.camera().center().distance(before) > 1.0 && framed > 10,
-        "the camera teleported instead of gliding",
+        runtime.shell.sue_menu_open(),
+        "the Sue button did not open the Sue menu",
     )?;
+    let labels = runtime.shell.sue_menu_labels(&[]);
+    for wanted in [
+        "Hub", "Studios", "Tools", "New", "File", "Project", "Settings", "Quit Sue",
+    ] {
+        ensure(
+            labels.iter().any(|label| label == wanted),
+            &format!("the Sue menu has no {wanted}"),
+        )?;
+    }
     ensure(
-        runtime.shell.selected() == Some(document) && runtime.shell.selection_pill_visible(),
-        "the document's selection pill did not appear",
-    )?;
-
-    // Typing goes into the arena; Ctrl+Z and Ctrl+Y go through the UndoStack.
-    let original = text_of(runtime, document);
-    crate::document::select_words(&ctx, document, 0, 0);
-    run_frames(runtime, &ctx, &mut clock, Vec::new());
-    run_frames(
-        runtime,
-        &ctx,
-        &mut clock,
-        vec![egui::Event::Text("Sue ".to_owned())],
-    );
-    let typed = text_of(runtime, document);
-    ensure(
-        typed == format!("Sue {original}"),
-        "typing did not reach the arena",
-    )?;
-    run_frames(
-        runtime,
-        &ctx,
-        &mut clock,
-        vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
-    );
-    ensure(
-        text_of(runtime, document) == original,
-        "Ctrl+Z did not undo the typing",
-    )?;
-    run_frames(
-        runtime,
-        &ctx,
-        &mut clock,
-        vec![key(egui::Key::Y, egui::Modifiers::COMMAND)],
-    );
-    ensure(
-        text_of(runtime, document) == typed,
-        "Ctrl+Y did not redo the typing",
-    )?;
-
-    // A new tone from the audio templates, projected onto the timeline,
-    // which springs open.
-    runtime.request(
-        ShellRequest::Create {
-            applet: sue_wm::AppletId::new(crate::audio_node::ID).map_err(text)?,
-            key: "tone".to_owned(),
-        },
-        &mut tex,
-        clock,
-    );
-    let audio = node_of(runtime, crate::audio_node::ID).ok_or("no audio")?;
-    runtime.with_context(&mut tex, clock, |cx| {
-        sue_wm::project_to_timeline(cx, audio, 3.0)
-    });
-    let timeline = run_frames(runtime, &ctx, &mut clock, Vec::new());
-    let entity = runtime
-        .engine
-        .world
-        .scene
-        .get(audio)
-        .map(|node| node.entity)
-        .ok_or("audio vanished")?;
-    ensure(
-        runtime
-            .engine
-            .world
-            .arena
-            .get(entity)
-            .map_err(text)?
-            .projections()
-            .contains(Projection::Timeline),
-        "Project to Timeline did not attach the projection",
-    )?;
-    ensure(
-        runtime.shell.timeline_open() && runtime.shell.timeline_reveal() > 0.999 && timeline > 5,
-        "the timeline did not spring open",
-    )?;
-
-    // The marking menu grows on its spring; the palette filters.
-    runtime.request(ShellRequest::Timeline(false), &mut tex, clock);
-    runtime
-        .shell
-        .open_radial(runtime.shell.canvas_rect().center());
-    let radial = run_frames(runtime, &ctx, &mut clock, Vec::new());
-    ensure(
-        runtime.shell.radial_open() && radial > 5,
-        "the marking menu did not open on its spring",
+        runtime.shell.sue_menu_labels(&["Tools"]) == ["Image Viewer", "Converter"],
+        "the Sue menu's Tools are not the tools",
     )?;
     run_frames(
         runtime,
@@ -868,18 +897,58 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         &mut clock,
         vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
     );
-    let documents = |runtime: &Runtime| {
-        runtime
-            .engine
-            .world
-            .scene
-            .iter()
-            .filter(|(_, node)| node.applet.as_str() == crate::document::ID)
-            .count()
-    };
-    let before = documents(runtime);
+    ensure(
+        !runtime.shell.sue_menu_open(),
+        "Esc did not close the Sue menu",
+    )?;
+
+    // A picture opens in the Image Viewer, a tool with a page of its own,
+    // and goes on from there by the Sue menu's Send To.
+    let picture = runtime
+        .engine
+        .world
+        .arena
+        .iter()
+        .find(|(_, entity)| crate::viewer::is_picture(entity))
+        .map(|(_, entity)| entity.id())
+        .ok_or("no picture to view")?;
+    runtime.request(
+        ShellRequest::OpenIn {
+            entity: picture,
+            applet: viewer.clone(),
+        },
+        &mut tex,
+        clock,
+    );
+    run_frames(runtime, &ctx, &mut clock, Vec::new());
+    ensure(
+        runtime.shell.page() == Some(&viewer)
+            && runtime
+                .applets
+                .get(&viewer)
+                .and_then(|applet| applet.focus())
+                == Some(picture),
+        "the picture did not open in the Image Viewer",
+    )?;
+    runtime.request(ShellRequest::SueMenu, &mut tex, clock);
+    let send_to = runtime.shell.sue_menu_labels(&["Send To"]);
+    ensure(
+        send_to.iter().any(|label| label == "Converter"),
+        "the Sue menu cannot send the picture to the Converter",
+    )?;
+    let sent = runtime.with_shell(&mut tex, clock, |shell, io, now| {
+        shell.sue_menu_pick(&["Send To", "Converter"], io, now)
+    });
+    ensure(sent, "Send To, Converter is not in the Sue menu")?;
+    run_frames(runtime, &ctx, &mut clock, Vec::new());
+    ensure(
+        runtime.shell.page() == Some(&convert),
+        "Send To did not open the Converter",
+    )?;
+
+    // The palette finds a tool; Settings floats over it and Esc closes it.
     runtime.shell.open_palette();
-    runtime.shell.palette_query("new document notes");
+    runtime.shell.palette_query("open image viewer");
     run_frames(runtime, &ctx, &mut clock, Vec::new());
     ensure(runtime.shell.palette_open(), "the palette did not open")?;
     run_frames(
@@ -889,9 +958,32 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
     );
     ensure(
-        documents(runtime) == before + 1,
-        "the palette's New Document: Notes did not run",
+        runtime.shell.page() == Some(&viewer),
+        "the palette's Open Image Viewer did not run",
     )?;
+    run_frames(
+        runtime,
+        &ctx,
+        &mut clock,
+        vec![key(egui::Key::Comma, egui::Modifiers::COMMAND)],
+    );
+    ensure(
+        runtime.shell.window().is_some(),
+        "Ctrl+, did not open Settings",
+    )?;
+    run_frames(
+        runtime,
+        &ctx,
+        &mut clock,
+        vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+    );
+    ensure(
+        runtime.shell.window().is_none(),
+        "Esc did not close Settings",
+    )?;
+    runtime.request(ShellRequest::Hub, &mut tex, clock);
+    run_frames(runtime, &ctx, &mut clock, Vec::new());
+    ensure(runtime.shell.hub_open(), "the Hub did not come back")?;
 
     // Then the shell sleeps, and egui asks for no frame either (its own hover
     // fades finish first, a second or so of headless time).
@@ -929,7 +1021,10 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         "the idle shell keeps drawing",
     )?;
     let mut detail = format!(
-        "booted into the Hub over the Welcome document, Esc closed it; {nodes} node kinds, {left}+{right} drawer applets, {windows} window; drawer glided {glide} frames ({}) vs {snap} (legacy snap); camera framed the document in {framed} frames; typed, Ctrl+Z, Ctrl+Y through the UndoStack; a new tone projected onto the timeline, which sprang open; marking menu and palette; then 0 FPS",
+        "booted on the Hub ({}, {}, {}); pinned with a click, one pin at a time, Ctrl+Z and Ctrl+Y; a box opened Sue Paint, gliding in {glide} frames ({}) vs {snap} (legacy snap); the Sue button's menu; a picture into the Image Viewer, Send To the Converter; palette, Settings, back to the Hub; then 0 FPS",
+        count(studios, "studio", "studios"),
+        count(tools, "tool", "tools"),
+        count(windows, "window", "windows"),
         sue_wm::profile_label(profile)
     );
     match render_shell(runtime, clock)? {
@@ -948,9 +1043,9 @@ fn check_writer_studio(subject: &mut Subject) -> Result<String, String> {
     let studio = sue_wm::AppletId::new(sue_writer::ID).map_err(text)?;
     let now = Instant::now();
     let mut textures = sue_platform::NoTextures;
-    runtime.request(ShellRequest::OpenStudio(studio.clone()), &mut textures, now);
+    runtime.request(ShellRequest::Open(studio.clone()), &mut textures, now);
     ensure(
-        runtime.shell.studio() == Some(&studio),
+        runtime.shell.page() == Some(&studio),
         "Sue Writer did not open",
     )?;
     let depth = runtime.engine.history.depth();
@@ -1036,7 +1131,11 @@ fn check_writer_studio(subject: &mut Subject) -> Result<String, String> {
         sizes.push((*format, bytes.len()));
     }
     let _ = std::fs::remove_dir_all(&dir);
-    runtime.request(ShellRequest::CloseStudio, &mut textures, now);
+    runtime.request(ShellRequest::Hub, &mut textures, now);
+    ensure(
+        runtime.shell.hub_open(),
+        "Sue Writer did not go back to the Hub",
+    )?;
     let pdf = sizes
         .iter()
         .find(|(format, _)| *format == "pdf")
@@ -1058,9 +1157,9 @@ fn check_paint_studio(subject: &mut Subject) -> Result<String, String> {
     let studio = sue_wm::AppletId::new(sue_paint::ID).map_err(text)?;
     let now = Instant::now();
     let mut textures = sue_platform::NoTextures;
-    runtime.request(ShellRequest::OpenStudio(studio.clone()), &mut textures, now);
+    runtime.request(ShellRequest::Open(studio.clone()), &mut textures, now);
     ensure(
-        runtime.shell.studio() == Some(&studio),
+        runtime.shell.page() == Some(&studio),
         "Sue Paint did not open",
     )?;
     let depth = runtime.engine.history.depth();
@@ -1163,8 +1262,11 @@ fn check_paint_studio(subject: &mut Subject) -> Result<String, String> {
         (raster.width(), raster.height()) == (320, 240),
         "the PNG has the wrong size",
     )?;
-    runtime.request(ShellRequest::CloseStudio, &mut textures, now);
-    ensure(runtime.shell.studio().is_none(), "Sue Paint did not close")?;
+    runtime.request(ShellRequest::Hub, &mut textures, now);
+    ensure(
+        runtime.shell.hub_open(),
+        "Sue Paint did not go back to the Hub",
+    )?;
     Ok(format!(
         "illustration of {} painted in {} undo steps, composited, undone, redone, saved in the project and exported as PNG ({} KiB)",
         count(layers.len(), "layer", "layers"),
@@ -1189,12 +1291,10 @@ fn check_backbone(subject: &mut Subject) -> Result<String, String> {
             .world
             .arena
             .iter()
-            .filter(|(_, entity)| !entity.class().starts_with(sue_wm::APP_CLASS_PREFIX))
             .map(|(_, entity)| (entity.id(), entity.name().to_owned()))
             .collect::<std::collections::BTreeSet<_>>()
     };
     let before = document(runtime);
-    let nodes = runtime.engine.world.scene.len();
     let dir = runtime.engine.paths.cache_dir.join("self-check");
     std::fs::create_dir_all(&dir).map_err(text)?;
     let path = dir.join("backbone.sue");
@@ -1208,21 +1308,8 @@ fn check_backbone(subject: &mut Subject) -> Result<String, String> {
         "the project lost or renamed entities",
     )?;
     ensure(
-        runtime.engine.world.scene.len() == nodes,
-        "the canvas layout did not survive",
-    )?;
-    ensure(
         runtime.project() == Some(path.as_path()),
         "the project path was not kept",
-    )?;
-    ensure(
-        runtime
-            .engine
-            .world
-            .arena
-            .iter()
-            .any(|(_, entity)| entity.name() == crate::engine::NOTE_NAME),
-        "opening a project dropped the quick note",
     )?;
 
     // Every format through one registry: export the sketch, read it back.
@@ -1318,9 +1405,8 @@ fn check_backbone(subject: &mut Subject) -> Result<String, String> {
     )?;
 
     Ok(format!(
-        "project saved and reopened ({}, {}, {} KiB); {} formats; PNG and CSV through the registry; operator with preset undone; background job",
+        "project saved and reopened ({}, {} KiB); {} formats; PNG and CSV through the registry; operator with preset undone; background job",
         count(before.len(), "entity", "entities"),
-        count(nodes, "node", "nodes"),
         bytes.len().div_ceil(1024),
         formats.iter().count(),
     ))

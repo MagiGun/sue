@@ -1,6 +1,6 @@
 //! # sue-writer: Sue Writer, the writing and publishing studio
 //!
-//! Sue Writer fills Sue's window with a place to write anything from a
+//! Sue Writer fills Sue's page with a place to write anything from a
 //! letter to a trilogy: a word processor's pages and toolbar, a binder of
 //! chapters and scenes as in writing studios for long work, a corkboard of
 //! index cards, an outliner, an inspector for synopses, notes, labels,
@@ -19,14 +19,12 @@
 //! - Pictures from Sue Paint go straight into the text (the Sue menu's
 //!   Send To), drawn with Sue Paint's own compositing.
 
-mod card;
 mod compile;
 mod menus;
 mod project;
 mod studio;
 mod ui;
 
-pub use card::{CARD_ID, WriterCard};
 pub use compile::{FORMATS, Look, Options, Separator, Titles, compile, import, sections};
 pub use project::{TEMPLATES, create};
 pub use studio::{ID, SueWriter};

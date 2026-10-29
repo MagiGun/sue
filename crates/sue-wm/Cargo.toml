@@ -1,6 +1,6 @@
 [package]
 name = "sue-wm"
-description = "Sue's adaptive window manager: SueApplet, the Launchpad, desktop tiling and mobile drawers, spring physics, the dirty-frame scheduler and the egui shell: infinite canvas, floating pills, radial menu, command palette and timeline."
+description = "Sue's shell: SueApplet, the Launchpad, the Hub of studios and tools with its pins, the top bar with the Sue button and menus, spring physics, the dirty-frame scheduler, the command palette and the theme, on egui."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

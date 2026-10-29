@@ -30,7 +30,7 @@ pub fn menus() -> Vec<Menu> {
                 MenuItem::sub("Export As", export),
                 MenuItem::Separator,
                 item("Project Settings...", "project.settings"),
-                item("Back to Canvas", "studio.leave"),
+                item("Back to the Hub", "studio.leave"),
             ],
         ),
         Menu::new(

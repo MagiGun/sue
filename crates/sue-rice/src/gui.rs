@@ -228,7 +228,7 @@ mod tests {
         assert_eq!(gap.label, "Padding");
         assert_eq!(
             gap.tooltip.as_deref(),
-            Some("Space inside drawers, pills and controls (px)")
+            Some("Space inside bars, pills and controls (px)")
         );
         assert_eq!(
             gap.control,
@@ -259,7 +259,7 @@ mod tests {
             }
         );
         assert!(matches!(
-            tree.widget("launchpad.boot_mode").unwrap().control,
+            tree.widget("launchpad.pinned").unwrap().control,
             Control::TextField { .. }
         ));
         let shaders =

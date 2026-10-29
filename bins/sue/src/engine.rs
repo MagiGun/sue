@@ -1,14 +1,12 @@
 //! Boot: wires a platform host, the live rice (migrated when it is old or
-//! tinted), the undoable world with its canvas, the catalog Settings reads,
-//! and the Welcome document Sue opens with, already on the infinite canvas.
+//! tinted), the undoable world, the installed applets and the catalog
+//! Settings reads.
 
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use egui::{Rect, pos2, vec2};
-use sue_core::{StringBuffer, UndoStack};
-use sue_io::meta;
+use sue_core::UndoStack;
 use sue_platform::{
     AudioConfig, AudioSink, FormFactor, HardwareCapabilities, OsFamily, PlatformHost,
     PlatformPaths, RealtimeStatus, write_atomic,
@@ -18,25 +16,16 @@ use sue_rice::{
     migrate,
 };
 use sue_wm::{
-    AppletId, AppletRole, Catalog, Choice, CommandButton, InfoTable, Launchpad, SceneNode,
-    SettingsGroup, SettingsItem, SettingsPage, ShellRequest, WmConfig, World,
+    AppletRole, Catalog, Choice, CommandButton, InfoTable, Launchpad, SettingsGroup, SettingsItem,
+    SettingsPage, ShellRequest, WmConfig, World,
 };
 
-use crate::{applets, document};
+use crate::applets;
 
 /// The live rice file in the platform rice directory. It starts as a byte-for-
 /// byte copy of the built-in `default.suerice` and is written back
 /// format-preservingly after every edit.
 pub const RICE_FILE: &str = "default.suerice";
-
-/// Where Notes are saved, in the notes directory.
-pub const NOTE_FILE: &str = "quick-note.txt";
-
-/// The entity Notes edits.
-pub const NOTE_NAME: &str = "Quick Note";
-
-/// The class of the quick note: an app entity, never saved into projects.
-pub const NOTE_CLASS: &str = "sue.app.note";
 
 /// Where the live rice came from.
 #[derive(Debug)]
@@ -108,24 +97,9 @@ pub fn shell_declarations() -> Vec<RiceDeclaration> {
     let declare = RiceDeclaration::new;
     vec![
         declare(
-            "general.workspace_dir",
-            text(""),
-            "Folder the File Manager opens in (empty for your home folder)",
-        ),
-        declare(
-            "general.autosave_seconds",
-            int(30, 0, 600),
-            "Save notes this often, in seconds (0 turns autosave off)",
-        ),
-        declare(
             "general.confirm_on_exit",
             toggle(true),
             "Ask before closing the window",
-        ),
-        declare(
-            "files.show_hidden",
-            toggle(false),
-            "List files and folders whose names start with a dot",
         ),
         declare(
             "io.jxl_effort",
@@ -184,7 +158,7 @@ pub fn shell_declarations() -> Vec<RiceDeclaration> {
                 min: Some(0.0),
                 max: Some(1.0),
             },
-            "Player volume",
+            "Volume of everything Sue plays",
         ),
         declare(
             "packages.require_signatures",
@@ -217,7 +191,7 @@ pub struct Engine {
     pub capabilities: HardwareCapabilities,
     /// Platform directories.
     pub paths: PlatformPaths,
-    /// The arena, the live rice and the canvas.
+    /// The arena and the live rice.
     pub world: World,
     /// The global undo tree.
     pub history: UndoStack<World>,
@@ -240,29 +214,6 @@ pub struct Engine {
     options: BootOptions,
 }
 
-/// Places a boot entity on the canvas, outside the undo history.
-fn place(
-    world: &mut World,
-    handle: sue_core::AssetHandle,
-    applet: &str,
-    rect: Rect,
-    props: &[(&str, f64)],
-) {
-    let mut node = SceneNode::new(
-        handle,
-        AppletId::new(applet).expect("built-in applet ids are valid"),
-        rect,
-    );
-    for (key, value) in props {
-        node.props.insert((*key).to_owned(), *value);
-    }
-    let id = world.scene.allocate();
-    world.scene.insert(id, node);
-}
-
-/// The text the welcome document starts with.
-const WELCOME: &str = "# Welcome to Sue\n\nThis is a **Document** on the infinite canvas. Click into it and type; select text with the mouse, double-click a word, use `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, and undo with `Ctrl+Z`.\n\n## Around you\n\nScroll to zoom, drag with the middle button or hold Space to pan, and right-click for the marking menu. Press Tab for the command palette.\n";
-
 impl Engine {
     /// Boots against `host` with no audio devices or GPU to report.
     ///
@@ -274,8 +225,8 @@ impl Engine {
 
     /// Boots against `host`: loads the live rice file (migrating one from an
     /// older release or with tinted colors, setting aside one that does not
-    /// parse), registers every riceable, loads the note, installs the
-    /// built-in applets and places the boot entities on the canvas.
+    /// parse), registers every riceable and installs the built-in applets.
+    /// The project starts empty.
     ///
     /// # Errors
     /// A message naming the subsystem that failed.
@@ -292,41 +243,10 @@ impl Engine {
             WmConfig::from_rice(&rice).map_err(|error| format!("window manager: {error}"))?;
         let profile = HardwareProfile::resolve(&config.hardware_profile, host.capabilities());
 
-        let mut world = World {
+        let world = World {
             rice,
             ..World::default()
         };
-        let note_path = paths.notes_dir().join(NOTE_FILE);
-        let note = match std::fs::read_to_string(&note_path) {
-            Ok(text) => text,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
-            Err(error) => {
-                return Err(format!(
-                    "notes: cannot read {}: {error}",
-                    note_path.display()
-                ));
-            }
-        };
-        let handle = world.arena.spawn(NOTE_NAME, StringBuffer::from(note));
-        if let Ok(entity) = world.arena.get_mut(handle) {
-            entity.set_meta(meta::SOURCE, note_path.display().to_string());
-            // Kept out of projects: it is the app's own note.
-            entity.set_class(NOTE_CLASS);
-        }
-
-        // The document Sue opens with.
-        let document_size = world.rice.get_i64("typography.document_size").unwrap_or(15);
-        let text = world
-            .arena
-            .spawn("Welcome", StringBuffer::from(WELCOME.to_owned()));
-        place(
-            &mut world,
-            text,
-            document::ID,
-            Rect::from_min_size(pos2(-620.0, -260.0), vec2(560.0, 440.0)),
-            &[("font_size", document_size as f64)],
-        );
-
         let mut engine = Self {
             os: host.os(),
             form_factor: host.form_factor(),
@@ -351,11 +271,6 @@ impl Engine {
     /// The live rice file.
     pub fn rice_path(&self) -> PathBuf {
         self.paths.rice_dir().join(RICE_FILE)
-    }
-
-    /// Where the note is saved.
-    pub fn note_path(&self) -> PathBuf {
-        self.paths.notes_dir().join(NOTE_FILE)
     }
 
     /// Re-reads the window-manager config and hardware profile from the rice,
@@ -419,20 +334,17 @@ impl Engine {
                 "general",
                 "General",
                 vec![
-                    group("Startup", vec![param("launchpad.boot_mode")]),
                     group(
-                        "File Manager",
-                        vec![param("general.workspace_dir"), section("files")],
-                    ),
-                    group(
-                        "Saving",
+                        "Startup",
                         vec![
-                            param("general.autosave_seconds"),
-                            param("general.confirm_on_exit"),
-                            fact("notes.path"),
+                            SettingsItem::Note(
+                                "Sue opens on the Hub, or straight into the studio or tool whose pin you set there."
+                                    .to_owned(),
+                            ),
+                            param("launchpad.pinned"),
                         ],
                     ),
-                    group("Notes", vec![section("notes")]),
+                    group("Quitting", vec![param("general.confirm_on_exit")]),
                 ],
             ),
             SettingsPage::new(
@@ -442,7 +354,6 @@ impl Engine {
                     group("Theme", vec![SettingsItem::Presets]),
                     group("Colors", vec![section("colors")]),
                     group("Geometry", vec![section("layout")]),
-                    group("Canvas", vec![section("canvas")]),
                     group("Typography", vec![section("typography")]),
                     group(
                         "Rice File",
@@ -503,7 +414,6 @@ impl Engine {
                         ]),
                     ),
                     group("Status", vec![fact("audio.stream"), fact("audio.realtime")]),
-                    group("Player", vec![section("player")]),
                 ],
             ),
             SettingsPage::new(
@@ -597,15 +507,15 @@ impl Engine {
             ),
         ];
 
-        // Live choices.
-        let mut boot = vec![Choice::new("hub", "Hub"), Choice::new("canvas", "Canvas")];
-        boot.extend(self.launchpad.manifests().filter_map(|manifest| {
-            let mode = manifest.mode.as_ref()?;
-            Some(Choice::new(manifest.id.as_str(), mode.label.clone()))
-        }));
-        catalog
-            .choices
-            .insert("launchpad.boot_mode".to_owned(), boot);
+        // Live choices: the Hub, or any studio or tool to open straight into.
+        let mut pins = vec![Choice::new("", "The Hub")];
+        pins.extend(
+            self.launchpad
+                .manifests()
+                .filter(|manifest| manifest.role.is_page())
+                .map(|manifest| Choice::new(manifest.id.as_str(), manifest.name.clone())),
+        );
+        catalog.choices.insert(sue_wm::PIN_KEY.to_owned(), pins);
         let mut devices = vec![Choice::new("", "System default")];
         devices.extend(
             self.options
@@ -619,8 +529,6 @@ impl Engine {
         for (name, folder) in [
             ("home", self.paths.home_dir.clone()),
             ("rice", self.paths.rice_dir()),
-            ("notes", self.paths.notes_dir()),
-            ("player", self.paths.data_dir.join("player")),
             ("paint", self.paths.data_dir.join("paint")),
         ] {
             catalog.folders.insert(name.to_owned(), folder);
@@ -653,11 +561,9 @@ impl Engine {
                     .manifests()
                     .map(|manifest| {
                         let place = match manifest.role {
-                            AppletRole::Node => "Canvas",
-                            AppletRole::LeftDrawer => "Left drawer",
-                            AppletRole::RightDrawer => "Right drawer",
+                            AppletRole::Studio => "Hub, Studios",
+                            AppletRole::Tool => "Hub, Tools",
                             AppletRole::Window => "Window",
-                            AppletRole::Studio => "Studio",
                         };
                         vec![
                             manifest.name.clone(),
@@ -685,11 +591,6 @@ impl Engine {
                 .insert(id.to_owned(), (label.to_owned(), value));
         };
         facts("rice.path", "File", self.rice_source.to_string());
-        facts(
-            "notes.path",
-            "Note file",
-            self.note_path().display().to_string(),
-        );
         let target = {
             let mut scheduler =
                 sue_wm::FrameScheduler::new(self.profile, self.capabilities.display_refresh_hz);
@@ -917,16 +818,30 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn boot_places_the_welcome_document_on_the_canvas() {
+    fn boot_starts_an_empty_project_with_the_studios_and_tools_installed() {
         let (host, root) = temp_host("boot");
         let engine = Engine::boot(&host).unwrap();
-        let applets: Vec<&str> = engine
-            .world
-            .scene
+        assert!(engine.world.arena.is_empty(), "nothing is made at boot");
+        let pages = |role: AppletRole| -> Vec<String> {
+            engine
+                .launchpad
+                .manifests()
+                .filter(|manifest| manifest.role == role)
+                .map(|manifest| manifest.name.clone())
+                .collect()
+        };
+        assert_eq!(pages(AppletRole::Studio), ["Sue Paint", "Sue Writer"]);
+        assert_eq!(pages(AppletRole::Tool), ["Image Viewer", "Converter"]);
+        assert_eq!(pages(AppletRole::Window), ["Settings"]);
+        // Settings offers every studio and tool to pin, and the Hub.
+        let pins: Vec<&str> = engine.catalog.choices[sue_wm::PIN_KEY]
             .iter()
-            .map(|(_, node)| node.applet.as_str())
+            .map(|choice| choice.value.as_str())
             .collect();
-        assert_eq!(applets, [document::ID]);
+        assert_eq!(
+            pins,
+            ["", "sue-paint", "sue-writer", "image-viewer", "convert"]
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -943,7 +858,15 @@ pub(crate) mod tests {
         ));
         let migrated = std::fs::read_to_string(&path).unwrap();
         assert!(!migrated.contains("#3b82f6"));
-        assert_eq!(engine.world.rice.get_i64("layout.rail_width"), Some(36));
+        assert_eq!(
+            engine.world.rice.get_i64("layout.status_bar_height"),
+            Some(22)
+        );
+        assert_eq!(
+            engine.world.rice.get_i64("layout.rail_width"),
+            None,
+            "keys that are gone are dropped"
+        );
         let backup = path.with_extension("suerice.v2.bak");
         assert_eq!(std::fs::read_to_string(&backup).unwrap(), old);
         // A second boot finds the file current.
@@ -1010,9 +933,9 @@ pub(crate) mod tests {
             );
         }
         assert_eq!(
-            engine.world.rice.get_str("launchpad.boot_mode"),
-            Some("hub"),
-            "Sue opens into the Hub"
+            engine.world.rice.get_str(sue_wm::PIN_KEY),
+            Some(""),
+            "nothing is pinned: Sue opens on the Hub"
         );
         assert!(
             engine

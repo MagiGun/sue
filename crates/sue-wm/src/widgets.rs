@@ -1,4 +1,4 @@
-//! Small widgets every surface shares: pill frames, pill and rail buttons,
+//! Small widgets every surface shares: pill frames, pill buttons,
 //! segmented choices, section headings and response curve graphs, all
 //! drawn from the [`Theme`].
 
@@ -68,44 +68,6 @@ pub fn pill_divider(ui: &mut Ui, theme: &Theme) {
     let (rect, _) =
         ui.allocate_exact_size(vec2(theme.border_width.max(1.0), height), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, theme.border);
-}
-
-/// A square icon button for the activity rails. The chosen one gets a
-/// white bar on its outer edge.
-pub fn rail_button(
-    ui: &mut Ui,
-    icon: &str,
-    tooltip: &str,
-    chosen: bool,
-    left: bool,
-    theme: &Theme,
-) -> Response {
-    let side = ui.available_width();
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(side), Sense::click());
-    let painter = ui.painter();
-    if response.hovered() {
-        painter.rect_filled(rect.shrink(4.0), radius(theme.control_radius), theme.hover);
-    }
-    if chosen {
-        let bar = if left {
-            Rect::from_min_size(rect.min, vec2(2.0, rect.height()))
-        } else {
-            Rect::from_min_size(rect.right_top() - vec2(2.0, 0.0), vec2(2.0, rect.height()))
-        };
-        painter.rect_filled(bar, 0.0, theme.border_active);
-    }
-    painter.text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        icon,
-        theme.font(theme.ui_size * 1.25),
-        if chosen || response.hovered() {
-            theme.text
-        } else {
-            theme.muted
-        },
-    );
-    response.on_hover_text(tooltip)
 }
 
 /// A row of options; returns the index clicked this frame.

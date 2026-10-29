@@ -1,7 +1,7 @@
 //! # sue-paint: Sue Paint, the painting and illustration studio
 //!
-//! Sue Paint fills Sue's window with a painting workspace: a menu bar, a
-//! command bar, the tool palette with sub tools and their properties, a
+//! Sue Paint fills Sue's page with a painting workspace: its menus in Sue's
+//! top bar after the Sue button, a command bar, the tool palette with sub tools and their properties, a
 //! color wheel, color sets, brush size sliders, tabs of open canvases, a
 //! navigator, a layer palette and a timeline. Menu items whose feature is
 //! not built yet are grayed out, so the menus show where it is heading.
@@ -30,7 +30,6 @@ pub mod blend;
 pub mod brush;
 pub mod camera;
 mod canvas;
-mod card;
 pub mod color;
 mod colorsets;
 mod comic;
@@ -68,7 +67,6 @@ pub mod vector;
 pub mod view;
 pub mod warp;
 
-pub use card::{CARD_ID, PictureCard};
 pub use menus::menus;
 pub use studio::{ID, SuePaint, mirror};
 

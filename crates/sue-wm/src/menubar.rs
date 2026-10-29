@@ -1,4 +1,6 @@
-//! Menu bars for studios: menus described as data, drawn by the shell.
+//! Menu bars for studios and tools: menus described as data, drawn in the
+//! shell's top bar after the Sue button, whose own menu is a
+//! [`MenuBar::dropdown`].
 //!
 //! A studio lists its menus as [`Menu`]s of [`MenuItem`]s, each naming a
 //! command. Every frame [`MenuBar::ui`] asks the studio for the state of
@@ -173,6 +175,12 @@ impl MenuBar {
         found.is_some()
     }
 
+    /// Opens a [`Self::dropdown`] menu (scripted runs, a shortcut).
+    pub fn open_dropdown(&mut self) {
+        self.open = Some(0);
+        self.path.clear();
+    }
+
     /// Closes every menu.
     pub fn close(&mut self) {
         self.open = None;
@@ -195,6 +203,7 @@ impl MenuBar {
         state: &dyn Fn(&str) -> ItemState,
         theme: &Theme,
     ) -> Option<String> {
+        let base = ui.scope_id().with("sue-menubar");
         let painter = ui.painter().with_clip_rect(rect);
         let font = theme.font(theme.ui_size);
         let mut x = rect.left() + 4.0;
@@ -206,7 +215,7 @@ impl MenuBar {
                 vec2(galley.size().x + 18.0, rect.height() - 4.0),
             );
             x = title.right();
-            let response = ui.interact(title, Id::unique(("sue-menubar", index)), Sense::click());
+            let response = ui.interact(title, base.with(("title", index)), Sense::click());
             if response.clicked() {
                 self.open = if self.open == Some(index) {
                     None
@@ -231,23 +240,63 @@ impl MenuBar {
         }
         let open = self.open?;
         let menu = menus.get(open)?;
+        let anchor = titles[open].left_bottom() + vec2(0.0, 1.0);
+        self.popups(ui, base, rect, anchor, &menu.items, state, theme)
+    }
+
+    /// A single menu under a button the caller drew (the Sue button):
+    /// `toggle` is the button's click, which opens or closes it. Returns
+    /// the command of the item picked this frame.
+    #[allow(clippy::too_many_arguments, reason = "a menu under a button")]
+    pub fn dropdown(
+        &mut self,
+        ui: &mut Ui,
+        button: Rect,
+        toggle: bool,
+        items: &[MenuItem],
+        state: &dyn Fn(&str) -> ItemState,
+        theme: &Theme,
+    ) -> Option<String> {
+        if toggle {
+            self.open = if self.open.is_some() { None } else { Some(0) };
+            self.path.clear();
+        }
+        self.open?;
+        let base = ui.scope_id().with("sue-dropdown");
+        let anchor = button.left_bottom() + vec2(0.0, 1.0);
+        self.popups(ui, base, button, anchor, items, state, theme)
+    }
+
+    /// The open menu at `anchor` and its open submenus; closes on a pick,
+    /// on Escape or on a click outside them and `owner` (the bar or the
+    /// button).
+    #[allow(clippy::too_many_arguments, reason = "the popups of a nested menu")]
+    fn popups(
+        &mut self,
+        ui: &Ui,
+        base: Id,
+        owner: Rect,
+        mut anchor: Pos2,
+        items: &[MenuItem],
+        state: &dyn Fn(&str) -> ItemState,
+        theme: &Theme,
+    ) -> Option<String> {
         let ctx = ui.ctx().clone();
-        let mut areas = vec![rect];
+        let mut areas = vec![owner];
         let mut picked = None;
-        let mut level_items = &menu.items;
-        let mut anchor = titles[open].left_bottom() + vec2(0.0, 1.0);
+        let mut level_items = items;
         for level in 0..=self.path.len() {
-            let (area, sub, chosen) = self.popup(&ctx, level, anchor, level_items, state, theme);
+            let (area, sub, chosen) =
+                self.popup(&ctx, base, level, anchor, level_items, state, theme);
             areas.push(area);
             if chosen.is_some() {
                 picked = chosen;
             }
             match sub {
-                Some((index, row)) => {
+                Some((_, row)) => {
                     if self.path.len() <= level {
                         break;
                     }
-                    let _ = index;
                     let Some(MenuItem::Sub { items, .. }) = level_items.get(self.path[level])
                     else {
                         self.path.truncate(level);
@@ -283,6 +332,7 @@ impl MenuBar {
     fn popup(
         &mut self,
         ctx: &egui::Context,
+        base: Id,
         level: usize,
         anchor: Pos2,
         items: &[MenuItem],
@@ -337,7 +387,7 @@ impl MenuBar {
         let area = Rect::from_min_size(origin, vec2(width, height));
         let mut sub = None;
         let mut picked = None;
-        egui::Area::new(Id::unique(("sue-menu-popup", level)))
+        egui::Area::new(base.with(("popup", level)))
             .fade_in(false)
             .order(Order::Tooltip)
             .fixed_pos(origin)
@@ -382,11 +432,8 @@ impl MenuBar {
                         }
                         MenuItem::Separator => ItemState::off(),
                     };
-                    let response = ui.interact(
-                        row,
-                        Id::unique(("sue-menu-item", level, index)),
-                        Sense::click(),
-                    );
+                    let response =
+                        ui.interact(row, base.with(("item", level, index)), Sense::click());
                     let open_sub = matches!(item, MenuItem::Sub { .. })
                         && self.path.get(level) == Some(&index);
                     if response.hovered() {

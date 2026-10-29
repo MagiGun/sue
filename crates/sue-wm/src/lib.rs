@@ -1,28 +1,24 @@
-//! # sue-wm: the infinite canvas shell
+//! # sue-wm: Sue's shell
 //!
-//! Every tool is a [`SueApplet`] registered at runtime with the
-//! [`Launchpad`]: canvas entity kinds, drawer utilities, the Settings window
-//! and full-window studios, whose menus are data drawn by [`MenuBar`]. The [`Shell`] draws Sue's window with egui: an infinite
-//! spatial canvas whose [`Camera`] zooms from 10% to 3200%, entity nodes
-//! drawn by their applets inside a camera-transformed layer, a floating top
-//! pill of modes, a floating selection pill above the selected entity, a
-//! spring-animated radial marking menu with nested New File wheels, a fuzzy
-//! command
-//! [`Palette`], spring-driven drawers and a bottom timeline whose blocks are
-//! the same arena entities.
+//! Every studio, tool and window is a [`SueApplet`] registered at runtime
+//! with the [`Launchpad`]. The [`Shell`] draws Sue's window with egui: a top
+//! bar with the Sue button in its corner (the Sue menu, a
+//! [`MenuBar::dropdown`]) followed by the open studio's or tool's menus,
+//! the page under it (the Hub, a box for every studio and tool with a pin
+//! that opens one at launch, or the studio or tool itself), a status bar,
+//! a fuzzy command [`Palette`] and the Settings window.
 //!
 //! Every moving part is a [`SpringDamper`] (`F = -kx - cv`) stepped with the
-//! real frame time; [`solve_layout`] maps the shell onto desktop tiles or
-//! touch overlays, and [`FrameScheduler`] keeps the frame cap of the
-//! hardware profile. The [`Theme`] binds the rice palette into egui's style.
-//! Text fields edit the arena in place through [`ArenaText`] and become
-//! undo steps through [`Typing`] (backbone rule 2).
+//! real frame time; [`solve_layout`] places the bars and the page for every
+//! form factor, and [`FrameScheduler`] keeps the frame cap of the hardware
+//! profile. The [`Theme`] binds the rice palette into egui's style. Text
+//! fields edit the arena in place through [`ArenaText`] and become undo
+//! steps through [`Typing`] (backbone rule 2).
 //!
 //! Specification: `HUMANZ.md` §3.2 to §3.6.
 
 mod applet;
 pub mod brand;
-mod camera;
 mod catalog;
 mod color_pick;
 mod config;
@@ -33,49 +29,35 @@ mod launchpad;
 mod layout;
 mod menubar;
 mod palette;
-mod radial;
-mod scene;
 mod scheduler;
 mod shell;
 pub mod shortcuts;
 mod spring;
 mod text;
 mod theme;
-mod timeline;
 mod transport;
 pub mod widgets;
 mod world;
 
 pub use applet::{
     AppletContext, AppletError, AppletId, AppletManifest, AppletRole, FilePick, FileTemplate,
-    FileType, MediaClass, ModeSpec, PaletteEntry, ShellRequest, ShellView, SueAction, SueApplet,
-    Tick, wheel,
+    FileType, PaletteEntry, ShellRequest, ShellView, SueAction, SueApplet, Tick, sue_menu,
 };
-pub use camera::Camera;
 pub use catalog::{
     Catalog, Choice, CommandButton, InfoTable, Property, PropertyGroup, SettingsGroup,
     SettingsItem, SettingsPage,
 };
 pub use color_pick::{ColorPick, alpha_bar, color_button, color_wheel, hsv_of, rgb_of, swatch};
-pub use config::{CanvasConfig, GridStyle, Keymap, WmConfig, register_rice, rice_declarations};
+pub use config::{Keymap, WmConfig, register_rice, rice_declarations};
 pub use error::WmError;
 pub use launchpad::{AppletFactory, Applets, Launchpad};
-pub use layout::{LayoutMetrics, LayoutRequest, LayoutSolution, Topology, solve_layout};
+pub use layout::{LayoutMetrics, LayoutRequest, LayoutSolution, bar_height, solve_layout};
 pub use menubar::{ItemState, Menu, MenuBar, MenuItem, context_items};
 pub use palette::{Palette, PaletteOutcome, fuzzy_score};
-pub use radial::{Radial, RadialOutcome, wedge_at, wedge_point};
-pub use scene::{NodeId, SCENE_CHUNK, Scene, SceneNode};
 pub use scheduler::{Damage, FrameScheduler, FrameTicket, RenderDemand};
-pub use shell::{
-    CANVAS_MODE, HUB_MODE, NODE_TITLE, Shell, ShellIo, TIMELINE_MODE, profile_label,
-    project_to_timeline,
-};
+pub use shell::{PIN_KEY, Shell, ShellIo, pinned, profile_label};
 pub use spring::{SpringDamper, SpringMode, SpringParams};
 pub use text::{ArenaText, TYPING_PAUSE, Typing};
 pub use theme::{COLOR_KEYS, STUDIO_THEME_CUSTOM, STUDIO_THEME_SUE, Theme};
-pub use timeline::{Block, TimelineEvent, TimelineState, timecode};
 pub use transport::{Clip, ClipSource, Transport, pcm_of};
-pub use world::{
-    APP_CLASS_PREFIX, ArenaEdit, Batch, NewEntity, PlaceNode, RemoveNode, RiceEdit, SetNodeProp,
-    SetNodeRect, SpawnNode, World,
-};
+pub use world::{ArenaEdit, Batch, RiceEdit, World};

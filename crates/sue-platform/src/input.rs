@@ -264,7 +264,7 @@ impl KeyEvent {
     }
 }
 
-/// A screen edge, for edge-swipe drawers.
+/// A screen edge, for edge swipes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ScreenEdge {
     /// Left edge.
@@ -323,7 +323,8 @@ pub enum TouchGesture {
     EdgeSwipe {
         /// Edge the swipe started from.
         edge: ScreenEdge,
-        /// How far it travelled, as a fraction `0.0..=1.0` of a drawer width.
+        /// How far it travelled, as a fraction `0.0..=1.0` of the panel it
+        /// pulls in.
         progress: f32,
     },
 }

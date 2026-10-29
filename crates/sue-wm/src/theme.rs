@@ -12,11 +12,11 @@ use sue_rice::{Rgba, RiceSchema, ThemePreset};
 /// Colors, geometry and type for the whole shell.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Theme {
-    /// Canvas background.
+    /// Page background.
     pub void: Color32,
-    /// Drawers and panels.
+    /// Bars and panels.
     pub panel: Color32,
-    /// Floating pills, cards and entity frames.
+    /// Menus, boxes and floating surfaces.
     pub pill: Color32,
     /// Hovered controls.
     pub hover: Color32,
@@ -38,15 +38,15 @@ pub struct Theme {
     pub grid: Color32,
     /// Shadow under floating surfaces.
     pub shadow: Color32,
-    /// Space inside drawers, pills and controls.
+    /// Space inside bars, pills and controls.
     pub padding: f32,
     /// Hairline thickness.
     pub border_width: f32,
     /// Rounding of buttons and fields.
     pub control_radius: f32,
-    /// Rounding of pills and cards.
+    /// Rounding of windows, menus and pill buttons.
     pub pill_radius: f32,
-    /// Height of floating pills.
+    /// Height of pill buttons.
     pub pill_height: f32,
     /// Width of the category list in Settings.
     pub settings_sidebar_width: f32,
@@ -60,10 +60,8 @@ pub struct Theme {
     pub small_size: f32,
     /// Headings.
     pub heading_size: f32,
-    /// Code and hex.
+    /// Monospace text.
     pub mono_size: f32,
-    /// Default size of new documents.
-    pub document_size: f32,
 }
 
 fn color(rgba: Rgba) -> Color32 {
@@ -199,7 +197,6 @@ impl Theme {
             small_size: number("typography.small_size", 11.0),
             heading_size: number("typography.heading_size", 18.0),
             mono_size: number("typography.mono_size", 12.0),
-            document_size: number("typography.document_size", 15.0),
         }
     }
 

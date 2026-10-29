@@ -5,8 +5,10 @@
 //! is tidied, Markdown becomes HTML and tables move between CSV, TSV and
 //! JSON; and anything becomes Base64, a hex dump or a byte map picture.
 //!
-//! Files come from Add Files (the File Manager, a folder at a time if you
-//! like), the File Manager's Convert button, or what is on the canvas. They
+//! It is a tool: it opens from the Hub or the Sue menu into a page of its
+//! own, with its menus in Sue's top bar. Files come from Add Files or Add
+//! a Folder (the system's dialogs), from the Sue menu's Send To in any
+//! studio or tool, or from the project's own pictures and sounds. They
 //! convert on a background thread, next to each file or into a chosen
 //! folder, and the list says where each one went.
 
@@ -17,13 +19,13 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
-use egui::{Align, Align2, Layout, RichText, ScrollArea, Sense, Ui, vec2};
+use egui::{Align, Align2, Layout, Rect, RichText, ScrollArea, Sense, Ui, pos2, vec2};
 use sue_core::{AssetHandle, ComponentKind};
 use sue_io::{SampleDepth, meta};
 use sue_platform::write_atomic;
 use sue_wm::{
-    AppletContext, AppletId, AppletManifest, AppletRole, FilePick, ShellRequest, SueApplet, Theme,
-    Tick, widgets,
+    AppletContext, AppletId, AppletManifest, AppletRole, FilePick, ItemState, Menu, MenuBar,
+    MenuItem, ShellRequest, SueApplet, Theme, Tick, widgets,
 };
 
 use self::ops::{Endings, Filter, Kind, Options, Resize, Target};
@@ -40,7 +42,7 @@ const FOLDER_LIMIT: usize = 500;
 enum Source {
     /// A file on disk.
     File(PathBuf),
-    /// A picture or sound on the canvas with no file behind it.
+    /// A picture or sound in the project with no file behind it.
     Entity(AssetHandle),
 }
 
@@ -146,6 +148,8 @@ pub struct Convert {
     channels: usize,
     started: bool,
     results: Option<Receiver<Finished>>,
+    menus: Vec<Menu>,
+    menubar: MenuBar,
 }
 
 impl Default for Convert {
@@ -166,6 +170,8 @@ impl Default for Convert {
             channels: 0,
             started: false,
             results: None,
+            menus: Self::menus(),
+            menubar: MenuBar::new(),
         }
     }
 }
@@ -291,9 +297,9 @@ impl Convert {
         });
     }
 
-    /// Pictures and sounds on the canvas: their files where they have one,
+    /// The project's pictures and sounds: their files where they have one,
     /// else the entities themselves.
-    fn add_canvas(&mut self, cx: &AppletContext<'_>) {
+    fn add_project(&mut self, cx: &AppletContext<'_>) {
         let found: Vec<(AssetHandle, String, Option<String>, Kind)> = cx
             .arena()
             .iter()
@@ -374,7 +380,7 @@ impl Convert {
     }
 
     /// Converts every waiting file: those on disk on a background thread,
-    /// the canvas's own at once.
+    /// the project's own at once.
     fn run(&mut self, cx: &mut AppletContext<'_>) {
         let options = self.settled_options();
         let fallback = crate::util::export_dir(cx);
@@ -430,7 +436,7 @@ impl Convert {
             });
     }
 
-    /// Converts a picture or sound held only on the canvas.
+    /// Converts a picture or sound held only in the project.
     fn convert_entity(
         cx: &AppletContext<'_>,
         handle: AssetHandle,
@@ -554,11 +560,73 @@ impl Convert {
         }
     }
 
-    fn pick(cx: &mut AppletContext<'_>, purpose: &str, title: &str) {
-        cx.request(ShellRequest::PickFile(
-            FilePick::open(Some(AppletId::new(ID).expect("a valid id")), purpose, title)
-                .or_folder(),
-        ));
+    /// Asks the system's dialog for a file, or with `folder` a folder.
+    fn pick(cx: &mut AppletContext<'_>, purpose: &str, title: &str, folder: bool) {
+        let pick = FilePick::open(Some(me()), purpose, title);
+        cx.request(ShellRequest::PickFile(if folder {
+            pick.folder()
+        } else {
+            pick
+        }));
+    }
+
+    /// The Converter's menus, in Sue's top bar.
+    fn menus() -> Vec<Menu> {
+        let act = MenuItem::action;
+        vec![
+            Menu::new(
+                "File",
+                vec![
+                    act("Add Files...", "convert.add"),
+                    act("Add a Folder...", "convert.add_folder"),
+                    act(
+                        "Add the Project's Pictures and Sounds",
+                        "convert.add_project",
+                    ),
+                    act("Clear the List", "convert.clear"),
+                    MenuItem::Separator,
+                    act("Choose the Output Folder...", "convert.folder"),
+                    MenuItem::Separator,
+                    act("Back to the Hub", "convert.leave"),
+                ],
+            ),
+            Menu::new(
+                "Convert",
+                vec![act("Convert the List", "convert.run").key("Ctrl+Enter")],
+            ),
+        ]
+    }
+
+    fn item_state(&self, command: &str) -> ItemState {
+        match command {
+            "convert.run" if self.busy() || self.inputs.is_empty() => ItemState::off(),
+            "convert.clear" if self.busy() || self.inputs.is_empty() => ItemState::off(),
+            _ => ItemState::on(),
+        }
+    }
+
+    /// Takes the rice's quality, effort and folder while the list is empty.
+    fn follow_rice(&mut self, cx: &AppletContext<'_>) {
+        if !self.inputs.is_empty() {
+            return;
+        }
+        let picture = &mut self.options.picture;
+        picture.jpeg_quality = cx
+            .rice()
+            .get_i64("io.jpeg_quality")
+            .and_then(|quality| u8::try_from(quality).ok())
+            .unwrap_or(picture.jpeg_quality);
+        picture.jxl_effort = cx
+            .rice()
+            .get_i64("io.jxl_effort")
+            .and_then(|effort| u8::try_from(effort).ok())
+            .unwrap_or(picture.jxl_effort);
+        if self.output.folder.is_none() {
+            let riced = cx.rice().get_str("io.convert_dir").unwrap_or("").trim();
+            if !riced.is_empty() {
+                self.output.folder = Some(PathBuf::from(riced));
+            }
+        }
     }
 
     // ----- The parts of the Converter -----------------------------------------
@@ -568,13 +636,22 @@ impl Convert {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
             if widgets::pill_button(ui, "Add Files", false, &theme)
-                .on_hover_text("Choose a file, or a whole folder, in the File Manager")
+                .on_hover_text("Choose a file with the system's dialog")
                 .clicked()
             {
-                Self::pick(cx, "add", "Add Files to Convert");
+                Self::pick(cx, "add", "Add Files to Convert", false);
             }
-            if widgets::pill_button(ui, "Add from the Canvas", false, &theme).clicked() {
-                self.add_canvas(cx);
+            if widgets::pill_button(ui, "Add a Folder", false, &theme)
+                .on_hover_text("Every file in a folder")
+                .clicked()
+            {
+                Self::pick(cx, "add", "Add a Folder to Convert", true);
+            }
+            if widgets::pill_button(ui, "Add from the Project", false, &theme)
+                .on_hover_text("The pictures and sounds open in Sue")
+                .clicked()
+            {
+                self.add_project(cx);
             }
             if !self.inputs.is_empty()
                 && !self.busy()
@@ -586,7 +663,7 @@ impl Convert {
         if self.inputs.is_empty() {
             ui.add(
                 egui::Label::new(
-                    RichText::new("Add any file: a picture, a song, a text file, a table, or anything at all. In the File Manager, Convert sends the selected file here.")
+                    RichText::new("Add any file: a picture, a song, a text file, a table, or anything at all. In any studio or tool, the Sue menu's Send To, Converter sends what it shows here.")
                         .color(theme.muted),
                 )
                 .wrap(),
@@ -1036,7 +1113,7 @@ impl Convert {
                 .clicked()
                 && self.output.folder.is_none()
             {
-                Self::pick(cx, "folder", "Choose Where Converted Files Go");
+                Self::pick(cx, "folder", "Choose Where Converted Files Go", true);
             }
         });
         if let Some(folder) = self.output.folder.clone() {
@@ -1050,7 +1127,7 @@ impl Convert {
                     .wrap(),
                 );
                 if widgets::pill_button(ui, "Change", false, &theme).clicked() {
-                    Self::pick(cx, "folder", "Choose Where Converted Files Go");
+                    Self::pick(cx, "folder", "Choose Where Converted Files Go", true);
                 }
                 if widgets::pill_button(ui, "Open", false, &theme).clicked() {
                     cx.request(ShellRequest::Command(format!(
@@ -1143,77 +1220,80 @@ impl Convert {
     }
 }
 
+fn me() -> AppletId {
+    AppletId::new(ID).expect("a valid id")
+}
+
 impl SueApplet for Convert {
     fn manifest(&self) -> AppletManifest {
-        let mut manifest = AppletManifest::new(ID, "Convert", AppletRole::LeftDrawer, "\u{1F504}");
+        let mut manifest = AppletManifest::new(ID, "Converter", AppletRole::Tool, "\u{1F504}");
         manifest.summary =
             "Turn any file into another kind: pictures, sounds, text, tables or bytes.".to_owned();
         manifest.order = 30;
         manifest
     }
 
-    fn drawer_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
-        if self.inputs.is_empty() {
-            let picture = &mut self.options.picture;
-            picture.jpeg_quality = cx
-                .rice()
-                .get_i64("io.jpeg_quality")
-                .and_then(|quality| u8::try_from(quality).ok())
-                .unwrap_or(picture.jpeg_quality);
-            picture.jxl_effort = cx
-                .rice()
-                .get_i64("io.jxl_effort")
-                .and_then(|effort| u8::try_from(effort).ok())
-                .unwrap_or(picture.jxl_effort);
-            if self.output.folder.is_none() {
-                let riced = cx.rice().get_str("io.convert_dir").unwrap_or("").trim();
-                if !riced.is_empty() {
-                    self.output.folder = Some(PathBuf::from(riced));
-                }
-            }
-        }
-        self.body(ui, cx);
+    fn page_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        self.follow_rice(cx);
         let theme = cx.theme.clone();
+        let full = ui.max_rect();
+        ui.painter().rect_filled(full, 0.0, theme.void);
         if ui
-            .add(
-                egui::Button::new(
-                    RichText::new("Open the large Converter")
-                        .size(theme.small_size)
-                        .color(theme.muted),
-                )
-                .frame(false),
-            )
-            .clicked()
+            .ctx()
+            .input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter))
+            && !self.busy()
         {
-            cx.request(ShellRequest::OpenWindow(
-                AppletId::new(ID).expect("a valid id"),
-            ));
+            self.run(cx);
         }
-    }
-
-    fn window_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
-        let theme = cx.theme.clone();
-        let area = ui.max_rect().shrink(theme.padding * 1.5);
+        // One readable column, centered on wide windows.
+        let width = (full.width() - theme.padding * 4.0).clamp(240.0, 760.0);
+        let area = Rect::from_min_max(
+            pos2(
+                full.center().x - width / 2.0,
+                full.top() + theme.padding * 2.0,
+            ),
+            pos2(full.center().x + width / 2.0, full.bottom()),
+        );
         let mut inner = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(area)
                 .layout(Layout::top_down(Align::Min)),
         );
+        inner.set_clip_rect(full.intersect(ui.clip_rect()));
         ScrollArea::vertical()
-            .id_salt("sue-convert-window")
+            .id_salt("sue-convert-page")
             .auto_shrink([false, false])
-            .show(&mut inner, |ui| self.body(ui, cx));
+            .show(&mut inner, |ui| {
+                ui.label(
+                    RichText::new("Converter")
+                        .size(theme.heading_size)
+                        .color(theme.text),
+                );
+                ui.add_space(theme.padding);
+                self.body(ui, cx);
+                ui.add_space(theme.padding * 2.0);
+            });
     }
 
-    fn window_title(&self) -> Option<String> {
-        Some("Convert".to_owned())
+    fn bar_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        let theme = cx.theme.clone();
+        let rect = ui.max_rect();
+        let mut menubar = std::mem::take(&mut self.menubar);
+        let picked = {
+            let state = |command: &str| self.item_state(command);
+            menubar.ui(ui, rect, &self.menus, &state, &theme)
+        };
+        self.menubar = menubar;
+        if let Some(command) = picked {
+            self.command(&command, cx);
+        }
     }
 
     fn commands(&self) -> Vec<sue_wm::PaletteEntry> {
         [
-            ("Convert: Add Files", "convert.add"),
-            ("Convert: Convert the List", "convert.run"),
-            ("Convert: Open the Large Converter", "convert.window"),
+            ("Add Files", "convert.add"),
+            ("Add a Folder", "convert.add_folder"),
+            ("Convert the List", "convert.run"),
         ]
         .into_iter()
         .map(|(label, command)| sue_wm::PaletteEntry {
@@ -1226,15 +1306,20 @@ impl SueApplet for Convert {
 
     fn command(&mut self, name: &str, cx: &mut AppletContext<'_>) -> bool {
         match name {
-            "convert.add" => Self::pick(cx, "add", "Add Files to Convert"),
-            "convert.run" if !self.busy() => self.run(cx),
-            "convert.run" => cx.notify("Already converting"),
-            "convert.window" => {
-                cx.request(ShellRequest::OpenWindow(
-                    AppletId::new(ID).expect("a valid id"),
-                ));
+            "convert.add" | "file.open" => {
+                Self::pick(cx, "add", "Add Files to Convert", false);
             }
+            "convert.add_folder" => Self::pick(cx, "add", "Add a Folder to Convert", true),
+            "convert.add_project" => self.add_project(cx),
+            "convert.clear" if !self.busy() => self.inputs.clear(),
+            "convert.folder" => Self::pick(cx, "folder", "Choose Where Converted Files Go", true),
+            "convert.run" if !self.busy() => self.run(cx),
+            "convert.run" | "convert.clear" => cx.notify("Already converting"),
+            "convert.leave" => cx.request(ShellRequest::Hub),
             _ => return false,
+        }
+        if cx.view.page.as_ref().map(AppletId::as_str) != Some(ID) && name != "convert.leave" {
+            cx.request(ShellRequest::Open(me()));
         }
         true
     }
@@ -1255,26 +1340,20 @@ impl SueApplet for Convert {
         focus: Option<&sue_core::Entity>,
         _current: bool,
     ) -> Vec<sue_wm::SueAction> {
-        let me = || AppletId::new(ID).expect("a valid id");
-        let mut actions = vec![sue_wm::SueAction::new(
-            sue_wm::wheel::FILE,
-            "Convert Files",
-            ShellRequest::OpenWindow(me()),
-        )];
-        if let Some(entity) = focus
-            && Self::kind_of_entity(entity).is_some()
-        {
-            actions.push(sue_wm::SueAction::new(
-                sue_wm::wheel::SEND_TO,
-                "Convert",
-                ShellRequest::SendEntity {
-                    to: me(),
-                    purpose: "add".to_owned(),
-                    entity: entity.id(),
-                },
-            ));
+        match focus {
+            Some(entity) if Self::kind_of_entity(entity).is_some() => {
+                vec![sue_wm::SueAction::new(
+                    sue_wm::sue_menu::SEND_TO,
+                    "Converter",
+                    ShellRequest::SendEntity {
+                        to: me(),
+                        purpose: "add".to_owned(),
+                        entity: entity.id(),
+                    },
+                )]
+            }
+            _ => Vec::new(),
         }
-        actions
     }
 
     fn take_entity(
@@ -1314,9 +1393,7 @@ impl SueApplet for Convert {
             }
             (None, None) => return,
         }
-        cx.request(ShellRequest::ShowDrawer(
-            AppletId::new(ID).expect("a valid id"),
-        ));
+        cx.request(ShellRequest::Open(me()));
     }
 
     fn picked(&mut self, pick: &FilePick, path: &Path, _cx: &mut AppletContext<'_>) {

@@ -1,88 +1,44 @@
 //! The shell: Sue's whole window as one immediate-mode egui frame.
 //!
-//! The infinite canvas fills the middle; every entity on it is a node drawn
-//! by its applet inside a camera-transformed egui layer, so text fields,
-//! paint strokes and waveforms zoom from 10% to 3200% with the canvas.
-//! Around it: activity rails, spring-driven drawers, a spring-driven bottom
-//! timeline and a status bar. Over it: the floating top pill (modes and
-//! spawn buttons), the floating selection pill above the selected entity,
-//! the radial marking menu, the command palette and the Settings window.
-//! A studio applet (Sue Paint) can take the whole window instead of the
-//! canvas; the status bar, the palette and Settings stay. Going in, the
-//! camera glides into the studio's card and then the studio's panels slide
-//! in over it; going out, they slide away and the camera glides back out.
-//! The marking menu's New File wheel opens a wheel of kinds of files, and
-//! each kind a wheel of exact kinds, all read from the applets' templates.
+//! A top bar runs across the window. The Sue button sits once, in its top
+//! left corner, and opens the Sue menu: the Hub, every studio and tool,
+//! new files, projects, Send To, the command palette and Settings. The
+//! studio or tool filling the page draws its own menus right after it
+//! ([`SueApplet::bar_ui`](crate::SueApplet::bar_ui)). Under the bar is the
+//! page: the Hub, a box for every studio and tool with a pin that makes Sue
+//! open straight into it, or the studio or tool itself. A status bar runs
+//! along the bottom; the command palette and the Settings window float over
+//! everything. Nothing here names an applet: the Hub, the menus and the
+//! palette are read from the registered manifests.
 //!
-//! Motion: every moving part is a [`SpringDamper`] stepped with the
-//! real, clamped frame time. While any spring moves the shell calls
-//! `request_repaint`, so frames come at the display rate with no input; once
-//! all settle (plus a short grace period) the loop sleeps at 0 FPS.
+//! Motion: a page comes in over the Hub and goes back out on a
+//! [`SpringDamper`] stepped with the real, clamped frame time (studios
+//! slide their palettes in with it). While any spring moves the shell calls
+//! `request_repaint`, so frames come at the display rate with no input;
+//! once all settle (plus a short grace period) the loop sleeps at 0 FPS.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use egui::emath::TSTransform;
 use egui::{
-    Align, Align2, Id, LayerId, Layout, Order, Pos2, Rect, RichText, ScrollArea, Sense, Stroke,
+    Align, Align2, Id, LayerId, Layout, Order, Rect, RichText, ScrollArea, Sense, Stroke,
     StrokeKind, Ui, UiBuilder, Vec2, pos2, vec2,
 };
-use sue_core::{AssetHandle, Projection, TimeSpan, UndoStack};
+use sue_core::UndoStack;
 use sue_platform::{AudioSink, FormFactor, FramePacing, SafeAreaInsets, TextureUpload};
-use sue_rice::HardwareProfile;
+use sue_rice::{HardwareProfile, RiceSchema, RiceValue, SetRiceValue};
 
-use crate::config::GridStyle;
 use crate::palette::{Palette, PaletteOutcome};
-use crate::radial::{Radial, RadialOutcome, wedge_point};
-use crate::timeline::{Block, TimelineEvent, TimelineState, timeline_ui};
-use crate::transport::{Clip, pcm_of};
 use crate::{
-    AppletContext, AppletId, AppletRole, Applets, ArenaEdit, Batch, Camera, Catalog,
-    FrameScheduler, LayoutRequest, NewEntity, NodeId, PaletteEntry, PlaceNode, RemoveNode,
-    SceneNode, SetNodeProp, SetNodeRect, ShellRequest, ShellView, SpawnNode, SpringDamper,
-    SpringMode, Theme, Transport, Typing, WmConfig, World, keys, solve_layout, widgets,
+    AppletContext, AppletId, AppletRole, Applets, Catalog, FilePick, FrameScheduler, ItemState,
+    LayoutRequest, LayoutSolution, MenuBar, MenuItem, PaletteEntry, RiceEdit, ShellRequest,
+    ShellView, SpringDamper, SpringMode, Theme, Transport, Typing, WmConfig, World, keys,
+    solve_layout, sue_menu, widgets,
 };
 
-/// Which wheel of the marking menu is showing.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum RadialPage {
-    /// The first wheel.
-    Root,
-    /// New File: the kinds of files.
-    Kinds,
-    /// The exact kinds of one kind of file.
-    Templates(String),
-    /// The Sue menu's first wheel.
-    Sue,
-    /// One of the Sue menu's wheels, by name.
-    Wheel(String),
-}
-
-/// What a wedge of the marking menu does.
-#[derive(Clone, Debug, PartialEq)]
-enum RadialAction {
-    Request(ShellRequest),
-    Open(RadialPage),
-    Template(AppletId, String),
-    /// Takes a card off the canvas.
-    Remove(NodeId),
-}
-
-/// Height of a node's title bar, in canvas units.
-pub const NODE_TITLE: f32 = 26.0;
-
-/// Where the built-in Timeline mode sits among the node modes (by applet
-/// order): after the visual kinds, before code.
-const TIMELINE_ORDER: i32 = 35;
-
-/// The mode that shows the whole canvas.
-pub const CANVAS_MODE: &str = "canvas";
-
-/// The mode that opens the timeline.
-pub const TIMELINE_MODE: &str = "timeline";
-
-/// The boot mode that opens the Hub over the canvas.
-pub const HUB_MODE: &str = "hub";
+/// The rice key of the Hub's pin: the studio or tool Sue opens into at
+/// launch, empty for the Hub.
+pub const PIN_KEY: &str = "launchpad.pinned";
 
 /// A hardware profile as people read it, e.g. `Legacy Low Spec`.
 #[must_use]
@@ -100,9 +56,19 @@ pub fn profile_label(profile: HardwareProfile) -> String {
         .join(" ")
 }
 
+/// The studio or tool pinned in `rice`, if it is installed.
+#[must_use]
+pub fn pinned(rice: &RiceSchema, applets: &Applets) -> Option<AppletId> {
+    let id = AppletId::new(rice.get_str(PIN_KEY)?.trim()).ok()?;
+    applets
+        .manifest(&id)
+        .is_some_and(|manifest| manifest.role.is_page())
+        .then_some(id)
+}
+
 /// Everything outside the shell that a frame reads and changes.
 pub struct ShellIo<'a> {
-    /// The arena, the live rice and the scene.
+    /// The arena and the live rice.
     pub world: &'a mut World,
     /// The global undo tree.
     pub history: &'a mut UndoStack<World>,
@@ -144,38 +110,21 @@ fn split<'b>(
     (&mut *io.applets, cx)
 }
 
-/// One drawer: which applet it shows and how far it is open.
+/// What a click on a box of the Hub asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HubClick {
+    /// Open the studio or tool.
+    Open,
+    /// Pin it, or take its pin away.
+    Pin,
+}
+
+/// What a palette entry does.
 #[derive(Clone, Debug, PartialEq)]
-struct Drawer {
-    shown: Option<AppletId>,
-    open: bool,
-    reveal: SpringDamper,
-}
-
-/// A node being moved or resized.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct NodeDrag {
-    node: NodeId,
-    from: Rect,
-    resize: bool,
-}
-
-/// The floating selection pill.
-#[derive(Clone, Debug, PartialEq)]
-struct SelectionPill {
-    node: Option<NodeId>,
-    appear: SpringDamper,
-    glide_x: SpringDamper,
-    glide_y: SpringDamper,
-    anchor: Option<Pos2>,
-}
-
-/// A mode in the top pill.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ModeButton {
-    id: String,
-    label: String,
-    order: i32,
+enum PaletteAction {
+    Request(ShellRequest),
+    Undo(bool),
+    Applet(AppletId, String),
 }
 
 /// The shell's state between frames.
@@ -187,66 +136,100 @@ pub struct Shell {
     form_factor: FormFactor,
     safe_area: SafeAreaInsets,
     scheduler: FrameScheduler,
-    left: Drawer,
-    right: Drawer,
-    timeline_open: bool,
-    timeline_reveal: SpringDamper,
-    timeline: TimelineState,
-    timeline_clip: Option<NodeId>,
-    camera: Camera,
-    mode: String,
-    selected: Option<NodeId>,
-    pill: SelectionPill,
-    top_pill: SpringDamper,
-    radial: Option<Radial>,
+    /// The studio or tool asked for; `None` is the Hub.
+    page: Option<AppletId>,
+    /// The studio or tool drawn, also while it leaves for the Hub.
+    shown: Option<AppletId>,
+    /// How far the shown page has come in over the Hub, 0 to 1.
+    reveal: SpringDamper,
     palette: Option<Palette>,
     window: Option<AppletId>,
     window_appear: SpringDamper,
-    hub: bool,
-    hub_appear: SpringDamper,
-    studio: Option<AppletId>,
-    studio_shown: Option<AppletId>,
-    studio_reveal: SpringDamper,
-    studio_zooming: bool,
-    studio_leave: Option<(Option<NodeId>, bool)>,
-    studio_restore: Option<bool>,
-    studio_area: Rect,
+    /// The Sue button's menu: which submenus are open.
+    sue_menu: MenuBar,
+    /// The Sue menu, built for the context it opened in.
+    sue_items: Vec<MenuItem>,
+    /// What each of its items (`sue:<index>`) runs, and whether it shows a
+    /// check mark.
+    sue_runs: Vec<(ShellRequest, bool)>,
     presets: Vec<sue_rice::ThemePreset>,
-    radial_page: RadialPage,
-    /// The wheels the marking menu came through, to go back.
-    radial_back: Vec<RadialPage>,
-    /// The card the marking menu opened on, if any (right-clicked).
-    radial_node: Option<NodeId>,
-    /// The Sue menu, built for the context it opened in: its first wheel
-    /// and its named wheels.
-    sue_wheels: Vec<(String, Vec<(String, RadialAction)>)>,
-    spawn_point: Option<Pos2>,
     interactive: bool,
-    space_down: bool,
-    space_panned: bool,
-    middle_pan: bool,
-    node_drag: Option<NodeDrag>,
     message: Option<(String, bool, Instant)>,
     message_path: Option<PathBuf>,
     last_frame: Option<Instant>,
     last_change: Option<Instant>,
     animating: bool,
-    canvas: Rect,
+    page_rect: Rect,
+    /// Where the last frame drew the Sue button.
+    sue_button: Rect,
+    /// Where the last frame drew the Hub's boxes and their pins.
+    hub_boxes: Vec<(AppletId, Rect, Rect)>,
     booted: bool,
 }
 
 impl std::fmt::Debug for Shell {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Shell")
-            .field("mode", &self.mode)
-            .field("selected", &self.selected)
-            .field("timeline_open", &self.timeline_open)
+            .field("page", &self.page)
+            .field("shown", &self.shown)
+            .field("window", &self.window)
             .finish_non_exhaustive()
     }
 }
 
+/// An item of the Sue menu that runs `request`.
+fn sue_item(
+    runs: &mut Vec<(ShellRequest, bool)>,
+    label: impl Into<String>,
+    request: ShellRequest,
+    checked: bool,
+) -> MenuItem {
+    runs.push((request, checked));
+    MenuItem::action(label, format!("sue:{}", runs.len() - 1))
+}
+
+/// Every applet's file templates, in applet order.
+fn templates(applets: &Applets) -> Vec<(AppletId, crate::FileTemplate)> {
+    applets
+        .iter()
+        .flat_map(|(manifest, applet)| {
+            applet
+                .templates()
+                .into_iter()
+                .map(|template| (manifest.id.clone(), template))
+        })
+        .collect()
+}
+
+/// A pushpin in `rect`: filled when `pinned`.
+fn pin_glyph(painter: &egui::Painter, rect: Rect, pinned: bool, color: egui::Color32) {
+    let size = rect.width().min(rect.height()) * 0.3;
+    let center = rect.center() - vec2(0.0, size * 0.25);
+    let head = center - vec2(0.0, size * 0.55);
+    let stroke = Stroke::new(1.5, color);
+    if pinned {
+        painter.circle_filled(head, size * 0.55, color);
+    } else {
+        painter.circle_stroke(head, size * 0.55, stroke);
+    }
+    painter.line_segment(
+        [
+            center + vec2(-size * 0.85, size * 0.1),
+            center + vec2(size * 0.85, size * 0.1),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            center + vec2(0.0, size * 0.1),
+            center + vec2(0.0, size * 1.45),
+        ],
+        stroke,
+    );
+}
+
 impl Shell {
-    /// A shell with closed drawers, centered on the origin.
+    /// A shell on the Hub.
     #[must_use]
     pub fn new(
         config: WmConfig,
@@ -259,69 +242,26 @@ impl Shell {
         let spring = |position| SpringDamper::new(config.spring, mode, position);
         let mut scheduler = FrameScheduler::new(profile, display_hz);
         scheduler.set_frame_cap(config.frame_rate_cap);
-        let camera = Camera::new(
-            config.camera_spring,
-            mode,
-            (config.canvas.zoom_min, config.canvas.zoom_max),
-        );
-        let mut top_pill = spring(0.0);
-        top_pill.set_target(1.0);
         Self {
-            left: Drawer {
-                shown: None,
-                open: false,
-                reveal: spring(0.0),
-            },
-            right: Drawer {
-                shown: None,
-                open: false,
-                reveal: spring(0.0),
-            },
-            timeline_open: false,
-            timeline_reveal: spring(0.0),
-            timeline: TimelineState::default(),
-            timeline_clip: None,
-            camera,
-            mode: CANVAS_MODE.to_owned(),
-            selected: None,
-            pill: SelectionPill {
-                node: None,
-                appear: spring(0.0),
-                glide_x: spring(0.0),
-                glide_y: spring(0.0),
-                anchor: None,
-            },
-            top_pill,
-            radial: None,
+            page: None,
+            shown: None,
+            reveal: spring(0.0),
             palette: None,
             window: None,
             window_appear: spring(0.0),
-            hub: false,
-            hub_appear: spring(0.0),
-            studio: None,
-            studio_shown: None,
-            studio_reveal: spring(0.0),
-            studio_zooming: false,
-            studio_leave: None,
-            studio_restore: None,
-            studio_area: Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 720.0)),
+            sue_menu: MenuBar::new(),
+            sue_items: Vec::new(),
+            sue_runs: Vec::new(),
             presets: sue_rice::builtin_presets(),
-            radial_page: RadialPage::Root,
-            radial_back: Vec::new(),
-            radial_node: None,
-            sue_wheels: Vec::new(),
-            spawn_point: None,
             interactive: false,
-            space_down: false,
-            space_panned: false,
-            middle_pan: false,
-            node_drag: None,
             message: None,
             message_path: None,
             last_frame: None,
             last_change: None,
             animating: true,
-            canvas: Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 720.0)),
+            page_rect: Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 720.0)),
+            sue_button: Rect::NOTHING,
+            hub_boxes: Vec::new(),
             booted: false,
             config,
             theme,
@@ -357,68 +297,45 @@ impl Shell {
         self.scheduler.target_hz()
     }
 
-    /// The canvas camera.
+    /// The page area of the last frame, in screen points.
     #[must_use]
-    pub fn camera(&self) -> &Camera {
-        &self.camera
+    pub fn page_rect(&self) -> Rect {
+        self.page_rect
     }
 
-    /// The canvas area of the last frame, in screen points.
+    /// Where the last frame drew the Sue button.
     #[must_use]
-    pub fn canvas_rect(&self) -> Rect {
-        self.canvas
+    pub fn sue_button(&self) -> Rect {
+        self.sue_button
     }
 
-    /// The active mode.
+    /// Where the last frame drew each box of the Hub, and its pin (empty
+    /// when a page covered the Hub).
     #[must_use]
-    pub fn mode(&self) -> &str {
-        &self.mode
+    pub fn hub_boxes(&self) -> &[(AppletId, Rect, Rect)] {
+        &self.hub_boxes
     }
 
-    /// The selected node.
+    /// The studio or tool filling the page (`None` on the Hub, and as soon
+    /// as one starts leaving for it).
     #[must_use]
-    pub fn selected(&self) -> Option<NodeId> {
-        self.selected
+    pub fn page(&self) -> Option<&AppletId> {
+        self.page.as_ref()
     }
 
-    /// `true` while the timeline is open.
+    /// `true` while the Hub is the page.
     #[must_use]
-    pub fn timeline_open(&self) -> bool {
-        self.timeline_open
+    pub fn hub_open(&self) -> bool {
+        self.page.is_none()
     }
 
-    /// The timeline playhead, in seconds.
+    /// How far the page has come in over the Hub, 0 to 1.
     #[must_use]
-    pub fn playhead(&self) -> f64 {
-        self.timeline.playhead
-    }
-
-    /// The applet shown in the left drawer, if open.
-    #[must_use]
-    pub fn left_drawer(&self) -> Option<&AppletId> {
-        self.left.shown.as_ref().filter(|_| self.left.open)
-    }
-
-    /// The applet shown in the right drawer, if open.
-    #[must_use]
-    pub fn right_drawer(&self) -> Option<&AppletId> {
-        self.right.shown.as_ref().filter(|_| self.right.open)
-    }
-
-    /// The studio filling the window, if any (`None` as soon as it starts
-    /// leaving).
-    #[must_use]
-    pub fn studio(&self) -> Option<&AppletId> {
-        self.studio.as_ref()
-    }
-
-    /// How far a studio has come in, 0 (the canvas) to 1 (all in place).
-    #[must_use]
-    pub fn studio_reveal(&self) -> f32 {
-        if self.studio_zooming {
-            0.0
+    pub fn reveal(&self) -> f32 {
+        if self.shown.is_some() {
+            self.reveal.position().clamp(0.0, 1.0)
         } else {
-            self.studio_reveal.position().clamp(0.0, 1.0)
+            0.0
         }
     }
 
@@ -440,16 +357,10 @@ impl Shell {
         self.palette.is_some()
     }
 
-    /// `true` while the marking menu is open.
+    /// `true` while the Sue menu is open.
     #[must_use]
-    pub fn radial_open(&self) -> bool {
-        self.radial.is_some()
-    }
-
-    /// `true` while the selection pill is (at least partly) visible.
-    #[must_use]
-    pub fn selection_pill_visible(&self) -> bool {
-        self.pill.node.is_some() && self.pill.appear.position() > 0.01
+    pub fn sue_menu_open(&self) -> bool {
+        self.sue_menu.is_open()
     }
 
     /// `true` while any spring moves.
@@ -476,26 +387,10 @@ impl Shell {
         self.theme = theme;
         let mode = self.spring_mode();
         let params = self.config.spring;
-        for spring in [
-            &mut self.left.reveal,
-            &mut self.right.reveal,
-            &mut self.timeline_reveal,
-            &mut self.pill.appear,
-            &mut self.pill.glide_x,
-            &mut self.pill.glide_y,
-            &mut self.top_pill,
-            &mut self.window_appear,
-            &mut self.hub_appear,
-            &mut self.studio_reveal,
-        ] {
+        for spring in [&mut self.reveal, &mut self.window_appear] {
             spring.set_params(params);
             spring.set_mode(mode);
         }
-        self.camera.configure(
-            self.config.camera_spring,
-            mode,
-            (self.config.canvas.zoom_min, self.config.canvas.zoom_max),
-        );
         self.touch();
     }
 
@@ -556,7 +451,7 @@ impl Shell {
     #[must_use]
     pub fn pacing(&self, now: Instant) -> FramePacing {
         let target_hz = self.scheduler.target_hz();
-        if self.animating || self.timeline.playing {
+        if self.animating {
             return FramePacing::Animate { target_hz };
         }
         if self
@@ -587,121 +482,17 @@ impl Shell {
 
     fn view(&self, now: Instant, dt: f32) -> ShellView {
         ShellView {
-            selected: self.selected,
-            zoom: self.camera.zoom(),
-            mode: self.mode.clone(),
-            timeline_open: self.timeline_open,
-            playhead: self.timeline.playhead,
-            timeline_playing: self.timeline.playing,
             form_factor: self.form_factor.chosen(&self.config.interface),
             profile: self.profile,
             now,
             dt,
-            studio: self.studio.clone(),
-            studio_reveal: self.studio_reveal(),
+            page: self.page.clone(),
+            reveal: self.reveal(),
             interactive: self.interactive,
         }
     }
 
-    // ----- Drawers, timeline, window -------------------------------------
-
-    /// Shows `id` in its drawer, or hides the drawer if it already shows it.
-    pub fn toggle_drawer_applet(&mut self, id: &AppletId, applets: &Applets) {
-        let Some(manifest) = applets.manifest(id) else {
-            return;
-        };
-        let drawer = match manifest.role {
-            AppletRole::LeftDrawer => &mut self.left,
-            AppletRole::RightDrawer => &mut self.right,
-            _ => return,
-        };
-        if drawer.open && drawer.shown.as_ref() == Some(id) {
-            drawer.open = false;
-            drawer.reveal.set_target(0.0);
-        } else {
-            drawer.shown = Some(id.clone());
-            drawer.open = true;
-            drawer.reveal.set_target(1.0);
-        }
-        self.touch();
-    }
-
-    /// Shows `id` in its drawer.
-    pub fn show_drawer(&mut self, id: &AppletId, applets: &Applets) {
-        let open = match applets.manifest(id).map(|manifest| manifest.role) {
-            Some(AppletRole::LeftDrawer) => self.left.open && self.left.shown.as_ref() == Some(id),
-            Some(AppletRole::RightDrawer) => {
-                self.right.open && self.right.shown.as_ref() == Some(id)
-            }
-            _ => return,
-        };
-        if !open {
-            self.toggle_drawer_applet(id, applets);
-        }
-    }
-
-    fn toggle_drawer(&mut self, left: bool, applets: &Applets) {
-        let role = if left {
-            AppletRole::LeftDrawer
-        } else {
-            AppletRole::RightDrawer
-        };
-        let first = applets
-            .with_role(role)
-            .next()
-            .map(|manifest| manifest.id.clone());
-        let drawer = if left {
-            &mut self.left
-        } else {
-            &mut self.right
-        };
-        drawer.open = !drawer.open;
-        if drawer.shown.is_none() {
-            drawer.shown = first;
-        }
-        drawer
-            .reveal
-            .set_target(if drawer.open { 1.0 } else { 0.0 });
-        self.touch();
-    }
-
-    /// Shows or hides the timeline.
-    pub fn set_timeline(&mut self, open: bool) {
-        self.timeline_open = open;
-        self.timeline_reveal
-            .set_target(if open { 1.0 } else { 0.0 });
-        if !open {
-            self.timeline.playing = false;
-        }
-        self.touch();
-    }
-
-    /// Closes the palette and the marking menu.
-    pub fn dismiss_overlays(&mut self) {
-        if let Some(palette) = self.palette.as_mut() {
-            palette.close();
-        }
-        if let Some(radial) = self.radial.as_mut() {
-            radial.close();
-        }
-        self.touch();
-    }
-
-    /// Whether the Hub is open.
-    #[must_use]
-    pub fn hub_open(&self) -> bool {
-        self.hub
-    }
-
-    /// Opens or closes the Hub, the list of studios to work in.
-    pub fn set_hub(&mut self, open: bool) {
-        if open {
-            self.dismiss_overlays();
-        }
-        self.hub = open;
-        self.hub_appear.set_target(if open { 1.0 } else { 0.0 });
-        self.touch();
-    }
+    // ----- Windows and overlays ---------------------------------------------
 
     /// Opens the window applet `id` (Settings).
     pub fn open_window(&mut self, id: AppletId) {
@@ -719,6 +510,7 @@ impl Shell {
 
     /// Opens the command palette.
     pub fn open_palette(&mut self) {
+        self.sue_menu.close();
         if self.palette.is_none() {
             self.palette = Some(Palette::open(self.config.spring, self.spring_mode()));
             self.touch();
@@ -732,664 +524,349 @@ impl Shell {
         }
     }
 
-    /// Opens the marking menu at a screen point.
-    pub fn open_radial(&mut self, at: Pos2) {
-        self.radial_node = None;
-        self.radial_page = RadialPage::Root;
-        self.radial_back.clear();
-        let canvas_point = self.camera.to_canvas(self.canvas, at);
-        self.radial = Some(Radial::open(
-            at,
-            canvas_point,
-            self.config.spring,
-            self.spring_mode(),
-        ));
+    /// Closes the palette and the Sue menu.
+    pub fn dismiss_overlays(&mut self) {
+        if let Some(palette) = self.palette.as_mut() {
+            palette.close();
+        }
+        self.sue_menu.close();
         self.touch();
     }
 
-    /// The entity the Sue menu is about: what the open studio works on, or
-    /// what is selected on the canvas.
-    fn sue_focus(&self, io: &ShellIo<'_>) -> Option<sue_core::EntityId> {
-        match &self.studio {
-            Some(studio) => io
-                .applets
-                .get(studio)
-                .and_then(|applet| applet.studio_focus()),
-            None => self
-                .selected
-                .and_then(|node| io.world.scene.get(node))
-                .and_then(|node| io.world.arena.get(node.entity).ok())
-                .map(sue_core::Entity::id),
+    // ----- Pages ------------------------------------------------------------
+
+    /// Fills the page with studio or tool `id`, which comes in over the Hub
+    /// (or takes the place of the one open).
+    pub fn open(&mut self, id: AppletId, applets: &Applets) {
+        match applets.manifest(&id).map(|manifest| manifest.role) {
+            Some(role) if role.is_page() => {}
+            Some(AppletRole::Window) => {
+                self.open_window(id);
+                return;
+            }
+            _ => {
+                self.notify(format!("There is no studio or tool called {id}"), true);
+                return;
+            }
+        }
+        self.dismiss_overlays();
+        if self.shown.is_none() {
+            self.reveal.snap_to(0.0);
+        }
+        self.page = Some(id.clone());
+        self.shown = Some(id);
+        self.reveal.set_target(1.0);
+        self.touch();
+    }
+
+    /// Goes back to the Hub: the page slides away over it.
+    pub fn hub(&mut self) {
+        self.dismiss_overlays();
+        self.page = None;
+        self.reveal.set_target(0.0);
+        self.touch();
+    }
+
+    /// Lets a page that left for the Hub go once it is out of sight.
+    fn advance(&mut self) {
+        if self.page.is_none()
+            && self.shown.is_some()
+            && self.reveal.target() <= 0.0
+            && self.reveal.position() <= 0.002
+        {
+            self.shown = None;
+            self.reveal.snap_to(0.0);
         }
     }
 
-    /// Builds the Sue menu for the context: Project, File and Send To for
-    /// the thing in focus, the open studio's own wheel, Studios, and every
-    /// wheel applets add to.
+    /// Pins `id` (or takes the pin away) as one undoable rice edit, so Sue
+    /// opens straight into it at launch. One pin at a time: pinning one
+    /// moves the pin from any other.
+    pub fn pin(&mut self, id: Option<AppletId>, io: &mut ShellIo<'_>) {
+        let value = id
+            .as_ref()
+            .map_or_else(String::new, |id| id.as_str().to_owned());
+        if io.world.rice.get_str(PIN_KEY).map(str::trim) == Some(value.as_str()) {
+            return;
+        }
+        let name = id
+            .as_ref()
+            .and_then(|id| io.applets.manifest(id))
+            .map(|manifest| manifest.name.clone());
+        let txn = SetRiceValue::new(PIN_KEY, RiceValue::Text(value));
+        io.typing.flush(io.history);
+        match io.history.apply(io.world, RiceEdit(txn)) {
+            Ok(_) => self.notify(
+                name.map_or_else(
+                    || "Sue opens on the Hub at launch".to_owned(),
+                    |name| format!("Sue opens in {name} at launch"),
+                ),
+                false,
+            ),
+            Err(error) => self.notify(format!("Could not pin it: {error}"), true),
+        }
+    }
+
+    // ----- The Sue menu -----------------------------------------------------
+
+    /// Builds the Sue menu for what is open: the Hub, the studios and
+    /// tools, new files, files, projects, Send To for what the page works
+    /// on, every submenu applets add to, the pin, the palette, Settings.
     fn build_sue_menu(&mut self, io: &ShellIo<'_>) {
-        let focus_id = self.sue_focus(io);
-        let focus = focus_id.and_then(|id| io.world.arena.get_by_id(id).ok());
-        let mut wheels: Vec<(String, Vec<(String, RadialAction)>)> = Vec::new();
-        let add = |wheels: &mut Vec<(String, Vec<(String, RadialAction)>)>,
-                   wheel: &str,
-                   label: String,
-                   action: RadialAction| {
-            match wheels.iter_mut().find(|(name, _)| name == wheel) {
-                Some((_, items)) => items.push((label, action)),
-                None => wheels.push((wheel.to_owned(), vec![(label, action)])),
+        let mut runs = Vec::new();
+        let run = &mut runs;
+        let keymap = &self.config.keymap;
+        let mut items = vec![sue_item(run, "Hub", ShellRequest::Hub, self.page.is_none())];
+        for (title, role) in [("Studios", AppletRole::Studio), ("Tools", AppletRole::Tool)] {
+            let pages: Vec<MenuItem> = io
+                .applets
+                .with_role(role)
+                .map(|manifest| {
+                    sue_item(
+                        run,
+                        manifest.name.clone(),
+                        ShellRequest::Open(manifest.id.clone()),
+                        self.page.as_ref() == Some(&manifest.id),
+                    )
+                })
+                .collect();
+            if !pages.is_empty() {
+                items.push(MenuItem::sub(title, pages));
             }
+        }
+        items.push(MenuItem::Separator);
+        // New: a submenu per kind of file, each with its exact kinds.
+        let mut kinds: Vec<(String, Vec<MenuItem>)> = Vec::new();
+        for (applet, template) in templates(io.applets) {
+            let item = sue_item(
+                run,
+                template.label,
+                ShellRequest::Create {
+                    applet,
+                    key: template.key,
+                },
+                false,
+            );
+            match kinds
+                .iter_mut()
+                .find(|(kind, _)| *kind == template.category)
+            {
+                Some((_, list)) => list.push(item),
+                None => kinds.push((template.category, vec![item])),
+            }
+        }
+        if !kinds.is_empty() {
+            items.push(MenuItem::sub(
+                "New",
+                kinds
+                    .into_iter()
+                    .map(|(kind, list)| MenuItem::sub(kind, list))
+                    .collect(),
+            ));
+        }
+        // The named submenus, Sue's own first.
+        let mut named: Vec<(String, Vec<MenuItem>)> = vec![
+            (
+                sue_menu::FILE.to_owned(),
+                vec![
+                    sue_item(
+                        run,
+                        "Open File...",
+                        ShellRequest::Command("file.open".to_owned()),
+                        false,
+                    )
+                    .key(keymap.open_file.to_string()),
+                ],
+            ),
+            (
+                sue_menu::PROJECT.to_owned(),
+                vec![
+                    sue_item(
+                        run,
+                        "Open Project...",
+                        ShellRequest::PickFile(
+                            FilePick::open(None, "open", "Open Project").extensions(&["sue"]),
+                        ),
+                        false,
+                    ),
+                    sue_item(
+                        run,
+                        "Save Project",
+                        ShellRequest::Command("file.save".to_owned()),
+                        false,
+                    )
+                    .key(keymap.save.to_string()),
+                    sue_item(
+                        run,
+                        "Save Project As...",
+                        ShellRequest::Command("file.save_as".to_owned()),
+                        false,
+                    ),
+                ],
+            ),
+            (sue_menu::SEND_TO.to_owned(), Vec::new()),
+        ];
+        let add = |named: &mut Vec<(String, Vec<MenuItem>)>, menu: &str, item: MenuItem| match named
+            .iter_mut()
+            .find(|(name, _)| name == menu)
+        {
+            Some((_, list)) => list.push(item),
+            None => named.push((menu.to_owned(), vec![item])),
         };
-        let request = RadialAction::Request;
-        // Projects and files.
-        add(
-            &mut wheels,
-            crate::wheel::PROJECT,
-            "Open Project".to_owned(),
-            request(ShellRequest::PickFile(
-                crate::FilePick::open(None, "open", "Open Project").extensions(&["sue"]),
-            )),
-        );
-        add(
-            &mut wheels,
-            crate::wheel::PROJECT,
-            "Save Project".to_owned(),
-            request(ShellRequest::Command("file.save".to_owned())),
-        );
-        add(
-            &mut wheels,
-            crate::wheel::PROJECT,
-            "Save Project As".to_owned(),
-            request(ShellRequest::Command("file.save_as".to_owned())),
-        );
-        add(
-            &mut wheels,
-            crate::wheel::FILE,
-            "New File \u{203a}".to_owned(),
-            RadialAction::Open(RadialPage::Kinds),
-        );
-        add(
-            &mut wheels,
-            crate::wheel::FILE,
-            "Open File".to_owned(),
-            request(ShellRequest::Command("file.open".to_owned())),
-        );
-        // The thing in focus, into the studios that take it.
+        // What the page works on, into every other studio and tool that
+        // takes it, then whatever each applet offers.
+        let focus_id = self
+            .page
+            .as_ref()
+            .and_then(|page| io.applets.get(page))
+            .and_then(|applet| applet.focus());
+        let focus = focus_id.and_then(|id| io.world.arena.get_by_id(id).ok());
         if let (Some(id), Some(entity)) = (focus_id, focus) {
             for (manifest, applet) in io.applets.iter() {
-                let current = self.studio.as_ref() == Some(&manifest.id);
-                if manifest.role == AppletRole::Studio && !current && applet.accepts(entity) {
-                    add(
-                        &mut wheels,
-                        crate::wheel::SEND_TO,
+                let current = self.page.as_ref() == Some(&manifest.id);
+                if manifest.role.is_page() && !current && applet.accepts(entity) {
+                    let item = sue_item(
+                        run,
                         manifest.name.clone(),
-                        request(ShellRequest::OpenIn {
+                        ShellRequest::OpenIn {
                             entity: id,
                             applet: manifest.id.clone(),
-                        }),
+                        },
+                        false,
                     );
+                    add(&mut named, sue_menu::SEND_TO, item);
                 }
             }
-            if self.studio.is_some()
-                && let Some(handle) = io.world.arena.handle_of(id)
-            {
-                add(
-                    &mut wheels,
-                    crate::wheel::SEND_TO,
-                    "Canvas".to_owned(),
-                    request(ShellRequest::Place {
-                        entity: handle,
-                        focus: true,
-                    }),
-                );
-            }
         }
-        // What every applet adds, the open studio's own wheel first.
-        let mut studio_wheel = None;
         for (manifest, applet) in io.applets.iter() {
-            let current = self.studio.as_ref() == Some(&manifest.id);
-            if current {
-                studio_wheel = Some(manifest.name.clone());
-            }
+            let current = self.page.as_ref() == Some(&manifest.id);
             for action in applet.sue_actions(focus, current) {
-                add(
-                    &mut wheels,
-                    &action.wheel,
-                    action.label,
-                    request(action.request),
-                );
+                let item = sue_item(run, action.label, action.request, false);
+                add(&mut named, &action.menu, item);
             }
         }
-        // Where to go.
-        add(
-            &mut wheels,
-            "Studios",
-            "Hub".to_owned(),
-            request(ShellRequest::Hub(true)),
+        items.extend(
+            named
+                .into_iter()
+                .filter(|(_, list)| !list.is_empty())
+                .map(|(name, list)| MenuItem::sub(name, list)),
         );
-        if self.studio.is_some() {
-            add(
-                &mut wheels,
-                "Studios",
-                "Canvas".to_owned(),
-                request(ShellRequest::CloseStudio),
-            );
+        items.push(MenuItem::Separator);
+        if let Some(page) = self.page.clone() {
+            let pinned = pinned(&io.world.rice, io.applets).as_ref() == Some(&page);
+            let name = io
+                .applets
+                .manifest(&page)
+                .map_or_else(String::new, |manifest| manifest.name.clone());
+            items.push(sue_item(
+                run,
+                format!("Open {name} at Launch"),
+                ShellRequest::Pin((!pinned).then_some(page)),
+                pinned,
+            ));
         }
-        let mut studios: Vec<_> = io
-            .applets
-            .manifests()
-            .filter(|manifest| manifest.role == AppletRole::Studio)
-            .collect();
-        studios.sort_by_key(|manifest| manifest.order);
-        for manifest in studios {
-            if self.studio.as_ref() != Some(&manifest.id) {
-                add(
-                    &mut wheels,
-                    "Studios",
-                    manifest.name.clone(),
-                    request(ShellRequest::OpenStudio(manifest.id.clone())),
-                );
-            }
-        }
-        // The first wheel: the open studio's wheel, then the rest.
-        let order = |name: &str| match name {
-            n if Some(n) == studio_wheel.as_deref() => 0,
-            crate::wheel::SEND_TO => 1,
-            crate::wheel::FILE => 2,
-            crate::wheel::PROJECT => 3,
-            "Studios" => 5,
-            _ => 4,
-        };
-        wheels.sort_by_key(|(name, _)| order(name));
-        let mut first: Vec<(String, RadialAction)> = wheels
-            .iter()
-            .map(|(name, _)| {
-                (
-                    format!("{name} \u{203a}"),
-                    RadialAction::Open(RadialPage::Wheel(name.clone())),
-                )
-            })
-            .collect();
-        first.push(("Command Palette".to_owned(), request(ShellRequest::Palette)));
-        first.push((
-            "Settings".to_owned(),
-            request(ShellRequest::OpenSettings(None)),
-        ));
-        wheels.insert(0, (String::new(), first));
-        self.sue_wheels = wheels;
+        let palette = format!("Command Palette ({})", keymap.command_palette);
+        items.push(sue_item(run, palette, ShellRequest::Palette, false));
+        items.push(
+            sue_item(run, "Settings", ShellRequest::OpenSettings(None), false)
+                .key(keymap.open_settings.to_string()),
+        );
+        items.push(
+            sue_item(
+                run,
+                "Quit Sue",
+                ShellRequest::Command("app.quit".to_owned()),
+                false,
+            )
+            .key(keymap.quit.to_string()),
+        );
+        self.sue_items = items;
+        self.sue_runs = runs;
     }
 
-    /// Opens the Sue menu by the Sue button: a wheel just inside the top
-    /// left corner, built for what is in focus.
-    pub fn open_sue_menu(&mut self, io: &ShellIo<'_>, screen: Rect) {
-        self.dismiss_overlays();
+    /// Opens the Sue menu under the Sue button, built for what is open.
+    pub fn open_sue_menu(&mut self, io: &ShellIo<'_>) {
+        if let Some(palette) = self.palette.as_mut() {
+            palette.close();
+        }
         self.build_sue_menu(io);
-        let reach = self.config.radial_radius + 70.0;
-        let at = pos2(
-            (screen.left() + 40.0 + reach).min(screen.center().x),
-            (screen.top() + 30.0 + reach).min(screen.center().y),
-        );
-        let canvas_point = self.camera.to_canvas(self.canvas, at);
-        self.radial = Some(Radial::open(
-            at,
-            canvas_point,
-            self.config.spring,
-            self.spring_mode(),
-        ));
-        self.radial_page = RadialPage::Sue;
-        self.radial_back.clear();
+        self.sue_menu.open_dropdown();
         self.touch();
     }
 
-    /// The Sue menu's labels on its current wheel (scripted runs).
+    /// The items of the Sue menu (with `path` naming the submenus to go
+    /// through), as labels (scripted runs).
     #[must_use]
-    pub fn sue_menu_labels(&self) -> Vec<String> {
-        self.radial_items_now()
-            .into_iter()
-            .map(|(label, _)| label)
+    pub fn sue_menu_labels(&self, path: &[&str]) -> Vec<String> {
+        let mut items = &self.sue_items;
+        for step in path {
+            let found = items.iter().find_map(|item| match item {
+                MenuItem::Sub { label, items } if label == step => Some(items),
+                _ => None,
+            });
+            match found {
+                Some(next) => items = next,
+                None => return Vec::new(),
+            }
+        }
+        items
+            .iter()
+            .filter_map(|item| match item {
+                MenuItem::Action { label, .. } | MenuItem::Sub { label, .. } => Some(label.clone()),
+                MenuItem::Separator => None,
+            })
             .collect()
     }
 
-    fn radial_items_now(&self) -> Vec<(String, RadialAction)> {
-        let name = match &self.radial_page {
-            RadialPage::Sue => String::new(),
-            RadialPage::Wheel(name) => name.clone(),
-            _ => return Vec::new(),
+    /// Picks the Sue menu's item at `path` (its submenus, then its label),
+    /// as a click would (scripted runs). Returns `false` if there is none.
+    pub fn sue_menu_pick(&mut self, path: &[&str], io: &mut ShellIo<'_>, now: Instant) -> bool {
+        let Some((last, submenus)) = path.split_last() else {
+            return false;
         };
-        self.sue_wheels
-            .iter()
-            .find(|(wheel, _)| *wheel == name)
-            .map(|(_, items)| items.clone())
-            .unwrap_or_default()
-    }
-
-    /// Goes into the Sue menu's wheel named `name` (scripted runs).
-    pub fn sue_menu_open(&mut self, name: &str) {
-        self.radial_back.push(self.radial_page.clone());
-        self.radial_page = RadialPage::Wheel(name.to_owned());
-        self.touch();
-    }
-
-    // ----- Selection, modes, camera ----------------------------------------
-
-    /// Selects a node (or nothing); the selection pill follows.
-    pub fn select(&mut self, node: Option<NodeId>, world: &mut World) {
-        if node == self.selected {
-            return;
-        }
-        if let Some(node) = node {
-            world.scene.raise(node);
-            if let (Some(old), Some(_)) = (self.pill.anchor, self.pill.node) {
-                // Glide from where the pill was.
-                let new = self.pill_anchor(node, world).unwrap_or(old);
-                self.pill.glide_x.snap_to(old.x - new.x);
-                self.pill.glide_y.snap_to(old.y - new.y);
-                self.pill.glide_x.set_target(0.0);
-                self.pill.glide_y.set_target(0.0);
-            }
-            self.pill.node = Some(node);
-            self.pill.appear.set_target(1.0);
-        } else {
-            self.pill.appear.set_target(0.0);
-        }
-        self.selected = node;
-        self.touch();
-    }
-
-    fn pill_anchor(&self, node: NodeId, world: &World) -> Option<Pos2> {
-        let rect = world.scene.get(node)?.rect;
-        let top = self.camera.to_screen(self.canvas, rect.center_top());
-        let lowest = self.canvas.top() + self.config.pill_height + self.config.pill_gap + 52.0;
-        Some(pos2(
-            top.x
-                .clamp(self.canvas.left() + 160.0, self.canvas.right() - 160.0),
-            (top.y - self.config.pill_gap)
-                .clamp(lowest, self.canvas.bottom() - self.config.pill_gap),
-        ))
-    }
-
-    /// Glides the camera to show everything.
-    pub fn frame_all(&mut self, world: &World) {
-        let bounds = world
-            .scene
-            .bounds()
-            .unwrap_or_else(|| Rect::from_center_size(Pos2::ZERO, vec2(800.0, 500.0)));
-        self.camera.frame(
-            self.canvas.size(),
-            bounds,
-            self.config.canvas.frame_margin + self.config.pill_height,
-        );
-        self.touch();
-    }
-
-    /// Glides the camera to frame a node.
-    pub fn frame_node(&mut self, node: NodeId, world: &World, zoom_percent: Option<u32>) {
-        let Some(rect) = world.scene.get(node).map(|node| node.rect) else {
-            return;
-        };
-        match zoom_percent {
-            Some(percent) => self.camera.glide_to(rect.center(), percent as f32 / 100.0),
-            None => {
-                // Leave room for the top pill and the selection pill.
-                let margin = self.config.canvas.frame_margin;
-                let room = self.canvas.size() - vec2(0.0, self.config.pill_height * 2.0);
-                self.camera.frame(room, rect, margin);
-                // Fitting never magnifies past 200%; 1:1 and the wheel go further.
-                let zoom = self.camera.target_zoom().min(2.0);
-                let lift = self.config.pill_height * 0.5 / zoom.max(1e-3);
-                self.camera.glide_to(rect.center() - vec2(0.0, lift), zoom);
+        let mut items = &self.sue_items;
+        for step in submenus {
+            let found = items.iter().find_map(|item| match item {
+                MenuItem::Sub { label, items } if label == step => Some(items),
+                _ => None,
+            });
+            match found {
+                Some(next) => items = next,
+                None => return false,
             }
         }
-        self.touch();
-    }
-
-    fn mode_buttons(applets: &Applets) -> Vec<ModeButton> {
-        let mut modes = vec![
-            ModeButton {
-                id: CANVAS_MODE.to_owned(),
-                label: "Canvas".to_owned(),
-                order: i32::MIN,
-            },
-            ModeButton {
-                id: TIMELINE_MODE.to_owned(),
-                label: "Timeline".to_owned(),
-                order: TIMELINE_ORDER,
-            },
-        ];
-        modes.extend(applets.manifests().filter_map(|manifest| {
-            let mode = manifest.mode.as_ref().filter(|mode| mode.in_pill)?;
-            Some(ModeButton {
-                id: manifest.id.as_str().to_owned(),
-                label: mode.label.clone(),
-                order: manifest.order,
-            })
-        }));
-        modes.sort_by_key(|mode| mode.order);
-        modes
-    }
-
-    /// Fills the window with studio `id`: the camera glides into the card
-    /// the studio will work on (the selected one if the studio takes it,
-    /// else the one it worked on last), then the studio's panels come in.
-    pub fn open_studio(&mut self, id: AppletId, io: &mut ShellIo<'_>) {
-        self.dismiss_overlays();
-        if self.hub {
-            self.set_hub(false);
-        }
-        self.mode = id.as_str().to_owned();
-        self.top_pill.set_target(0.0);
-        self.pill.appear.set_target(0.0);
-        let showing = self.studio_shown.as_ref() == Some(&id);
-        // The side panels stay with every studio; the timeline slides away
-        // and comes back when the studio closes.
-        if self.studio_restore.is_none() {
-            self.studio_restore = Some(self.timeline_open);
-        }
-        if self.timeline_open {
-            self.set_timeline(false);
-        }
-        self.studio = Some(id.clone());
-        self.studio_shown = Some(id.clone());
-        self.studio_leave = None;
-        let shot = if showing && self.studio_reveal.position() > 0.05 {
-            None
-        } else {
-            self.studio_card(&id, io)
-                .and_then(|node| self.studio_shot(node, &id, io))
-        };
-        match shot {
-            Some((center, zoom)) => {
-                self.camera.glide_to(center, zoom);
-                self.studio_zooming = true;
-                self.studio_reveal.snap_to(0.0);
-            }
-            None => {
-                self.studio_zooming = false;
-                self.studio_reveal.set_target(1.0);
-            }
-        }
-        self.touch();
-    }
-
-    /// Leaves the studio for the canvas: its panels slide away from its
-    /// card, then the camera glides out to everything (`overview`) or stays
-    /// for whatever the caller frames next.
-    pub fn close_studio(&mut self, io: &mut ShellIo<'_>, overview: bool) {
-        let Some(id) = self.studio.take() else {
-            self.touch();
-            return;
-        };
-        self.mode = CANVAS_MODE.to_owned();
-        self.studio_zooming = false;
-        let card = io
-            .applets
-            .get(&id)
-            .and_then(|applet| applet.studio_focus())
-            .and_then(|focus| Self::card_of(focus, io.world));
-        // Under the studio the camera jumps to that card, so the panels
-        // slide away from the very picture on the canvas.
-        if let Some((center, zoom)) = card.and_then(|node| self.studio_shot(node, &id, io))
-            && self.studio_reveal.position() > 0.5
-        {
-            self.camera.snap(center, zoom);
-        }
-        self.studio_leave = Some((card, overview));
-        self.studio_reveal.set_target(0.0);
-        self.touch();
-    }
-
-    /// The node showing the entity with `id`.
-    fn card_of(id: sue_core::EntityId, world: &World) -> Option<NodeId> {
-        world
-            .scene
-            .iter()
-            .find(|(_, node)| {
-                world
-                    .arena
-                    .get(node.entity)
-                    .is_ok_and(|entity| entity.id() == id)
-            })
-            .map(|(node, _)| node)
-    }
-
-    /// The card a studio opens on: the selected node if the studio takes
-    /// its entity, else the node of what the studio worked on last.
-    fn studio_card(&self, id: &AppletId, io: &ShellIo<'_>) -> Option<NodeId> {
-        let applet = io.applets.get(id)?;
-        let selected = self.selected.filter(|node| {
-            io.world
-                .scene
-                .get(*node)
-                .and_then(|node| io.world.arena.get(node.entity).ok())
-                .is_some_and(|entity| applet.accepts(entity))
+        let command = items.iter().find_map(|item| match item {
+            MenuItem::Action { label, command, .. } if label == last => Some(command.clone()),
+            _ => None,
         });
-        selected.or_else(|| Self::card_of(applet.studio_focus()?, io.world))
-    }
-
-    /// Where the camera must be for a card's content to fill the studio's
-    /// area the way the studio shows its picture (24 points of margin).
-    fn studio_shot(
-        &self,
-        node: NodeId,
-        studio: &AppletId,
-        io: &ShellIo<'_>,
-    ) -> Option<(Pos2, f32)> {
-        let world = &*io.world;
-        let scene_node = world.scene.get(node)?;
-        let rect = scene_node.rect;
-        let content = Rect::from_min_max(pos2(rect.left(), rect.top() + NODE_TITLE), rect.max);
-        let area = self.studio_area;
-        // Where the studio will show it, if it says; else filling the
-        // window, 24 points in.
-        let target = world
-            .arena
-            .get(scene_node.entity)
-            .ok()
-            .and_then(|entity| io.applets.get(studio)?.card_frame(area, entity))
-            .filter(|target| target.width() > 1.0 && target.height() > 1.0)
-            .unwrap_or_else(|| area.shrink(24.0));
-        let room = target.size().max(vec2(16.0, 16.0));
-        let zoom = (room.x / content.width().max(1.0)).min(room.y / content.height().max(1.0));
-        let center = content.center() - (target.center() - self.canvas.center()) / zoom;
-        Some((center, zoom))
-    }
-
-    /// Moves a studio's entry and exit along: the panels come in once the
-    /// camera has reached the card, and the canvas comes back once they are
-    /// gone.
-    fn advance_studio(&mut self, world: &World) {
-        if self.studio_zooming && self.camera.near_target() {
-            self.studio_zooming = false;
-            self.studio_reveal.set_target(1.0);
-        }
-        let gone = self.studio.is_none()
-            && self.studio_reveal.target() <= 0.0
-            && self.studio_reveal.position() <= 0.002;
-        if gone && self.studio_shown.take().is_some() {
-            self.studio_reveal.snap_to(0.0);
-            self.top_pill.set_target(1.0);
-            if self.studio_restore.take() == Some(true) {
-                self.set_timeline(true);
+        match command {
+            Some(command) => {
+                self.run_sue_item(&command, io, now);
+                true
             }
-            let (card, overview) = self.studio_leave.take().unwrap_or((None, true));
-            if let Some(node) = card.filter(|node| world.scene.get(*node).is_some()) {
-                self.selected = Some(node);
-            }
-            if let Some(node) = self.selected {
-                self.pill.node = Some(node);
-                self.pill.appear.set_target(1.0);
-            }
-            if overview {
-                self.frame_all(world);
-            }
+            None => false,
         }
     }
 
-    /// Switches mode: the canvas shows everything, the timeline opens, a
-    /// node mode frames (or creates) an entity of its applet, and a studio
-    /// mode fills the window with the studio.
-    pub fn set_mode(&mut self, mode: &str, io: &mut ShellIo<'_>, now: Instant) {
-        if let Ok(id) = AppletId::new(mode)
-            && io
-                .applets
-                .manifest(&id)
-                .is_some_and(|manifest| manifest.role == AppletRole::Studio)
+    fn run_sue_item(&mut self, command: &str, io: &mut ShellIo<'_>, now: Instant) {
+        self.sue_menu.close();
+        let request = command
+            .strip_prefix("sue:")
+            .and_then(|index| index.parse::<usize>().ok())
+            .and_then(|index| self.sue_runs.get(index))
+            .map(|(request, _)| request.clone());
+        if let Some(request) = request
+            && let Some(leftover) = self.handle(request, io, now)
         {
-            self.open_studio(id, io);
-            return;
-        }
-        if self.studio.is_some() {
-            self.close_studio(io, mode == CANVAS_MODE);
-        }
-        match mode {
-            CANVAS_MODE => {
-                self.mode = CANVAS_MODE.to_owned();
-                self.frame_all(io.world);
-            }
-            TIMELINE_MODE => {
-                self.mode = TIMELINE_MODE.to_owned();
-                self.set_timeline(true);
-            }
-            other => {
-                let Ok(id) = AppletId::new(other) else {
-                    return;
-                };
-                if io
-                    .applets
-                    .manifest(&id)
-                    .and_then(|m| m.mode.as_ref())
-                    .is_none()
-                {
-                    self.notify(format!("There is no {other} mode"), true);
-                    return;
-                }
-                let target = self
-                    .selected
-                    .filter(|node| io.world.scene.get(*node).is_some_and(|n| n.applet == id))
-                    .or_else(|| io.world.scene.topmost_of(&id));
-                let target = match target {
-                    Some(node) => Some(node),
-                    None => self.spawn(&id, None, io, now),
-                };
-                if let Some(node) = target {
-                    self.mode = other.to_owned();
-                    self.select(Some(node), io.world);
-                    self.frame_node(node, io.world, None);
-                }
-            }
+            io.requests.push(leftover);
         }
         self.touch();
     }
 
-    /// Creates a new entity of node applet `id` at `at` (canvas units), or
-    /// in view. Returns its node.
-    pub fn spawn(
-        &mut self,
-        id: &AppletId,
-        at: Option<Pos2>,
-        io: &mut ShellIo<'_>,
-        now: Instant,
-    ) -> Option<NodeId> {
-        let view = self.view(now, 0.0);
-        let theme = self.theme.clone();
-        let entity = {
-            let (applets, mut cx) = split(io, &theme, view);
-            applets.get_mut(id)?.new_entity(&mut cx)?
-        };
-        self.spawn_entity(id, entity, at, io)
-    }
-
-    /// Makes a new file from template `key` of applet `id`, placed at `at`
-    /// (canvas units) or in view. Returns the node, when the shell placed it.
-    pub fn create(
-        &mut self,
-        id: &AppletId,
-        key: &str,
-        at: Option<Pos2>,
-        io: &mut ShellIo<'_>,
-        now: Instant,
-    ) -> Option<NodeId> {
-        // An applet that places its own file places it here too.
-        self.spawn_point = at;
-        let view = self.view(now, 0.0);
-        let theme = self.theme.clone();
-        let entity = {
-            let (applets, mut cx) = split(io, &theme, view);
-            applets.get_mut(id)?.create(key, &mut cx)?
-        };
-        self.spawn_point = None;
-        self.spawn_entity(id, entity, at, io)
-    }
-
-    /// Spawns `entity` as a node of applet `id` and selects it.
-    fn spawn_entity(
-        &mut self,
-        id: &AppletId,
-        entity: NewEntity,
-        at: Option<Pos2>,
-        io: &mut ShellIo<'_>,
-    ) -> Option<NodeId> {
-        let center = at.unwrap_or_else(|| self.camera.center());
-        let rect = io.world.scene.free_spot(center, entity.size, 48.0);
-        let mut txn = SpawnNode::new(entity, id.clone(), rect);
-        io.typing.flush(io.history);
-        // Applied here and recorded after, so the new node's id is known.
-        match sue_core::ReversibleTransaction::apply(&mut txn, io.world) {
-            Ok(()) => {
-                let (node, _) = txn.placed()?;
-                io.history.record(txn);
-                self.select(Some(node), io.world);
-                Some(node)
-            }
-            Err(error) => {
-                self.notify(format!("Could not create it: {error}"), true);
-                None
-            }
-        }
-    }
-
-    /// Puts an arena entity on the canvas, drawn by the applet that accepts
-    /// it, and selects it.
-    pub fn place(
-        &mut self,
-        entity: AssetHandle,
-        focus: bool,
-        io: &mut ShellIo<'_>,
-    ) -> Option<NodeId> {
-        let found = io.world.arena.get(entity).ok()?;
-        let Some(applet) = io.applets.node_applet_for(found) else {
-            self.notify("No applet shows this kind of file", true);
-            return None;
-        };
-        let size = io.applets.get(&applet)?.node_size(found);
-        let near = self
-            .spawn_point
-            .take()
-            .unwrap_or_else(|| self.camera.center());
-        let rect = io.world.scene.free_spot(near, size, 48.0);
-        let node = io.world.scene.allocate();
-        let txn = PlaceNode::with_id(SceneNode::new(entity, applet.clone(), rect), node);
-        io.typing.flush(io.history);
-        if let Err(error) = io.history.apply(io.world, txn) {
-            self.notify(format!("Could not place it: {error}"), true);
-            return None;
-        }
-        self.select(Some(node), io.world);
-        if focus {
-            if io
-                .applets
-                .manifest(&applet)
-                .and_then(|m| m.mode.as_ref())
-                .is_some()
-            {
-                self.mode = applet.as_str().to_owned();
-            }
-            self.frame_node(node, io.world, None);
-        }
-        Some(node)
-    }
+    // ----- Requests ---------------------------------------------------------
 
     /// Handles a request meant for the shell; returns the ones for the
-    /// engine (messages, files, commands).
+    /// engine (messages, files, commands, file dialogs).
     pub fn handle(
         &mut self,
         request: ShellRequest,
@@ -1397,25 +874,6 @@ impl Shell {
         now: Instant,
     ) -> Option<ShellRequest> {
         match request {
-            ShellRequest::Select(node) => self.select(node, io.world),
-            ShellRequest::Focus(node) => {
-                if let Some(applet) = io.world.scene.get(node).map(|n| n.applet.clone()) {
-                    if io
-                        .applets
-                        .manifest(&applet)
-                        .and_then(|m| m.mode.as_ref())
-                        .is_some()
-                    {
-                        self.mode = applet.as_str().to_owned();
-                    }
-                    self.select(Some(node), io.world);
-                    self.frame_node(node, io.world, None);
-                }
-            }
-            ShellRequest::Frame { node, zoom_percent } => {
-                self.frame_node(node, io.world, zoom_percent);
-            }
-            ShellRequest::Timeline(open) => self.set_timeline(open),
             ShellRequest::OpenSettings(page) => {
                 let id = io
                     .applets
@@ -1429,63 +887,41 @@ impl Shell {
                     self.open_window(id);
                 }
             }
-            ShellRequest::Mode(mode) => self.set_mode(&mode, io, now),
-            ShellRequest::Spawn(id) => {
-                if let Some(node) = self.spawn(&id, None, io, now) {
-                    self.frame_node(node, io.world, None);
-                }
-            }
             ShellRequest::Create { applet, key } => {
-                if let Some(node) = self.create(&applet, &key, None, io, now) {
-                    self.frame_node(node, io.world, None);
+                let view = self.view(now, 0.0);
+                let theme = self.theme.clone();
+                let (applets, mut cx) = split(io, &theme, view);
+                if let Some(target) = applets.get_mut(&applet) {
+                    target.create(&key, &mut cx);
                 }
             }
             ShellRequest::Palette => self.open_palette(),
-            ShellRequest::ResetCamera => {
-                self.mode = CANVAS_MODE.to_owned();
-                self.frame_all(io.world);
-            }
-            ShellRequest::ShowDrawer(id) => self.show_drawer(&id, io.applets),
-            ShellRequest::Place { entity, focus } => {
-                if focus && self.studio.is_some() {
-                    self.close_studio(io, false);
-                }
-                if focus && let Some(leave) = self.studio_leave.as_mut() {
-                    // Framing what was asked for wins over the overview.
-                    leave.1 = false;
-                }
-                self.place(entity, focus, io);
-            }
-            ShellRequest::OpenStudio(id) => self.open_studio(id, io),
-            ShellRequest::CloseStudio => self.close_studio(io, true),
-            ShellRequest::Hub(open) => self.set_hub(open),
-            ShellRequest::SueMenu => {
-                let screen = self.studio_area.union(self.canvas);
-                self.open_sue_menu(io, screen);
-            }
+            ShellRequest::Open(id) => self.open(id, io.applets),
+            ShellRequest::Hub => self.hub(),
+            ShellRequest::Pin(id) => self.pin(id, io),
+            ShellRequest::SueMenu => self.open_sue_menu(io),
             ShellRequest::OpenIn { entity, applet } => {
-                let Some(handle) = io.world.arena.handle_of(entity) else {
+                if io.world.arena.get_by_id(entity).is_err() {
                     self.notify("That is gone", true);
                     return None;
-                };
-                let studio = io
+                }
+                if !io
                     .applets
                     .manifest(&applet)
-                    .is_some_and(|manifest| manifest.role == AppletRole::Studio);
-                if studio {
-                    // The studio opens on the entity's card, made if needed.
-                    let card =
-                        Self::card_of(entity, io.world).or_else(|| self.place(handle, false, io));
-                    if let Some(node) = card {
-                        self.select(Some(node), io.world);
-                    }
-                    self.open_studio(applet, io);
-                } else {
-                    if self.studio.is_some() {
-                        self.close_studio(io, false);
-                    }
-                    self.place(handle, true, io);
+                    .is_some_and(|manifest| manifest.role.is_page())
+                {
+                    self.notify(format!("There is no studio or tool called {applet}"), true);
+                    return None;
                 }
+                {
+                    let view = self.view(now, 0.0);
+                    let theme = self.theme.clone();
+                    let (applets, mut cx) = split(io, &theme, view);
+                    if let Some(target) = applets.get_mut(&applet) {
+                        target.take_entity("open", entity, &mut cx);
+                    }
+                }
+                self.open(applet, io.applets);
             }
             ShellRequest::SendEntity {
                 to,
@@ -1513,7 +949,7 @@ impl Shell {
                 }
             }
             ShellRequest::SendFile { to, purpose, path } => {
-                let pick = crate::FilePick::open(Some(to.clone()), &purpose, "");
+                let pick = FilePick::open(Some(to.clone()), &purpose, "");
                 let view = self.view(now, 0.0);
                 let theme = self.theme.clone();
                 let (applets, mut cx) = split(io, &theme, view);
@@ -1521,18 +957,7 @@ impl Shell {
                     applet.picked(&pick, &path, &mut cx);
                 }
             }
-            ShellRequest::PickFile(pick) => {
-                // The first applet that picks files shows it in its window.
-                let picker = io.applets.iter_mut().find_map(|(manifest, applet)| {
-                    applet.begin_pick(&pick).then(|| manifest.id.clone())
-                });
-                match picker {
-                    Some(id) => self.open_window(id),
-                    None => return Some(ShellRequest::PickFile(pick)),
-                }
-            }
             ShellRequest::Picked { pick, path } => {
-                self.close_window();
                 let Some(requester) = pick.requester.clone() else {
                     return Some(ShellRequest::Picked { pick, path });
                 };
@@ -1549,32 +974,20 @@ impl Shell {
         None
     }
 
-    /// Boots: applies the riced boot mode.
-    pub fn boot(&mut self, io: &mut ShellIo<'_>, now: Instant) {
+    /// Boots: opens the pinned studio or tool, already in place, or stays
+    /// on the Hub.
+    pub fn boot(&mut self, io: &mut ShellIo<'_>) {
         if self.booted {
             return;
         }
         self.booted = true;
-        let mode = self.config.boot_mode.clone();
-        if mode.is_empty() || mode == CANVAS_MODE || mode == HUB_MODE {
-            let bounds = io.world.scene.bounds();
-            if let Some(bounds) = bounds {
-                self.camera.frame(
-                    self.canvas.size(),
-                    bounds,
-                    self.config.canvas.frame_margin + self.config.pill_height,
-                );
-            }
-            // Unless something already opened a studio.
-            if mode == HUB_MODE && self.studio.is_none() {
-                self.set_hub(true);
-            }
-        } else {
-            self.set_mode(&mode, io, now);
+        if self.page.is_none()
+            && let Some(id) = pinned(&io.world.rice, io.applets)
+        {
+            self.open(id, io.applets);
+            self.reveal.snap_to(1.0);
         }
     }
-
-    // ----- Undo -------------------------------------------------------------
 
     fn undo(&mut self, io: &mut ShellIo<'_>, redo: bool) {
         io.typing.flush(io.history);
@@ -1595,22 +1008,12 @@ impl Shell {
             ),
             Err(error) => self.notify(format!("Undo failed: {error}"), true),
         }
-        if self
-            .selected
-            .is_some_and(|node| io.world.scene.get(node).is_none())
-        {
-            self.select(None, io.world);
-        }
         self.touch();
     }
 
-    // ----- The frame ----------------------------------------------------------
+    // ----- The frame --------------------------------------------------------
 
     /// Builds one frame into the root `ui`.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one frame of the whole shell, in drawing order"
-    )]
     pub fn ui(&mut self, root: &mut Ui, io: &mut ShellIo<'_>, now: Instant) {
         let ctx = root.ctx().clone();
         // Real wall-clock time, clamped; after a sleep, one nominal frame.
@@ -1637,7 +1040,7 @@ impl Shell {
         }
         let theme = self.theme.clone();
 
-        // Files dropped anywhere open on the canvas.
+        // Files dropped anywhere open in the studio or tool that takes them.
         let dropped: Vec<PathBuf> = ctx.input(|input| {
             input
                 .raw
@@ -1650,139 +1053,66 @@ impl Shell {
         for path in dropped {
             io.requests.push(ShellRequest::OpenFile(path));
         }
-
-        if self.hub
-            && self.window.is_none()
-            && self.palette.is_none()
-            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-        {
-            self.set_hub(false);
-        }
         self.global_keys(&ctx, io, now);
-        self.spawn_point = None;
 
         // Springs.
         let mut moving = false;
-        moving |= self.studio_reveal.step(motion_dt);
-        moving |= self.left.reveal.step(motion_dt);
-        moving |= self.right.reveal.step(motion_dt);
-        moving |= self.timeline_reveal.step(motion_dt);
-        moving |= self.camera.step(motion_dt, self.canvas);
-        moving |= self.pill.appear.step(motion_dt);
-        moving |= self.pill.glide_x.step(motion_dt);
-        moving |= self.pill.glide_y.step(motion_dt);
-        moving |= self.top_pill.step(motion_dt);
+        moving |= self.reveal.step(motion_dt);
         moving |= self.window_appear.step(motion_dt);
-        moving |= self.hub_appear.step(motion_dt);
-        if let Some(radial) = self.radial.as_mut() {
-            moving |= radial.step(motion_dt);
-        }
         if let Some(palette) = self.palette.as_mut() {
             moving |= palette.step(motion_dt);
-        }
-        if self.pill.appear.target() == 0.0 && self.pill.appear.is_settled() {
-            self.pill.node = None;
         }
         if self.window_appear.target() == 0.0 && self.window_appear.is_settled() {
             self.window = None;
         }
-        if self.radial.as_ref().is_some_and(Radial::is_gone) {
-            self.radial = None;
-        }
         if self.palette.as_ref().is_some_and(Palette::is_gone) {
             self.palette = None;
         }
-
-        // Timeline playback.
-        if self.timeline.playing {
-            self.timeline.playhead += f64::from(dt);
-            self.sync_timeline_audio(io);
-        }
+        self.advance();
 
         let layout = solve_layout(&LayoutRequest {
             viewport: root.max_rect(),
             safe_area: self.safe_area,
             form_factor: self.form_factor.chosen(&self.config.interface),
-            left_reveal: self.left.reveal.position(),
-            right_reveal: self.right.reveal.position(),
-            timeline_reveal: self.timeline_reveal.position(),
             metrics: self.config.metrics,
-            studio_open: self.studio.is_some(),
         });
-        self.canvas = layout.canvas;
-        // A studio works between the side panels, which stay with it.
-        self.studio_area = layout.canvas;
-        self.advance_studio(io.world);
-        let settled =
-            self.studio.is_some() && !self.studio_zooming && self.studio_reveal.position() >= 0.999;
-
-        if settled && let Some(studio) = self.studio_shown.clone() {
-            self.studio_layer(root, &studio, false, io, &theme, now, dt);
-            self.chrome_ui(root, &layout, io, &theme, now, dt);
-            let screen = root.max_rect();
-            self.radial_ui(&ctx, screen, io, &theme, now);
-            self.hub_ui(&ctx, screen, io, &theme, now);
-            self.palette_ui(&ctx, io, &theme, now);
-            self.window_ui(&ctx, screen, io, &theme, now, dt);
-            self.animating = moving;
-            self.scheduler.set_animating(self.animating);
-            if self.animating {
-                ctx.request_repaint();
-            }
-            if io.typing.flush_if_paused(io.history, now) {
-                self.touch();
-            }
-            return;
+        self.page_rect = layout.page;
+        self.sue_button = layout.sue_button;
+        self.hub_boxes.clear();
+        let settled = self.shown.is_some() && self.reveal.position() >= 0.999;
+        // The Hub, unless a page covers it whole.
+        if !settled {
+            self.hub_ui(root, layout.page, io, &theme);
         }
-
-        self.canvas_ui(root, io, &theme, now, dt);
-        self.chrome_ui(root, &layout, io, &theme, now, dt);
-
-        // A studio coming in or going out, over the canvas, not yet
-        // taking clicks.
-        if let Some(studio) = self.studio_shown.clone()
-            && !self.studio_zooming
-        {
-            self.studio_layer(root, &studio, true, io, &theme, now, dt);
-            let area = self.studio_area;
-            egui::Area::new(Id::unique("sue-studio-shield"))
-                .order(Order::Middle)
-                .fixed_pos(area.min)
-                .show(&ctx, |ui| {
-                    ui.allocate_rect(area, Sense::click_and_drag());
-                });
+        // The page, wearing its own theme if it has one, with its menus in
+        // the bar after the Sue button.
+        let page = self
+            .shown
+            .clone()
+            .map(|id| (id.clone(), self.page_theme(&id, &io.world.rice, &theme)));
+        if let Some((id, page_theme)) = &page {
+            self.with_theme(&ctx, page_theme, |shell| {
+                shell.page_layer(root, id, layout.page, !settled, io, page_theme, now, dt);
+            });
         }
-
-        // Floating surfaces.
-        let studio_over = self.studio_shown.is_some() && !self.studio_zooming;
-        if self.top_pill.position() > 0.01 && !studio_over {
-            self.top_pill_ui(&ctx, &theme);
-        }
-        if self.studio_shown.is_none() {
-            self.selection_pill_ui(&ctx, io, &theme, now, dt);
-        }
-        self.radial_ui(&ctx, root.max_rect(), io, &theme, now);
-        self.hub_ui(&ctx, root.max_rect(), io, &theme, now);
+        let bar_theme = page.as_ref().map_or(&theme, |(_, theme)| theme).clone();
+        self.with_theme(&ctx, &bar_theme, |shell| {
+            shell.bar_ui(
+                root,
+                &layout,
+                page.as_ref().map(|(id, _)| id),
+                !settled,
+                io,
+                &bar_theme,
+                now,
+                dt,
+            );
+        });
+        self.status_ui(root, layout.status, io, &theme);
         self.palette_ui(&ctx, io, &theme, now);
         self.window_ui(&ctx, root.max_rect(), io, &theme, now, dt);
-        if self.space_down && self.studio_shown.is_none() {
-            // While Space is held, the canvas pans instead of editing.
-            egui::Area::new(Id::unique("sue-space-pan"))
-                .order(Order::Foreground)
-                .fixed_pos(self.canvas.min)
-                .show(&ctx, |ui| {
-                    let response = ui.allocate_rect(self.canvas, Sense::drag());
-                    if response.dragged() {
-                        self.camera.pan_by(response.drag_delta());
-                        self.space_panned = true;
-                        self.touch();
-                    }
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-                });
-        }
 
-        // Applet ticks that need every frame (a stroke in progress).
-        self.animating = moving || self.node_drag.is_some() || self.timeline.playing;
+        self.animating = moving;
         self.scheduler.set_animating(self.animating);
         if self.animating {
             ctx.request_repaint();
@@ -1792,124 +1122,374 @@ impl Shell {
         }
     }
 
-    /// The structural panels around the canvas: the rails, the drawers, the
-    /// timeline dock and the status bar. Every studio keeps them too.
-    #[allow(clippy::too_many_arguments, reason = "the panels around the canvas")]
-    fn chrome_ui(
-        &mut self,
-        root: &mut Ui,
-        layout: &crate::LayoutSolution,
-        io: &mut ShellIo<'_>,
-        theme: &Theme,
-        now: Instant,
-        dt: f32,
-    ) {
-        let theme = theme.clone();
-        let painter = root.painter().clone();
-        for rect in [layout.left_rail, layout.right_rail, layout.status] {
-            painter.rect_filled(rect, 0.0, theme.panel);
-        }
-        painter.vline(
-            layout.left_rail.right(),
-            layout.left_rail.y_range(),
-            theme.hairline(),
-        );
-        painter.vline(
-            layout.right_rail.left(),
-            layout.right_rail.y_range(),
-            theme.hairline(),
-        );
-        painter.hline(
-            layout.status.x_range(),
-            layout.status.top(),
-            theme.hairline(),
-        );
-        // A phone's open studio has the whole width: no rails to draw.
-        if layout.left_rail.width() > 0.0 {
-            self.rail_ui(root, layout.left_rail, true, io, &theme);
-            self.rail_ui(root, layout.right_rail, false, io, &theme);
-        }
-        self.drawer_ui(
-            root,
-            layout.left_drawer,
-            layout.left_drawer_full,
-            true,
-            io,
-            &theme,
-            now,
-            dt,
-        );
-        self.drawer_ui(
-            root,
-            layout.right_drawer,
-            layout.right_drawer_full,
-            false,
-            io,
-            &theme,
-            now,
-            dt,
-        );
-        if layout.timeline.height() > 0.5 {
-            self.timeline_dock(root, layout.timeline, layout.timeline_full, io, &theme, now);
-        }
-        self.status_ui(root, layout.status, io, &theme);
+    /// The theme a page wears: its own (its rice section's `theme`), or
+    /// Sue's.
+    fn page_theme(&self, id: &AppletId, rice: &RiceSchema, theme: &Theme) -> Theme {
+        let section = id.as_str().replace('-', "_");
+        theme.for_studio(rice, &section, &self.presets)
     }
 
-    /// The studio itself, between the side panels. While it
-    /// comes in or goes out (`lifted`) it paints on a layer above the
-    /// canvas's cards; its widgets keep the same ids either way.
-    #[allow(clippy::too_many_arguments, reason = "one layer of a studio")]
-    fn studio_layer(
+    /// Runs `draw` with `theme` as egui's style, so menus and popups wear it
+    /// too, and Sue's again afterwards.
+    fn with_theme(&mut self, ctx: &egui::Context, theme: &Theme, draw: impl FnOnce(&mut Self)) {
+        let own = *theme != self.theme;
+        if own {
+            let visuals = theme.visuals(self.config.caret_blink);
+            ctx.all_styles_mut(|style| style.visuals = visuals.clone());
+        }
+        draw(self);
+        if own {
+            let visuals = self.theme.visuals(self.config.caret_blink);
+            ctx.all_styles_mut(|style| style.visuals = visuals.clone());
+        }
+    }
+
+    /// The studio or tool itself. While it comes in or goes out (`lifted`)
+    /// it paints on a layer above the Hub and a shield takes the clicks;
+    /// its widgets keep the same ids either way.
+    #[allow(clippy::too_many_arguments, reason = "one layer of a page")]
+    fn page_layer(
         &mut self,
         root: &mut Ui,
-        studio: &AppletId,
+        id: &AppletId,
+        area: Rect,
         lifted: bool,
         io: &mut ShellIo<'_>,
         theme: &Theme,
         now: Instant,
         dt: f32,
     ) {
-        let area = self.studio_area;
         let view = self.view(now, dt);
-        // A studio may wear its own theme: its colors are egui's while it
-        // draws (its menus and popups too), and Sue's again afterwards.
-        let section = studio.as_str().replace('-', "_");
-        let theme = theme.for_studio(&io.world.rice, &section, &self.presets);
-        let own = theme != self.theme;
-        let ctx = root.ctx().clone();
-        if own {
-            let visuals = theme.visuals(self.config.caret_blink);
-            ctx.all_styles_mut(|style| style.visuals = visuals.clone());
+        let mut builder = UiBuilder::new()
+            .max_rect(area)
+            .id_salt(("sue-page", id.as_str()))
+            .layout(Layout::top_down(Align::Min));
+        if lifted {
+            builder = builder.layer_id(LayerId::new(Order::Middle, Id::unique("sue-page-lifted")));
         }
-        let theme = &theme;
-        {
-            let mut builder = UiBuilder::new()
-                .max_rect(area)
-                .id_salt(("sue-studio", studio.as_str()))
-                .layout(Layout::top_down(Align::Min));
-            if lifted {
-                builder =
-                    builder.layer_id(LayerId::new(Order::Middle, Id::unique("sue-studio-lifted")));
+        let mut page_ui = root.new_child(builder);
+        page_ui.set_clip_rect(area);
+        if lifted {
+            // A gentle fade over the Hub; studios slide their palettes too.
+            let t = self.reveal();
+            page_ui.set_opacity(t * t * (3.0 - 2.0 * t));
+        }
+        page_ui.painter().rect_filled(area, 0.0, theme.void);
+        let (applets, mut cx) = split(io, theme, view);
+        match applets.get_mut(id) {
+            Some(applet) => applet.page_ui(&mut page_ui, &mut cx),
+            None => {
+                self.page = None;
+                self.shown = None;
             }
-            let mut studio_ui = root.new_child(builder);
-            studio_ui.set_clip_rect(area);
-            if own {
-                studio_ui.style_mut().visuals = theme.visuals(self.config.caret_blink);
+        }
+        if lifted {
+            egui::Area::new(Id::unique("sue-page-shield"))
+                .order(Order::Middle)
+                .fixed_pos(area.min)
+                .show(root.ctx(), |ui| {
+                    ui.allocate_rect(area, Sense::click_and_drag());
+                });
+        }
+    }
+
+    /// The top bar: the Sue button and its menu, then the page's menus (or
+    /// the word Hub).
+    #[allow(clippy::too_many_arguments, reason = "the bar and what is in it")]
+    fn bar_ui(
+        &mut self,
+        root: &mut Ui,
+        layout: &LayoutSolution,
+        page: Option<&AppletId>,
+        moving: bool,
+        io: &mut ShellIo<'_>,
+        theme: &Theme,
+        now: Instant,
+        dt: f32,
+    ) {
+        let painter = root.painter().clone();
+        painter.rect_filled(layout.bar, 0.0, theme.panel);
+        painter.hline(layout.bar.x_range(), layout.bar.bottom(), theme.hairline());
+
+        // The Sue button: Sue's silhouette ("Sue" without a GPU).
+        let button = layout.sue_button;
+        let response = root
+            .interact(button, Id::unique("sue-button"), Sense::click())
+            .on_hover_text("Sue: the Hub, every studio and tool, files, projects and Settings");
+        let open = self.sue_menu.is_open();
+        let face = button.shrink2(vec2(4.0, 3.0));
+        if open || response.hovered() {
+            painter.rect_filled(
+                face,
+                theme.control_radius,
+                if open { theme.active } else { theme.hover },
+            );
+        }
+        let mark = Rect::from_center_size(face.center(), Vec2::splat(face.height() - 4.0));
+        if !crate::brand::mark(&painter, &mut *io.textures, mark, theme.text) {
+            painter.text(
+                face.center(),
+                Align2::CENTER_CENTER,
+                "Sue",
+                theme.font(theme.small_size + 0.5),
+                theme.text,
+            );
+        }
+        if response.clicked() && !open {
+            self.build_sue_menu(io);
+            if let Some(palette) = self.palette.as_mut() {
+                palette.close();
             }
-            let (applets, mut cx) = split(io, theme, view);
-            match applets.get_mut(studio) {
-                Some(applet) => applet.studio_ui(&mut studio_ui, &mut cx),
-                None => {
-                    self.studio = None;
-                    self.studio_shown = None;
-                    self.mode = CANVAS_MODE.to_owned();
+        }
+        let picked = {
+            let runs = &self.sue_runs;
+            let state = |command: &str| {
+                command
+                    .strip_prefix("sue:")
+                    .and_then(|index| index.parse::<usize>().ok())
+                    .and_then(|index| runs.get(index))
+                    .map_or(ItemState::off(), |(_, checked)| {
+                        if *checked {
+                            ItemState::check(true)
+                        } else {
+                            ItemState::on()
+                        }
+                    })
+            };
+            self.sue_menu.dropdown(
+                root,
+                button,
+                response.clicked(),
+                &self.sue_items,
+                &state,
+                theme,
+            )
+        };
+        if let Some(command) = picked {
+            self.run_sue_item(&command, io, now);
+        }
+        painter.vline(
+            button.right(),
+            layout.bar.shrink2(vec2(0.0, 6.0)).y_range(),
+            theme.hairline(),
+        );
+
+        // The page's own menus, or where people are.
+        match page {
+            Some(id) => {
+                let view = self.view(now, dt);
+                let mut bar = root.new_child(
+                    UiBuilder::new()
+                        .max_rect(layout.menus)
+                        .id_salt(("sue-bar", id.as_str()))
+                        .layout(Layout::left_to_right(Align::Center)),
+                );
+                bar.set_clip_rect(layout.menus);
+                if moving {
+                    bar.set_opacity(self.reveal());
+                    bar.disable();
+                }
+                let (applets, mut cx) = split(io, theme, view);
+                if let Some(applet) = applets.get_mut(id) {
+                    applet.bar_ui(&mut bar, &mut cx);
                 }
             }
+            None => {
+                painter.text(
+                    layout.menus.left_center() + vec2(theme.padding * 1.5, 0.0),
+                    Align2::LEFT_CENTER,
+                    "Hub",
+                    theme.font(theme.ui_size),
+                    theme.muted,
+                );
+            }
         }
-        if own {
-            let visuals = self.theme.visuals(self.config.caret_blink);
-            ctx.all_styles_mut(|style| style.visuals = visuals.clone());
+    }
+
+    /// The Hub: a box for every studio, then for every tool, each with a
+    /// pin at its bottom right.
+    fn hub_ui(&mut self, root: &mut Ui, area: Rect, io: &mut ShellIo<'_>, theme: &Theme) {
+        root.painter().rect_filled(area, 0.0, theme.void);
+        // A page on its way in takes no clicks on the Hub under it.
+        let live = self.page.is_none();
+        let touch = self.form_factor.chosen(&self.config.interface) != FormFactor::Desktop;
+        let narrow = area.width() < 560.0;
+        let margin = if narrow { 16.0 } else { 40.0 };
+        let gap = if narrow { 12.0 } else { 16.0 };
+        let size = if narrow {
+            vec2(
+                ((area.width() - margin * 2.0 - gap) / 2.0).max(132.0),
+                184.0,
+            )
+        } else {
+            vec2(256.0, 176.0)
+        };
+        let columns = ((area.width() - margin * 2.0 + gap) / (size.x + gap))
+            .floor()
+            .max(1.0) as usize;
+        let pinned = pinned(&io.world.rice, io.applets);
+        let mut clicked = None;
+        let mut ui = root.new_child(
+            UiBuilder::new()
+                .max_rect(area)
+                .id_salt("sue-hub")
+                .layout(Layout::top_down(Align::Min)),
+        );
+        ui.set_clip_rect(area);
+        ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(&mut ui, |ui| {
+                ui.add_space(margin * 0.75);
+                for (title, role) in [("Studios", AppletRole::Studio), ("Tools", AppletRole::Tool)]
+                {
+                    let boxes: Vec<(AppletId, String, String, String)> = io
+                        .applets
+                        .with_role(role)
+                        .map(|manifest| {
+                            (
+                                manifest.id.clone(),
+                                manifest.name.clone(),
+                                manifest.icon.clone(),
+                                manifest.summary.clone(),
+                            )
+                        })
+                        .collect();
+                    if boxes.is_empty() {
+                        continue;
+                    }
+                    ui.horizontal(|ui| {
+                        ui.add_space(margin);
+                        ui.label(
+                            RichText::new(title)
+                                .size(theme.heading_size)
+                                .color(theme.text),
+                        );
+                    });
+                    ui.add_space(gap * 0.75);
+                    for row in boxes.chunks(columns) {
+                        ui.horizontal(|ui| {
+                            ui.add_space(margin);
+                            ui.spacing_mut().item_spacing.x = gap;
+                            for (id, name, icon, summary) in row {
+                                let on = pinned.as_ref() == Some(id);
+                                let what = (name.as_str(), icon.as_str(), summary.as_str());
+                                let (click, rect, pin) =
+                                    Self::hub_box(ui, size, what, on, live, touch, theme);
+                                self.hub_boxes.push((id.clone(), rect, pin));
+                                if let Some(click) = click {
+                                    clicked = Some((id.clone(), click));
+                                }
+                            }
+                        });
+                        ui.add_space(gap);
+                    }
+                    ui.add_space(margin * 0.5);
+                }
+            });
+        match clicked {
+            Some((id, HubClick::Open)) => self.open(id, io.applets),
+            Some((id, HubClick::Pin)) => {
+                let again = pinned.as_ref() == Some(&id);
+                self.pin((!again).then_some(id), io);
+            }
+            None => {}
         }
+    }
+
+    /// One box of the Hub, with sharp corners and a pin at its bottom
+    /// right. Returns what was clicked, the box and the pin.
+    fn hub_box(
+        ui: &mut Ui,
+        size: Vec2,
+        (name, icon, summary): (&str, &str, &str),
+        pinned: bool,
+        live: bool,
+        touch: bool,
+        theme: &Theme,
+    ) -> (Option<HubClick>, Rect, Rect) {
+        let sense = if live { Sense::click() } else { Sense::hover() };
+        let (rect, response) = ui.allocate_exact_size(size, sense);
+        let side = if touch { 44.0 } else { 30.0 };
+        let pin = Rect::from_min_size(
+            rect.right_bottom() - vec2(side + 8.0, side + 8.0),
+            Vec2::splat(side),
+        );
+        // The pin is checked after the box, so it wins the click over it.
+        let pin_response = ui
+            .interact(pin, ui.scope_id().with(("sue-hub-pin", name)), sense)
+            .on_hover_text(if pinned {
+                "Pinned: Sue opens here at launch. Click to take the pin away"
+            } else {
+                "Pin: Sue opens here at launch"
+            });
+        let hovered = live && (response.hovered() || pin_response.hovered());
+        let painter = ui.painter();
+        painter.rect(
+            rect,
+            0.0,
+            if hovered { theme.hover } else { theme.pill },
+            Stroke::new(
+                theme.border_width.max(1.0),
+                if hovered {
+                    theme.border_active
+                } else {
+                    theme.border
+                },
+            ),
+            StrokeKind::Inside,
+        );
+        painter.text(
+            rect.left_top() + vec2(18.0, 16.0),
+            Align2::LEFT_TOP,
+            icon,
+            theme.font(theme.heading_size * 1.8),
+            theme.text,
+        );
+        painter.text(
+            rect.left_top() + vec2(18.0, 76.0),
+            Align2::LEFT_TOP,
+            name,
+            theme.font(theme.ui_size * 1.2),
+            theme.text,
+        );
+        let galley = painter.layout(
+            summary.to_owned(),
+            theme.font(theme.small_size),
+            theme.muted,
+            rect.width() - 36.0 - side,
+        );
+        painter.with_clip_rect(rect.shrink(1.0)).galley(
+            rect.left_top() + vec2(18.0, 102.0),
+            galley,
+            theme.muted,
+        );
+        // The pin: a square button, sharp like its box.
+        if pin_response.hovered() && live {
+            painter.rect_filled(pin, 0.0, theme.active);
+        }
+        if pinned {
+            painter.rect_stroke(pin, 0.0, theme.hairline_active(), StrokeKind::Inside);
+        }
+        pin_glyph(
+            painter,
+            pin,
+            pinned,
+            if pinned || pin_response.hovered() {
+                theme.text
+            } else {
+                theme.muted
+            },
+        );
+        let click = if !live {
+            None
+        } else if pin_response.clicked() {
+            Some(HubClick::Pin)
+        } else if response.clicked() {
+            Some(HubClick::Open)
+        } else {
+            None
+        };
+        (click, rect, pin)
     }
 
     fn global_keys(&mut self, ctx: &egui::Context, io: &mut ShellIo<'_>, now: Instant) {
@@ -1920,30 +1500,25 @@ impl Shell {
         let typing = ctx.text_edit_focused();
         // Chords the open studio uses itself stay with it.
         let reserved: Vec<sue_rice::Keybind> = self
-            .studio
+            .page
             .as_ref()
-            .and_then(|studio| io.applets.get(studio))
+            .and_then(|page| io.applets.get(page))
             .map(|applet| applet.reserved_keys())
             .unwrap_or_default();
         let take = |input: &mut egui::InputState, bind: &sue_rice::Keybinds| {
             keys::consume_except(input, bind, &reserved)
         };
-        let (undo, redo, settings, left, right, timeline, reset, open, save, quit) =
-            ctx.input_mut(|input| {
-                let redo = take(input, &keymap.redo) || take(input, &keymap.redo_alt);
-                (
-                    take(input, &keymap.undo),
-                    redo,
-                    take(input, &keymap.open_settings),
-                    take(input, &keymap.toggle_left_drawer),
-                    take(input, &keymap.toggle_right_drawer),
-                    take(input, &keymap.toggle_timeline),
-                    take(input, &keymap.reset_camera),
-                    take(input, &keymap.open_file),
-                    take(input, &keymap.save),
-                    take(input, &keymap.quit),
-                )
-            });
+        let (undo, redo, settings, open, save, quit) = ctx.input_mut(|input| {
+            let redo = take(input, &keymap.redo) || take(input, &keymap.redo_alt);
+            (
+                take(input, &keymap.undo),
+                redo,
+                take(input, &keymap.open_settings),
+                take(input, &keymap.open_file),
+                take(input, &keymap.save),
+                take(input, &keymap.quit),
+            )
+        });
         if undo {
             self.undo(io, false);
         }
@@ -1953,74 +1528,23 @@ impl Shell {
         if settings {
             self.handle(ShellRequest::OpenSettings(None), io, now);
         }
-        if let Some(studio) = self.studio.clone() {
-            // A studio keeps the window; canvas keys wait until it closes,
-            // and Open asks the studio first.
-            if open {
-                let view = self.view(now, 0.0);
-                let theme = self.theme.clone();
-                let (applets, mut cx) = split(io, &theme, view);
-                let handled = applets
-                    .get_mut(&studio)
-                    .is_some_and(|applet| applet.command("file.open", &mut cx));
-                if !handled {
-                    io.requests
-                        .push(ShellRequest::Command("file.open".to_owned()));
-                }
-            }
-            if save {
-                io.requests
-                    .push(ShellRequest::Command("file.save".to_owned()));
-            }
-            if quit {
-                io.requests
-                    .push(ShellRequest::Command("app.quit".to_owned()));
-            }
-            self.space_down = false;
-            if typing || self.palette.is_some() {
-                return;
-            }
-            let (palette, escape) = ctx.input_mut(|input| {
-                (
-                    take(input, &keymap.command_palette)
-                        || take(input, &keymap.command_palette_alt),
-                    self.window.is_some()
-                        && self.window_appear.target() > 0.0
-                        && input.key_pressed(egui::Key::Escape),
-                )
-            });
-            if palette {
-                self.open_palette();
-            }
-            if escape {
-                self.close_window();
-            }
-            // The side panels stay with studios, so their keys work too.
-            if left {
-                self.toggle_drawer(true, io.applets);
-            }
-            if right {
-                self.toggle_drawer(false, io.applets);
-            }
-            let _ = (timeline, reset);
-            return;
-        }
-        if left {
-            self.toggle_drawer(true, io.applets);
-        }
-        if right {
-            self.toggle_drawer(false, io.applets);
-        }
-        if timeline {
-            let open = !self.timeline_open;
-            self.set_timeline(open);
-        }
-        if reset {
-            self.handle(ShellRequest::ResetCamera, io, now);
-        }
         if open {
-            io.requests
-                .push(ShellRequest::Command("file.open".to_owned()));
+            // The page opens files its own way first.
+            let handled = match self.page.clone() {
+                Some(page) => {
+                    let view = self.view(now, 0.0);
+                    let theme = self.theme.clone();
+                    let (applets, mut cx) = split(io, &theme, view);
+                    applets
+                        .get_mut(&page)
+                        .is_some_and(|applet| applet.command("file.open", &mut cx))
+                }
+                None => false,
+            };
+            if !handled {
+                io.requests
+                    .push(ShellRequest::Command("file.open".to_owned()));
+            }
         }
         if save {
             io.requests
@@ -2031,760 +1555,38 @@ impl Shell {
                 .push(ShellRequest::Command("app.quit".to_owned()));
         }
         if typing || self.palette.is_some() {
-            self.space_down = false;
             return;
         }
-        let (palette, delete, escape) = ctx.input_mut(|input| {
+        let (palette, escape) = ctx.input_mut(|input| {
             (
-                keys::consume(input, &keymap.command_palette)
-                    || keys::consume(input, &keymap.command_palette_alt),
-                keys::consume(input, &keymap.delete),
-                input.key_pressed(egui::Key::Escape) && self.radial.is_none(),
+                take(input, &keymap.command_palette) || take(input, &keymap.command_palette_alt),
+                self.window.is_some()
+                    && self.window_appear.target() > 0.0
+                    && input.key_pressed(egui::Key::Escape),
             )
         });
         if palette {
             self.open_palette();
         }
-        if delete && let Some(node) = self.selected {
-            io.typing.flush(io.history);
-            if let Err(error) = io.history.apply(io.world, RemoveNode::new(node)) {
-                self.notify(format!("Could not remove it: {error}"), true);
-            }
-            self.select(None, io.world);
-        }
         if escape {
-            if self.window.is_some() && self.window_appear.target() > 0.0 {
-                self.close_window();
-            } else {
-                self.select(None, io.world);
-            }
-        }
-        // Space: hold and drag pans; a tap plays or pauses the timeline.
-        if let Some(space) = keymap
-            .play_pause
-            .first()
-            .and_then(|chord| keys::egui_key(chord.key))
-        {
-            let (pressed, released, down) = ctx.input(|input| {
-                (
-                    input.key_pressed(space),
-                    input.key_released(space),
-                    input.key_down(space),
-                )
-            });
-            if pressed && !self.space_down {
-                self.space_down = true;
-                self.space_panned = false;
-            }
-            if released || (!down && self.space_down) {
-                if self.space_down && !self.space_panned && self.timeline_open {
-                    self.toggle_play(io);
-                }
-                self.space_down = false;
-            }
-        }
-    }
-
-    fn toggle_play(&mut self, io: &mut ShellIo<'_>) {
-        self.timeline.playing = !self.timeline.playing;
-        if self.timeline.playing {
-            self.sync_timeline_audio(io);
-        } else if io
-            .transport
-            .clip()
-            .is_some_and(|clip| clip.owner.starts_with(TIMELINE_MODE))
-        {
-            io.transport.set_playing(false, io.audio.as_deref_mut());
-            self.timeline_clip = None;
-        }
-        self.touch();
-    }
-
-    /// Plays the audio block under the playhead through the transport.
-    fn sync_timeline_audio(&mut self, io: &mut ShellIo<'_>) {
-        let playhead = self.timeline.playhead;
-        let under = io
-            .world
-            .scene
-            .iter()
-            .filter(|(_, node)| {
-                io.world
-                    .arena
-                    .get(node.entity)
-                    .is_ok_and(|entity| entity.projections().contains(Projection::Timeline))
-            })
-            .filter_map(|(id, node)| {
-                let pcm = pcm_of(io.world, node.entity)?;
-                let rate = f64::from(pcm.sample_rate().max(1));
-                let start_frame = node.prop("clip_start", 0.0).max(0.0);
-                let end_frame = node
-                    .prop("clip_end", pcm.frames() as f64)
-                    .min(pcm.frames() as f64);
-                let t0 = node.prop("t0", 0.0);
-                let seconds = (end_frame - start_frame).max(0.0) / rate;
-                (playhead >= t0 && playhead < t0 + seconds).then(|| {
-                    (
-                        id,
-                        Clip {
-                            source: crate::ClipSource::Entity(node.entity),
-                            start: start_frame as usize,
-                            end: end_frame as usize,
-                            gain: node.prop("gain", 1.0) as f32,
-                            owner: format!("{TIMELINE_MODE}:{}", id.0),
-                        },
-                        start_frame + (playhead - t0) * rate,
-                    )
-                })
-            })
-            .next();
-        match under {
-            Some((id, clip, frame)) if self.timeline_clip != Some(id) => {
-                if io.audio.is_none() {
-                    io.requests
-                        .push(ShellRequest::Command("audio.start".to_owned()));
-                }
-                io.transport.load(clip, io.audio.as_deref_mut());
-                io.transport.seek(frame, io.audio.as_deref_mut());
-                io.transport.set_playing(true, io.audio.as_deref_mut());
-                self.timeline_clip = Some(id);
-            }
-            Some(_) => {}
-            None => {
-                if self.timeline_clip.take().is_some() {
-                    io.transport.set_playing(false, io.audio.as_deref_mut());
-                }
-            }
-        }
-    }
-
-    // ----- Canvas ---------------------------------------------------------------
-
-    fn draw_grid(&self, painter: &egui::Painter, theme: &Theme) {
-        let style = self.config.canvas.grid_style;
-        if style == GridStyle::None {
-            return;
-        }
-        let zoom = self.camera.zoom();
-        let mut spacing = self.config.canvas.grid_spacing.max(4.0);
-        while spacing * zoom < 14.0 {
-            spacing *= 2.0;
-        }
-        while spacing * zoom > 112.0 {
-            spacing /= 2.0;
-        }
-        let visible = self.camera.visible(self.canvas);
-        let start_x = (visible.left() / spacing).floor() as i64;
-        let end_x = (visible.right() / spacing).ceil() as i64;
-        let start_y = (visible.top() / spacing).floor() as i64;
-        let end_y = (visible.bottom() / spacing).ceil() as i64;
-        if (end_x - start_x) * (end_y - start_y) > 40_000 {
-            return;
-        }
-        match style {
-            GridStyle::Dots => {
-                let radius = (zoom * 0.9).clamp(0.6, 1.4);
-                for gx in start_x..=end_x {
-                    for gy in start_y..=end_y {
-                        let point = pos2(gx as f32 * spacing, gy as f32 * spacing);
-                        painter.circle_filled(
-                            self.camera.to_screen(self.canvas, point),
-                            radius,
-                            theme.grid,
-                        );
-                    }
-                }
-            }
-            GridStyle::Lines => {
-                let stroke = Stroke::new(1.0, theme.grid);
-                for gx in start_x..=end_x {
-                    let x = self
-                        .camera
-                        .to_screen(self.canvas, pos2(gx as f32 * spacing, 0.0))
-                        .x;
-                    painter.vline(x, self.canvas.y_range(), stroke);
-                }
-                for gy in start_y..=end_y {
-                    let y = self
-                        .camera
-                        .to_screen(self.canvas, pos2(0.0, gy as f32 * spacing))
-                        .y;
-                    painter.hline(self.canvas.x_range(), y, stroke);
-                }
-            }
-            GridStyle::None => {}
-        }
-    }
-
-    #[allow(clippy::too_many_lines, reason = "the canvas and its nodes, in order")]
-    fn canvas_ui(
-        &mut self,
-        root: &mut Ui,
-        io: &mut ShellIo<'_>,
-        theme: &Theme,
-        now: Instant,
-        dt: f32,
-    ) {
-        let ctx = root.ctx().clone();
-        let canvas = self.canvas;
-        let painter = root.painter().with_clip_rect(canvas);
-        painter.rect_filled(canvas, 0.0, theme.void);
-        self.draw_grid(&painter, theme);
-
-        // Background: clicks on empty canvas deselect.
-        let background = root.interact(canvas, Id::unique("sue-canvas"), Sense::click_and_drag());
-        let pointer = ctx.input(|input| input.pointer.hover_pos());
-        let over_canvas = pointer.is_some_and(|at| {
-            canvas.contains(at)
-                && ctx
-                    .layer_id_at(at)
-                    .is_none_or(|layer| layer.order == Order::Background)
-        });
-        let modal = self.palette.is_some() || self.window.is_some() || self.radial.is_some();
-
-        // Wheel and pinch zoom around the pointer.
-        if over_canvas && !modal {
-            let line = self.config.wheel_line_px.max(1.0);
-            let (notches, pinch) = ctx.input_mut(|input| {
-                let mut notches = 0.0;
-                input.events.retain(|event| match event {
-                    egui::Event::MouseWheel {
-                        unit,
-                        delta,
-                        modifiers,
-                        ..
-                    } if !modifiers.command => {
-                        notches += match unit {
-                            egui::MouseWheelUnit::Line => delta.y,
-                            egui::MouseWheelUnit::Point => delta.y / line,
-                            egui::MouseWheelUnit::Page => delta.y * 10.0,
-                        };
-                        false
-                    }
-                    _ => true,
-                });
-                input.smooth_scroll_delta = Vec2::ZERO;
-                (notches, input.zoom_delta())
-            });
-            if let Some(at) = pointer {
-                if notches.abs() > 0.0 {
-                    self.camera
-                        .zoom_at(canvas, at, notches * self.config.canvas.zoom_step);
-                    self.touch();
-                }
-                if (pinch - 1.0).abs() > 1e-4 {
-                    self.camera.zoom_at(canvas, at, pinch.ln());
-                    self.touch();
-                }
-            }
-        }
-        // Middle-drag pans from anywhere on the canvas.
-        let (middle_pressed, middle_down, delta, secondary) = ctx.input(|input| {
-            (
-                input.pointer.button_pressed(egui::PointerButton::Middle),
-                input.pointer.middle_down(),
-                input.pointer.delta(),
-                input.pointer.button_pressed(egui::PointerButton::Secondary),
-            )
-        });
-        if middle_pressed && over_canvas {
-            self.middle_pan = true;
-        }
-        if !middle_down {
-            self.middle_pan = false;
-        }
-        if self.middle_pan && delta != Vec2::ZERO {
-            self.camera.pan_by(delta);
-            self.touch();
-        }
-        // Right-click opens the marking menu; on a card, it selects the card
-        // and the menu offers what can be done to it first.
-        if secondary
-            && over_canvas
-            && !modal
-            && let Some(at) = pointer
-        {
-            let point = self.camera.to_canvas(canvas, at);
-            let under = io.world.scene.stacked().into_iter().rev().find(|id| {
-                io.world
-                    .scene
-                    .get(*id)
-                    .is_some_and(|node| node.rect.contains(point))
-            });
-            self.open_radial(at);
-            if let Some(node) = under {
-                self.select(Some(node), io.world);
-                self.radial_node = Some(node);
-            }
-        }
-
-        // The scene, in a layer the camera transforms.
-        let transform: TSTransform = self.camera.transform(canvas);
-        let layer = LayerId::new(root.layer_id().order, Id::unique("sue-scene"));
-        ctx.set_sublayer(root.layer_id(), layer);
-        ctx.set_transform_layer(layer, transform);
-        let visible = self.camera.visible(canvas);
-        let mut scene_ui = root.new_child(
-            UiBuilder::new()
-                .layer_id(layer)
-                .max_rect(visible)
-                .sense(Sense::hover()),
-        );
-        scene_ui.set_clip_rect(visible);
-        let zoom = self.camera.zoom();
-        let hair = theme.border_width / zoom.max(1e-3);
-        let mut clicked_node = None;
-        for id in io.world.scene.stacked() {
-            let Some(node) = io.world.scene.get(id).cloned() else {
-                continue;
-            };
-            if !node.rect.intersects(visible) {
-                continue;
-            }
-            let selected = self.selected == Some(id);
-            let card = node.rect;
-            let title = Rect::from_min_size(card.min, vec2(card.width(), NODE_TITLE));
-            let content = Rect::from_min_max(pos2(card.left(), title.bottom()), card.max);
-            let scene_painter = scene_ui.painter().clone();
-            let radius = egui::CornerRadius::same(theme.pill_radius.clamp(0.0, 64.0) as u8);
-            scene_painter.rect_filled(card, radius, theme.pill);
-            scene_painter.hline(
-                card.x_range(),
-                title.bottom(),
-                Stroke::new(hair, theme.border),
-            );
-            let name = io
-                .world
-                .arena
-                .get(node.entity)
-                .map_or_else(|_| "Missing".to_owned(), |entity| entity.name().to_owned());
-            let kind = io
-                .applets
-                .manifest(&node.applet)
-                .map_or_else(String::new, |manifest| manifest.name.clone());
-            let title_painter = scene_painter.with_clip_rect(title.intersect(visible));
-            title_painter.text(
-                title.left_center() + vec2(10.0, 0.0),
-                Align2::LEFT_CENTER,
-                &name,
-                theme.font(theme.small_size),
-                if selected { theme.text } else { theme.muted },
-            );
-            let kind_rect = title_painter.text(
-                title.right_center() - vec2(10.0, 0.0),
-                Align2::RIGHT_CENTER,
-                &kind,
-                theme.font(theme.small_size),
-                theme.muted,
-            );
-            if io
-                .world
-                .arena
-                .get(node.entity)
-                .is_ok_and(|entity| entity.projections().contains(Projection::Timeline))
-            {
-                // On the timeline: a dot before the kind.
-                title_painter.circle_filled(
-                    pos2(kind_rect.left() - 8.0, title.center().y),
-                    2.5,
-                    theme.text,
-                );
-            }
-
-            // Title bar: select, focus, move.
-            let title_response = scene_ui.interact(
-                title,
-                Id::unique(("sue-node-title", id.0)),
-                Sense::click_and_drag(),
-            );
-            if title_response.clicked() || title_response.drag_started() {
-                clicked_node = Some(id);
-            }
-            if title_response.double_clicked() {
-                self.handle(ShellRequest::Focus(id), io, now);
-            }
-            if title_response.drag_started() {
-                self.node_drag = Some(NodeDrag {
-                    node: id,
-                    from: card,
-                    resize: false,
-                });
-            }
-            if title_response.dragged()
-                && let Some(drag) = self
-                    .node_drag
-                    .filter(|drag| drag.node == id && !drag.resize)
-                && let Some(live) = io.world.scene.get_mut(drag.node)
-            {
-                live.rect = live.rect.translate(title_response.drag_delta());
-            }
-            if title_response.hovered() {
-                ctx.set_cursor_icon(egui::CursorIcon::Grab);
-            }
-
-            // Content, drawn by the applet.
-            let mut content_ui = scene_ui.new_child(
-                UiBuilder::new()
-                    .max_rect(content)
-                    .id_salt(("sue-node", id.0))
-                    .layout(Layout::top_down(Align::Min)),
-            );
-            content_ui.set_clip_rect(content.intersect(visible));
-            let view = self.view(now, dt);
-            {
-                let (applets, mut cx) = split(io, theme, view);
-                if let Some(applet) = applets.get_mut(&node.applet) {
-                    applet.node_ui(&mut content_ui, id, &mut cx);
-                }
-            }
-            let pressed_inside = ctx.input(|input| input.pointer.any_pressed())
-                && content_ui
-                    .ctx()
-                    .input(|input| input.pointer.interact_pos())
-                    .is_some_and(|at| {
-                        let at = transform.inverse() * at;
-                        content.contains(at) && visible.contains(at)
-                    })
-                && over_canvas;
-            if pressed_inside {
-                clicked_node = Some(id);
-            }
-
-            // Resize handle.
-            let grip = Rect::from_min_max(card.max - vec2(14.0, 14.0), card.max);
-            let grip_response =
-                scene_ui.interact(grip, Id::unique(("sue-node-grip", id.0)), Sense::drag());
-            if grip_response.hovered() || grip_response.dragged() {
-                ctx.set_cursor_icon(egui::CursorIcon::ResizeNwSe);
-            }
-            if grip_response.drag_started() {
-                self.node_drag = Some(NodeDrag {
-                    node: id,
-                    from: card,
-                    resize: true,
-                });
-            }
-            if grip_response.dragged()
-                && let Some(live) = io.world.scene.get_mut(id)
-            {
-                let size = (live.rect.size() + grip_response.drag_delta()).max(vec2(180.0, 110.0));
-                live.rect = Rect::from_min_size(live.rect.min, size);
-            }
-            // Border on top of the content.
-            let border = if selected {
-                Stroke::new(hair * 1.5, theme.border_active)
-            } else {
-                Stroke::new(hair, theme.border)
-            };
-            scene_ui
-                .painter()
-                .rect_stroke(card, radius, border, StrokeKind::Inside);
-            for step in [4.0, 8.0] {
-                scene_ui.painter().line_segment(
-                    [
-                        pos2(card.right() - step - 3.0, card.bottom() - 3.0),
-                        pos2(card.right() - 3.0, card.bottom() - step - 3.0),
-                    ],
-                    Stroke::new(hair, theme.muted),
-                );
-            }
-        }
-        // A finished move or resize becomes one undo step.
-        if let Some(drag) = self.node_drag
-            && !ctx.input(|input| input.pointer.primary_down())
-        {
-            self.node_drag = None;
-            if let Some(node) = io.world.scene.get(drag.node)
-                && node.rect != drag.from
-            {
-                io.typing.flush(io.history);
-                io.history
-                    .record(SetNodeRect::new(drag.node, drag.from, node.rect));
-            }
-        }
-        if let Some(node) = clicked_node {
-            self.select(Some(node), io.world);
-        } else if background.clicked() && !modal {
-            self.select(None, io.world);
-        }
-    }
-
-    // ----- Rails, drawers, status ----------------------------------------------
-
-    fn rail_ui(
-        &mut self,
-        root: &mut Ui,
-        rect: Rect,
-        left: bool,
-        io: &mut ShellIo<'_>,
-        theme: &Theme,
-    ) {
-        let role = if left {
-            AppletRole::LeftDrawer
-        } else {
-            AppletRole::RightDrawer
-        };
-        let entries: Vec<(AppletId, String, String)> = io
-            .applets
-            .with_role(role)
-            .map(|manifest| {
-                (
-                    manifest.id.clone(),
-                    manifest.icon.clone(),
-                    manifest.name.clone(),
-                )
-            })
-            .collect();
-        let mut rect = rect;
-        if left {
-            // The Sue button, top left in the canvas and in every studio:
-            // the Sue menu, built for what is in focus.
-            let button = Rect::from_min_size(rect.min, vec2(rect.width(), rect.width() + 4.0));
-            let response = root
-                .interact(button, Id::unique("sue-button"), Sense::click())
-                .on_hover_text(
-                    "Sue: projects, files, and sending what you work on to other studios",
-                );
-            let open = self.radial.is_some()
-                && self.radial_page != RadialPage::Root
-                && matches!(self.radial_page, RadialPage::Sue | RadialPage::Wheel(_));
-            let painter = root.painter();
-            let face = button.shrink(5.0);
-            painter.rect_filled(
-                face,
-                theme.control_radius,
-                if open || response.hovered() {
-                    theme.active
-                } else {
-                    theme.pill
-                },
-            );
-            painter.rect_stroke(
-                face,
-                theme.control_radius,
-                if open {
-                    theme.hairline_active()
-                } else {
-                    theme.hairline()
-                },
-                egui::StrokeKind::Inside,
-            );
-            // Sue's silhouette, in the theme's text color ("Sue" without a GPU).
-            if !crate::brand::mark(painter, &mut *io.textures, face.shrink(3.0), theme.text) {
-                painter.text(
-                    face.center(),
-                    Align2::CENTER_CENTER,
-                    "Sue",
-                    theme.font(theme.small_size + 0.5),
-                    theme.text,
-                );
-            }
-            if response.clicked() {
-                if open {
-                    self.dismiss_overlays();
-                } else {
-                    self.open_sue_menu(io, root.max_rect());
-                }
-            }
-            painter.hline(rect.x_range(), button.bottom(), theme.hairline());
-            rect.min.y = button.bottom() + 2.0;
-        }
-        let mut ui = root.new_child(
-            UiBuilder::new()
-                .max_rect(rect)
-                .layout(Layout::top_down(Align::Center)),
-        );
-        ui.spacing_mut().item_spacing.y = 2.0;
-        let drawer = if left { &self.left } else { &self.right };
-        let mut clicked = None;
-        for (id, icon, name) in entries {
-            let chosen = drawer.open && drawer.shown.as_ref() == Some(&id);
-            if widgets::rail_button(&mut ui, &icon, &name, chosen, left, theme).clicked() {
-                clicked = Some(id);
-            }
-        }
-        if let Some(id) = clicked {
-            self.toggle_drawer_applet(&id, io.applets);
-        }
-        if left {
-            // Settings at the foot of the left rail.
-            let gear =
-                Rect::from_min_max(pos2(rect.left(), rect.bottom() - rect.width()), rect.max);
-            let mut foot = root.new_child(UiBuilder::new().max_rect(gear));
-            let open = self.window.is_some() && self.window_appear.target() > 0.0;
-            if widgets::rail_button(
-                &mut foot,
-                "\u{2699}",
-                "Settings (Ctrl+,)",
-                open,
-                true,
-                theme,
-            )
-            .clicked()
-            {
-                if open {
-                    self.close_window();
-                } else {
-                    io.requests.push(ShellRequest::OpenSettings(None));
-                }
-            }
-        }
-    }
-
-    #[allow(clippy::too_many_arguments, reason = "a drawer and where it is")]
-    fn drawer_ui(
-        &mut self,
-        root: &mut Ui,
-        visible: Rect,
-        full: Rect,
-        left: bool,
-        io: &mut ShellIo<'_>,
-        theme: &Theme,
-        now: Instant,
-        dt: f32,
-    ) {
-        if visible.width() < 0.5 {
-            return;
-        }
-        let drawer = if left { &self.left } else { &self.right };
-        let Some(id) = drawer.shown.clone() else {
-            return;
-        };
-        let painter = root.painter().with_clip_rect(visible);
-        painter.rect_filled(full, 0.0, theme.panel);
-        let edge = if left {
-            visible.right()
-        } else {
-            visible.left()
-        };
-        root.painter()
-            .vline(edge, visible.y_range(), theme.hairline());
-        let mut ui = root.new_child(
-            UiBuilder::new()
-                .max_rect(full.shrink(theme.padding))
-                .id_salt(("sue-drawer", id.as_str()))
-                .layout(Layout::top_down(Align::Min)),
-        );
-        ui.set_clip_rect(visible);
-        let name = io
-            .applets
-            .manifest(&id)
-            .map_or_else(String::new, |manifest| manifest.name.clone());
-        let mut close = false;
-        ui.horizontal(|ui| {
-            widgets::heading(ui, &name, theme);
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui
-                    .add(
-                        egui::Button::new(
-                            RichText::new("\u{00D7}")
-                                .size(theme.ui_size * 1.3)
-                                .color(theme.muted),
-                        )
-                        .frame(false),
-                    )
-                    .on_hover_text("Close")
-                    .clicked()
-                {
-                    close = true;
-                }
-            });
-        });
-        ui.add_space(theme.padding * 0.5);
-        let view = self.view(now, dt);
-        ScrollArea::vertical()
-            .id_salt(("sue-drawer-scroll", id.as_str()))
-            .auto_shrink([false, false])
-            .show(&mut ui, |ui| {
-                let (applets, mut cx) = split(io, theme, view);
-                if let Some(applet) = applets.get_mut(&id) {
-                    applet.drawer_ui(ui, &mut cx);
-                }
-            });
-        if close {
-            self.toggle_drawer_applet(&id, io.applets);
+            self.close_window();
         }
     }
 
     fn status_ui(&mut self, root: &mut Ui, rect: Rect, io: &mut ShellIo<'_>, theme: &Theme) {
         let painter = root.painter().with_clip_rect(rect);
+        painter.rect_filled(rect, 0.0, theme.panel);
+        painter.hline(rect.x_range(), rect.top(), theme.hairline());
         let font = theme.font(theme.small_size);
-        // Hub, at the far left, so every studio can reach it.
-        let hub_text = painter.layout_no_wrap("Hub".to_owned(), font.clone(), theme.text);
-        let hub = Rect::from_min_size(
-            rect.min,
-            vec2(hub_text.size().x + theme.padding * 2.0, rect.height()),
-        );
-        let response = root
-            .interact(hub, Id::unique("sue-status-hub"), Sense::click())
-            .on_hover_text("Every studio you can work in");
-        if response.hovered() || self.hub {
-            painter.rect_filled(hub, 0.0, theme.hover);
-        }
-        painter.galley(
-            pos2(
-                hub.left() + theme.padding,
-                rect.center().y - hub_text.size().y / 2.0,
-            ),
-            hub_text,
-            theme.text,
-        );
-        painter.vline(
-            hub.right(),
-            rect.shrink2(vec2(0.0, 5.0)).y_range(),
-            theme.hairline(),
-        );
-        if response.clicked() {
-            let open = !self.hub;
-            self.set_hub(open);
-        }
-        // Command, for the palette everywhere (studios may keep Tab).
-        let command_text = painter.layout_no_wrap("Command".to_owned(), font.clone(), theme.text);
-        let command = Rect::from_min_size(
-            pos2(hub.right(), rect.top()),
-            vec2(command_text.size().x + theme.padding * 2.0, rect.height()),
-        );
-        let command_response = root
-            .interact(command, Id::unique("sue-status-command"), Sense::click())
-            .on_hover_text("The command palette");
-        if command_response.hovered() || self.palette.is_some() {
-            painter.rect_filled(command, 0.0, theme.hover);
-        }
-        painter.galley(
-            pos2(
-                command.left() + theme.padding,
-                rect.center().y - command_text.size().y / 2.0,
-            ),
-            command_text,
-            theme.text,
-        );
-        painter.vline(
-            command.right(),
-            rect.shrink2(vec2(0.0, 5.0)).y_range(),
-            theme.hairline(),
-        );
-        if command_response.clicked() {
-            self.open_palette();
-        }
-        let hub = command;
-        let rect = Rect::from_min_max(pos2(hub.right(), rect.top()), rect.max);
-        let mode_label = Self::mode_buttons(io.applets)
-            .into_iter()
-            .find(|mode| mode.id == self.mode)
-            .map_or_else(|| "Canvas".to_owned(), |mode| mode.label);
-        let selection = self
-            .selected
-            .and_then(|node| io.world.scene.get(node))
-            .and_then(|node| io.world.arena.get(node.entity).ok())
-            .map(|entity| entity.name().to_owned());
-        let mut left = mode_label;
-        if let Some(name) = selection {
-            left.push_str("    ");
-            left.push_str(&name);
-        }
+        let place = self
+            .page
+            .as_ref()
+            .and_then(|page| io.applets.manifest(page))
+            .map_or_else(|| "Hub".to_owned(), |manifest| manifest.name.clone());
         let placed = painter.text(
             rect.left_center() + vec2(theme.padding, 0.0),
             Align2::LEFT_CENTER,
-            left,
+            place,
             font.clone(),
             theme.muted,
         );
@@ -2792,7 +1594,6 @@ impl Shell {
             format!("{} entities", io.world.arena.len()),
             format!("Undo {}", io.history.depth()),
             profile_label(self.profile),
-            format!("{:.0}%", self.camera.zoom() * 100.0),
             match io.fps {
                 Some(fps) if self.animating => format!("{fps} FPS"),
                 _ => "Idle".to_owned(),
@@ -2800,7 +1601,7 @@ impl Shell {
         ];
         let mut x = rect.right() - theme.padding;
         // From the right; on a narrow screen the ones that would run into
-        // the mode's name are left out.
+        // the page's name are left out.
         for (index, item) in items.iter().enumerate().rev() {
             let width = painter
                 .layout_no_wrap(item.clone(), font.clone(), theme.muted)
@@ -2867,622 +1668,49 @@ impl Shell {
         }
     }
 
-    // ----- Timeline dock ----------------------------------------------------------
+    // ----- Palette and window -------------------------------------------------
 
-    fn timeline_dock(
-        &mut self,
-        root: &mut Ui,
-        visible: Rect,
-        full: Rect,
-        io: &mut ShellIo<'_>,
-        theme: &Theme,
-        now: Instant,
-    ) {
-        // Lanes by title, in applet order; applets may share one.
-        let mut titles: Vec<String> = Vec::new();
-        let mut lanes: Vec<(AppletId, usize)> = Vec::new();
-        for manifest in io.applets.manifests() {
-            if let Some(title) = &manifest.lane {
-                let index = titles
-                    .iter()
-                    .position(|seen| seen == title)
-                    .unwrap_or_else(|| {
-                        titles.push(title.clone());
-                        titles.len() - 1
-                    });
-                lanes.push((manifest.id.clone(), index));
-            }
-        }
-        let blocks: Vec<Block> = io
-            .world
-            .scene
-            .iter()
-            .filter_map(|(id, node)| {
-                let entity = io.world.arena.get(node.entity).ok()?;
-                if !entity.projections().contains(Projection::Timeline) {
-                    return None;
-                }
-                let lane = lanes
-                    .iter()
-                    .find(|(applet, _)| applet == &node.applet)
-                    .map(|(_, lane)| *lane)?;
-                let duration = io
-                    .applets
-                    .get(&node.applet)
-                    .map_or(4.0, |applet| applet.duration(node, io.world));
-                Some(Block {
-                    node: id,
-                    lane,
-                    start: node.prop("t0", 0.0),
-                    duration,
-                    label: entity.name().to_owned(),
-                    selected: self.selected == Some(id),
-                })
-            })
-            .collect();
-        let mut ui = root.new_child(UiBuilder::new().max_rect(full).id_salt("sue-timeline"));
-        ui.set_clip_rect(visible);
-        let events = timeline_ui(&mut ui, full, &mut self.timeline, &titles, &blocks, theme);
-        for event in events {
-            match event {
-                TimelineEvent::Seek(at) => {
-                    self.timeline.playhead = at;
-                    self.timeline_clip = None;
-                    if self.timeline.playing {
-                        self.sync_timeline_audio(io);
-                    }
-                }
-                TimelineEvent::TogglePlay => self.toggle_play(io),
-                TimelineEvent::Select(node) => self.select(Some(node), io.world),
-                TimelineEvent::Moved { node, to, .. } => {
-                    io.typing.flush(io.history);
-                    let txn = SetNodeProp::new(node, "t0", Some(to), "Move on timeline");
-                    if let Err(error) = io.history.apply(io.world, txn) {
-                        self.notify(format!("Could not move it: {error}"), true);
-                    }
-                }
-            }
-            self.touch();
-        }
-        let _ = now;
-    }
-
-    // ----- Floating pills -----------------------------------------------------------
-
-    fn top_pill_ui(&mut self, ctx: &egui::Context, theme: &Theme) {
-        let appear = self.top_pill.position().clamp(0.0, 1.0);
-        let at = pos2(
-            self.canvas.center().x,
-            self.canvas.top() + theme.padding * 1.5 - (1.0 - appear) * 16.0,
-        );
-        let mut hub = false;
-        let mut palette = false;
-        egui::Area::new(Id::unique("sue-top-pill"))
-            .order(Order::Foreground)
-            .pivot(Align2::CENTER_TOP)
-            .fixed_pos(at)
-            .show(ctx, |ui| {
-                ui.set_opacity(appear);
-                widgets::pill_frame(theme).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 2.0;
-                        if widgets::pill_button(ui, "Hub", self.hub, theme)
-                            .on_hover_text("Every studio you can work in")
-                            .clicked()
-                        {
-                            hub = true;
-                        }
-                        widgets::pill_divider(ui, theme);
-                        let hint = format!("Command ({})", self.config.keymap.command_palette);
-                        if widgets::pill_button(ui, &hint, self.palette.is_some(), theme).clicked()
-                        {
-                            palette = true;
-                        }
-                    });
-                });
-            });
-        if hub {
-            let open = !self.hub;
-            self.set_hub(open);
-        }
-        if palette {
-            self.open_palette();
-        }
-    }
-
-    /// The places the Hub offers: the canvas, then every studio, as
-    /// (mode, name, icon, summary).
-    fn hub_places(applets: &Applets) -> Vec<(String, String, String, String)> {
-        let mut places = vec![(
-            CANVAS_MODE.to_owned(),
-            "Canvas".to_owned(),
-            "\u{221E}".to_owned(),
-            "Every file of the project, side by side on one endless surface".to_owned(),
-        )];
-        let mut studios: Vec<_> = applets
-            .manifests()
-            .filter(|manifest| manifest.role == AppletRole::Studio)
-            .collect();
-        studios.sort_by_key(|manifest| manifest.order);
-        places.extend(studios.into_iter().map(|manifest| {
-            (
-                manifest.id.as_str().to_owned(),
-                manifest.name.clone(),
-                manifest.icon.clone(),
-                manifest.summary.clone(),
-            )
-        }));
-        places
-    }
-
-    /// The Hub: a card for the canvas and for each studio, over a scrim.
-    fn hub_ui(
-        &mut self,
-        ctx: &egui::Context,
-        screen: Rect,
-        io: &mut ShellIo<'_>,
-        theme: &Theme,
-        now: Instant,
-    ) {
-        let appear = self.hub_appear.position().clamp(0.0, 1.0);
-        if appear <= 0.01 && !self.hub {
-            return;
-        }
-        let scrim = egui::Area::new(Id::unique("sue-hub-scrim"))
-            .order(Order::Middle)
-            .fixed_pos(screen.min)
-            .show(ctx, |ui| {
-                let response = ui.allocate_rect(screen, Sense::click());
-                ui.painter()
-                    .rect_filled(screen, 0.0, theme.shadow.gamma_multiply(0.55 * appear));
-                response.clicked()
-            })
-            .inner;
-        if scrim && self.hub {
-            self.set_hub(false);
-        }
-        let places = Self::hub_places(io.applets);
-        let gap = theme.padding * 2.0;
-        // A phone gets two columns of smaller cards, so all fit.
-        let narrow = screen.width() < 560.0;
-        let card = if narrow {
-            vec2(
-                ((screen.width() - 32.0 - theme.padding * 4.0 - gap) / 2.0).max(120.0),
-                184.0,
-            )
-        } else {
-            vec2(220.0, 168.0)
-        };
-        let margin = if narrow { 24.0 } else { 96.0 };
-        let fit = ((screen.width() - margin + gap) / (card.x + gap))
-            .floor()
-            .max(1.0) as usize;
-        let columns = fit.clamp(1, places.len().max(1));
-        let current = if self.studio.is_some() {
-            self.mode.clone()
-        } else {
-            CANVAS_MODE.to_owned()
-        };
-        let width = columns as f32 * card.x + (columns as f32 - 1.0) * gap + theme.padding * 4.0;
-        let at = pos2(
-            screen.center().x - width / 2.0,
-            screen.top()
-                + (screen.height() * if narrow { 0.08 } else { 0.22 }).min(180.0)
-                + (1.0 - appear) * 22.0,
-        );
-        let mut picked = None;
-        egui::Area::new(Id::unique("sue-hub"))
-            .order(Order::Foreground)
-            .fixed_pos(at)
-            .interactable(appear > 0.3)
-            .show(ctx, |ui| {
-                ui.set_opacity(appear);
-                widgets::window_frame(theme)
-                    .inner_margin(egui::Margin::same((theme.padding * 2.0) as i8))
-                    .show(ui, |ui| {
-                        ui.set_width(width - theme.padding * 4.0);
-                        ui.horizontal(|ui| {
-                            let (mark, _) = ui.allocate_exact_size(
-                                Vec2::splat(theme.heading_size + 6.0),
-                                Sense::hover(),
-                            );
-                            crate::brand::mark(ui.painter(), &mut *io.textures, mark, theme.text);
-                            ui.label(
-                                RichText::new("Hub")
-                                    .size(theme.heading_size)
-                                    .color(theme.text),
-                            );
-                        });
-                        ui.label(
-                            RichText::new("Choose where to work. Esc goes back.")
-                                .size(theme.small_size)
-                                .color(theme.muted),
-                        );
-                        ui.add_space(theme.padding * 1.5);
-                        for row in places.chunks(columns) {
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = gap;
-                                for (id, name, icon, summary) in row {
-                                    if Self::hub_card(
-                                        ui,
-                                        card,
-                                        (name, icon, summary),
-                                        *id == current,
-                                        theme,
-                                    ) {
-                                        picked = Some(id.clone());
-                                    }
-                                }
-                            });
-                            ui.add_space(gap / 2.0);
-                        }
-                    });
-            });
-        if let Some(id) = picked {
-            self.set_hub(false);
-            if id == CANVAS_MODE {
-                if self.studio.is_some() {
-                    self.close_studio(io, true);
-                } else {
-                    self.set_mode(CANVAS_MODE, io, now);
-                }
-            } else {
-                self.set_mode(&id, io, now);
-            }
-        }
-    }
-
-    /// One card of the Hub. Returns whether it was clicked.
-    fn hub_card(
-        ui: &mut Ui,
-        size: Vec2,
-        (name, icon, summary): (&str, &str, &str),
-        current: bool,
-        theme: &Theme,
-    ) -> bool {
-        let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-        let hovered = response.hovered();
-        let fill = if hovered {
-            theme.hover
-        } else if current {
-            theme.active
-        } else {
-            theme.pill
-        };
-        let painter = ui.painter();
-        painter.rect(
-            rect,
-            theme.control_radius * 2.0,
-            fill,
-            egui::Stroke::new(
-                theme.border_width.max(1.0),
-                if current || hovered {
-                    theme.border_active
-                } else {
-                    theme.border
-                },
-            ),
-            egui::StrokeKind::Inside,
-        );
-        painter.text(
-            rect.left_top() + vec2(18.0, 16.0),
-            Align2::LEFT_TOP,
-            icon,
-            theme.font(theme.heading_size * 1.8),
-            theme.text,
-        );
-        painter.text(
-            rect.left_top() + vec2(18.0, 76.0),
-            Align2::LEFT_TOP,
-            name,
-            theme.font(theme.ui_size * 1.2),
-            theme.text,
-        );
-        let galley = painter.layout(
-            summary.to_owned(),
-            theme.font(theme.small_size),
-            theme.muted,
-            rect.width() - 36.0,
-        );
-        painter.galley(rect.left_top() + vec2(18.0, 102.0), galley, theme.muted);
-        if current {
-            painter.text(
-                rect.right_top() + vec2(-14.0, 16.0),
-                Align2::RIGHT_TOP,
-                "Open now",
-                theme.font(theme.small_size),
-                theme.muted,
-            );
-        }
-        response
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .clicked()
-    }
-
-    fn selection_pill_ui(
-        &mut self,
-        ctx: &egui::Context,
-        io: &mut ShellIo<'_>,
-        theme: &Theme,
-        now: Instant,
-        dt: f32,
-    ) {
-        let Some(node) = self.pill.node else {
-            return;
-        };
-        let Some(applet) = io.world.scene.get(node).map(|n| n.applet.clone()) else {
-            self.pill.node = None;
-            return;
-        };
-        let Some(anchor) = self.pill_anchor(node, io.world) else {
-            return;
-        };
-        self.pill.anchor = Some(anchor);
-        let appear = self.pill.appear.position().clamp(0.0, 1.0);
-        let at = anchor
-            + vec2(self.pill.glide_x.position(), self.pill.glide_y.position())
-            + vec2(0.0, (1.0 - appear) * 10.0);
-        let view = self.view(now, dt);
-        egui::Area::new(Id::unique("sue-selection-pill"))
-            .order(Order::Foreground)
-            .pivot(Align2::CENTER_BOTTOM)
-            .fixed_pos(at)
-            .interactable(appear > 0.5)
-            .show(ctx, |ui| {
-                ui.set_opacity(appear);
-                widgets::pill_frame(theme).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 2.0;
-                        let (applets, mut cx) = split(io, theme, view);
-                        if let Some(applet) = applets.get_mut(&applet) {
-                            applet.pill_ui(ui, node, &mut cx);
-                        }
-                    });
-                });
-            });
-    }
-
-    // ----- Marking menu, palette, window --------------------------------------------
-
-    /// Where the next wheel grows: around wedge `index` of `count`, kept on
-    /// screen.
-    fn next_wheel(radial: &Radial, index: usize, count: usize, radius: f32, screen: Rect) -> Pos2 {
-        let at = wedge_point(radial.center, index, count, radius * 1.4);
-        let margin = radius + 8.0;
-        pos2(
-            at.x.clamp(
-                screen.left() + margin,
-                (screen.right() - margin).max(screen.left() + margin),
-            ),
-            at.y.clamp(
-                screen.top() + margin,
-                (screen.bottom() - margin).max(screen.top() + margin),
-            ),
-        )
-    }
-
-    /// Opens the New File wheel of an open marking menu, and the wheel of
-    /// `kind` in it (scripted runs and snapshots).
-    pub fn radial_new_file(&mut self, kind: Option<&str>, applets: &Applets) {
-        let radius = self.config.radial_radius;
-        let screen = self.studio_area;
-        self.radial_page = RadialPage::Root;
-        let mut path = vec![(0, RadialPage::Kinds)];
-        if let Some(kind) = kind {
-            self.radial_page = RadialPage::Kinds;
-            let kinds = self.radial_items(applets);
-            if let Some(index) = kinds.iter().position(|(label, _)| label.starts_with(kind)) {
-                path.push((index, RadialPage::Templates(kind.to_owned())));
-            }
-            self.radial_page = RadialPage::Root;
-        }
-        for (index, page) in path {
-            let count = self.radial_items(applets).len();
-            if let Some(radial) = self.radial.as_mut() {
-                let center = Self::next_wheel(radial, index, count, radius, screen);
-                radial.descend(center);
-            }
-            self.radial_page = page;
-        }
-        self.touch();
-    }
-
-    /// Every applet's file templates, in applet order.
-    fn templates(applets: &Applets) -> Vec<(AppletId, crate::FileTemplate)> {
-        applets
-            .manifests()
-            .flat_map(|manifest| {
-                applets
-                    .get(&manifest.id)
-                    .map(|applet| applet.templates())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|template| (manifest.id.clone(), template))
-            })
-            .collect()
-    }
-
-    /// The wedges of the wheel showing now.
-    fn radial_items(&self, applets: &Applets) -> Vec<(String, RadialAction)> {
-        match &self.radial_page {
-            RadialPage::Root => {
-                let mut items = Vec::new();
-                if let Some(node) = self.radial_node {
-                    items.push(("Delete".to_owned(), RadialAction::Remove(node)));
-                }
-                items.extend([
-                    (
-                        "New File \u{203a}".to_owned(),
-                        RadialAction::Open(RadialPage::Kinds),
-                    ),
-                    (
-                        "Open File".to_owned(),
-                        RadialAction::Request(ShellRequest::Command("file.open".to_owned())),
-                    ),
-                ]);
-                for manifest in applets.with_role(AppletRole::Studio) {
-                    if let Some(mode) = &manifest.mode {
-                        items.push((
-                            mode.label.clone(),
-                            RadialAction::Request(ShellRequest::Mode(
-                                manifest.id.as_str().to_owned(),
-                            )),
-                        ));
-                    }
-                }
-                items.push((
-                    "Hub".to_owned(),
-                    RadialAction::Request(ShellRequest::Hub(true)),
-                ));
-                items.push((
-                    "Command Palette".to_owned(),
-                    RadialAction::Request(ShellRequest::Palette),
-                ));
-                items.push((
-                    "Reset Camera".to_owned(),
-                    RadialAction::Request(ShellRequest::ResetCamera),
-                ));
-                items
-            }
-            RadialPage::Kinds => {
-                let mut kinds: Vec<String> = Vec::new();
-                for (_, template) in Self::templates(applets) {
-                    if !kinds.contains(&template.category) {
-                        kinds.push(template.category);
-                    }
-                }
-                kinds
-                    .into_iter()
-                    .map(|kind| {
-                        (
-                            format!("{kind} \u{203a}"),
-                            RadialAction::Open(RadialPage::Templates(kind)),
-                        )
-                    })
-                    .collect()
-            }
-            RadialPage::Sue | RadialPage::Wheel(_) => self.radial_items_now(),
-            RadialPage::Templates(kind) => Self::templates(applets)
-                .into_iter()
-                .filter(|(_, template)| &template.category == kind)
-                .map(|(id, template)| (template.label, RadialAction::Template(id, template.key)))
-                .collect(),
-        }
-    }
-
-    fn radial_ui(
-        &mut self,
-        ctx: &egui::Context,
-        screen: Rect,
-        io: &mut ShellIo<'_>,
-        theme: &Theme,
-        now: Instant,
-    ) {
-        let items = self.radial_items(io.applets);
-        let radius = self.config.radial_radius;
-        let Some(mut radial) = self.radial.take() else {
-            return;
-        };
-        let labels: Vec<String> = items.iter().map(|(label, _)| label.clone()).collect();
-        let canvas_point = radial.canvas_point;
-        let outcome = radial.ui(ctx, screen, &labels, radius, theme);
-        self.touch();
-        match outcome {
-            RadialOutcome::Picked(index) => {
-                let Some((_, action)) = items.into_iter().nth(index) else {
-                    self.radial = Some(radial);
-                    return;
-                };
-                match action {
-                    RadialAction::Open(page) => {
-                        radial.descend(Self::next_wheel(
-                            &radial,
-                            index,
-                            labels.len(),
-                            radius,
-                            screen,
-                        ));
-                        self.radial_back.push(self.radial_page.clone());
-                        self.radial_page = page;
-                    }
-                    RadialAction::Remove(node) => {
-                        radial.close();
-                        self.radial_page = RadialPage::Root;
-                        io.typing.flush(io.history);
-                        match io.history.apply(io.world, RemoveNode::new(node)) {
-                            Ok(_) => self.notify("Deleted (Ctrl+Z brings it back)", false),
-                            Err(error) => {
-                                self.notify(format!("Could not delete it: {error}"), true)
-                            }
-                        }
-                        self.select(None, io.world);
-                    }
-                    RadialAction::Template(id, key) => {
-                        radial.close();
-                        self.radial_page = RadialPage::Root;
-                        if let Some(node) = self.create(&id, &key, Some(canvas_point), io, now) {
-                            self.select(Some(node), io.world);
-                        }
-                    }
-                    RadialAction::Request(request) => {
-                        radial.close();
-                        self.radial_page = RadialPage::Root;
-                        match request {
-                            ShellRequest::Timeline(_) => {
-                                let open = !self.timeline_open;
-                                self.set_timeline(open);
-                            }
-                            other => {
-                                if let Some(request) = self.handle(other, io, now) {
-                                    io.requests.push(request);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            RadialOutcome::Back => {
-                radial.ascend();
-                self.radial_page = self.radial_back.pop().unwrap_or(match &self.radial_page {
-                    RadialPage::Templates(_) => RadialPage::Kinds,
-                    _ => RadialPage::Root,
-                });
-            }
-            RadialOutcome::Dismissed => self.radial_page = RadialPage::Root,
-            RadialOutcome::Open => {}
-        }
-        if self.radial.is_none() {
-            self.radial = Some(radial);
-        }
-    }
-
-    /// Every palette entry: shell actions, modes, spawns, drawers and the
-    /// applets' own commands.
-    fn palette_entries(&self, applets: &Applets) -> Vec<(PaletteEntry, PaletteAction)> {
+    /// Every palette entry: the Hub, every studio and tool, the pin, Sue's
+    /// own actions, new files and the applets' own commands.
+    fn palette_entries(&self, io: &ShellIo<'_>) -> Vec<(PaletteEntry, PaletteAction)> {
         let keymap = &self.config.keymap;
-        let mut entries = vec![
-            (
-                entry("Toggle Left Drawer", keymap.toggle_left_drawer.to_string()),
-                PaletteAction::Drawer(true),
-            ),
-            (
-                entry(
-                    "Toggle Right Drawer",
-                    keymap.toggle_right_drawer.to_string(),
-                ),
-                PaletteAction::Drawer(false),
-            ),
-            (
-                entry("Toggle Timeline", keymap.toggle_timeline.to_string()),
-                PaletteAction::Request(ShellRequest::Timeline(!self.timeline_open)),
-            ),
+        let request = PaletteAction::Request;
+        let command = |name: &str| request(ShellRequest::Command(name.to_owned()));
+        let mut entries = vec![(
+            entry("Go to the Hub", String::new()),
+            request(ShellRequest::Hub),
+        )];
+        for manifest in io.applets.manifests() {
+            if manifest.role.is_page() {
+                entries.push((
+                    entry(&format!("Open {}", manifest.name), String::new()),
+                    request(ShellRequest::Open(manifest.id.clone())),
+                ));
+            }
+        }
+        let pinned = pinned(&io.world.rice, io.applets);
+        if let Some(page) = self.page.clone()
+            && pinned.as_ref() != Some(&page)
+        {
+            let name = io
+                .applets
+                .manifest(&page)
+                .map_or_else(String::new, |manifest| manifest.name.clone());
+            entries.push((
+                entry(&format!("Pin {name}: Open It at Launch"), String::new()),
+                request(ShellRequest::Pin(Some(page))),
+            ));
+        }
+        if pinned.is_some() {
+            entries.push((
+                entry("Unpin: Open the Hub at Launch", String::new()),
+                request(ShellRequest::Pin(None)),
+            ));
+        }
+        entries.extend([
             (
                 entry("Open Settings", keymap.open_settings.to_string()),
-                PaletteAction::Request(ShellRequest::OpenSettings(None)),
-            ),
-            (
-                entry("Reset Camera", keymap.reset_camera.to_string()),
-                PaletteAction::Request(ShellRequest::ResetCamera),
+                request(ShellRequest::OpenSettings(None)),
             ),
             (
                 entry("Undo", keymap.undo.to_string()),
@@ -3494,67 +1722,41 @@ impl Shell {
             ),
             (
                 entry("Open File", keymap.open_file.to_string()),
-                PaletteAction::Request(ShellRequest::Command("file.open".to_owned())),
+                command("file.open"),
+            ),
+            (
+                entry("Open Project", String::new()),
+                request(ShellRequest::PickFile(
+                    FilePick::open(None, "open", "Open Project").extensions(&["sue"]),
+                )),
             ),
             (
                 entry("Save Project", keymap.save.to_string()),
-                PaletteAction::Request(ShellRequest::Command("file.save".to_owned())),
+                command("file.save"),
             ),
             (
                 entry("Save Project As", String::new()),
-                PaletteAction::Request(ShellRequest::Command("file.save_as".to_owned())),
+                command("file.save_as"),
             ),
             (
                 entry("Quit Sue", keymap.quit.to_string()),
-                PaletteAction::Request(ShellRequest::Command("app.quit".to_owned())),
+                command("app.quit"),
             ),
-        ];
-        for mode in Self::mode_buttons(applets) {
-            entries.push((
-                entry(&format!("Mode: {}", mode.label), String::new()),
-                PaletteAction::Request(ShellRequest::Mode(mode.id)),
-            ));
-        }
-        for manifest in applets.manifests() {
-            if let Some(mode) = manifest.mode.as_ref().filter(|mode| !mode.in_pill) {
-                entries.push((
-                    entry(&format!("Mode: {}", mode.label), String::new()),
-                    PaletteAction::Request(ShellRequest::Mode(manifest.id.as_str().to_owned())),
-                ));
-            }
-            if matches!(
-                manifest.role,
-                AppletRole::LeftDrawer | AppletRole::RightDrawer
-            ) {
-                entries.push((
-                    entry(&format!("Show {}", manifest.name), String::new()),
-                    PaletteAction::Request(ShellRequest::ShowDrawer(manifest.id.clone())),
-                ));
-            }
-        }
-        for (applet, template) in Self::templates(applets) {
+        ]);
+        for (applet, template) in templates(io.applets) {
             entries.push((
                 entry(
                     &format!("New {}: {}", template.category, template.label),
                     String::new(),
                 ),
-                PaletteAction::Request(ShellRequest::Create {
+                request(ShellRequest::Create {
                     applet,
                     key: template.key,
                 }),
             ));
         }
-        if self.selected.is_some() {
-            entries.push((
-                entry("Remove Selection from Canvas", keymap.delete.to_string()),
-                PaletteAction::RemoveSelection,
-            ));
-        }
-        for manifest in applets.manifests() {
-            let commands = applets
-                .get(&manifest.id)
-                .map_or_else(Vec::new, |applet| applet.commands());
-            for command in commands {
+        for (manifest, applet) in io.applets.iter() {
+            for command in applet.commands() {
                 entries.push((
                     PaletteEntry {
                         label: format!("{}: {}", manifest.name, command.label),
@@ -3578,14 +1780,14 @@ impl Shell {
         if self.palette.is_none() {
             return;
         }
-        let entries = self.palette_entries(io.applets);
+        let entries = self.palette_entries(io);
         let shown: Vec<PaletteEntry> = entries.iter().map(|(entry, _)| entry.clone()).collect();
-        let canvas = self.canvas;
+        let area = self.page_rect;
         let outcome = self
             .palette
             .as_mut()
             .map_or(PaletteOutcome::Open, |palette| {
-                palette.ui(ctx, canvas, &shown, theme)
+                palette.ui(ctx, area, &shown, theme)
             });
         self.touch();
         if let PaletteOutcome::Run(index) = outcome
@@ -3597,15 +1799,7 @@ impl Shell {
                         io.requests.push(request);
                     }
                 }
-                PaletteAction::Drawer(left) => self.toggle_drawer(left, io.applets),
                 PaletteAction::Undo(redo) => self.undo(io, redo),
-                PaletteAction::RemoveSelection => {
-                    if let Some(node) = self.selected {
-                        io.typing.flush(io.history);
-                        let _ = io.history.apply(io.world, RemoveNode::new(node));
-                        self.select(None, io.world);
-                    }
-                }
                 PaletteAction::Applet(id, command) => {
                     let view = self.view(now, 0.0);
                     let (applets, mut cx) = split(io, theme, view);
@@ -3654,13 +1848,8 @@ impl Shell {
         let at = screen.center() - size / 2.0 + vec2(0.0, (1.0 - appear) * 18.0);
         let name = io
             .applets
-            .get(&id)
-            .and_then(|applet| applet.window_title())
-            .or_else(|| {
-                io.applets
-                    .manifest(&id)
-                    .map(|manifest| manifest.name.clone())
-            })
+            .manifest(&id)
+            .map(|manifest| manifest.name.clone())
             .unwrap_or_default();
         let view = self.view(now, dt);
         let mut close = false;
@@ -3744,49 +1933,14 @@ impl Shell {
         work(&mut cx)
     }
 
-    /// Moves the timeline playhead.
-    pub fn seek(&mut self, seconds: f64) {
-        self.timeline.playhead = seconds.max(0.0);
-        self.timeline_clip = None;
-        self.touch();
-    }
-
     /// Steps the shell's springs without drawing (headless scripted runs).
     pub fn settle(&mut self, dt: f32) -> bool {
         let mut moving = false;
-        for spring in [
-            &mut self.left.reveal,
-            &mut self.right.reveal,
-            &mut self.timeline_reveal,
-            &mut self.pill.appear,
-            &mut self.pill.glide_x,
-            &mut self.pill.glide_y,
-            &mut self.top_pill,
-            &mut self.window_appear,
-            &mut self.hub_appear,
-            &mut self.studio_reveal,
-        ] {
+        for spring in [&mut self.reveal, &mut self.window_appear] {
             moving |= spring.step(dt);
         }
-        moving |= self.camera.step(dt, self.canvas);
+        self.advance();
         moving
-    }
-
-    /// Sets the canvas area (headless runs that never draw).
-    pub fn set_canvas(&mut self, canvas: Rect) {
-        self.canvas = canvas;
-    }
-
-    /// The timeline's reveal, 0 to 1.
-    #[must_use]
-    pub fn timeline_reveal(&self) -> f32 {
-        self.timeline_reveal.position()
-    }
-
-    /// The left drawer's reveal, 0 to 1.
-    #[must_use]
-    pub fn left_reveal(&self) -> f32 {
-        self.left.reveal.position()
     }
 
     /// Duration of the grace period.
@@ -3801,73 +1955,5 @@ fn entry(label: &str, hint: String) -> PaletteEntry {
         label: label.to_owned(),
         command: label.to_owned(),
         hint,
-    }
-}
-
-/// What a palette entry does.
-#[derive(Clone, Debug, PartialEq)]
-enum PaletteAction {
-    Request(ShellRequest),
-    Drawer(bool),
-    Undo(bool),
-    RemoveSelection,
-    Applet(AppletId, String),
-}
-
-/// A non-destructive Timeline projection of `node`'s entity, placed after
-/// the last block in its lane, as one undo step; opens the timeline.
-pub fn project_to_timeline(cx: &mut AppletContext<'_>, node: NodeId, seconds: f64) {
-    let Some(scene_node) = cx.world.scene.get(node).cloned() else {
-        return;
-    };
-    let already = cx
-        .world
-        .arena
-        .get(scene_node.entity)
-        .is_ok_and(|entity| entity.projections().contains(Projection::Timeline));
-    let lane_end = cx
-        .world
-        .scene
-        .iter()
-        .filter(|(id, other)| *id != node && other.applet == scene_node.applet)
-        .filter(|(_, other)| {
-            cx.world
-                .arena
-                .get(other.entity)
-                .is_ok_and(|entity| entity.projections().contains(Projection::Timeline))
-        })
-        .map(|(_, other)| other.prop("t0", 0.0) + other.prop("dur", 4.0))
-        .fold(0.0_f64, f64::max);
-    let start = if already {
-        scene_node.prop("t0", 0.0)
-    } else {
-        lane_end
-    };
-    let mut batch = Batch::new("Project to Timeline")
-        .then(SetNodeProp::new(node, "t0", Some(start), "Timeline start"))
-        .then(SetNodeProp::new(
-            node,
-            "dur",
-            Some(seconds),
-            "Timeline length",
-        ));
-    if !already {
-        match TimeSpan::from_seconds(start, seconds.max(0.01)) {
-            Ok(span) => {
-                batch = batch.then(ArenaEdit(sue_core::txn::AttachProjection::new(
-                    scene_node.entity,
-                    Projection::Timeline,
-                    span,
-                )));
-            }
-            Err(error) => {
-                cx.fail(error.to_string());
-                return;
-            }
-        }
-    }
-    match cx.apply(batch) {
-        Ok(_) => cx.request(ShellRequest::Timeline(true)),
-        Err(error) => cx.fail(format!("Could not project it: {error}")),
     }
 }

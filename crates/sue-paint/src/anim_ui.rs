@@ -62,7 +62,6 @@ impl SuePaint {
         let timeline = anim::new_timeline(picture, fps, frames);
         if Self::apply(cx, timeline) {
             self.activate(&cx.world.arena, picture);
-            Self::place_picture(cx, picture);
             if let Some(layer) = doc::layers(&cx.world.arena, picture)
                 .into_iter()
                 .rev()

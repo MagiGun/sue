@@ -20,13 +20,6 @@ pub struct DirEntryInfo {
     pub modified: Option<SystemTime>,
 }
 
-/// Lists `dir`: folders first, then files, each sorted by name without
-/// regard to case. Names starting with a dot are skipped unless
-/// `show_hidden`. Entries that vanish or cannot be read while listing are
-/// left out.
-///
-/// # Errors
-/// If `dir` itself cannot be read.
 /// Compatibility junctions Windows keeps in every profile for programs from
 /// before Vista. They cannot be opened, so they are never listed unless hidden
 /// entries are shown.
@@ -43,29 +36,6 @@ const LEGACY_JUNCTIONS: [&str; 10] = [
     "Templates",
 ];
 
-/// The tops of the file systems: the drive letters in use on Windows, `/`
-/// elsewhere.
-#[must_use]
-pub fn roots() -> Vec<PathBuf> {
-    if cfg!(target_os = "android") {
-        // People's files (Download, Pictures, Documents) and Sue's own.
-        let mut roots = vec![PathBuf::from("/storage/emulated/0")];
-        roots.extend(
-            crate::PlatformPaths::detect()
-                .ok()
-                .map(|paths| paths.data_dir),
-        );
-        roots
-    } else if cfg!(windows) {
-        (b'A'..=b'Z')
-            .map(|letter| PathBuf::from(format!("{}:\\", char::from(letter))))
-            .filter(|drive| drive.is_dir())
-            .collect()
-    } else {
-        vec![PathBuf::from("/")]
-    }
-}
-
 /// `true` for entries the OS hides from people: dot files everywhere, and
 /// the legacy junctions on Windows.
 #[must_use]
@@ -73,6 +43,13 @@ pub fn hidden_by_os(name: &str) -> bool {
     name.starts_with('.') || (cfg!(windows) && LEGACY_JUNCTIONS.contains(&name))
 }
 
+/// Lists `dir`: folders first, then files, each sorted by name without
+/// regard to case. Names starting with a dot are skipped unless
+/// `show_hidden`. Entries that vanish or cannot be read while listing are
+/// left out.
+///
+/// # Errors
+/// If `dir` itself cannot be read.
 pub fn list_dir(dir: &Path, show_hidden: bool) -> io::Result<Vec<DirEntryInfo>> {
     let mut entries: Vec<DirEntryInfo> = fs::read_dir(dir)?
         .filter_map(Result::ok)

@@ -1,21 +1,13 @@
-//! `sue`: boots Sue on its infinite canvas in a native
-//! GPU window, or runs the headless self-check, or renders offscreen snapshots.
+//! `sue`: boots Sue on its Hub (or the studio or tool pinned there) in a
+//! native GPU window, or runs the headless self-check, or renders offscreen
+//! snapshots.
 //! The executable is [`cli`]; phones and tablets start [`run_window`] from
 //! their platform entry (`crates/sue-platform/android` on Android).
 
 mod applets;
-mod audio_node;
 mod convert;
 mod desktop;
-mod document;
 mod engine;
-mod files;
-mod hex;
-mod history;
-mod image;
-mod inspector;
-mod notes;
-mod player;
 mod runtime;
 mod selfcheck;
 mod settings;
@@ -34,7 +26,7 @@ use sue_platform::HeadlessHost;
 const USAGE: &str = "\
 Usage: sue [--self-check | --snapshot <dir> | --version | --help]
 
-  (no flags)        Open the Sue window (the infinite canvas)
+  (no flags)        Open the Sue window (the Hub)
   --self-check      Boot every subsystem headlessly and verify they work together
   --snapshot <dir>  Render the shell offscreen into PNG files in <dir>
   --version         Print the version

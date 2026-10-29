@@ -159,12 +159,16 @@ impl Applets {
             .map(|(_, applet)| applet.as_ref())
     }
 
-    /// The first node applet that accepts `entity`.
+    /// The first studio or tool that works on `entity`, studios first.
     #[must_use]
-    pub fn node_applet_for(&self, entity: &Entity) -> Option<AppletId> {
-        self.list
-            .iter()
-            .find(|(manifest, applet)| manifest.role == AppletRole::Node && applet.accepts(entity))
+    pub fn page_for(&self, entity: &Entity) -> Option<AppletId> {
+        [AppletRole::Studio, AppletRole::Tool]
+            .into_iter()
+            .find_map(|role| {
+                self.list
+                    .iter()
+                    .find(|(manifest, applet)| manifest.role == role && applet.accepts(entity))
+            })
             .map(|(manifest, _)| manifest.id.clone())
     }
     /// Every applet with its manifest.
@@ -189,43 +193,22 @@ impl Applets {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
-    use crate::{AppletContext, FileTemplate, ModeSpec};
+    use sue_core::{Arena, StringBuffer};
 
-    /// A node applet for tests.
-    pub(crate) struct Probe(pub &'static str, pub AppletRole, pub i32);
+    /// A studio or tool for tests that takes entities named after it.
+    struct Probe(&'static str, AppletRole, i32);
 
     impl SueApplet for Probe {
         fn manifest(&self) -> AppletManifest {
             let mut manifest = AppletManifest::new(self.0, self.0, self.1, "*");
             manifest.order = self.2;
-            if self.1 == AppletRole::Node {
-                manifest.mode = Some(ModeSpec {
-                    label: self.0.to_owned(),
-                    in_pill: true,
-                });
-                manifest.lane = Some(format!("{} Track", self.0));
-            }
             manifest
         }
 
-        fn templates(&self) -> Vec<FileTemplate> {
-            if self.1 == AppletRole::Node {
-                vec![FileTemplate::new("Probe", self.0, "plain")]
-            } else {
-                Vec::new()
-            }
-        }
-
-        fn new_entity(&mut self, _cx: &mut AppletContext<'_>) -> Option<crate::NewEntity> {
-            Some(crate::NewEntity {
-                name: self.0.to_owned(),
-                base: sue_core::StringBuffer::new().into(),
-                meta: Vec::new(),
-                size: egui::vec2(200.0, 120.0),
-                props: Vec::new(),
-            })
+        fn accepts(&self, entity: &Entity) -> bool {
+            entity.name() == "shared" || entity.name() == self.0
         }
     }
 
@@ -233,20 +216,50 @@ pub(crate) mod tests {
     fn applets_register_once_and_come_back_sorted() {
         let mut launchpad = Launchpad::new();
         launchpad
-            .register(|| Box::new(Probe("paint", AppletRole::Node, 20)))
+            .register(|| Box::new(Probe("paint", AppletRole::Studio, 20)))
             .unwrap();
         launchpad
-            .register(|| Box::new(Probe("document", AppletRole::Node, 10)))
+            .register(|| Box::new(Probe("writer", AppletRole::Studio, 10)))
             .unwrap();
         assert!(matches!(
-            launchpad.register(|| Box::new(Probe("paint", AppletRole::Node, 1))),
+            launchpad.register(|| Box::new(Probe("paint", AppletRole::Tool, 1))),
             Err(WmError::DuplicateApplet(_))
         ));
         let applets = launchpad.instantiate();
         let order: Vec<&str> = applets.manifests().map(|m| m.id.as_str()).collect();
-        assert_eq!(order, ["document", "paint"]);
+        assert_eq!(order, ["writer", "paint"]);
         assert!(launchpad.unregister(&AppletId::new("paint").unwrap()));
         assert_eq!(launchpad.len(), 1);
+    }
+
+    #[test]
+    fn an_entity_opens_in_the_first_studio_that_takes_it_then_a_tool() {
+        let mut launchpad = Launchpad::new();
+        for (id, role, order) in [
+            ("viewer", AppletRole::Tool, 1),
+            ("paint", AppletRole::Studio, 20),
+            ("settings", AppletRole::Window, 0),
+        ] {
+            launchpad
+                .register(move || Box::new(Probe(id, role, order)))
+                .unwrap();
+        }
+        let applets = launchpad.instantiate();
+        let mut arena = Arena::new();
+        let mut page_for = |name: &str| {
+            let handle = arena.spawn(name, StringBuffer::new());
+            let entity = arena.get(handle).unwrap();
+            applets.page_for(entity).map(|id| id.as_str().to_owned())
+        };
+        assert_eq!(
+            page_for("shared").as_deref(),
+            Some("paint"),
+            "studios first"
+        );
+        assert_eq!(page_for("viewer").as_deref(), Some("viewer"));
+        assert_eq!(page_for("settings"), None, "a window is not a page");
+        assert_eq!(page_for("nobody"), None);
+        assert!(AppletRole::Tool.is_page() && !AppletRole::Window.is_page());
     }
 
     #[test]

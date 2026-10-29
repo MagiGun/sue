@@ -68,7 +68,6 @@ pub enum Icon {
     Prev,
     Next,
     Loop,
-    Canvas,
     Up,
     Down,
     /// Three lines: a palette's menu.
@@ -632,13 +631,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             curve(0.5, 0.5, 0.3, 200.0, 340.0);
             filled(&[(0.2, 0.36), (0.12, 0.56), (0.32, 0.54)]);
             filled(&[(0.8, 0.64), (0.88, 0.44), (0.68, 0.46)]);
-        }
-        Icon::Canvas => {
-            for x in [0.22, 0.5, 0.78] {
-                for y in [0.22, 0.5, 0.78] {
-                    dot(x, y, 0.06);
-                }
-            }
         }
         Icon::Up => line(&[(0.22, 0.64), (0.5, 0.34), (0.78, 0.64)]),
         Icon::Down => line(&[(0.22, 0.36), (0.5, 0.66), (0.78, 0.36)]),

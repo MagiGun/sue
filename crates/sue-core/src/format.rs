@@ -1,7 +1,7 @@
 //! File formats and bundles. Every importer turns bytes into a [`Bundle`]
 //! (entities plus the relations between them) and every exporter turns
 //! entities back into bytes, through one [`FormatRegistry`]. So any format
-//! a feature teaches Sue opens everywhere: drop a `.csv` on the canvas, put
+//! a feature teaches Sue opens everywhere: drop a `.csv` on the window, put
 //! it in a slideshow or feed it to a node graph, it is the same entity.
 //!
 //! Bundles are also the clipboard and the "insert from another document"

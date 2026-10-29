@@ -9,8 +9,8 @@
 use crate::{DEFAULT_RICE, RiceError, RiceSchema, RiceValue};
 
 /// The format of [`DEFAULT_RICE`], declared in its header as
-/// `# sue-rice format 4`.
-pub const RICE_FORMAT: u32 = 4;
+/// `# sue-rice format 5`.
+pub const RICE_FORMAT: u32 = 5;
 
 const MARKER: &str = "# sue-rice format ";
 
@@ -19,7 +19,17 @@ const HISTORY: &[(u32, &str)] = &[
     (1, include_str!("../rice/history/v1.suerice")),
     (2, include_str!("../rice/history/v2.suerice")),
     (3, include_str!("../rice/history/v3.suerice")),
+    (4, include_str!("../rice/history/v4.suerice")),
 ];
+
+/// Keys that moved, as (old path, new path, old values that mean "no
+/// value" and do not carry over). Sue's boot mode became the Hub's pin: a
+/// studio chosen on purpose stays pinned, the Hub and the canvas mean none.
+const RENAMED: &[(&str, &str, &[&str])] = &[(
+    "launchpad.boot_mode",
+    "launchpad.pinned",
+    &["hub", "canvas"],
+)];
 
 /// The format a `.suerice` text declares in its header; files written before
 /// the marker existed are format 1.
@@ -85,11 +95,19 @@ pub fn migrate(text: &str) -> Result<Option<Migration>, RiceError> {
         if untouched {
             continue;
         }
-        if migrated.get(entry.path()).as_ref() == Some(&value) {
+        let renamed = RENAMED.iter().find(|(old, _, _)| *old == entry.path());
+        if let Some((old, _, empty)) = renamed
+            && matches!(&value, RiceValue::Text(text) if empty.contains(&text.as_str()))
+        {
+            dropped.push((*old).to_owned());
             continue;
         }
-        if migrated.parameter(entry.path()).is_some() && migrated.set(entry.path(), value).is_ok() {
-            kept.push(entry.path().to_owned());
+        let path = renamed.map_or(entry.path(), |(_, new, _)| new);
+        if migrated.get(path).as_ref() == Some(&value) {
+            continue;
+        }
+        if migrated.parameter(path).is_some() && migrated.set(path, value).is_ok() {
+            kept.push(path.to_owned());
         } else {
             dropped.push(entry.path().to_owned());
         }
@@ -110,6 +128,7 @@ mod tests {
     const V1: &str = include_str!("../rice/history/v1.suerice");
     const V2: &str = include_str!("../rice/history/v2.suerice");
     const V3: &str = include_str!("../rice/history/v3.suerice");
+    const V4: &str = include_str!("../rice/history/v4.suerice");
 
     #[test]
     fn the_shipped_default_is_current() {
@@ -117,6 +136,7 @@ mod tests {
         assert_eq!(format_of(V1), 1);
         assert_eq!(format_of(V2), 2);
         assert_eq!(format_of(V3), 3);
+        assert_eq!(format_of(V4), 4);
         assert_eq!(migrate(DEFAULT_RICE).unwrap(), None);
     }
 
@@ -140,7 +160,7 @@ mod tests {
         assert_eq!(migration.dropped, ["shaders.blur_passes"]);
         let schema = RiceSchema::parse(&migration.text).unwrap();
         assert_eq!(schema.get_i64("typography.ui_size"), Some(17));
-        assert_eq!(schema.get_i64("layout.rail_width"), Some(36));
+        assert_eq!(schema.get_i64("layout.status_bar_height"), Some(22));
         assert_eq!(format_of(&migration.text), RICE_FORMAT);
     }
 
@@ -160,20 +180,52 @@ mod tests {
     }
 
     #[test]
-    fn the_canvas_era_opens_into_the_hub_and_keeps_its_choices() {
+    fn the_canvas_era_opens_on_the_hub_and_keeps_its_choices() {
         // Booting into the canvas was the old default, so it takes the new
         // one; the retired Local AI and sketch pad keys go away.
         let migration = migrate(V3).unwrap().unwrap();
         assert_eq!(migration.from, 3);
         assert_eq!(migration.text, DEFAULT_RICE.replace("\r\n", "\n"));
         let schema = RiceSchema::parse(&migration.text).unwrap();
-        assert_eq!(schema.get_str("launchpad.boot_mode"), Some("hub"));
+        assert_eq!(schema.get_str("launchpad.pinned"), Some(""));
+        assert!(schema.get("launchpad.boot_mode").is_none());
         assert!(schema.get("ai.backend").is_none());
         assert!(schema.get("paint.brush_size").is_none());
-        // A studio chosen on purpose stays.
+        // A studio chosen on purpose stays: it is pinned now.
         let chosen = V3.replace("boot_mode = \"canvas\"", "boot_mode = \"sue-paint\"");
         let migration = migrate(&chosen).unwrap().unwrap();
-        assert_eq!(migration.kept, ["launchpad.boot_mode"]);
+        assert_eq!(migration.kept, ["launchpad.pinned"]);
+        let schema = RiceSchema::parse(&migration.text).unwrap();
+        assert_eq!(schema.get_str("launchpad.pinned"), Some("sue-paint"));
+    }
+
+    #[test]
+    fn the_side_panel_era_keeps_what_still_exists() {
+        // The Hub era of format 4, with the canvas, drawers, File Manager,
+        // Notes and Player: their keys go, the rest keeps its choices.
+        let migration = migrate(V4).unwrap().unwrap();
+        assert_eq!(migration.from, 4);
+        assert_eq!(migration.text, DEFAULT_RICE.replace("\r\n", "\n"));
+        let custom = V4
+            .replace("rail_width = 36 ", "rail_width = 50 ")
+            .replace("show_hidden = false", "show_hidden = true")
+            .replace("ui_size = 13 ", "ui_size = 15 ")
+            .replace("boot_mode = \"hub\"", "boot_mode = \"canvas\"");
+        let migration = migrate(&custom).unwrap().unwrap();
+        assert_eq!(migration.kept, ["typography.ui_size"]);
+        assert_eq!(
+            migration.dropped,
+            [
+                "launchpad.boot_mode",
+                "layout.rail_width",
+                "files.show_hidden"
+            ]
+        );
+        let schema = RiceSchema::parse(&migration.text).unwrap();
+        assert_eq!(schema.get_i64("typography.ui_size"), Some(15));
+        assert_eq!(schema.get_str("launchpad.pinned"), Some(""));
+        assert!(schema.get("canvas.zoom_min").is_none());
+        assert!(schema.get("notes.font_size").is_none());
     }
 
     #[test]

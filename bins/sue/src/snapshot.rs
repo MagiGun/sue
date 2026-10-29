@@ -14,7 +14,7 @@ use sue_platform::{
     PlatformPaths, wgpu,
 };
 use sue_rice::DEFAULT_RICE;
-use sue_wm::{AppletId, NodeId, ShellRequest};
+use sue_wm::{AppletId, ShellRequest};
 
 use crate::engine::{BootOptions, Engine};
 use crate::runtime::Runtime;
@@ -192,14 +192,14 @@ impl Camera2 {
     }
 }
 
-fn node_of(runtime: &Runtime, applet: &str) -> Option<NodeId> {
+/// Where the Hub drew `applet`'s box and its pin in the last frame.
+fn hub_box(runtime: &Runtime, applet: &str) -> Option<(Rect, Rect)> {
     runtime
-        .engine
-        .world
-        .scene
+        .shell
+        .hub_boxes()
         .iter()
-        .find(|(_, node)| node.applet.as_str() == applet)
-        .map(|(id, _)| id)
+        .find(|(id, _, _)| id.as_str() == applet)
+        .map(|(_, rect, pin)| (*rect, *pin))
 }
 
 /// Renders the shell's main scenes into `dir` as PNG files and returns
@@ -207,6 +207,7 @@ fn node_of(runtime: &Runtime, applet: &str) -> Option<NodeId> {
 ///
 /// # Errors
 /// GPU, boot or file-system failures.
+#[allow(clippy::too_many_lines, reason = "one scripted tour of Sue")]
 pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBuf>, String> {
     std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
     let gpu = GpuContext::headless().map_err(|error| error.to_string())?;
@@ -250,92 +251,33 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
             Ok(())
         };
     let home = paths.home_dir;
+    let id = |text: &str| AppletId::new(text).map_err(|error| error.to_string());
+    let paint = id(sue_paint::ID)?;
+    let writer = id(sue_writer::ID)?;
+    let convert = id(crate::convert::ID)?;
 
-    // 0. The Hub Sue opens with, then 1. the canvas behind it, with the
-    // Welcome document, a tone and the top pill.
+    // 00. The Hub Sue opens on; 01. Sue Paint pinned with a click on its
+    // pin; 02. the Sue menu under the Sue button.
     shoot(&mut runtime, &mut camera, "00-hub")?;
-    runtime.request(ShellRequest::Hub(false), &mut camera.painter, camera.now);
-    runtime.request(
-        ShellRequest::Create {
-            applet: sue_wm::AppletId::new(crate::audio_node::ID)
-                .map_err(|error| error.to_string())?,
-            key: "tone".to_owned(),
-        },
-        &mut camera.painter,
-        camera.now,
-    );
-    runtime.request(ShellRequest::ResetCamera, &mut camera.painter, camera.now);
-    runtime.request(ShellRequest::Select(None), &mut camera.painter, camera.now);
-    shoot(&mut runtime, &mut camera, "01-canvas")?;
-
-    // 2. The selection pill above the document.
-    let document = node_of(&runtime, crate::document::ID).ok_or("no document")?;
-    runtime.request(
-        ShellRequest::Select(Some(document)),
-        &mut camera.painter,
-        camera.now,
-    );
-    shoot(&mut runtime, &mut camera, "02-selection-pill")?;
-
-    // 3. Document mode: the camera frames the document, text selected.
-    runtime.request(
-        ShellRequest::Mode(crate::document::ID.to_owned()),
-        &mut camera.painter,
-        camera.now,
-    );
-    if let Some(document) = node_of(&runtime, crate::document::ID) {
-        crate::document::select_words(&camera.ctx, document, 30, 38);
+    if let Some((_, pin)) = hub_box(&runtime, sue_paint::ID) {
+        camera.click(pin.center());
     }
-    shoot(&mut runtime, &mut camera, "03-document-mode")?;
-
-    // 4. Everything projected onto the open timeline, audio selected.
-    for applet in [crate::document::ID, crate::audio_node::ID] {
-        if let Some(node) = node_of(&runtime, applet) {
-            let seconds = if applet == crate::audio_node::ID {
-                3.0
-            } else {
-                4.0
-            };
-            runtime.with_context(&mut camera.painter, camera.now, |cx| {
-                sue_wm::project_to_timeline(cx, node, seconds);
-            });
-        }
-    }
-    camera.settle(&mut runtime);
-    runtime.request(ShellRequest::ResetCamera, &mut camera.painter, camera.now);
-    runtime.shell.seek(1.25);
-    if let Some(audio) = node_of(&runtime, crate::audio_node::ID) {
-        runtime.request(
-            ShellRequest::Select(Some(audio)),
-            &mut camera.painter,
-            camera.now,
-        );
-    }
-    shoot(&mut runtime, &mut camera, "04-timeline")?;
-
-    // 5. The marking menu and 6. the command palette.
-    runtime.request(
-        ShellRequest::Timeline(false),
-        &mut camera.painter,
-        camera.now,
-    );
-    runtime.request(ShellRequest::Select(None), &mut camera.painter, camera.now);
-    let center = runtime.shell.canvas_rect().center();
-    runtime.shell.open_radial(center);
-    shoot(&mut runtime, &mut camera, "05-radial-menu")?;
-    runtime
-        .shell
-        .radial_new_file(Some("Picture"), &runtime.applets);
-    shoot(&mut runtime, &mut camera, "05b-new-file-wheels")?;
+    shoot(&mut runtime, &mut camera, "01-hub-pinned")?;
+    runtime.request(ShellRequest::Pin(None), &mut camera.painter, camera.now);
+    camera.click(runtime.shell.sue_button().center());
+    shoot(&mut runtime, &mut camera, "02-sue-menu")?;
     runtime.shell.dismiss_overlays();
-    runtime.shell.open_palette();
-    runtime.shell.palette_query("new");
-    shoot(&mut runtime, &mut camera, "06-command-palette")?;
 
-    // 7 and 8. Settings, on two categories.
+    // 03. The command palette.
+    runtime.shell.open_palette();
+    runtime.shell.palette_query("open");
+    shoot(&mut runtime, &mut camera, "03-command-palette")?;
+    runtime.shell.dismiss_overlays();
+
+    // 04 and 05. Settings, on two categories.
     for (page, name) in [
-        ("appearance", "07-settings-appearance"),
-        ("display", "08-settings-display"),
+        ("appearance", "04-settings-appearance"),
+        ("general", "05-settings-general"),
     ] {
         runtime.request(
             ShellRequest::OpenSettings(Some(page.to_owned())),
@@ -344,9 +286,9 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         );
         shoot(&mut runtime, &mut camera, name)?;
         if page == "appearance" {
-            // 7b. The color wheel behind the Void swatch.
+            // 04b. The color wheel behind the Void swatch.
             camera.click(Pos2::new(1176.0, 318.0));
-            shoot(&mut runtime, &mut camera, "07b-color-wheel")?;
+            shoot(&mut runtime, &mut camera, "04b-color-wheel")?;
             camera.click(Pos2::new(700.0, 860.0));
             camera.settle(&mut runtime);
         }
@@ -354,97 +296,22 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     runtime.shell.close_window();
     runtime.shell.dismiss_overlays();
 
-    // 9. Files and the Inspector open, with a JPEG XL picture on the canvas.
-    runtime.open_path(&home.join("test-card.jxl"), &mut camera.painter, camera.now);
-    for drawer in [crate::files::ID, crate::inspector::ID] {
-        runtime.request(
-            ShellRequest::ShowDrawer(AppletId::new(drawer).map_err(|error| error.to_string())?),
-            &mut camera.painter,
-            camera.now,
-        );
-    }
-    shoot(&mut runtime, &mut camera, "09-drawers-image")?;
-
-    // 9a. Notes, with its toolbar, next to the editable Inspector.
-    runtime.request(
-        ShellRequest::ShowDrawer(
-            AppletId::new(crate::notes::ID).map_err(|error| error.to_string())?,
-        ),
-        &mut camera.painter,
-        camera.now,
-    );
-    shoot(&mut runtime, &mut camera, "09a-notes-inspector")?;
-    runtime.request(
-        ShellRequest::ShowDrawer(
-            AppletId::new(crate::files::ID).map_err(|error| error.to_string())?,
-        ),
-        &mut camera.painter,
-        camera.now,
-    );
-
-    // 9b. The large File Manager, as cards with picture thumbnails.
-    let _ = runtime
-        .engine
-        .world
-        .rice
-        .set("files.view", sue_rice::RiceValue::Text("cards".to_owned()));
-    runtime.request(
-        ShellRequest::OpenWindow(
-            AppletId::new(crate::files::ID).map_err(|error| error.to_string())?,
-        ),
-        &mut camera.painter,
-        camera.now,
-    );
-    camera.settle(&mut runtime);
-    for _ in 0..40 {
-        // The thumbnails come from a background thread.
-        runtime.timer(&mut camera.painter, camera.now);
-        let output = camera.frame(&mut runtime);
-        camera.painter.apply_textures(output.textures_delta);
-        std::thread::sleep(Duration::from_millis(25));
-    }
-    shoot(&mut runtime, &mut camera, "09b-file-manager")?;
-    runtime.shell.close_window();
-
-    // 9c. The large Player, with the sample song added and playing.
-    let player = AppletId::new(crate::player::ID).map_err(|error| error.to_string())?;
-    runtime.request(
-        ShellRequest::SendFile {
-            to: player.clone(),
-            purpose: "import".to_owned(),
-            path: home.clone(),
-        },
-        &mut camera.painter,
-        camera.now,
-    );
-    for _ in 0..80 {
-        runtime.timer(&mut camera.painter, camera.now);
-        camera.now += Duration::from_millis(25);
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    // 06. The Image Viewer, a tool: Open Picture asks the system's dialog,
+    // answered here with a JPEG XL picture.
     runtime.request(
         ShellRequest::AppletCommand {
-            applet: player.clone(),
-            command: "player.toggle".to_owned(),
+            applet: id(crate::viewer::ID)?,
+            command: "viewer.open".to_owned(),
         },
         &mut camera.painter,
         camera.now,
     );
-    for _ in 0..40 {
-        runtime.timer(&mut camera.painter, camera.now);
-        camera.now += Duration::from_millis(25);
-        std::thread::sleep(Duration::from_millis(10));
+    if !runtime.answer_pick(&home.join("test-card.jxl"), &mut camera.painter, camera.now) {
+        return Err("Open Picture did not ask for a file".to_owned());
     }
-    runtime.request(
-        ShellRequest::OpenWindow(player.clone()),
-        &mut camera.painter,
-        camera.now,
-    );
-    shoot(&mut runtime, &mut camera, "09c-player")?;
-    runtime.shell.close_window();
+    shoot(&mut runtime, &mut camera, "06-image-viewer")?;
 
-    // 9d. The large Converter with a picture, a song and a text file.
-    let convert = AppletId::new(crate::convert::ID).map_err(|error| error.to_string())?;
+    // 07. The Converter with a picture, a song and a text file.
     for name in ["photo.png", "chord.wav", "README.md"] {
         runtime.request(
             ShellRequest::SendFile {
@@ -456,82 +323,36 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
             camera.now,
         );
     }
-    runtime.request(
-        ShellRequest::OpenWindow(convert),
-        &mut camera.painter,
-        camera.now,
-    );
-    shoot(&mut runtime, &mut camera, "09d-converter")?;
-    runtime.request(
-        ShellRequest::AppletCommand {
-            applet: player,
-            command: "player.toggle".to_owned(),
-        },
-        &mut camera.painter,
-        camera.now,
-    );
-    runtime.shell.close_window();
-    let _ = runtime
-        .engine
-        .world
-        .rice
-        .set("files.view", sue_rice::RiceValue::Text("list".to_owned()));
+    runtime.request(ShellRequest::Open(convert), &mut camera.painter, camera.now);
+    shoot(&mut runtime, &mut camera, "07-converter")?;
 
-    // 10. Code / Hex on an unknown file, with the History drawer.
-    runtime.open_path(&home.join("archive.zip"), &mut camera.painter, camera.now);
+    // 08. Sue Paint with a sample illustration, 09. the Sue menu over it,
+    // 10. its Layer menu and 11. its dialogs.
     runtime.request(
-        ShellRequest::ShowDrawer(
-            AppletId::new(crate::history::ID).map_err(|error| error.to_string())?,
-        ),
+        ShellRequest::Open(paint.clone()),
         &mut camera.painter,
         camera.now,
     );
-    shoot(&mut runtime, &mut camera, "10-code-hex")?;
-
-    // 11. Sue Paint with a sample illustration, 12. its Layer menu and
-    // 13. its New dialog.
-    let studio = AppletId::new(sue_paint::ID).map_err(|error| error.to_string())?;
-    runtime.request(
-        ShellRequest::OpenStudio(studio.clone()),
-        &mut camera.painter,
-        camera.now,
-    );
-    let sample = runtime.with_context(&mut camera.painter, camera.now, |cx| {
+    runtime.with_context(&mut camera.painter, camera.now, |cx| {
         sue_paint::sample_picture(cx, 1600, 1200)
     });
-    shoot(&mut runtime, &mut camera, "11-sue-paint")?;
-    // 11b. The same, wide: the side drawers closed, every palette docked.
-    let open: Vec<AppletId> = [runtime.shell.left_drawer(), runtime.shell.right_drawer()]
-        .into_iter()
-        .flatten()
-        .cloned()
-        .collect();
-    for id in &open {
-        runtime.shell.toggle_drawer_applet(id, &runtime.applets);
-    }
-    shoot(&mut runtime, &mut camera, "11b-sue-paint-wide")?;
-    // 11c. The Sue menu, in Sue Paint, and its Send To wheel.
+    shoot(&mut runtime, &mut camera, "08-sue-paint")?;
     runtime.request(ShellRequest::SueMenu, &mut camera.painter, camera.now);
-    shoot(&mut runtime, &mut camera, "11c-sue-menu")?;
-    runtime.shell.sue_menu_open("Send To");
-    shoot(&mut runtime, &mut camera, "11d-sue-menu-send-to")?;
+    shoot(&mut runtime, &mut camera, "09-sue-menu-in-paint")?;
     runtime.shell.dismiss_overlays();
     camera.settle(&mut runtime);
-    for id in &open {
-        runtime.shell.toggle_drawer_applet(id, &runtime.applets);
-    }
     for (target, name) in [
-        ("menu/Layer", "12-sue-paint-menu"),
-        ("dialog/new", "13-sue-paint-new"),
-        ("dialog/pressure", "13b-sue-paint-pressure"),
+        ("menu/Layer", "10-sue-paint-menu"),
+        ("dialog/new", "11-sue-paint-new"),
+        ("dialog/pressure", "11b-sue-paint-pressure"),
     ] {
-        if let Some(applet) = runtime.applets.get_mut(&studio) {
+        if let Some(applet) = runtime.applets.get_mut(&paint) {
             applet.navigate("dialog/close");
             applet.navigate(target);
         }
         shoot(&mut runtime, &mut camera, name)?;
     }
-    // 13c. The Page Manager of a manga of five pages.
+    // 11c. The Page Manager of a manga of five pages.
     for command in [
         "story.add",
         "story.add",
@@ -541,22 +362,22 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     ] {
         runtime.request(
             ShellRequest::AppletCommand {
-                applet: studio.clone(),
+                applet: paint.clone(),
                 command: command.to_owned(),
             },
             &mut camera.painter,
             camera.now,
         );
     }
-    if let Some(applet) = runtime.applets.get_mut(&studio) {
+    if let Some(applet) = runtime.applets.get_mut(&paint) {
         applet.navigate("dialog/close");
         applet.navigate("dialog/pages");
     }
-    shoot(&mut runtime, &mut camera, "13c-sue-paint-pages")?;
-    if let Some(applet) = runtime.applets.get_mut(&studio) {
+    shoot(&mut runtime, &mut camera, "11c-sue-paint-pages")?;
+    if let Some(applet) = runtime.applets.get_mut(&paint) {
         applet.navigate("dialog/close");
     }
-    // 13d. The Timeline of a page: two cels, onion skin on.
+    // 11d. The Timeline of a page: two cels, onion skin on.
     for command in [
         "anim.cel.new",
         "anim.next",
@@ -568,64 +389,38 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     ] {
         runtime.request(
             ShellRequest::AppletCommand {
-                applet: studio.clone(),
+                applet: paint.clone(),
                 command: command.to_owned(),
             },
             &mut camera.painter,
             camera.now,
         );
     }
-    shoot(&mut runtime, &mut camera, "13d-sue-paint-timeline")?;
+    shoot(&mut runtime, &mut camera, "11d-sue-paint-timeline")?;
 
-    // 14. Back on the canvas, the same picture as a card.
-    runtime.request(ShellRequest::CloseStudio, &mut camera.painter, camera.now);
-    if let Some(entity) = sample.and_then(|id| runtime.engine.world.arena.handle_of(id)) {
-        runtime.request(
-            ShellRequest::Place {
-                entity,
-                focus: true,
-            },
-            &mut camera.painter,
-            camera.now,
-        );
-    }
-    shoot(&mut runtime, &mut camera, "14-illustration-card")?;
-
-    // 15 and 16. Open in Sue Paint from the card: the camera zooms into it,
-    // then the panels slide in.
+    // 12 and 13. Back to the Hub, then into Sue Paint again: the page
+    // comes in over the Hub and its palettes slide in.
+    runtime.request(ShellRequest::Hub, &mut camera.painter, camera.now);
+    camera.settle(&mut runtime);
     runtime.request(
-        ShellRequest::OpenStudio(studio.clone()),
+        ShellRequest::Open(paint.clone()),
         &mut camera.painter,
         camera.now,
     );
     // Kept apart until the last shot, which borrows the list.
     let mut entering = Vec::new();
-    for (frames, name) in [(14, "15-entering-zoom"), (26, "16-entering-panels")] {
+    for (frames, name) in [(6, "12-entering-a"), (14, "13-entering-b")] {
         let path = dir.join(format!("{name}.png"));
         camera.shoot_after(&mut runtime, &path, frames)?;
         entering.push(path);
     }
     camera.settle(&mut runtime);
-    runtime.request(ShellRequest::CloseStudio, &mut camera.painter, camera.now);
-    camera.settle(&mut runtime);
 
-    // 17 to 23. Sue Writer on a sample novel: pages, the corkboard, the
-    // outliner, composition mode, the compile dialog and the Format menu,
-    // then its card on the canvas.
-    let writer = AppletId::new(sue_writer::ID).map_err(|error| error.to_string())?;
+    // 14 to 19. Sue Writer on a sample novel: pages, the corkboard, the
+    // outliner, composition mode, the compile dialog and the Format menu.
     let novel = runtime
         .with_context(&mut camera.painter, camera.now, sue_writer::sample_project)
         .ok_or("the sample novel was not made")?;
-    if let Some(entity) = runtime.engine.world.arena.handle_of(novel) {
-        runtime.request(
-            ShellRequest::Place {
-                entity,
-                focus: false,
-            },
-            &mut camera.painter,
-            camera.now,
-        );
-    }
     runtime.request(
         ShellRequest::OpenIn {
             entity: novel,
@@ -639,13 +434,13 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         camera.settle(&mut runtime);
         std::thread::sleep(std::time::Duration::from_millis(400));
     }
-    shoot(&mut runtime, &mut camera, "17-sue-writer")?;
+    shoot(&mut runtime, &mut camera, "14-sue-writer")?;
     for (target, name) in [
-        ("view/corkboard", "18-sue-writer-corkboard"),
-        ("view/outliner", "19-sue-writer-outliner"),
-        ("view/composition", "20-sue-writer-composition"),
-        ("dialog/compile", "21-sue-writer-compile"),
-        ("menu/Format", "22-sue-writer-format-menu"),
+        ("view/corkboard", "15-sue-writer-corkboard"),
+        ("view/outliner", "16-sue-writer-outliner"),
+        ("view/composition", "17-sue-writer-composition"),
+        ("dialog/compile", "18-sue-writer-compile"),
+        ("menu/Format", "19-sue-writer-format-menu"),
     ] {
         if let Some(applet) = runtime.applets.get_mut(&writer) {
             applet.navigate("dialog/close");
@@ -658,29 +453,26 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         applet.navigate("dialog/close");
         applet.navigate("view/document");
     }
-    runtime.request(ShellRequest::CloseStudio, &mut camera.painter, camera.now);
-    camera.settle(&mut runtime);
-    shoot(&mut runtime, &mut camera, "23-manuscript-card")?;
-    // 24 to 27. Into Sue Writer from its card, frame by frame.
-    runtime.request(
-        ShellRequest::OpenIn {
-            entity: novel,
-            applet: writer.clone(),
-        },
-        &mut camera.painter,
-        camera.now,
-    );
-    for (frames, name) in [
-        (10, "24-writer-entering-a"),
-        (14, "25-writer-entering-b"),
-        (8, "26-writer-entering-c"),
-        (8, "27-writer-entering-d"),
-        (8, "28-writer-entering-e"),
-        (30, "29-writer-entering-f"),
+
+    // 20 to 23. The touch layouts: the Hub and Sue Paint on a phone and on
+    // a tablet.
+    for (interface, size, prefix) in [
+        ("phone", [430_u32, 932_u32], "20-phone"),
+        ("tablet", [1180, 820], "22-tablet"),
     ] {
-        let path = dir.join(format!("{name}.png"));
-        camera.shoot_after(&mut runtime, &path, frames)?;
-        entering.push(path);
+        let _ = runtime.engine.world.rice.set(
+            "display.interface",
+            sue_rice::RiceValue::Text(interface.to_owned()),
+        );
+        camera.size = size;
+        runtime.request(ShellRequest::Hub, &mut camera.painter, camera.now);
+        shoot(&mut runtime, &mut camera, &format!("{prefix}-hub"))?;
+        runtime.request(
+            ShellRequest::Open(paint.clone()),
+            &mut camera.painter,
+            camera.now,
+        );
+        shoot(&mut runtime, &mut camera, &format!("{prefix}-sue-paint"))?;
     }
     written.extend(entering);
     let _ = std::fs::remove_dir_all(&root);

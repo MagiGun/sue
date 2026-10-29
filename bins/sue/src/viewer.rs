@@ -1,11 +1,12 @@
-//! The Image Viewer: a picture on the canvas, filling the window. It zooms
-//! (fit, 100%, the wheel), pans, and walks through the canvas's other
-//! pictures with the arrow keys; it does the simple edits (turn, mirror,
-//! crop, resize, brightness and contrast, saturation and hue, grayscale,
+//! The Image Viewer, a tool: one picture filling its page. It zooms (fit,
+//! 100%, the wheel), pans, and walks through the project's other pictures
+//! with the arrow keys; it does the simple edits (turn, mirror, crop,
+//! resize, brightness and contrast, saturation and hue, grayscale,
 //! invert), each one undo step on the very same entity; and it hands the
-//! picture on: Save As in any picture format (the File Manager's type
+//! picture on: Save As in any picture format (the save dialog's type
 //! list), a lossless JPEG XL re-encode, the Converter, Sue Paint (the
-//! same entity becomes a layer) and Sue Writer (into the text).
+//! same entity becomes a layer) and Sue Writer (into the text). Its menus
+//! sit in Sue's top bar after the Sue button; its toolbar under them.
 
 use std::path::Path;
 
@@ -18,8 +19,8 @@ use sue_core::{ComponentKind, Entity, EntityId, PixelFormat, RasterTile2D};
 use sue_io::meta;
 use sue_paint::filters::Filter;
 use sue_wm::{
-    AppletContext, AppletId, AppletManifest, AppletRole, ArenaEdit, FilePick, FileType, ModeSpec,
-    PaletteEntry, ShellRequest, SueAction, SueApplet, Theme, wheel, widgets,
+    AppletContext, AppletId, AppletManifest, AppletRole, ArenaEdit, FilePick, FileType, ItemState,
+    Menu, MenuBar, MenuItem, PaletteEntry, ShellRequest, SueApplet, Theme, widgets,
 };
 
 use crate::util::human_bytes;
@@ -29,6 +30,71 @@ pub const ID: &str = "image-viewer";
 
 fn me() -> AppletId {
     AppletId::new(ID).expect("a valid id")
+}
+
+/// A decoded picture the viewer shows: raster pixels with a size, and not a
+/// byte map of an unknown file.
+pub fn is_picture(entity: &Entity) -> bool {
+    entity.component(ComponentKind::RasterTile2D).is_some()
+        && entity.meta(meta::WIDTH).is_some()
+        && entity.meta(meta::ENTROPY).is_none()
+}
+
+/// The viewer's menus, in Sue's top bar.
+fn menus() -> Vec<Menu> {
+    let act = MenuItem::action;
+    vec![
+        Menu::new(
+            "File",
+            vec![
+                act("Open Picture...", "viewer.open").key("Ctrl+O"),
+                MenuItem::Separator,
+                act("Save As...", "viewer.save_as"),
+                act("Save Over the File...", "viewer.save"),
+                act("Re-encode as JPEG XL...", "viewer.reencode"),
+                MenuItem::Separator,
+                act("Show in Folder", "viewer.show"),
+                MenuItem::Separator,
+                act("Back to the Hub", "viewer.leave").key("Esc"),
+            ],
+        ),
+        Menu::new(
+            "Image",
+            vec![
+                act("Turn Left", "viewer.rotate_left"),
+                act("Turn Right", "viewer.rotate_right"),
+                act("Flip Horizontal", "viewer.flip_h"),
+                act("Flip Vertical", "viewer.flip_v"),
+                MenuItem::Separator,
+                act("Crop", "viewer.crop"),
+                act("Adjust...", "viewer.adjust"),
+                act("Resize...", "viewer.resize"),
+                MenuItem::Separator,
+                act("Grayscale", "viewer.grayscale"),
+                act("Invert", "viewer.invert"),
+            ],
+        ),
+        Menu::new(
+            "View",
+            vec![
+                act("Fit to the Window", "viewer.fit"),
+                act("Actual Size", "viewer.actual"),
+                act("Zoom In", "viewer.zoom_in"),
+                act("Zoom Out", "viewer.zoom_out"),
+                MenuItem::Separator,
+                act("Previous Picture", "viewer.previous"),
+                act("Next Picture", "viewer.next"),
+            ],
+        ),
+        Menu::new(
+            "Send",
+            vec![
+                act("Convert...", "viewer.convert"),
+                act("Open in Sue Paint", "viewer.paint"),
+                act("Put in Sue Writer", "viewer.writer"),
+            ],
+        ),
+    ]
 }
 
 /// The picture types the viewer saves as, its own format first.
@@ -111,6 +177,9 @@ pub struct Viewer {
     shown: bool,
     /// The last revision shown, to keep the texture fresh.
     seen: u64,
+    menus: Vec<Menu>,
+    menubar: MenuBar,
+    bound: sue_wm::shortcuts::Bound,
 }
 
 impl Default for Viewer {
@@ -129,6 +198,9 @@ impl Default for Viewer {
             replace: false,
             shown: false,
             seen: 0,
+            menus: menus(),
+            menubar: MenuBar::new(),
+            bound: sue_wm::shortcuts::Bound::default(),
         }
     }
 }
@@ -219,17 +291,33 @@ impl Viewer {
             .as_raster()
     }
 
-    /// The pictures on the canvas, in the order they were placed.
+    /// The project's pictures, in the order they came in.
     fn pictures(cx: &AppletContext<'_>) -> Vec<EntityId> {
-        let scene = &cx.world.scene;
-        scene
-            .stacked()
-            .into_iter()
-            .filter_map(|node| scene.get(node))
-            .filter_map(|node| cx.world.arena.get(node.entity).ok())
-            .filter(|entity| crate::image::is_picture(entity))
+        cx.world
+            .arena
+            .iter()
+            .map(|(_, entity)| entity)
+            .filter(|entity| is_picture(entity))
             .map(Entity::id)
             .collect()
+    }
+
+    /// How a menu item looks now: picture commands work with a picture.
+    fn item_state(&self, command: &str, cx: &AppletContext<'_>) -> ItemState {
+        let source = self
+            .current
+            .and_then(|id| cx.arena().get_by_id(id).ok())
+            .is_some_and(|entity| entity.meta(meta::SOURCE).is_some());
+        match command {
+            "viewer.open" | "viewer.leave" => ItemState::on(),
+            "viewer.save" | "viewer.show" if !source => ItemState::off(),
+            "viewer.fit" => ItemState::check(self.fit),
+            "viewer.crop" => ItemState::check(self.tool == Tool::Crop),
+            "viewer.adjust" => ItemState::check(self.adjust.is_some()),
+            "viewer.resize" => ItemState::check(self.resize.is_some()),
+            _ if self.current.is_some() => ItemState::on(),
+            _ => ItemState::off(),
+        }
     }
 
     /// Changes the picture's pixels to `pixels` of `size`, as one undo step.
@@ -286,6 +374,18 @@ impl Viewer {
     )]
     fn run(&mut self, command: &str, cx: &mut AppletContext<'_>) -> bool {
         match command {
+            "viewer.open" | "file.open" => {
+                // The engine reads it into the project, and a picture comes
+                // back here.
+                let pick = FilePick::open(None, "open", "Open Picture").types(vec![FileType::new(
+                    "Pictures",
+                    &[
+                        "png", "jpg", "jpeg", "jxl", "webp", "gif", "bmp", "tif", "tiff", "tga",
+                        "qoi", "ico", "ppm",
+                    ],
+                )]);
+                cx.request(ShellRequest::PickFile(pick));
+            }
             "viewer.fit" => self.fit = true,
             "viewer.actual" => {
                 self.fit = false;
@@ -481,7 +581,7 @@ impl Viewer {
                     self.show(pictures[(at + step) % pictures.len()]);
                 }
             }
-            "viewer.leave" => cx.request(ShellRequest::CloseStudio),
+            "viewer.leave" => cx.request(ShellRequest::Hub),
             _ => return false,
         }
         true
@@ -516,7 +616,7 @@ impl Viewer {
                 self.adjust = None;
                 self.resize = None;
             } else {
-                cx.request(ShellRequest::CloseStudio);
+                cx.request(ShellRequest::Hub);
             }
         }
         if self.tool == Tool::Crop
@@ -529,18 +629,17 @@ impl Viewer {
 
     #[allow(clippy::too_many_lines, reason = "the viewer's whole window")]
     fn frame(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
-        let present = cx.view.studio.as_ref().map(AppletId::as_str) == Some(ID);
-        let reveal = cx.view.studio_reveal.clamp(0.0, 1.0);
+        self.bound
+            .refresh(&mut self.menus, cx.rice(), KEYS_SECTION, shortcut_table());
+        let present = cx.view.page.as_ref().map(AppletId::as_str) == Some(ID);
+        let reveal = cx.view.reveal.clamp(0.0, 1.0);
         if present && !self.shown {
             self.shown = true;
-            let selected = cx
-                .view
-                .selected
-                .and_then(|node| cx.entity(node))
-                .filter(|entity| crate::image::is_picture(entity))
-                .map(Entity::id);
-            if let Some(id) = selected {
-                self.show(id);
+            // Opened with nothing to show: the project's first picture.
+            if self.current.is_none()
+                && let Some(first) = Self::pictures(cx).first()
+            {
+                self.show(*first);
             }
         }
         if self
@@ -555,8 +654,8 @@ impl Viewer {
         }
         let theme = cx.theme.clone();
         let full = ui.max_rect();
-        // The picture lines up with its card as the studio comes in; the
-        // bars slide in from the edges.
+        // The ground turns opaque as the page comes in; the bars slide in
+        // from the edges.
         let hide = 1.0 - reveal * reveal * (3.0 - 2.0 * reveal);
         let ground = Color32::from_gray(0x16);
         let cover = (reveal / 0.35).clamp(0.0, 1.0);
@@ -589,7 +688,7 @@ impl Viewer {
             pos2(full.right() - side, full.bottom() - info_height),
         );
         self.picture_ui(ui, view, cx, &theme, cover);
-        self.bar_ui(ui, bar, cx, &theme);
+        self.toolbar_ui(ui, bar, cx, &theme);
         self.info_ui(ui, info, cx, &theme);
         if side > 0.0 {
             self.panel_ui(ui, panel, cx, &theme);
@@ -611,7 +710,7 @@ impl Viewer {
             ui.painter().text(
                 view.center(),
                 Align2::CENTER_CENTER,
-                "Double-click a picture on the canvas to see it here.",
+                "Open a picture (File, Open Picture) or drop one on the window.",
                 theme.font(theme.ui_size + 2.0),
                 theme.muted,
             );
@@ -828,7 +927,7 @@ impl Viewer {
         }
     }
 
-    fn bar_ui(&mut self, ui: &mut Ui, bar: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
+    fn toolbar_ui(&mut self, ui: &mut Ui, bar: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
         ui.painter().rect_filled(bar, 0.0, theme.panel);
         ui.painter()
             .hline(bar.x_range(), bar.bottom(), theme.hairline());
@@ -935,38 +1034,15 @@ impl Viewer {
             "Save as any picture format (Ctrl+Shift+S)",
             false,
         );
-        ui.add_enabled_ui(has, |ui| {
-            ui.menu_button(RichText::new("More").size(theme.ui_size), |ui| {
-                for (label, command) in [
-                    ("Save Over the File...", "viewer.save"),
-                    ("Re-encode as JPEG XL...", "viewer.reencode"),
-                    ("Convert...", "viewer.convert"),
-                    ("Open in Sue Paint", "viewer.paint"),
-                    ("Put in Sue Writer", "viewer.writer"),
-                    ("Show in Folder", "viewer.show"),
-                ] {
-                    if ui.button(label).clicked() {
-                        run = Some(command);
-                        ui.close();
-                    }
-                }
-            });
-        });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if widgets::pill_button(ui, "Back to Canvas", false, theme)
-                .on_hover_text("Esc")
-                .clicked()
-            {
-                run = Some("viewer.leave");
-            }
             if widgets::pill_button(ui, "\u{203A}", false, theme)
-                .on_hover_text("Next picture on the canvas (Right)")
+                .on_hover_text("Next picture of the project (Right)")
                 .clicked()
             {
                 run = Some("viewer.next");
             }
             if widgets::pill_button(ui, "\u{2039}", false, theme)
-                .on_hover_text("Previous picture on the canvas (Left)")
+                .on_hover_text("Previous picture of the project (Left)")
                 .clicked()
             {
                 run = Some("viewer.previous");
@@ -1214,43 +1290,45 @@ fn texture_key(id: EntityId) -> u64 {
 
 impl SueApplet for Viewer {
     fn manifest(&self) -> AppletManifest {
-        let mut manifest = AppletManifest::new(ID, "Image Viewer", AppletRole::Studio, "\u{1F5BC}");
+        let mut manifest = AppletManifest::new(ID, "Image Viewer", AppletRole::Tool, "\u{1F5BC}");
         manifest.summary =
             "Look at pictures large, turn, crop and adjust them, and save or send them anywhere."
                 .to_owned();
         manifest.order = 27;
-        manifest.mode = Some(ModeSpec {
-            label: "Image Viewer".to_owned(),
-            in_pill: false,
-        });
         manifest
     }
 
     fn accepts(&self, entity: &Entity) -> bool {
-        crate::image::is_picture(entity)
+        is_picture(entity)
     }
 
-    fn studio_focus(&self) -> Option<EntityId> {
+    fn focus(&self) -> Option<EntityId> {
         self.current
     }
 
-    fn card_frame(&self, area: Rect, entity: &Entity) -> Option<Rect> {
-        // Where the picture will sit, fitted between the bars.
-        let raster = entity.component(ComponentKind::RasterTile2D)?.as_raster()?;
-        let size = vec2(raster.width() as f32, raster.height() as f32);
-        let view = Rect::from_min_max(
-            pos2(area.left(), area.top() + 40.0),
-            pos2(area.right(), area.bottom() - 26.0),
-        );
-        let fit = (view.width() / size.x.max(1.0))
-            .min(view.height() / size.y.max(1.0))
-            .min(1.0)
-            * 0.96;
-        Some(Rect::from_center_size(view.center(), size * fit))
+    fn page_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        self.frame(ui, cx);
     }
 
-    fn studio_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
-        self.frame(ui, cx);
+    fn bar_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        let theme = cx.theme.clone();
+        let rect = ui.max_rect();
+        let mut menubar = std::mem::take(&mut self.menubar);
+        let picked = {
+            let state = |command: &str| self.item_state(command, cx);
+            menubar.ui(ui, rect, &self.menus, &state, &theme)
+        };
+        self.menubar = menubar;
+        if let Some(command) = picked {
+            self.run(&command, cx);
+        }
+    }
+
+    fn take_entity(&mut self, purpose: &str, entity: EntityId, cx: &mut AppletContext<'_>) {
+        if purpose == "open" {
+            self.show(entity);
+            cx.request(ShellRequest::Open(me()));
+        }
     }
 
     fn rice_declarations(&self) -> Vec<sue_rice::RiceDeclaration> {
@@ -1258,7 +1336,7 @@ impl SueApplet for Viewer {
     }
 
     fn tick(&mut self, cx: &mut AppletContext<'_>) -> sue_wm::Tick {
-        if cx.view.studio.as_ref().map(AppletId::as_str) != Some(ID) {
+        if cx.view.page.as_ref().map(AppletId::as_str) != Some(ID) {
             self.shown = false;
         }
         sue_wm::Tick::default()
@@ -1294,39 +1372,6 @@ impl SueApplet for Viewer {
 
     fn command(&mut self, name: &str, cx: &mut AppletContext<'_>) -> bool {
         self.run(name, cx)
-    }
-
-    fn sue_actions(&self, focus: Option<&Entity>, current: bool) -> Vec<SueAction> {
-        let command = |name: &str| ShellRequest::AppletCommand {
-            applet: me(),
-            command: name.to_owned(),
-        };
-        if current {
-            return [
-                ("Save As", "viewer.save_as"),
-                ("Re-encode as JPEG XL", "viewer.reencode"),
-                ("Rotate Right", "viewer.rotate_right"),
-                ("Crop", "viewer.crop"),
-                ("Adjust", "viewer.adjust"),
-                ("Convert", "viewer.convert"),
-                ("Open in Sue Paint", "viewer.paint"),
-                ("Put in Sue Writer", "viewer.writer"),
-            ]
-            .into_iter()
-            .map(|(label, name)| SueAction::new("Image Viewer", label, command(name)))
-            .collect();
-        }
-        match focus {
-            Some(entity) if crate::image::is_picture(entity) => vec![SueAction::new(
-                wheel::SEND_TO,
-                "Image Viewer",
-                ShellRequest::OpenIn {
-                    entity: entity.id(),
-                    applet: me(),
-                },
-            )],
-            _ => Vec::new(),
-        }
     }
 
     fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {

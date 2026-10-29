@@ -1,4 +1,4 @@
-//! Settings: a floating window over the canvas (gear on the left rail, or
+//! Settings: a floating window over the page (the Sue menu's Settings, or
 //! `Ctrl+,`). A category sidebar on the left; on the right only the chosen
 //! category's controls, under a live filter. Pages are registered data from
 //! the engine's catalog; a rice section no page claims lands on a final
