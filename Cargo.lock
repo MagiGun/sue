@@ -2378,6 +2378,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d87d638e33c06f577498cbcc50491496a3ed4246998a7fbba7ccb98b1e7eab22"
 dependencies = [
  "bitflags 2.13.2",
+ "block2 0.6.2",
  "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
@@ -3193,6 +3194,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sue-ios"
+version = "0.0.3"
+dependencies = [
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+ "objc2-ui-kit 0.3.2",
+]
+
+[[package]]
 name = "sue-model"
 version = "0.0.3"
 dependencies = [
@@ -3232,9 +3242,11 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
+ "jni 0.21.1",
  "open",
  "pollster 1.0.1",
  "rfd",
+ "sue-ios",
  "wgpu",
  "winit",
 ]

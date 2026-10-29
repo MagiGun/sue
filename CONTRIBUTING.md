@@ -60,7 +60,9 @@ backbone; section 8 maps every feature area onto it).
    test. A new version reads every older file.
 5. **No hidden copies.** Large buffers move by handle or as `Shared`.
 6. **OS code only in `sue-platform`.** No `cfg(target_os)`, `windows-sys`,
-   `libc` or `objc` anywhere else. `unsafe` is forbidden everywhere.
+   `libc` or `objc` anywhere else. `unsafe` is forbidden everywhere but
+   in audited, maintainer-approved items of `crates/sue-platform/android`
+   and `crates/sue-platform/ios`.
 7. **Studios share features.** Use the shared color picker, file dialogs,
    fonts, text editor, exporters and models; give a shared feature a new mode
    instead of copying it.
@@ -158,12 +160,16 @@ start; Flathub wants the cargo crates vendored with
 `flatpak-cargo-generator`). The AUR takes the `PKGBUILD` a release writes,
 pushed with an AUR account to `ssh://aur@aur.archlinux.org/sue-bin.git`.
 
-Android needs the SDK with the NDK, Java's `keytool`, `cargo install
-cargo-ndk` and the Rust targets `aarch64-linux-android`,
-`armv7-linux-androideabi` and `x86_64-linux-android`; `--abi x86_64` builds
-just what an emulator runs. Sue starts there as a native activity from
-`crates/sue-platform/android`, the one place that exports a symbol for the
-system to call.
+Android needs the SDK with the NDK, a Java development kit (`javac` and
+`keytool`), `cargo install cargo-ndk` and the Rust targets
+`aarch64-linux-android`, `armv7-linux-androideabi` and
+`x86_64-linux-android`; `--abi x86_64` builds just what an emulator runs.
+Sue starts there as a native activity from `crates/sue-platform/android`,
+the one place that exports a symbol for the system to call; its one Java
+class, `packaging/android/java/com/magigun/sue/SueActivity.java`, adds the
+system's file pickers. On iOS the picker's Objective-C calls live in
+`crates/sue-platform/ios`. Those two crates are the only ones where
+`unsafe` is relaxed, item by item, with the maintainer's approval.
 
 ## Branches and commits
 

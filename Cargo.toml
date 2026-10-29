@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "crates/sue-platform/android", "bins/*"]
+members = ["crates/*", "crates/sue-platform/android", "crates/sue-platform/ios", "bins/*"]
 
 [workspace.package]
 version = "0.0.3"
@@ -53,6 +53,13 @@ egui-wgpu = { version = "0.37", default-features = false }
 # sue-platform: iOS has none of them.
 egui-winit = { version = "0.37", default-features = false }
 jpeg-encoder = "0.7"
+
+# The system's own file pickers on phones and tablets: Java's (JNI) on
+# Android and UIKit's on iOS, the versions winit and cpal already use.
+jni = "0.21"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false }
+objc2-ui-kit = { version = "0.3", default-features = false }
 
 # Typography and publishing: reading installed fonts, and the deflate
 # inside DOCX, EPUB, ODT and PDF files.

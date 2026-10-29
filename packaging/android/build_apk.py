@@ -1,14 +1,16 @@
 """Builds Sue's Android package (APK) without Gradle.
 
 The Rust library is built for each ABI with cargo-ndk, then the SDK's own
-tools put it in a package: aapt2 links the manifest and icon, zipalign
-aligns it and apksigner signs it. Phones and tablets get the same package.
+tools put it in a package: javac and d8 turn Sue's activity (the one Java
+class, which adds the system's file pickers) into classes.dex, aapt2 links
+the manifest and icon, zipalign aligns it and apksigner signs it. Phones
+and tablets get the same package.
 
     python packaging/android/build_apk.py --release
     python packaging/android/build_apk.py --abi x86_64        (an emulator)
 
 It needs the Android SDK (ANDROID_HOME) with build-tools, a platform and
-the NDK, Java's keytool, and `cargo install cargo-ndk` with the Rust
+the NDK, a Java development kit (javac and keytool), and `cargo install cargo-ndk` with the Rust
 targets (`rustup target add aarch64-linux-android armv7-linux-androideabi
 x86_64-linux-android`). With no keystore given it signs with the debug
 key in ~/.android, making one if there is none; releases pass their own
@@ -121,6 +123,23 @@ def main() -> None:
         for library in libs.rglob("*.so"):
             run([tool(strip, "llvm-strip"), "--strip-unneeded", library])
 
+    # Sue's activity, compiled against the platform and turned into Dalvik
+    # bytecode.
+    classes = work / "classes"
+    classes.mkdir()
+    sources = sorted((HERE / "java").rglob("*.java"))
+    javac = shutil.which("javac") or str(pathlib.Path(os.environ.get("JAVA_HOME", "")) / "bin" / "javac")
+    run([
+        javac, "-source", "8", "-target", "8", "-bootclasspath", android_jar, "-Xlint:-options",
+        "-encoding", "UTF-8", "-d", classes, *sources,
+    ])
+    dex = work / "dex"
+    dex.mkdir()
+    run([
+        tool(build_tools, "d8"), "--min-api", args.min_sdk, "--lib", android_jar,
+        "--output", dex, *sorted(classes.rglob("*.class")),
+    ])
+
     # The manifest and the icon, linked against the platform.
     number = version()
     parts = [int(part) for part in re.findall(r"\d+", number)[:3]] + [0, 0, 0]
@@ -140,6 +159,7 @@ def main() -> None:
         work / "res.zip",
     ])
     with zipfile.ZipFile(base, "a", compression=zipfile.ZIP_DEFLATED) as package:
+        package.write(dex / "classes.dex", "classes.dex")
         for library in sorted(libs.rglob("*.so")):
             package.write(library, f"lib/{library.parent.name}/{library.name}")
         # The license travels with every copy.

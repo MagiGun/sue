@@ -15,7 +15,8 @@
 //!
 //! The rest of the OS surface lives here too: [`AudioOutput`] (a `cpal`
 //! stream fed by a lock-free ring), [`list_dir`] and [`write_atomic`], and
-//! hand-offs to the system browser, file manager and native dialogs.
+//! hand-offs to the system browser, file manager and the system's own file
+//! dialogs (on phones and tablets they answer later, see [`poll_picks`]).
 //!
 //! Specification: `HUMANZ.md` §3.1, §3.2 and §3.5.
 
@@ -28,9 +29,19 @@ mod fs;
 mod gpu;
 mod host;
 mod input;
+#[cfg(target_os = "ios")]
+mod ios;
 mod os;
 mod paint;
 mod paths;
+#[cfg_attr(
+    not(any(target_os = "android", target_os = "ios")),
+    allow(
+        dead_code,
+        reason = "only phones and tablets stage picked files; the tests run it everywhere"
+    )
+)]
+mod picks;
 
 pub use audio::{
     AudioConfig, AudioOutput, AudioSink, AudioStreamInfo, NullAudio, RealtimeStatus,
@@ -53,8 +64,9 @@ pub use input::{
     ScreenEdge, StylusSample, SwipeDirection, TouchGesture, WindowEvent,
 };
 pub use os::{
-    FileFilter, copy_text, open_document, open_url, pick_folder, pick_open_file, pick_save_file,
-    reveal_file, reveal_folder, web_url,
+    FileFilter, PickNews, Picking, copy_text, deliver_picked_files, open_document, open_url,
+    pick_folder, pick_open_file, pick_save_file, picks_busy, poll_picks, reveal_file,
+    reveal_folder, web_url,
 };
 pub use paint::{EguiPainter, NoTextures, TextureUpload};
 pub use paths::{PlatformPaths, font_dirs, system_font_dirs};
