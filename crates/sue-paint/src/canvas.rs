@@ -494,6 +494,8 @@ impl SuePaint {
                 }
                 let mut stroke =
                     BrushStroke::new(info.id, tip, rgb, info.alpha_locked && !tip.eraser);
+                let other = if self.sub_active { self.main } else { self.sub };
+                stroke.set_sub_color(color::unit(other));
                 let shifted = doc
                     .selection
                     .as_ref()

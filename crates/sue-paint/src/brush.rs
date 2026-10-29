@@ -164,6 +164,84 @@ impl Dynamics {
     }
 }
 
+/// How a stroke's starting and ending are measured (Clip Studio Paint's
+/// How to specify).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TaperMode {
+    /// Starting and ending in pixels.
+    #[default]
+    Length,
+    /// Starting and ending as percentages of the whole stroke.
+    Percent,
+    /// The stroke fades out by the ending length from where it began.
+    Fade,
+}
+
+impl TaperMode {
+    /// Every mode, as the menu lists them.
+    pub const ALL: [Self; 3] = [Self::Length, Self::Percent, Self::Fade];
+
+    /// What people read.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Length => "Specify length",
+            Self::Percent => "By percentage",
+            Self::Fade => "Fade",
+        }
+    }
+}
+
+/// Color jitter: how far the paint's color wanders (Clip Studio Paint's
+/// Color Jitter). Amounts are 0 to 1: hue as a share of half the color
+/// wheel, saturation and luminosity as shares of their range, and how far
+/// toward the sub color.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Jitter {
+    /// Change brush tip color: every dab differs (brushes that stamp).
+    pub tip: bool,
+    /// Hue for each dab.
+    pub hue: f32,
+    /// Saturation for each dab.
+    pub saturation: f32,
+    /// Luminosity for each dab.
+    pub value: f32,
+    /// Blend with sub color for each dab.
+    pub sub: f32,
+    /// Randomize per stroke: the whole stroke differs.
+    pub stroke: bool,
+    /// Hue for each stroke.
+    pub stroke_hue: f32,
+    /// Saturation for each stroke.
+    pub stroke_saturation: f32,
+    /// Luminosity for each stroke.
+    pub stroke_value: f32,
+}
+
+/// `color` moved by up to `amounts` (hue, saturation, luminosity, toward
+/// `sub`) with the four chances in `chance` (0 to 1).
+fn jittered(color: [f32; 3], sub: [f32; 3], amounts: [f32; 4], chance: [f32; 4]) -> [f32; 3] {
+    let spread = |amount: f32, chance: f32| (chance * 2.0 - 1.0) * amount.clamp(0.0, 1.0);
+    let mut hsv = crate::color::Hsv::from_rgb(color);
+    hsv.h = (hsv.h + spread(amounts[0], chance[0]) * 180.0).rem_euclid(360.0);
+    hsv.s = (hsv.s + spread(amounts[1], chance[1])).clamp(0.0, 1.0);
+    hsv.v = (hsv.v + spread(amounts[2], chance[2])).clamp(0.0, 1.0);
+    let rgb = hsv.to_rgb();
+    let toward = chance[3] * amounts[3].clamp(0.0, 1.0);
+    [0, 1, 2].map(|i| rgb[i] + (sub[i] - rgb[i]) * toward)
+}
+
+/// A steady chance from 0 to 1 for `seed` and `salt`.
+fn noise(seed: u32, salt: u32) -> f32 {
+    let mut h = seed ^ salt.wrapping_mul(0x9E37_79B1);
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x85EB_CA6B);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0xC2B2_AE35);
+    h ^= h >> 16;
+    (h & 0xFFFF) as f32 / 65_535.0
+}
+
 /// The shape and behavior of a brush.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tip {
@@ -198,8 +276,21 @@ pub struct Tip {
     /// Length over which a stroke grows from a point to full size, in
     /// pixels.
     pub taper_start: f32,
-    /// Length over which a stroke thins to a point at its end, in pixels.
+    /// Length over which a stroke thins to a point at its end, in pixels
+    /// (a percentage of the stroke `By percentage`, and the length it fades
+    /// out by with `Fade`).
     pub taper_end: f32,
+    /// How the starting and ending are measured.
+    pub taper_mode: TaperMode,
+    /// The starting and ending thin the brush.
+    pub taper_size: bool,
+    /// The starting and ending fade the paint.
+    pub taper_opacity: bool,
+    /// Quicker strokes get longer starts and ends (Starting and ending by
+    /// speed).
+    pub taper_by_speed: bool,
+    /// How far the color wanders.
+    pub jitter: Jitter,
     /// How much of the color under the brush it picks up and drags along,
     /// 0 to 1 (painting brushes).
     pub mix: f32,
@@ -223,6 +314,11 @@ impl Default for Tip {
             eraser: false,
             taper_start: 0.0,
             taper_end: 0.0,
+            taper_mode: TaperMode::Length,
+            taper_size: true,
+            taper_opacity: false,
+            taper_by_speed: false,
+            jitter: Jitter::default(),
             mix: 0.0,
         }
     }
@@ -348,6 +444,8 @@ pub struct Stroke {
     dirty: Option<[u32; 4]>,
     speed: f32,
     seed: u32,
+    sub: [f32; 3],
+    end_speeds: Option<(f32, f32)>,
 }
 
 impl Stroke {
@@ -371,7 +469,32 @@ impl Stroke {
             dirty: None,
             speed: 0.0,
             seed: 0,
+            sub: [1.0; 3],
+            end_speeds: None,
         }
+    }
+
+    /// The sub color, for color jitter that blends toward it.
+    pub fn set_sub_color(&mut self, sub: [f32; 3]) {
+        self.sub = sub;
+    }
+
+    /// How fast the pen moved as the stroke began and as it ended (the
+    /// ending is known once the pen lifts).
+    fn speeds(&self) -> (f32, f32) {
+        if let Some(speeds) = self.end_speeds {
+            return speeds;
+        }
+        let mean = |samples: &[Sample]| {
+            if samples.is_empty() {
+                0.0
+            } else {
+                samples.iter().map(|sample| sample.speed).sum::<f32>() / samples.len() as f32
+            }
+        };
+        let head = &self.samples[..self.samples.len().min(6)];
+        let start = mean(head);
+        (start, start)
     }
 
     /// How fast the pen moves now, 0 (still) to 1 (fast), for the samples
@@ -424,6 +547,23 @@ impl Stroke {
         };
         if self.seed == 0 {
             self.seed = (at[0].to_bits() ^ at[1].to_bits().rotate_left(16)) | 1;
+            let jitter = self.tip.jitter;
+            if jitter.stroke && !self.tip.eraser {
+                // Randomize per stroke: one color for the whole stroke.
+                let chance = [1, 2, 3, 4].map(|salt| noise(self.seed, salt));
+                self.color = jittered(
+                    self.color,
+                    self.sub,
+                    [
+                        jitter.stroke_hue,
+                        jitter.stroke_saturation,
+                        jitter.stroke_value,
+                        0.0,
+                    ],
+                    chance,
+                );
+                self.carried = self.color;
+            }
         }
         match self.samples.last().copied() {
             None => {
@@ -459,7 +599,11 @@ impl Stroke {
         finish: Finish,
         selection: Option<&Selection>,
     ) {
-        let finishing = finish.correction > 0 || finish.flick.is_some() || self.tip.taper_end > 0.0;
+        let finishing = finish.correction > 0
+            || finish.flick.is_some()
+            || self.tip.taper_end > 0.0
+            || (self.tip.taper_start > 0.0
+                && (self.tip.taper_mode == TaperMode::Percent || self.tip.taper_by_speed));
         if self.samples.len() < 2 || !finishing {
             return;
         }
@@ -477,6 +621,15 @@ impl Stroke {
         if path.is_empty() {
             return;
         }
+        // The pen's speed at both ends, from the samples as drawn.
+        let mean = |samples: &[Sample]| {
+            samples.iter().map(|sample| sample.speed).sum::<f32>() / samples.len().max(1) as f32
+        };
+        let count = self.samples.len();
+        self.end_speeds = Some((
+            mean(&self.samples[..count.min(6)]),
+            mean(&self.samples[count.saturating_sub(6)..]),
+        ));
         self.restart(raster);
         self.total = Some(length(&path));
         self.flicked = self.total.unwrap_or(0.0) - before;
@@ -486,6 +639,7 @@ impl Stroke {
         }
         self.total = None;
         self.flicked = 0.0;
+        self.end_speeds = None;
     }
 
     /// Puts back the pixels from before the stroke, to paint it again.
@@ -518,9 +672,32 @@ impl Stroke {
             let x = x.clamp(0.0, 1.0);
             1.0 - (1.0 - x) * (1.0 - x)
         };
-        let mut start = self.tip.taper_start.max(0.0);
+        let tip = &self.tip;
+        let (mut start, mut end) = match (tip.taper_mode, self.total) {
+            (TaperMode::Percent, Some(total)) => (
+                tip.taper_start / 100.0 * total,
+                tip.taper_end / 100.0 * total,
+            ),
+            // While drawing the length is not known yet: start as if the
+            // stroke were 200 pixels long, and end once it is known.
+            (TaperMode::Percent, None) => (tip.taper_start / 100.0 * 200.0, 0.0),
+            _ => (tip.taper_start, tip.taper_end),
+        };
+        start = start.max(0.0);
+        end = end.max(0.0);
+        if tip.taper_by_speed {
+            let (first, last) = self.speeds();
+            start *= 0.3 + 1.4 * first;
+            end *= 0.3 + 1.4 * last;
+        }
+        if tip.taper_mode == TaperMode::Fade {
+            // Fade: gone by the ending length, however long the stroke.
+            let up = if start > 0.0 { ease(s / start) } else { 1.0 };
+            let down = if end > 0.0 { ease(1.0 - s / end) } else { 1.0 };
+            return up.min(down);
+        }
         // A flick thins all the way along the stretch it added.
-        let mut end = self.tip.taper_end.max(self.flicked * 1.2).max(0.0);
+        end = end.max(self.flicked * 1.2);
         match self.total {
             Some(total) => {
                 if total < 1.0 {
@@ -554,7 +731,17 @@ impl Stroke {
     ) {
         let (ra, sa) = self.tip.dab_at(a.pressure, a.speed, self.chance(s0));
         let (rb, sb) = self.tip.dab_at(b.pressure, b.speed, self.chance(s1));
-        let (ra, rb) = (ra * self.taper(s0), rb * self.taper(s1));
+        let (ta, tb) = (self.taper(s0), self.taper(s1));
+        let (ra, rb) = if self.tip.taper_size {
+            (ra * ta, rb * tb)
+        } else {
+            (ra, rb)
+        };
+        let (sa, sb) = if self.tip.taper_opacity {
+            (sa * ta, sb * tb)
+        } else {
+            (sa, sb)
+        };
         let reach = ra.max(rb).max(0.7) + self.tip.aa.edge() + 1.0;
         let rect = [
             a.at[0].min(b.at[0]) - reach,
@@ -630,7 +817,13 @@ impl Stroke {
         let (mut radius, mut strength) =
             self.tip
                 .dab_at(sample.pressure, sample.speed, self.chance(s));
-        radius *= self.taper(s);
+        let taper = self.taper(s);
+        if self.tip.taper_size {
+            radius *= taper;
+        }
+        if self.tip.taper_opacity {
+            strength *= taper;
+        }
         // Tiny dabs keep their area instead of vanishing between pixels.
         if self.tip.at_least_one {
             radius = radius.max(0.5);
@@ -656,7 +849,9 @@ impl Stroke {
                     *carried += (target - *carried) * rate;
                 }
             }
-            Mode::Direct(self.carried)
+            Mode::Direct(self.tip_color(self.carried, s))
+        } else if self.tip.jitter.tip && !self.tip.eraser {
+            Mode::Direct(self.tip_color(self.color, s))
         } else if self.tip.build_up {
             Mode::Accumulate
         } else {
@@ -674,6 +869,23 @@ impl Stroke {
                 tip.coverage(d, radius) * strength
             },
         );
+    }
+
+    /// `color` with the tip's color jitter at `s` along the stroke.
+    fn tip_color(&self, color: [f32; 3], s: f32) -> [f32; 3] {
+        let jitter = self.tip.jitter;
+        if !jitter.tip {
+            return color;
+        }
+        let step = (s * 4.0) as u32;
+        let chance =
+            [11, 12, 13, 14].map(|salt| noise(self.seed ^ step.wrapping_mul(0x27D4_EB2F), salt));
+        jittered(
+            color,
+            self.sub,
+            [jitter.hue, jitter.saturation, jitter.value, jitter.sub],
+            chance,
+        )
     }
 
     /// Lays coverage from `amount` (per pixel center, already including
@@ -1648,6 +1860,114 @@ mod tests {
             .map(|step| stroke.chance(step as f32 * 2.0))
             .collect();
         assert!(spread.iter().any(|value| *value < 0.3) && spread.iter().any(|value| *value > 0.7));
+    }
+
+    /// Paints a straight stroke from x 10 to 190 at y 50 and lifts.
+    fn straight(tip: Tip) -> RasterTile2D {
+        let mut raster = layer(200, 100);
+        let mut stroke = Stroke::new(EntityId::new(), tip, [0.0; 3], false);
+        for step in 0..=90 {
+            stroke.to(&mut raster, [10.0 + step as f32 * 2.0, 50.0], 1.0, None);
+        }
+        stroke.end(&mut raster, Finish::default(), None);
+        raster
+    }
+
+    /// How many pixels of column `x` the stroke covers.
+    fn width_at(raster: &RasterTile2D, x: u32) -> usize {
+        (0..raster.height())
+            .filter(|&y| alpha(raster, x, y) > 60)
+            .count()
+    }
+
+    #[test]
+    fn starting_and_ending_by_percentage_fade_and_opacity() {
+        let pen = Tip {
+            size: 12.0,
+            size_by: Dynamics::NONE,
+            ..Tip::default()
+        };
+        // By percentage: the first and last fifth of the stroke thin out.
+        let percent = straight(Tip {
+            taper_mode: TaperMode::Percent,
+            taper_start: 20.0,
+            taper_end: 20.0,
+            ..pen
+        });
+        assert!(width_at(&percent, 16) < width_at(&percent, 100));
+        assert!(width_at(&percent, 186) < width_at(&percent, 100));
+        assert!(width_at(&percent, 100) >= 11);
+        // Fade: gone 80 pixels in, however long the stroke.
+        let fade = straight(Tip {
+            taper_mode: TaperMode::Fade,
+            taper_end: 80.0,
+            ..pen
+        });
+        assert!(width_at(&fade, 20) > 0);
+        assert_eq!(width_at(&fade, 120), 0, "faded out");
+        // Opacity only: the line keeps its width and gets lighter.
+        let light = straight(Tip {
+            taper_end: 60.0,
+            taper_size: false,
+            taper_opacity: true,
+            ..pen
+        });
+        let column = |x| (0..100).map(|y| alpha(&light, x, y)).max().unwrap();
+        assert!(column(186) < column(100));
+        assert_eq!(
+            (0..100).filter(|&y| alpha(&light, 186, y) > 0).count(),
+            (0..100).filter(|&y| alpha(&light, 100, y) > 0).count()
+        );
+    }
+
+    #[test]
+    fn color_jitter_varies_strokes_and_dabs_steadily() {
+        let jitter = Jitter {
+            stroke: true,
+            stroke_hue: 0.5,
+            stroke_value: 0.3,
+            ..Jitter::default()
+        };
+        let tip = Tip {
+            jitter,
+            ..Tip::default()
+        };
+        let color_of = |start: f32| {
+            let mut raster = layer(60, 60);
+            let mut stroke = Stroke::new(EntityId::new(), tip, [0.9, 0.2, 0.2], false);
+            stroke.to(&mut raster, [start, 30.0], 1.0, None);
+            stroke.color
+        };
+        assert_ne!(color_of(10.0), [0.9, 0.2, 0.2], "the stroke wandered");
+        assert_eq!(
+            color_of(10.0),
+            color_of(10.0),
+            "the same stroke, the same color"
+        );
+        assert_ne!(color_of(10.0), color_of(30.0));
+        // A stamping brush changes color dab by dab.
+        let airbrush = Tip {
+            size: 6.0,
+            build_up: true,
+            flow: 1.0,
+            hardness: 1.0,
+            size_by: Dynamics::NONE,
+            jitter: Jitter {
+                tip: true,
+                hue: 1.0,
+                ..Jitter::default()
+            },
+            ..Tip::default()
+        };
+        let mut raster = layer(200, 20);
+        let mut stroke = Stroke::new(EntityId::new(), airbrush, [0.9, 0.2, 0.2], false);
+        stroke.to(&mut raster, [5.0, 10.0], 1.0, None);
+        stroke.to(&mut raster, [195.0, 10.0], 1.0, None);
+        let bytes = raster.bytes().unwrap();
+        let reds: std::collections::HashSet<u8> = (10..190)
+            .map(|x| bytes[((10 * 200 + x) * 4) as usize])
+            .collect();
+        assert!(reds.len() > 4, "dabs in several colors");
     }
 
     #[test]

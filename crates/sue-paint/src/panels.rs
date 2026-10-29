@@ -12,7 +12,7 @@ use sue_model::BlendMode;
 use sue_model::picture::{self, LayerKind};
 use sue_wm::{AppletContext, ShellRequest, Theme};
 
-use crate::brush::{AntiAlias, Dynamics, Stroke as BrushStroke};
+use crate::brush::{AntiAlias, Dynamics, Jitter, Stroke as BrushStroke, TaperMode};
 use crate::color::{self, Hsv};
 use crate::doc;
 use crate::icons::{self, Icon};
@@ -272,6 +272,110 @@ fn dynamic_row(
         changed
     })
     .inner
+}
+
+/// Starting and ending (Clip Studio Paint's): how they are measured, how
+/// long they are, what they change, and whether speed stretches them.
+fn starting_and_ending_ui(ui: &mut Ui, tip: &mut crate::brush::Tip, theme: &Theme) {
+    let small = |text: &str| {
+        RichText::new(text)
+            .size(theme.small_size + 0.5)
+            .color(theme.muted)
+    };
+    egui::CollapsingHeader::new(small("Starting and ending"))
+        .id_salt("starting-and-ending")
+        .default_open(true)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.add_sized(vec2(78.0, 18.0), egui::Label::new(small("How to specify")));
+                egui::ComboBox::from_id_salt("taper-mode")
+                    .selected_text(tip.taper_mode.label())
+                    .show_ui(ui, |ui| {
+                        for mode in TaperMode::ALL {
+                            ui.selectable_value(&mut tip.taper_mode, mode, mode.label());
+                        }
+                    });
+            });
+            let (unit, top) = match tip.taper_mode {
+                TaperMode::Percent => (" %", 100.0),
+                TaperMode::Length | TaperMode::Fade => (" px", 400.0),
+            };
+            slider_row(
+                ui,
+                "Starting",
+                &mut tip.taper_start,
+                0.0..=top,
+                unit,
+                false,
+                theme,
+            );
+            let ending = if tip.taper_mode == TaperMode::Fade {
+                "Fade by"
+            } else {
+                "Ending"
+            };
+            slider_row(
+                ui,
+                ending,
+                &mut tip.taper_end,
+                0.0..=top,
+                unit,
+                false,
+                theme,
+            );
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut tip.taper_size, small("Brush size"));
+                ui.checkbox(&mut tip.taper_opacity, small("Opacity"));
+            });
+            ui.checkbox(
+                &mut tip.taper_by_speed,
+                small("Starting and ending by speed"),
+            )
+            .on_hover_text("Quicker strokes get longer starts and ends");
+        });
+}
+
+/// Color Jitter (Clip Studio Paint's): every dab, or every stroke, in a
+/// slightly different color.
+fn color_jitter_ui(ui: &mut Ui, jitter: &mut Jitter, stamps: bool, theme: &Theme) {
+    let small = |text: &str| {
+        RichText::new(text)
+            .size(theme.small_size + 0.5)
+            .color(theme.muted)
+    };
+    let amount = |ui: &mut Ui, label: &str, value: &mut f32, top: f32, unit: &str, on: bool| {
+        let mut shown = *value * top;
+        ui.add_enabled_ui(on, |ui| {
+            if slider_row(ui, label, &mut shown, 0.0..=top, unit, false, theme) {
+                *value = shown / top;
+            }
+        });
+    };
+    egui::CollapsingHeader::new(small("Color jitter"))
+        .id_salt("color-jitter")
+        .show(ui, |ui| {
+            ui.add_enabled_ui(stamps, |ui| {
+                ui.checkbox(&mut jitter.tip, small("Change brush tip color"))
+                    .on_disabled_hover_text("For brushes that stamp (build up, color mixing)");
+            });
+            let on = jitter.tip && stamps;
+            amount(ui, "Hue", &mut jitter.hue, 180.0, " deg", on);
+            amount(ui, "Saturation", &mut jitter.saturation, 100.0, " %", on);
+            amount(ui, "Luminosity", &mut jitter.value, 100.0, " %", on);
+            amount(ui, "Blend sub", &mut jitter.sub, 100.0, " %", on);
+            ui.checkbox(&mut jitter.stroke, small("Randomize per stroke"));
+            let on = jitter.stroke;
+            amount(ui, "Hue", &mut jitter.stroke_hue, 180.0, " deg", on);
+            amount(
+                ui,
+                "Saturation",
+                &mut jitter.stroke_saturation,
+                100.0,
+                " %",
+                on,
+            );
+            amount(ui, "Luminosity", &mut jitter.stroke_value, 100.0, " %", on);
+        });
 }
 
 /// The dynamics of one setting: which inputs change it, down to what, and
@@ -912,26 +1016,10 @@ impl SuePaint {
                     .on_hover_text(
                         "A quick stroke carries on along the pen's momentum into a fine point",
                     );
-                ui.label(small("Starting and ending"));
                 let tip = &mut sub.tip;
-                slider_row(
-                    ui,
-                    "Taper start",
-                    &mut tip.taper_start,
-                    0.0..=200.0,
-                    " px",
-                    false,
-                    theme,
-                );
-                slider_row(
-                    ui,
-                    "Taper end",
-                    &mut tip.taper_end,
-                    0.0..=200.0,
-                    " px",
-                    false,
-                    theme,
-                );
+                starting_and_ending_ui(ui, tip, theme);
+                let stamps = tip.dabbed();
+                color_jitter_ui(ui, &mut tip.jitter, stamps, theme);
                 if tip.dabbed() {
                     let mut spacing = tip.spacing * 100.0;
                     if slider_row(ui, "Spacing", &mut spacing, 1.0..=200.0, " %", true, theme) {
