@@ -448,6 +448,12 @@ familiar:
   from: pick the layer, then Register Selected Layer.
   File, Export Animation saves an animated GIF, a movie or every frame as a
   picture.
+- **3D layers:** Layer, New Layer, 3D Layer puts a cube, sphere, cylinder,
+  cone or plane on the canvas, and File, Import, 3D Data brings in an OBJ
+  model. With the Object tool (O), drag to turn the camera, Shift and drag
+  to move it, Ctrl and drag to come nearer; Tool Property sets the camera,
+  light and whether it draws shaded, as line art or both. Layer, Convert to
+  Lines and Tones makes clean line art and tone from it to draw over.
 - **Webtoons:** File, New has a tall Webtoon canvas, and File, Export
   Webtoon cuts it into numbered pictures at the height and width you
   choose, ready to upload.

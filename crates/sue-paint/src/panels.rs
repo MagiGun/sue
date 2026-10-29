@@ -848,6 +848,15 @@ impl SuePaint {
         if let Some(command) = command {
             self.run(command, cx);
         }
+        // A 3D layer's view from Tool Property: shown now, kept when let go.
+        if let Some((layer, view)) = self.pending_view3d.take() {
+            self.preview_view3d(cx, layer, &view);
+        }
+        if std::mem::take(&mut self.view3d_release)
+            && let Some((layer, base, before)) = self.view3d_before.take()
+        {
+            self.finish_view3d(cx, layer, base, &before);
+        }
     }
 
     /// A sample stroke drawn with the current brush.
@@ -944,6 +953,14 @@ impl SuePaint {
             && let Some(folder) = self.camera_folder(arena)
         {
             return self.camera_properties(ui, folder, arena, theme);
+        }
+        if tool == Tool::Operation
+            && let Some(layer) = self
+                .layer()
+                .filter(|layer| crate::three::is_3d(arena, *layer))
+        {
+            self.view3d_properties(ui, layer, arena, theme);
+            return None;
         }
         ui.spacing_mut().item_spacing.y = 6.0;
         let small = |text: &str| {
@@ -1689,6 +1706,81 @@ impl SuePaint {
                 Err(error) => cx.fail(format!("Cannot delete the material: {error}")),
             }
             self.material_pick = None;
+        }
+    }
+
+    /// The Object tool's settings for a 3D layer: its camera, light and
+    /// look. A change shows at once and keeps as one step when let go.
+    fn view3d_properties(
+        &mut self,
+        ui: &mut Ui,
+        layer: sue_core::EntityId,
+        arena: &sue_core::Arena,
+        theme: &Theme,
+    ) {
+        let Ok(entity) = arena.get_by_id(layer) else {
+            return;
+        };
+        let now = crate::three::View3D::of(entity);
+        let mut view = now;
+        let mut released = false;
+        let slider = |ui: &mut Ui,
+                      name: &str,
+                      value: &mut f32,
+                      range: std::ops::RangeInclusive<f32>,
+                      suffix: &str| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(name).color(theme.muted));
+                let response = ui.add(egui::Slider::new(value, range).suffix(suffix));
+                response.drag_stopped() || (response.changed() && !response.dragged())
+            })
+            .inner
+        };
+        released |= slider(ui, "Camera angle", &mut view.yaw, -180.0..=180.0, " deg");
+        released |= slider(ui, "Height", &mut view.pitch, -89.0..=89.0, " deg");
+        released |= slider(ui, "Distance", &mut view.distance, 0.6..=30.0, "");
+        released |= slider(ui, "Perspective", &mut view.fov, 5.0..=120.0, " deg");
+        released |= slider(ui, "Light", &mut view.light, -180.0..=180.0, " deg");
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Draw as").color(theme.muted));
+            egui::ComboBox::from_id_salt(("sue-paint-3d-style", layer))
+                .selected_text(crate::three::STYLES[usize::from(view.style.min(2))])
+                .show_ui(ui, |ui| {
+                    for (index, name) in crate::three::STYLES.iter().enumerate() {
+                        if ui
+                            .selectable_value(&mut view.style, index as u8, *name)
+                            .clicked()
+                        {
+                            released = true;
+                        }
+                    }
+                });
+        });
+        if view.style > 0 {
+            released |= slider(ui, "Line width", &mut view.line_width, 0.5..=20.0, " px");
+            released |= slider(ui, "Fold lines at", &mut view.crease, 5.0..=170.0, " deg");
+        }
+        ui.label(
+            RichText::new("Drag on the canvas to turn the camera; Shift moves it, Ctrl comes nearer. Layer, Convert to Lines and Tones makes line art from it.")
+                .size(theme.small_size)
+                .color(theme.muted),
+        );
+        if view != now {
+            if self
+                .view3d_before
+                .as_ref()
+                .is_none_or(|(id, _, _)| *id != layer)
+            {
+                let before = crate::doc::raster(arena, layer)
+                    .and_then(|raster| raster.bytes())
+                    .map(<[u8]>::to_vec)
+                    .unwrap_or_default();
+                self.view3d_before = Some((layer, now, before));
+            }
+            self.pending_view3d = Some((layer, view));
+        }
+        if released {
+            self.view3d_release = true;
         }
     }
 
@@ -3161,6 +3253,9 @@ impl SuePaint {
                         ) {
                             (true, _) => format!("{} (draft)", info.name),
                             (false, true) => format!("{} (reference)", info.name),
+                            _ if crate::three::is_3d(&cx.world.arena, info.id) => {
+                                format!("{} (3D)", info.name)
+                            }
                             _ => info.name.clone(),
                         };
                         ui.painter().text(

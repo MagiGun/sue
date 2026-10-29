@@ -1276,6 +1276,23 @@ back into the selection. The Selection Launcher, under any selection, holds
 Deselect, Invert, Expand, Shrink, Clear, Clear Outside, Fill, Scale/Rotate
 and Crop.
 
+**3D layers.** A 3D layer (`sue.paint.layer3d`, Layer, New Layer, 3D Layer
+with a cube, sphere, cylinder, cone or plane, or File, Import, 3D Data for an
+OBJ model through `sue_io::ObjFormat`) links by `sue.ref` to a model entity
+whose shape is the shared `Geometry`, and keeps its camera (angle, height,
+distance, field of view, pan), light, look (shaded, line art or both),
+line width and fold angle as properties (`sue_paint::three`). Its pixels are
+the model fitted to a box 2 wide and drawn by a small software renderer:
+triangles projected with perspective into a depth buffer (depth
+interpolated as its inverse), flat lighting, and lines where the outline
+is, where the depth jumps, or where neighboring normals differ by more than
+the fold angle, widened by a distance transform. Every view change redraws
+the layer and is one step (properties with `ReplaceComponent`); the Object
+tool turns the camera by dragging (Shift pans, Ctrl zooms) and Tool
+Property sets each value, shown live and kept when let go. Convert to Lines
+and Tones on a 3D layer takes the lines from the model and its shading as
+tone (Clip Studio Paint's LT conversion of 3D). Pens refuse 3D layers.
+
 **Webtoons and timelines.** New has a Webtoon canvas (800 by 12800
 pixels); Export Webtoon scales the flattened picture to an output width and
 cuts it every split height into numbered pictures, top to bottom. Edit
@@ -1929,6 +1946,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: the Material palette, built-in tones and patterns, Register Material, Image | **Implemented**; a unit test for a tone's coverage and color and a picture registered, cut, read back and placed; an end-to-end run registers a drawing and pastes it as a layer | `sue-paint/src/materials.rs`, `panels.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: Layer Property effects (border, tone, layer color, expression color) and right-click menus | **Implemented**; unit tests for the border's reach, rim and roundness, each effect's color, a tone's coverage, a border rendered round a dot with the pixels kept, and sub tools duplicated, reset and deleted | `sue-paint/src/effects.rs`, `composite.rs`, `panels.rs`, `tools.rs`, `sue-wm/src/menubar.rs` |
 | §3.7 Sue Paint: Polyline, Selection pen and Erase selection; expand, shrink and blur selections; Select Color Gamut; selection layers; Quick Mask; the Selection Launcher | **Implemented**; a unit test for growing, shrinking, blurring, painting and picking colors, and an end-to-end run that shrinks a full selection, keeps it as a layer and turns Quick Mask on and off | `sue-paint/src/select.rs`, `canvas.rs`, `studio.rs`, `bins/sue/src/runtime.rs` |
+| §3.7 Sue Paint: 3D layers (shapes and OBJ models), their camera and look, and lines and tones from them | **Implemented**; unit tests for the renderer's coverage, outlines and folds (a sphere smooth inside), each look, and a layer turned and undone; an end-to-end run makes a cube, turns it with the Object tool, undoes, converts it to lines and tones and imports an OBJ model | `sue-paint/src/three.rs`, `canvas.rs`, `panels.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: brush tip materials | Planned; the menu item is present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |

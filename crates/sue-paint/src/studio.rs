@@ -184,6 +184,16 @@ pub(crate) enum Gesture {
     /// Painting the selection with the Selection pen (or out of it with
     /// Erase selection): where the pen last was (picture pixels).
     SelectPaint { add: bool, last: [f32; 2] },
+    /// The Object tool turning a 3D layer's camera: where the drag began
+    /// (screen), the view then, its pixels then, and how it moves (0 turn,
+    /// 1 pan, 2 zoom).
+    Orbit {
+        layer: EntityId,
+        start: Pos2,
+        base: crate::three::View3D,
+        before: Vec<u8>,
+        mode: u8,
+    },
     /// Dragging a ruler's handle: the ruler's text from before.
     RulerHandle {
         handle: crate::rulers::Handle,
@@ -340,6 +350,13 @@ pub struct SuePaint {
     pub(crate) webtoon: (u32, u32),
     /// The timeline drives what shows (Enable Timeline).
     pub(crate) timeline_on: bool,
+    /// A 3D layer's view being changed in Tool Property, and its view and
+    /// pixels from before.
+    pub(crate) view3d_before: Option<(EntityId, crate::three::View3D, Vec<u8>)>,
+    /// A 3D layer view Tool Property asked for this frame, and whether its
+    /// slider was let go.
+    pub(crate) pending_view3d: Option<(EntityId, crate::three::View3D)>,
+    pub(crate) view3d_release: bool,
     /// A camera being set up and not keyed yet: its folder, the frame and
     /// where it stands.
     pub(crate) camera_pending: Option<(EntityId, u32, crate::camera::Camera)>,
@@ -441,6 +458,9 @@ impl Default for SuePaint {
             webtoon: (1280, 800),
             timeline_on: true,
             camera_pending: None,
+            view3d_before: None,
+            pending_view3d: None,
+            view3d_release: false,
             material_kind: 0,
             material_pick: None,
             material_thumbs: HashMap::new(),
@@ -713,6 +733,8 @@ fn implemented(command: &str) -> bool {
             | "anim.last"
             | "anim.timeline.edit"
             | "anim.timeline.enable"
+            | "layer.new.3d"
+            | "file.import.3d"
             | "filter.line_extraction"
             | "filter.lines_tones"
             | "file.export.pdf"
@@ -1314,10 +1336,145 @@ impl SuePaint {
         cx.notify(format!("Exported {written} cels"));
     }
 
+    /// Adds a 3D layer showing `model` (a new model entity) above the
+    /// current layer, as one step.
+    pub(crate) fn add_3d_layer(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        name: &str,
+        model: sue_core::Entity,
+    ) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        match crate::three::new_layer(&cx.world.arena, picture, self.layer(), name, model) {
+            Ok((edit, id)) => {
+                if Self::apply(cx, edit)
+                    && let Some(doc) = self.doc_mut()
+                {
+                    doc.layer = Some(id);
+                }
+                self.toolbox.pick(crate::tools::Tool::Operation);
+                self.toolbox.pick_sub(crate::tools::Tool::Operation, 0);
+            }
+            Err(error) => cx.fail(error),
+        }
+    }
+
+    /// Imports the model at `path` (OBJ) as a 3D layer.
+    fn import_3d(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        use sue_core::FormatHandler as _;
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        let name = path.file_stem().map_or_else(
+            || "Model".to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        );
+        let bundle = std::fs::read(path)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| {
+                sue_io::ObjFormat
+                    .import(&bytes, &name, &sue_core::Properties::new())
+                    .map_err(|error| error.to_string())
+            });
+        match bundle.map(|bundle| bundle.entities.into_iter().next()) {
+            Ok(Some(model)) => self.add_3d_layer(cx, &name, model),
+            Ok(None) => cx.fail("The file has no model in it"),
+            Err(error) => cx.fail(format!("Cannot import {name}: {error}")),
+        }
+    }
+
+    /// Shows 3D layer `layer` as `view` sees it, in place (while it is being
+    /// changed; [`Self::finish_view3d`] records it).
+    pub(crate) fn preview_view3d(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        layer: EntityId,
+        view: &crate::three::View3D,
+    ) {
+        let Some(raster) = doc::raster(&cx.world.arena, layer) else {
+            return;
+        };
+        let size = [raster.width(), raster.height()];
+        let Some(drawn) = crate::three::buffers_of(&cx.world.arena, layer, view, size)
+            .and_then(|buffers| crate::three::draw(&buffers, view))
+        else {
+            return;
+        };
+        if let Ok(entity) = cx.world.arena.get_by_id_mut(layer) {
+            let properties = entity.properties_mut();
+            for (key, value) in [
+                (crate::three::YAW, f64::from(view.yaw)),
+                (crate::three::PITCH, f64::from(view.pitch)),
+                (crate::three::DISTANCE, f64::from(view.distance)),
+                (crate::three::FOV, f64::from(view.fov)),
+                (crate::three::LIGHT, f64::from(view.light)),
+                (crate::three::LINE_WIDTH, f64::from(view.line_width)),
+                (crate::three::CREASE, f64::from(view.crease)),
+                (crate::three::PAN_X, f64::from(view.pan[0])),
+                (crate::three::PAN_Y, f64::from(view.pan[1])),
+            ] {
+                properties.set(key, value);
+            }
+            properties.set(crate::three::STYLE, i64::from(view.style));
+        }
+        if let (Some(into), Some(from)) = (
+            doc::raster_mut(&mut cx.world.arena, layer).and_then(sue_core::RasterTile2D::bytes_mut),
+            drawn.bytes(),
+        ) {
+            into.copy_from_slice(from);
+        }
+        if let Some(doc) = self.doc_mut() {
+            doc.compositor
+                .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+        }
+    }
+
+    /// Records a 3D layer's view change as one step: back to `base` and
+    /// `before` (its pixels), then the change.
+    pub(crate) fn finish_view3d(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        layer: EntityId,
+        base: crate::three::View3D,
+        before: &[u8],
+    ) {
+        let Some(now) = cx
+            .world
+            .arena
+            .get_by_id(layer)
+            .ok()
+            .map(crate::three::View3D::of)
+        else {
+            return;
+        };
+        if now == base {
+            return;
+        }
+        self.preview_view3d(cx, layer, &base);
+        if let Some(into) =
+            doc::raster_mut(&mut cx.world.arena, layer).and_then(sue_core::RasterTile2D::bytes_mut)
+            && into.len() == before.len()
+        {
+            into.copy_from_slice(before);
+        }
+        if let Some(edit) = crate::three::set_view(&cx.world.arena, layer, &now, "Move Camera") {
+            Self::apply(cx, edit);
+        }
+    }
+
     /// Convert to Lines and Tones: the current layer's lines on a new layer
     /// (Line Extraction) and its shading on another as dots (a gray layer
     /// with the Tone effect on), the layer itself hidden, as one step.
     pub(crate) fn lines_and_tones(&mut self, cx: &mut AppletContext<'_>) {
+        if let Some(layer) = self
+            .layer()
+            .filter(|layer| crate::three::is_3d(&cx.world.arena, *layer))
+        {
+            self.lines_and_tones_3d(cx, layer);
+            return;
+        }
         let (Some(picture), Some(info)) = (self.picture(), self.paintable(&cx.world.arena).ok())
         else {
             cx.fail("Pick a raster layer to convert to lines and tones");
@@ -1392,6 +1549,78 @@ impl SuePaint {
         let edit = edit
             .then(SetProperty::new(ids[0], crate::effects::TONE, true))
             .then(SetProperty::new(info.id, picture::VISIBLE, false));
+        if Self::apply(cx, edit)
+            && let Some(doc) = self.doc_mut()
+        {
+            doc.layer = Some(ids[1]);
+        }
+    }
+
+    /// Convert to Lines and Tones for a 3D layer: its outline and folds as
+    /// lines, its shading as tone, each on a layer of its own, the 3D layer
+    /// hidden, as one step (Clip Studio Paint's LT conversion of 3D).
+    fn lines_and_tones_3d(&mut self, cx: &mut AppletContext<'_>, layer: EntityId) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let Some(raster) = doc::raster(&cx.world.arena, layer) else {
+            return;
+        };
+        let size = [raster.width(), raster.height()];
+        let Some(view) = cx
+            .world
+            .arena
+            .get_by_id(layer)
+            .ok()
+            .map(crate::three::View3D::of)
+        else {
+            return;
+        };
+        let Some(buffers) = crate::three::buffers_of(&cx.world.arena, layer, &view, size) else {
+            cx.fail("The 3D layer has no model");
+            return;
+        };
+        let line = crate::three::lines(&buffers, view.line_width.max(1.0), view.crease);
+        let lines: Vec<u8> = line
+            .iter()
+            .flat_map(|ink| [0, 0, 0, (ink * 255.0).round() as u8])
+            .collect();
+        let tones: Vec<u8> = (0..line.len())
+            .flat_map(|at| {
+                let shade = if buffers.covered(at) {
+                    1.0 - buffers.light[at]
+                } else {
+                    0.0
+                };
+                [0, 0, 0, (shade.clamp(0.0, 1.0) * 255.0).round() as u8]
+            })
+            .collect();
+        let tile = |pixels: Vec<u8>| {
+            sue_core::RasterTile2D::from_bytes(
+                size[0],
+                size[1],
+                sue_core::PixelFormat::Rgba8,
+                pixels,
+            )
+        };
+        let (Ok(lines), Ok(tones)) = (tile(lines), tile(tones)) else {
+            return;
+        };
+        let Ok((spawns, ids)) = doc::add_layers_pixels(
+            &cx.world.arena,
+            picture,
+            Some(layer),
+            vec![("Tones".to_owned(), tones), ("Lines".to_owned(), lines)],
+        ) else {
+            return;
+        };
+        let mut edit = doc::Edit::new("Convert to Lines and Tones");
+        for spawn in spawns {
+            edit = edit.then(spawn);
+        }
+        let edit = edit
+            .then(SetProperty::new(ids[0], crate::effects::TONE, true))
+            .then(SetProperty::new(layer, picture::VISIBLE, false));
         if Self::apply(cx, edit)
             && let Some(doc) = self.doc_mut()
         {
@@ -1614,6 +1843,14 @@ impl SuePaint {
 
     /// The current layer if pens and brushes can draw on it.
     pub(crate) fn drawable(&self, arena: &Arena) -> Result<doc::LayerInfo, String> {
+        if let Some(info) = self.layer_info(arena)
+            && crate::three::is_3d(arena, info.id)
+        {
+            return Err(format!(
+                "{} is a 3D layer: draw on a layer above it, or use the Object tool to move the camera",
+                info.name
+            ));
+        }
         let info = self
             .layer_info(arena)
             .ok_or("Pick a layer to draw on first")?;
@@ -3222,6 +3459,22 @@ impl SuePaint {
                     self.dialog = Some(Dialog::Webtoon(self.webtoon.0, self.webtoon.1));
                 }
             }
+            "layer.new.3d" => {
+                if self.picture().is_some() {
+                    self.dialog = Some(Dialog::Shape3D(0));
+                }
+            }
+            "file.import.3d" => {
+                let start = self
+                    .last_dir
+                    .clone()
+                    .or_else(|| cx.catalog.folders.get("home").cloned());
+                cx.request(ShellRequest::PickFile(
+                    FilePick::open(Some(me_id()), "model3d", "Import 3D Data")
+                        .extensions(&["obj"])
+                        .starting_in(start),
+                ));
+            }
             "layer.rasterize" => {
                 let (Some(picture), Some(layer)) = (self.picture(), self.layer()) else {
                     return;
@@ -4290,6 +4543,7 @@ impl SueApplet for SuePaint {
             "timelapse" => self.export_timelapse(cx, path),
             "anim-sequence" => self.export_animation(cx, path, false),
             "subview" => self.add_reference(path, cx),
+            "model3d" => self.import_3d(cx, path),
             "colorset-import" => match std::fs::read_to_string(path) {
                 Ok(text) => {
                     let colors = crate::colorsets::import(&text);

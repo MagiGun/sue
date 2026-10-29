@@ -871,6 +871,43 @@ impl SuePaint {
                 });
             }
             Tool::Operation if sub.mode == 1 => self.pick_layer_at(&cx.world.arena, p),
+            Tool::Operation
+                if self
+                    .layer()
+                    .is_some_and(|layer| crate::three::is_3d(&cx.world.arena, layer)) =>
+            {
+                // A 3D layer: drag to turn the camera, Shift to move it,
+                // Ctrl to come nearer or go further.
+                let Some(layer) = self.layer() else {
+                    return;
+                };
+                let (Some(base), Some(before)) = (
+                    cx.world
+                        .arena
+                        .get_by_id(layer)
+                        .ok()
+                        .map(crate::three::View3D::of),
+                    doc::raster(&cx.world.arena, layer)
+                        .and_then(|raster| raster.bytes())
+                        .map(<[u8]>::to_vec),
+                ) else {
+                    return;
+                };
+                let mode = if modifiers.shift {
+                    1
+                } else if modifiers.command {
+                    2
+                } else {
+                    0
+                };
+                self.gesture = Some(Gesture::Orbit {
+                    layer,
+                    start: pos,
+                    base,
+                    before,
+                    mode,
+                });
+            }
             Tool::Operation if self.camera_folder(&cx.world.arena).is_some() => {
                 // The camera frame: inside moves it, a corner zooms, outside
                 // turns it.
@@ -1610,6 +1647,31 @@ impl SuePaint {
             }
             return;
         }
+        if let Some(Gesture::Orbit {
+            layer,
+            start,
+            base,
+            mode,
+            ..
+        }) = &self.gesture
+        {
+            let (layer, start, base, mode) = (*layer, *start, *base, *mode);
+            let (dx, dy) = (pos.x - start.x, pos.y - start.y);
+            let mut view = base;
+            match mode {
+                1 => {
+                    let scale = base.distance / 600.0;
+                    view.pan = [base.pan[0] - dx * scale, base.pan[1] + dy * scale];
+                }
+                2 => view.distance = (base.distance * (dy / 200.0).exp()).clamp(0.6, 100.0),
+                _ => {
+                    view.yaw = base.yaw - dx * 0.4;
+                    view.pitch = (base.pitch + dy * 0.4).clamp(-89.0, 89.0);
+                }
+            }
+            self.preview_view3d(cx, layer, &view);
+            return;
+        }
         if let Some(Gesture::Camera {
             folder,
             start,
@@ -1829,7 +1891,8 @@ impl SuePaint {
             | Gesture::VectorErase { .. }
             | Gesture::Correct { .. }
             | Gesture::MoveLines { .. }
-            | Gesture::Camera { .. } => {}
+            | Gesture::Camera { .. }
+            | Gesture::Orbit { .. } => {}
         }
     }
 
@@ -2145,6 +2208,12 @@ impl SuePaint {
                     doc.set_selection(Some(selection));
                 }
             }
+            Gesture::Orbit {
+                layer,
+                base,
+                before,
+                ..
+            } => self.finish_view3d(cx, layer, base, &before),
             Gesture::RulerHandle { handle, before } => {
                 let Some(picture) = self.picture() else {
                     return;

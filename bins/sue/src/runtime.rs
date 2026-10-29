@@ -2739,6 +2739,167 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_3d_layers_turn_and_become_lines_and_tones() {
+        let (mut runtime, root) = runtime("paint-3d");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.studio_focus())
+            .unwrap();
+        let command = |runtime: &mut Runtime, command: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: command.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let three_d = |runtime: &Runtime| {
+            sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+                .into_iter()
+                .find(|info| sue_paint::three::is_3d(&runtime.engine.world.arena, info.id))
+                .map(|info| info.id)
+        };
+        // Layer, New Layer, 3D Layer: a cube, drawn.
+        command(&mut runtime, "layer.new.3d");
+        step(&mut runtime, Vec::new());
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        let layer = three_d(&runtime).expect("a 3D layer");
+        let arena = &runtime.engine.world.arena;
+        assert!(sue_paint::three::model_of(arena, layer).is_some());
+        let drawn = sue_paint::doc::raster(arena, layer)
+            .unwrap()
+            .bytes()
+            .unwrap()
+            .to_vec();
+        assert!(drawn.chunks(4).any(|pixel| pixel[3] > 0));
+        let yaw = |runtime: &Runtime| {
+            sue_paint::three::View3D::of(runtime.engine.world.arena.get_by_id(layer).unwrap()).yaw
+        };
+        let before = yaw(&runtime);
+        // The Object tool (picked for a new 3D layer) turns the camera.
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let middle = runtime.shell.canvas_rect().center();
+        step(&mut runtime, vec![egui::Event::PointerMoved(middle)]);
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(middle), press(middle, true)],
+        );
+        for part in 1..=4 {
+            step(
+                &mut runtime,
+                vec![egui::Event::PointerMoved(
+                    middle + vec2(25.0 * part as f32, 0.0),
+                )],
+            );
+        }
+        step(&mut runtime, vec![press(middle + vec2(100.0, 0.0), false)]);
+        let after = yaw(&runtime);
+        assert!(
+            (after - (before - 40.0)).abs() < 1.0,
+            "turned by the drag: {before} to {after}"
+        );
+        assert_ne!(
+            sue_paint::doc::raster(&runtime.engine.world.arena, layer)
+                .unwrap()
+                .bytes()
+                .unwrap(),
+            &drawn[..]
+        );
+        command(&mut runtime, "edit.undo");
+        assert!((yaw(&runtime) - before).abs() < 1e-3, "one step to undo");
+        assert_eq!(
+            sue_paint::doc::raster(&runtime.engine.world.arena, layer)
+                .unwrap()
+                .bytes()
+                .unwrap(),
+            &drawn[..]
+        );
+        // Convert to Lines and Tones from the model.
+        command(&mut runtime, "filter.lines_tones");
+        let names: Vec<String> = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+            .into_iter()
+            .map(|info| info.name)
+            .collect();
+        assert!(
+            names.contains(&"Lines".to_owned()) && names.contains(&"Tones".to_owned()),
+            "{names:?}"
+        );
+        let lines = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+            .into_iter()
+            .find(|info| info.name == "Lines")
+            .unwrap();
+        let raster = sue_paint::doc::raster(&runtime.engine.world.arena, lines.id).unwrap();
+        assert!(
+            raster
+                .bytes()
+                .unwrap()
+                .chunks(4)
+                .any(|pixel| pixel[3] > 200),
+            "outlines drawn"
+        );
+        // File, Import, 3D Data: an OBJ model becomes a 3D layer.
+        std::fs::create_dir_all(&root).unwrap();
+        let obj = root.join("Wedge.obj");
+        std::fs::write(
+            &obj,
+            "v 0 0 0
+v 1 0 0
+v 0 1 0
+v 0 0 1
+f 1 2 3
+f 1 2 4
+f 1 3 4
+f 2 3 4
+",
+        )
+        .unwrap();
+        runtime.request(
+            ShellRequest::Picked {
+                pick: FilePick::open(Some(paint.clone()), "model3d", "Import 3D Data"),
+                path: obj,
+            },
+            &mut NoTextures,
+            start,
+        );
+        assert!(
+            sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+                .iter()
+                .any(|info| info.name == "Wedge"
+                    && sue_paint::three::is_3d(&runtime.engine.world.arena, info.id))
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_masks_hide_without_erasing_the_layer() {
         let (mut runtime, root) = runtime("paint-mask");
         let ctx = egui::Context::default();

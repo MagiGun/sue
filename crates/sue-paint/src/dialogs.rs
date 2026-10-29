@@ -390,6 +390,8 @@ pub(crate) enum Dialog {
     Webtoon(u32, u32),
     /// Edit Timeline: frames a second and length in frames.
     Timeline(u32, u32),
+    /// New 3D Layer: which of Sue Paint's shapes.
+    Shape3D(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -476,6 +478,7 @@ impl SuePaint {
             Dialog::Gamut(..) => ("Select Color Gamut", vec2(340.0, 170.0)),
             Dialog::Webtoon(..) => ("Export Webtoon", vec2(340.0, 170.0)),
             Dialog::Timeline(..) => ("Edit Timeline", vec2(320.0, 150.0)),
+            Dialog::Shape3D(_) => ("New 3D Layer", vec2(300.0, 230.0)),
             Dialog::Correction(_, filter, ..) => (
                 filter.label(),
                 vec2(
@@ -580,6 +583,18 @@ impl SuePaint {
                                     ui.add(egui::DragValue::new(length).range(1..=100_000).suffix(" frames"));
                                     ui.end_row();
                                 });
+                                ok_cancel(ui, &mut outcome);
+                            }
+                            Dialog::Shape3D(kind) => {
+                                label(ui, "Shape:", theme);
+                                for (index, name) in crate::three::SHAPES.iter().enumerate() {
+                                    ui.radio_value(kind, index, *name);
+                                }
+                                ui.label(
+                                    RichText::new("File, Import, 3D Data brings in models of your own")
+                                        .size(theme.small_size)
+                                        .color(theme.muted),
+                                );
                                 ok_cancel(ui, &mut outcome);
                             }
                             Dialog::Material(name) => {
@@ -816,6 +831,12 @@ impl SuePaint {
             (Dialog::Webtoon(height, width), Outcome::Ok) => {
                 self.ask_export_webtoon(cx, height, width)
             }
+            (Dialog::Shape3D(kind), Outcome::Ok) => {
+                let name = crate::three::SHAPES[kind.min(crate::three::SHAPES.len() - 1)];
+                let model = sue_core::Entity::empty(name, sue_model::class::MODEL)
+                    .with_ext(crate::three::shape(kind));
+                self.add_3d_layer(cx, name, model);
+            }
             (Dialog::Timeline(fps, length), Outcome::Ok) => {
                 if let Some(picture) = self.picture()
                     && let Some(edit) =
@@ -929,7 +950,8 @@ impl SuePaint {
                 | Dialog::SelectBy(..)
                 | Dialog::Gamut(..)
                 | Dialog::Webtoon(..)
-                | Dialog::Timeline(..),
+                | Dialog::Timeline(..)
+                | Dialog::Shape3D(_),
                 Outcome::Cancel,
             ) => {}
         }
