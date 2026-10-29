@@ -113,7 +113,7 @@ jobs:
       - run: packaging/arch/build.sh
       - name: Installs and runs
         run: |
-          pacman -U --noconfirm dist/sue-bin-*.pkg.tar.zst
+          pacman -U --noconfirm dist/Sue-*-linux-x86_64.pkg.tar.zst
           sue --self-check
 
   flatpak:

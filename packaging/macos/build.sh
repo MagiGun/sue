@@ -12,15 +12,19 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
-# A checkout with Windows line endings leaves a carriage return to strip.
-version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1 | tr -d '\r')"
+# The release's version (SUE_VERSION, set by the Release workflow from the
+# version typed or the tag pushed), else Cargo.toml's. A checkout with
+# Windows line endings leaves a carriage return to strip.
+version="${SUE_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1 | tr -d '\r')}"
+version="${version#v}"
+export SUE_VERSION="$version"
 out="$root/dist"
 work="$root/target/macos-package"
 rm -rf "$work"
 mkdir -p "$out" "$work"
 
 for target in aarch64-apple-darwin x86_64-apple-darwin; do
-  cargo build --release -p sue --target "$target"
+  cargo build --release -p sue --bins --target "$target"
 done
 app="$work/Sue.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
@@ -40,6 +44,14 @@ done
 iconutil -c icns "$iconset" -o "$app/Contents/Resources/sue.icns"
 
 codesign --force --deep --sign "${SUE_SIGN_IDENTITY:--}" "$app"
-ditto -c -k --keepParent "$app" "$out/Sue-$version-macos.zip"
-hdiutil create -volname Sue -srcfolder "$app" -ov -format UDZO "$out/Sue-$version-macos.dmg"
+hdiutil create -volname Sue -srcfolder "$app" -ov -format UDZO "$out/Sue-$version-macos-universal.dmg"
+
+# The command line program, for a terminal: --self-check, --version.
+cli="$work/sue-cli"
+mkdir -p "$cli"
+lipo -create -output "$cli/sue-cli" \
+  target/aarch64-apple-darwin/release/sue-cli target/x86_64-apple-darwin/release/sue-cli
+codesign --force --sign "${SUE_SIGN_IDENTITY:--}" "$cli/sue-cli"
+cp LICENSE README.md "$cli/"
+ditto -c -k --keepParent "$cli" "$out/Sue-cli-$version-macos-universal.zip"
 ls -l "$out"

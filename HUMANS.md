@@ -7,7 +7,7 @@ musicians, filmmakers, makers and coders. It has no technical jargon. When a ter
 needs explaining, it is explained the first time it appears.
 
 > **Where things stand:** This guide describes the experience Sue is built for.
-> Sue v1.0 "Faustian Enigma" already opens its own window with the Hub, where
+> Sue already opens its own window with the Hub, where
 > you pick a studio, over the infinite canvas described below. You can write,
 > paint in Sue Paint, listen, split and level audio, view pictures and
 > raw bytes, line things up on the timeline, browse files, play music, convert
@@ -655,8 +655,10 @@ device decides), Desktop, Tablet or Phone. Sue Paint's Window, Interface menu
 does the same, and on a phone the row at the top of the menus does too. So a
 phone can use the full desktop layout, and a computer can try the touch ones.
 
-**Getting Sue.** Each release has a package for every system: a zip for
-Windows, a `.dmg` for macOS; for Linux an AppImage (runs almost anywhere), a
+**Getting Sue.** Each release has a package for every system: for Windows an
+installer (`.msi`) or a portable zip, for 64-bit, 32-bit and ARM PCs; a
+`.dmg` for macOS; FreeBSD; for Linux (Intel, ARM and RISC-V) an AppImage
+(runs almost anywhere), a
 Flatpak, a `.deb` (Debian, Ubuntu, Mint), an `.rpm` (Fedora, openSUSE), a
 `.pkg.tar.zst` (Arch, CachyOS, Manjaro: `sudo pacman -U` it) or a tarball;
 one APK for every Android phone and tablet, and a package for iPhone and iPad

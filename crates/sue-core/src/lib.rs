@@ -1,6 +1,6 @@
 //! # sue-core: the substrate
 //!
-//! The universal data kernel of Sue v1.0 "Faustian Enigma", and the backbone
+//! The universal data kernel of Sue, and the backbone
 //! every feature builds on. All engine data lives in one generational
 //! [`Arena`] of [`Entity`]s, addressed at runtime by 64-bit [`AssetHandle`]s
 //! and for good by [`EntityId`]s. An entity has a class, an optional base
@@ -64,8 +64,13 @@ pub use undo::{NodeId, ReversibleTransaction, TxnError, UndoStack};
 pub use units::{Dimension, DimensionMismatch, Quantity, UNITS, Unit};
 pub use value::{Properties, PropertyDef, PropertySchema, Value, ValueType};
 
-/// Engine version, taken from the workspace manifest.
-pub const SUE_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Engine version: the release's when the build sets `SUE_VERSION` (the
+/// Release workflow does, from the version typed or the tag pushed), else
+/// the workspace manifest's.
+pub const SUE_VERSION: &str = match option_env!("SUE_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
 
 /// Release codename.
 pub const SUE_CODENAME: &str = "Faustian Enigma";

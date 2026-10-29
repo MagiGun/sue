@@ -12,8 +12,12 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
-# A checkout with Windows line endings leaves a carriage return to strip.
-version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1 | tr -d '\r')"
+# The release's version (SUE_VERSION, set by the Release workflow from the
+# version typed or the tag pushed), else Cargo.toml's. A checkout with
+# Windows line endings leaves a carriage return to strip.
+version="${SUE_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1 | tr -d '\r')}"
+version="${version#v}"
+export SUE_VERSION="$version"
 out="$root/dist"
 work="$root/target/ios-package"
 rm -rf "$work"
@@ -21,7 +25,7 @@ mkdir -p "$out" "$work"
 
 bundle() {
   local target="$1" app="$2"
-  cargo build --release -p sue --target "$target"
+  cargo build --release -p sue --bin sue --target "$target"
   mkdir -p "$app"
   cp "target/$target/release/sue" "$app/sue"
   sed "s/@VERSION@/$version/g" packaging/ios/Info.plist > "$app/Info.plist"

@@ -1,12 +1,15 @@
 [package]
 name = "sue"
-description = "Sue v1.0 \"Faustian Enigma\": boots the Singular Unified Engine and runs its self-check."
+description = "Sue, the Singular Unified Engine: opens its window, or runs its self-check."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 repository.workspace = true
 license-file.workspace = true
+# `sue` opens the window (and, built for release on Windows, no console);
+# `sue-cli` is the same program for a terminal: --self-check, --version.
+default-run = "sue"
 
 [dependencies]
 egui.workspace = true

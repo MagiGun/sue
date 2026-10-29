@@ -11,9 +11,15 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
-# A checkout with Windows line endings leaves a carriage return to strip.
-version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1 | tr -d '\r')"
-arch="$(uname -m)"
+# The release's version (SUE_VERSION, set by the Release workflow from the
+# version typed or the tag pushed), else Cargo.toml's. A checkout with
+# Windows line endings leaves a carriage return to strip.
+version="${SUE_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1 | tr -d '\r')}"
+version="${version#v}"
+export SUE_VERSION="$version"
+# Another CPU's package (SUE_ARCH=aarch64): it only repackages the release
+# tarball, so any Arch machine can make it.
+arch="${SUE_ARCH:-$(uname -m)}"
 out="$root/dist"
 tarball="$out/Sue-$version-linux-$arch.tar.gz"
 if [ ! -f "$tarball" ]; then
@@ -30,17 +36,25 @@ sed -e "s/^pkgver=.*/pkgver=$version/" \
     -e "s/^sha256sums_$arch=.*/sha256sums_$arch=('$sum')/" \
     packaging/arch/PKGBUILD > "$work/PKGBUILD"
 
+# makepkg builds for the CPU its configuration names.
+sed "s/^CARCH=.*/CARCH=\"$arch\"/" /etc/makepkg.conf > "$work/makepkg.conf"
 if [ "$(id -u)" = 0 ]; then
   id builder >/dev/null 2>&1 || useradd -m builder
   chown -R builder "$work"
-  su builder -c "cd '$work' && makepkg --force --nodeps --noconfirm"
+  su builder -c "cd '$work' && makepkg --config '$work/makepkg.conf' --force --nodeps --noconfirm"
 else
-  (cd "$work" && makepkg --force --nodeps --noconfirm)
+  (cd "$work" && makepkg --config "$work/makepkg.conf" --force --nodeps --noconfirm)
 fi
-cp "$work"/sue-bin-*.pkg.tar.zst "$out/"
+cp "$work"/sue-bin-*-"$arch".pkg.tar.zst "$out/Sue-$version-linux-$arch.pkg.tar.zst"
 
-# The AUR's PKGBUILD for this release: the download and its checksum.
+# The AUR's PKGBUILD for this release: the downloads and their checksums.
+# A second CPU's run adds its checksum to the first one's.
+template=packaging/arch/PKGBUILD
+if [ -f "$out/PKGBUILD" ] && grep -q "^pkgver=$version\$" "$out/PKGBUILD"; then
+  template="$out/PKGBUILD"
+fi
 sed -e "s/^pkgver=.*/pkgver=$version/" \
     -e "s/^sha256sums_$arch=.*/sha256sums_$arch=('$sum')/" \
-    packaging/arch/PKGBUILD > "$out/PKGBUILD"
-ls -l "$out"/sue-bin-*.pkg.tar.zst "$out/PKGBUILD"
+    "$template" > "$work/PKGBUILD.release"
+cp "$work/PKGBUILD.release" "$out/PKGBUILD"
+ls -l "$out/Sue-$version-linux-$arch.pkg.tar.zst" "$out/PKGBUILD"

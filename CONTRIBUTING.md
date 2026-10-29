@@ -97,16 +97,20 @@ The CI workflow runs the same four on Windows, macOS and Linux.
 ## Building packages
 
 Each system has a script in `packaging/`, and the Release workflow runs
-them all when a `v*` tag is pushed. Every package lands in `dist/`.
+them all when a `v*` tag is pushed or when it is run by hand with a
+version. Every package lands in `dist/`. The version comes from
+`SUE_VERSION` when it is set (the workflow sets it from the version typed
+or the tag), else from `Cargo.toml`; Sue reports the same one.
 
 | System | Command | Makes |
 | --- | --- | --- |
-| Windows | `powershell -File packaging/windows/build.ps1` | a zip with `Sue.exe` |
-| Linux | `packaging/linux/build.sh` | `.tar.gz`, `.deb`, `.rpm` and an AppImage |
+| Windows | `powershell -File packaging/windows/build.ps1 -Arch x64` (or `x86`, `arm64`) | an `.msi` installer and a portable zip, with `Sue.exe` (no console) and `sue-cli.exe` (for a terminal); the installer needs WiX 5 (`dotnet tool install --global wix --version 5.0.2`, then `wix extension add -g WixToolset.UI.wixext/5.0.2`) |
+| Linux | `packaging/linux/build.sh` | `.tar.gz`, `.deb`, `.rpm` and an AppImage with its `.zsync` (for AppImage updaters); for another CPU set `SUE_TARGET`, `SUE_ARCH` and `STRIP` (the Release workflow builds RISC-V this way) |
 | Linux from any system | `docker build -t sue-linux packaging/linux`, then `docker run --rm -v "$PWD:/src" -v sue-target:/target sue-linux` | the same, built in Debian 12 |
 | Arch Linux, CachyOS, Manjaro | `packaging/arch/build.sh` (on Arch, after the Linux script) | a `.pkg.tar.zst` and the AUR's `PKGBUILD` for the release |
 | Flatpak | `packaging/flatpak/build.sh` (needs `flatpak-builder`, after the Linux script) | a `.flatpak` bundle |
-| macOS | `packaging/macos/build.sh` (on a Mac) | `Sue.app` for Apple silicon and Intel, zipped and as a `.dmg` |
+| macOS | `packaging/macos/build.sh` (on a Mac) | `Sue.app` for Apple silicon and Intel in a `.dmg`, and `sue-cli` zipped |
+| FreeBSD | `packaging/freebsd/build.sh` (on FreeBSD, with `pkgconf` and `alsa-lib`) | a tarball for `/usr/local` |
 | iPhone and iPad | `packaging/ios/build.sh` (on a Mac with Xcode) | an unsigned `.ipa` and a simulator build |
 | Android phones and tablets | `python packaging/android/build_apk.py --release` | one APK for arm64, armv7 and x86_64 |
 

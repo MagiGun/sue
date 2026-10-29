@@ -1,4 +1,4 @@
-//! `sue`: boots Sue v1.0 "Faustian Enigma" on its infinite canvas in a native
+//! `sue`: boots Sue on its infinite canvas in a native
 //! GPU window, or runs the headless self-check, or renders offscreen snapshots.
 //! The executable is [`cli`]; phones and tablets start [`run_window`] from
 //! their platform entry (`crates/sue-platform/android` on Android).

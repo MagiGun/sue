@@ -56,6 +56,10 @@ def run(command, **kwargs) -> None:
 
 
 def version() -> str:
+    """SUE_VERSION (set by the Release workflow from the version typed or
+    the tag pushed), else Cargo.toml's."""
+    if os.environ.get("SUE_VERSION"):
+        return os.environ["SUE_VERSION"].lstrip("v")
     text = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
     found = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
     return found.group(1) if found else "0.0.0"

@@ -5,7 +5,7 @@
 # `sue-bin`; packaging/arch/build.sh fills in the version and checksum and
 # builds the .pkg.tar.zst the release carries.
 pkgname=sue-bin
-pkgver=1.0.0
+pkgver=0.0.1
 pkgrel=1
 pkgdesc="Sue, the Singular Unified Engine: painting, comics, animation, writing and sound in one app"
 arch=('x86_64' 'aarch64')

@@ -35,6 +35,6 @@
     <control>touch</control>
   </supports>
   <releases>
-    <release version="1.0.0" date="2026-10-29"/>
+    <release version="@VERSION@" date="@DATE@"/>
   </releases>
 </component>

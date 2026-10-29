@@ -2,8 +2,8 @@
 
 > "A jack of all trades is a master of none, but oftentimes better than a master of one."
 
-This is the architectural specification of **Sue: Singular Unified Engine**, v1.0
-"Faustian Enigma". It is written for systems engineers. The plain-English
+This is the architectural specification of **Sue: Singular Unified Engine**.
+It is written for systems engineers. The plain-English
 companion is [`HUMANS.md`](HUMANS.md); the backbone rules every contributor,
 human or AI, follows are in [`AGENTS.md`](AGENTS.md).
 
@@ -157,10 +157,10 @@ the side of rebuilding.
 allocated in fixed-size chunks that never move. Generations are atomics. Readers
 validate a handle with one acquire-load and never block. Writers append to
 per-thread command buffers that are merged at frame boundaries, and freed memory
-is reclaimed epoch by epoch. v1.0 ships the single-writer form of the same
+is reclaimed epoch by epoch. Sue ships the single-writer form of the same
 contract: mutation requires `&mut Arena`, and `Arena: Send + Sync` allows any
 number of concurrent readers. Long work runs on the job pool (§1.12) over
-`Shared` buffers and comes back as a transaction. Code written against the v1.0
+`Shared` buffers and comes back as a transaction. Code written against today's
 API (handles, ids, split borrows, transactions) carries over unchanged.
 
 ### 1.3 Entities
@@ -1952,9 +1952,9 @@ separators are measured against, and it exercises the full zero-copy path.
 
 ---
 
-## 7. Implementation status (v1.0 "Faustian Enigma")
+## 7. Implementation status
 
-| Spec | Status in v1.0 | Where |
+| Spec | Status | Where |
 | --- | --- | --- |
 | §1.2 Arena, handles, split borrows | **Implemented** (single-writer; lock-free arena planned) | `sue-core/src/arena.rs`, `handle.rs` |
 | §1.2 Stable `EntityId`s, id lookup, revisions | **Implemented** | `sue-core/src/id.rs`, `arena.rs` |

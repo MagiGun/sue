@@ -1,8 +1,8 @@
-# Sue v1.0 "Faustian Enigma"
+# Sue
 
 > "A jack of all trades is a master of none, but oftentimes better than a master of one."
 
-![Version](https://img.shields.io/badge/version-1.0%20Faustian%20Enigma-111111)
+[![Latest release](https://img.shields.io/github/v/release/MagiGun/sue?include_prereleases&label=latest%20release&color=111111)](https://github.com/MagiGun/sue/releases)
 ![Rust](https://img.shields.io/badge/rust-2024%20edition-333333?logo=rust)
 ![MSRV](https://img.shields.io/badge/MSRV-1.95-555555)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20%7C%20iOS-333333)
@@ -24,8 +24,7 @@ Putting a document on the timeline, or a song next to a painting, attaches a new
 
 ## Where things stand
 
-v1.0 "Faustian Enigma" contains the eleven crates below and the `sue`
-executable. It opens a native GPU window drawn with egui in a pure monochrome
+Sue is made of the eleven crates below and the `sue` executable. It opens a native GPU window drawn with egui in a pure monochrome
 theme (black to white, nothing else), straight onto an **infinite canvas**:
 
 - **The Hub:** Sue opens with a card for each place to work (the Canvas and
