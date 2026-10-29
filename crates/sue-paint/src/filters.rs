@@ -290,7 +290,134 @@ impl Filter {
     }
 
     /// The operation on one pixel (for the per-pixel filters).
-    fn point(&self, [r, g, b, a]: [u8; 4], x: u32, y: u32) -> [u8; 4] {
+    /// A correction as text, for a correction layer's setting; `None` for
+    /// filters that are not corrections.
+    #[must_use]
+    pub fn to_text(&self) -> Option<String> {
+        let hex = |[r, g, b]: [u8; 3]| format!("{r:02x}{g:02x}{b:02x}");
+        Some(match *self {
+            Self::BrightnessContrast {
+                brightness,
+                contrast,
+            } => format!("brightness:{brightness},{contrast}"),
+            Self::HueSaturation {
+                hue,
+                saturation,
+                luminosity,
+            } => format!("hue:{hue},{saturation},{luminosity}"),
+            Self::Levels {
+                black,
+                white,
+                gamma,
+                out_black,
+                out_white,
+            } => {
+                format!("levels:{black},{white},{gamma},{out_black},{out_white}")
+            }
+            Self::ToneCurve {
+                rgb,
+                red,
+                green,
+                blue,
+                ..
+            } => format!("curve:{rgb}|{red}|{green}|{blue}"),
+            Self::ColorBalance { shifts, .. } => {
+                let values: Vec<String> =
+                    shifts.iter().flatten().map(ToString::to_string).collect();
+                format!("balance:{}", values.join(","))
+            }
+            Self::Invert => "invert".to_owned(),
+            Self::Posterize { levels } => format!("posterize:{levels}"),
+            Self::Binarize { threshold } => format!("binarize:{threshold}"),
+            Self::GradientMap { from, to } => format!("gradient:{},{}", hex(from), hex(to)),
+            _ => return None,
+        })
+    }
+
+    /// A correction read back from [`Self::to_text`].
+    #[must_use]
+    pub fn from_text(text: &str) -> Option<Self> {
+        let (kind, values) = text.split_once(':').unwrap_or((text, ""));
+        let numbers: Vec<f32> = values
+            .split(',')
+            .filter_map(|value| value.trim().parse().ok())
+            .collect();
+        let hex = |value: &str| -> Option<[u8; 3]> {
+            let value = value.trim();
+            let byte = |at: usize| u8::from_str_radix(value.get(at..at + 2)?, 16).ok();
+            Some([byte(0)?, byte(2)?, byte(4)?])
+        };
+        Some(match (kind, numbers.as_slice()) {
+            ("brightness", &[brightness, contrast]) => Self::BrightnessContrast {
+                brightness,
+                contrast,
+            },
+            ("hue", &[hue, saturation, luminosity]) => Self::HueSaturation {
+                hue,
+                saturation,
+                luminosity,
+            },
+            ("levels", &[black, white, gamma, out_black, out_white]) => Self::Levels {
+                black,
+                white,
+                gamma,
+                out_black,
+                out_white,
+            },
+            ("curve", _) => {
+                let curves: Vec<sue_model::Response> = values
+                    .split('|')
+                    .filter_map(|curve| curve.parse().ok())
+                    .collect();
+                let [rgb, red, green, blue] = curves.as_slice() else {
+                    return None;
+                };
+                Self::ToneCurve {
+                    rgb: *rgb,
+                    red: *red,
+                    green: *green,
+                    blue: *blue,
+                    channel: 0,
+                }
+            }
+            ("balance", values) if values.len() == 9 => {
+                let mut shifts = [[0.0; 3]; 3];
+                for (index, value) in values.iter().enumerate() {
+                    shifts[index / 3][index % 3] = *value;
+                }
+                Self::ColorBalance { shifts, range: 1 }
+            }
+            ("invert", _) => Self::Invert,
+            ("posterize", &[levels]) => Self::Posterize {
+                levels: levels as u32,
+            },
+            ("binarize", &[threshold]) => Self::Binarize { threshold },
+            ("gradient", _) => {
+                let (from, to) = values.split_once(',')?;
+                Self::GradientMap {
+                    from: hex(from)?,
+                    to: hex(to)?,
+                }
+            }
+            _ => return None,
+        })
+    }
+
+    /// `true` for corrections that change each channel on its own, so a
+    /// table of 256 values a channel stands for them.
+    #[must_use]
+    pub const fn per_channel(&self) -> bool {
+        matches!(
+            self,
+            Self::ToneCurve { .. }
+                | Self::Levels { .. }
+                | Self::Invert
+                | Self::Posterize { .. }
+                | Self::BrightnessContrast { .. }
+        )
+    }
+
+    pub(crate) fn point(&self, [r, g, b, a]: [u8; 4], x: u32, y: u32) -> [u8; 4] {
         let unit = |value: u8| f32::from(value) / 255.0;
         let byte = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
         let rgb = [unit(r), unit(g), unit(b)];
@@ -523,6 +650,55 @@ mod tests {
             }
         }
         pixels
+    }
+
+    #[test]
+    fn corrections_read_back_from_their_text() {
+        let curve = sue_model::Response::new(&[[0.0, 0.1], [0.5, 0.3], [1.0, 1.0]]);
+        let mut shifts = [[0.0; 3]; 3];
+        shifts[2][1] = -0.5;
+        for filter in [
+            Filter::BrightnessContrast {
+                brightness: 0.2,
+                contrast: -0.1,
+            },
+            Filter::HueSaturation {
+                hue: 30.0,
+                saturation: 0.5,
+                luminosity: 0.0,
+            },
+            Filter::Levels {
+                black: 0.1,
+                white: 0.9,
+                gamma: 1.5,
+                out_black: 0.0,
+                out_white: 1.0,
+            },
+            Filter::ToneCurve {
+                rgb: curve,
+                red: sue_model::Response::LINEAR,
+                green: curve,
+                blue: sue_model::Response::LINEAR,
+                channel: 0,
+            },
+            Filter::ColorBalance { shifts, range: 1 },
+            Filter::Invert,
+            Filter::Posterize { levels: 4 },
+            Filter::Binarize { threshold: 0.4 },
+            Filter::GradientMap {
+                from: [1, 2, 3],
+                to: [250, 128, 0],
+            },
+        ] {
+            let text = filter.to_text().unwrap();
+            assert_eq!(Filter::from_text(&text), Some(filter), "{text}");
+        }
+        assert_eq!(
+            Filter::GaussianBlur { radius: 2.0 }.to_text(),
+            None,
+            "not a correction"
+        );
+        assert_eq!(Filter::from_text("nonsense:1"), None);
     }
 
     #[test]

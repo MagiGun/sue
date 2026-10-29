@@ -519,6 +519,15 @@ fn implemented(command: &str) -> bool {
             | "edit.crop"
             | "view.snap_special"
             | "layer.new.text"
+            | "layer.correction.brightness"
+            | "layer.correction.levels"
+            | "layer.correction.curve"
+            | "layer.correction.hue"
+            | "layer.correction.balance"
+            | "layer.correction.invert"
+            | "layer.correction.posterize"
+            | "layer.correction.binarize"
+            | "layer.correction.gradient_map"
             | "layer.mask.outside"
             | "layer.mask.inside"
             | "layer.mask.delete"
@@ -1900,6 +1909,67 @@ impl SuePaint {
                 self.dialog = Some(Dialog::Frame(crate::comic::FrameSpec::default()));
             }
             "layer.new.balloon" => self.add_balloon_layer(cx),
+            command if command.starts_with("layer.correction.") => {
+                let filter = match command.trim_start_matches("layer.correction.") {
+                    "brightness" => Filter::BrightnessContrast {
+                        brightness: 0.0,
+                        contrast: 0.0,
+                    },
+                    "levels" => Filter::Levels {
+                        black: 0.0,
+                        white: 1.0,
+                        gamma: 1.0,
+                        out_black: 0.0,
+                        out_white: 1.0,
+                    },
+                    "curve" => Filter::ToneCurve {
+                        rgb: sue_model::Response::LINEAR,
+                        red: sue_model::Response::LINEAR,
+                        green: sue_model::Response::LINEAR,
+                        blue: sue_model::Response::LINEAR,
+                        channel: 0,
+                    },
+                    "hue" => Filter::HueSaturation {
+                        hue: 0.0,
+                        saturation: 0.0,
+                        luminosity: 0.0,
+                    },
+                    "balance" => Filter::ColorBalance {
+                        shifts: [[0.0; 3]; 3],
+                        range: 1,
+                    },
+                    "invert" => Filter::Invert,
+                    "posterize" => Filter::Posterize { levels: 4 },
+                    "binarize" => Filter::Binarize { threshold: 0.5 },
+                    "gradient_map" => Filter::GradientMap {
+                        from: self.main,
+                        to: self.sub,
+                    },
+                    _ => {
+                        cx.notify("That correction is not in Sue Paint yet");
+                        return;
+                    }
+                };
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                let text = filter.to_text().unwrap_or_default();
+                let (edit, layer) = doc::new_correction(
+                    &cx.world.arena,
+                    picture,
+                    self.layer(),
+                    filter.label(),
+                    &text,
+                );
+                if Self::apply(cx, edit) {
+                    if let Some(doc) = self.doc_mut() {
+                        doc.layer = Some(layer);
+                    }
+                    if filter != Filter::Invert {
+                        self.dialog = Some(Dialog::Correction(layer, filter, text, true));
+                    }
+                }
+            }
             "layer.new.text" => {
                 let middle = self
                     .picture()

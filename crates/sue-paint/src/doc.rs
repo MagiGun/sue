@@ -408,6 +408,33 @@ pub fn resample(
     Ok(edit)
 }
 
+// ----- Correction layers -------------------------------------------------------------
+
+/// The class of a correction layer: it changes the picture below it.
+pub const CORRECTION: &str = "sue.paint.correction";
+/// A correction layer's correction (`Text`, `Filter::to_text`).
+pub const CORRECTION_FILTER: &str = "correction.filter";
+
+/// The edit that puts a correction layer named `name` doing `text` right
+/// above `layer` (or on top), and its id.
+#[must_use]
+pub fn new_correction(
+    arena: &Arena,
+    picture: EntityId,
+    layer: Option<EntityId>,
+    name: &str,
+    text: &str,
+) -> (Edit, EntityId) {
+    let correction = Entity::empty(name, CORRECTION).with_property(CORRECTION_FILTER, text);
+    let id = correction.id();
+    let order = key_above(arena, picture, layer);
+    let edit = Edit::new(format!("New {name}")).then(
+        SpawnEntity::new(correction)
+            .with_relation(Relation::new(picture, CHILD, id).ordered(order)),
+    );
+    (edit, id)
+}
+
 // ----- Layer masks -------------------------------------------------------------------
 
 /// The relation from a layer to its mask.
@@ -1179,6 +1206,30 @@ mod tests {
             move_shapes("10,20 30,40;e:1,2,3,4", [5.0, -5.0], [2.0, 2.0]),
             "30,30 70,70;e:12,-6,16,-2"
         );
+    }
+
+    #[test]
+    fn correction_layers_change_the_picture_below_them() {
+        let mut arena = Arena::new();
+        let (mut edit, picture) = create(&NewPicture {
+            width: 2,
+            height: 1,
+            paper: Some(Color::srgb8(200, 200, 200)),
+            ..NewPicture::default()
+        })
+        .unwrap();
+        sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        let shown =
+            |arena: &Arena| render(arena, picture, [0, 0, 1, 1], RenderOptions::default())[0];
+        assert_eq!(shown(&arena), 200);
+        let top = layers(&arena, picture).last().map(|info| info.id);
+        let (mut edit, correction) =
+            new_correction(&arena, picture, top, "Reverse Gradient", "invert");
+        sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        assert_eq!(shown(&arena), 55, "inverted below it");
+        let mut half = set(correction, picture::OPACITY, 0.5);
+        sue_core::ReversibleTransaction::apply(&mut half, &mut arena).unwrap();
+        assert_eq!(shown(&arena), 128, "halfway at half opacity");
     }
 
     #[test]

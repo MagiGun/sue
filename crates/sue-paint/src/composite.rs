@@ -40,8 +40,47 @@ pub struct FrameView {
     pub onion: Vec<(EntityId, [f32; 3], f32)>,
 }
 
+/// A correction layer's change, ready for every pixel: a table a channel
+/// for corrections that treat channels apart, else the filter itself.
+enum Correction {
+    Table(Box<[[u8; 256]; 3]>),
+    Pixel(Box<crate::filters::Filter>),
+}
+
+impl Correction {
+    fn of(filter: crate::filters::Filter) -> Self {
+        if filter.per_channel() {
+            let mut table = Box::new([[0_u8; 256]; 3]);
+            for value in 0..=255_u8 {
+                let out = filter.point([value, value, value, 255], 0, 0);
+                for channel in 0..3 {
+                    table[channel][usize::from(value)] = out[channel];
+                }
+            }
+            Self::Table(table)
+        } else {
+            Self::Pixel(Box::new(filter))
+        }
+    }
+
+    /// `rgb` (straight, 0 to 1) corrected.
+    fn apply(&self, rgb: [f32; 3]) -> [f32; 3] {
+        let byte = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+        match self {
+            Self::Table(table) => [0, 1, 2]
+                .map(|channel| f32::from(table[channel][usize::from(byte(rgb[channel]))]) / 255.0),
+            Self::Pixel(filter) => {
+                let out = filter.point([byte(rgb[0]), byte(rgb[1]), byte(rgb[2]), 255], 0, 0);
+                [0, 1, 2].map(|channel| f32::from(out[channel]) / 255.0)
+            }
+        }
+    }
+}
+
 enum Source<'a> {
     Paper([f32; 3]),
+    /// A correction layer: it changes the picture below it.
+    Correction(Correction),
     Raster {
         raster: &'a RasterTile2D,
         offset: [i64; 2],
@@ -62,6 +101,8 @@ impl Layer<'_> {
     fn sample(&self, x: u32, y: u32) -> [f32; 4] {
         match &self.source {
             Source::Paper(rgb) => [rgb[0], rgb[1], rgb[2], 1.0],
+            // A correction has no pixels of its own.
+            Source::Correction(_) => [0.0; 4],
             Source::Raster { raster, offset } => {
                 let lx = i64::from(x) - offset[0];
                 let ly = i64::from(y) - offset[1];
@@ -148,6 +189,13 @@ fn gather_view<'a>(
                     let color = picture::paper_color(entity).to_space(sue_core::ColorSpace::Srgb);
                     Source::Paper(color.rgb)
                 }
+                LayerKind::Other if entity.class() == crate::doc::CORRECTION => {
+                    let filter = entity
+                        .property(crate::doc::CORRECTION_FILTER)
+                        .and_then(sue_core::Value::as_str)
+                        .and_then(crate::filters::Filter::from_text)?;
+                    Source::Correction(Correction::of(filter))
+                }
                 LayerKind::Other => return None,
             };
             let mask = crate::doc::mask_of(arena, entity.id())
@@ -181,6 +229,16 @@ fn pixel(layers: &[Layer<'_>], x: u32, y: u32) -> [f32; 4] {
     let mut base_alpha = 1.0;
     let mut base_visible = true;
     for layer in layers {
+        if let Source::Correction(correction) = &layer.source {
+            // Everything below, corrected, by the layer's opacity.
+            if layer.style.visible && color[3] > 0.0 {
+                let fixed = correction.apply([color[0], color[1], color[2]]);
+                for channel in 0..3 {
+                    color[channel] += (fixed[channel] - color[channel]) * layer.style.opacity;
+                }
+            }
+            continue;
+        }
         if !layer.style.clip {
             base_visible = layer.style.visible;
         }

@@ -2183,6 +2183,7 @@ impl SuePaint {
         let mut rename_done = None;
         let mut fold = None;
         let mut mask_click = None;
+        let mut reopen = None;
         egui::ScrollArea::vertical()
             .id_salt("sue-paint-layers")
             .show(&mut list_ui, |ui| {
@@ -2393,7 +2394,25 @@ impl SuePaint {
                             },
                         );
                     }
-                    if response.double_clicked() {
+                    let correction = cx
+                        .world
+                        .arena
+                        .get_by_id(info.id)
+                        .ok()
+                        .filter(|entity| entity.class() == doc::CORRECTION)
+                        .and_then(|entity| entity.property(doc::CORRECTION_FILTER))
+                        .and_then(Value::as_str)
+                        .and_then(|text| {
+                            crate::filters::Filter::from_text(text)
+                                .map(|filter| (filter, text.to_owned()))
+                        });
+                    if response.double_clicked()
+                        && let Some((filter, text)) = correction
+                    {
+                        // A correction layer's settings, as Clip Studio Paint
+                        // opens them on a double-click.
+                        reopen = Some((info.id, filter, text));
+                    } else if response.double_clicked() {
                         self.renaming = Some((info.id, info.name.clone()));
                     } else if response.clicked() {
                         pick = Some(info.id);
@@ -2413,6 +2432,9 @@ impl SuePaint {
         }
         if let Some((id, open)) = fold {
             Self::apply(cx, doc::set(id, doc::OPEN, open));
+        }
+        if let Some((id, filter, text)) = reopen {
+            self.dialog = Some(crate::dialogs::Dialog::Correction(id, filter, text, false));
         }
         if let Some(id) = mask_click
             && let Some(doc) = self.doc_mut()

@@ -362,6 +362,10 @@ pub(crate) enum Dialog {
     Resolution(ResolutionDialog),
     /// The Text tool's words: the text layer they go to (new if `None`).
     Text(Option<EntityId>, crate::lettering::Lettering),
+    /// A correction layer's settings, shown live: the layer, the
+    /// correction, its setting when the dialog opened, and whether the
+    /// layer was just made (Cancel takes it away again).
+    Correction(EntityId, Filter, String, bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -433,6 +437,17 @@ impl SuePaint {
             Dialog::Canvas(_) => ("Change Canvas Size", vec2(380.0, 300.0)),
             Dialog::Resolution(_) => ("Change Image Resolution", vec2(380.0, 250.0)),
             Dialog::Text(..) => ("Text", vec2(440.0, 380.0)),
+            Dialog::Correction(_, filter, ..) => (
+                filter.label(),
+                vec2(
+                    400.0,
+                    match filter {
+                        Filter::ToneCurve { .. } => 340.0,
+                        Filter::Levels { .. } => 310.0,
+                        _ => 230.0,
+                    },
+                ),
+            ),
             Dialog::Pressure(pressure) => (
                 "Adjust pen pressure",
                 vec2(560.0, if pressure.show_graph { 520.0 } else { 330.0 }),
@@ -477,6 +492,15 @@ impl SuePaint {
                             Dialog::Pages(pages) => outcome = self.pages_ui(ui, pages, cx, theme),
                             Dialog::Frame(frame) => outcome = frame_ui(ui, frame, theme),
                             Dialog::Text(_, lettering) => outcome = text_ui(ui, lettering, theme),
+                            Dialog::Correction(_, filter, ..) => {
+                                filter_params(ui, filter, theme);
+                                ui.label(
+                                    RichText::new("Changes every layer under this one")
+                                        .size(theme.small_size)
+                                        .color(theme.muted),
+                                );
+                                ok_cancel(ui, &mut outcome);
+                            }
                             Dialog::Canvas(canvas) => outcome = canvas_ui(ui, canvas, theme),
                             Dialog::Resolution(resolution) => {
                                 outcome = resolution_ui(ui, resolution, theme)
@@ -555,6 +579,18 @@ impl SuePaint {
         }
         match (dialog, outcome) {
             (dialog, Outcome::Open) => {
+                if let Dialog::Correction(layer, filter, ..) = &dialog
+                    && let Some(text) = filter.to_text()
+                    && let Ok(entity) = cx.world.arena.get_by_id(*layer)
+                    && entity
+                        .property(doc::CORRECTION_FILTER)
+                        .and_then(sue_core::Value::as_str)
+                        != Some(text.as_str())
+                    && let Ok(entity) = cx.world.arena.get_by_id_mut(*layer)
+                {
+                    // The setting shows live while the dialog is open.
+                    entity.properties_mut().set(doc::CORRECTION_FILTER, text);
+                }
                 if let Dialog::Filter(filter) = &dialog {
                     let pointer_down = ctx.input(|input| input.pointer.any_down());
                     let wanted = if filter.preview {
@@ -603,6 +639,33 @@ impl SuePaint {
             }
             (Dialog::Frame(frame), Outcome::Ok) => self.add_frame_layer(cx, frame),
             (Dialog::Text(layer, lettering), Outcome::Ok) => self.put_text(cx, layer, &lettering),
+            (Dialog::Correction(layer, filter, before, made), outcome) => {
+                let text = filter.to_text().unwrap_or_default();
+                // The setting shows live while the dialog is open.
+                let set_now = |cx: &mut AppletContext<'_>, text: &str| {
+                    if let Ok(entity) = cx.world.arena.get_by_id_mut(layer) {
+                        entity
+                            .properties_mut()
+                            .set(doc::CORRECTION_FILTER, text.to_owned());
+                    }
+                };
+                match outcome {
+                    Outcome::Open => {}
+                    Outcome::Ok => {
+                        // Back as it was, then the change as one undo step.
+                        set_now(cx, &before);
+                        if text != before {
+                            Self::apply(cx, doc::set(layer, doc::CORRECTION_FILTER, text));
+                        }
+                    }
+                    Outcome::Cancel => {
+                        set_now(cx, &before);
+                        if made {
+                            let _ = cx.undo(false);
+                        }
+                    }
+                }
+            }
             (Dialog::Canvas(canvas), Outcome::Ok) => {
                 if let Some(picture) = self.picture() {
                     match doc::resize_canvas(&cx.world.arena, picture, canvas.size, canvas.shift())
@@ -1313,10 +1376,10 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
 }
 
 /// A filter dialog's body: its settings, the preview switch, OK and Cancel.
-fn filter_ui(ui: &mut Ui, dialog: &mut FilterDialog, theme: &Theme) -> Outcome {
-    let mut outcome = Outcome::Open;
+/// A filter's or correction's settings.
+fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
     ui.spacing_mut().slider_width = 220.0;
-    match &mut dialog.filter {
+    match filter {
         Filter::BrightnessContrast {
             brightness,
             contrast,
@@ -1491,6 +1554,11 @@ fn filter_ui(ui: &mut Ui, dialog: &mut FilterDialog, theme: &Theme) -> Outcome {
         }
         Filter::Invert | Filter::Recolor { .. } | Filter::BrightnessToOpacity { .. } => {}
     }
+}
+
+fn filter_ui(ui: &mut Ui, dialog: &mut FilterDialog, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    filter_params(ui, &mut dialog.filter, theme);
     ui.checkbox(&mut dialog.preview, "Preview");
     ui.label(
         RichText::new(if dialog.selection.is_some() {

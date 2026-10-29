@@ -2433,6 +2433,79 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_correction_layers_change_what_is_below_and_cancel_cleanly() {
+        let (mut runtime, root) = runtime("paint-correction");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.studio_focus())
+            .unwrap();
+        let command = |runtime: &mut Runtime, name: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: name.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let shown = |runtime: &Runtime| {
+            let options = sue_paint::composite::RenderOptions {
+                paper: true,
+                drafts: true,
+            };
+            sue_paint::composite::render(
+                &runtime.engine.world.arena,
+                picture,
+                [0, 0, 1, 1],
+                options,
+            )[0]
+        };
+        let layers =
+            |runtime: &Runtime| sue_paint::doc::layers(&runtime.engine.world.arena, picture).len();
+        assert_eq!(shown(&runtime), 255, "white paper");
+        // Reverse Gradient as a correction layer: the paper shows black.
+        command(&mut runtime, "layer.correction.invert");
+        assert_eq!(shown(&runtime), 0);
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        assert_eq!(shown(&runtime), 255, "undone");
+        // Level Correction opens its settings; Esc takes the layer away.
+        let before = layers(&runtime);
+        command(&mut runtime, "layer.correction.levels");
+        assert_eq!(layers(&runtime), before + 1);
+        step(&mut runtime, Vec::new());
+        step(&mut runtime, vec![key(egui::Key::Escape, plain)]);
+        step(&mut runtime, Vec::new());
+        assert_eq!(layers(&runtime), before, "cancelled, gone");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_saves_as_a_project_or_any_picture_type() {
         let (mut runtime, root) = runtime("paint-save-as");
         let ctx = egui::Context::default();
