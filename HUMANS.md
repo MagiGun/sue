@@ -144,6 +144,8 @@ to that card's mode.
 
 ### The marking menu and the command palette
 
+The **Sue button** at the top left (Sue's silhouette) opens the Sue menu.
+
 **Right-click** anywhere on the canvas: a round menu grows around the pointer
 with New File, Open File, Sue Paint, Hub, Command Palette and Reset Camera. Click a slice, or hold the right button, drag toward a slice and let
 go. Right-click a card and the wheel also offers **Delete**, which takes the

@@ -2564,13 +2564,16 @@ impl Shell {
                 },
                 egui::StrokeKind::Inside,
             );
-            painter.text(
-                face.center(),
-                Align2::CENTER_CENTER,
-                "Sue",
-                theme.font(theme.small_size + 0.5),
-                theme.text,
-            );
+            // Sue's silhouette, in the theme's text color ("Sue" without a GPU).
+            if !crate::brand::mark(painter, &mut *io.textures, face.shrink(3.0), theme.text) {
+                painter.text(
+                    face.center(),
+                    Align2::CENTER_CENTER,
+                    "Sue",
+                    theme.font(theme.small_size + 0.5),
+                    theme.text,
+                );
+            }
             if response.clicked() {
                 if open {
                     self.dismiss_overlays();
@@ -3048,11 +3051,18 @@ impl Shell {
                     .inner_margin(egui::Margin::same((theme.padding * 2.0) as i8))
                     .show(ui, |ui| {
                         ui.set_width(width - theme.padding * 4.0);
-                        ui.label(
-                            RichText::new("Hub")
-                                .size(theme.heading_size)
-                                .color(theme.text),
-                        );
+                        ui.horizontal(|ui| {
+                            let (mark, _) = ui.allocate_exact_size(
+                                Vec2::splat(theme.heading_size + 6.0),
+                                Sense::hover(),
+                            );
+                            crate::brand::mark(ui.painter(), &mut *io.textures, mark, theme.text);
+                            ui.label(
+                                RichText::new("Hub")
+                                    .size(theme.heading_size)
+                                    .color(theme.text),
+                            );
+                        });
                         ui.label(
                             RichText::new("Choose where to work. Esc goes back.")
                                 .size(theme.small_size)

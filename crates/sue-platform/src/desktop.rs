@@ -15,7 +15,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{StartCause, WindowEvent as OsWindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::window::{Window, WindowId};
+use winit::window::{Icon, Window, WindowId};
 
 use crate::gpu::{GpuContext, GpuPreference, WindowSurface};
 use crate::paint::EguiPainter;
@@ -50,6 +50,9 @@ pub struct DesktopOptions {
     pub height: f32,
     /// Which GPU draws the window (from rice).
     pub gpu: GpuPreference,
+    /// The window's and the taskbar's icon: square RGBA8 pixels and their
+    /// side.
+    pub icon: Option<(Vec<u8>, u32)>,
 }
 
 /// An application driven by the desktop host.
@@ -126,7 +129,13 @@ impl DesktopHost {
         let attributes = Window::default_attributes()
             .with_title(options.title.clone())
             .with_inner_size(LogicalSize::new(options.width, options.height))
-            .with_min_inner_size(LogicalSize::new(360.0, 480.0));
+            .with_min_inner_size(LogicalSize::new(360.0, 480.0))
+            .with_window_icon(
+                options
+                    .icon
+                    .as_ref()
+                    .and_then(|(rgba, side)| Icon::from_rgba(rgba.clone(), *side, *side).ok()),
+            );
         let window = Arc::new(
             event_loop
                 .create_window(attributes)

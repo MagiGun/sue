@@ -985,6 +985,13 @@ studio's menus showing its current first chords and gives the shell the
 chords the open studio keeps for itself (`SueApplet::reserved_keys`). The
 shell's own keys (`[keys]`) work the same way.
 
+**Sue's icon.** `assets/icons` holds the app icon and the bare silhouette,
+each as SVG (the source), PNG and JPEG XL at 1024 pixels, and a Windows
+`.ico` with six sizes, plus inverted and black versions. `sue_wm::brand`
+reads the `.ico` sizes: the app icon is the window's and the taskbar's
+(`DesktopOptions::icon`), and `brand::mark` draws the silhouette, white on
+clear, tinted to the theme's text color, on the Sue button and the Hub.
+
 **Going in and out of a studio.** Opening a studio, the shell finds the card
 it will work on (the selected node, if the studio `accepts` its entity, else
 the node of its `studio_focus`), closes the timeline (the side panels stay),

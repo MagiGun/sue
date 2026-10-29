@@ -21,6 +21,7 @@
 //! Specification: `HUMANZ.md` §3.2 to §3.6.
 
 mod applet;
+pub mod brand;
 mod camera;
 mod catalog;
 mod color_pick;

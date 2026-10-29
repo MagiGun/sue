@@ -94,6 +94,7 @@ pub fn run() -> Result<(), String> {
             width: 1440.0,
             height: 900.0,
             gpu: gpu_preference(),
+            icon: sue_wm::brand::pixels(sue_wm::brand::APP_ICON, 256),
         },
     )
     .map_err(|error| error.to_string())

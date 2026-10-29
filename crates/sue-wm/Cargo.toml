@@ -13,6 +13,8 @@ sue-core.workspace = true
 sue-model.workspace = true
 sue-platform.workspace = true
 sue-rice.workspace = true
+zune-core.workspace = true
+zune-png.workspace = true
 ttf-parser.workspace = true
 
 [lints]
