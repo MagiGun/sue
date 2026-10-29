@@ -117,7 +117,8 @@ Do:
 - Use the shared features (`sue-wm` widgets, `sue_wm::fonts`, `sue-type`,
   `sue-io` formats, `FilePick`, the shared models) instead of writing new
   ones; give a shared feature a new mode when a studio needs more.
-- Update `HUMANZ.md` and `HUMANS.md` when a feature changes.
+- Update `HUMANZ.md` and `HUMANS.md` when a feature changes, and add a line
+  for people who use Sue under Unreleased in `CHANGELOG.md`.
 - Say plainly what you verified and what you did not.
 
 Do not:
