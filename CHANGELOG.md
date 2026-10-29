@@ -23,6 +23,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Writer on a phone: the text flows to the screen's width at a size you
+  can read, the formatting is a row of big buttons right above the keyboard,
+  and the line you are writing stays in sight when the keyboard comes up.
+  Tapping a formatting button keeps the keyboard up.
+- Sue Writer has fewer options in the way: one short toolbar (what Word and
+  LibreOffice Writer keep at hand), the Format menu grouped as LibreOffice
+  groups it, Draft and Page beside the zoom, and the inspector hidden until
+  View, Inspector. Tablets get larger toolbar buttons.
 - The Sue button sits once, in the window's top left corner, and the
   open studio's or tool's menus follow it.
 - The Image Viewer and the Converter are tools with pages of their own,

@@ -451,10 +451,14 @@ starts a project from a template: a blank document, a novel, a short story, a
 screenplay, a non-fiction book, an essay or paper, a poetry collection, a
 letter or a report.
 
-It looks like a word processor: pages that fit the window, a toolbar with
+It looks like a word processor: pages that fit the window and one short
+toolbar, with what Word and LibreOffice Writer keep at hand: Undo and Redo,
 paragraph styles, every font installed on your computer, sizes, bold, italic,
-underline, strikethrough, raised and lowered text, colors, highlights,
-alignment, lists, indents and line spacing. The usual keys work: `Ctrl+B`,
+underline, colors, highlights, alignment, lists and indents. Everything else
+is one menu away, grouped the way LibreOffice groups it: Format, Text for
+strikethrough, raised and lowered text and small capitals, then Align Text,
+Line Spacing and Lists. Draft and Page sit at the bottom right beside the
+zoom. The usual keys work: `Ctrl+B`,
 `Ctrl+I`, `Ctrl+U`, `Ctrl+E` to center, `Ctrl+J` to justify, `Ctrl+Alt+1` for
 a heading, `Ctrl+Enter` for a new page, `Ctrl+K` for a link, `Ctrl+F` to find
 and `Ctrl+H` to replace. Enter after a heading goes on in body text, Enter on
@@ -470,9 +474,9 @@ For long work it is also a writing studio:
   reorder; right-click for the rest.
 - **The corkboard** shows each item as an index card with its synopsis,
   label color and status; **the outliner** lists them in a table.
-- **The inspector** on the right keeps each scene's synopsis, notes, label,
-  status, word target and keywords, and **snapshots**: take one before a big
-  rewrite and put it back whenever you like.
+- **The inspector** (View, Inspector) keeps each scene's synopsis, notes,
+  label, status, word target and keywords, and **snapshots**: take one
+  before a big rewrite and put it back whenever you like.
 - **Targets**: a word target for the book and for each scene, and a daily
   goal; the status bar counts as you go, and Writing Statistics shows the
   words you wrote each day.
@@ -485,6 +489,17 @@ chapter titles from your folders, scene breaks and a title page, and saves it
 as a PDF (set in your fonts, with bookmarks and page numbers), a Word
 document, an OpenDocument file, an EPUB e-book, a web page, RTF, Markdown or
 plain text. `Ctrl+P` goes straight to PDF.
+
+**Sue Writer on a phone** gives the screen to your words. The text flows to
+the width of the screen at a size you can read (View, Page View shows the
+pages instead). The top bar has the Sue button, a menu button with every
+menu, Undo, Redo, the binder and Find. The formatting is a row of big
+buttons at the bottom (style, bold, italic, underline, alignment, lists,
+indents, font, size and colors; swipe it sideways for the rest), so it sits
+right above the keyboard while you type, and tapping one keeps the keyboard
+up. When the keyboard comes up, the line you are writing moves into sight
+above it. The binder covers the page when you open it and closes when you
+pick a scene. **On a tablet** the toolbar's buttons are larger, for fingers.
 
 Sue Writer works with the rest of Sue. Pictures from Sue Paint go straight
 into your text with the Sue menu's Send To. Open a Word, Markdown, HTML or

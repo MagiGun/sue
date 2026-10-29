@@ -3282,6 +3282,7 @@ dependencies = [
  "sue-io",
  "sue-model",
  "sue-paint",
+ "sue-platform",
  "sue-rice",
  "sue-type",
  "sue-wm",

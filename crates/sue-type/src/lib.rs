@@ -29,4 +29,6 @@ pub mod typeset;
 
 pub use editor::{Caret, Editor, EditorOutput, EditorView, OutlineEntry};
 pub use layout::{Ink, PX_PER_PT, PageSetup, ViewMode};
-pub use style::{Align, BODY, Fonts, ListKind, ParagraphLook, ParagraphStyle, SHEETS, StyleSheet};
+pub use style::{
+    Align, BODY, CharFormat, Fonts, ListKind, ParagraphLook, ParagraphStyle, SHEETS, StyleSheet,
+};

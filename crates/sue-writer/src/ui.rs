@@ -21,6 +21,12 @@ use crate::studio::{Dialog, Figure, ID, PAGES, Settings, SueWriter, View};
 const TOOLBAR_HEIGHT: f32 = 36.0;
 const STATUS_HEIGHT: f32 = 24.0;
 const FIND_HEIGHT: f32 = 34.0;
+/// A thumb-sized button on a phone.
+const THUMB: f32 = 44.0;
+/// A phone's formatting bar: one row of thumb-sized buttons.
+const PHONE_BAR: f32 = THUMB + 8.0;
+/// The room beside a phone's lines, so that they get the screen's width.
+const PHONE_GAP: f32 = 14.0;
 
 fn rgb(color: [u8; 3]) -> Color32 {
     Color32::from_rgb(color[0], color[1], color[2])
@@ -79,8 +85,21 @@ impl SueWriter {
             self.selected = self.open;
         }
         let ctx = ui.ctx().clone();
+        self.phone = cx.view.form_factor == sue_platform::FormFactor::Mobile;
         if self.ready {
             self.keys(&ctx, cx);
+        }
+        // A press on the Writer's own bars leaves the keyboard with the
+        // text: on a phone, tapping Bold keeps the on-screen keyboard up.
+        let on_bar = ctx.input(|input| {
+            (input.pointer.any_pressed() || input.pointer.any_released())
+                && input
+                    .pointer
+                    .interact_pos()
+                    .is_some_and(|pos| self.bars.iter().any(|bar| bar.contains(pos)))
+        });
+        if on_bar {
+            self.editor.keep_focus();
         }
         let theme = cx.theme.clone();
         let full = ui.max_rect();
@@ -98,26 +117,40 @@ impl SueWriter {
         }
         let simple = self.simple(cx);
         let places = self.places(full, simple, self.project.is_some(), self.open.is_some());
-        // The text first, so the panels sliding in pass over it.
-        {
+        // The text first, so the panels sliding in pass over it (on a
+        // phone the binder or the inspector takes the text's place).
+        if places.center.is_positive() {
             let mut center = ui.new_child(UiBuilder::new().max_rect(places.center));
             center.set_clip_rect(places.center.intersect(ui.clip_rect()));
             center.set_opacity(cover.max(0.02));
             self.center_ui(&mut center, places.center, cx, &theme);
         }
-        // The menus are in Sue's top bar (`menu_bar`); the toolbar slides
-        // down from the page's top.
-        let lift = hide * (places.body.top() - full.top());
-        let toolbar = Rect::from_min_size(
-            pos2(full.left(), full.top() - lift),
-            vec2(full.width(), self.toolbar_height),
-        );
-        self.toolbar(ui, toolbar, cx, &theme);
+        // The menus are in Sue's top bar (`menu_bar`). The toolbar slides
+        // down from the page's top; a phone's comes up from the bottom,
+        // where it sits right above the on-screen keyboard.
+        let toolbar = if self.phone {
+            places
+                .toolbar
+                .translate(vec2(0.0, hide * (full.bottom() - places.toolbar.top())))
+        } else {
+            let lift = hide * (places.body.top() - full.top());
+            places.toolbar.translate(vec2(0.0, -lift))
+        };
+        if self.phone {
+            self.phone_toolbar(ui, toolbar, cx, &theme);
+        } else {
+            self.toolbar(ui, toolbar, cx, &theme);
+        }
+        self.bars.clear();
+        self.bars.push(toolbar);
+        self.bars.extend(self.top_bar);
         if self.find.is_some() {
-            let find = Rect::from_min_size(
-                pos2(full.left(), toolbar.bottom()),
-                vec2(full.width(), FIND_HEIGHT),
-            );
+            let top = if self.phone {
+                full.top()
+            } else {
+                toolbar.bottom()
+            };
+            let find = Rect::from_min_size(pos2(full.left(), top), vec2(full.width(), FIND_HEIGHT));
             self.find_bar(ui, find, cx, &theme);
         }
         let body = places.body;
@@ -164,6 +197,14 @@ impl SueWriter {
         }
         let theme = cx.theme.clone();
         let rect = ui.max_rect();
+        if cx.view.form_factor == sue_platform::FormFactor::Mobile {
+            self.top_bar = Some(rect);
+            if let Some(command) = self.phone_top_bar(ui, rect, cx, &theme) {
+                self.run_typing(&command, cx);
+            }
+            return;
+        }
+        self.top_bar = None;
         let picked = {
             let mut menubar = std::mem::take(&mut self.menubar);
             let state = |command: &str| self.item_state(command, cx);
@@ -172,8 +213,101 @@ impl SueWriter {
             picked
         };
         if let Some(command) = picked {
-            self.run(&command, cx);
+            self.run_typing(&command, cx);
         }
+    }
+
+    /// Runs `command`, and gives the keyboard back to the text after one
+    /// that changes how it looks, so that writing goes on (on a phone,
+    /// with the on-screen keyboard up).
+    pub(crate) fn run_typing(&mut self, command: &str, cx: &mut AppletContext<'_>) {
+        self.run(command, cx);
+        if keeps_typing(command) && self.view == View::Document {
+            self.editor.focus();
+        }
+    }
+
+    /// Sue Writer's row in Sue's top bar on a phone: the menus under one
+    /// button, undo and redo, and at the right Find and the binder.
+    fn phone_top_bar(
+        &mut self,
+        ui: &mut Ui,
+        bar: Rect,
+        cx: &AppletContext<'_>,
+        theme: &Theme,
+    ) -> Option<String> {
+        let slot = |index: usize, from_right: bool| {
+            let x = if from_right {
+                bar.right() - 4.0 - (index as f32 + 1.0) * (THUMB + 2.0)
+            } else {
+                bar.left() + 4.0 + index as f32 * (THUMB + 2.0)
+            };
+            Rect::from_min_size(pos2(x, bar.center().y - THUMB / 2.0), vec2(THUMB, THUMB))
+        };
+        let mut run = None;
+        let menu = slot(0, false);
+        let open = self.menubar.is_open();
+        let toggle = thumb(ui, menu, open, true, theme, menu_icon)
+            .on_hover_text("Menus")
+            .clicked();
+        let items = crate::menus::phone_menu(&self.menus);
+        let picked = {
+            let mut menubar = std::mem::take(&mut self.menubar);
+            let state = |command: &str| self.item_state(command, cx);
+            let picked = menubar.dropdown(ui, menu, toggle, &items, &state, theme);
+            self.menubar = menubar;
+            picked
+        };
+        if picked.is_some() {
+            run = picked;
+        }
+        let history = (cx.history.can_undo(), cx.history.can_redo());
+        let undo = thumb(
+            ui,
+            slot(1, false),
+            false,
+            history.0,
+            theme,
+            |painter, rect, color| {
+                undo_icon(painter, rect, color, false);
+            },
+        );
+        if undo.on_hover_text("Undo").clicked() {
+            run = Some("edit.undo".to_owned());
+        }
+        let redo = thumb(
+            ui,
+            slot(2, false),
+            false,
+            history.1,
+            theme,
+            |painter, rect, color| {
+                undo_icon(painter, rect, color, true);
+            },
+        );
+        if redo.on_hover_text("Redo").clicked() {
+            run = Some("edit.redo".to_owned());
+        }
+        let finding = self.find.is_some();
+        if thumb(ui, slot(0, true), finding, true, theme, find_icon)
+            .on_hover_text("Find")
+            .clicked()
+        {
+            if finding {
+                self.find = None;
+            } else {
+                run = Some("edit.find".to_owned());
+            }
+        }
+        if self.project.is_some()
+            && !self.simple(cx)
+            && thumb(ui, slot(1, true), self.phone_binder, true, theme, book_icon)
+                .on_hover_text("Binder")
+                .clicked()
+        {
+            run = Some("view.binder".to_owned());
+        }
+        run
     }
 
     /// Where everything goes in `full`: the bars, the binder and inspector
@@ -185,14 +319,43 @@ impl SueWriter {
         has_project: bool,
         has_open: bool,
     ) -> Places {
-        let top = full.top()
-            + self.toolbar_height
-            + if self.find.is_some() {
-                FIND_HEIGHT
-            } else {
-                0.0
-            };
+        let find = if self.find.is_some() {
+            FIND_HEIGHT
+        } else {
+            0.0
+        };
         let status = Rect::from_min_max(pos2(full.left(), full.bottom() - STATUS_HEIGHT), full.max);
+        if self.phone {
+            // The formatting sits at the bottom, above the status bar and so
+            // right above the on-screen keyboard; the binder or the
+            // inspector, when asked for, takes the whole page in turn.
+            let toolbar = Rect::from_min_max(
+                pos2(full.left(), status.top() - PHONE_BAR),
+                pos2(full.right(), status.top()),
+            );
+            let body = Rect::from_min_max(
+                pos2(full.left(), full.top() + find),
+                pos2(full.right(), toolbar.top()),
+            );
+            let binder = (self.phone_binder && !simple && has_project).then_some(body);
+            let inspector =
+                (binder.is_none() && self.inspector && (has_project || has_open)).then_some(body);
+            let center = if binder.is_some() || inspector.is_some() {
+                Rect::NOTHING
+            } else {
+                body
+            };
+            return Places {
+                body,
+                toolbar,
+                status,
+                binder,
+                inspector,
+                center,
+            };
+        }
+        let toolbar = Rect::from_min_size(full.min, vec2(full.width(), self.toolbar_height));
+        let top = toolbar.bottom() + find;
         let body = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), status.top()));
         let mut center = body;
         let mut binder = None;
@@ -217,6 +380,7 @@ impl SueWriter {
         }
         Places {
             body,
+            toolbar,
             status,
             binder,
             inspector,
@@ -229,8 +393,8 @@ impl SueWriter {
         let has_project = self.project.is_some();
         let has_text = self.editor.current().is_some();
         match command {
-            "view.page" => ItemState::check(self.paged && self.view == View::Document),
-            "view.draft" => ItemState::check(!self.paged && self.view == View::Document),
+            "view.page" => ItemState::check(self.pages_shown() && self.view == View::Document),
+            "view.draft" => ItemState::check(!self.pages_shown() && self.view == View::Document),
             "view.document" => ItemState::check(self.view == View::Document),
             "view.corkboard" => ItemState {
                 enabled: has_project,
@@ -244,7 +408,7 @@ impl SueWriter {
             "view.typewriter" => ItemState::check(self.typewriter),
             "view.binder" => ItemState {
                 enabled: has_project,
-                checked: Some(self.binder),
+                checked: Some(self.binder_shown()),
             },
             "view.inspector" => ItemState::check(self.inspector),
             "project.include" => ItemState {
@@ -305,56 +469,38 @@ impl SueWriter {
 
     // ----- Toolbar -------------------------------------------------------------
 
-    #[allow(clippy::too_many_lines, reason = "one row of controls")]
+    /// The formatting toolbar: what Word's mini toolbar and LibreOffice
+    /// Writer's single toolbar keep at hand (undo and redo, the paragraph
+    /// style, the font and its size, bold, italic and underline, the
+    /// colors, alignment, lists and indents), with Find at the right. The
+    /// rest is in the Format menu; the views are in the status bar.
     fn toolbar(&mut self, ui: &mut Ui, rect: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
         ui.painter().rect_filled(rect, 0.0, theme.panel);
         ui.painter()
             .hline(rect.x_range(), rect.bottom(), theme.hairline());
-        let sheet = self.sheet(cx);
-        let (para, chars) = self.editor.look_here(&sheet);
-        let text_on = self.editor.current().is_some() && self.view == View::Document;
         let mut run: Option<String> = None;
         let inner = rect.shrink2(vec2(8.0, 4.0));
-        // The views at the right first; the formatting scrolls in the rest.
-        // The views sit on the first row.
-        let first_row = Rect::from_min_size(inner.min, vec2(inner.width(), TOOLBAR_HEIGHT - 8.0));
+        let first_row = Rect::from_min_size(
+            inner.min,
+            vec2(
+                inner.width(),
+                (self.toolbar_height - 8.0).min(TOOLBAR_HEIGHT),
+            ),
+        );
         let mut right = ui.new_child(
             UiBuilder::new()
                 .max_rect(first_row)
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
         );
         right.set_clip_rect(rect.intersect(ui.clip_rect()));
+        if widgets::pill_button(&mut right, "Find", self.find.is_some(), theme)
+            .on_hover_text("Find and replace (Ctrl+F)")
+            .clicked()
         {
-            let ui = &mut right;
-            ui.spacing_mut().item_spacing.x = 4.0;
-            let options = ["Page", "Draft", "Cards", "Outline"].map(String::from);
-            let chosen = match (self.view, self.paged) {
-                (View::Document, true) => 0,
-                (View::Document, false) => 1,
-                (View::Corkboard, _) => 2,
-                (View::Outliner, _) => 3,
-            };
-            if let Some(index) = widgets::segmented(ui, &options, Some(chosen), theme) {
-                run = Some(
-                    ["view.page", "view.draft", "view.corkboard", "view.outliner"][index]
-                        .to_owned(),
-                );
-            }
-            if widgets::pill_button(ui, "Find", self.find.is_some(), theme)
-                .on_hover_text("Find and replace (Ctrl+F)")
-                .clicked()
-            {
-                if self.find.is_some() {
-                    self.find = None;
-                } else {
-                    run = Some("edit.find".to_owned());
-                }
-            }
-            if widgets::pill_button(ui, "Focus", false, theme)
-                .on_hover_text("Composition mode: only the text (F11)")
-                .clicked()
-            {
-                run = Some("view.composition".to_owned());
+            if self.find.is_some() {
+                self.find = None;
+            } else {
+                run = Some("edit.find".to_owned());
             }
         }
         let taken = right.min_rect().width() + 12.0;
@@ -370,268 +516,343 @@ impl SueWriter {
         row.set_clip_rect(
             Rect::from_x_y_ranges(left.x_range(), rect.y_range()).intersect(ui.clip_rect()),
         );
-        let ui = &mut row;
         // The formatting wraps onto a second row when the studio is narrow.
-        ui.horizontal_wrapped(|ui| {
-            {
+        // A tablet's buttons are bigger, for fingers and pens.
+        let tablet = cx.view.form_factor == sue_platform::FormFactor::Tablet;
+        row.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(4.0, 6.0);
+            if tablet {
+                ui.spacing_mut().interact_size.y = 32.0;
+                ui.spacing_mut().button_padding = vec2(8.0, 6.0);
+            }
+            let size = if tablet { 32.0 } else { 24.0 };
+            self.format_controls(ui, cx, theme, size, &mut run);
+        });
+        self.toolbar_height = (row.min_rect().bottom() - rect.top() + 5.0).max(TOOLBAR_HEIGHT);
+        if let Some(command) = run {
+            self.run_typing(&command, cx);
+        }
+    }
+
+    /// A phone's formatting bar: the same controls as thumb-sized buttons
+    /// in one row that scrolls sideways, at the bottom of the page, so that
+    /// it sits right above the on-screen keyboard.
+    fn phone_toolbar(
+        &mut self,
+        ui: &mut Ui,
+        rect: Rect,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        ui.painter().rect_filled(rect, 0.0, theme.panel);
+        ui.painter()
+            .hline(rect.x_range(), rect.top(), theme.hairline());
+        let mut run: Option<String> = None;
+        let mut row = ui.new_child(
+            UiBuilder::new()
+                .max_rect(rect.shrink2(vec2(4.0, 4.0)))
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        row.set_clip_rect(rect.intersect(ui.clip_rect()));
+        egui::ScrollArea::horizontal()
+            .id_salt("writer-phone-toolbar")
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .show(&mut row, |ui| {
+                ui.horizontal_centered(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
+                    self.format_controls(ui, cx, theme, THUMB, &mut run);
+                });
+            });
+        if let Some(command) = run {
+            self.run_typing(&command, cx);
+        }
+    }
+
+    /// The formatting controls, `size` points tall: 24 at a desk, 32 on a
+    /// tablet, a thumb's 44 on a phone. A phone has undo and redo in the
+    /// top bar, starts with what it reaches for most and steps through the
+    /// alignments with one button.
+    #[allow(clippy::too_many_lines, reason = "one row of controls")]
+    fn format_controls(
+        &mut self,
+        ui: &mut Ui,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+        size: f32,
+        run: &mut Option<String>,
+    ) {
+        let big = self.phone;
+        let sheet = self.sheet(cx);
+        let (para, chars) = self.editor.look_here(&sheet);
+        let text_on = self.editor.current().is_some() && self.view == View::Document;
+        if !big {
+            let history = (cx.history.can_undo(), cx.history.can_redo());
+            for (redo, enabled, hint, command) in [
+                (false, history.0, "Undo (Ctrl+Z)", "edit.undo"),
+                (true, history.1, "Redo (Ctrl+Shift+Z)", "edit.redo"),
+            ] {
+                if ui
+                    .add_enabled_ui(enabled, |ui| {
+                        icon(ui, size, false, theme, |painter, rect, color| {
+                            undo_icon(painter, rect, color, redo);
+                        })
+                    })
+                    .inner
+                    .on_hover_text(hint)
+                    .clicked()
                 {
-                    ui.spacing_mut().item_spacing = vec2(4.0, 6.0);
-                    ui.add_enabled_ui(text_on, |ui| {
-                        // Paragraph style.
-                        egui::ComboBox::from_id_salt("writer-style")
-                            .selected_text(sheet.get(&para.style).name.clone())
-                            .width(132.0)
-                            .show_ui(ui, |ui| {
-                                for style in &sheet.styles {
-                                    let label = RichText::new(&style.name).size(
-                                        theme.ui_size
-                                            + if style.outline.is_some() { 1.5 } else { 0.0 },
-                                    );
-                                    if ui
-                                        .selectable_label(style.key == para.style, label)
-                                        .clicked()
-                                    {
-                                        run = Some(format!("style.{}", style.key));
-                                    }
-                                }
-                            });
-                        // Font.
-                        let font = chars.font.clone().unwrap_or_else(|| para.font.clone());
-                        let font_id = Id::unique("writer-font-filter");
-                        egui::ComboBox::from_id_salt("writer-font")
-                            .selected_text(font.clone())
-                            .width(150.0)
-                            .height(420.0)
-                            .show_ui(ui, |ui| {
-                                let mut filter: String =
-                                    ui.data(|data| data.get_temp(font_id)).unwrap_or_default();
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut filter)
-                                        .hint_text("Search fonts")
-                                        .desired_width(200.0),
-                                );
-                                ui.data_mut(|data| data.insert_temp(font_id, filter.clone()));
-                                if !sue_wm::fonts::ready() {
-                                    ui.label(
-                                        RichText::new("Finding installed fonts...")
-                                            .color(theme.muted),
-                                    );
-                                }
-                                if ui
-                                    .selectable_label(chars.font.is_none(), "Style's font")
-                                    .clicked()
-                                {
-                                    self.editor.set_char(cx, kind::FONT, None, "Font");
-                                }
-                                let needle = filter.to_lowercase();
-                                for family in sue_wm::fonts::families() {
-                                    if !needle.is_empty()
-                                        && !family.to_lowercase().contains(&needle)
-                                    {
-                                        continue;
-                                    }
-                                    if ui.selectable_label(family == font, &family).clicked() {
-                                        self.editor.set_char(
-                                            cx,
-                                            kind::FONT,
-                                            Some(Value::Text(family.clone())),
-                                            "Font",
-                                        );
-                                    }
-                                }
-                            });
-                        // Size.
-                        let size = chars.size.unwrap_or(para.size);
-                        egui::ComboBox::from_id_salt("writer-size")
-                            .selected_text(format!("{size:.0}"))
-                            .width(48.0)
-                            .show_ui(ui, |ui| {
-                                for option in [
-                                    8.0_f32, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0,
-                                    28.0, 32.0, 36.0, 48.0, 72.0,
-                                ] {
-                                    if ui
-                                        .selectable_label(
-                                            (option - size).abs() < 0.1,
-                                            format!("{option:.0}"),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.editor.set_char(
-                                            cx,
-                                            kind::SIZE,
-                                            Some(Value::Float(f64::from(option))),
-                                            "Size",
-                                        );
-                                    }
-                                }
-                            });
-                        widgets::pill_divider(ui, theme);
-                        for (label, command, on, hint) in [
-                            ("B", "format.bold", chars.bold || para.bold, "Bold (Ctrl+B)"),
-                            (
-                                "I",
-                                "format.italic",
-                                chars.italic || para.italic,
-                                "Italic (Ctrl+I)",
-                            ),
-                            (
-                                "U",
-                                "format.underline",
-                                chars.underline,
-                                "Underline (Ctrl+U)",
-                            ),
-                            (
-                                "S",
-                                "format.strike",
-                                chars.strike,
-                                "Strikethrough (Ctrl+Shift+X)",
-                            ),
-                            (
-                                "x\u{00B2}",
-                                "format.superscript",
-                                chars.script == 1,
-                                "Superscript",
-                            ),
-                            (
-                                "x\u{2082}",
-                                "format.subscript",
-                                chars.script == -1,
-                                "Subscript",
-                            ),
-                        ] {
-                            let text = match label {
-                                "B" => RichText::new(label).strong(),
-                                "I" => RichText::new(label).italics(),
-                                "U" => RichText::new(label).underline(),
-                                "S" => RichText::new(label).strikethrough(),
-                                _ => RichText::new(label),
-                            };
-                            if toggle(ui, text, on, theme).on_hover_text(hint).clicked() {
-                                run = Some(command.to_owned());
-                            }
-                        }
-                        // Text color and highlight.
-                        let mut rgba = chars
-                            .color
-                            .map_or([0x18, 0x18, 0x18, 255], |[r, g, b]| [r, g, b, 255]);
-                        let pick =
-                            sue_wm::color_button(ui, "writer-color", &mut rgba, false, theme);
-                        if pick.released || (pick.changed && !pick.dragging) {
-                            let hex = format!("#{:02x}{:02x}{:02x}", rgba[0], rgba[1], rgba[2]);
-                            self.editor.set_char(
-                                cx,
-                                kind::COLOR,
-                                Some(Value::Text(hex)),
-                                "Text Color",
-                            );
-                        }
-                        ui.menu_button(
-                            RichText::new("Highlight").size(theme.small_size + 1.0),
-                            |ui| {
-                                for (name, color) in [
-                                    ("Yellow", "yellow"),
-                                    ("Green", "green"),
-                                    ("Blue", "blue"),
-                                    ("Pink", "pink"),
-                                    ("None", "none"),
-                                ] {
-                                    if ui.button(name).clicked() {
-                                        run = Some(format!("format.highlight.{color}"));
-                                        ui.close();
-                                    }
-                                }
-                            },
-                        );
-                        widgets::pill_divider(ui, theme);
-                        for (align, command, hint) in [
-                            (sue_type::Align::Left, "align.left", "Align left (Ctrl+L)"),
-                            (sue_type::Align::Center, "align.center", "Center (Ctrl+E)"),
-                            (
-                                sue_type::Align::Right,
-                                "align.right",
-                                "Align right (Ctrl+R)",
-                            ),
-                            (
-                                sue_type::Align::Justify,
-                                "align.justify",
-                                "Justify (Ctrl+J)",
-                            ),
-                        ] {
-                            if icon(ui, para.align == align, theme, |painter, rect, color| {
-                                align_icon(painter, rect, color, align)
-                            })
-                            .on_hover_text(hint)
-                            .clicked()
-                            {
-                                run = Some(command.to_owned());
-                            }
-                        }
-                        widgets::pill_divider(ui, theme);
-                        let bullet = para.list == Some(sue_type::ListKind::Bullet);
-                        let number = para.list == Some(sue_type::ListKind::Number);
-                        if icon(ui, bullet, theme, |painter, rect, color| {
-                            list_icon(painter, rect, color, false)
-                        })
-                        .on_hover_text("Bulleted list (Ctrl+Shift+L)")
-                        .clicked()
-                        {
-                            run = Some("list.bullet".to_owned());
-                        }
-                        if icon(ui, number, theme, |painter, rect, color| {
-                            list_icon(painter, rect, color, true)
-                        })
-                        .on_hover_text("Numbered list")
-                        .clicked()
-                        {
-                            run = Some("list.number".to_owned());
-                        }
-                        if icon(ui, false, theme, |painter, rect, color| {
-                            indent_icon(painter, rect, color, false)
-                        })
-                        .on_hover_text("Decrease indent")
-                        .clicked()
-                        {
-                            run = Some("indent.less".to_owned());
-                        }
-                        if icon(ui, false, theme, |painter, rect, color| {
-                            indent_icon(painter, rect, color, true)
-                        })
-                        .on_hover_text("Increase indent")
-                        .clicked()
-                        {
-                            run = Some("indent.more".to_owned());
-                        }
-                        egui::ComboBox::from_id_salt("writer-spacing")
-                            .selected_text(
-                                format!("{:.2}", para.line_spacing)
-                                    .trim_end_matches('0')
-                                    .trim_end_matches('.')
-                                    .to_owned(),
-                            )
-                            .width(44.0)
-                            .show_ui(ui, |ui| {
-                                for (label, value) in [
-                                    ("Single", "1"),
-                                    ("1.15", "1.15"),
-                                    ("1.5", "1.5"),
-                                    ("Double", "2"),
-                                ] {
-                                    if ui.selectable_label(false, label).clicked() {
-                                        run = Some(format!("spacing.{value}"));
-                                    }
-                                }
-                            })
-                            .response
-                            .on_hover_text("Line spacing");
-                    });
+                    *run = Some(command.to_owned());
                 }
             }
-        });
-        self.toolbar_height = (ui.min_rect().bottom() - rect.top() + 5.0).max(TOOLBAR_HEIGHT);
-        if let Some(command) = run {
-            self.run(&command, cx);
+            widgets::pill_divider(ui, theme);
         }
+        ui.add_enabled_ui(text_on, |ui| {
+            if big {
+                ui.spacing_mut().interact_size.y = size;
+                ui.spacing_mut().button_padding = vec2(10.0, 8.0);
+            }
+            // Paragraph style.
+            egui::ComboBox::from_id_salt("writer-style")
+                .selected_text(sheet.get(&para.style).name.clone())
+                .width(if big { 140.0 } else { 132.0 })
+                .show_ui(ui, |ui| {
+                    for style in &sheet.styles {
+                        let label = RichText::new(&style.name)
+                            .size(theme.ui_size + if style.outline.is_some() { 1.5 } else { 0.0 });
+                        if ui
+                            .selectable_label(style.key == para.style, label)
+                            .clicked()
+                        {
+                            *run = Some(format!("style.{}", style.key));
+                        }
+                    }
+                });
+            if !big {
+                self.font_controls(ui, cx, theme, &para, &chars);
+            }
+            widgets::pill_divider(ui, theme);
+            for (label, command, on, hint) in [
+                ("B", "format.bold", chars.bold || para.bold, "Bold (Ctrl+B)"),
+                (
+                    "I",
+                    "format.italic",
+                    chars.italic || para.italic,
+                    "Italic (Ctrl+I)",
+                ),
+                (
+                    "U",
+                    "format.underline",
+                    chars.underline,
+                    "Underline (Ctrl+U)",
+                ),
+            ] {
+                let text = match label {
+                    "B" => RichText::new(label).strong(),
+                    "I" => RichText::new(label).italics(),
+                    _ => RichText::new(label).underline(),
+                };
+                if toggle(ui, size, text, on, theme)
+                    .on_hover_text(hint)
+                    .clicked()
+                {
+                    *run = Some(command.to_owned());
+                }
+            }
+            if !big {
+                self.color_controls(ui, cx, theme, &chars, run);
+            }
+            widgets::pill_divider(ui, theme);
+            if big {
+                // One button steps through the alignments.
+                let (next, command) = match para.align {
+                    sue_type::Align::Left => (sue_type::Align::Center, "align.center"),
+                    sue_type::Align::Center => (sue_type::Align::Right, "align.right"),
+                    sue_type::Align::Right => (sue_type::Align::Justify, "align.justify"),
+                    sue_type::Align::Justify => (sue_type::Align::Left, "align.left"),
+                };
+                let shown = para.align;
+                if icon(ui, size, false, theme, |painter, rect, color| {
+                    align_icon(painter, rect, color, shown);
+                })
+                .on_hover_text(format!("Alignment (next: {next:?})"))
+                .clicked()
+                {
+                    *run = Some(command.to_owned());
+                }
+            } else {
+                for (align, command, hint) in [
+                    (sue_type::Align::Left, "align.left", "Align left (Ctrl+L)"),
+                    (sue_type::Align::Center, "align.center", "Center (Ctrl+E)"),
+                    (
+                        sue_type::Align::Right,
+                        "align.right",
+                        "Align right (Ctrl+R)",
+                    ),
+                    (
+                        sue_type::Align::Justify,
+                        "align.justify",
+                        "Justify (Ctrl+J)",
+                    ),
+                ] {
+                    if icon(
+                        ui,
+                        size,
+                        para.align == align,
+                        theme,
+                        |painter, rect, color| {
+                            align_icon(painter, rect, color, align);
+                        },
+                    )
+                    .on_hover_text(hint)
+                    .clicked()
+                    {
+                        *run = Some(command.to_owned());
+                    }
+                }
+                widgets::pill_divider(ui, theme);
+            }
+            let bullet = para.list == Some(sue_type::ListKind::Bullet);
+            let number = para.list == Some(sue_type::ListKind::Number);
+            for (numbered, on, hint, command) in [
+                (false, bullet, "Bulleted list (Ctrl+Shift+L)", "list.bullet"),
+                (true, number, "Numbered list", "list.number"),
+            ] {
+                if icon(ui, size, on, theme, |painter, rect, color| {
+                    list_icon(painter, rect, color, numbered);
+                })
+                .on_hover_text(hint)
+                .clicked()
+                {
+                    *run = Some(command.to_owned());
+                }
+            }
+            for (more, hint, command) in [
+                (false, "Decrease indent", "indent.less"),
+                (true, "Increase indent", "indent.more"),
+            ] {
+                if icon(ui, size, false, theme, |painter, rect, color| {
+                    indent_icon(painter, rect, color, more);
+                })
+                .on_hover_text(hint)
+                .clicked()
+                {
+                    *run = Some(command.to_owned());
+                }
+            }
+            if big {
+                widgets::pill_divider(ui, theme);
+                self.font_controls(ui, cx, theme, &para, &chars);
+                self.color_controls(ui, cx, theme, &chars, run);
+            }
+        });
+    }
+
+    /// The font and its size.
+    fn font_controls(
+        &mut self,
+        ui: &mut Ui,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+        para: &sue_type::ParagraphLook,
+        chars: &sue_type::CharFormat,
+    ) {
+        let font = chars.font.clone().unwrap_or_else(|| para.font.clone());
+        let font_id = Id::unique("writer-font-filter");
+        egui::ComboBox::from_id_salt("writer-font")
+            .selected_text(font.clone())
+            .width(150.0)
+            .height(420.0)
+            .show_ui(ui, |ui| {
+                let mut filter: String = ui.data(|data| data.get_temp(font_id)).unwrap_or_default();
+                ui.add(
+                    egui::TextEdit::singleline(&mut filter)
+                        .hint_text("Search fonts")
+                        .desired_width(200.0),
+                );
+                ui.data_mut(|data| data.insert_temp(font_id, filter.clone()));
+                if !sue_wm::fonts::ready() {
+                    ui.label(RichText::new("Finding installed fonts...").color(theme.muted));
+                }
+                if ui
+                    .selectable_label(chars.font.is_none(), "Style's font")
+                    .clicked()
+                {
+                    self.editor.set_char(cx, kind::FONT, None, "Font");
+                }
+                let needle = filter.to_lowercase();
+                for family in sue_wm::fonts::families() {
+                    if !needle.is_empty() && !family.to_lowercase().contains(&needle) {
+                        continue;
+                    }
+                    if ui.selectable_label(family == font, &family).clicked() {
+                        self.editor.set_char(
+                            cx,
+                            kind::FONT,
+                            Some(Value::Text(family.clone())),
+                            "Font",
+                        );
+                    }
+                }
+            });
+        let size = chars.size.unwrap_or(para.size);
+        egui::ComboBox::from_id_salt("writer-size")
+            .selected_text(format!("{size:.0}"))
+            .width(48.0)
+            .show_ui(ui, |ui| {
+                for option in [
+                    8.0_f32, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 32.0, 36.0,
+                    48.0, 72.0,
+                ] {
+                    if ui
+                        .selectable_label((option - size).abs() < 0.1, format!("{option:.0}"))
+                        .clicked()
+                    {
+                        self.editor.set_char(
+                            cx,
+                            kind::SIZE,
+                            Some(Value::Float(f64::from(option))),
+                            "Size",
+                        );
+                    }
+                }
+            });
+    }
+
+    /// The text color and the highlight.
+    fn color_controls(
+        &mut self,
+        ui: &mut Ui,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+        chars: &sue_type::CharFormat,
+        run: &mut Option<String>,
+    ) {
+        let mut rgba = chars
+            .color
+            .map_or([0x18, 0x18, 0x18, 255], |[r, g, b]| [r, g, b, 255]);
+        let pick = sue_wm::color_button(ui, "writer-color", &mut rgba, false, theme);
+        if pick.released || (pick.changed && !pick.dragging) {
+            let hex = format!("#{:02x}{:02x}{:02x}", rgba[0], rgba[1], rgba[2]);
+            self.editor
+                .set_char(cx, kind::COLOR, Some(Value::Text(hex)), "Text Color");
+        }
+        ui.menu_button(
+            RichText::new("Highlight").size(theme.small_size + 1.0),
+            |ui| {
+                for (name, color) in [
+                    ("Yellow", "yellow"),
+                    ("Green", "green"),
+                    ("Blue", "blue"),
+                    ("Pink", "pink"),
+                    ("None", "none"),
+                ] {
+                    if ui.button(name).clicked() {
+                        *run = Some(format!("format.highlight.{color}"));
+                        ui.close();
+                    }
+                }
+            },
+        );
     }
 
     // ----- Binder ----------------------------------------------------------------
@@ -836,6 +1057,8 @@ impl SueWriter {
                         self.view = View::Document;
                     }
                     self.editor.select(id, 0..0);
+                    // A phone's binder covers the text: back to writing.
+                    self.phone_binder = false;
                 } else {
                     // A folder shows its documents one after another; a
                     // picture in Research shows as itself.
@@ -1141,9 +1364,18 @@ impl SueWriter {
         } else {
             Ink::paper()
         };
-        // The page fits the space, until people zoom themselves.
-        let (mode, across) = if self.paged && !composing {
+        // The page fits the space, until people zoom themselves. A phone
+        // reflows the text to its screen at a size that reads (as Word's
+        // mobile view does), unless asked for pages.
+        let pages = self.pages_shown() && !composing;
+        let reflow = self.phone && !pages;
+        let phone_zoom = if self.fit { 1.0 } else { self.zoom };
+        let (mode, across) = if pages {
             (ViewMode::Page, page.size[0])
+        } else if reflow {
+            let width =
+                ((rect.width() - 2.0 * PHONE_GAP) / (phone_zoom * sue_type::PX_PER_PT)).max(120.0);
+            (ViewMode::Draft { width }, width)
         } else if composing {
             (ViewMode::Draft { width: 560.0 }, 600.0)
         } else {
@@ -1154,9 +1386,13 @@ impl SueWriter {
                 page.text_width() + 60.0,
             )
         };
-        // Never smaller than can be read: past that the page scrolls across.
-        let fit = ((rect.width() - 56.0) / (across * sue_type::PX_PER_PT)).clamp(0.6, 3.0);
-        let zoom = if self.fit {
+        // Never smaller than can be read, past which the page scrolls
+        // across; a phone's page may shrink further to be seen whole.
+        let least = if self.phone { 0.3 } else { 0.6 };
+        let fit = ((rect.width() - 56.0) / (across * sue_type::PX_PER_PT)).clamp(least, 3.0);
+        let zoom = if reflow {
+            phone_zoom
+        } else if self.fit {
             fit.min(if composing { 1.3 } else { 1.0 })
         } else {
             self.zoom
@@ -1184,6 +1420,7 @@ impl SueWriter {
             smart_quotes,
             read_only: false,
             titles: &titles,
+            gap: reflow.then_some(PHONE_GAP),
         };
         let mut area = ui.new_child(UiBuilder::new().max_rect(rect));
         let output = self.editor.show(&mut area, cx, &docs, &view);
@@ -1889,7 +2126,8 @@ impl SueWriter {
         } else {
             parts.push(format!("{doc_words} words"));
         }
-        if self.project.is_some() && !self.simple(cx) {
+        // A phone keeps to the words and the page.
+        if self.project.is_some() && !self.simple(cx) && !self.phone {
             let target = self
                 .project_entity(cx)
                 .and_then(|entity| entity.property(manuscript::TARGET))
@@ -1914,7 +2152,7 @@ impl SueWriter {
                 parts.push(format!("Today {session:+}"));
             }
         }
-        if self.view == View::Document && self.paged {
+        if self.view == View::Document && self.pages_shown() {
             let (page, pages) = self.page_info;
             parts.push(format!("Page {} of {}", page + 1, pages.max(1)));
         }
@@ -1926,16 +2164,22 @@ impl SueWriter {
             theme.font(theme.small_size + 0.5),
             theme.muted,
         );
-        // Zoom at the right.
+        if self.phone {
+            // Two fingers zoom on a phone.
+            return;
+        }
+        // The views and the zoom at the right, where Word and LibreOffice
+        // keep them.
         let zoom = Rect::from_min_max(
-            pos2(rect.right() - 150.0, rect.top() + 2.0),
-            pos2(rect.right() - 8.0, rect.bottom() - 2.0),
+            pos2(rect.right() - 290.0, rect.top() + 1.0),
+            pos2(rect.right() - 8.0, rect.bottom() - 1.0),
         );
         let mut child = ui.new_child(
             UiBuilder::new()
                 .max_rect(zoom)
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
         );
+        child.spacing_mut().item_spacing.x = 4.0;
         if child.small_button("+").on_hover_text("Zoom in").clicked() {
             self.run("view.zoom_in", cx);
         }
@@ -1964,6 +2208,12 @@ impl SueWriter {
             .clicked()
         {
             self.run("view.zoom_out", cx);
+        }
+        widgets::pill_divider(&mut child, theme);
+        let options = ["Draft", "Page"].map(String::from);
+        let chosen = (self.view == View::Document).then_some(usize::from(self.paged));
+        if let Some(index) = widgets::segmented(&mut child, &options, chosen, theme) {
+            self.run(["view.draft", "view.page"][index], cx);
         }
     }
 
@@ -2581,6 +2831,8 @@ impl SueWriter {
 pub(crate) struct Places {
     /// Between the bars.
     pub body: Rect,
+    /// The formatting toolbar: at the top, or a phone's at the bottom.
+    pub toolbar: Rect,
     /// The status bar.
     pub status: Rect,
     /// The binder, when it shows.
@@ -2670,8 +2922,11 @@ fn drop_zone(rect: Rect, pointer: Pos2, folder: bool) -> Zone {
 }
 
 /// A toggle button showing `text`.
-fn toggle(ui: &mut Ui, text: RichText, on: bool, theme: &Theme) -> egui::Response {
-    let button = egui::Button::new(text.size(theme.ui_size + 1.0).color(if on {
+/// A square text button `size` points wide (24 at a desk, a thumb's 44
+/// on a phone).
+fn toggle(ui: &mut Ui, size: f32, text: RichText, on: bool, theme: &Theme) -> egui::Response {
+    let grow = if size > 30.0 { 4.0 } else { 1.0 };
+    let button = egui::Button::new(text.size(theme.ui_size + grow).color(if on {
         theme.text
     } else {
         theme.muted
@@ -2682,32 +2937,137 @@ fn toggle(ui: &mut Ui, text: RichText, on: bool, theme: &Theme) -> egui::Respons
         Color32::TRANSPARENT
     })
     .stroke(Stroke::NONE)
-    .min_size(vec2(24.0, 24.0));
+    .min_size(vec2(size, size));
     ui.add(button)
 }
 
-/// A square button with a drawn icon.
+/// A square button with a drawn icon, `size` points wide.
 fn icon(
     ui: &mut Ui,
+    size: f32,
     on: bool,
     theme: &Theme,
     draw: impl FnOnce(&Painter, Rect, Color32),
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::click());
+    paint_button(ui, rect, &response, on, ui.is_enabled(), theme, draw);
+    response
+}
+
+/// A thumb-sized button with a drawn icon at `rect` (a phone's top bar).
+fn thumb(
+    ui: &mut Ui,
+    rect: Rect,
+    on: bool,
+    enabled: bool,
+    theme: &Theme,
+    draw: impl FnOnce(&Painter, Rect, Color32),
+) -> egui::Response {
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let id = ui
+        .scope_id()
+        .with(("writer-thumb", rect.min.x as i32, rect.min.y as i32));
+    let response = ui.interact(rect, id, sense);
+    paint_button(ui, rect, &response, on, enabled, theme, draw);
+    response
+}
+
+fn paint_button(
+    ui: &Ui,
+    rect: Rect,
+    response: &egui::Response,
+    on: bool,
+    enabled: bool,
+    theme: &Theme,
+    draw: impl FnOnce(&Painter, Rect, Color32),
+) {
     if on {
         ui.painter()
             .rect_filled(rect, theme.control_radius, theme.active);
-    } else if response.hovered() {
+    } else if response.hovered() && enabled {
         ui.painter()
             .rect_filled(rect, theme.control_radius, theme.hover);
     }
-    let color = if on || response.hovered() {
+    let color = if !enabled {
+        theme.muted.gamma_multiply(0.45)
+    } else if on || response.hovered() {
         theme.text
     } else {
         theme.muted
     };
-    draw(ui.painter(), rect.shrink(6.0), color);
-    response
+    // Half the button: a desk's 12 points, a thumb's 22.
+    let inner = (rect.width() * 0.5).clamp(12.0, 22.0);
+    draw(
+        ui.painter(),
+        Rect::from_center_size(rect.center(), vec2(inner, inner)),
+        color,
+    );
+}
+
+/// Commands after which the text gets the keyboard back: they change how
+/// it looks, or add to it, without asking anything.
+fn keeps_typing(command: &str) -> bool {
+    [
+        "format.", "align.", "list.", "indent.", "spacing.", "style.",
+    ]
+    .iter()
+    .any(|prefix| command.starts_with(prefix))
+        || matches!(
+            command,
+            "edit.undo" | "edit.redo" | "insert.page_break" | "insert.scene_break" | "insert.date"
+        )
+}
+
+/// Three lines: the menus.
+fn menu_icon(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.8, color);
+    for index in 0..3 {
+        let y = rect.top() + 3.0 + index as f32 * (rect.height() - 6.0) / 2.0;
+        painter.line_segment(
+            [pos2(rect.left() + 1.0, y), pos2(rect.right() - 1.0, y)],
+            stroke,
+        );
+    }
+}
+
+/// A curved arrow back (undo) or forward (redo).
+fn undo_icon(painter: &Painter, rect: Rect, color: Color32, redo: bool) {
+    let stroke = Stroke::new(1.6, color);
+    let flip = |point: Pos2| {
+        if redo {
+            pos2(rect.left() + rect.right() - point.x, point.y)
+        } else {
+            point
+        }
+    };
+    let center = pos2(rect.center().x + 1.0, rect.center().y + 2.0);
+    let radius = rect.width() * 0.36;
+    let points: Vec<Pos2> = (0..=12)
+        .map(|step| {
+            let angle = std::f32::consts::PI * (1.0 + step as f32 / 12.0);
+            flip(center + vec2(angle.cos(), angle.sin()) * radius)
+        })
+        .chain([flip(pos2(rect.right() - 1.0, center.y + radius * 0.6))])
+        .collect();
+    painter.add(egui::Shape::line(points, stroke));
+    let tip = flip(pos2(center.x - radius, center.y));
+    let side = if redo { -1.0 } else { 1.0 };
+    painter.line_segment([tip, tip + vec2(-3.5 * side, -4.0)], stroke);
+    painter.line_segment([tip, tip + vec2(4.0 * side, -2.5)], stroke);
+}
+
+/// A magnifying glass: Find.
+fn find_icon(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    let center = rect.center() - vec2(2.0, 2.0);
+    let radius = rect.width() * 0.3;
+    painter.circle_stroke(center, radius, stroke);
+    let start = center + vec2(1.0, 1.0) * radius * std::f32::consts::FRAC_1_SQRT_2;
+    painter.line_segment([start, rect.right_bottom() - vec2(1.0, 1.0)], stroke);
 }
 
 fn align_icon(painter: &Painter, rect: Rect, color: Color32, align: sue_type::Align) {
@@ -2855,16 +3215,68 @@ mod tests {
 
     #[test]
     fn the_page_lays_out_on_a_phone_and_on_a_desktop() {
-        let writer = SueWriter::default();
-        // A phone's page: the text takes it all, the panels fold away.
-        let phone = Rect::from_min_size(pos2(0.0, 52.0), vec2(390.0, 760.0));
-        let places = writer.places(phone, false, true, true);
+        let mut writer = SueWriter::default();
+        // A narrow window on a desk: the text takes it all, the panels
+        // fold away.
+        let narrow = Rect::from_min_size(pos2(0.0, 52.0), vec2(390.0, 760.0));
+        let places = writer.places(narrow, false, true, true);
         assert!(places.binder.is_none() && places.inspector.is_none());
         assert_eq!(places.center.width(), 390.0);
-        // A desktop's page has room for the binder and the inspector.
+        // A desktop's page has room for the binder, and for the inspector
+        // once it is asked for (it starts hidden, as a word processor's
+        // side panels do).
         let desktop = Rect::from_min_size(pos2(0.0, 28.0), vec2(1440.0, 850.0));
+        let places = writer.places(desktop, false, true, true);
+        assert!(places.binder.is_some() && places.inspector.is_none());
+        writer.inspector = true;
         let places = writer.places(desktop, false, true, true);
         assert!(places.binder.is_some() && places.inspector.is_some());
         assert!(places.center.width() >= 520.0);
+        assert_eq!(places.toolbar.top(), desktop.top());
+    }
+
+    #[test]
+    fn a_phone_writes_above_its_keyboard() {
+        let mut writer = SueWriter {
+            phone: true,
+            ..SueWriter::default()
+        };
+        // The window above an on-screen keyboard: the formatting bar sits
+        // at its bottom, right above the keyboard, the text fills the rest.
+        let above = Rect::from_min_size(pos2(0.0, 52.0), vec2(390.0, 380.0));
+        let places = writer.places(above, false, true, true);
+        assert_eq!(places.toolbar.bottom(), places.status.top());
+        assert_eq!(places.status.bottom(), above.bottom());
+        assert_eq!(places.center, places.body);
+        assert_eq!(places.center.bottom(), places.toolbar.top());
+        assert!(places.center.height() > 250.0);
+        assert!(places.toolbar.height() >= THUMB);
+        // The binder starts closed; asked for, it takes the whole page in
+        // turn, and the text hides.
+        writer.phone_binder = true;
+        let places = writer.places(above, false, true, true);
+        assert_eq!(places.binder, Some(places.body));
+        assert!(!places.center.is_positive());
+        // A phone reflows the text unless asked for pages.
+        assert!(!writer.pages_shown());
+        writer.phone_pages = true;
+        assert!(writer.pages_shown());
+    }
+
+    #[test]
+    fn typing_goes_on_after_formatting() {
+        for command in [
+            "format.bold",
+            "align.center",
+            "list.bullet",
+            "style.heading1",
+            "edit.undo",
+        ] {
+            assert!(keeps_typing(command), "{command}");
+        }
+        // These ask something first, and keep the keyboard for that.
+        for command in ["insert.link", "edit.find", "compile.open", "view.binder"] {
+            assert!(!keeps_typing(command), "{command}");
+        }
     }
 }

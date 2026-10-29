@@ -208,7 +208,7 @@ format_strike = "Ctrl+Shift+X" # @keybind Strikethrough
 project_split = "Ctrl+Shift+K" # @keybind Split at Selection
 format_superscript = "Ctrl+Shift++ or Ctrl+Shift+=" # @keybind Superscript
 format_subscript = "Ctrl+="    # @keybind Subscript
-format_clear = "Ctrl+Space"    # @keybind Clear Formatting
+format_clear = "Ctrl+Space"    # @keybind Clear Direct Formatting
 align_center = "Ctrl+E"        # @keybind Center
 align_left = "Ctrl+L"          # @keybind Left
 align_right = "Ctrl+R"         # @keybind Right

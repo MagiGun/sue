@@ -58,6 +58,10 @@ pub struct EditorView<'a> {
     /// The names of the documents, shown between them when there are
     /// several.
     pub titles: &'a [String],
+    /// The room around the pages or the column, in screen points; `None`
+    /// for the usual (24 around pages, 32 around a column). A phone wants
+    /// less, so that the lines get the width.
+    pub gap: Option<f32>,
 }
 
 /// What happened in a frame.
@@ -139,6 +143,11 @@ pub struct Editor {
     viewport: Rect,
     /// Asked for by the studio before the next frame.
     want_focus: bool,
+    /// Keep the keyboard through this frame's press elsewhere (a toolbar
+    /// button), so that a phone's keyboard stays up.
+    hold: bool,
+    /// The editor had the keyboard last frame.
+    had_focus: bool,
     scroll_target: Option<Caret>,
 }
 
@@ -176,6 +185,8 @@ impl Editor {
             gap: 24.0,
             viewport: Rect::NOTHING,
             want_focus: false,
+            hold: false,
+            had_focus: false,
             scroll_target: None,
         }
     }
@@ -260,6 +271,14 @@ impl Editor {
     /// Gives the editor the keyboard on the next frame.
     pub fn focus(&mut self) {
         self.want_focus = true;
+    }
+
+    /// Keeps the keyboard, if the editor has it, through a press this
+    /// frame outside the text: the studio calls it when the press is on
+    /// its own toolbar, so that tapping Bold leaves a phone's on-screen
+    /// keyboard up and the caret where it was.
+    pub fn keep_focus(&mut self) {
+        self.hold = true;
     }
 
     /// `true` while the editor has the keyboard.
@@ -635,7 +654,7 @@ impl Editor {
         output: &mut EditorOutput,
     ) {
         let paged = matches!(view.mode, ViewMode::Page);
-        self.gap = if paged { 24.0 } else { 32.0 };
+        self.gap = view.gap.unwrap_or(if paged { 24.0 } else { 32.0 }).max(0.0);
         let available = ui.available_size();
         let width = self.laid.page.x + self.gap * 2.0;
         let height = if paged {
@@ -647,9 +666,16 @@ impl Editor {
         let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
         self.origin = rect.min;
         self.page_x = ((rect.width() - self.laid.page.x) / 2.0).max(self.gap);
+        // When the view changes size under the caret (a phone's keyboard
+        // comes up and the window shrinks above it), the caret is shown
+        // again, so the line being written is never hidden.
+        let resized = (ui.clip_rect().size() - self.viewport.size()).length() > 1.0;
         self.viewport = ui.clip_rect();
         let response = ui.interact(rect, self.id, Sense::click_and_drag());
         let ctx = ui.ctx().clone();
+        if std::mem::take(&mut self.hold) && self.had_focus {
+            ctx.memory_mut(|memory| memory.request_focus(self.id));
+        }
 
         // Ctrl and the wheel zoom.
         if response.hovered() {
@@ -660,6 +686,10 @@ impl Editor {
         }
         self.pointer(ui, &response, output);
         let focused = ctx.memory(|memory| memory.has_focus(self.id));
+        if focused && resized && self.had_focus {
+            self.follow = true;
+        }
+        self.had_focus = focused;
         if focused {
             ctx.memory_mut(|memory| {
                 memory.set_focus_lock_filter(
