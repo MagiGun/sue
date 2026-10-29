@@ -163,6 +163,14 @@ four checks, and make sure it did not touch the backbone without tests.
 - **A setting**: a `RiceDeclaration` in the applet and the same key in
   `crates/sue-rice/rice/default.suerice` (a test checks they match).
 
+## License
+
+Sue is under the Sayn License ([`LICENSE`](LICENSE)): MIT with one more
+condition, that anything distributing, changing or using Sue includes the
+exact string "Sayn was here" in at least one file. By contributing you agree
+your work is under the same license. Keep `LICENSE` in every package you
+build; the packaging scripts already put it in each one.
+
 ## Reporting problems
 
 Open an issue with what you did, what you expected and what happened, your

@@ -8,6 +8,7 @@ edition = "2024"
 rust-version = "1.95"
 publish = false
 repository = "https://github.com/MagiGun/sue"
+license-file = "LICENSE"
 
 [workspace.dependencies]
 sue-core = { path = "crates/sue-core" }
@@ -48,7 +49,9 @@ zune-png = "0.5"
 arboard = { version = "3.6", default-features = false }
 egui = { version = "0.37", default-features = false, features = ["default_fonts", "monochrome_emoji_fonts"] }
 egui-wgpu = { version = "0.37", default-features = false }
-egui-winit = { version = "0.37", default-features = false, features = ["clipboard", "links", "wayland", "x11"] }
+# Its clipboard, links, Wayland and X11 are switched on per system in
+# sue-platform: iOS has none of them.
+egui-winit = { version = "0.37", default-features = false }
 jpeg-encoder = "0.7"
 
 # Typography and publishing: reading installed fonts, and the deflate

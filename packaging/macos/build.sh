@@ -26,6 +26,7 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 lipo -create -output "$app/Contents/MacOS/sue" \
   target/aarch64-apple-darwin/release/sue target/x86_64-apple-darwin/release/sue
 sed "s/@VERSION@/$version/g" packaging/macos/Info.plist > "$app/Contents/Info.plist"
+cp LICENSE "$app/Contents/Resources/LICENSE"
 
 # The icon, every size iconutil wants, from the PNG.
 iconset="$work/sue.iconset"

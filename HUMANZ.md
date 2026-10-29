@@ -755,7 +755,8 @@ three-finger taps undo and redo.
 desktop-only crates (`arboard`, `rfd`, `open`, `audio_thread_priority`) left
 out by target. On Android, `crates/sue-platform/android` is a `cdylib` whose
 only item is the exported `android_main` (the one place the `unsafe_code` lint
-is relaxed, from `forbid` to `deny` with a single audited `allow`); it hands the
+is relaxed, from `forbid` to `deny` with a single audited `allow`, approved by
+the maintainer on 2026-10-28 for that entry alone); it hands the
 `AndroidApp` to `sue_platform::android` and runs `sue::run_window`, the same
 app the desktop executable runs, then ends the process, because a window's
 event loop can be made once per process. The host:

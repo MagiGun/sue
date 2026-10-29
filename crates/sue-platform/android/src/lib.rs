@@ -3,6 +3,10 @@
 //! and runs Sue's window, the same app as on desktops.
 //!
 //! On every other system this library is empty.
+//!
+//! The exported entry is the one exception to Sue's forbidden `unsafe`,
+//! approved by the maintainer on 2026-10-28 (backbone rule 6). It stays the
+//! only item here; anything more needs its own approval.
 
 #[cfg(target_os = "android")]
 #[allow(

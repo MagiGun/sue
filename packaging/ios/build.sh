@@ -24,6 +24,7 @@ bundle() {
   mkdir -p "$app"
   cp "target/$target/release/sue" "$app/sue"
   sed "s/@VERSION@/$version/g" packaging/ios/Info.plist > "$app/Info.plist"
+  cp LICENSE "$app/LICENSE"
   sips -z 120 120 assets/icons/sue_icon.png --out "$app/AppIcon60x60@2x.png" >/dev/null
   sips -z 152 152 assets/icons/sue_icon.png --out "$app/AppIcon76x76@2x~ipad.png" >/dev/null
 }

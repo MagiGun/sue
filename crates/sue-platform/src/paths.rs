@@ -295,7 +295,21 @@ mod tests {
                 .join("cache")
         );
         assert_eq!(paths.packages_dir(), paths.data_dir.join("packages"));
-        assert_eq!(paths.home_dir, Path::new(r"C:\Users\a"));
+        // Without USERPROFILE, home is two folders up from APPDATA; a Windows
+        // path only splits into folders when the tests run on Windows.
+        if cfg!(windows) {
+            assert_eq!(paths.home_dir, Path::new(r"C:\Users\a"));
+        }
+        let with_profile = PlatformPaths::resolve(
+            OsFamily::Windows,
+            env_of(&[
+                ("APPDATA", r"C:\Users\a\AppData\Roaming"),
+                ("USERPROFILE", r"C:\Users\b"),
+            ]),
+            None,
+        )
+        .unwrap();
+        assert_eq!(with_profile.home_dir, Path::new(r"C:\Users\b"));
     }
 
     #[test]

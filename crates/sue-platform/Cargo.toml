@@ -6,6 +6,7 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 repository.workspace = true
+license-file.workspace = true
 
 [dependencies]
 cpal.workspace = true
@@ -15,6 +16,12 @@ egui-winit.workspace = true
 pollster.workspace = true
 wgpu.workspace = true
 winit.workspace = true
+
+# The system clipboard, web links and the Linux display servers, everywhere
+# but iOS, where the clipboard crate would build its Linux (Wayland and X11)
+# side and cannot.
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+egui-winit = { workspace = true, features = ["clipboard", "links", "wayland", "x11"] }
 
 # The system clipboard, native dialogs, the opener and real-time audio
 # threads exist on desktops only; phones and tablets go without them.

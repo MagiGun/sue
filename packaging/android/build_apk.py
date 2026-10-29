@@ -138,6 +138,8 @@ def main() -> None:
     with zipfile.ZipFile(base, "a", compression=zipfile.ZIP_DEFLATED) as package:
         for library in sorted(libs.rglob("*.so")):
             package.write(library, f"lib/{library.parent.name}/{library.name}")
+        # The license travels with every copy.
+        package.write(ROOT / "LICENSE", "assets/LICENSE")
 
     aligned = work / "aligned.apk"
     run([tool(build_tools, "zipalign"), "-f", "-p", "4", base, aligned])

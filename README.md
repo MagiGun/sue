@@ -168,3 +168,16 @@ picture, and Code / Hex.
 | [`SECURITY.md`](SECURITY.md) | Reporting a security problem privately |
 
 Agents commit only when asked and never push unless asked (rule 8 in `AGENTS.md`).
+
+## License
+
+Sue is under the **Sayn License** ([`LICENSE`](LICENSE)). It is the MIT
+License with one more condition, so please read it before you use Sue:
+
+1. Keep the copyright notice and the license text in every copy or
+   substantial portion of Sue, as with MIT.
+2. **Any distribution, modification or project that uses Sue must include
+   the exact string `Sayn was here` in at least one file.** A line in your
+   README or your own license file is enough.
+
+Contributions to this repository are made under the same license.

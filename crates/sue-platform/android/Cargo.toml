@@ -6,6 +6,7 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 repository.workspace = true
+license-file.workspace = true
 
 [lib]
 name = "sue_android"
@@ -18,6 +19,8 @@ sue-platform.workspace = true
 # Android calls the app through one exported symbol, which Rust counts as
 # unsafe: this crate (part of sue-platform, backbone rule 6) relaxes the
 # workspace's `forbid` to `deny` so that one audited item may allow it.
+# Approved by the maintainer on 2026-10-28 for `android_main` only; any
+# other unsafe code here needs its own approval.
 [lints.rust]
 unsafe_code = "deny"
 rust_2018_idioms = { level = "warn", priority = -1 }

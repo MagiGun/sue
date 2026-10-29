@@ -18,6 +18,7 @@ cargo build --release -p sue
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Copy-Item target\release\sue.exe (Join-Path $work "Sue.exe")
 Copy-Item README.md $work
+Copy-Item LICENSE (Join-Path $work "LICENSE.txt")
 Copy-Item assets\icons\sue_icon.ico $work
 
 $zip = Join-Path $out "Sue-$version-windows-$arch.zip"
