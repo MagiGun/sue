@@ -203,4 +203,23 @@ impl System for Documents {
             None => Err("the folder made no file".to_owned()),
         }
     }
+
+    fn list_in(&self, folder: &str) -> Result<Vec<(String, String)>, String> {
+        let text = call(
+            "listIn",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            &[Arg::Text(folder)],
+        )?
+        .unwrap_or_default();
+        if let Some(why) = text.strip_prefix('!') {
+            return Err(why.to_owned());
+        }
+        // A line each: the document's URI (which has no tabs), a tab and
+        // its name.
+        Ok(text
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .map(|(document, name)| (document.to_owned(), name.to_owned()))
+            .collect())
+    }
 }

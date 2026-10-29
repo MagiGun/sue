@@ -78,6 +78,13 @@ pub(crate) trait System: Send + Sync + 'static {
         Err("this system makes no documents in folders".to_owned())
     }
 
+    /// The documents right inside the folder at `place`, folders left
+    /// out: each one's place and name.
+    fn list_in(&self, folder: &str) -> Result<Vec<(String, String)>, String> {
+        let _ = folder;
+        Ok(Vec::new())
+    }
+
     /// Offers `file` to the export picker; its answer comes from
     /// [`System::answer`].
     fn export(&self, file: &Path) -> Result<(), String> {
@@ -85,6 +92,10 @@ pub(crate) trait System: Send + Sync + 'static {
         Err("this system has no export picker".to_owned())
     }
 }
+
+/// The most files of a chosen folder copied into Sue's cache, as many as
+/// the Converter adds from a folder.
+const FOLDER_FILES: usize = 500;
 
 /// Where a staged file is handed back to.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -278,6 +289,13 @@ enum Landed {
     Delivered { file: PathBuf, made: Option<String> },
     /// A staged file could not reach its place.
     Undelivered { file: PathBuf, why: String },
+    /// A chosen folder's files are copied into its staged folder: each
+    /// with its document, and how many could not be read; or why not.
+    Listed {
+        dir: PathBuf,
+        place: String,
+        result: Result<(Vec<(PathBuf, String)>, usize), String>,
+    },
 }
 
 /// What the picker is waiting for.
@@ -371,6 +389,26 @@ impl<S: System> Picker<S> {
                         shown(&file)
                     )));
                 }
+                Landed::Listed {
+                    dir,
+                    place,
+                    result: Ok((copied, unread)),
+                } => {
+                    // A copied file written later goes back to its own
+                    // document.
+                    self.staging.made.extend(copied);
+                    self.staging.keep(dir.clone(), Place::Folder(place));
+                    if unread > 0 {
+                        news.push(PickNews::Failed(format!(
+                            "{unread} files in {} could not be read",
+                            shown(&dir)
+                        )));
+                    }
+                    news.push(PickNews::Answered(Picking::Chosen(dir)));
+                }
+                Landed::Listed {
+                    result: Err(why), ..
+                } => news.push(PickNews::Answered(Picking::Failed(why))),
             }
         }
         self.next_export(&mut news);
@@ -414,24 +452,32 @@ impl<S: System> Picker<S> {
                 news.push(PickNews::Answered(answer));
             }
             (Asking::Pick(Kind::Folder), Answer::Chosen(place)) => {
-                let answer = if S::FOLDERS_ARE_PATHS {
-                    Picking::Chosen(PathBuf::from(place))
-                } else {
-                    match self
-                        .staging
-                        .slot(&self.system.name(&place))
-                        .and_then(|dir| {
-                            fs::create_dir_all(&dir)?;
-                            Ok(dir)
-                        }) {
-                        Ok(dir) => {
-                            self.staging.keep(dir.clone(), Place::Folder(place));
-                            Picking::Chosen(dir)
-                        }
-                        Err(error) => Picking::Failed(error.to_string()),
+                if S::FOLDERS_ARE_PATHS {
+                    news.push(PickNews::Answered(Picking::Chosen(PathBuf::from(place))));
+                    return;
+                }
+                // The folder's files are copied in first, so that what
+                // reads the folder finds them.
+                match self
+                    .staging
+                    .slot(&self.system.name(&place))
+                    .and_then(|dir| {
+                        fs::create_dir_all(&dir)?;
+                        Ok(dir)
+                    }) {
+                    Ok(dir) => self.spawn(
+                        move |system, dir| {
+                            let result = system
+                                .list_in(&place)
+                                .map(|documents| copy_folder(system, &dir, documents));
+                            Landed::Listed { dir, place, result }
+                        },
+                        dir,
+                    ),
+                    Err(error) => {
+                        news.push(PickNews::Answered(Picking::Failed(error.to_string())));
                     }
-                };
-                news.push(PickNews::Answered(answer));
+                }
             }
             (Asking::Export(file), answer) => {
                 self.staging.landed(&file, None);
@@ -529,6 +575,33 @@ impl<S: System> Picker<S> {
             }
         }
     }
+}
+
+/// Copies a chosen folder's documents into its staged folder `dir`: the
+/// files copied, each with its document, and how many could not be read.
+/// Hidden files are left out, and a name met twice keeps its first file.
+fn copy_folder<S: System>(
+    system: &S,
+    dir: &Path,
+    documents: Vec<(String, String)>,
+) -> (Vec<(PathBuf, String)>, usize) {
+    let mut copied = Vec::new();
+    let mut unread = 0;
+    for (document, name) in documents.into_iter().take(FOLDER_FILES) {
+        let name = file_name(&name);
+        let file = dir.join(&name);
+        if name.starts_with('.') || file.exists() {
+            continue;
+        }
+        match system.copy_in(&document, &file) {
+            Ok(()) => copied.push((file, document)),
+            Err(_) => {
+                let _ = fs::remove_file(&file);
+                unread += 1;
+            }
+        }
+    }
+    (copied, unread)
 }
 
 /// A staged file's name, for messages.
@@ -634,6 +707,20 @@ mod tests {
                     let path = Path::new(folder).join(name);
                     fs::write(&path, b"").map_err(|error| error.to_string())?;
                     Ok(path.to_string_lossy().into_owned())
+                }
+
+                fn list_in(&self, folder: &str) -> Result<Vec<(String, String)>, String> {
+                    let entries = fs::read_dir(folder).map_err(|error| error.to_string())?;
+                    Ok(entries
+                        .flatten()
+                        .filter(|entry| entry.path().is_file())
+                        .map(|entry| {
+                            (
+                                entry.path().to_string_lossy().into_owned(),
+                                entry.file_name().to_string_lossy().into_owned(),
+                            )
+                        })
+                        .collect())
                 }
 
                 fn export(&self, file: &Path) -> Result<(), String> {
@@ -752,9 +839,11 @@ mod tests {
     }
 
     #[test]
-    fn android_makes_files_in_a_chosen_folder() {
+    fn android_reads_and_makes_files_in_a_chosen_folder() {
         let dir = scratch("folder");
         let folder = dir.join("documents");
+        fs::write(folder.join("Song.wav"), b"samples").unwrap();
+        fs::create_dir(folder.join("Albums")).unwrap();
         let mut picker = Picker::new(Android::default(), dir.join("cache"));
 
         assert_eq!(picker.show(Kind::Folder, &[], ""), Picking::Waiting);
@@ -762,8 +851,23 @@ mod tests {
             .system
             .0
             .answer_with(Answer::Chosen(folder.to_string_lossy().into_owned()));
-        let staged = chosen(&picker.poll());
+        let staged = chosen(&settle(&mut picker));
         assert!(staged.is_dir());
+
+        // What is in the folder is there to read, folders left out, and
+        // untouched it goes nowhere.
+        assert_eq!(fs::read(staged.join("Song.wav")).unwrap(), b"samples");
+        assert!(!staged.join("Albums").exists());
+        picker.deliver();
+        assert!(!picker.busy());
+        // Written, it goes back to its own document.
+        write(&staged.join("Song.wav"), "samples, mixed");
+        picker.deliver();
+        assert!(settle(&mut picker).is_empty());
+        assert_eq!(
+            fs::read(folder.join("Song.wav")).unwrap(),
+            b"samples, mixed"
+        );
 
         write(&staged.join("a.jxl"), "one");
         fs::write(staged.join(".b.jxl.1.tmp"), b"half written").unwrap();
@@ -780,7 +884,8 @@ mod tests {
         picker.deliver();
         assert!(settle(&mut picker).is_empty());
         assert_eq!(fs::read(folder.join("a.jxl")).unwrap(), b"one again");
-        assert_eq!(fs::read_dir(&folder).unwrap().count(), 1);
+        // Song.wav, Albums and a.jxl: nothing made twice.
+        assert_eq!(fs::read_dir(&folder).unwrap().count(), 3);
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -835,7 +940,10 @@ mod tests {
         write(&file, "project");
         picker.deliver();
         assert!(picker.poll().is_empty());
-        assert_eq!(*picker.system.0.exported.lock().unwrap(), [file.clone()]);
+        assert_eq!(
+            *picker.system.0.exported.lock().unwrap(),
+            std::slice::from_ref(&file)
+        );
         assert!(picker.busy(), "waiting for the export picker");
         picker
             .system

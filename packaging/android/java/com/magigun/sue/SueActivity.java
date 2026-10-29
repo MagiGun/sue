@@ -22,7 +22,8 @@ import java.util.Locale;
  * Access Framework). Sue calls these methods through JNI
  * (crates/sue-platform/src/android.rs); there are no native methods.
  * The picker answers later: Sue polls takePicked, and copies documents in
- * and out on its own worker threads with copyIn, copyOut and createIn.
+ * and out on its own worker threads with copyIn, copyOut, createIn and
+ * listIn.
  */
 public class SueActivity extends NativeActivity {
     private static final int PICK = 0x5E1;
@@ -169,6 +170,43 @@ public class SueActivity extends NativeActivity {
             Uri folder = DocumentsContract.buildDocumentUriUsingTree(root, DocumentsContract.getTreeDocumentId(root));
             Uri made = DocumentsContract.createDocument(getContentResolver(), folder, mimeType(name), name);
             return made == null ? "!the folder made no file" : made.toString();
+        } catch (Exception error) {
+            return "!" + why(error);
+        }
+    }
+
+    /**
+     * The documents right inside the chosen folder, folders left out: a
+     * line each, its URI, a tab and its name; or "!" and why not.
+     */
+    public String listIn(String tree) {
+        try {
+            Uri root = Uri.parse(tree);
+            Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(root, DocumentsContract.getTreeDocumentId(root));
+            Cursor cursor = getContentResolver().query(children, new String[] {
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+            }, null, null, null);
+            if (cursor == null) {
+                return "!the folder cannot be read";
+            }
+            StringBuilder list = new StringBuilder();
+            try {
+                while (cursor.moveToNext()) {
+                    String name = cursor.getString(1);
+                    if (name == null || DocumentsContract.Document.MIME_TYPE_DIR.equals(cursor.getString(2))) {
+                        continue;
+                    }
+                    list.append(DocumentsContract.buildDocumentUriUsingTree(root, cursor.getString(0)))
+                            .append('\t')
+                            .append(name.replace('\n', ' '))
+                            .append('\n');
+                }
+            } finally {
+                cursor.close();
+            }
+            return list.toString();
         } catch (Exception error) {
             return "!" + why(error);
         }

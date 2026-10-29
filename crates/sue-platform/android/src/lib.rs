@@ -56,7 +56,7 @@ fn java(app: &AndroidApp) -> Option<(JavaVM, GlobalRef)> {
     // for as long as the process runs.
     let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()?;
     let activity = {
-        let mut env = vm.attach_current_thread().ok()?;
+        let env = vm.attach_current_thread().ok()?;
         // SAFETY: android-activity's pointer is the JNI reference to the
         // activity, valid while it runs; the global reference made from it
         // at once is Sue's own.

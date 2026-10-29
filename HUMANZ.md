@@ -801,10 +801,10 @@ stand-in:
 
 | | Android (`android::Documents`) | iOS (`ios::Files`) |
 | --- | --- | --- |
-| Reached through | `SueActivity` (`packaging/android/java`), a `NativeActivity` subclass with no native methods, called with `jni` 0.21's safe API on a `GlobalRef` the launcher makes | `sue-ios` (`crates/sue-platform/ios`): a `UIDocumentPickerDelegate` class and the calls that show the picker over the key window's topmost view controller |
+| Reached through | `SueActivity` (`packaging/android/java`), a `NativeActivity` subclass with no native methods, called with `jni` 0.21's safe API on a `GlobalRef` the launcher makes: `showPicker`, `takePicked`, `displayName`, `copyIn`, `copyOut`, `createIn` and `listIn`, strings in and out (approved by the maintainer on 2026-10-29) | `sue-ios` (`crates/sue-platform/ios`): a `UIDocumentPickerDelegate` class and the calls that show the picker over the key window's topmost view controller |
 | Open | `ACTION_OPEN_DOCUMENT` (MIME types from the extensions, any file when one is unknown); the copy's writes go back to the document | `initForOpeningContentTypes:asCopy:` with `UTType`s from the extensions; the copy is Sue's own |
 | Save | `ACTION_CREATE_DOCUMENT` asks first; every write to the staged path (`Ctrl+S` too) goes to the document (`"wt"`, else `"w"`) | The staged path is the answer at once; once written, `initForExportingURLs:asCopy:` asks where it goes, each time |
-| Folder | `ACTION_OPEN_DOCUMENT_TREE`; each file written in the staged folder becomes a document in the tree (`createDocument`), then is updated in place | The folder's own path, with security-scoped access started |
+| Folder | `ACTION_OPEN_DOCUMENT_TREE`; the tree's top-level files are copied in first on a worker thread (`listIn`, at most 500, hidden ones left out) and each written back to its own document; each new file written in the staged folder becomes a document in the tree (`createDocument`), then is updated in place | The folder's own path, with security-scoped access started |
 
 **Packages.** `packaging/` has a script per system: for Windows a portable
 zip, an `.msi` (WiX, with Sue's icon on its pages and its Start menu

@@ -169,8 +169,10 @@ the Files picker, which also reaches Google Drive and other apps' storage,
 and on iPhone and iPad the Files browser. Sue works on a copy of a file you
 open. On Android, saving that file writes your changes back to the
 original, and saving somewhere new asks where first, then every save
-(`Ctrl+S` too) goes there. A folder you choose on Android, say for the
-Converter's results, gets each file Sue makes in it. iPhone and iPad save
+(`Ctrl+S` too) goes there. A folder you choose on Android works both
+ways: Sue reads the files in it (the Converter's Add a Folder) and each
+file Sue makes in it lands there (the Converter's results; Android lets
+you choose any folder but the top of Download). iPhone and iPad save
 first and then ask where in Files the file goes, each time you save; a
 folder you choose there is written to directly.
 
