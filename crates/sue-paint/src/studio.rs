@@ -269,6 +269,10 @@ pub struct SuePaint {
     pub(crate) modifiers: egui::Modifiers,
     /// Onion skin shows the cels around the current frame.
     pub(crate) onion: bool,
+    /// The light table shows (Enable Light Table).
+    pub(crate) light_table: bool,
+    /// How much the light table's layers show, 0 to 1.
+    pub(crate) light_opacity: f32,
     /// Playback starts over at the end.
     pub(crate) looping: bool,
     pub(crate) pressure: Option<f32>,
@@ -335,6 +339,8 @@ impl Default for SuePaint {
             transform: None,
             modifiers: egui::Modifiers::NONE,
             onion: false,
+            light_table: true,
+            light_opacity: 0.5,
             looping: true,
             pressure: None,
             pen_curve: sue_model::Response::LINEAR,
@@ -564,6 +570,10 @@ fn implemented(command: &str) -> bool {
             | "anim.frame.insert"
             | "anim.frame.delete"
             | "anim.onion"
+            | "anim.onion_settings"
+            | "anim.light_table"
+            | "anim.light_table.register"
+            | "anim.light_table.clear"
             | "anim.loop"
             | "anim.play"
             | "anim.next"
@@ -1701,6 +1711,9 @@ impl SuePaint {
             "layer.toggle.draft" => info.map_or(ItemState::off(), |info| flag(info.style.draft)),
             "layer.toggle.lock" => info.map_or(ItemState::off(), |info| flag(info.locked)),
             "view.grid" => flag(self.grid),
+            "anim.onion" => flag(self.onion),
+            "anim.loop" => flag(self.looping),
+            "anim.light_table" => flag(self.light_table),
             "view.snap_special" => self
                 .doc()
                 .map_or(ItemState::off(), |doc| flag(doc.ruler_on)),

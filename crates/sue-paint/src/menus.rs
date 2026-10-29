@@ -265,7 +265,18 @@ pub fn menus() -> Vec<Menu> {
                     vec![
                         act("Enable Onion Skin", "anim.onion"),
                         act("Onion Skin Settings...", "anim.onion_settings"),
-                        act("Light Table", "anim.light_table"),
+                    ],
+                ),
+                sub(
+                    "Light Table",
+                    vec![
+                        act("Enable Light Table", "anim.light_table"),
+                        SEP,
+                        act("Register Selected Layer", "anim.light_table.register"),
+                        act(
+                            "Deregister All Images from Light Table",
+                            "anim.light_table.clear",
+                        ),
                     ],
                 ),
                 SEP,

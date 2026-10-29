@@ -1306,8 +1306,15 @@ one cel, a layer of the picture by id, until the next key (a blank key shows
 nothing); `anim.length` holds the length in frames. At a frame the
 compositor takes a `FrameView` that hides the cels no folder shows and draws
 the cels before and after tinted blue and green at a third of their opacity
-(onion skin). Playback advances by the frame rate, and moving to a frame makes
-its cel the current layer. Animations export as an animated GIF
+(onion skin). Onion Skin Settings (`anim::Onion`, kept on the picture as
+`anim.onion`) choose how many cels show before and after, Clip Studio
+Paint's color modes (Color, Half color, Monochrome: how far each cel's color
+gives way to its skin color) and an opacity that starts at a level and drops
+a step per cel. The light table is a `sue.paint.light_table` relation from a
+cel to each layer registered to it; while that cel is drawn the frame view
+shows them in their own colors at the light table's opacity. Playback
+advances by the frame rate, and moving to a frame makes its cel the current
+layer. Animations export as an animated GIF
 (`sue_io::encode_gif_animation`) or a numbered picture sequence.
 
 **Other edits.** Fill floods the current layer or all layers within a
@@ -1776,7 +1783,8 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: scale and free transform, layer folders, layer masks, canvas size, crop and resolution, the symmetrical ruler, text layers and balloon text, tone curve, levels, color balance and gradient maps | **Implemented**; end-to-end tests drive each with egui events (Ctrl+T, Ctrl+G and the folder moves, crop, a mirrored stroke, a mask erased, words written and edited) | `sue-paint`, `sue-type/src/raster.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: Close gap and Area scaling, the Blend tool (Blur, Finger Tip, Liquify) and correction layers | **Implemented**; unit tests for a fill held in a broken ring, every dab kind and every correction read back from its text; end-to-end runs that liquify a stroke and add, undo and cancel correction layers | `sue-paint/src/fill.rs`, `blend.rs`, `composite.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: rulers (linear, parallel and radial lines, concentric circles, 1, 2 and 3-point perspective, symmetry), saved on the picture | **Implemented**; unit tests for their text, the guide a stroke chooses, and vanishing points made and moved; an end-to-end run that creates a 2-point ruler, holds a drifting stroke upright (and not with snapping off), adds a third point from two lines, and deletes and undoes | `sue-paint/src/rulers.rs`, `canvas.rs`, `bins/sue/src/runtime.rs` |
-| §3.7 Sue Paint: vector layers, curve rulers, materials, the camera folder, light table and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
+| §3.7 Sue Paint: Onion Skin Settings and the light table | **Implemented**; a unit test for as many cels as asked fading a step each, color modes and light table layers, and the animation end-to-end run keeps the settings and registers, refuses and undoes a light table layer | `sue-paint/src/anim.rs`, `anim_ui.rs`, `bins/sue/src/runtime.rs` |
+| §3.7 Sue Paint: vector layers, curve rulers, materials, the camera folder and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |

@@ -368,6 +368,8 @@ pub(crate) enum Dialog {
     Correction(EntityId, Filter, String, bool),
     /// Create Perspective Ruler: how many vanishing points, 1 to 3.
     Perspective(u32),
+    /// Onion Skin Settings.
+    Onion(crate::anim::Onion),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -440,6 +442,7 @@ impl SuePaint {
             Dialog::Resolution(_) => ("Change Image Resolution", vec2(380.0, 250.0)),
             Dialog::Text(..) => ("Text", vec2(440.0, 380.0)),
             Dialog::Perspective(_) => ("Create Perspective Ruler", vec2(320.0, 190.0)),
+            Dialog::Onion(_) => ("Onion Skin Settings", vec2(360.0, 330.0)),
             Dialog::Correction(_, filter, ..) => (
                 filter.label(),
                 vec2(
@@ -495,6 +498,7 @@ impl SuePaint {
                             Dialog::Pages(pages) => outcome = self.pages_ui(ui, pages, cx, theme),
                             Dialog::Frame(frame) => outcome = frame_ui(ui, frame, theme),
                             Dialog::Text(_, lettering) => outcome = text_ui(ui, lettering, theme),
+                            Dialog::Onion(onion) => outcome = onion_ui(ui, onion, theme),
                             Dialog::Perspective(count) => {
                                 ui.horizontal(|ui| {
                                     label(ui, "Type:", theme);
@@ -663,6 +667,21 @@ impl SuePaint {
             (Dialog::Frame(frame), Outcome::Ok) => self.add_frame_layer(cx, frame),
             (Dialog::Text(layer, lettering), Outcome::Ok) => self.put_text(cx, layer, &lettering),
             (Dialog::Perspective(count), Outcome::Ok) => self.make_perspective(cx, count),
+            (Dialog::Onion(onion), Outcome::Ok) => {
+                if let Some(picture) = self.picture() {
+                    let edit = doc::Edit::new("Onion Skin Settings").then(
+                        sue_core::txn::SetProperty::new(
+                            picture,
+                            crate::anim::ONION,
+                            onion.to_text(),
+                        ),
+                    );
+                    if Self::apply(cx, edit) {
+                        // The settings are for seeing it.
+                        self.onion = true;
+                    }
+                }
+            }
             (Dialog::Correction(layer, filter, before, made), outcome) => {
                 let text = filter.to_text().unwrap_or_default();
                 // The setting shows live while the dialog is open.
@@ -745,9 +764,100 @@ impl SuePaint {
                 | Dialog::Text(..),
                 Outcome::Cancel | Outcome::Ok,
             )
-            | (Dialog::Perspective(_), Outcome::Cancel) => {}
+            | (Dialog::Perspective(_) | Dialog::Onion(_), Outcome::Cancel) => {}
         }
     }
+}
+
+/// Onion Skin Settings, as Clip Studio Paint lays them out: how many cels
+/// show before and after, their colors, and how faint they are.
+fn onion_ui(ui: &mut Ui, onion: &mut crate::anim::Onion, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    ui.label(
+        RichText::new("Number of skins")
+            .size(theme.small_size)
+            .color(theme.muted),
+    );
+    egui::Grid::new("sue-paint-onion-count")
+        .num_columns(2)
+        .spacing(vec2(12.0, 8.0))
+        .show(ui, |ui| {
+            label(ui, "Previous frame:", theme);
+            ui.add(
+                egui::DragValue::new(&mut onion.before)
+                    .range(0..=10)
+                    .suffix(" cels"),
+            );
+            ui.end_row();
+            label(ui, "Next frame:", theme);
+            ui.add(
+                egui::DragValue::new(&mut onion.after)
+                    .range(0..=10)
+                    .suffix(" cels"),
+            );
+            ui.end_row();
+        });
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new("View Settings")
+            .size(theme.small_size)
+            .color(theme.muted),
+    );
+    egui::Grid::new("sue-paint-onion-view")
+        .num_columns(2)
+        .spacing(vec2(12.0, 8.0))
+        .show(ui, |ui| {
+            label(ui, "Color mode:", theme);
+            egui::ComboBox::from_id_salt("sue-paint-onion-mode")
+                .selected_text(crate::anim::Onion::MODES[usize::from(onion.mode.min(2))])
+                .show_ui(ui, |ui| {
+                    for (mode, name) in crate::anim::Onion::MODES.iter().enumerate() {
+                        ui.selectable_value(&mut onion.mode, mode as u8, *name);
+                    }
+                });
+            ui.end_row();
+            for (name, color) in [
+                ("Previous frame:", &mut onion.before_color),
+                ("Next frame:", &mut onion.after_color),
+            ] {
+                label(ui, name, theme);
+                let mut rgba = [color[0], color[1], color[2], 255];
+                if sue_wm::color_button(ui, name, &mut rgba, false, theme).changed {
+                    *color = [rgba[0], rgba[1], rgba[2]];
+                }
+                ui.end_row();
+            }
+        });
+    let mut specify = onion.opacity.is_some();
+    if ui.checkbox(&mut specify, "Specify opacity level").changed() {
+        onion.opacity = specify.then_some((0.8, 0.1));
+    }
+    if let Some((start, step)) = onion.opacity.as_mut() {
+        egui::Grid::new("sue-paint-onion-opacity")
+            .num_columns(2)
+            .spacing(vec2(12.0, 8.0))
+            .show(ui, |ui| {
+                let percent = |ui: &mut Ui, name: &str, value: &mut f32| {
+                    label(ui, name, theme);
+                    let mut shown = (*value * 100.0).round();
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut shown)
+                                .range(0.0..=100.0)
+                                .suffix(" %"),
+                        )
+                        .changed()
+                    {
+                        *value = shown / 100.0;
+                    }
+                    ui.end_row();
+                };
+                percent(ui, "Start:", start);
+                percent(ui, "Step opacity:", step);
+            });
+    }
+    ok_cancel(ui, &mut outcome);
+    outcome
 }
 
 /// Change Canvas Size: width, height and the anchor.

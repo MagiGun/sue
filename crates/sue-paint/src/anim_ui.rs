@@ -23,6 +23,17 @@ type Edit = sue_core::txn::Batch<sue_core::Arena>;
 
 impl SuePaint {
     /// The current picture's timeline, cloned, and its length.
+    /// The cel being drawn: the one the current folder shows at the
+    /// current frame.
+    pub(crate) fn editing_cel(&self, arena: &sue_core::Arena) -> Option<EntityId> {
+        let (_, sequence, _) = self.timeline_here(arena)?;
+        let doc = self.doc()?;
+        anim::folders(&sequence)
+            .contains(&doc.track)
+            .then(|| anim::cel_at(&sequence.tracks[doc.track], sequence.rate, doc.frame))
+            .flatten()
+    }
+
     fn timeline_here(&self, arena: &sue_core::Arena) -> Option<(EntityId, Sequence, u32)> {
         let picture = self.picture()?;
         let sequence = anim::timeline(arena, picture)?.clone();
@@ -118,10 +129,30 @@ impl SuePaint {
         if let Some(frame) = moved {
             self.go_to_frame(&cx.world.arena, frame);
         }
+        let settings = self
+            .picture()
+            .map(|picture| anim::Onion::of(&cx.world.arena, picture))
+            .unwrap_or_default();
+        // The light table of the cel being drawn.
+        let traced = if self.light_table {
+            self.editing_cel(&cx.world.arena)
+                .map(|cel| anim::light_table(&cx.world.arena, cel))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let opacity = self.light_opacity;
         if let Some(doc) = self.doc_mut() {
             let playing = doc.playing.is_some();
-            doc.compositor
-                .set_view(Some(anim::view(&sequence, doc.frame, onion && !playing)));
+            let mut view = anim::view(
+                &sequence,
+                doc.frame,
+                (onion && !playing).then_some(&settings),
+            );
+            if !playing {
+                view = view.with_light_table(&traced, opacity);
+            }
+            doc.compositor.set_view(Some(view));
         }
     }
 
@@ -240,6 +271,39 @@ impl SuePaint {
                 Self::apply(cx, edit);
             }
             "anim.onion" => self.onion = !self.onion,
+            "anim.onion_settings" => {
+                if let Some(picture) = self.picture() {
+                    self.dialog = Some(crate::dialogs::Dialog::Onion(anim::Onion::of(
+                        &cx.world.arena,
+                        picture,
+                    )));
+                }
+            }
+            "anim.light_table" => self.light_table = !self.light_table,
+            "anim.light_table.register" => {
+                let (Some(cel), Some(layer)) = (self.editing_cel(&cx.world.arena), self.layer())
+                else {
+                    cx.notify("Go to a frame with a cel to give it a light table");
+                    return true;
+                };
+                if cel == layer {
+                    cx.notify(
+                        "Pick the layer to trace from in the Layer palette, then register it",
+                    );
+                } else if anim::light_table(&cx.world.arena, cel).contains(&layer) {
+                    cx.notify("That layer is on this cel's light table already");
+                } else if Self::apply(cx, anim::register(cel, layer)) {
+                    self.light_table = true;
+                }
+            }
+            "anim.light_table.clear" => {
+                if let Some(cel) = self.editing_cel(&cx.world.arena) {
+                    let layers = anim::light_table(&cx.world.arena, cel);
+                    if !layers.is_empty() {
+                        Self::apply(cx, anim::deregister(cel, &layers));
+                    }
+                }
+            }
             "anim.loop" => self.looping = !self.looping,
             "anim.play" => {
                 let now = cx.view.now;
@@ -311,7 +375,7 @@ impl SuePaint {
                     arena,
                     picture,
                     options,
-                    Some(&anim::view(&sequence, frame, false)),
+                    Some(&anim::view(&sequence, frame, None)),
                 )
             })
             .collect();

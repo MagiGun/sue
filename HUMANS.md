@@ -425,7 +425,11 @@ familiar:
   starts a timeline. The Timeline palette makes folders and cels, plays and
   stops (with loop), steps frame by frame and sets the frame rate and length.
   Click a frame to go there; double-click to show the current layer from
-  there. Onion skin shows the drawing before in blue and after in green.
+  there. Onion skin shows the drawing before in blue and after in green;
+  Onion Skin Settings choose how many, their colors and how faint they
+  get. The **light table** (Animation, Light Table, or the Animation Cels
+  palette) shows other layers under the cel you are drawing, to trace
+  from: pick the layer, then Register Selected Layer.
   File, Export Animation saves an animated GIF or every frame as a picture.
 
 `Ctrl+N` makes a new canvas: pick a preset or a paper size, a unit, a

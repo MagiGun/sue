@@ -7,7 +7,9 @@
 //! frames is the picture's [`LENGTH`].
 //!
 //! At any frame, the cels no folder shows are hidden; onion skin shows the
-//! cels just before (blue) and after (green) faintly.
+//! cels before (blue) and after (green) faintly, as its settings say
+//! ([`Onion`]), and the light table shows the layers registered to the cel
+//! being drawn ([`LIGHT_TABLE`]).
 
 use std::collections::HashSet;
 
@@ -15,7 +17,7 @@ use sue_core::txn::{Batch, SetExtension, SetProperty};
 use sue_core::{Arena, EntityId, Rate, Time, Value};
 use sue_model::{Clip, Sequence, Track};
 
-use crate::composite::FrameView;
+use crate::composite::{FrameView, Skin};
 
 /// The kind of track that is an animation folder.
 pub const CELS: &str = "sue.paint.cels";
@@ -23,6 +25,174 @@ pub const CELS: &str = "sue.paint.cels";
 pub const LENGTH: &str = "anim.length";
 /// A key that shows nothing (a clip property).
 const BLANK: &str = "anim.blank";
+/// A picture's onion skin settings ([`Onion::to_text`]).
+pub const ONION: &str = "anim.onion";
+/// The relation from a cel to a layer on its light table, shown to trace
+/// from while the cel is drawn.
+pub const LIGHT_TABLE: &str = "sue.paint.light_table";
+
+/// How onion skin shows the cels around the current one: Clip Studio
+/// Paint's Onion Skin Settings.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Onion {
+    /// How many cels before the current one show.
+    pub before: u32,
+    /// How many cels after it show.
+    pub after: u32,
+    /// Color mode: 0 Color (the cels' own), 1 Half color, 2 Monochrome.
+    pub mode: u8,
+    /// The color of the cels before.
+    pub before_color: [u8; 3],
+    /// The color of the cels after.
+    pub after_color: [u8; 3],
+    /// Specify opacity level: the nearest cel's opacity and how much less
+    /// each one further shows (0 to 1); `None` shows them fully.
+    pub opacity: Option<(f32, f32)>,
+}
+
+impl Default for Onion {
+    fn default() -> Self {
+        Self {
+            before: 1,
+            after: 1,
+            mode: 2,
+            before_color: [0, 0, 255],
+            after_color: [0, 255, 0],
+            opacity: Some((0.8, 0.1)),
+        }
+    }
+}
+
+impl Onion {
+    /// The color modes, in order.
+    pub const MODES: [&str; 3] = ["Color", "Half color", "Monochrome"];
+
+    /// The settings as text, for the picture.
+    #[must_use]
+    pub fn to_text(&self) -> String {
+        let hex = |[r, g, b]: [u8; 3]| format!("{r:02x}{g:02x}{b:02x}");
+        let (on, start, step) = self
+            .opacity
+            .map_or((0, 0.8, 0.1), |(start, step)| (1, start, step));
+        format!(
+            "{},{},{},{},{},{on},{start},{step}",
+            self.before,
+            self.after,
+            self.mode,
+            hex(self.before_color),
+            hex(self.after_color),
+        )
+    }
+
+    /// Settings read back from [`Self::to_text`].
+    #[must_use]
+    pub fn from_text(text: &str) -> Option<Self> {
+        let parts: Vec<&str> = text.split(',').map(str::trim).collect();
+        let [
+            before,
+            after,
+            mode,
+            before_color,
+            after_color,
+            on,
+            start,
+            step,
+        ] = parts.as_slice()
+        else {
+            return None;
+        };
+        let hex = |value: &str| -> Option<[u8; 3]> {
+            let byte = |at: usize| u8::from_str_radix(value.get(at..at + 2)?, 16).ok();
+            Some([byte(0)?, byte(2)?, byte(4)?])
+        };
+        Some(Self {
+            before: before.parse().ok()?,
+            after: after.parse().ok()?,
+            mode: mode.parse::<u8>().ok()?.min(2),
+            before_color: hex(before_color)?,
+            after_color: hex(after_color)?,
+            opacity: (*on == "1")
+                .then(|| Some((start.parse().ok()?, step.parse().ok()?)))
+                .flatten(),
+        })
+    }
+
+    /// The settings on `picture` (the default when it has none).
+    #[must_use]
+    pub fn of(arena: &Arena, picture: EntityId) -> Self {
+        arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(|entity| entity.property(ONION))
+            .and_then(Value::as_str)
+            .and_then(Self::from_text)
+            .unwrap_or_default()
+    }
+
+    /// How much the cel `away` cels from the current one shows (1 is the
+    /// nearest).
+    #[must_use]
+    pub fn opacity_at(&self, away: u32) -> f32 {
+        self.opacity.map_or(1.0, |(start, step)| {
+            (start - step * away.saturating_sub(1) as f32).clamp(0.0, 1.0)
+        })
+    }
+
+    /// How much of a cel's color gives way to the skin color.
+    #[must_use]
+    pub fn tint(&self) -> f32 {
+        match self.mode {
+            0 => 0.0,
+            1 => 0.5,
+            _ => 1.0,
+        }
+    }
+}
+
+/// The layers on `cel`'s light table, in the order they were registered.
+#[must_use]
+pub fn light_table(arena: &Arena, cel: EntityId) -> Vec<EntityId> {
+    arena.relations().targets(cel, LIGHT_TABLE)
+}
+
+/// The edit that puts `layer` on `cel`'s light table.
+#[must_use]
+pub fn register(cel: EntityId, layer: EntityId) -> Edit {
+    Edit::new("Register to Light Table").then(sue_core::txn::Relate::new(sue_core::Relation::new(
+        cel,
+        LIGHT_TABLE,
+        layer,
+    )))
+}
+
+/// The edit that takes `layers` off `cel`'s light table.
+#[must_use]
+pub fn deregister(cel: EntityId, layers: &[EntityId]) -> Edit {
+    layers
+        .iter()
+        .fold(Edit::new("Deregister from Light Table"), |edit, layer| {
+            edit.then(sue_core::txn::Unrelate::new(cel, LIGHT_TABLE, *layer))
+        })
+}
+
+impl FrameView {
+    /// The same with `layers` (a light table) shown at `opacity` in their
+    /// own colors when the frame hides them.
+    #[must_use]
+    pub fn with_light_table(mut self, layers: &[EntityId], opacity: f32) -> Self {
+        for layer in layers {
+            if !self.onion.iter().any(|skin| skin.cel == *layer) {
+                self.onion.push(Skin {
+                    cel: *layer,
+                    color: [0.0; 3],
+                    tint: 0.0,
+                    opacity,
+                });
+            }
+        }
+        self
+    }
+}
 
 type Edit = Batch<Arena>;
 
@@ -84,9 +254,9 @@ pub fn cel_at(track: &Track, rate: Rate, frame: u32) -> Option<EntityId> {
 }
 
 /// How the layers look at `frame`: every cel no folder shows is hidden;
-/// with onion skin, each folder's cels just before and after show faintly.
+/// with `onion` skin, each folder's cels before and after show faintly.
 #[must_use]
-pub fn view(sequence: &Sequence, frame: u32, onion: bool) -> FrameView {
+pub fn view(sequence: &Sequence, frame: u32, onion: Option<&Onion>) -> FrameView {
     let mut cels = HashSet::new();
     let mut shown = HashSet::new();
     let mut faint = Vec::new();
@@ -96,20 +266,34 @@ pub fn view(sequence: &Sequence, frame: u32, onion: bool) -> FrameView {
         cels.extend(keys.iter().filter_map(|(_, cel)| *cel));
         let now = cel_at(track, sequence.rate, frame);
         shown.extend(now);
-        if onion {
+        if let Some(onion) = onion {
             let current = keys.iter().rposition(|(at, _)| *at <= frame);
-            let before = current
-                .and_then(|at| at.checked_sub(1))
-                .and_then(|at| keys[at].1);
+            let before = keys[..current.unwrap_or(0)]
+                .iter()
+                .rev()
+                .filter_map(|(_, cel)| *cel)
+                .take(onion.before as usize);
             let after = keys
                 .iter()
-                .find(|(at, _)| *at > frame)
-                .and_then(|(_, cel)| *cel);
-            if let Some(cel) = before.filter(|cel| Some(*cel) != now) {
-                faint.push((cel, [0.25, 0.45, 1.0], 0.35));
-            }
-            if let Some(cel) = after.filter(|cel| Some(*cel) != now) {
-                faint.push((cel, [0.2, 0.75, 0.35], 0.35));
+                .filter(|(at, _)| *at > frame)
+                .filter_map(|(_, cel)| *cel)
+                .take(onion.after as usize);
+            let unit = |[r, g, b]: [u8; 3]| [r, g, b].map(|value| f32::from(value) / 255.0);
+            for (cels, color) in [
+                (before.collect::<Vec<_>>(), onion.before_color),
+                (after.collect::<Vec<_>>(), onion.after_color),
+            ] {
+                for (away, cel) in cels.into_iter().enumerate() {
+                    if Some(cel) == now || faint.iter().any(|skin: &Skin| skin.cel == cel) {
+                        continue;
+                    }
+                    faint.push(Skin {
+                        cel,
+                        color: unit(color),
+                        tint: onion.tint(),
+                        opacity: onion.opacity_at(away as u32 + 1),
+                    });
+                }
             }
         }
     }
@@ -258,6 +442,76 @@ mod tests {
     use sue_core::{Entity, ReversibleTransaction};
 
     #[test]
+    fn onion_skin_settings_show_as_many_cels_as_asked_fading_away() {
+        let mut arena = Arena::new();
+        let entity = Entity::empty("Walk", sue_model::class::IMAGE);
+        let id = entity.id();
+        arena.insert(entity);
+        let mut edit = new_timeline(id, 12, 12);
+        edit.apply(&mut arena).unwrap();
+        let mut sequence = timeline(&arena, id).unwrap().clone();
+        let layer = |arena: &mut Arena| {
+            let entity = Entity::empty("Cel", "sue.layer");
+            let id = entity.id();
+            arena.insert_keep_id(entity).unwrap();
+            id
+        };
+        let cels: Vec<EntityId> = (0..6).map(|_| layer(&mut arena)).collect();
+        for (index, cel) in cels.iter().enumerate() {
+            sequence = assign(&sequence, 0, index as u32 * 2, Some(*cel), id, 12);
+        }
+        // At cel 3 (frame 6): two before and one after, fading by a step.
+        let onion = Onion {
+            before: 2,
+            after: 1,
+            mode: 1,
+            opacity: Some((0.6, 0.2)),
+            ..Onion::default()
+        };
+        let at = view(&sequence, 6, Some(&onion));
+        let shown: Vec<(EntityId, f32)> = at
+            .onion
+            .iter()
+            .map(|skin| (skin.cel, skin.opacity))
+            .collect();
+        assert_eq!(shown.len(), 3);
+        assert_eq!(shown[0].0, cels[2]);
+        assert!((shown[0].1 - 0.6).abs() < 1e-6);
+        assert_eq!(shown[1].0, cels[1]);
+        assert!((shown[1].1 - 0.4).abs() < 1e-6, "one step fainter");
+        assert_eq!(shown[2].0, cels[4]);
+        assert!(
+            at.onion.iter().all(|skin| (skin.tint - 0.5).abs() < 1e-6),
+            "half color"
+        );
+        // The settings read back from their text, and none shows fully.
+        assert_eq!(Onion::from_text(&onion.to_text()), Some(onion));
+        let full = Onion {
+            opacity: None,
+            ..onion
+        };
+        assert_eq!(Onion::from_text(&full.to_text()), Some(full));
+        assert_eq!(full.opacity_at(3), 1.0);
+        // A light table shows its layers in their own colors.
+        let reference = layer(&mut arena);
+        let traced = view(&sequence, 6, None).with_light_table(&[reference], 0.5);
+        assert_eq!(traced.onion.len(), 1);
+        assert_eq!(traced.onion[0].tint, 0.0);
+        let mut put = register(cels[3], reference);
+        put.apply(&mut arena).unwrap();
+        assert_eq!(light_table(&arena, cels[3]), vec![reference]);
+        let mut off = deregister(cels[3], &[reference]);
+        off.apply(&mut arena).unwrap();
+        assert!(light_table(&arena, cels[3]).is_empty());
+        off.revert(&mut arena).unwrap();
+        assert_eq!(
+            light_table(&arena, cels[3]),
+            vec![reference],
+            "and back on undo"
+        );
+    }
+
+    #[test]
     fn folders_show_one_cel_at_a_time_with_onion_skin() {
         let mut arena = Arena::new();
         let picture = Entity::empty("Walk", sue_model::class::IMAGE);
@@ -282,12 +536,15 @@ mod tests {
             track.clips()[0].duration,
             Time::from_frames(3, sequence.rate)
         );
-        let at = view(&sequence, 1, false);
+        let at = view(&sequence, 1, None);
         assert!(at.hidden.contains(&two) && !at.hidden.contains(&one));
         // Onion skin: the next cel shows faintly in green.
-        let at = view(&sequence, 1, true);
+        let onion = Onion::default();
+        let at = view(&sequence, 1, Some(&onion));
         assert_eq!(at.onion.len(), 1);
-        assert_eq!(at.onion[0].0, two);
+        assert_eq!(at.onion[0].cel, two);
+        assert_eq!(at.onion[0].color, [0.0, 1.0, 0.0]);
+        assert!((at.onion[0].opacity - 0.8).abs() < 1e-6);
         // Insert a frame at 1: later keys move one on; deleting moves back.
         let longer = shift(&sequence, 1, 1, 9);
         assert_eq!(cel_at(&longer.tracks[0], longer.rate, 3), Some(one));

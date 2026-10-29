@@ -2063,7 +2063,7 @@ impl SuePaint {
         let stack = doc::layers(&cx.world.arena, picture_id);
         let current = self.layer_info(&cx.world.arena);
         if self.layer_tab == 3 {
-            self.cels_tab(ui, body, theme);
+            self.cels_tab(ui, body, cx, theme);
             return;
         }
         match self.layer_tab {
@@ -2723,31 +2723,105 @@ impl SuePaint {
 
     // ----- Timeline -----------------------------------------------------------------------
 
-    /// The Animation Cels tab: its tools, which wait for animation.
-    fn cels_tab(&mut self, ui: &mut Ui, body: Rect, theme: &Theme) {
+    /// The Animation Cels tab: the cel tools and the light table of the
+    /// cel being drawn, as Clip Studio Paint's Animation cels palette.
+    fn cels_tab(&mut self, ui: &mut Ui, body: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
         let row = Rect::from_min_size(body.min + vec2(6.0, 6.0), vec2(body.width() - 12.0, 22.0));
-        let buttons: [(Icon, &str); 6] = [
-            (Icon::Cel, "New animation cel"),
-            (Icon::Edit, "Specify cels"),
-            (Icon::Delete, "Delete cel"),
-            (Icon::Onion, "Onion skin"),
-            (Icon::Layers, "Light table"),
-            (Icon::Loop, "Cel order"),
+        let cel = self.editing_cel(&cx.world.arena);
+        let has = cel.is_some();
+        let buttons: [(Icon, &str, &str, bool, bool); 5] = [
+            (Icon::Cel, "New animation cel", "anim.cel.new", true, false),
+            (Icon::Edit, "Specify cels", "anim.cel.assign", has, false),
+            (Icon::Onion, "Onion skin", "anim.onion", true, self.onion),
+            (
+                Icon::Layers,
+                "Enable light table",
+                "anim.light_table",
+                true,
+                self.light_table,
+            ),
+            (
+                Icon::Reference,
+                "Register selected layer to the light table",
+                "anim.light_table.register",
+                has,
+                false,
+            ),
         ];
-        for (index, (icon, tip)) in buttons.iter().enumerate() {
+        let mut run = None;
+        for (index, (icon, tip, command, enabled, active)) in buttons.iter().enumerate() {
             let at = Rect::from_min_size(
                 pos2(row.left() + index as f32 * 26.0, row.top()),
                 vec2(22.0, 22.0),
             );
-            icon_button(ui, at, *icon, false, false, tip, theme);
+            if icon_button(ui, at, *icon, *enabled, *active, tip, theme) {
+                run = Some(*command);
+            }
         }
-        ui.painter().text(
-            pos2(body.left() + 8.0, row.bottom() + 16.0),
-            Align2::LEFT_CENTER,
-            "Animation cels arrive with animation",
-            theme.font(theme.small_size + 0.5),
-            theme.muted,
+        let mut inner = child(
+            ui,
+            Rect::from_min_max(
+                pos2(body.left() + 8.0, row.bottom() + 8.0),
+                body.max - vec2(8.0, 8.0),
+            ),
+            "cels-light-table",
         );
+        let small = |text: &str| {
+            RichText::new(text)
+                .size(theme.small_size + 0.5)
+                .color(theme.muted)
+        };
+        match cel {
+            None => {
+                inner.label(small("Go to a frame with a cel to see its light table"));
+            }
+            Some(cel) => {
+                let name = |id: sue_core::EntityId| {
+                    cx.world
+                        .arena
+                        .get_by_id(id)
+                        .map_or_else(|_| "Layer".to_owned(), |entity| entity.name().to_owned())
+                };
+                inner.label(small(&format!("Light table of cel {}", name(cel))));
+                let mut opacity = self.light_opacity * 100.0;
+                if slider_row(
+                    &mut inner,
+                    "Opacity",
+                    &mut opacity,
+                    0.0..=100.0,
+                    " %",
+                    false,
+                    theme,
+                ) {
+                    self.light_opacity = opacity / 100.0;
+                }
+                let layers = crate::anim::light_table(&cx.world.arena, cel);
+                if layers.is_empty() {
+                    inner.label(small(
+                        "Pick a layer to trace from, then register it with the last button",
+                    ));
+                }
+                let mut off = None;
+                for layer in layers {
+                    inner.horizontal(|ui| {
+                        if ui
+                            .small_button("x")
+                            .on_hover_text("Deregister from the light table")
+                            .clicked()
+                        {
+                            off = Some(layer);
+                        }
+                        ui.label(name(layer));
+                    });
+                }
+                if let Some(layer) = off {
+                    Self::apply(cx, crate::anim::deregister(cel, &[layer]));
+                }
+            }
+        }
+        if let Some(command) = run {
+            self.run(command, cx);
+        }
     }
 
     pub(crate) fn timeline_panel(

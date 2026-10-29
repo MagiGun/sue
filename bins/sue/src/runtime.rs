@@ -1708,6 +1708,43 @@ pub(crate) mod tests {
         );
         assert_eq!(runtime.engine.history.depth(), depth);
 
+        // Onion Skin Settings keeps its settings on the picture.
+        command(&mut runtime, "anim.onion_settings");
+        step(&mut runtime, Vec::new());
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        let arena = &runtime.engine.world.arena;
+        assert!(
+            arena
+                .get_by_id(picture)
+                .unwrap()
+                .property(sue_paint::anim::ONION)
+                .is_some()
+        );
+        assert_eq!(
+            sue_paint::anim::Onion::of(arena, picture),
+            sue_paint::anim::Onion::default()
+        );
+
+        // The light table: the cel being drawn cannot trace itself; the
+        // first cel, picked in the Layer palette, goes on its light table.
+        let (first, second) = (keys[0].1.unwrap(), keys[1].1.unwrap());
+        command(&mut runtime, "anim.light_table.register");
+        assert!(sue_paint::anim::light_table(&runtime.engine.world.arena, second).is_empty());
+        command(&mut runtime, "layer.select_below");
+        command(&mut runtime, "anim.light_table.register");
+        assert_eq!(
+            sue_paint::anim::light_table(&runtime.engine.world.arena, second),
+            vec![first]
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        assert!(sue_paint::anim::light_table(&runtime.engine.world.arena, second).is_empty());
+
         // The image sequence shows one cel per frame.
         std::fs::create_dir_all(&root).unwrap();
         runtime.request(

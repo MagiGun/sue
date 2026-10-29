@@ -31,13 +31,27 @@ impl Default for RenderOptions {
 }
 
 /// How an animation frame shows the layers: the cels it hides, and the
-/// ones shown faintly in one color around it (onion skin).
+/// ones shown faintly around it (onion skin, the light table).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FrameView {
     /// Cels not on this frame.
     pub hidden: HashSet<EntityId>,
-    /// Cels shown anyway, tinted (sRGB, 0 to 1) at an opacity.
-    pub onion: Vec<(EntityId, [f32; 3], f32)>,
+    /// Cels shown anyway.
+    pub onion: Vec<Skin>,
+}
+
+/// A hidden cel shown anyway: in a color, faintly.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Skin {
+    /// The cel.
+    pub cel: EntityId,
+    /// Its skin color (sRGB, 0 to 1).
+    pub color: [f32; 3],
+    /// How much of its own color gives way to the skin color: 1 for
+    /// Monochrome, a half for Half color, 0 for Color.
+    pub tint: f32,
+    /// How much shows, 0 to 1.
+    pub opacity: f32,
 }
 
 /// A correction layer's change, ready for every pixel: a table a channel
@@ -90,8 +104,9 @@ enum Source<'a> {
 struct Layer<'a> {
     source: Source<'a>,
     style: LayerStyle,
-    /// Drawn in this color (onion skin), keeping its alpha.
-    tint: Option<[f32; 3]>,
+    /// Drawn toward this color by this much (onion skin), keeping its
+    /// alpha.
+    tint: Option<([f32; 3], f32)>,
     /// The layer mask, the layer's size: its alpha is how much shows.
     mask: Option<&'a RasterTile2D>,
 }
@@ -166,10 +181,10 @@ fn gather_view<'a>(
             if let Some(view) = view
                 && view.hidden.contains(&entity.id())
             {
-                match view.onion.iter().find(|(id, _, _)| *id == entity.id()) {
-                    Some((_, color, opacity)) => {
-                        style.opacity *= opacity;
-                        tint = Some(*color);
+                match view.onion.iter().find(|skin| skin.cel == entity.id()) {
+                    Some(skin) => {
+                        style.opacity *= skin.opacity;
+                        tint = Some((skin.color, skin.tint));
                     }
                     None => style.visible = false,
                 }
@@ -252,8 +267,10 @@ fn pixel(layers: &[Layer<'_>], x: u32, y: u32) -> [f32; 4] {
         if let Some(mask) = layer.mask {
             source[3] *= mask_at(mask, layer.style.offset, x, y);
         }
-        if let Some([r, g, b]) = layer.tint {
-            source = [r, g, b, source[3]];
+        if let Some((color, amount)) = layer.tint {
+            for channel in 0..3 {
+                source[channel] += (color[channel] - source[channel]) * amount;
+            }
         }
         source[3] *= layer.style.opacity;
         if layer.style.clip {
