@@ -79,6 +79,12 @@
     .card p { margin: 0; color: var(--muted); font-size: 15px; }
     .platforms { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 24px; padding: 0; list-style: none; }
     .platforms li { border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 14px; color: var(--muted); background: var(--panel); }
+    .note { margin-top: 28px; max-width: 760px; }
+    .note p { margin: 0 0 12px; }
+    .note p:last-of-type { margin-bottom: 10px; }
+    code { font: 14px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace; }
+    pre { margin: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); overflow-x: auto; }
+    pre code { white-space: pre; }
     .links a.card { text-decoration: none; display: block; }
     .links a.card:hover { border-color: var(--muted); }
     .links a.card h3::after { content: " \2192"; color: var(--muted); }
@@ -157,6 +163,12 @@
           <li>iPhone and iPad</li>
         </ul>
         <a class="button primary" href="https://github.com/MagiGun/sue/releases/latest">Get the latest release</a>
+        <div class="card note">
+          <h3>Installing on Windows</h3>
+          <p>The <code>-setup.exe</code> is the easiest. Sue isn't code-signed yet, so Windows may say "Windows protected your PC" or "Unknown publisher": choose <strong>More info</strong>, then <strong>Run anyway</strong>. Before extracting the portable zip, right-click it, choose <strong>Properties</strong> and tick <strong>Unblock</strong>, or Windows asks again for every program inside.</p>
+          <p>Or install with <a href="https://scoop.sh">Scoop</a>, which skips the warning and keeps Sue up to date with <code>scoop update sue</code>:</p>
+          <pre><code>scoop install https://github.com/MagiGun/sue/releases/latest/download/sue.json</code></pre>
+        </div>
       </div>
     </section>
 
