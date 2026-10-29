@@ -648,7 +648,7 @@ impl SuePaint {
         let here = self.timeline_here(&cx.world.arena);
         let has = here.is_some();
         let playing = self.doc().is_some_and(|doc| doc.playing.is_some());
-        let buttons: [(Icon, &str, &str, bool, bool); 15] = [
+        let buttons: [(Icon, &str, &str, bool, bool); 14] = [
             (Icon::New, "New timeline", "anim.timeline.new", !has, false),
             (
                 Icon::NewFolder,
@@ -689,8 +689,12 @@ impl SuePaint {
             (Icon::Onion, "Onion skin", "anim.onion", has, self.onion),
             (Icon::First, "First frame", "anim.first", has, false),
             (Icon::Prev, "Previous frame", "anim.prev", has, false),
-            (Icon::Play, "Play", "anim.play", has && !playing, false),
-            (Icon::Stop, "Stop", "anim.play", has && playing, false),
+            // One button, as in Clip Studio Paint: Play, and Stop while it plays.
+            if playing {
+                (Icon::Stop, "Stop", "anim.play", has, true)
+            } else {
+                (Icon::Play, "Play", "anim.play", has, false)
+            },
             (Icon::Next, "Next frame", "anim.next", has, false),
             (Icon::Last, "Last frame", "anim.last", has, false),
             (Icon::Loop, "Loop", "anim.loop", has, self.looping),
