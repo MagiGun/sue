@@ -534,7 +534,14 @@ For long work it is also a writing studio:
   words you wrote each day.
 - **Composition mode** (`F11`) leaves nothing but your words on a dark page,
   the line you are on kept in the middle. `Esc` comes back.
-- **Find and replace** across one scene or the whole project.
+- **Find and replace** across one scene or the whole project, matching
+  case or whole words, or with **regular expressions**: `\d+` finds numbers,
+  `^Chapter` finds lines that start with it, and in the replacement `$1`
+  puts back what the first group in brackets caught (`(\w+), (\w+)` with
+  `$2 $1` turns "Smith, John" into "John Smith").
+- **Change Case** (Format, Text, Change Case): Sentence case, lowercase,
+  UPPERCASE, Capitalize Every Word and tOGGLE cASE, for the selection or the
+  word you are in, keeping its formatting.
 
 **Tables** come from Table, Insert Table (`Ctrl+F12`): choose the columns
 and rows, and whether the first row is a heading. Click in a cell and type;

@@ -482,6 +482,49 @@ impl Editor {
         self.replace_selection(cx, text, None);
     }
 
+    /// Changes the case of the selection (or of the word at the caret),
+    /// keeping its formatting and selecting what it changed. Returns
+    /// `false` if nothing changed.
+    pub fn change_case(&mut self, cx: &mut AppletContext<'_>, case: crate::case::Case) -> bool {
+        let Some(doc) = self.current() else {
+            return false;
+        };
+        let mut range = self.selection();
+        if range.is_empty() {
+            let (start, end) = word_around(self.text(), range.start);
+            range = start..end;
+        }
+        let text = self.text();
+        let before = &text[range.clone()];
+        let sentence_start = text[..range.start]
+            .trim_end_matches([' ', '"', '\'', '\u{201C}', '\u{2018}', '('])
+            .chars()
+            .next_back()
+            .is_none_or(|ch| matches!(ch, '.' | '!' | '?' | '\n'));
+        let after = crate::case::change(before, case, sentence_start);
+        if after == before {
+            return false;
+        }
+        let marks = self.marks[self.caret.doc].slice(range.clone());
+        self.commit(cx);
+        cx.typing.flush(cx.history);
+        let Some(end) = edit::replace(cx, doc, range.clone(), &after, Some(&marks), &[]) else {
+            return false;
+        };
+        cx.typing.flush(cx.history);
+        self.sync_text(cx);
+        self.anchor = Caret {
+            doc: self.caret.doc,
+            offset: range.start,
+        };
+        self.caret = Caret {
+            doc: self.caret.doc,
+            offset: end,
+        };
+        self.follow = true;
+        true
+    }
+
     /// Puts an embedded entity (a picture) in a paragraph of its own at the
     /// caret.
     pub fn insert_embed(&mut self, cx: &mut AppletContext<'_>, entity: EntityId) {

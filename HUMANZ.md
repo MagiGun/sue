@@ -1759,6 +1759,14 @@ and tested apart from egui (curve, landing exactly, retargeting, the blink, no
 frames at rest); `bins/sue` types in Sue Writer and checks egui's repaint
 delay: zero while it glides, the blink at rest, nothing after.
 
+**Find and case (`sue-type::find`, `case`).** `Finder` searches plain
+text (case folded unless asked, whole words) or a regular expression (the
+`regex` crate; case and whole words apply to it too, no empty matches), and
+fills a regular expression's replacement with what its groups caught (`$1`,
+`${name}`). `case::change` turns text into upper, lower, sentence or title
+case or swaps it; `Editor::change_case` does it to the selection or the
+word at the caret as one undo step, keeping the marks.
+
 **Typesetting and PDF (`sue-type::typeset`, `sue-io::pdf`).** For print, the
 same styles and marks are set from the font files themselves (`ttf-parser`
 widths): lines broken at spaces, justified, paginated with the same rules,

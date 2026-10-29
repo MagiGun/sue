@@ -10,6 +10,7 @@ use sue_model::manuscript::{self, role};
 use sue_model::{class, mark_kind as kind, picture};
 use sue_rice::{RiceDeclaration, RiceParameter};
 use sue_type::editor::TableEdit;
+use sue_type::find::{Finder, Query};
 use sue_type::{Editor, Fonts, PageSetup, StyleSheet};
 use sue_wm::{
     AppletContext, AppletId, AppletManifest, AppletRole, ArenaEdit, FilePick, Menu, MenuBar,
@@ -107,6 +108,7 @@ pub(crate) struct Find {
     pub replace: String,
     pub case: bool,
     pub words: bool,
+    pub regex: bool,
     pub project: bool,
     pub replacing: bool,
     pub focus: bool,
@@ -921,6 +923,12 @@ impl SueWriter {
             "format.underline" => self.editor.toggle(cx, kind::UNDERLINE, "Underline"),
             "format.strike" => self.editor.toggle(cx, kind::STRIKE, "Strikethrough"),
             "format.code" => self.editor.toggle(cx, kind::CODE, "Code"),
+            case if case.starts_with("format.case.") => {
+                let Some(case) = sue_type::case::Case::parse(&case["format.case.".len()..]) else {
+                    return false;
+                };
+                self.editor.change_case(cx, case);
+            }
             "format.small_caps" => self.editor.toggle(cx, kind::SMALL_CAPS, "Small Capitals"),
             "format.superscript" | "format.subscript" => {
                 let script = if command.ends_with("superscript") {
@@ -1175,44 +1183,22 @@ impl SueWriter {
         find.focus = true;
     }
 
-    /// The matches of the find bar's query in `text`.
-    pub(crate) fn matches(find: &Find, text: &str) -> Vec<std::ops::Range<usize>> {
-        if find.query.is_empty() {
-            return Vec::new();
-        }
-        let (hay, needle) = if find.case {
-            (text.to_owned(), find.query.clone())
-        } else {
-            (text.to_lowercase(), find.query.to_lowercase())
-        };
-        // Lowercasing may change lengths; only use it when it did not.
-        let (hay, needle) = if hay.len() == text.len() {
-            (hay, needle)
-        } else {
-            (text.to_owned(), find.query.clone())
-        };
-        let mut out = Vec::new();
-        let mut from = 0;
-        while let Some(at) = hay[from..].find(&needle) {
-            let start = from + at;
-            let end = start + needle.len();
-            let boundary = |at: usize, before: bool| {
-                let ch = if before {
-                    text[..at].chars().next_back()
-                } else {
-                    text[at..].chars().next()
-                };
-                ch.is_none_or(|ch| !ch.is_alphanumeric())
-            };
-            if !find.words || (boundary(start, true) && boundary(end, false)) {
-                out.push(start..end);
-            }
-            from = end.max(start + 1);
-            while from < hay.len() && !hay.is_char_boundary(from) {
-                from += 1;
+    /// The find bar's query, ready to search with (`None`, with the reason
+    /// shown in the bar, when its regular expression is wrong).
+    pub(crate) fn finder(&mut self) -> Option<Finder> {
+        let find = self.find.as_mut()?;
+        match Finder::new(&Query {
+            text: find.query.clone(),
+            case: find.case,
+            words: find.words,
+            regex: find.regex,
+        }) {
+            Ok(finder) => Some(finder),
+            Err(error) => {
+                find.message = error;
+                None
             }
         }
-        out
     }
 
     /// Selects the next (or previous) match, across the project's documents
@@ -1224,6 +1210,9 @@ impl SueWriter {
         if find.query.is_empty() {
             return;
         }
+        let Some(finder) = self.finder() else {
+            return;
+        };
         let mut docs = self.shown_docs(cx);
         if find.project
             && let Some(root) = self.project
@@ -1254,7 +1243,7 @@ impl SueWriter {
             let text = sue_type::edit::text_of(cx.arena(), doc)
                 .unwrap_or("")
                 .to_owned();
-            let found = Self::matches(&find, &text);
+            let found = finder.matches(&text);
             let pick = if step == 0 {
                 if backward {
                     found
@@ -1299,14 +1288,13 @@ impl SueWriter {
         let Some(find) = self.find.clone() else {
             return;
         };
-        let selected = self.editor.selected_text().to_owned();
-        let same = if find.case {
-            selected == find.query
-        } else {
-            selected.to_lowercase() == find.query.to_lowercase()
+        let Some(finder) = self.finder() else {
+            return;
         };
-        if same && !selected.is_empty() {
-            self.editor.insert(cx, &find.replace);
+        let selected = self.editor.selected_text().to_owned();
+        if finder.is_match(&selected) {
+            let with = finder.replacement(&selected, 0..selected.len(), &find.replace);
+            self.editor.insert(cx, &with);
         }
         self.find_next(cx, false);
     }
@@ -1314,6 +1302,9 @@ impl SueWriter {
     /// Replaces every match (in the shown documents, or the project).
     pub(crate) fn replace_all(&mut self, cx: &mut AppletContext<'_>) {
         let Some(find) = self.find.clone() else {
+            return;
+        };
+        let Some(finder) = self.finder() else {
             return;
         };
         let mut docs = self.shown_docs(cx);
@@ -1332,7 +1323,7 @@ impl SueWriter {
             let text = sue_type::edit::text_of(cx.arena(), doc)
                 .unwrap_or("")
                 .to_owned();
-            let found = Self::matches(&find, &text);
+            let found = finder.matches(&text);
             if found.is_empty() {
                 continue;
             }
@@ -1340,12 +1331,13 @@ impl SueWriter {
             let mut marks = sue_type::edit::marks_of(cx.arena(), doc);
             let mut new = text.clone();
             for range in found.into_iter().rev() {
+                let with = finder.replacement(&text, range.clone(), &find.replace);
                 let before = new.clone();
                 marks.delete_text(&before, range.clone());
                 new.replace_range(range.clone(), "");
                 let before = new.clone();
-                marks.insert_text(&before, range.start, &find.replace, None);
-                new.insert_str(range.start, &find.replace);
+                marks.insert_text(&before, range.start, &with, None);
+                new.insert_str(range.start, &with);
             }
             if let Some(step) = project::replace_all(cx.arena(), doc, &new, marks, "Replace All") {
                 batch.push(Box::new(step));

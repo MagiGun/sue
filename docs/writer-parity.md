@@ -34,7 +34,7 @@ of work is by how much people miss each one (the plan at the end).
 | Character shading and border | WL | missing | |
 | Outline, shadow, emboss, engrave | WL | missing | |
 | Character spacing, scale, position | WL | missing | |
-| Change case (upper, lower, sentence, title, toggle) | WL | missing | |
+| Change case (upper, lower, sentence, title, toggle) | WL | done | Shared `sue_type::case` |
 | Clear direct formatting | WL | done | |
 | Format painter (clone formatting) | WL | missing | |
 | Inline code | WL | done | |
@@ -259,7 +259,7 @@ of work is by how much people miss each one (the plan at the end).
 | Replace, replace all | WL | done | |
 | Match case, whole words | WL | done | |
 | Across the project | - | done | Sue's own |
-| Regular expressions | WL | missing | |
+| Regular expressions | WL | done | Shared `sue_type::find`, `$1` in replacements |
 | Find formatting and styles | WL | missing | |
 | Find all, select all matches | WL | missing | |
 | Go to page | WL | missing | |

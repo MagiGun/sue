@@ -51,7 +51,7 @@ pub fn sample_project(cx: &mut AppletContext<'_>) -> Option<EntityId> {
     cx.apply(ArenaEdit(project::set(
         root,
         project::HEADER,
-        Some(Value::Text("		Writer / {title} / {page}".into())),
+        Some(Value::Text("\t\tWriter / {title} / {page}".into())),
     )))
     .ok()?;
     let draft = manuscript::folder(cx.arena(), root, role::DRAFT)?;
