@@ -2473,6 +2473,118 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_records_a_timelapse_and_exports_it_as_a_video() {
+        let (mut runtime, root) = runtime("paint-timelapse");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.studio_focus())
+            .unwrap();
+        let command = |runtime: &mut Runtime, command: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: command.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        // File, Timelapse, Record Timelapse: the picture keeps that, and a
+        // frame goes in for the canvas as it is and after each stroke.
+        command(&mut runtime, "file.timelapse.record");
+        for _ in 0..3 {
+            step(&mut runtime, Vec::new());
+        }
+        let dir = sue_paint::timelapse::folder(&runtime.engine.catalog.folders["paint"], picture);
+        assert_eq!(sue_paint::timelapse::frames(&dir).len(), 1);
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let middle = runtime.shell.canvas_rect().center();
+        step(&mut runtime, vec![key(egui::Key::P, plain)]);
+        for y in [-40.0, 40.0] {
+            let (a, b) = (middle + vec2(-80.0, y), middle + vec2(80.0, y));
+            step(
+                &mut runtime,
+                vec![egui::Event::PointerMoved(a), press(a, true)],
+            );
+            step(
+                &mut runtime,
+                vec![
+                    egui::Event::PointerMoved(middle + vec2(0.0, y)),
+                    egui::Event::PointerMoved(b),
+                ],
+            );
+            step(&mut runtime, vec![press(b, false)]);
+            for _ in 0..3 {
+                step(&mut runtime, Vec::new());
+            }
+        }
+        assert_eq!(sue_paint::timelapse::frames(&dir).len(), 3, "one a stroke");
+        // Export Timelapse writes a video of them.
+        std::fs::create_dir_all(&root).unwrap();
+        runtime.request(
+            ShellRequest::Picked {
+                pick: FilePick::save(
+                    Some(paint.clone()),
+                    "timelapse",
+                    "Export Timelapse",
+                    "Drawing.avi",
+                ),
+                path: root.join("Drawing.avi"),
+            },
+            &mut NoTextures,
+            start,
+        );
+        let video = std::fs::read(root.join("Drawing.avi")).unwrap();
+        assert_eq!(&video[..4], b"RIFF");
+        assert_eq!(&video[8..12], b"AVI ");
+        // Stopping keeps the frames but adds no more.
+        command(&mut runtime, "file.timelapse.record");
+        let a = middle + vec2(-80.0, 80.0);
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(a), press(a, true)],
+        );
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(a + vec2(60.0, 0.0))],
+        );
+        step(&mut runtime, vec![press(a + vec2(60.0, 0.0), false)]);
+        for _ in 0..3 {
+            step(&mut runtime, Vec::new());
+        }
+        assert_eq!(sue_paint::timelapse::frames(&dir).len(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_masks_hide_without_erasing_the_layer() {
         let (mut runtime, root) = runtime("paint-mask");
         let ctx = egui::Context::default();

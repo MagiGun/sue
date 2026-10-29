@@ -28,6 +28,7 @@ pub mod publish;
 mod raster;
 mod sniff;
 mod tile_cache;
+mod video;
 pub mod zip;
 
 pub use audio::{
@@ -56,6 +57,7 @@ pub use sniff::{
     sniff_stream,
 };
 pub use tile_cache::{TileCache, TileCacheStats, TileKey};
+pub use video::MjpegAvi;
 
 /// One codec compiled into this build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

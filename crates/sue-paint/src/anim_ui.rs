@@ -318,7 +318,9 @@ impl SuePaint {
             "anim.prev" => self.go_to_frame(&cx.world.arena, i64::from(frame) - 1),
             "anim.first" => self.go_to_frame(&cx.world.arena, 0),
             "anim.last" => self.go_to_frame(&cx.world.arena, -1),
-            "file.export.gif" | "file.export.sequence" => self.ask_export_animation(cx, command),
+            "file.export.gif" | "file.export.sequence" | "file.export.movie" => {
+                self.ask_export_animation(cx, command);
+            }
             _ => return false,
         }
         true
@@ -340,6 +342,12 @@ impl SuePaint {
                 vec![FileType::new("Animated GIF", &["gif"])],
                 format!("{name}.gif"),
             )
+        } else if command == "file.export.movie" {
+            (
+                "anim-movie",
+                vec![FileType::new("Motion JPEG AVI video", &["avi"])],
+                format!("{name}.avi"),
+            )
         } else {
             (
                 "anim-sequence",
@@ -360,6 +368,37 @@ impl SuePaint {
             .types(types)
             .starting_in(self.last_dir.clone()),
         ));
+    }
+
+    /// Writes the animation to `path` as a Motion JPEG AVI video.
+    pub(crate) fn export_movie(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let Some((frames, fps)) = self.render_frames(&cx.world.arena) else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        let Some(first) = frames.first() else {
+            return;
+        };
+        let mut video =
+            sue_io::MjpegAvi::new(first.width(), first.height(), fps.round().max(1.0) as u32);
+        let result = frames
+            .iter()
+            .try_for_each(|frame| video.push_frame(frame, 90))
+            .and_then(|()| {
+                let count = video.frames();
+                let bytes = video.finish();
+                write_atomic(path, &bytes)
+                    .map_err(|error| error.to_string())
+                    .map(|()| (bytes.len(), count))
+            });
+        match result {
+            Ok((size, count)) => {
+                cx.saved(path, format!("{count} frames, {} KiB", size.div_ceil(1024)))
+            }
+            Err(error) => cx.fail(format!("Cannot export the movie: {error}")),
+        }
     }
 
     /// Every frame of the timeline, flattened.

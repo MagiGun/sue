@@ -120,6 +120,8 @@ pub(crate) struct NewDialog {
     pub paper_color: [u8; 3],
     pub size: usize,
     pub preset: Option<String>,
+    /// Record timelapse from the start.
+    pub timelapse: bool,
 }
 
 impl NewDialog {
@@ -141,6 +143,7 @@ impl NewDialog {
                 .map_or([255, 255, 255], |color| crate::color::bytes(color.rgb)),
             size: 0,
             preset: None,
+            timelapse: false,
         }
     }
 
@@ -158,6 +161,7 @@ impl NewDialog {
                 let [r, g, b] = self.paper_color;
                 Color::srgb8(r, g, b)
             }),
+            timelapse: self.timelapse,
         }
     }
 
@@ -370,6 +374,8 @@ pub(crate) enum Dialog {
     Perspective(u32),
     /// Onion Skin Settings.
     Onion(crate::anim::Onion),
+    /// Export Timelapse: the video's size and length.
+    Timelapse(crate::timelapse::Export),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -443,6 +449,7 @@ impl SuePaint {
             Dialog::Text(..) => ("Text", vec2(440.0, 380.0)),
             Dialog::Perspective(_) => ("Create Perspective Ruler", vec2(320.0, 190.0)),
             Dialog::Onion(_) => ("Onion Skin Settings", vec2(360.0, 330.0)),
+            Dialog::Timelapse(_) => ("Export Timelapse", vec2(360.0, 230.0)),
             Dialog::Correction(_, filter, ..) => (
                 filter.label(),
                 vec2(
@@ -499,6 +506,41 @@ impl SuePaint {
                             Dialog::Frame(frame) => outcome = frame_ui(ui, frame, theme),
                             Dialog::Text(_, lettering) => outcome = text_ui(ui, lettering, theme),
                             Dialog::Onion(onion) => outcome = onion_ui(ui, onion, theme),
+                            Dialog::Timelapse(export) => {
+                                egui::Grid::new("sue-paint-timelapse-export")
+                                    .num_columns(2)
+                                    .spacing(vec2(12.0, 8.0))
+                                    .show(ui, |ui| {
+                                        label(ui, "Long side:", theme);
+                                        egui::ComboBox::from_id_salt("sue-paint-timelapse-side")
+                                            .selected_text(format!("{} px", export.side))
+                                            .show_ui(ui, |ui| {
+                                                for side in [480, 720, 1080, 1280, 1920] {
+                                                    ui.selectable_value(&mut export.side, side, format!("{side} px"));
+                                                }
+                                            });
+                                        ui.end_row();
+                                        label(ui, "Length:", theme);
+                                        let mut fit = export.seconds.is_some();
+                                        ui.vertical(|ui| {
+                                            if ui.radio_value(&mut fit, true, "Fit to specified length").changed()
+                                                || ui.radio_value(&mut fit, false, "Export all frames").changed()
+                                            {
+                                                export.seconds = fit.then_some(30.0);
+                                            }
+                                            if let Some(seconds) = export.seconds.as_mut() {
+                                                ui.add(egui::DragValue::new(seconds).range(1.0..=600.0).suffix(" s"));
+                                            }
+                                        });
+                                        ui.end_row();
+                                    });
+                                ui.label(
+                                    RichText::new("A Motion JPEG AVI video, or an animated GIF")
+                                        .size(theme.small_size)
+                                        .color(theme.muted),
+                                );
+                                ok_cancel(ui, &mut outcome);
+                            }
                             Dialog::Perspective(count) => {
                                 ui.horizontal(|ui| {
                                     label(ui, "Type:", theme);
@@ -667,6 +709,7 @@ impl SuePaint {
             (Dialog::Frame(frame), Outcome::Ok) => self.add_frame_layer(cx, frame),
             (Dialog::Text(layer, lettering), Outcome::Ok) => self.put_text(cx, layer, &lettering),
             (Dialog::Perspective(count), Outcome::Ok) => self.make_perspective(cx, count),
+            (Dialog::Timelapse(export), Outcome::Ok) => self.ask_export_timelapse(cx, export),
             (Dialog::Onion(onion), Outcome::Ok) => {
                 if let Some(picture) = self.picture() {
                     let edit = doc::Edit::new("Onion Skin Settings").then(
@@ -764,7 +807,8 @@ impl SuePaint {
                 | Dialog::Text(..),
                 Outcome::Cancel | Outcome::Ok,
             )
-            | (Dialog::Perspective(_) | Dialog::Onion(_), Outcome::Cancel) => {}
+            | (Dialog::Perspective(_) | Dialog::Onion(_) | Dialog::Timelapse(_), Outcome::Cancel) =>
+                {}
         }
     }
 }
@@ -1479,12 +1523,15 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
             label(ui, "Working profile: sRGB", theme);
         });
         ui.checkbox(&mut false, "Create animated illustration");
-        ui.horizontal(|ui| {
-            label(ui, "Record timelapse:", theme);
-            egui::ComboBox::from_id_salt("sue-paint-timelapse")
-                .selected_text("Off")
-                .show_ui(ui, |_| {});
-        });
+    });
+    ui.horizontal(|ui| {
+        label(ui, "Record timelapse:", theme);
+        egui::ComboBox::from_id_salt("sue-paint-timelapse")
+            .selected_text(if new.timelapse { "On" } else { "Off" })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut new.timelapse, false, "Off");
+                ui.selectable_value(&mut new.timelapse, true, "On");
+            });
     });
     ui.label(
         RichText::new(format!(

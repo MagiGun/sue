@@ -635,6 +635,7 @@ mod tests {
             height: 4,
             dpi: 72.0,
             paper: Some(Color::srgb8(255, 255, 255)),
+            timelapse: false,
         })
         .unwrap();
         edit.apply(&mut arena).unwrap();

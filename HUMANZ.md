@@ -1262,6 +1262,18 @@ pressure. Each drag paints the layer again from its lines and records one
 step. Remove dust clears specks no larger than the dust size from a raster
 layer, in a dragged box or all of it.
 
+**Timelapse.** A picture that records (`timelapse.record`, set from New or
+File, Timelapse) keeps a frame each time its composite settles after a
+change, between strokes: a JPEG at most 1280 pixels on its longest side in
+Sue Paint's folder (`timelapse/<picture id>/`), so recording adds nothing to
+the undo history or the project (`sue_paint::timelapse`). Export Timelapse
+lays the frames over white in one size (the last frame's shape at the long
+side chosen), every frame at 30 a second or as many a second as fit the
+length (skipping frames past 60 a second), holds the last frame a second,
+and writes a Motion JPEG AVI (`sue_io::MjpegAvi`, every frame a JPEG and a
+key frame, with an index) or an animated GIF. Export Animation, Movie writes
+the timeline the same way.
+
 **Rulers.** A picture keeps its rulers as text properties
 (`sue_paint::rulers`): `ruler.linear` (two ends), `ruler.special` (parallel
 lines at an angle, radial lines or concentric circles about a center),
@@ -1829,7 +1841,8 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: vector layers with the Vector eraser (touched area, up to intersection, whole line) | **Implemented**; unit tests for a brush and lines read back, a line painted again to the same pixels, and each eraser mode; an end-to-end run that draws two crossing lines, undoes and redoes one, erases up to the crossing and undoes it | `sue-paint/src/vector.rs`, `brush.rs`, `canvas.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: Correct Line (control points, pinch, simplify, connect, adjust line width, redraw, redraw width) and Remove dust | **Implemented**; unit tests for every operation and dust removal, and the vector end-to-end run pinches a line and undoes it | `sue-paint/src/correct.rs`, `vector.rs`, `brush.rs`, `canvas.rs` |
 | §3.7 Sue Paint: the Operation tool (Object for vector lines, Select layer), curve, figure and pen rulers | **Implemented**; a unit test for path rulers read back and holding strokes on a curve and round a rectangle's corner; the vector end-to-end run moves a line with Object, deletes and undoes it | `sue-paint/src/rulers.rs`, `canvas.rs`, `bins/sue/src/runtime.rs` |
-| §3.7 Sue Paint: materials, the camera folder and timelapse | Planned; their menu items and tools are present and grayed out | n/a |
+| §3.7 Sue Paint: timelapse recording and export, and movies of animations (Motion JPEG AVI) | **Implemented**; unit tests for the AVI's headers and index and for frames kept, fitted and timed; an end-to-end run records a frame a stroke, exports a video and stops | `sue-io/src/video.rs`, `sue-paint/src/timelapse.rs`, `bins/sue/src/runtime.rs` |
+| §3.7 Sue Paint: materials and the camera folder | Planned; their menu items and tools are present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |

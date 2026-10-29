@@ -446,7 +446,12 @@ familiar:
   get. The **light table** (Animation, Light Table, or the Animation Cels
   palette) shows other layers under the cel you are drawing, to trace
   from: pick the layer, then Register Selected Layer.
-  File, Export Animation saves an animated GIF or every frame as a picture.
+  File, Export Animation saves an animated GIF, a movie or every frame as a
+  picture.
+- **Timelapse** (File, Timelapse, or Record timelapse in New): while it
+  records, Sue keeps a picture of the canvas after every change. Export
+  Timelapse makes a video (or a GIF) of how you drew it, fitted to the
+  length you choose or with every frame.
 
 `Ctrl+N` makes a new canvas: pick a preset or a paper size, a unit, a
 resolution and a paper color. `Ctrl+O` opens a PNG, JPEG or JPEG XL picture,

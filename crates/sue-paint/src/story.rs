@@ -171,6 +171,7 @@ pub fn add_page(
             .and_then(Value::as_f64)
             .unwrap_or(72.0),
         paper,
+        timelapse: false,
     };
     let (spawn, id) = doc::create(&spec)?;
     let edit = Edit::new("Add Page").then(spawn).then(Relate::new(

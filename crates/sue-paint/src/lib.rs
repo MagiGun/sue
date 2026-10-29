@@ -51,6 +51,7 @@ pub mod select;
 pub mod story;
 mod studio;
 mod subview;
+pub mod timelapse;
 pub mod tools;
 pub mod transform;
 mod transform_ui;

@@ -318,6 +318,12 @@ pub struct SuePaint {
     pub(crate) picked_lines: Option<(EntityId, Vec<usize>)>,
     /// The points of a curve ruler being placed (picture pixels).
     pub(crate) curve_points: Vec<[f32; 2]>,
+    /// Each recording picture's compositor version at its last timelapse
+    /// frame, the version it is waiting to settle on, and its next frame
+    /// number.
+    pub(crate) timelapse: HashMap<EntityId, (u64, u64, usize)>,
+    /// How the timelapse being exported is laid out.
+    pub(crate) timelapse_export: crate::timelapse::Export,
     /// Scale/Rotate or Free Transform, while it is on.
     pub(crate) transform: Option<crate::transform_ui::TransformSession>,
     /// The keys held this frame (Shift frees a transform's aspect).
@@ -393,6 +399,8 @@ impl Default for SuePaint {
             vanishing_line: None,
             picked_lines: None,
             curve_points: Vec::new(),
+            timelapse: HashMap::new(),
+            timelapse_export: crate::timelapse::Export::default(),
             transform: None,
             modifiers: egui::Modifiers::NONE,
             onion: false,
@@ -597,6 +605,9 @@ fn implemented(command: &str) -> bool {
             | "view.snap_special"
             | "view.snap_ruler"
             | "layer.new.vector"
+            | "file.timelapse.record"
+            | "file.timelapse.export"
+            | "file.export.movie"
             | "layer.ruler.perspective"
             | "layer.ruler.symmetry"
             | "layer.ruler.circle"
@@ -837,6 +848,124 @@ impl SuePaint {
                 crate::rulers::Path::curve(&points),
                 "Create Curve Ruler",
             );
+        }
+    }
+
+    /// `true` if `picture` records its timelapse.
+    pub(crate) fn recording(&self, arena: &Arena, picture: EntityId) -> bool {
+        arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(|entity| entity.property(crate::timelapse::RECORD))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
+    /// Keeps a timelapse frame of the current canvas when it records and has
+    /// changed since its last one, between strokes.
+    fn record_timelapse(&mut self, cx: &mut AppletContext<'_>, ctx: &egui::Context) {
+        if self.gesture.is_some() {
+            return;
+        }
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        if !self.recording(&cx.world.arena, picture) {
+            return;
+        }
+        let Some(base) = crate::colorsets::folder(cx) else {
+            return;
+        };
+        let dir = crate::timelapse::folder(&base, picture);
+        let (seen, waiting, next) = match self.timelapse.get(&picture) {
+            Some(known) => *known,
+            None => (u64::MAX, u64::MAX, crate::timelapse::frames(&dir).len()),
+        };
+        let Some(doc) = self.doc() else {
+            return;
+        };
+        if doc.playing.is_some() {
+            return;
+        }
+        let (pixels, size, version) = doc.compositor.display();
+        if size[0] == 0 || pixels.is_empty() || seen == version {
+            return;
+        }
+        if waiting != version {
+            // A change often paints twice; keep it once it settles.
+            self.timelapse.insert(picture, (seen, version, next));
+            ctx.request_repaint();
+            return;
+        }
+        let kept = crate::timelapse::capture(&dir, next, pixels, size);
+        match kept {
+            Ok(()) => {
+                self.timelapse.insert(picture, (version, version, next + 1));
+            }
+            Err(error) => {
+                // Stop trying this picture until it changes again.
+                self.timelapse.insert(picture, (version, version, next));
+                cx.fail(format!("Cannot record the timelapse: {error}"));
+            }
+        }
+    }
+
+    /// Asks where to export the timelapse laid out as `export`.
+    pub(crate) fn ask_export_timelapse(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        export: crate::timelapse::Export,
+    ) {
+        self.timelapse_export = export;
+        let name = self
+            .picture()
+            .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
+            .map_or_else(|| "Timelapse".to_owned(), |entity| entity.name().to_owned());
+        cx.request(ShellRequest::PickFile(
+            FilePick::save(
+                Some(me_id()),
+                "timelapse",
+                "Export Timelapse",
+                &format!("{name} timelapse.avi"),
+            )
+            .types(vec![
+                sue_wm::FileType::new("Motion JPEG AVI video", &["avi"]),
+                sue_wm::FileType::new("Animated GIF", &["gif"]),
+            ])
+            .starting_in(self.last_dir.clone()),
+        ));
+    }
+
+    /// Writes the current canvas's timelapse to `path`, as a video or a
+    /// GIF by its extension.
+    fn export_timelapse(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let (Some(picture), Some(base)) = (self.picture(), crate::colorsets::folder(cx)) else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        let dir = crate::timelapse::folder(&base, picture);
+        let gif = path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("gif"));
+        let result = if gif {
+            crate::timelapse::video_frames(&dir, self.timelapse_export).and_then(|(frames, fps)| {
+                let count = frames.len();
+                sue_io::encode_gif_animation(&frames, 1000 / fps.max(1)).map(|bytes| (bytes, count))
+            })
+        } else {
+            crate::timelapse::export_avi(&dir, self.timelapse_export)
+        };
+        match result.and_then(|(bytes, count)| {
+            write_atomic(path, &bytes)
+                .map_err(|error| error.to_string())
+                .map(|()| (bytes.len(), count))
+        }) {
+            Ok((size, count)) => {
+                cx.saved(path, format!("{count} frames, {} KiB", size.div_ceil(1024)))
+            }
+            Err(error) => cx.fail(format!("Cannot export the timelapse: {error}")),
         }
     }
 
@@ -1869,6 +1998,16 @@ impl SuePaint {
             "layer.toggle.draft" => info.map_or(ItemState::off(), |info| flag(info.style.draft)),
             "layer.toggle.lock" => info.map_or(ItemState::off(), |info| flag(info.locked)),
             "view.grid" => flag(self.grid),
+            "file.timelapse.record" => self.doc().map_or(ItemState::off(), |doc| {
+                flag(
+                    arena
+                        .get_by_id(doc.picture)
+                        .ok()
+                        .and_then(|entity| entity.property(crate::timelapse::RECORD))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                )
+            }),
             "anim.onion" => flag(self.onion),
             "anim.loop" => flag(self.looping),
             "anim.light_table" => flag(self.light_table),
@@ -2246,6 +2385,24 @@ impl SuePaint {
             "view.snap_ruler" => {
                 if let Some(doc) = self.doc_mut() {
                     doc.snap_ruler = !doc.snap_ruler;
+                }
+            }
+            "file.timelapse.record" => {
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                let on = self.recording(&cx.world.arena, picture);
+                let edit = doc::Edit::new(if on {
+                    "Stop Recording Timelapse"
+                } else {
+                    "Record Timelapse"
+                })
+                .then(SetProperty::new(picture, crate::timelapse::RECORD, !on));
+                Self::apply(cx, edit);
+            }
+            "file.timelapse.export" => {
+                if self.picture().is_some() {
+                    self.dialog = Some(Dialog::Timelapse(self.timelapse_export));
                 }
             }
             "layer.ruler.show" => {
@@ -2933,6 +3090,7 @@ impl SuePaint {
         }
         self.sync_docs(&cx.world.arena);
         self.animate(cx, &ui.ctx().clone());
+        self.record_timelapse(cx, &ui.ctx().clone());
         if let Some(doc) = self.docs.get_mut(self.active) {
             doc.compositor.sync(&cx.world.arena);
         }
@@ -3398,6 +3556,8 @@ impl SueApplet for SuePaint {
             "save-as" => self.save_as_to(cx, path),
             "story-pages" => self.export_pages(cx, path),
             "anim-gif" => self.export_animation(cx, path, true),
+            "anim-movie" => self.export_movie(cx, path),
+            "timelapse" => self.export_timelapse(cx, path),
             "anim-sequence" => self.export_animation(cx, path, false),
             "subview" => self.add_reference(path, cx),
             "colorset-import" => match std::fs::read_to_string(path) {

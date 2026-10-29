@@ -38,6 +38,8 @@ pub struct NewPicture {
     pub dpi: f64,
     /// The paper color, or `None` for a clear background.
     pub paper: Option<Color>,
+    /// It records its timelapse from the start.
+    pub timelapse: bool,
 }
 
 impl Default for NewPicture {
@@ -48,6 +50,7 @@ impl Default for NewPicture {
             height: 1200,
             dpi: 72.0,
             paper: Some(Color::srgb8(255, 255, 255)),
+            timelapse: false,
         }
     }
 }
@@ -67,7 +70,8 @@ pub fn create(spec: &NewPicture) -> Result<(Edit, EntityId), String> {
     let image = Entity::empty(spec.name.clone(), class::IMAGE)
         .with_property(picture::WIDTH, i64::from(spec.width))
         .with_property(picture::HEIGHT, i64::from(spec.height))
-        .with_property(picture::DPI, spec.dpi);
+        .with_property(picture::DPI, spec.dpi)
+        .with_property(crate::timelapse::RECORD, spec.timelapse);
     let id = image.id();
     let mut edit = Edit::new(format!("New {}", spec.name)).then(SpawnEntity::new(image));
     let mut keys = OrderKey::sequence(None, 2).into_iter();
