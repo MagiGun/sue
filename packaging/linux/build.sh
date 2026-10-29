@@ -11,7 +11,8 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
-version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+# A checkout with Windows line endings leaves a carriage return to strip.
+version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1 | tr -d '\r')"
 arch="$(uname -m)"
 case "$arch" in
   x86_64) deb_arch=amd64 ;;
