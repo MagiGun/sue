@@ -65,7 +65,7 @@ pub fn capture(dir: &Path, index: usize, pixels: &[u8], size: [u32; 2]) -> Resul
     let tile = RasterTile2D::from_bytes(to[0], to[1], PixelFormat::Rgba8, small)
         .map_err(|error| error.to_string())?;
     let jpeg = sue_io::encode_as(&tile, "jpg", 85, 1)?;
-    std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+    sue_platform::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
     sue_platform::write_atomic(&dir.join(format!("{index:06}.jpg")), &jpeg)
         .map_err(|error| error.to_string())
 }
@@ -101,7 +101,7 @@ pub fn video_frames(dir: &Path, export: Export) -> Result<(Vec<RasterTile2D>, u3
         .last()
         .ok_or("This canvas has no timelapse yet: record it first")?;
     let read = |path: &Path| -> Result<RasterTile2D, String> {
-        let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+        let bytes = sue_platform::fs::read(path).map_err(|error| error.to_string())?;
         Ok(sue_io::decode_jpeg(&bytes)?.tile)
     };
     let shape = read(last)?;

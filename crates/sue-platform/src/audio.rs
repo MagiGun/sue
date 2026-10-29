@@ -334,14 +334,15 @@ where
     let mut scratch = vec![0.0_f32; 16_384];
     let data = move |out: &mut [T], _: &cpal::OutputCallbackInfo| {
         if shared.realtime.load(Ordering::Relaxed) == 1 {
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            #[cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))]
             let granted = audio_thread_priority::promote_current_thread_to_real_time(
                 buffer_frames,
                 sample_rate,
             )
             .is_ok();
-            // Phones and tablets give audio callbacks a high priority already.
-            #[cfg(any(target_os = "android", target_os = "ios"))]
+            // Phones and tablets give audio callbacks a high priority
+            // already; the browser runs them on its own audio thread.
+            #[cfg(any(target_os = "android", target_os = "ios", target_arch = "wasm32"))]
             let granted = {
                 let _ = (buffer_frames, sample_rate);
                 true

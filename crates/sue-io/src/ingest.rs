@@ -1,6 +1,6 @@
 //! Universal ingest: turns any bytes into an arena entity, routed by content.
 
-use std::time::Instant;
+use std::time::Duration;
 
 use sue_core::{Arena, AssetHandle, CoreError, RasterTile2D, StringBuffer};
 
@@ -61,10 +61,14 @@ pub enum IngestView {
 }
 
 /// Ingest settings, read from rice by the caller.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub struct IngestOptions {
     /// Columns of the byte map.
     pub byte_map_width: u32,
+    /// The platform's monotonic clock: the time since any fixed moment.
+    /// Ingest times its decoding with it (std's clock is not on every
+    /// system Sue runs on).
+    pub clock: fn() -> Duration,
 }
 
 /// The result of ingesting one stream.
@@ -84,8 +88,8 @@ pub struct Ingested {
     pub micros: u64,
 }
 
-fn elapsed(started: Instant) -> u64 {
-    u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX)
+fn elapsed(clock: fn() -> Duration, started: Duration) -> u64 {
+    u64::try_from(clock().saturating_sub(started).as_micros()).unwrap_or(u64::MAX)
 }
 
 /// The file extension the audio prober is hinted with.
@@ -155,7 +159,7 @@ pub fn ingest_bytes(
     pipeline: &dyn JxlPipeline,
     options: IngestOptions,
 ) -> Result<Ingested, CoreError> {
-    let started = Instant::now();
+    let started = (options.clock)();
     let route = sniff_stream(&bytes);
     let length = bytes.len();
     let label = route_label(&route);
@@ -176,7 +180,7 @@ pub fn ingest_bytes(
                             (meta::BITS, info.bits_per_sample.to_string()),
                         ],
                         length,
-                        elapsed(started),
+                        elapsed(options.clock, started),
                     )?;
                     ingested.image = Some(info);
                     return Ok(ingested);
@@ -203,7 +207,7 @@ pub fn ingest_bytes(
                             (meta::BITS, decoded.info.bits_per_sample.to_string()),
                         ],
                         length,
-                        elapsed(started),
+                        elapsed(options.clock, started),
                     );
                 }
                 Err(error) => (
@@ -218,7 +222,7 @@ pub fn ingest_bytes(
         IngestRoute::Native(format) if audio_extension(format).is_some() => {
             match decode_audio(bytes, audio_extension(format)) {
                 Ok((decoded, _)) => {
-                    let micros = elapsed(started);
+                    let micros = elapsed(options.clock, started);
                     let info = decoded.info;
                     let handle = arena.spawn(name, decoded.pcm);
                     let entity = arena.get_mut(handle)?;
@@ -271,7 +275,7 @@ pub fn ingest_bytes(
         IngestRoute::Structured(format) => match String::from_utf8(bytes) {
             Ok(text) => {
                 let handle = arena.spawn(name, StringBuffer::from(text));
-                let micros = elapsed(started);
+                let micros = elapsed(options.clock, started);
                 let entity = arena.get_mut(handle)?;
                 entity.set_meta(meta::BYTES, length.to_string());
                 entity.set_meta(meta::ROUTE, label);
@@ -297,7 +301,7 @@ pub fn ingest_bytes(
     let entropy = shannon_entropy(&bytes[..bytes.len().min(64 * 1024)]);
     let tile = byte_map_tile(bytes, options.byte_map_width)?;
     let handle = arena.spawn(name, tile);
-    let micros = elapsed(started);
+    let micros = elapsed(options.clock, started);
     let entity = arena.get_mut(handle)?;
     entity.set_meta(meta::BYTES, length.to_string());
     entity.set_meta(meta::ROUTE, label);
@@ -335,7 +339,10 @@ mod tests {
     use crate::{NativeJxlPipeline, encode_png, encode_wav};
     use sue_core::{ComponentKind, PCMFloat1D, PixelFormat, RasterTile2D};
 
-    const OPTIONS: IngestOptions = IngestOptions { byte_map_width: 64 };
+    const OPTIONS: IngestOptions = IngestOptions {
+        byte_map_width: 64,
+        clock: || Duration::ZERO,
+    };
 
     #[test]
     fn jxl_files_become_decoded_rasters() {

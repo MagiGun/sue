@@ -8,20 +8,25 @@ use std::fmt;
 use std::hash::{BuildHasher, Hasher};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// A globally unique, stable entity id: a random (version 4) UUID.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct EntityId(u128);
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
+static SEED: AtomicU64 = AtomicU64::new(0);
+
+/// Mixes `seed` into every id made from now on. The randomness of ids
+/// comes from std's hasher keys, which the operating system fills; a
+/// system that gives std none (the browser) calls this once at start-up
+/// with random bits of its own, so two sessions never make the same ids.
+pub fn seed_entity_ids(seed: u64) {
+    SEED.fetch_xor(seed, Ordering::Relaxed);
+}
 
 fn random_u64(salt: u64) -> u64 {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos());
     let mut hasher = std::hash::RandomState::new().build_hasher();
-    hasher.write_u128(nanos);
+    hasher.write_u64(SEED.load(Ordering::Relaxed));
     hasher.write_u64(COUNTER.fetch_add(1, Ordering::Relaxed));
     hasher.write_u64(salt);
     hasher.finish()
@@ -132,5 +137,15 @@ mod tests {
         assert_eq!(EntityId::from_bytes(id.to_bytes()), id);
         assert!(!id.is_nil());
         assert!("xyz".parse::<EntityId>().is_err());
+    }
+
+    #[test]
+    fn seeded_ids_stay_unique_valid_uuids() {
+        let before: BTreeSet<EntityId> = (0..1_000).map(|_| EntityId::new()).collect();
+        seed_entity_ids(0x5EED_0F_5E55_1015);
+        let after: BTreeSet<EntityId> = (0..1_000).map(|_| EntityId::new()).collect();
+        assert_eq!(before.len() + after.len(), 2_000);
+        assert!(before.is_disjoint(&after));
+        assert!(after.iter().all(|id| id.to_string()[14..15] == *"4"));
     }
 }

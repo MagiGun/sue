@@ -333,7 +333,7 @@ impl SuePaint {
         if let Some(dir) = path.parent() {
             self.last_dir = Some(dir.to_path_buf());
         }
-        let text = match std::fs::read_to_string(path) {
+        let text = match sue_platform::fs::read_to_string(path) {
             Ok(text) => text,
             Err(error) => {
                 cx.fail(format!("Cannot read {}: {error}", path.display()));

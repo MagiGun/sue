@@ -181,7 +181,7 @@ impl ColorSets {
         }
         self.loaded = true;
         if let Some(text) =
-            folder.and_then(|folder| std::fs::read_to_string(folder.join(FILE)).ok())
+            folder.and_then(|folder| sue_platform::fs::read_to_string(folder.join(FILE)).ok())
         {
             let sets = parse(&text);
             if !sets.is_empty() {
@@ -198,7 +198,7 @@ impl ColorSets {
         let Some(folder) = folder else {
             return Ok(());
         };
-        std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+        sue_platform::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
         sue_platform::write_atomic(&folder.join(FILE), write(&self.sets).as_bytes())
             .map_err(|error| error.to_string())
     }

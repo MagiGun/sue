@@ -10,11 +10,12 @@
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use egui::{Align2, Id, Order, RichText, Sense};
 use sue_core::{SueFile, UndoStack};
 use sue_io::{IngestOptions, NativeJxlPipeline, ingest_bytes, meta};
+use sue_platform::time::Instant;
 use sue_platform::{
     AudioConfig, AudioOutput, AudioSink, FramePacing, PickNews, Picking, TextureUpload,
     write_atomic,
@@ -783,13 +784,13 @@ impl Runtime {
         let limit = u64::try_from(limit_mib)
             .unwrap_or(u64::MAX)
             .saturating_mul(1024 * 1024);
-        let bytes = match std::fs::metadata(path) {
+        let bytes = match sue_platform::fs::metadata(path) {
             Ok(metadata) if metadata.is_dir() => Err("it is a folder".to_owned()),
             Ok(metadata) if metadata.len() > limit => Err(format!(
                 "it is {}, over the {limit_mib} MiB limit (io.max_ingest_mib)",
                 human_bytes(metadata.len())
             )),
-            Ok(_) => std::fs::read(path).map_err(|error| error.to_string()),
+            Ok(_) => sue_platform::fs::read(path).map_err(|error| error.to_string()),
             Err(error) => Err(error.to_string()),
         };
         let bytes = match bytes {
@@ -822,6 +823,7 @@ impl Runtime {
             &NativeJxlPipeline,
             IngestOptions {
                 byte_map_width: width,
+                clock: sue_platform::time::since_start,
             },
         ) {
             Ok(ingested) => ingested,
@@ -897,7 +899,7 @@ impl Runtime {
     /// Re-reads the rice file and applies what differs as one undoable step.
     fn reload_rice(&mut self) {
         let path = self.engine.rice_path();
-        let text = match std::fs::read_to_string(&path) {
+        let text = match sue_platform::fs::read_to_string(&path) {
             Ok(text) => text,
             Err(error) => {
                 self.shell

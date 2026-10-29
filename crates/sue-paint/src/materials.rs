@@ -176,7 +176,7 @@ pub fn picture(material: &Material, size: [u32; 2], color: [u8; 3]) -> Option<Ra
             .get(*index)
             .map(|(_, _, ink)| draw(size, color, *ink)),
         Source::File(path) => {
-            let bytes = std::fs::read(path).ok()?;
+            let bytes = sue_platform::fs::read(path).ok()?;
             sue_io::decode_png(&bytes).ok().map(|decoded| decoded.tile)
         }
     }
@@ -290,7 +290,7 @@ pub fn register(folder: &Path, name: &str, tile: &RasterTile2D) -> Result<PathBu
         safe.trim().to_owned()
     };
     let dir = folder.join("materials");
-    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    sue_platform::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     let path = dir.join(format!("{safe}.png"));
     sue_platform::write_atomic(&path, &png).map_err(|error| error.to_string())?;
     Ok(path)

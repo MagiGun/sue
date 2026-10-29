@@ -15,7 +15,9 @@ pub enum OsFamily {
     Android,
     /// Apple iOS / iPadOS.
     Ios,
-    /// Anything else (BSDs, WASM hosts, …); treated like Linux for paths.
+    /// A web browser (Sue built to WebAssembly).
+    Web,
+    /// Anything else (BSDs, …); treated like Linux for paths.
     Other,
 }
 
@@ -33,6 +35,8 @@ impl OsFamily {
             Self::MacOs
         } else if cfg!(target_os = "ios") {
             Self::Ios
+        } else if cfg!(target_arch = "wasm32") {
+            Self::Web
         } else {
             Self::Other
         }
@@ -53,6 +57,7 @@ impl OsFamily {
             Self::MacOs => "macOS",
             Self::Android => "Android",
             Self::Ios => "iOS",
+            Self::Web => "Web",
             Self::Other => "Other",
         }
     }
@@ -143,6 +148,8 @@ pub enum GraphicsApi {
     Dx12,
     /// Apple Metal.
     Metal,
+    /// The browser's WebGPU.
+    WebGpu,
 }
 
 /// Coarse GPU performance class.

@@ -61,6 +61,14 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false }
 objc2-ui-kit = { version = "0.3", default-features = false }
 
+# The browser: its window, storage, clipboard, file pickers and clock,
+# the versions winit and wgpu already use.
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = "0.3"
+web-time = "1"
+
 # Typography and publishing: reading installed fonts, and the deflate
 # inside DOCX, EPUB, ODT and PDF files.
 miniz_oxide = "0.8"
@@ -81,6 +89,15 @@ unimplemented = "warn"
 
 [profile.release]
 lto = "thin"
+
+# The browser build (packaging/web/build.sh): smaller over faster, since
+# the whole program is downloaded before Sue opens.
+[profile.web]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+strip = "debuginfo"
 
 # Codecs, the GPU stack and the audio backend are far too slow unoptimized;
 # Sue's own crates stay at the default debug level for fast rebuilds.

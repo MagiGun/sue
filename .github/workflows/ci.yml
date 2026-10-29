@@ -127,6 +127,21 @@ jobs:
       - name: Build
         run: cargo build -p sue --target aarch64-apple-ios
 
+  # The browser build (WebAssembly), so it keeps compiling; the Web
+  # workflow builds and publishes it from main.
+  web:
+    name: Web build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain and target (from rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Check
+        run: cargo check --target wasm32-unknown-unknown -p sue
+      - name: Clippy
+        run: cargo clippy --target wasm32-unknown-unknown -p sue -- -D warnings
+
   # The Linux packages, built on every push to main so a broken package
   # shows before a release does.
   linux-packages:

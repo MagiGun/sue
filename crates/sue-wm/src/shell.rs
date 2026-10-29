@@ -18,7 +18,9 @@
 //! once all settle (plus a short grace period) the loop sleeps at 0 FPS.
 
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use sue_platform::time::Instant;
 
 use egui::{
     Align, Align2, Id, LayerId, Layout, Order, Rect, RichText, ScrollArea, Sense, Stroke,

@@ -1,0 +1,60 @@
+# Sue in the browser: builds the WebAssembly version (packaging/web) on
+# every push to main and publishes it in the try/ folder of the gh-pages
+# branch, which GitHub Pages serves as https://magigun.github.io/sue/try/.
+# Only try/ changes; the rest of the site is left as it is.
+name: Web
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One publish at a time, the newest last.
+concurrency:
+  group: web-pages
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARYEN: "version_133"
+
+jobs:
+  publish:
+    name: Build and publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain and target (from rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: wasm-bindgen and wasm-opt
+        run: |
+          # wasm-bindgen of the version in Cargo.lock, which the build must match.
+          version="$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"/\1/p;}' Cargo.lock | head -n 1)"
+          name="wasm-bindgen-$version-x86_64-unknown-linux-musl"
+          curl -fsSL "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$version/$name.tar.gz" | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
+          curl -fsSL "https://github.com/WebAssembly/binaryen/releases/download/$BINARYEN/binaryen-$BINARYEN-x86_64-linux.tar.gz" | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-$BINARYEN/bin" >> "$GITHUB_PATH"
+      - name: Build
+        run: packaging/web/build.sh
+      - name: Publish into gh-pages try/
+        run: |
+          site="$RUNNER_TEMP/site"
+          git fetch --depth 1 origin gh-pages
+          git worktree add --detach "$site" FETCH_HEAD
+          rm -rf "$site/try"
+          cp -R dist/web "$site/try"
+          cd "$site"
+          git add -A try
+          if git diff --cached --quiet; then
+            echo "The web version is already up to date."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "chore(site): the web version from ${GITHUB_SHA::7}"
+          git push origin HEAD:gh-pages

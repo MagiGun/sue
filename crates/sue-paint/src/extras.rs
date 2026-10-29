@@ -242,13 +242,13 @@ pub(crate) fn panels_from(line: &str) -> Option<Panels> {
 }
 
 fn read(folder: Option<&Path>, file: &str) -> Option<String> {
-    std::fs::read_to_string(folder?.join(file)).ok()
+    sue_platform::fs::read_to_string(folder?.join(file)).ok()
 }
 
 fn write(folder: Option<&Path>, file: &str, text: &str) -> Result<(), String> {
     let folder = folder.ok_or("Sue Paint has no data folder")?;
-    std::fs::create_dir_all(folder)
-        .and_then(|()| std::fs::write(folder.join(file), text))
+    sue_platform::fs::create_dir_all(folder)
+        .and_then(|()| sue_platform::fs::write(folder.join(file), text))
         .map_err(|error| error.to_string())
 }
 
@@ -276,7 +276,7 @@ impl SuePaint {
                     .file_stem()
                     .map(|stem| stem.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                if let Some(shape) = std::fs::read(&path)
+                if let Some(shape) = sue_platform::fs::read(&path)
                     .ok()
                     .and_then(|bytes| sue_io::decode_png(&bytes).ok())
                     .and_then(|decoded| {

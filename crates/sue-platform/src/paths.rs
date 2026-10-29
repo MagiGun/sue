@@ -102,6 +102,17 @@ impl PlatformPaths {
                     home_dir: root.join("documents"),
                 })
             }
+            // The page's own files (`crate::web::store`), the same on every
+            // browser.
+            OsFamily::Web => {
+                let root = Path::new("/sue");
+                Ok(Self {
+                    config_dir: root.join("config"),
+                    data_dir: root.join("data"),
+                    cache_dir: root.join("cache"),
+                    home_dir: root.join("documents"),
+                })
+            }
             OsFamily::Linux | OsFamily::Other => {
                 // The XDG spec requires relative paths in these variables to be
                 // ignored. `has_root` is the POSIX notion of absolute on any host.
@@ -203,6 +214,8 @@ where
             dirs
         }
         OsFamily::Android => vec![PathBuf::from("/system/fonts")],
+        // A page cannot list the fonts installed; Sue brings its own.
+        OsFamily::Web => Vec::new(),
         OsFamily::Linux | OsFamily::Other => {
             let mut dirs = vec![
                 PathBuf::from("/usr/share/fonts"),

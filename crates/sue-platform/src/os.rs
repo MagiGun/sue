@@ -11,7 +11,11 @@ use std::path::{Path, PathBuf};
 /// # Errors
 /// The clipboard's message when it is unavailable.
 pub fn copy_text(text: &str) -> Result<(), String> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::web::page::copy_text(text)
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))]
     {
         arboard::Clipboard::new()
             .and_then(|mut clipboard| clipboard.set_text(text.to_owned()))
@@ -27,11 +31,11 @@ pub fn copy_text(text: &str) -> Result<(), String> {
 /// The system opener for files, folders and web addresses, where there is
 /// one (desktops).
 fn open_detached(target: &std::ffi::OsStr) -> io::Result<()> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))]
     {
         open::that_detached(target)
     }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_arch = "wasm32"))]
     {
         let _ = target;
         Err(io::Error::new(
@@ -86,6 +90,9 @@ pub fn web_url(text: &str) -> io::Result<String> {
 /// An invalid address, or the OS failing to start a browser.
 pub fn open_url(text: &str) -> io::Result<String> {
     let url = web_url(text)?;
+    #[cfg(target_arch = "wasm32")]
+    crate::web::page::open_url(&url)?;
+    #[cfg(not(target_arch = "wasm32"))]
     open_detached(url.as_ref())?;
     Ok(url)
 }
@@ -192,7 +199,7 @@ pub enum PickNews {
 /// where writes go back to it ([`deliver_picked_files`]).
 #[must_use]
 pub fn pick_open_file(title: &str, start: Option<&Path>, filters: &[FileFilter]) -> Picking {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))]
     {
         let mut dialog = rfd::FileDialog::new().set_title(title);
         if let Some(start) = start.filter(|start| start.is_dir()) {
@@ -205,6 +212,11 @@ pub fn pick_open_file(title: &str, start: Option<&Path>, filters: &[FileFilter])
             .pick_file()
             .map_or(Picking::Cancelled, Picking::Chosen)
     }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (title, start);
+        crate::web::page::pick_open(&extensions(filters), false)
+    }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = (title, start);
@@ -216,7 +228,7 @@ pub fn pick_open_file(title: &str, start: Option<&Path>, filters: &[FileFilter])
 /// block until it closes; phones and tablets answer [`Picking::Waiting`].
 #[must_use]
 pub fn pick_folder(title: &str, start: Option<&Path>) -> Picking {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))]
     {
         let mut dialog = rfd::FileDialog::new().set_title(title);
         if let Some(start) = start.filter(|start| start.is_dir()) {
@@ -225,6 +237,11 @@ pub fn pick_folder(title: &str, start: Option<&Path>) -> Picking {
         dialog
             .pick_folder()
             .map_or(Picking::Cancelled, Picking::Chosen)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (title, start);
+        crate::web::page::pick_open(&[], true)
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
@@ -245,7 +262,7 @@ pub fn pick_save_file(
     file_name: &str,
     filters: &[FileFilter],
 ) -> Picking {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))]
     {
         let mut dialog = rfd::FileDialog::new()
             .set_title(title)
@@ -260,6 +277,11 @@ pub fn pick_save_file(
             .save_file()
             .map_or(Picking::Cancelled, Picking::Chosen)
     }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (title, start);
+        crate::web::page::pick_save(file_name, &extensions(filters))
+    }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = (title, start);
@@ -267,9 +289,9 @@ pub fn pick_save_file(
     }
 }
 
-/// Every extension the filters take, for the mobile pickers, which offer
-/// one list of kinds.
-#[cfg(any(target_os = "android", target_os = "ios"))]
+/// Every extension the filters take, for the mobile and browser pickers,
+/// which offer one list of kinds.
+#[cfg(any(target_os = "android", target_os = "ios", target_arch = "wasm32"))]
 fn extensions(filters: &[FileFilter]) -> Vec<String> {
     let mut all: Vec<String> = Vec::new();
     for extension in filters.iter().flat_map(|filter| &filter.extensions) {
@@ -289,7 +311,11 @@ pub fn poll_picks() -> Vec<PickNews> {
     {
         crate::picks::native().poll()
     }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::web::page::poll()
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))]
     {
         Vec::new()
     }
@@ -302,6 +328,8 @@ pub fn poll_picks() -> Vec<PickNews> {
 pub fn deliver_picked_files() {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     crate::picks::native().deliver();
+    #[cfg(target_arch = "wasm32")]
+    crate::web::page::deliver();
 }
 
 /// `true` while a system dialog is open beside Sue or a picked file is
@@ -313,7 +341,11 @@ pub fn picks_busy() -> bool {
     {
         crate::picks::native().busy()
     }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::web::page::busy()
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))]
     {
         false
     }

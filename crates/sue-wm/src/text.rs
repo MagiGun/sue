@@ -9,7 +9,9 @@
 
 use std::any::TypeId;
 use std::ops::Range;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use sue_platform::time::Instant;
 
 use egui::TextBuffer;
 use egui::text::CharIndex;

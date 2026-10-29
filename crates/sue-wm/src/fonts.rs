@@ -155,7 +155,7 @@ impl Library {
         if let Some(bytes) = self.files.get(path) {
             return Some(bytes.clone());
         }
-        let bytes = Arc::new(std::fs::read(path).ok()?);
+        let bytes = Arc::new(sue_platform::fs::read(path).ok()?);
         self.files.insert(path.to_path_buf(), bytes.clone());
         Some(bytes)
     }
