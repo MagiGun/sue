@@ -69,3 +69,8 @@ case-lower = lowercase
 case-upper = UPPERCASE
 case-title = Capitalize Every Word
 case-toggle = tOGGLE cASE
+
+## editor.rs
+
+new-comment = New Comment
+delete-comment = Delete Comment

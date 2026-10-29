@@ -622,8 +622,8 @@ pub struct CharFormat {
     pub script: i8,
     /// A link's target.
     pub link: Option<String>,
-    /// `true` inside a comment.
-    pub comment: bool,
+    /// The comment this run is under ([`crate::comments`]).
+    pub comment: Option<EntityId>,
     /// A footnote that follows this run.
     pub footnote: Option<String>,
 }
@@ -688,7 +688,12 @@ pub fn char_format(marks: &[&Mark], range: &Range<usize>) -> CharFormat {
                 };
             }
             kind::LINK => look.link = mark.value.as_str().map(str::to_owned),
-            kind::COMMENT => look.comment = true,
+            kind::COMMENT => {
+                look.comment = match mark.value {
+                    Value::Entity(id) => Some(id),
+                    _ => None,
+                };
+            }
             kind::FOOTNOTE if mark.range.end == range.end => {
                 look.footnote = mark.value.as_str().map(str::to_owned);
             }

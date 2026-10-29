@@ -202,6 +202,19 @@ pub fn menus() -> Vec<Menu> {
             ],
         ),
         Menu::new(
+            tr!("review"),
+            vec![
+                item(tr!("new-comment-ellipsis"), "review.comment").key("Ctrl+Alt+C"),
+                item(tr!("previous-comment"), "review.previous_comment"),
+                item(tr!("next-comment"), "review.next_comment"),
+                item(tr!("resolve-comment"), "review.resolve"),
+                item(tr!("delete-comment"), "review.delete_comment"),
+                item(tr!("delete-all-comments"), "review.delete_all_comments"),
+                MenuItem::Separator,
+                item(tr!("comments"), "review.comments"),
+            ],
+        ),
+        Menu::new(
             tr!("project"),
             vec![
                 item(tr!("split-at-selection"), "project.split").key("Ctrl+Shift+K"),

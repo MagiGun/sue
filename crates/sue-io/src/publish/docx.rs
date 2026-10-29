@@ -258,6 +258,10 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
     }
     let mut images: Vec<(String, Vec<u8>)> = Vec::new();
     let mut notes: Vec<String> = Vec::new();
+    // Comments: each opens once, before its first words, and closes at the
+    // end of them (or of their paragraph).
+    let mut comments: Vec<sue_core::EntityId> = Vec::new();
+    let mut open_comment: Option<usize> = None;
     // Each numbered list starts again at 1: a numbering instance per list.
     let mut number_instances = 0_usize;
     let mut body = String::new();
@@ -363,6 +367,21 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
                 );
             }
             for (text, look) in &para.runs {
+                let here = look.comment.filter(|id| book.comments.contains_key(id));
+                let current = open_comment.map(|index| comments[index]);
+                if here != current {
+                    if let Some(index) = open_comment.take() {
+                        body.push_str(&comment_end(index));
+                    }
+                    if let Some(id) = here
+                        && !comments.contains(&id)
+                    {
+                        comments.push(id);
+                        let index = comments.len() - 1;
+                        let _ = write!(body, "<w:commentRangeStart w:id=\"{index}\"/>");
+                        open_comment = Some(index);
+                    }
+                }
                 let run = format!("<w:r>{}{}</w:r>", run_props(look), run_text(text));
                 match &look.link {
                     Some(link) => {
@@ -381,9 +400,21 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
                     );
                 }
             }
+            if let Some(index) = open_comment.take() {
+                body.push_str(&comment_end(index));
+            }
             body.push_str("</w:p>");
         }
     }
+    if !comments.is_empty() {
+        relations.push((
+            "rIdComments".into(),
+            "comments".into(),
+            "comments.xml".into(),
+            false,
+        ));
+    }
+    let comments_xml = comments_part(book, &comments);
     let [top, right, bottom, left] = book.margins;
     let mut references = String::new();
     if has_header {
@@ -514,6 +545,12 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
             "<Override PartName=\"/word/header1.xml\" ContentType=\"{main}.header+xml\"/>"
         );
     }
+    if !comments.is_empty() {
+        let _ = write!(
+            types,
+            "<Override PartName=\"/word/comments.xml\" ContentType=\"{main}.comments+xml\"/>"
+        );
+    }
     if has_footer {
         let _ = write!(
             types,
@@ -542,6 +579,9 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
     zip.add_text("word/settings.xml", &settings);
     if has_header {
         zip.add_text("word/header1.xml", &header);
+    }
+    if !comments.is_empty() {
+        zip.add_text("word/comments.xml", &comments_xml);
     }
     if has_footer {
         zip.add_text("word/footer1.xml", &footer);
@@ -866,6 +906,60 @@ pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
     Ok((text, marks))
 }
 
+/// The end of comment `index`'s words, and its mark in the text.
+fn comment_end(index: usize) -> String {
+    format!(
+        "<w:commentRangeEnd w:id=\"{index}\"/><w:r><w:commentReference w:id=\"{index}\"/></w:r>"
+    )
+}
+
+/// The comments part: each comment by its author and date, its replies
+/// after it as paragraphs of their own, named.
+fn comments_part(book: &Book, comments: &[sue_core::EntityId]) -> String {
+    let mut out = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:comments xmlns:w=\"{W}\">"
+    );
+    for (index, id) in comments.iter().enumerate() {
+        let Some(thread) = book.comments.get(id) else {
+            continue;
+        };
+        let date = if thread.first.date.len() == 10 {
+            format!("{}T00:00:00Z", thread.first.date)
+        } else {
+            thread.first.date.clone()
+        };
+        let initials: String = thread
+            .first
+            .author
+            .split_whitespace()
+            .filter_map(|word| word.chars().next())
+            .collect();
+        let _ = write!(
+            out,
+            "<w:comment w:id=\"{index}\" w:author=\"{}\" w:date=\"{}\" w:initials=\"{}\">",
+            escape(&thread.first.author),
+            escape(&date),
+            escape(&initials)
+        );
+        let _ = write!(
+            out,
+            "<w:p><w:r>{}</w:r></w:p>",
+            run_text(&thread.first.text)
+        );
+        for reply in &thread.replies {
+            let _ = write!(
+                out,
+                "<w:p><w:r><w:rPr><w:b/></w:rPr>{}</w:r><w:r>{}</w:r></w:p>",
+                run_text(&format!("{}: ", reply.author)),
+                run_text(&reply.text)
+            );
+        }
+        out.push_str("</w:comment>");
+    }
+    out.push_str("</w:comments>");
+    out
+}
+
 /// A running header (`w:hdr`) or footer (`w:ftr`) part: one paragraph with
 /// a centered and a right tab stop across `width` points, its page fields
 /// Word's own `PAGE` and `NUMPAGES`.
@@ -1001,6 +1095,23 @@ fn table_xml(table: &crate::publish::PublishTable, width: f32) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn word_comments_mark_their_words_and_keep_their_replies() {
+        let bytes = to_docx(&super::super::tests::with_comment());
+        let files: HashMap<String, Vec<u8>> = read_zip(&bytes).unwrap().into_iter().collect();
+        let xml = String::from_utf8(files["word/document.xml"].clone()).unwrap();
+        assert!(xml.contains("<w:commentRangeStart w:id=\"0\"/>"), "{xml}");
+        assert!(xml.contains("<w:commentReference w:id=\"0\"/>"));
+        let start = xml.find("commentRangeStart").unwrap();
+        let end = xml.find("commentRangeEnd").unwrap();
+        assert!(xml[start..end].contains("dark"));
+        let comments = String::from_utf8(files["word/comments.xml"].clone()).unwrap();
+        assert!(comments.contains("w:author=\"Ann\""), "{comments}");
+        assert!(comments.contains("Too much?") && comments.contains("Keep it."));
+        let types = String::from_utf8(files["[Content_Types].xml"].clone()).unwrap();
+        assert!(types.contains("comments+xml"));
+    }
+
     #[test]
     fn word_contents_are_a_toc_field_word_updates() {
         let bytes = to_docx(&super::super::tests::with_contents());

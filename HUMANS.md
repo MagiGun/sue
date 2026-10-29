@@ -580,6 +580,15 @@ table and back. A table that runs onto the next page breaks between rows and
 repeats its heading row at the top. Tables go into every format you compile
 to, PDF and Word included.
 
+**Comments** are in the Review menu. Select some words and choose New
+Comment (`Ctrl+Alt+C`); type it and press `Ctrl+Enter`. The words are shaded,
+and Review, Comments shows every comment beside the text: the words it is
+about (click them to go there), who wrote it and when, its replies, a box to
+reply in, Resolve and Delete. Previous and Next Comment step through them.
+Comments carry the project's author (Project Settings). They go into Word
+and OpenDocument files as real comments with their replies, and into web
+pages as notes on the words.
+
 A **table of contents** comes from Insert, Table of Contents: give it a
 title and how many heading levels it lists. It shows every heading with its
 page and a dotted leader, set in by level, and it keeps up by itself as you

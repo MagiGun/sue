@@ -143,6 +143,8 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
     let mut page_breaks = false;
     let mut tables = 0;
     let mut table_styles = String::new();
+    let mut commented: Vec<sue_core::EntityId> = Vec::new();
+    let mut open_comment: Option<sue_core::EntityId> = None;
     for (index, section) in book.sections.iter().enumerate() {
         let mut open_list: Option<&str> = None;
         for (para_index, para) in paragraphs(&section.text, &section.marks)
@@ -197,6 +199,21 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
                 images.push((name, figure.png.clone()));
             }
             for (text, look) in &para.runs {
+                let here = look.comment.filter(|id| book.comments.contains_key(id));
+                if here != open_comment {
+                    if let Some(open) = open_comment.take() {
+                        let index = commented.iter().position(|id| *id == open).unwrap_or(0);
+                        let _ = write!(inner, "<office:annotation-end office:name=\"c{index}\"/>");
+                    }
+                    if let Some(id) = here
+                        && !commented.contains(&id)
+                        && let Some(thread) = book.comments.get(&id)
+                    {
+                        commented.push(id);
+                        inner.push_str(&annotation(thread, commented.len() - 1));
+                        open_comment = Some(id);
+                    }
+                }
                 let mut piece = String::new();
                 for (index, part) in text.split('\t').enumerate() {
                     if index > 0 {
@@ -222,6 +239,10 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
                         escape(note)
                     );
                 }
+            }
+            if let Some(open) = open_comment.take() {
+                let index = commented.iter().position(|id| *id == open).unwrap_or(0);
+                let _ = write!(inner, "<office:annotation-end office:name=\"c{index}\"/>");
             }
             let new_page = para.page_break || (section.new_page && index > 0 && para_index == 0);
             page_breaks |= new_page;
@@ -346,6 +367,31 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
     zip.finish()
 }
 
+/// Comment number `index` as an OpenDocument annotation: its author,
+/// date and text, then its replies, named.
+fn annotation(thread: &sue_model::comments::Thread, index: usize) -> String {
+    let mut out = format!(
+        "<office:annotation office:name=\"c{index}\"><dc:creator>{}</dc:creator><dc:date>{}</dc:date><text:p>{}</text:p>",
+        escape(&thread.first.author),
+        escape(&if thread.first.date.len() == 10 {
+            format!("{}T00:00:00", thread.first.date)
+        } else {
+            thread.first.date.clone()
+        }),
+        escape(&thread.first.text)
+    );
+    for reply in &thread.replies {
+        let _ = write!(
+            out,
+            "<text:p>{}: {}</text:p>",
+            escape(&reply.author),
+            escape(&reply.text)
+        );
+    }
+    out.push_str("</office:annotation>");
+    out
+}
+
 /// A running header or footer's paragraph: its parts parted by tabs (the
 /// paragraph style's centered and right tab stops), its page fields
 /// OpenDocument's own.
@@ -456,6 +502,25 @@ fn table_xml(table: &crate::publish::PublishTable, number: usize, width: f32) ->
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn opendocument_comments_are_annotations_over_their_words() {
+        let files = read_zip(&to_odt(&super::super::tests::with_comment())).unwrap();
+        let content = files
+            .iter()
+            .find(|(name, _)| name == "content.xml")
+            .unwrap();
+        let xml = String::from_utf8(content.1.clone()).unwrap();
+        let start = xml
+            .find("<office:annotation office:name=\"c0\">")
+            .expect("an annotation");
+        let end = xml
+            .find("<office:annotation-end office:name=\"c0\"/>")
+            .unwrap();
+        assert!(xml[start..end].contains("dark"), "{xml}");
+        assert!(xml.contains("<dc:creator>Ann</dc:creator>"));
+        assert!(xml.contains("<text:p>Bo: Keep it.</text:p>"));
+    }
+
     #[test]
     fn opendocument_contents_are_an_index_of_the_outline() {
         let files = read_zip(&to_odt(&super::super::tests::with_contents())).unwrap();

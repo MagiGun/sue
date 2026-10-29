@@ -545,6 +545,110 @@ impl Editor {
         self.place_table(cx, entity, self.selection())
     }
 
+    /// Every comment in the shown documents, in order: the document (an
+    /// index into the shown documents), the words it is about and its
+    /// entity.
+    #[must_use]
+    pub fn comments(&self) -> Vec<(usize, Range<usize>, EntityId)> {
+        let mut out = Vec::new();
+        for (doc, marks) in self.marks.iter().enumerate() {
+            let mut found: Vec<(Range<usize>, EntityId)> = marks
+                .marks()
+                .iter()
+                .filter(|mark| mark.kind == kind::COMMENT)
+                .filter_map(|mark| match mark.value {
+                    Value::Entity(id) => Some((mark.range.clone(), id)),
+                    _ => None,
+                })
+                .collect();
+            found.sort_by_key(|(range, _)| range.start);
+            out.extend(found.into_iter().map(|(range, id)| (doc, range, id)));
+        }
+        out
+    }
+
+    /// The comment under the caret, if any.
+    #[must_use]
+    pub fn comment_here(&self) -> Option<EntityId> {
+        let at = self.caret.offset;
+        self.comments()
+            .into_iter()
+            .find(|(doc, range, _)| *doc == self.caret.doc && range.start <= at && at <= range.end)
+            .map(|(_, _, id)| id)
+    }
+
+    /// Puts comment `entity` on the selection (or the word at the caret),
+    /// spawning it, as one undo step. Returns `false` when there are no
+    /// words to comment on.
+    pub fn add_comment(&mut self, cx: &mut AppletContext<'_>, entity: sue_core::Entity) -> bool {
+        let Some(doc) = self.current() else {
+            return false;
+        };
+        let mut range = self.selection();
+        if range.is_empty() {
+            let (start, end) = word_around(self.text(), range.start);
+            range = start..end;
+        }
+        if range.is_empty() {
+            return false;
+        }
+        self.commit(cx);
+        let id = entity.id();
+        let mut marks = self.marks[self.caret.doc].clone();
+        marks.set(range.clone(), kind::COMMENT, Some(Value::Entity(id)));
+        let batch = sue_core::txn::Batch::new(tr!("new-comment"))
+            .then(sue_core::txn::SpawnEntity::new(entity))
+            .then(sue_core::txn::SetExtension::set(doc, marks));
+        if cx.apply(ArenaEdit(batch)).is_err() {
+            return false;
+        }
+        self.sync_text(cx);
+        self.select(doc, range);
+        true
+    }
+
+    /// Takes comment `id` and its replies out of the shown documents, as
+    /// one undo step.
+    pub fn remove_comment(&mut self, cx: &mut AppletContext<'_>, id: EntityId) -> bool {
+        self.commit(cx);
+        let mut batch = sue_core::txn::Batch::new(tr!("delete-comment"));
+        let mut found = false;
+        for (index, doc) in self.docs.iter().enumerate() {
+            let mut marks = self.marks[index].clone();
+            let ranges: Vec<Range<usize>> = marks
+                .marks()
+                .iter()
+                .filter(|mark| mark.kind == kind::COMMENT && mark.value == Value::Entity(id))
+                .map(|mark| mark.range.clone())
+                .collect();
+            if ranges.is_empty() {
+                continue;
+            }
+            for range in ranges {
+                marks.set(range, kind::COMMENT, None);
+            }
+            batch.push(Box::new(sue_core::txn::SetExtension::set(*doc, marks)));
+            found = true;
+        }
+        if !found {
+            return false;
+        }
+        let replies = cx
+            .arena()
+            .relations()
+            .targets(id, sue_model::comments::REPLY);
+        for reply in replies.into_iter().rev() {
+            batch.push(Box::new(sue_core::txn::DespawnEntity::new(reply)));
+        }
+        batch.push(Box::new(sue_core::txn::DespawnEntity::new(id)));
+        let done = cx.apply(ArenaEdit(batch)).is_ok();
+        let docs = self.docs.clone();
+        for (index, doc) in docs.iter().enumerate() {
+            self.marks[index] = edit::marks_of(cx.arena(), *doc);
+        }
+        done
+    }
+
     /// Puts a table of contents with `contents`' settings in a paragraph of
     /// its own at the caret. Returns its entity.
     pub fn insert_contents(

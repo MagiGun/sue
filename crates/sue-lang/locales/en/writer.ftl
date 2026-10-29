@@ -423,3 +423,33 @@ middle = Middle
 header = Header
 footer = Footer
 different-first-page-none-title-page = Different first page (none on a title page)
+
+## menus.rs
+
+review = Review
+new-comment-ellipsis = New Comment...
+previous-comment = Previous Comment
+next-comment = Next Comment
+resolve-comment = Resolve Comment
+delete-comment = Delete Comment
+delete-all-comments = Delete All Comments
+comments = Comments
+
+## studio.rs
+
+select-words-comment = Select the words to comment on
+reply = Reply
+reopen-comment = Reopen Comment
+no-comments = No comments
+put-caret-comments-words-first = Put the caret in a comment's words first
+
+## ui.rs
+
+no-comments-select-some-words-choose = No comments. Select some words and choose Review, New Comment.
+reopen = Reopen
+resolve = Resolve
+show-resolved-comments = Show resolved comments
+new-comment = New Comment
+by = By { $value }
+your-comment = Your comment
+add-comment = Add Comment

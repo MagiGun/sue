@@ -420,7 +420,8 @@ impl SueWriter {
                 enabled: has_project,
                 checked: Some(self.binder_shown()),
             },
-            "view.inspector" => ItemState::check(self.inspector),
+            "view.inspector" => ItemState::check(self.inspector && !self.comments),
+            "review.comments" => ItemState::check(self.inspector && self.comments),
             "project.include" => ItemState {
                 enabled: self.selected.is_some(),
                 checked: self
@@ -1956,6 +1957,96 @@ impl SueWriter {
     // ----- Inspector -----------------------------------------------------------------
 
     /// A text property edited in place, committed when the field lets go.
+    /// The comments of what is shown, as threads: the words each is about
+    /// (a press selects them), what was said, a reply box, Resolve and
+    /// Delete.
+    fn comments_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>, theme: &Theme) {
+        let comments = self.editor.comments();
+        if comments.is_empty() {
+            ui.label(
+                RichText::new(tr!("no-comments-select-some-words-choose"))
+                    .size(theme.small_size)
+                    .color(theme.muted),
+            );
+            return;
+        }
+        let mut act: Option<After> = None;
+        for (doc, range, id) in comments {
+            let Some(thread) = sue_model::comments::thread(cx.arena(), id) else {
+                continue;
+            };
+            if thread.resolved && !self.show_resolved {
+                continue;
+            }
+            let Some(doc_id) = self.editor.docs().get(doc).copied() else {
+                continue;
+            };
+            let words: String = sue_type::edit::text_of(cx.arena(), doc_id)
+                .and_then(|text| text.get(range.clone()))
+                .unwrap_or("")
+                .chars()
+                .take(80)
+                .collect();
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let quote = RichText::new(format!("\u{201C}{}\u{201D}", words.trim()))
+                    .italics()
+                    .color(theme.muted);
+                if ui
+                    .add(egui::Label::new(quote).sense(egui::Sense::click()))
+                    .clicked()
+                {
+                    let range = range.clone();
+                    act = Some(Box::new(move |me: &mut Self, _| {
+                        me.editor.select(doc_id, range);
+                        me.editor.focus();
+                    }));
+                }
+                for note in std::iter::once(&thread.first).chain(&thread.replies) {
+                    ui.label(
+                        RichText::new(format!("{}, {}", note.author, note.date))
+                            .size(theme.small_size)
+                            .strong(),
+                    );
+                    ui.label(&note.text);
+                }
+                let draft = self.drafts.entry((id, "reply")).or_default();
+                let response = ui.add(
+                    egui::TextEdit::singleline(draft)
+                        .hint_text(tr!("reply"))
+                        .desired_width(f32::INFINITY),
+                );
+                let send =
+                    response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                ui.horizontal(|ui| {
+                    if (ui.small_button(tr!("reply")).clicked() || send) && !draft.trim().is_empty()
+                    {
+                        let text = std::mem::take(draft).trim().to_owned();
+                        act = Some(Box::new(move |me: &mut Self, cx| me.reply(cx, id, &text)));
+                    }
+                    let resolve = if thread.resolved {
+                        tr!("reopen")
+                    } else {
+                        tr!("resolve")
+                    };
+                    if ui.small_button(resolve).clicked() {
+                        act = Some(Box::new(move |me: &mut Self, cx| me.resolve(cx, id)));
+                    }
+                    if ui.small_button(tr!("delete")).clicked() {
+                        act = Some(Box::new(move |me: &mut Self, cx| {
+                            me.editor.remove_comment(cx, id);
+                        }));
+                    }
+                });
+            });
+            ui.add_space(6.0);
+        }
+        ui.checkbox(&mut self.show_resolved, tr!("show-resolved-comments"));
+        if let Some(act) = act {
+            act(self, cx);
+        }
+    }
+
     fn property_field(
         &mut self,
         ui: &mut Ui,
@@ -2012,6 +2103,29 @@ impl SueWriter {
         child.set_clip_rect(rect.intersect(ui.clip_rect()));
         let ui = &mut child;
         let mut run: Option<String> = None;
+        if self.comments {
+            ui.horizontal(|ui| {
+                if ui.selectable_label(false, tr!("inspector")).clicked() {
+                    self.comments = false;
+                }
+                let _ = ui.selectable_label(true, tr!("comments"));
+            });
+            ui.add_space(4.0);
+            egui::ScrollArea::vertical()
+                .id_salt("writer-comments")
+                .auto_shrink([false, false])
+                .show(ui, |ui| self.comments_ui(ui, cx, theme));
+            return;
+        }
+        if !self.editor.comments().is_empty() {
+            ui.horizontal(|ui| {
+                let _ = ui.selectable_label(true, tr!("inspector"));
+                if ui.selectable_label(false, tr!("comments")).clicked() {
+                    self.comments = true;
+                }
+            });
+            ui.add_space(4.0);
+        }
         egui::ScrollArea::vertical()
             .id_salt("writer-inspector")
             .auto_shrink([false, false])
@@ -2535,6 +2649,7 @@ impl SueWriter {
             Dialog::Table { .. } => tr!("insert-table"),
             Dialog::Furniture(_) => tr!("header-and-footer"),
             Dialog::Contents(_) => tr!("table-of-contents"),
+            Dialog::Comment(_) => tr!("new-comment"),
             Dialog::Statistics => tr!("writing-statistics"),
             Dialog::Shortcuts => tr!("keyboard-shortcuts"),
         };
@@ -2746,6 +2861,38 @@ impl SueWriter {
                                     me.editor
                                         .insert_table(cx, rows, columns, u32::from(heading));
                                     me.editor.focus();
+                                }));
+                                keep = false;
+                            }
+                            if ui.button(tr!("cancel")).clicked() {
+                                keep = false;
+                            }
+                        });
+                    }
+                    Dialog::Comment(text) => {
+                        ui.label(tr!("by", value = self.author_name(cx)));
+                        let response = ui.add(
+                            egui::TextEdit::multiline(text)
+                                .desired_rows(4)
+                                .desired_width(340.0)
+                                .hint_text(tr!("your-comment")),
+                        );
+                        response.request_focus();
+                        let send = ui.input_mut(|input| {
+                            input.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter)
+                        });
+                        ui.horizontal(|ui| {
+                            if ui
+                                .button(tr!("add-comment"))
+                                .on_hover_text("Ctrl+Enter")
+                                .clicked()
+                                || send
+                            {
+                                let text = text.trim().to_owned();
+                                after = Some(Box::new(move |me: &mut Self, cx| {
+                                    if !text.is_empty() {
+                                        me.add_comment(cx, &text);
+                                    }
                                 }));
                                 keep = false;
                             }

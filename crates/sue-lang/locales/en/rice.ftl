@@ -483,6 +483,8 @@ sue_writer_keys-project_snapshot = Project snapshot
     .description = Take Snapshot
 sue_writer_keys-list_bullet = List bullet
     .description = Bulleted List
+sue_writer_keys-review_comment = Review comment
+    .description = New Comment
 
 ## [image_viewer_keys]
 

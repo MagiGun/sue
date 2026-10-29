@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use sue_core::{EntityId, Value};
+use sue_model::comments::Thread;
 use sue_model::contents::Contents;
 use sue_model::{CharFormat, Running, RunningPiece, TextMarks, mark_kind as kind, running_pieces};
 
@@ -227,6 +228,8 @@ pub struct Book {
     pub tables: HashMap<EntityId, PublishTable>,
     /// The tables of contents (their entries are the book's headings).
     pub contents: HashMap<EntityId, Contents>,
+    /// The comments its `comment` marks name, with their replies.
+    pub comments: HashMap<EntityId, Thread>,
     /// The page size.
     pub page: [f32; 2],
     /// Top, right, bottom and left margins.
@@ -294,6 +297,7 @@ impl Book {
             figures: HashMap::new(),
             tables: HashMap::new(),
             contents: HashMap::new(),
+            comments: HashMap::new(),
             page: [612.0, 792.0],
             margins: [72.0; 4],
             header: Running::default(),
@@ -569,6 +573,33 @@ mod tests {
                 ],
                 header_rows: 1,
                 shares: vec![0.7, 0.3],
+            },
+        );
+        book
+    }
+
+    /// A book with a comment and its reply on the words "dark and stormy".
+    pub(crate) fn with_comment() -> Book {
+        use sue_model::comments::Note;
+        let mut book = sample();
+        let id = EntityId::new();
+        let text = book.sections[0].text.clone();
+        let at = text.find("dark and stormy").unwrap_or(0);
+        book.sections[0]
+            .marks
+            .set(at..at + 15, kind::COMMENT, Some(Value::Entity(id)));
+        let note = |author: &str, text: &str| Note {
+            id: EntityId::new(),
+            author: author.to_owned(),
+            date: "2026-10-29".to_owned(),
+            text: text.to_owned(),
+        };
+        book.comments.insert(
+            id,
+            Thread {
+                first: note("Ann", "Too much?"),
+                replies: vec![note("Bo", "Keep it.")],
+                resolved: false,
             },
         );
         book

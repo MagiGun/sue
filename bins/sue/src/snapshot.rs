@@ -454,6 +454,21 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         applet.navigate("dialog/close");
         applet.navigate("view/document");
     }
+    // 19a. The comments beside the text (Review, Comments), shown and put
+    // away again.
+    for shown in [true, false] {
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: writer.clone(),
+                command: "review.comments".to_owned(),
+            },
+            &mut camera.painter,
+            camera.now,
+        );
+        if shown {
+            shoot(&mut runtime, &mut camera, "19a-sue-writer-comments")?;
+        }
+    }
 
     // 19b and 19c. The Hub's lists: the novel saved as a project, the
     // picture opened earlier, and a picture another run kept unsaved; then
