@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Sue
+GenericName=Creative Studio
+Comment=One environment for painting, writing, sound and more
+Exec=sue %F
+Icon=sue
+Terminal=false
+Categories=Graphics;2DGraphics;RasterGraphics;
+MimeType=image/png;image/jpeg;image/jxl;image/vnd.adobe.photoshop;image/webp;audio/flac;audio/x-wav;text/plain;
+Keywords=paint;draw;illustration;comic;animation;write;audio;
+StartupWMClass=sue

@@ -94,6 +94,27 @@ cargo run -p sue -- --self-check
 
 The CI workflow runs the same four on Windows, macOS and Linux.
 
+## Building packages
+
+Each system has a script in `packaging/`, and the Release workflow runs
+them all when a `v*` tag is pushed. Every package lands in `dist/`.
+
+| System | Command | Makes |
+| --- | --- | --- |
+| Windows | `powershell -File packaging/windows/build.ps1` | a zip with `Sue.exe` |
+| Linux | `packaging/linux/build.sh` | `.tar.gz`, `.deb`, `.rpm` and an AppImage |
+| Linux from any system | `docker build -t sue-linux packaging/linux`, then `docker run --rm -v "$PWD:/src" -v sue-target:/target sue-linux` | the same, built in Debian 12 |
+| macOS | `packaging/macos/build.sh` (on a Mac) | `Sue.app` for Apple silicon and Intel, zipped and as a `.dmg` |
+| iPhone and iPad | `packaging/ios/build.sh` (on a Mac with Xcode) | an unsigned `.ipa` and a simulator build |
+| Android phones and tablets | `python packaging/android/build_apk.py --release` | one APK for arm64, armv7 and x86_64 |
+
+Android needs the SDK with the NDK, Java's `keytool`, `cargo install
+cargo-ndk` and the Rust targets `aarch64-linux-android`,
+`armv7-linux-androideabi` and `x86_64-linux-android`; `--abi x86_64` builds
+just what an emulator runs. Sue starts there as a native activity from
+`crates/sue-platform/android`, the one place that exports a symbol for the
+system to call.
+
 ## Branches and commits
 
 - Work on a branch, never directly on `main`.

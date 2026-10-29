@@ -9,3 +9,6 @@
 *.wav binary
 *.flac binary
 *.sue binary
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.desktop text eol=lf

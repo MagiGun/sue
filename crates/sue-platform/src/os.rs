@@ -10,9 +10,34 @@ use std::path::{Path, PathBuf};
 /// # Errors
 /// The clipboard's message when it is unavailable.
 pub fn copy_text(text: &str) -> Result<(), String> {
-    arboard::Clipboard::new()
-        .and_then(|mut clipboard| clipboard.set_text(text.to_owned()))
-        .map_err(|error| error.to_string())
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        arboard::Clipboard::new()
+            .and_then(|mut clipboard| clipboard.set_text(text.to_owned()))
+            .map_err(|error| error.to_string())
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = text;
+        Err("there is no system clipboard to reach here; select the text and copy it".to_owned())
+    }
+}
+
+/// The system opener for files, folders and web addresses, where there is
+/// one (desktops).
+fn open_detached(target: &std::ffi::OsStr) -> io::Result<()> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        open::that_detached(target)
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = target;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "this device opens files from Sue's own File Manager",
+        ))
+    }
 }
 
 /// Normalizes what a user typed into a URL bar: `example.com` becomes
@@ -60,7 +85,7 @@ pub fn web_url(text: &str) -> io::Result<String> {
 /// An invalid address, or the OS failing to start a browser.
 pub fn open_url(text: &str) -> io::Result<String> {
     let url = web_url(text)?;
-    open::that_detached(&url)?;
+    open_detached(url.as_ref())?;
     Ok(url)
 }
 
@@ -75,7 +100,7 @@ pub fn reveal_folder(dir: &Path) -> io::Result<()> {
             format!("{} is not a folder", dir.display()),
         ));
     }
-    open::that_detached(dir)
+    open_detached(dir.as_os_str())
 }
 
 /// Opens a document (a PDF to print, a picture) in the program the
@@ -90,7 +115,7 @@ pub fn open_document(path: &Path) -> io::Result<()> {
             format!("{} is gone", path.display()),
         ));
     }
-    open::that_detached(path)
+    open_detached(path.as_os_str())
 }
 
 /// Shows a file in the system file manager, selected in its folder where
@@ -106,7 +131,7 @@ pub fn reveal_file(path: &Path) -> io::Result<()> {
         ));
     }
     if path.is_dir() {
-        return open::that_detached(path);
+        return open_detached(path.as_os_str());
     }
     if cfg!(target_os = "windows") {
         let mut select = std::ffi::OsString::from("/select,");
@@ -123,7 +148,7 @@ pub fn reveal_file(path: &Path) -> io::Result<()> {
             .map(|_| ())
     } else {
         let folder = path.parent().unwrap_or(path);
-        open::that_detached(folder)
+        open_detached(folder.as_os_str())
     }
 }
 
@@ -144,14 +169,23 @@ pub fn pick_open_file(
     start: Option<&Path>,
     filters: &[FileFilter],
 ) -> Option<PathBuf> {
-    let mut dialog = rfd::FileDialog::new().set_title(title);
-    if let Some(start) = start.filter(|start| start.is_dir()) {
-        dialog = dialog.set_directory(start);
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let mut dialog = rfd::FileDialog::new().set_title(title);
+        if let Some(start) = start.filter(|start| start.is_dir()) {
+            dialog = dialog.set_directory(start);
+        }
+        for filter in filters {
+            dialog = dialog.add_filter(filter.name.clone(), &filter.extensions);
+        }
+        dialog.pick_file()
     }
-    for filter in filters {
-        dialog = dialog.add_filter(filter.name.clone(), &filter.extensions);
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        // Phones and tablets use Sue's own File Manager.
+        let _ = (title, start, filters);
+        None
     }
-    dialog.pick_file()
 }
 
 /// Asks the user where to save a file with the native dialog. Blocks until
@@ -163,16 +197,24 @@ pub fn pick_save_file(
     file_name: &str,
     filters: &[FileFilter],
 ) -> Option<PathBuf> {
-    let mut dialog = rfd::FileDialog::new()
-        .set_title(title)
-        .set_file_name(file_name);
-    if let Some(start) = start.filter(|start| start.is_dir()) {
-        dialog = dialog.set_directory(start);
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let mut dialog = rfd::FileDialog::new()
+            .set_title(title)
+            .set_file_name(file_name);
+        if let Some(start) = start.filter(|start| start.is_dir()) {
+            dialog = dialog.set_directory(start);
+        }
+        for filter in filters {
+            dialog = dialog.add_filter(filter.name.clone(), &filter.extensions);
+        }
+        dialog.save_file()
     }
-    for filter in filters {
-        dialog = dialog.add_filter(filter.name.clone(), &filter.extensions);
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (title, start, file_name, filters);
+        None
     }
-    dialog.save_file()
 }
 
 #[cfg(test)]

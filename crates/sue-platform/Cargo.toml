@@ -8,17 +8,25 @@ publish.workspace = true
 repository.workspace = true
 
 [dependencies]
-arboard.workspace = true
-audio_thread_priority.workspace = true
 cpal.workspace = true
 egui.workspace = true
 egui-wgpu.workspace = true
 egui-winit.workspace = true
-open.workspace = true
 pollster.workspace = true
-rfd.workspace = true
 wgpu.workspace = true
 winit.workspace = true
+
+# The system clipboard, native dialogs, the opener and real-time audio
+# threads exist on desktops only; phones and tablets go without them.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+arboard.workspace = true
+audio_thread_priority.workspace = true
+open.workspace = true
+rfd.workspace = true
+
+# Android starts Sue as a native activity.
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { workspace = true, features = ["android-native-activity"] }
 
 [lints]
 workspace = true

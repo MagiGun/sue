@@ -25,7 +25,12 @@ impl PlatformPaths {
     /// As [`resolve`](Self::resolve); always on mobile, which needs a sandbox
     /// root.
     pub fn detect() -> Result<Self, PlatformError> {
-        Self::resolve(OsFamily::current(), |name| std::env::var(name).ok(), None)
+        let sandbox = sandbox_root();
+        Self::resolve(
+            OsFamily::current(),
+            |name| std::env::var(name).ok(),
+            sandbox.as_deref(),
+        )
     }
 
     /// Resolves the directories for `os`.
@@ -214,6 +219,23 @@ where
             }
             dirs
         }
+    }
+}
+
+/// The app sandbox the phone or tablet gives Sue: Android's internal data
+/// folder, iOS's container (its `HOME`); `None` on desktops.
+fn sandbox_root() -> Option<PathBuf> {
+    #[cfg(target_os = "android")]
+    {
+        crate::android::app().and_then(|app| app.internal_data_path())
+    }
+    #[cfg(target_os = "ios")]
+    {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        None
     }
 }
 

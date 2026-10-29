@@ -122,6 +122,19 @@ impl std::fmt::Debug for DesktopHost {
 }
 
 impl DesktopHost {
+    /// Makes the window's surface again, for a window the system gave back.
+    fn renew_surface(&mut self) -> Result<(), PlatformError> {
+        let surface = self
+            .gpu
+            .instance
+            .create_surface(Arc::clone(&self.window))
+            .map_err(|error| PlatformError::Gpu(error.to_string()))?;
+        let size = self.window.inner_size();
+        self.surface =
+            WindowSurface::new(surface, &self.gpu, size.width.max(1), size.height.max(1))?;
+        Ok(())
+    }
+
     fn create(
         event_loop: &ActiveEventLoop,
         options: &DesktopOptions,
@@ -196,7 +209,8 @@ impl DesktopHost {
             egui,
             ctx,
             os,
-            form_factor: FormFactor::Desktop,
+            // Phones and tablets by their shorter side; computers are desktops.
+            form_factor: FormFactor::classify(os, size.width.min(size.height) as f32 / scale),
             capabilities,
             paths,
             info,
@@ -349,6 +363,18 @@ impl PlatformHost for DesktopHost {
 /// # Errors
 /// Window, GPU or application start-up failures.
 pub fn run_desktop<A: DesktopApp>(app: A, options: DesktopOptions) -> Result<(), PlatformError> {
+    #[cfg(target_os = "android")]
+    let event_loop = {
+        use winit::platform::android::EventLoopBuilderExtAndroid;
+        let android = crate::android::app().ok_or_else(|| {
+            PlatformError::Window("Android did not hand Sue its activity".to_owned())
+        })?;
+        EventLoop::builder()
+            .with_android_app(android)
+            .build()
+            .map_err(|error| PlatformError::Window(error.to_string()))?
+    };
+    #[cfg(not(target_os = "android"))]
     let event_loop = EventLoop::new().map_err(|error| PlatformError::Window(error.to_string()))?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut runner = Runner {
@@ -358,6 +384,7 @@ pub fn run_desktop<A: DesktopApp>(app: A, options: DesktopOptions) -> Result<(),
         error: None,
         last_frame: None,
         exiting: false,
+        paused: false,
     };
     event_loop
         .run_app(&mut runner)
@@ -372,6 +399,9 @@ struct Runner<A> {
     error: Option<PlatformError>,
     last_frame: Option<Instant>,
     exiting: bool,
+    /// The system took the window away (Android in the background): nothing
+    /// draws until it is given back.
+    paused: bool,
 }
 
 /// What the loop does next.
@@ -434,7 +464,7 @@ impl<A: DesktopApp> ApplicationHandler for Runner<A> {
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: StartCause) {}
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if self.exiting {
+        if self.exiting || self.paused {
             return;
         }
         let Some(host) = self.host.as_mut() else {
@@ -476,10 +506,26 @@ impl<A: DesktopApp> ApplicationHandler for Runner<A> {
         }
     }
 
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        self.paused = true;
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.host.is_some() {
+        if let Some(host) = self.host.as_mut() {
+            // Back from the background: the window may be new, so is its
+            // surface.
+            if self.paused {
+                if let Err(error) = host.renew_surface() {
+                    self.error = Some(error);
+                    event_loop.exit();
+                    return;
+                }
+                host.window.request_redraw();
+            }
+            self.paused = false;
             return;
         }
+        self.paused = false;
         match DesktopHost::create(event_loop, &self.options) {
             Ok(mut host) => match self.app.start(&mut host) {
                 Ok(()) => {
@@ -504,7 +550,7 @@ impl<A: DesktopApp> ApplicationHandler for Runner<A> {
         _window_id: WindowId,
         event: OsWindowEvent,
     ) {
-        if self.exiting {
+        if self.exiting || (self.paused && matches!(event, OsWindowEvent::RedrawRequested)) {
             return;
         }
         let Some(host) = self.host.as_mut() else {

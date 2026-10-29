@@ -19,6 +19,8 @@
 //!
 //! Specification: `HUMANZ.md` §3.1, §3.2 and §3.5.
 
+#[cfg(target_os = "android")]
+pub mod android;
 mod audio;
 mod desktop;
 mod device;
