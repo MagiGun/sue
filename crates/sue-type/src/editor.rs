@@ -432,7 +432,7 @@ impl Editor {
         if range.is_empty() {
             return;
         }
-        edit::reformat(cx, doc, "Clear Formatting", |_, marks| {
+        edit::reformat(cx, doc, &tr!("clear-formatting"), |_, marks| {
             let kinds: Vec<String> = marks
                 .marks()
                 .iter()
@@ -495,7 +495,7 @@ impl Editor {
             return;
         };
         let object = object_at..object_at + sue_model::OBJECT.len_utf8();
-        edit::reformat(cx, doc, "Insert Picture", |_, marks| {
+        edit::reformat(cx, doc, &tr!("insert-picture"), |_, marks| {
             marks.set(object, kind::EMBED, Some(Value::Entity(entity)));
         });
         self.set_caret(
@@ -1392,8 +1392,8 @@ impl Editor {
                 let at = self.caret.offset;
                 // Backspace at the start of a list item ends the list first.
                 if !forward && self.at_paragraph_start() && self.in_list() {
-                    self.set_paragraph(cx, kind::LIST, None, "End List");
-                    self.set_paragraph(cx, kind::LEVEL, None, "End List");
+                    self.set_paragraph(cx, kind::LIST, None, &tr!("end-list"));
+                    self.set_paragraph(cx, kind::LEVEL, None, &tr!("end-list"));
                     return true;
                 }
                 let range = if forward {
@@ -1428,8 +1428,8 @@ impl Editor {
             Key::Enter => {
                 // Enter on an empty list item ends the list.
                 if selection.is_empty() && self.in_list() && self.paragraph_empty() {
-                    self.set_paragraph(cx, kind::LIST, None, "End List");
-                    self.set_paragraph(cx, kind::LEVEL, None, "End List");
+                    self.set_paragraph(cx, kind::LIST, None, &tr!("end-list"));
+                    self.set_paragraph(cx, kind::LEVEL, None, &tr!("end-list"));
                     return true;
                 }
                 let (look, _) = self.look_here(view.sheet);
@@ -1440,7 +1440,7 @@ impl Editor {
                     && at_end
                     && let Some(next) = view.sheet.get(&look.style).next.clone()
                 {
-                    self.set_style(cx, &next, "Next Style");
+                    self.set_style(cx, &next, &tr!("next-style"));
                 }
                 changed
             }
@@ -1456,14 +1456,14 @@ impl Editor {
                         cx,
                         kind::LEVEL,
                         Some(Value::Int(level as i64)),
-                        "List Level",
+                        &tr!("list-level"),
                     );
                     return true;
                 }
                 if let Some(tab) = view.sheet.get(&look.style).tab.clone()
                     && self.paragraph_empty()
                 {
-                    self.set_style(cx, &tab, "Change Element");
+                    self.set_style(cx, &tab, &tr!("change-element"));
                     return true;
                 }
                 if shift {
