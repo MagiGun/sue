@@ -11,9 +11,11 @@
 
 [general]
 confirm_on_exit = true         # Ask before closing the window
+autosave_seconds = 60          # [0..3600] Keep unsaved work this often, so the Hub can bring it back (s; 0 turns autosave off)
 
 [launchpad]
 pinned = ""                    # @text The studio or tool Sue opens straight into (the pin on its box in the Hub; empty opens the Hub)
+recent_count = 8               # [0..50] How many recent files and projects the Hub lists (0 hides the list)
 
 [profile]
 hardware = "auto"              # {auto|high-refresh|balanced|legacy-low-spec|mobile-battery-saver} Frame pacing and effect budget

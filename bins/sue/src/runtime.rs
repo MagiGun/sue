@@ -6,9 +6,16 @@
 //! egui for them with `request_repaint`) and for a short riced grace period
 //! after any change. Then the window sleeps at 0 FPS, waking only for timed
 //! work: the audio queue while something plays, a status message to clear,
-//! a typing burst to close into one undo step.
+//! a typing burst to close into one undo step, unsaved work to keep.
+//!
+//! The work Sue remembers ([`WorkList`]): every file opened or saved goes
+//! first in the recent list, and work nobody saved is kept by itself
+//! (`general.autosave_seconds` after a change, and at quit) for the Hub to
+//! recover or discard. Opening another project keeps the unsaved work it
+//! replaces the same way.
 
 use std::collections::VecDeque;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -21,7 +28,8 @@ use sue_platform::{
 };
 use sue_rice::{RiceSchema, SetRiceValues};
 use sue_wm::{
-    Applets, FilePick, RiceEdit, Shell, ShellIo, ShellRequest, Theme, Transport, Typing, widgets,
+    AppletId, AppletRole, Applets, FilePick, RiceEdit, Shell, ShellIo, ShellRequest, Theme,
+    Transport, Typing, WorkList, unix_now, widgets,
 };
 
 use crate::engine::Engine;
@@ -101,6 +109,7 @@ macro_rules! shell_io {
             audio: $runtime.engine.audio.as_deref_mut(),
             transport: &mut $runtime.transport,
             requests: &mut $runtime.engine.requests,
+            work: &$runtime.work,
             fps: ($runtime.telemetry.fps() > 0).then(|| $runtime.telemetry.fps()),
         }
     };
@@ -144,6 +153,30 @@ pub struct Runtime {
     project: Option<PathBuf>,
     /// The open project file, so chunks this build does not know survive.
     project_file: SueFile,
+    /// The files of late and the work Sue kept (the Hub's lists).
+    work: WorkList,
+    /// The arena's revision when the work was last looked at for keeping.
+    autosave_seen: u64,
+    /// When to keep the work next, while a change waits for it.
+    next_autosave: Option<Instant>,
+    /// What the project was when saved or opened (`None`: unknown, as
+    /// after a recovery), so unchanged work is not kept.
+    saved_digest: Option<u64>,
+    /// What the work kept by this run holds.
+    kept_digest: Option<u64>,
+    /// The Hub was open in the last frame; its lists are read again each
+    /// time it opens.
+    hub_was_open: bool,
+}
+
+/// Said after opening something over unsaved work, which was kept.
+const REPLACED: &str = "; the unsaved work before it is on the Hub, under Unsaved Work";
+
+/// A digest of a project's bytes, to tell whether two are the same.
+fn digest(bytes: &[u8]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
 }
 
 impl Runtime {
@@ -187,6 +220,12 @@ impl Runtime {
             next_pick_poll: None,
             project: None,
             project_file: SueFile::new(),
+            work: WorkList::default(),
+            autosave_seen: 0,
+            next_autosave: None,
+            saved_digest: None,
+            kept_digest: None,
+            hub_was_open: false,
         })
     }
 
@@ -195,7 +234,49 @@ impl Runtime {
     pub fn interactive(mut self, interactive: bool) -> Self {
         self.interactive = interactive;
         self.shell.set_interactive(interactive);
+        self.remembering(interactive)
+    }
+
+    /// Lets the runtime remember work in Sue's data folder: the files of
+    /// late and the work it keeps. Off, nothing is written there (tests and
+    /// the self-check run beside people's own lists).
+    #[must_use]
+    pub fn remembering(mut self, on: bool) -> Self {
+        if !on {
+            self.work = WorkList::default();
+            return self;
+        }
+        let dir = self.engine.paths.data_dir.join("work");
+        let first = !dir.join("recent.txt").exists();
+        self.work = WorkList::open(dir);
+        // Sue Paint kept its own recent files before Sue did.
+        if first
+            && let Ok(text) =
+                std::fs::read_to_string(self.engine.paths.data_dir.join("paint").join("recent.txt"))
+        {
+            let paint = AppletId::new(sue_paint::ID).ok();
+            let now = unix_now();
+            let paths: Vec<&str> = text
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .collect();
+            for (age, path) in paths.iter().enumerate().rev() {
+                let when = now.saturating_sub(age as u64);
+                let _ = self
+                    .work
+                    .remember(Path::new(path), false, paint.clone(), when);
+            }
+        }
+        self.work.refresh();
+        self.autosave_seen = self.engine.world.arena.revision();
         self
+    }
+
+    /// The files of late and the work Sue kept (tests).
+    #[cfg(test)]
+    #[must_use]
+    pub fn work(&self) -> &WorkList {
+        &self.work
     }
 
     /// The current theme.
@@ -232,6 +313,13 @@ impl Runtime {
         }
         self.serve_requests(textures, now);
         self.refresh_rice();
+        // The Hub's lists are read again each time it opens.
+        let hub = self.shell.hub_open();
+        if hub && !self.hub_was_open {
+            self.work.refresh();
+        }
+        self.hub_was_open = hub;
+        self.schedule_autosave(now);
         if self.shell.is_animating() {
             self.telemetry.record(now);
         } else {
@@ -357,6 +445,7 @@ impl Runtime {
             self.typing.deadline(),
             self.next_tick,
             self.next_pick_poll,
+            self.next_autosave,
         ]
         .into_iter()
         .flatten()
@@ -405,6 +494,12 @@ impl Runtime {
             redraw |= tick.repaint || tick.animating;
             self.serve_requests(textures, now);
         }
+        if self.next_autosave.is_some_and(|due| due <= now) {
+            self.next_autosave = None;
+            self.autosave();
+            redraw = true;
+        }
+        self.schedule_autosave(now);
         redraw
     }
 
@@ -428,11 +523,246 @@ impl Runtime {
         true
     }
 
-    /// Saves what must survive: the open typing group and the rice.
+    /// Saves what must survive: the open typing group, the rice, and the
+    /// work nobody saved (kept for the Hub to offer next time).
     pub fn shutdown(&mut self) {
         self.typing.flush(&mut self.engine.history);
         if let Some(Err(error)) = self.persist() {
             eprintln!("sue: could not save the rice: {error}");
+        }
+        self.autosave();
+    }
+
+    /// How often unsaved work is kept, or `None` when it is not (no folder
+    /// to keep it in, or `general.autosave_seconds` is 0).
+    fn autosave_interval(&self) -> Option<Duration> {
+        self.work.dir()?;
+        let seconds = self
+            .engine
+            .world
+            .rice
+            .get_i64("general.autosave_seconds")
+            .unwrap_or(60);
+        u64::try_from(seconds)
+            .ok()
+            .filter(|seconds| *seconds > 0)
+            .map(Duration::from_secs)
+    }
+
+    /// After a change, keeps the work once the riced interval has passed.
+    fn schedule_autosave(&mut self, now: Instant) {
+        if self.next_autosave.is_none()
+            && self.engine.world.arena.revision() != self.autosave_seen
+            && let Some(interval) = self.autosave_interval()
+        {
+            self.next_autosave = Some(now + interval);
+        }
+    }
+
+    /// The project as it would be saved now.
+    fn project_bytes(&mut self) -> Vec<u8> {
+        self.engine.world.write_into(&mut self.project_file);
+        self.project_file.to_bytes()
+    }
+
+    /// Keeps the work if it changed and nobody saved it, for the Hub to
+    /// offer under Unsaved Work; lets the kept copy go once the work is
+    /// saved (or empty) again.
+    fn autosave(&mut self) {
+        if self.autosave_interval().is_none() {
+            return;
+        }
+        let revision = self.engine.world.arena.revision();
+        if revision == self.autosave_seen {
+            return;
+        }
+        self.autosave_seen = revision;
+        if self.engine.world.arena.is_empty() && self.project.is_none() {
+            self.kept_digest = None;
+            let _ = self.work.release();
+            return;
+        }
+        let bytes = self.project_bytes();
+        let kept = digest(&bytes);
+        if Some(kept) == self.saved_digest {
+            self.kept_digest = None;
+            let _ = self.work.release();
+            return;
+        }
+        if Some(kept) == self.kept_digest {
+            return;
+        }
+        let (name, page) = self.what_is_open();
+        match self
+            .work
+            .keep(&bytes, self.project.as_deref(), &name, page, unix_now())
+        {
+            Ok(()) => self.kept_digest = Some(kept),
+            Err(error) => self
+                .shell
+                .notify(format!("Could not keep the unsaved work: {error}"), true),
+        }
+    }
+
+    /// Keeps the work about to be replaced if nobody saved it, so the Hub
+    /// offers it; what comes next is kept apart from it. Returns `true`
+    /// when something was kept.
+    fn set_aside(&mut self) -> bool {
+        if self.autosave_interval().is_none() {
+            return false;
+        }
+        // Look again, whether or not the timer came.
+        self.autosave_seen = self.engine.world.arena.revision().wrapping_add(1);
+        self.autosave();
+        let kept = self.kept_digest.is_some();
+        self.work.start_over();
+        self.kept_digest = None;
+        self.next_autosave = None;
+        kept
+    }
+
+    /// What the page shows, by name, and the page: for the kept work's
+    /// note.
+    fn what_is_open(&self) -> (String, Option<AppletId>) {
+        let page = self.shell.page().cloned();
+        let focus = page
+            .as_ref()
+            .and_then(|id| self.applets.get(id))
+            .and_then(|applet| applet.focus())
+            .and_then(|id| self.engine.world.arena.get_by_id(id).ok())
+            .map(|entity| entity.name().to_owned());
+        match focus {
+            Some(name) => (name, page),
+            None => self.first_page(page.as_ref()).map_or_else(
+                || (String::new(), page.clone()),
+                |(entity, applet)| {
+                    let name = self
+                        .engine
+                        .world
+                        .arena
+                        .get_by_id(entity)
+                        .map(|entity| entity.name().to_owned())
+                        .unwrap_or_default();
+                    (name, Some(applet))
+                },
+            ),
+        }
+    }
+
+    /// The first thing in the project a studio works on (or else a tool),
+    /// and where: `prefer` first, when it takes something.
+    fn first_page(&self, prefer: Option<&AppletId>) -> Option<(sue_core::EntityId, AppletId)> {
+        let mut studio = None;
+        let mut tool = None;
+        for (_, entity) in self.engine.world.arena.iter() {
+            if let Some(prefer) = prefer
+                && self
+                    .applets
+                    .get(prefer)
+                    .is_some_and(|applet| applet.accepts(entity))
+            {
+                return Some((entity.id(), prefer.clone()));
+            }
+            let Some(applet) = self.applets.page_for(entity) else {
+                continue;
+            };
+            let role = self.applets.manifest(&applet).map(|manifest| manifest.role);
+            if role == Some(AppletRole::Studio) {
+                studio.get_or_insert((entity.id(), applet));
+            } else {
+                tool.get_or_insert((entity.id(), applet));
+            }
+        }
+        studio.or(tool)
+    }
+
+    /// Opens what the project holds in its studio (`prefer` first). Returns
+    /// the studio or tool, if anything opened.
+    fn open_first_page(
+        &mut self,
+        prefer: Option<&AppletId>,
+        textures: &mut dyn TextureUpload,
+        now: Instant,
+    ) -> Option<AppletId> {
+        let (entity, applet) = self.first_page(prefer)?;
+        self.request(
+            ShellRequest::OpenIn {
+                entity,
+                applet: applet.clone(),
+            },
+            textures,
+            now,
+        );
+        Some(applet)
+    }
+
+    /// Brings back the work kept as `id` and opens it in its studio. The
+    /// work it replaces is kept first if nobody saved it.
+    fn recover(&mut self, id: &str, textures: &mut dyn TextureUpload, now: Instant) {
+        let Some(kept) = self.work.autosave(id).cloned() else {
+            self.shell.notify("That unsaved work is gone", true);
+            return;
+        };
+        let file = std::fs::read(&kept.file)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| SueFile::from_bytes(&bytes).map_err(|error| error.to_string()));
+        let file = match file {
+            Ok(file) => file,
+            Err(error) => {
+                self.shell
+                    .notify(format!("Cannot recover {}: {error}", kept.title()), true);
+                return;
+            }
+        };
+        let replaced = self.set_aside();
+        self.typing.flush(&mut self.engine.history);
+        self.transport
+            .set_playing(false, self.engine.audio.as_deref_mut());
+        if let Err(error) = self.engine.world.load_file(&file, &sue_model::registry()) {
+            self.shell
+                .notify(format!("Cannot recover {}: {error}", kept.title()), true);
+            return;
+        }
+        self.engine.history = UndoStack::new();
+        self.typing = Typing::default();
+        self.project.clone_from(&kept.project);
+        self.project_file = file;
+        // This run keeps it from now on, until it is saved.
+        self.work.adopt(&kept.id);
+        self.saved_digest = None;
+        let bytes = self.project_bytes();
+        self.kept_digest = Some(digest(&bytes));
+        self.autosave_seen = self.engine.world.arena.revision();
+        self.shell.notify(
+            format!(
+                "Recovered {}; save it to keep it{}",
+                kept.title(),
+                if replaced { REPLACED } else { "" }
+            ),
+            false,
+        );
+        self.open_first_page(kept.page.as_ref(), textures, now);
+    }
+
+    /// Throws away the work kept as `id`.
+    fn discard(&mut self, id: &str) {
+        let title = self
+            .work
+            .autosave(id)
+            .map_or_else(String::new, sue_wm::Autosave::title);
+        match self.work.discard(id) {
+            Ok(()) => self.shell.notify(format!("Discarded {title}"), false),
+            Err(error) => self
+                .shell
+                .notify(format!("Cannot discard {title}: {error}"), true),
+        }
+    }
+
+    /// Puts `path` first in the files of late.
+    fn remember(&mut self, path: &Path, saved: bool, page: Option<AppletId>) {
+        if let Err(error) = self.work.remember(path, saved, page, unix_now()) {
+            self.shell
+                .notify(format!("Cannot remember the recent files: {error}"), true);
         }
     }
 
@@ -469,6 +799,15 @@ impl Runtime {
                         self.picked(&pick, &path, textures, now);
                     }
                     Some(ShellRequest::PickFile(pick)) => self.pick_with_system_dialog(pick),
+                    Some(ShellRequest::Remember { path, saved }) => {
+                        let page = self.shell.page().cloned();
+                        self.remember(&path, saved, page);
+                    }
+                    Some(ShellRequest::Forget(path)) => {
+                        let _ = self.work.forget(&path);
+                    }
+                    Some(ShellRequest::Recover(id)) => self.recover(&id, textures, now),
+                    Some(ShellRequest::Discard(id)) => self.discard(&id),
                     Some(_) | None => {}
                 }
             }
@@ -720,9 +1059,17 @@ impl Runtime {
     /// The file system's message.
     pub fn save_project_to(&mut self, path: &Path) -> Result<(), String> {
         self.typing.flush(&mut self.engine.history);
-        self.engine.world.write_into(&mut self.project_file);
-        write_atomic(path, &self.project_file.to_bytes()).map_err(|error| error.to_string())?;
+        let bytes = self.project_bytes();
+        write_atomic(path, &bytes).map_err(|error| error.to_string())?;
         self.project = Some(path.to_path_buf());
+        // Saved: nothing is kept for it any more.
+        self.saved_digest = Some(digest(&bytes));
+        self.kept_digest = None;
+        self.autosave_seen = self.engine.world.arena.revision();
+        self.next_autosave = None;
+        let _ = self.work.release();
+        let page = self.shell.page().cloned();
+        self.remember(path, true, page);
         self.shell.notify_saved(path, "project");
         Ok(())
     }
@@ -733,6 +1080,7 @@ impl Runtime {
     /// Why the project could not be read; nothing changes then.
     pub fn open_project(&mut self, path: &Path, bytes: &[u8]) -> Result<(), String> {
         let file = SueFile::from_bytes(bytes).map_err(|error| error.to_string())?;
+        let replaced = self.set_aside();
         self.typing.flush(&mut self.engine.history);
         self.transport
             .set_playing(false, self.engine.audio.as_deref_mut());
@@ -745,8 +1093,20 @@ impl Runtime {
         self.typing = Typing::default();
         self.project = Some(path.to_path_buf());
         self.project_file = file;
-        self.shell
-            .notify(format!("Opened {}", file_name(path)), false);
+        if self.work.dir().is_some() {
+            let bytes = self.project_bytes();
+            self.saved_digest = Some(digest(&bytes));
+        }
+        self.kept_digest = None;
+        self.autosave_seen = self.engine.world.arena.revision();
+        self.shell.notify(
+            format!(
+                "Opened {}{}",
+                file_name(path),
+                if replaced { REPLACED } else { "" }
+            ),
+            false,
+        );
         Ok(())
     }
 
@@ -761,6 +1121,7 @@ impl Runtime {
             .find(|(_, applet)| applet.opens_file(path))
             .map(|(manifest, _)| manifest.id.clone());
         if let Some(to) = taker {
+            self.remember(path, false, Some(to.clone()));
             self.request(
                 ShellRequest::SendFile {
                     to,
@@ -801,9 +1162,21 @@ impl Runtime {
             }
         };
         if SueFile::sniff(&bytes) {
-            if let Err(reason) = self.open_project(path, &bytes) {
-                self.shell
-                    .notify(format!("Cannot open {name}: {reason}"), true);
+            match self.open_project(path, &bytes) {
+                Ok(()) => {
+                    // Back in the studio it was saved from, if it takes
+                    // what the project holds.
+                    let prefer = self
+                        .work
+                        .recent()
+                        .find(|file| file.path == path)
+                        .and_then(|file| file.page.clone());
+                    let page = self.open_first_page(prefer.as_ref(), textures, now);
+                    self.remember(path, false, page);
+                }
+                Err(reason) => self
+                    .shell
+                    .notify(format!("Cannot open {name}: {reason}"), true),
             }
             self.serve_requests(textures, now);
             return;
@@ -853,6 +1226,7 @@ impl Runtime {
         if let Some(note) = ingested.note {
             self.shell.notify(format!("{name}: {note}"), false);
         }
+        self.remember(path, false, Some(applet.clone()));
         self.request(ShellRequest::OpenIn { entity: id, applet }, textures, now);
     }
 
@@ -3930,6 +4304,205 @@ f 2 3 4
             shell.sue_menu_pick(&["Hub"], io, now)
         });
         assert!(home_picked && runtime.shell.hub_open());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A click at `at` over three frames, for [`frames`].
+    fn click_at(at: egui::Pos2) -> impl FnMut(usize) -> Vec<egui::Event> {
+        move |frame: usize| match frame {
+            0 => vec![egui::Event::PointerMoved(at)],
+            1 => vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            2 => vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Where the Hub drew the row (or button) that does `row`.
+    fn hub_row(runtime: &Runtime, row: &sue_wm::HubRow) -> Option<egui::Rect> {
+        runtime
+            .shell
+            .hub_rows()
+            .iter()
+            .filter(|(what, _)| what == row)
+            .map(|(_, rect)| *rect)
+            .max_by(|a, b| a.width().total_cmp(&b.width()))
+    }
+
+    #[test]
+    fn the_hub_lists_recent_files_saved_projects_and_unsaved_work() {
+        use sue_wm::HubRow;
+        let (host, root) = temp_host("hub-lists");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        let boot = || {
+            Runtime::new(Engine::boot(&host).unwrap())
+                .unwrap()
+                .remembering(true)
+        };
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let pictures = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .filter(|(_, entity)| sue_model::picture::is_picture(entity))
+                .count()
+        };
+        let mut runtime = boot();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        assert!(runtime.shell.hub_rows().is_empty(), "nothing yet");
+
+        // A picture opened from a file goes first among the recent files.
+        std::fs::create_dir_all(&root).unwrap();
+        let photo = root.join("photo.png");
+        let pixels = vec![200_u8; 4 * 4 * 4];
+        std::fs::write(&photo, sue_io::encode_png_rgba(4, 4, &pixels).unwrap()).unwrap();
+        runtime.request(
+            ShellRequest::OpenFile(photo.clone()),
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(
+            runtime.work().recent().next().map(|file| &file.path),
+            Some(&photo)
+        );
+
+        // A picture made in Sue Paint and saved as a project is a saved
+        // project too.
+        runtime.request(
+            ShellRequest::Create {
+                applet: paint.clone(),
+                key: "Square Post".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        let album = root.join("album.sue");
+        runtime.save_project_to(&album).unwrap();
+        let first: Vec<&Path> = runtime
+            .work()
+            .recent()
+            .map(|file| file.path.as_path())
+            .collect();
+        assert_eq!(first, [album.as_path(), photo.as_path()]);
+        assert_eq!(runtime.work().projects().len(), 1);
+        assert_eq!(runtime.work().projects()[0].page.as_ref(), Some(&paint));
+        // The Sue menu opens them too.
+        runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
+        assert_eq!(
+            runtime.shell.sue_menu_labels(&["File", "Open Recent"]),
+            ["album.sue", "photo.png"]
+        );
+        runtime.shell.dismiss_overlays();
+
+        // A second picture, never saved, is kept at quit.
+        runtime.request(
+            ShellRequest::Create {
+                applet: paint.clone(),
+                key: "Square Post".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(pictures(&runtime), 2);
+        runtime.shutdown();
+
+        // The next start lists all three on the Hub.
+        let mut runtime = boot();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let kept = runtime.work().unsaved().next().cloned().unwrap();
+        assert_eq!(kept.project.as_deref(), Some(album.as_path()));
+        assert_eq!(kept.title(), "album");
+        for row in [
+            HubRow::Open(photo.clone()),
+            HubRow::Open(album.clone()),
+            HubRow::Recover(kept.id.clone()),
+            HubRow::Discard(kept.id.clone()),
+        ] {
+            assert!(hub_row(&runtime, &row).is_some(), "{row:?} is on the Hub");
+        }
+
+        // A click on it brings it back in Sue Paint, both pictures, and the
+        // project it belongs to.
+        let at = hub_row(&runtime, &HubRow::Recover(kept.id.clone()))
+            .unwrap()
+            .left_center()
+            + vec2(40.0, 0.0);
+        frames(&mut runtime, &ctx, size, start, click_at(at));
+        assert_eq!(runtime.shell.page(), Some(&paint));
+        assert_eq!(pictures(&runtime), 2);
+        assert_eq!(runtime.project(), Some(album.as_path()));
+        assert_eq!(runtime.work().unsaved().count(), 0, "it is this run's now");
+        assert!(kept.file.exists(), "kept until it is saved");
+        runtime.save_project_to(&album).unwrap();
+        assert!(!kept.file.exists(), "saved, it is let go");
+
+        // Opening another project keeps the unsaved work it replaces.
+        runtime.request(
+            ShellRequest::Create {
+                applet: paint.clone(),
+                key: "Square Post".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(pictures(&runtime), 3);
+        runtime.request(
+            ShellRequest::OpenFile(album.clone()),
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(pictures(&runtime), 2, "the saved project");
+        assert_eq!(
+            runtime.shell.page(),
+            Some(&paint),
+            "in the studio it was saved from"
+        );
+        let replaced = runtime.work().unsaved().next().cloned().unwrap();
+
+        // Discard asks once more, then throws it away.
+        runtime.request(ShellRequest::Hub, &mut NoTextures, start);
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let discard = HubRow::Discard(replaced.id.clone());
+        let button = hub_row(&runtime, &discard).unwrap().center();
+        frames(&mut runtime, &ctx, size, start, click_at(button));
+        assert!(replaced.file.exists(), "a first click only asks");
+        let button = hub_row(&runtime, &discard).unwrap().center();
+        frames(&mut runtime, &ctx, size, start, click_at(button));
+        assert!(!replaced.file.exists());
+        assert_eq!(runtime.work().unsaved().count(), 0);
+        assert!(hub_row(&runtime, &discard).is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn runs_that_do_not_remember_leave_no_trace() {
+        let (mut runtime, root) = runtime("no-trace");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("story.sue");
+        runtime.request(
+            ShellRequest::Create {
+                applet: AppletId::new(sue_paint::ID).unwrap(),
+                key: "Square Post".to_owned(),
+            },
+            &mut NoTextures,
+            Instant::now(),
+        );
+        runtime.save_project_to(&path).unwrap();
+        runtime.shutdown();
+        assert!(!runtime.engine.paths.data_dir.join("work").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 

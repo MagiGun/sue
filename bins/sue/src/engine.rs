@@ -102,6 +102,12 @@ pub fn shell_declarations() -> Vec<RiceDeclaration> {
             "Ask before closing the window",
         ),
         declare(
+            "general.autosave_seconds",
+            int(60, 0, 3600),
+            "Keep unsaved work this often, so the Hub can bring it back (s; 0 turns autosave off)",
+        )
+        .labeled("Autosave Every"),
+        declare(
             "io.jxl_effort",
             int(7, 1, 9),
             "JPEG XL effort for conversions (higher is smaller and slower)",
@@ -342,6 +348,17 @@ impl Engine {
                                     .to_owned(),
                             ),
                             param("launchpad.pinned"),
+                            param("launchpad.recent_count"),
+                        ],
+                    ),
+                    group(
+                        "Unsaved Work",
+                        vec![
+                            SettingsItem::Note(
+                                "Sue keeps work you have not saved by itself. The Hub lists it under Unsaved Work, to recover or discard."
+                                    .to_owned(),
+                            ),
+                            param("general.autosave_seconds"),
                         ],
                     ),
                     group("Quitting", vec![param("general.confirm_on_exit")]),

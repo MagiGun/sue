@@ -66,6 +66,10 @@ see (you can color it yourself in Settings).
 │  │ Image Viewer │ │ Converter    │                                │
 │  │          [⚲] │ │          [⚲] │                                │
 │  └──────────────┘ └──────────────┘                                │
+│  Recent            Saved Projects     Unsaved Work                │
+│  ┌──────────────┐  ┌──────────────┐   ┌──────────────────────┐    │
+│  │ album  Proj. │  │ album        │   │ Novel   [Recover]    │    │
+│  └──────────────┘  └──────────────┘   └──────────────────────┘    │
 ├───────────────────────────────────────────────────────────────────┤
 │ Hub                                    0 entities  Undo 0  Idle   │
 └───────────────────────────────────────────────────────────────────┘
@@ -85,6 +89,27 @@ Hub. Only one can be pinned: pinning another moves the pin, and clicking the
 pinned one again takes it away. `Ctrl+Z` undoes a pin like any other change,
 and you can also choose it under Settings, General, Startup.
 
+Under the boxes are three lists, side by side when the window is wide and
+one under the other when it is not:
+
+- **Recent**: the files and projects you opened or saved lately, newest
+  first, each with when, the folder it is in, and what it is (a project, a
+  PNG). Settings, General, Startup says how many it shows.
+- **Saved Projects**: every Sue project (`.sue`) you saved or opened, by
+  name, with the studio it was saved from.
+- **Unsaved Work**: work Sue kept for you by itself. Sue keeps whatever you
+  have not saved a minute after you change it, and again when you quit, so
+  a crash or a quick Quit loses nothing. Each piece says when it was kept
+  and whether it was never saved or is newer than its project file.
+  **Recover** (or a click on it) brings it back in the studio it was made
+  in; save it to keep it. **Discard** asks once more (Really Discard) and
+  then throws it away.
+
+Click a recent file or a saved project to open it where it belongs: a
+project opens in the studio it was saved from. Opening a project while you
+have unsaved work does not lose that work: it goes to Unsaved Work. Files
+that are gone drop off the lists by themselves.
+
 ### The Sue button and its menu
 
 At the very top left of the window, always in the same place, is the **Sue**
@@ -100,7 +125,7 @@ The Sue button opens the **Sue menu**, for Sue as a whole:
   Sprite or a custom size) or a new writing project (a blank document, a
   novel, a short story, a screenplay and more), opened right where it
   belongs;
-- **File**: Open File (`Ctrl+O`);
+- **File**: Open File (`Ctrl+O`) and Open Recent, the Hub's recent files;
 - **Project**: open, save and save as;
 - **Send To**: the thing you are working on, into another studio or tool,
   with no exporting and importing. A picture in Sue Paint goes into the
@@ -164,6 +189,11 @@ re-encoded JPEG XL, an exported rice), the status bar says the file's name and
 the folder it went to. Click that message to see the file, selected, in your
 system's file manager.
 
+Every file you open and every project or picture you save goes first in
+Sue's one list of recent files: the Hub's Recent, the Sue menu's File, Open
+Recent, and Sue Paint's File, Open Recent (its pictures) all show the same
+list.
+
 **On a phone or tablet** the system's own picker slides over Sue: on Android
 the Files picker, which also reaches Google Drive and other apps' storage,
 and on iPhone and iPad the Files browser. Sue works on a copy of a file you
@@ -203,7 +233,9 @@ Keymaps, MCP), and the right side shows only that category. Type in "Filter
 settings..." to search all of them.
 
 Under General, **Open At Launch** is the Hub's pin: the Hub, or the studio or
-tool Sue opens straight into. Under Display & Graphics, **Performance
+tool Sue opens straight into. **Recent Files on the Hub** says how many the
+Hub's Recent list shows (0 hides it), and **Autosave Every** how soon after a
+change Sue keeps unsaved work for the Hub's Unsaved Work (0 turns it off). Under Display & Graphics, **Performance
 Preference** sets how smooth and how frugal Sue is (Auto picks for your
 machine). **GPU preference** chooses which graphics card draws the window:
 Auto uses the one your screen is plugged into, Integrated the power-saving
