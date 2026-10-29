@@ -6,6 +6,11 @@ use sue_rice::{Keybinds, RiceDeclaration, RiceError, RiceParameter, RiceSchema};
 
 use crate::{LayoutMetrics, SpringParams, WmError};
 
+/// The rice key that lets the text caret glide (`true`) or jump.
+pub const SMOOTH_CARET_KEY: &str = "motion.smooth_caret";
+/// The rice key of how long a caret glide takes (ms).
+pub const CARET_GLIDE_KEY: &str = "motion.caret_glide_ms";
+
 /// Every parameter the shell reads, with defaults. The shipped
 /// `default.suerice` must match these exactly (tested below).
 #[must_use]
@@ -109,6 +114,18 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
             int(530, 0, 2000),
             "Caret blink interval (0 keeps the caret solid)",
         ),
+        declare(
+            SMOOTH_CARET_KEY,
+            toggle(true),
+            "Let the text caret glide to its new place instead of jumping",
+        )
+        .labeled("Smooth Caret"),
+        declare(
+            CARET_GLIDE_KEY,
+            int(100, 20, 400),
+            "How long the caret takes to glide to its new place (ms; less is faster)",
+        )
+        .labeled("Caret Glide Time"),
         declare(
             "motion.message_seconds",
             int(4, 1, 30),

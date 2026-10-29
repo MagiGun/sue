@@ -4041,6 +4041,93 @@ f 2 3 4
     }
 
     #[test]
+    fn sue_writers_caret_glides_after_typing_then_asks_for_no_frames() {
+        let (mut runtime, root) = runtime("smooth-caret");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        runtime.request(
+            ShellRequest::Create {
+                applet: AppletId::new(sue_writer::ID).unwrap(),
+                key: "novel".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        // One frame `dt` seconds after the last; how soon egui wants the next.
+        let mut now = start;
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>, dt: f64| {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, size)),
+                events,
+                time: Some(ctx.input(|input| input.time) + dt),
+                ..egui::RawInput::default()
+            };
+            now += Duration::from_secs_f64(dt);
+            let output = ctx.run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
+            let delay = output
+                .viewport_output
+                .values()
+                .next()
+                .map_or(Duration::MAX, |viewport| viewport.repaint_delay);
+            output.drop_without_applying_deltas();
+            delay
+        };
+        // Let the studio come in and egui's own fades finish.
+        for _ in 0..300 {
+            step(&mut runtime, Vec::new(), 0.008);
+        }
+        let typed = |text: &str| vec![egui::Event::Text(text.to_owned())];
+
+        // A word typed: egui answers any input with a frame at once; the
+        // gliding caret keeps them coming for its 0.1 s, and no longer.
+        assert_eq!(step(&mut runtime, typed("Once"), 0.008), Duration::ZERO);
+        let mut gliding = 0;
+        while step(&mut runtime, Vec::new(), 0.008) == Duration::ZERO {
+            gliding += 1;
+            assert!(gliding < 100, "the caret never lands");
+        }
+        assert!((9..=15).contains(&gliding), "{gliding} frames");
+        // At rest only its blink wakes egui, later.
+        let blink = step(&mut runtime, Vec::new(), 0.008);
+        assert!(
+            blink > Duration::from_millis(200) && blink <= Duration::from_millis(530),
+            "{blink:?}"
+        );
+        // After a while it rests lit, and nothing asks for frames.
+        step(&mut runtime, Vec::new(), sue_type::caret::BLINK_FOR + 1.0);
+        let idle = step(&mut runtime, Vec::new(), 0.008);
+        assert!(
+            idle > Duration::from_secs(60),
+            "egui asks for frames every {idle:?} ({:?})",
+            ctx.repaint_causes()
+        );
+
+        // Smooth Caret off in Settings: the caret jumps, no frames to glide.
+        runtime
+            .engine
+            .world
+            .rice
+            .set(sue_wm::SMOOTH_CARET_KEY, sue_rice::RiceValue::Bool(false))
+            .unwrap();
+        step(&mut runtime, Vec::new(), 0.008);
+        assert_eq!(step(&mut runtime, typed(" upon"), 0.008), Duration::ZERO);
+        // (egui still draws a frame or two as the words count goes up.)
+        let mut jumped = 0;
+        while step(&mut runtime, Vec::new(), 0.008) == Duration::ZERO {
+            jumped += 1;
+            assert!(jumped < 100);
+        }
+        assert!(
+            jumped <= 2 && gliding >= jumped + 8,
+            "{jumped} and {gliding}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_writer_makes_a_novel_types_undoes_takes_a_picture_and_compiles() {
         let (mut runtime, root) = runtime("sue-writer");
         let ctx = egui::Context::default();

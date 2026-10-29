@@ -13,6 +13,8 @@
 //! - [`editor`]: the rich text editor, on one document or several in a
 //!   row, as pages or a column, with its own caret, selection, clipboard,
 //!   input methods and lists.
+//! - [`caret`]: how that caret moves: it glides to its new place instead of
+//!   jumping, and blinks only at rest.
 //! - [`edit`]: the edits it makes, in place in the arena with their undo.
 //! - [`typeset`]: the same text set on pages for print, from the font files
 //!   themselves, which the PDF writer in `sue-io` draws.
@@ -20,6 +22,7 @@
 //! The text lives where it always does (backbone rule 1): a `StringBuffer`
 //! with [`sue_model::TextMarks`] on an entity of the arena.
 
+pub mod caret;
 pub mod edit;
 pub mod editor;
 pub mod layout;

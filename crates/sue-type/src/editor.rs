@@ -4,11 +4,14 @@
 //! the arena. It draws its own caret and selection, so pages, styles,
 //! lists and pictures stay exact, and takes the keyboard, the mouse, the
 //! clipboard (keeping formatting between Sue's own documents) and input
-//! methods. Edits go through [`crate::edit`], so undo covers them.
+//! methods. Edits go through [`crate::edit`], so undo covers them. The
+//! caret glides to its new place and blinks at rest ([`crate::caret`]).
 
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use egui::text::{CCursor, CharIndex, LayoutJob, TextFormat};
 use egui::{Color32, Event, Id, Key, Modifiers, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
@@ -16,6 +19,7 @@ use sue_core::{EntityId, Value};
 use sue_model::{TextMarks, mark_kind as kind};
 use sue_wm::AppletContext;
 
+use crate::caret::{self, CaretGlide, CaretMotion};
 use crate::edit;
 use crate::layout::{
     Block, Ink, Laid, PX_PER_PT, PageSetup, Setting, Source, ViewMode, byte_of_char, char_of_byte,
@@ -149,6 +153,9 @@ pub struct Editor {
     /// The editor had the keyboard last frame.
     had_focus: bool,
     scroll_target: Option<Caret>,
+    /// How the caret glides and blinks, from the rice and the hardware.
+    motion: CaretMotion,
+    glide: CaretGlide,
 }
 
 impl std::fmt::Debug for Editor {
@@ -188,6 +195,8 @@ impl Editor {
             hold: false,
             had_focus: false,
             scroll_target: None,
+            motion: CaretMotion::STILL,
+            glide: CaretGlide::default(),
         }
     }
 
@@ -524,6 +533,18 @@ impl Editor {
             }
         }
         self.prepare(&ctx, cx, docs, view);
+        let rice = cx.rice();
+        self.motion = CaretMotion::new(
+            rice.get_bool(sue_wm::SMOOTH_CARET_KEY).unwrap_or(true),
+            rice.get_i64(sue_wm::CARET_GLIDE_KEY)
+                .unwrap_or(caret::GLIDE_MS),
+            cx.view.profile.budget().spring_physics,
+            &ui.visuals().text_cursor,
+        );
+        if !ctx.input(|input| input.focused) {
+            // The window is in the background: a lit caret, no frames.
+            self.motion.blink = None;
+        }
         let mut output = EditorOutput {
             pages: self.laid.pages,
             ..EditorOutput::default()
@@ -710,7 +731,8 @@ impl Editor {
                 self.prepare(&ctx, cx, &docs, view);
             }
         }
-        self.paint(ui, view, focused);
+        let caret = self.caret_look(ui, view, focused, response.dragged());
+        self.paint(ui, view, focused, caret);
         if let Some(target) = self.scroll_target.take() {
             self.caret = self.clamp(target);
             self.follow = true;
@@ -1486,7 +1508,9 @@ impl Editor {
 
     // ----- Painting -----------------------------------------------------------------
 
-    fn paint(&self, ui: &Ui, view: &EditorView<'_>, focused: bool) {
+    /// Draws the desk, the pages, the text, the selection and `caret` (on
+    /// screen, from [`Self::caret_look`]).
+    fn paint(&self, ui: &Ui, view: &EditorView<'_>, focused: bool, caret: Option<Rect>) {
         let painter = ui.painter();
         let paged = matches!(view.mode, ViewMode::Page);
         painter.rect_filled(self.viewport, 0.0, view.desk);
@@ -1643,30 +1667,110 @@ impl Editor {
                 painter.galley(at, label.clone(), view.ink.text);
             }
         }
-        if focused && let Some(caret) = self.caret_rect(self.caret) {
+        if let Some(bar) = caret {
             let width = (1.5 * view.zoom).clamp(1.0, 3.0);
-            if let Some(preedit) = &self.preedit {
-                let size = caret.height() * 0.75;
-                let job = LayoutJob::single_section(
-                    preedit.clone(),
-                    TextFormat {
-                        font_id: egui::FontId::proportional(size),
-                        color: view.ink.text,
-                        background: view.ink.paper,
-                        underline: Stroke::new(1.0, view.ink.text),
-                        ..TextFormat::default()
-                    },
-                );
-                let galley = ui.ctx().fonts_mut(|fonts| fonts.layout_job(job));
-                painter.galley(caret.min, galley, view.ink.text);
-            } else {
-                painter.rect_filled(
-                    Rect::from_min_max(caret.min, pos2(caret.min.x + width, caret.max.y)),
-                    0.0,
-                    view.ink.text,
-                );
-            }
+            painter.rect_filled(
+                Rect::from_min_max(bar.min, pos2(bar.min.x + width, bar.max.y)),
+                0.0,
+                view.ink.text,
+            );
         }
+        if focused
+            && let Some(preedit) = &self.preedit
+            && let Some(caret) = self.caret_rect(self.caret)
+        {
+            let size = caret.height() * 0.75;
+            let job = LayoutJob::single_section(
+                preedit.clone(),
+                TextFormat {
+                    font_id: egui::FontId::proportional(size),
+                    color: view.ink.text,
+                    background: view.ink.paper,
+                    underline: Stroke::new(1.0, view.ink.text),
+                    ..TextFormat::default()
+                },
+            );
+            let galley = ui.ctx().fonts_mut(|fonts| fonts.layout_job(job));
+            painter.galley(caret.min, galley, view.ink.text);
+        }
+    }
+
+    /// Where to draw the caret this frame, on screen: gliding to its place
+    /// and blinking at rest ([`crate::caret`]). `None` while the blink has
+    /// it dark, or when it is not drawn (no keyboard, or an input method
+    /// composing in its place). Asks for the frames that need it and no
+    /// others.
+    fn caret_look(
+        &mut self,
+        ui: &Ui,
+        view: &EditorView<'_>,
+        focused: bool,
+        dragging: bool,
+    ) -> Option<Rect> {
+        let target = self.caret_rect(self.caret);
+        let shown = focused && self.preedit.is_none() && target.is_some();
+        let offset = self.origin.to_vec2();
+        let frame = caret::Frame {
+            target: target.unwrap_or(Rect::NOTHING).translate(-offset),
+            cause: self.caret_cause(),
+            view: self.view_key(view),
+            shown,
+            viewport: self.viewport.translate(-offset),
+            now: ui.input(|input| input.time),
+            dragging,
+        };
+        let look = self.glide.frame(frame, self.motion);
+        if look.moving {
+            ui.ctx().request_repaint();
+        } else if shown
+            && let Some(wake) = look
+                .wake
+                .and_then(|wake| Duration::try_from_secs_f64(wake).ok())
+        {
+            ui.ctx().request_repaint_after(wake);
+        }
+        let target = target?;
+        // At rest the caret's own bar is drawn, untouched.
+        let bar = if look.moving {
+            look.bar.translate(offset)
+        } else {
+            target
+        };
+        (shown && look.lit).then_some(bar)
+    }
+
+    /// What puts the caret where it is: its place and its document's
+    /// revision. It glides when this changes.
+    fn caret_cause(&self) -> u64 {
+        let revision = self
+            .docs
+            .get(self.caret.doc)
+            .and_then(|id| self.cache.get(id))
+            .map_or(0, |cached| cached.key.revision);
+        let mut hasher = DefaultHasher::new();
+        (self.caret.doc, self.caret.offset, revision).hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// How the documents are shown: which ones, the zoom, the page and
+    /// where it sits. The caret never glides across a change of these.
+    fn view_key(&self, view: &EditorView<'_>) -> u64 {
+        let mode = match view.mode {
+            ViewMode::Page => 0,
+            ViewMode::Draft { width } => width.to_bits(),
+        };
+        let mut hasher = DefaultHasher::new();
+        (
+            &self.docs,
+            mode,
+            view.zoom.to_bits(),
+            self.laid.page.x.to_bits(),
+            self.laid.page.y.to_bits(),
+            self.page_x.to_bits(),
+            self.gap.to_bits(),
+        )
+            .hash(&mut hasher);
+        hasher.finish()
     }
 
     fn paint_selection(

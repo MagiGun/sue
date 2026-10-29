@@ -479,6 +479,14 @@ screenplay, Enter and Tab move between scene headings, action, characters,
 parentheticals and dialogue, each at its proper indent, typed in capitals
 where it should be. Quotes turn curly as you type (Settings, Studios).
 
+Typing feels smooth: the caret glides to its new place instead of jumping,
+whether you type, delete, move with the arrow keys, Home and End, click
+somewhere else, or the text wraps to a new line or page. It blinks only while
+it rests, and after ten seconds without a move it stays lit, so an idle
+window draws nothing. **Smooth Caret** (Settings, Display & Graphics, Motion)
+turns the glide off, and **Caret Glide Time** sets how fast it is; older
+machines skip it.
+
 For long work it is also a writing studio:
 
 - **The binder** on the left holds your chapters and scenes, research and a

@@ -25,6 +25,11 @@ follow [Semantic Versioning](https://semver.org/).
   Files browser on iPhone and iPad. On Android, saving a file you opened
   writes back to the original, and a folder you choose is read and
   written (the Converter's Add a Folder and its output folder).
+- Typing in Sue Writer feels smooth: the caret glides to its new place
+  instead of jumping, as you type, delete, move with the keys or click, and
+  as lines and pages wrap. It blinks only while it rests. Settings, Display
+  & Graphics, Motion has Smooth Caret to turn it off and Caret Glide Time
+  for its speed.
 
 ### Changed
 

@@ -713,8 +713,8 @@ window opens, so a change applies after a restart. Offscreen rendering
 `DesktopApp`. Every time the loop is about to wait (`about_to_wait`) it combines
 two questions: the application's `FramePacing`, and when egui wants its next
 frame (`repaint_delay` of the last frame: zero while a widget animates or the
-shell called `request_repaint`, the caret's blink time while a text field has
-focus, never otherwise).
+shell called `request_repaint` or the editor's caret glides, the caret's blink
+time while a text field has focus, never otherwise).
 
 | Answer | Loop step |
 | --- | --- |
@@ -889,7 +889,9 @@ these facts, in order:
    (`TYPING_PAUSE`, 900 ms), or a status message to clear.
 4. Otherwise `Sleep`: 0 FPS and no CPU. A focused text field still blinks its
    caret through egui's own repaint delay (`motion.caret_blink_ms`; 0 keeps it
-   solid and the window fully asleep).
+   solid and the window fully asleep). The rich text editor's caret asks egui
+   for every frame only while it glides, then for one at each turn of its
+   blink, and for none once it has rested `sue_type::caret::BLINK_FOR` (10 s).
 
 Each frame measures real elapsed time, `dt = now - last_frame` clamped to
 $[0.0001, 0.05]$ s; the first frame after sleeping advances by one nominal
@@ -1634,6 +1636,30 @@ marks, and `Typing::record_with` makes each burst one undo step for both;
 formatting is a `SetExtension` transaction. The editor registers as a text
 field, so the shell's keys (the command palette) leave typing alone.
 
+**The caret (`sue-type::caret`).** The editor's caret glides to its new place
+instead of jumping, the approach of WordCraft (MIT or Apache 2.0), which
+measured it from Word for Windows. Each frame the editor hands `CaretGlide` the
+caret's bar in content space (points from the scrolled content's top left, so
+scrolling does not bend the path), a fingerprint of what put it there (the
+caret and its document's revision) and one of the view (documents, zoom, page,
+width). When the first changes, the bar's top and bottom ease from where the
+caret was heading to the new place in `motion.caret_glide_ms` (100 ms) along
+Word's curve, `cubic-bezier(0, 0, 0, 1)`, whose closed form is
+`3s^(2/3) - 2s`: the same time for a character, a line or the next page.
+Another move before it lands sets off from the end of the glide under way, so
+fast typing and held keys keep the caret at most one move behind the text and
+never send it back. Typing, Backspace and Delete, the arrows, Home and End, a
+click, text wrapping to a new line or page and a heading's taller caret all
+glide; a view change, a hidden caret, a pointer dragging a selection, a start
+off screen or a jump further than the view is tall (Ctrl+End) put it straight
+there. A gliding caret stays lit; at rest it blinks at egui's text cursor
+timing (`motion.caret_blink_ms`), lit first after each move, and after 10 s
+without one it stays lit. `motion.smooth_caret` off, or a `HardwareProfile`
+without spring physics (`LegacyLowSpec`), makes it jump. The motion is pure
+and tested apart from egui (curve, landing exactly, retargeting, the blink, no
+frames at rest); `bins/sue` types in Sue Writer and checks egui's repaint
+delay: zero while it glides, the blink at rest, nothing after.
+
 **Typesetting and PDF (`sue-type::typeset`, `sue-io::pdf`).** For print, the
 same styles and marks are set from the font files themselves (`ttf-parser`
 widths): lines broken at spaces, justified, paginated with the same rules,
@@ -1773,7 +1799,7 @@ packages can add their own:
 | --- | --- |
 | General | Where Sue opens (`launchpad.pinned`, labeled Open At Launch: the Hub, or the studio or tool pinned there) and quit confirmation |
 | Appearance & Rice | Theme presets (Void, Graphite, Paper, Gray), every color, geometry (padding, hairlines, radii, pill buttons, the top bar and the status bar, shadows), typography, the rice file with Reload, Export and Open Folder |
-| Display & Graphics | The performance preference (`profile.hardware`, labeled Performance Preference) and the active profile; the GPU preference (picked by adapter type: integrated, discrete, or the display's GPU), the GPU drawing, every GPU found and Restart Sue (the GPU is chosen at startup); the frame-rate cap, the settle grace, UI scale, list wheel speed, motion (instant snap, animation speed, spring constants, caret blink, message time) |
+| Display & Graphics | The performance preference (`profile.hardware`, labeled Performance Preference) and the active profile; the GPU preference (picked by adapter type: integrated, discrete, or the display's GPU), the GPU drawing, every GPU found and Restart Sue (the GPU is chosen at startup); the frame-rate cap, the settle grace, UI scale, list wheel speed, motion (instant snap, animation speed, spring constants, caret blink, smooth caret and its glide time, message time) |
 | Audio & DSP | Output device, sample rate, buffer size, real-time priority, volume, and the live stream and real-time status |
 | Files & Codecs | JPEG XL effort, bit-exact JPEG recompression, the conversion folder and JPEG quality, the open-file size limit, byte-map width, the built-in codecs |
 | Studios | Each studio's own settings and theme: for Sue Paint the new picture size and resolution, `sue_paint.theme` (Gray by default, the Sue theme, a preset, or Custom) and the Custom colors (`sue_paint_colors`) |
@@ -2003,7 +2029,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §1.13 Layered pictures and blend modes | **Implemented**; Sue Paint makes and edits them | `sue-model/src/picture.rs`, `blend.rs` |
 | §3.8 Rich text with paragraph marks, manuscripts | **Implemented**; Sue Writer edits them | `sue-model/src/text.rs`, `manuscript.rs` |
 | §3.8 Installed fonts | **Implemented** (a background scan; faces installed into egui on first use) | `sue-wm/src/fonts.rs`, `sue-platform/src/paths.rs` |
-| §3.8 Rich text editor, styles, page layout, typesetting | **Implemented** | `sue-type` |
+| §3.8 Rich text editor, styles, page layout, typesetting | **Implemented**; the caret glides and blinks at rest (`sue-type/src/caret.rs`) | `sue-type` |
 | §3.8 Publishing formats and PDF | **Implemented** (Word both ways; OpenDocument, EPUB, HTML, RTF, Markdown, text out; HTML and Markdown in; fonts embedded whole, not subset) | `sue-io/src/publish`, `pdf.rs`, `zip.rs` |
 | §3.8 Sue Writer | **Implemented**; on a phone laid out for a thumb and an on-screen keyboard (text reflowed to the screen, formatting above the keyboard, the caret kept in sight); snapshots show the phone with and without the keyboard | `sue-writer`, `sue-type/src/editor.rs`, `sue-platform/src/desktop.rs` |
 | §2.1 Three-tier sniffer | **Implemented** | `sue-io/src/sniff.rs` |
