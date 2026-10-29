@@ -130,7 +130,7 @@ pub fn warp(source: &[u8], width: u32, height: u32, pins: &[Pin], step: u32) -> 
 
 /// The color at `[x, y]` of an RGBA8 picture (pixel corners at whole
 /// numbers), bilinear over premultiplied alpha so edges stay clean.
-fn sample(source: &[u8], width: u32, height: u32, x: f32, y: f32) -> [u8; 4] {
+pub(crate) fn sample(source: &[u8], width: u32, height: u32, x: f32, y: f32) -> [u8; 4] {
     let (x, y) = (x - 0.5, y - 0.5);
     let (x0, y0) = (x.floor(), y.floor());
     let (fx, fy) = (x - x0, y - y0);

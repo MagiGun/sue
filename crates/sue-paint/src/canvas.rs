@@ -103,6 +103,9 @@ impl SuePaint {
         self.draw_picture(ui, viewport, size, cx, theme);
         self.overlays(ui, viewport, size, &response, cx, theme);
         self.warp_ui(ui, viewport, size, cx, theme);
+        if self.transform.is_some() {
+            self.transform_ui(ui, viewport, size, cx, theme);
+        }
         self.status_strip(ui, status, Some(size), cx, theme);
     }
 
@@ -258,14 +261,16 @@ impl SuePaint {
     ) {
         let ctx = ui.ctx().clone();
         let blocked = self.dialog.is_some() || self.menubar.is_open() || !self.ready;
-        let (events, space, time, dt) = ctx.input(|input| {
+        let (events, space, time, dt, held) = ctx.input(|input| {
             (
                 input.events.clone(),
                 input.key_down(Key::Space),
                 input.time,
                 input.unstable_dt,
+                input.modifiers,
             )
         });
+        self.modifiers = held;
         let space = space && !ctx.text_edit_focused();
         // Spread this frame's pointer samples evenly over the frame's time,
         // so the stabilizer and flicks see the pen's real speed.
@@ -431,6 +436,11 @@ impl SuePaint {
                 start: pos.x,
                 size: self.toolbox.current().tip.size,
             });
+            return;
+        }
+        if !space && self.transform.is_some() {
+            let view = doc.view;
+            self.transform_press(pos, view, viewport, size);
             return;
         }
         if !space && self.warp.is_some() {
@@ -626,6 +636,19 @@ impl SuePaint {
             self.pick(pos, mode, viewport, size, cx);
             return;
         }
+        if matches!(self.gesture, Some(Gesture::Transform { .. })) {
+            let Some(view) = self.docs.get(self.active).map(|doc| doc.view) else {
+                return;
+            };
+            let p = view.to_picture(viewport, size, pos);
+            let offset = self
+                .transform
+                .as_ref()
+                .map_or([0.0; 2], |session| session.offset.map(|value| value as f32));
+            self.transform_drag([p.x - offset[0], p.y - offset[1]], self.modifiers);
+            self.transform_preview(cx);
+            return;
+        }
         if let Some(Gesture::Pin { index }) = self.gesture {
             let Some(view) = self.docs.get(self.active).map(|doc| doc.view) else {
                 return;
@@ -712,7 +735,7 @@ impl SuePaint {
                     entity.properties_mut().set(picture::Y, origin[1] + dy);
                 }
             }
-            Gesture::Pick { .. } | Gesture::Pin { .. } => {}
+            Gesture::Pick { .. } | Gesture::Pin { .. } | Gesture::Transform { .. } => {}
         }
     }
 
@@ -879,6 +902,7 @@ impl SuePaint {
             | Gesture::Rotate { .. }
             | Gesture::Pick { .. }
             | Gesture::Pin { .. }
+            | Gesture::Transform { .. }
             | Gesture::BrushSize { .. } => {}
         }
     }

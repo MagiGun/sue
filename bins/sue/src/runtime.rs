@@ -1768,6 +1768,111 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_scale_rotate_moves_a_stroke_in_one_undo_step() {
+        let (mut runtime, root) = runtime("paint-transform");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.studio_focus())
+            .unwrap();
+        let layer = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+            .last()
+            .unwrap()
+            .id;
+        let ink = |runtime: &Runtime, rows: std::ops::Range<u32>| {
+            let raster = sue_paint::doc::raster(&runtime.engine.world.arena, layer).unwrap();
+            rows.map(|y| {
+                u32::from(raster.bytes().unwrap()[((y * raster.width() + 800) * 4 + 3) as usize])
+            })
+            .sum::<u32>()
+        };
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let (from, to) = (middle - vec2(60.0, 0.0), middle + vec2(60.0, 0.0));
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(from), press(from, true)],
+        );
+        step(
+            &mut runtime,
+            vec![
+                egui::Event::PointerMoved(middle),
+                egui::Event::PointerMoved(to),
+            ],
+        );
+        step(&mut runtime, vec![press(to, false)]);
+        assert!(ink(&runtime, 580..620) > 0);
+        let depth = runtime.engine.history.depth();
+
+        // Ctrl+T, drag from inside the box down, Enter.
+        step(
+            &mut runtime,
+            vec![key(egui::Key::T, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, Vec::new());
+        let down = middle + vec2(0.0, 80.0);
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(middle), press(middle, true)],
+        );
+        step(
+            &mut runtime,
+            vec![
+                egui::Event::PointerMoved(middle + vec2(0.0, 40.0)),
+                egui::Event::PointerMoved(down),
+            ],
+        );
+        step(&mut runtime, vec![press(down, false)]);
+        assert_eq!(
+            runtime.engine.history.depth(),
+            depth,
+            "a preview, not history yet"
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        step(&mut runtime, Vec::new());
+        assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
+        assert_eq!(ink(&runtime, 580..620), 0, "the stroke left its place");
+        assert!(ink(&runtime, 700..820) > 0, "and moved down");
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        assert!(ink(&runtime, 580..620) > 0, "undo puts it back");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_saves_as_a_project_or_any_picture_type() {
         let (mut runtime, root) = runtime("paint-save-as");
         let ctx = egui::Context::default();

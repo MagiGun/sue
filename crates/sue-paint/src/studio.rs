@@ -107,6 +107,16 @@ pub(crate) enum Gesture {
     },
     /// Dragging puppet warp pin `index`.
     Pin { index: usize },
+    /// Dragging a transform handle: what it grabbed, where (layer pixels),
+    /// and the box as it was.
+    Transform {
+        handle: crate::transform_ui::Handle,
+        start: [f32; 2],
+        quad: crate::transform::Quad,
+        center: [f32; 2],
+        scale: [f32; 2],
+        angle: f32,
+    },
     /// Scrolling the view.
     Pan { last: Pos2 },
     /// Ctrl+Alt and drag: the brush size follows the pointer across.
@@ -220,6 +230,10 @@ pub struct SuePaint {
     pub(crate) gesture: Option<Gesture>,
     /// Puppet warp, while it is on.
     pub(crate) warp: Option<WarpSession>,
+    /// Scale/Rotate or Free Transform, while it is on.
+    pub(crate) transform: Option<crate::transform_ui::TransformSession>,
+    /// The keys held this frame (Shift frees a transform's aspect).
+    pub(crate) modifiers: egui::Modifiers,
     /// Onion skin shows the cels around the current frame.
     pub(crate) onion: bool,
     /// Playback starts over at the end.
@@ -284,6 +298,8 @@ impl Default for SuePaint {
             dialog: None,
             gesture: None,
             warp: None,
+            transform: None,
+            modifiers: egui::Modifiers::NONE,
             onion: false,
             looping: true,
             pressure: None,
@@ -449,6 +465,10 @@ fn implemented(command: &str) -> bool {
             | "file.shortcuts"
             | "file.pressure"
             | "edit.transform.puppet"
+            | "edit.transform.scale"
+            | "edit.transform.free"
+            | "edit.transform.distort"
+            | "edit.transform.perspective"
             | "story.manager"
             | "story.order"
             | "story.open_page"
@@ -1521,6 +1541,10 @@ impl SuePaint {
             "file.preferences" => cx.request(ShellRequest::OpenSettings(None)),
             "file.shortcuts" => cx.request(ShellRequest::OpenSettings(Some("keymaps".to_owned()))),
             "edit.transform.puppet" => self.start_warp(cx),
+            "edit.transform.scale" => self.start_transform(cx, false),
+            "edit.transform.free" | "edit.transform.distort" | "edit.transform.perspective" => {
+                self.start_transform(cx, true);
+            }
             "file.pressure" => {
                 self.dialog = Some(Dialog::Pressure(PressureDialog::new(self.pen_curve)));
             }
@@ -2015,6 +2039,7 @@ impl SuePaint {
             || self.dialog.is_some()
             || self.menubar.is_open()
             || self.warp.is_some()
+            || self.transform.is_some()
         {
             return;
         }
