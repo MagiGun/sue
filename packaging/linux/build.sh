@@ -35,7 +35,7 @@ stage() {
   local prefix="$1"
   install -Dm755 "$binary" "$prefix/usr/bin/sue"
   install -Dm644 packaging/linux/sue.desktop "$prefix/usr/share/applications/sue.desktop"
-  install -Dm644 assets/icons/sue_icon.png "$prefix/usr/share/icons/hicolor/512x512/apps/sue.png"
+  install -Dm644 assets/icons/sue_icon_512.png "$prefix/usr/share/icons/hicolor/512x512/apps/sue.png"
   install -Dm644 assets/icons/sue_icon.svg "$prefix/usr/share/icons/hicolor/scalable/apps/sue.svg"
   install -Dm644 README.md "$prefix/usr/share/doc/sue/README.md"
   install -Dm644 LICENSE "$prefix/usr/share/doc/sue/LICENSE"

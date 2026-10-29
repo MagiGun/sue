@@ -1,5 +1,7 @@
 # Builds every package for every system and publishes them as a GitHub
-# release. Push a tag such as v1.0.0, or run it by hand for a draft.
+# release. Push a tag such as v1.0.0 to publish one; or run it by hand
+# (Actions, Release, Run workflow) with a version: that makes a draft
+# release whose tag is made at the commit it ran on once you publish it.
 #
 # Android releases are signed with the key in the ANDROID_KEYSTORE secret
 # (base64 of the keystore), ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS;
@@ -12,6 +14,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "The release's tag, such as v1.0.0"
+        required: true
+        default: v1.0.0
 
 permissions:
   contents: write
@@ -167,6 +174,10 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          # A tag push names the release; a run by hand names it with its
+          # version and tags the commit it ran on.
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+          target_commitish: ${{ github.sha }}
           draft: ${{ github.event_name == 'workflow_dispatch' }}
           generate_release_notes: true
-          name: Sue ${{ github.ref_name }}
+          name: Sue ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
