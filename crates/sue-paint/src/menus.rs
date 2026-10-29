@@ -498,6 +498,10 @@ pub fn menus() -> Vec<Menu> {
                 sub(
                     "Render",
                     vec![
+                        act("Focus Lines...", "filter.focus_lines"),
+                        act("Speed Lines...", "filter.speed_lines"),
+                        act("Screentone...", "filter.tone"),
+                        SEP,
                         act("Perlin Noise...", "filter.perlin"),
                         act("Clouds", "filter.clouds"),
                     ],

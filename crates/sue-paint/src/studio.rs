@@ -448,6 +448,12 @@ fn implemented(command: &str) -> bool {
             | "story.delete"
             | "story.export_page"
             | "story.export_pages"
+            | "filter.focus_lines"
+            | "filter.speed_lines"
+            | "filter.tone"
+            | "layer.new.tone"
+            | "layer.new.frame"
+            | "layer.new.balloon"
     ) || TOOL_KEYS.iter().any(|(known, _, _)| *known == command)
 }
 
@@ -1587,6 +1593,55 @@ impl SuePaint {
             "filter.gaussian" => self.filter_dialog(cx, Filter::GaussianBlur { radius: 4.0 }),
             "filter.mosaic" => self.filter_dialog(cx, Filter::Mosaic { size: 12 }),
             "filter.noise" => self.filter_dialog(cx, Filter::Noise { amount: 0.2 }),
+            "filter.focus_lines" => {
+                let rgb = self.drawing_color();
+                self.filter_dialog(
+                    cx,
+                    Filter::FocusLines {
+                        count: 160,
+                        gap: 0.45,
+                        width: 5.0,
+                        jitter: 0.4,
+                        seed: 1,
+                        rgb,
+                    },
+                );
+            }
+            "filter.speed_lines" => {
+                let rgb = self.drawing_color();
+                self.filter_dialog(
+                    cx,
+                    Filter::SpeedLines {
+                        count: 90,
+                        angle: 0.0,
+                        width: 4.0,
+                        jitter: 0.5,
+                        seed: 1,
+                        rgb,
+                    },
+                );
+            }
+            "filter.tone" => {
+                let rgb = self.drawing_color();
+                self.filter_dialog(
+                    cx,
+                    Filter::Tone {
+                        density: 0.2,
+                        cell: 8.0,
+                        angle: 45.0,
+                        rgb,
+                    },
+                );
+            }
+            "layer.new.tone" => {
+                // A new layer of tone, in the selection if there is one.
+                self.run("layer.new", cx);
+                self.run("filter.tone", cx);
+            }
+            "layer.new.frame" => {
+                self.dialog = Some(Dialog::Frame(crate::comic::FrameSpec::default()));
+            }
+            "layer.new.balloon" => self.add_balloon_layer(cx),
             "layer.new" | "layer.new.fill" => {
                 let Some(picture) = self.picture() else {
                     return;

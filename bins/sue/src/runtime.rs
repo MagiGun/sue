@@ -1457,6 +1457,163 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_makes_manga_frames_balloons_and_focus_lines() {
+        let (mut runtime, root) = runtime("paint-manga");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let command = |runtime: &mut Runtime, name: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: name.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.studio_focus())
+            .unwrap();
+        let layer_of = |runtime: &Runtime, class: &str| {
+            let arena = &runtime.engine.world.arena;
+            sue_paint::doc::layers(arena, picture)
+                .into_iter()
+                .find(|info| {
+                    arena
+                        .get_by_id(info.id)
+                        .is_ok_and(|entity| entity.class() == class)
+                })
+                .map(|info| info.id)
+        };
+        let text_of = |runtime: &Runtime, layer, key| {
+            runtime
+                .engine
+                .world
+                .arena
+                .get_by_id(layer)
+                .ok()
+                .and_then(|entity| {
+                    entity
+                        .property(key)
+                        .and_then(sue_core::Value::as_str)
+                        .map(str::to_owned)
+                })
+                .unwrap_or_default()
+        };
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let drag = |step: &mut dyn FnMut(&mut Runtime, Vec<egui::Event>),
+                    runtime: &mut Runtime,
+                    from,
+                    to| {
+            step(
+                runtime,
+                vec![egui::Event::PointerMoved(from), press(from, true)],
+            );
+            step(runtime, vec![egui::Event::PointerMoved(to)]);
+            step(runtime, vec![press(to, false)]);
+        };
+        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+
+        // A frame border folder of the manga layout: five panels.
+        command(&mut runtime, "layer.new.frame");
+        step(&mut runtime, Vec::new());
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let frame = layer_of(&runtime, sue_paint::manga::FRAME).expect("a frame layer");
+        let panels = |runtime: &Runtime| {
+            sue_paint::manga::decode_panels(&text_of(runtime, frame, sue_paint::manga::PANELS))
+                .len()
+        };
+        assert_eq!(panels(&runtime), 5);
+        // The Frame Border tool's division cuts the middle panel in two.
+        step(&mut runtime, vec![key(egui::Key::U, plain)]);
+        step(&mut runtime, vec![key(egui::Key::U, plain)]);
+        step(&mut runtime, vec![key(egui::Key::Period, plain)]);
+        let depth = runtime.engine.history.depth();
+        drag(
+            &mut step,
+            &mut runtime,
+            middle - vec2(0.0, 30.0),
+            middle + vec2(0.0, 30.0),
+        );
+        assert_eq!(panels(&runtime), 6, "divided");
+        assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        assert_eq!(panels(&runtime), 5, "undone");
+
+        // A balloon and its tail on a balloon layer.
+        step(&mut runtime, vec![key(egui::Key::T, plain)]);
+        step(&mut runtime, vec![key(egui::Key::T, plain)]);
+        drag(
+            &mut step,
+            &mut runtime,
+            middle - vec2(40.0, 30.0),
+            middle + vec2(40.0, 30.0),
+        );
+        let balloon = layer_of(&runtime, sue_paint::manga::BALLOON).expect("a balloon layer");
+        let shapes = |runtime: &Runtime| {
+            sue_paint::manga::decode_shapes(&text_of(runtime, balloon, sue_paint::manga::SHAPES))
+                .len()
+        };
+        assert_eq!(shapes(&runtime), 1);
+        step(&mut runtime, vec![key(egui::Key::Period, plain)]);
+        drag(&mut step, &mut runtime, middle, middle + vec2(70.0, 60.0));
+        assert_eq!(shapes(&runtime), 2, "a tail");
+
+        // Focus lines on a new layer, applied as one step.
+        command(&mut runtime, "layer.new");
+        step(&mut runtime, Vec::new());
+        let depth = runtime.engine.history.depth();
+        command(&mut runtime, "filter.focus_lines");
+        step(&mut runtime, Vec::new());
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        assert_eq!(runtime.engine.history.depth(), depth + 1);
+        let arena = &runtime.engine.world.arena;
+        let top = sue_paint::doc::layers(arena, picture).last().unwrap().id;
+        let raster = sue_paint::doc::raster(arena, top).unwrap();
+        let inked = raster
+            .bytes()
+            .unwrap()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel[3] > 128)
+            .count();
+        assert!(inked > 10_000, "focus lines: {inked} pixels");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_saves_as_a_project_or_any_picture_type() {
         let (mut runtime, root) = runtime("paint-save-as");
         let ctx = egui::Context::default();

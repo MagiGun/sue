@@ -144,8 +144,6 @@ impl Tool {
             Self::Decoration
                 | Self::Blend
                 | Self::Text
-                | Self::Balloon
-                | Self::Frame
                 | Self::Ruler
                 | Self::CorrectLine
                 | Self::Operation
@@ -424,11 +422,22 @@ impl Tool {
                     SubTool::new(self, "Filled Ellipse", 4, line),
                 ]
             }
+            Self::Frame => vec![
+                plain("Rectangle Frame", 0),
+                plain("Frame Border Division", 1),
+            ],
+            Self::Balloon => {
+                let outline = tip(3.0, |t| {
+                    t.size_by.pressure = false;
+                });
+                vec![
+                    SubTool::new(self, "Ellipse Balloon", 0, outline),
+                    SubTool::new(self, "Balloon Tail", 1, outline),
+                ]
+            }
             Self::Decoration
             | Self::Blend
             | Self::Text
-            | Self::Balloon
-            | Self::Frame
             | Self::Ruler
             | Self::CorrectLine
             | Self::Operation => vec![plain(self.label(), 0)],

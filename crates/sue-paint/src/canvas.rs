@@ -551,6 +551,15 @@ impl SuePaint {
                     line: modifiers.shift,
                 });
             }
+            Tool::Frame | Tool::Balloon => {
+                self.gesture = Some(Gesture::Shape {
+                    tool,
+                    sub: Box::new(sub),
+                    op,
+                    from: p,
+                    to: p,
+                });
+            }
             Tool::Figure | Tool::Gradient => {
                 if let Err(error) = self.paintable(&cx.world.arena) {
                     cx.fail(error);
@@ -829,6 +838,8 @@ impl SuePaint {
                 }
                 Tool::Figure => self.figure(from, to, &sub, size, cx),
                 Tool::Gradient => self.gradient(from, to, &sub, cx),
+                Tool::Frame => self.frame_drag(from, to, &sub, cx),
+                Tool::Balloon => self.balloon_drag(from, to, &sub, cx),
                 _ => {}
             },
             Gesture::Lasso { op, points } => {
@@ -1505,14 +1516,17 @@ impl SuePaint {
                         painter.circle_stroke(screen([from.x, from.y]), 4.0, outline);
                         painter.circle_stroke(screen([to.x, to.y]), 4.0, outline);
                     }
-                    Tool::Figure if sub.mode == 0 => {
+                    Tool::Figure | Tool::Frame | Tool::Balloon
+                        if (tool == &Tool::Figure && sub.mode == 0) || sub.mode == 1 =>
+                    {
                         painter.line_segment(
                             [screen([from.x, from.y]), screen([to.x, to.y])],
                             outline,
                         );
                     }
                     _ if (tool == &Tool::Select && sub.mode == 1)
-                        || (tool == &Tool::Figure && matches!(sub.mode, 2 | 4)) =>
+                        || (tool == &Tool::Figure && matches!(sub.mode, 2 | 4))
+                        || (tool == &Tool::Balloon && sub.mode == 0) =>
                     {
                         let points = ellipse_points(*from, *to).into_iter().map(screen).collect();
                         painter.add(Shape::closed_line(points, outline));

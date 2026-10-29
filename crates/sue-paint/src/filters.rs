@@ -68,6 +68,48 @@ pub enum Filter {
         /// The color left behind.
         rgb: [u8; 3],
     },
+    /// Manga focus lines toward the middle (Clip Studio Paint's saturated
+    /// lines).
+    FocusLines {
+        /// How many lines.
+        count: u32,
+        /// The clear middle, 0 to 1 of the way out.
+        gap: f32,
+        /// Line width at the base, in pixels.
+        width: f32,
+        /// How much the lengths vary, 0 to 1.
+        jitter: f32,
+        /// A different scatter for each number.
+        seed: u32,
+        /// The ink.
+        rgb: [u8; 3],
+    },
+    /// Manga speed lines, parallel (Clip Studio Paint's streamlines).
+    SpeedLines {
+        /// How many lines.
+        count: u32,
+        /// Their direction in degrees.
+        angle: f32,
+        /// Line width in the middle, in pixels.
+        width: f32,
+        /// How much the lengths vary, 0 to 1.
+        jitter: f32,
+        /// A different scatter for each number.
+        seed: u32,
+        /// The ink.
+        rgb: [u8; 3],
+    },
+    /// Screentone dots.
+    Tone {
+        /// How much of the area the dots cover, 0 to 1.
+        density: f32,
+        /// Dot spacing in pixels.
+        cell: f32,
+        /// The screen's angle in degrees.
+        angle: f32,
+        /// The ink.
+        rgb: [u8; 3],
+    },
 }
 
 impl Filter {
@@ -86,6 +128,9 @@ impl Filter {
             Self::Noise { .. } => "Add Noise",
             Self::Recolor { .. } => "Change Color to Drawing Color",
             Self::BrightnessToOpacity { .. } => "Convert Brightness to Opacity",
+            Self::FocusLines { .. } => "Focus Lines",
+            Self::SpeedLines { .. } => "Speed Lines",
+            Self::Tone { .. } => "Screentone",
         }
     }
 
@@ -111,6 +156,41 @@ impl Filter {
                 }
             }
             Self::Mosaic { size } => mosaic(pixels, width, height, size.max(1)),
+            Self::FocusLines {
+                count,
+                gap,
+                width: line,
+                jitter,
+                seed,
+                rgb,
+            } => crate::manga::focus_lines(
+                pixels,
+                width,
+                height,
+                [width as f32 / 2.0, height as f32 / 2.0],
+                count,
+                gap,
+                line,
+                jitter,
+                seed,
+                rgb,
+            ),
+            Self::SpeedLines {
+                count,
+                angle,
+                width: line,
+                jitter,
+                seed,
+                rgb,
+            } => crate::manga::speed_lines(
+                pixels, width, height, count, angle, line, jitter, seed, rgb,
+            ),
+            Self::Tone {
+                density,
+                cell,
+                angle,
+                rgb,
+            } => crate::manga::tone(pixels, width, height, density, cell, angle, rgb),
             _ => {
                 for (index, pixel) in pixels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                     *pixel = self.point(*pixel, index as u32 % width, index as u32 / width);
@@ -195,7 +275,12 @@ impl Filter {
                 let luma = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
                 return [color[0], color[1], color[2], byte(unit(a) * (1.0 - luma))];
             }
-            Self::GaussianBlur { .. } | Self::Sharpen { .. } | Self::Mosaic { .. } => rgb,
+            Self::GaussianBlur { .. }
+            | Self::Sharpen { .. }
+            | Self::Mosaic { .. }
+            | Self::FocusLines { .. }
+            | Self::SpeedLines { .. }
+            | Self::Tone { .. } => rgb,
         };
         [byte(out[0]), byte(out[1]), byte(out[2]), a]
     }

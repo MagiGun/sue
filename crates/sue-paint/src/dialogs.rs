@@ -319,6 +319,7 @@ pub(crate) enum Dialog {
     Shortcuts,
     Pressure(PressureDialog),
     Pages(PagesDialog),
+    Frame(crate::comic::FrameSpec),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -376,6 +377,7 @@ impl SuePaint {
             Dialog::Filter(filter) => (filter.filter.label(), vec2(400.0, 250.0)),
             Dialog::Shortcuts => ("Keyboard Shortcuts", vec2(470.0, 560.0)),
             Dialog::Pages(_) => ("Page Manager", vec2(820.0, 620.0)),
+            Dialog::Frame(_) => ("New Frame Border Folder", vec2(420.0, 330.0)),
             Dialog::Pressure(pressure) => (
                 "Adjust pen pressure",
                 vec2(560.0, if pressure.show_graph { 520.0 } else { 330.0 }),
@@ -418,6 +420,7 @@ impl SuePaint {
                                 outcome = pressure_ui(ui, pressure, theme)
                             }
                             Dialog::Pages(pages) => outcome = self.pages_ui(ui, pages, cx, theme),
+                            Dialog::Frame(frame) => outcome = frame_ui(ui, frame, theme),
                             Dialog::Shortcuts => {
                                 egui::ScrollArea::vertical().max_height(size.y - 90.0).show(
                                     ui,
@@ -538,6 +541,7 @@ impl SuePaint {
                     )));
                 }
             }
+            (Dialog::Frame(frame), Outcome::Ok) => self.add_frame_layer(cx, frame),
             (Dialog::New(new), Outcome::Ok) => {
                 let spec = new.spec();
                 match new.project {
@@ -555,11 +559,61 @@ impl SuePaint {
                 }
             }
             (
-                Dialog::New(_) | Dialog::Shortcuts | Dialog::Pressure(_) | Dialog::Pages(_),
+                Dialog::New(_)
+                | Dialog::Shortcuts
+                | Dialog::Pressure(_)
+                | Dialog::Pages(_)
+                | Dialog::Frame(_),
                 Outcome::Cancel | Outcome::Ok,
             ) => {}
         }
     }
+}
+
+/// New Frame Border Folder: a layout, the border and the gaps.
+fn frame_ui(ui: &mut Ui, frame: &mut crate::comic::FrameSpec, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    egui::Grid::new("sue-paint-frame")
+        .num_columns(2)
+        .spacing(vec2(12.0, 8.0))
+        .show(ui, |ui| {
+            label(ui, "Layout:", theme);
+            egui::ComboBox::from_id_salt("sue-paint-frame-layout")
+                .selected_text(crate::manga::LAYOUTS[frame.layout].0)
+                .width(220.0)
+                .show_ui(ui, |ui| {
+                    for (index, (name, _)) in crate::manga::LAYOUTS.iter().enumerate() {
+                        ui.selectable_value(&mut frame.layout, index, *name);
+                    }
+                });
+            ui.end_row();
+            label(ui, "Border width:", theme);
+            ui.add(egui::Slider::new(&mut frame.border, 0.0..=40.0).suffix(" px"));
+            ui.end_row();
+            label(ui, "Margin:", theme);
+            ui.add(egui::Slider::new(&mut frame.margin, 0.0..=400.0).suffix(" px"));
+            ui.end_row();
+            label(ui, "Gap across:", theme);
+            ui.add(egui::Slider::new(&mut frame.gap, 0.0..=200.0).suffix(" px"));
+            ui.end_row();
+            label(ui, "Gap down:", theme);
+            ui.add(egui::Slider::new(&mut frame.gap_y, 0.0..=200.0).suffix(" px"));
+            ui.end_row();
+        });
+    ui.label(
+        RichText::new("Layers under the frame show only inside the panels. The Frame Border tool draws more panels and divides them.")
+            .size(theme.small_size)
+            .color(theme.muted),
+    );
+    ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
+        if ui.button("OK").clicked() {
+            outcome = Outcome::Ok;
+        }
+        if ui.button("Cancel").clicked() {
+            outcome = Outcome::Cancel;
+        }
+    });
+    outcome
 }
 
 /// Pen Pressure Settings: the words, the buttons, the pad and the graph.
@@ -1014,6 +1068,66 @@ fn filter_ui(ui: &mut Ui, dialog: &mut FilterDialog, theme: &Theme) -> Outcome {
         }
         Filter::Sharpen { amount } => {
             ui.add(egui::Slider::new(amount, 0.0..=3.0).text("Amount"));
+        }
+        Filter::FocusLines {
+            count,
+            gap,
+            width,
+            jitter,
+            seed,
+            ..
+        } => {
+            ui.add(
+                egui::Slider::new(count, 8..=600)
+                    .logarithmic(true)
+                    .text("Lines"),
+            );
+            ui.add(egui::Slider::new(gap, 0.0..=0.95).text("Clear middle"));
+            ui.add(
+                egui::Slider::new(width, 0.5..=40.0)
+                    .logarithmic(true)
+                    .text("Width (px)"),
+            );
+            ui.add(egui::Slider::new(jitter, 0.0..=1.0).text("Length variation"));
+            ui.add(egui::Slider::new(seed, 1..=999).text("Scatter"));
+        }
+        Filter::SpeedLines {
+            count,
+            angle,
+            width,
+            jitter,
+            seed,
+            ..
+        } => {
+            ui.add(
+                egui::Slider::new(count, 4..=600)
+                    .logarithmic(true)
+                    .text("Lines"),
+            );
+            ui.add(egui::Slider::new(angle, -180.0..=180.0).text("Angle"));
+            ui.add(
+                egui::Slider::new(width, 0.5..=40.0)
+                    .logarithmic(true)
+                    .text("Width (px)"),
+            );
+            ui.add(egui::Slider::new(jitter, 0.0..=1.0).text("Length variation"));
+            ui.add(egui::Slider::new(seed, 1..=999).text("Scatter"));
+        }
+        Filter::Tone {
+            density,
+            cell,
+            angle,
+            ..
+        } => {
+            let mut percent = *density * 100.0;
+            if ui
+                .add(egui::Slider::new(&mut percent, 1.0..=90.0).text("Density (%)"))
+                .changed()
+            {
+                *density = percent / 100.0;
+            }
+            ui.add(egui::Slider::new(cell, 3.0..=60.0).text("Dot spacing (px)"));
+            ui.add(egui::Slider::new(angle, 0.0..=90.0).text("Angle"));
         }
         Filter::Invert | Filter::Recolor { .. } | Filter::BrightnessToOpacity { .. } => {}
     }
