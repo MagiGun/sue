@@ -8,6 +8,7 @@
 //! | --- | --- |
 //! | [`TextMarks`] | word processing, notes, markdown, novels, LaTeX, layout |
 //! | [`manuscript`] | novels, scripts, theses, manuals, e-books, outlines |
+//! | [`changes`] | tracked changes in any text: who inserted and deleted what |
 //! | [`comments`] | comments and replies on any text |
 //! | [`contents`] | tables of contents in any text, made from its headings |
 //! | [`Table`] | spreadsheets, databases, CSV, schedules, bills of materials |
@@ -23,6 +24,7 @@
 //! way (see `HUMANZ.md` §8), and register it with [`register`].
 
 mod blend;
+pub mod changes;
 pub mod comments;
 pub mod contents;
 mod curve;

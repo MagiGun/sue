@@ -18,6 +18,11 @@ use crate::style::{
 };
 use crate::tables::{TableBlock, TableSource, lay_table};
 
+/// The color of text a tracked change inserted.
+pub const CHANGE_INSERTED: Color32 = Color32::from_rgb(0x1f, 0x6f, 0xc4);
+/// The color of text a tracked change deleted.
+pub const CHANGE_DELETED: Color32 = Color32::from_rgb(0xc0, 0x39, 0x2b);
+
 /// Screen pixels per point at 100% zoom (a 96 dpi screen).
 pub const PX_PER_PT: f32 = 96.0 / 72.0;
 
@@ -295,6 +300,12 @@ pub(crate) fn format(
     {
         text = color(rgb);
     }
+    // Tracked changes show in their own colors, as in Word.
+    if run.deleted.is_some() {
+        text = CHANGE_DELETED;
+    } else if run.inserted.is_some() {
+        text = CHANGE_INSERTED;
+    }
     let mut background = Color32::TRANSPARENT;
     if let Some(rgb) = run.highlight {
         background = color(rgb);
@@ -314,12 +325,20 @@ pub(crate) fn format(
         color: text,
         background,
         italics: fake_italic,
-        underline: if look.underline || run.underline || run.link.is_some() {
+        underline: if look.underline
+            || run.underline
+            || run.link.is_some()
+            || run.inserted.is_some()
+        {
             stroke
         } else {
             Stroke::NONE
         },
-        strikethrough: if run.strike { stroke } else { Stroke::NONE },
+        strikethrough: if run.strike || run.deleted.is_some() {
+            stroke
+        } else {
+            Stroke::NONE
+        },
         valign: match run.script {
             1 => egui::Align::TOP,
             -1 => egui::Align::BOTTOM,

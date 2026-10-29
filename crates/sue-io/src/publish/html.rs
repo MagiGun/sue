@@ -108,6 +108,19 @@ pub(crate) fn para_html(
         if look.strike {
             piece = format!("<s>{piece}</s>");
         }
+        if let Some(change) = &look.deleted {
+            piece = format!(
+                "<del title=\"{}, {}\">{piece}</del>",
+                escape(&change.author),
+                escape(&change.date)
+            );
+        } else if let Some(change) = &look.inserted {
+            piece = format!(
+                "<ins title=\"{}, {}\">{piece}</ins>",
+                escape(&change.author),
+                escape(&change.date)
+            );
+        }
         match look.script {
             1 => piece = format!("<sup>{piece}</sup>"),
             -1 => piece = format!("<sub>{piece}</sub>"),

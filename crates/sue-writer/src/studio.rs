@@ -773,6 +773,95 @@ impl SueWriter {
         let _ = cx.apply(ArenaEdit(step));
     }
 
+    /// `true` while the project (or the open file) records its changes.
+    pub(crate) fn tracking(&self, cx: &AppletContext<'_>) -> bool {
+        self.project
+            .or(self.editor.current())
+            .and_then(|id| cx.arena().get_by_id(id).ok())
+            .and_then(|entity| entity.property(sue_model::changes::TRACK))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
+    /// Selects the next (or previous) tracked change after the caret.
+    pub(crate) fn next_change(&mut self, cx: &mut AppletContext<'_>, backward: bool) {
+        let changes = self.editor.changes();
+        let here = (self.editor.caret().doc, self.editor.selection().start);
+        let pick = if backward {
+            changes
+                .iter()
+                .rev()
+                .find(|(doc, tracked)| (*doc, tracked.range.start) < here)
+                .or(changes.last())
+        } else {
+            changes
+                .iter()
+                .find(|(doc, tracked)| (*doc, tracked.range.start) > here)
+                .or(changes.first())
+        };
+        let Some((doc, tracked)) = pick.cloned() else {
+            cx.notify("No changes");
+            return;
+        };
+        if let Some(id) = self.editor.docs().get(doc).copied() {
+            self.editor.select(id, tracked.range);
+            self.editor.focus();
+        }
+    }
+
+    /// Accepts (`keep`) or rejects the change at the caret or the ones the
+    /// selection touches, or with `all` every change shown, as one undo
+    /// step.
+    pub(crate) fn settle_changes(&mut self, cx: &mut AppletContext<'_>, keep: bool, all: bool) {
+        self.editor.commit(cx);
+        let label = match (keep, all) {
+            (true, false) => "Accept Change",
+            (false, false) => "Reject Change",
+            (true, true) => "Accept All Changes",
+            (false, true) => "Reject All Changes",
+        };
+        let mut batch = sue_core::txn::Batch::new(label);
+        let selection = self.editor.selection();
+        let current = self.editor.current();
+        let mut count = 0;
+        for doc in self.editor.docs().to_vec() {
+            if !all && Some(doc) != current {
+                continue;
+            }
+            let Some(text) = sue_type::edit::text_of(cx.arena(), doc).map(str::to_owned) else {
+                continue;
+            };
+            let marks = sue_type::edit::marks_of(cx.arena(), doc);
+            let range = if all {
+                0..text.len()
+            } else {
+                selection.clone()
+            };
+            let before = sue_model::changes::changes(&marks).len();
+            let (text, marks) = if keep {
+                sue_model::changes::accept(&text, &marks, range)
+            } else {
+                sue_model::changes::reject(&text, &marks, range)
+            };
+            let settled = before - sue_model::changes::changes(&marks).len();
+            if settled == 0 {
+                continue;
+            }
+            count += settled;
+            if let Some(step) = project::replace_all(cx.arena(), doc, &text, marks, label) {
+                batch.push(Box::new(step));
+            }
+        }
+        if count == 0 {
+            cx.notify("No changes here");
+        } else if self.apply(cx, batch) {
+            cx.notify(format!(
+                "{} {count}",
+                if keep { "Accepted" } else { "Rejected" }
+            ));
+        }
+    }
+
     /// Selects the next (or previous) comment's words after the caret.
     pub(crate) fn next_comment(&mut self, cx: &mut AppletContext<'_>, backward: bool) {
         let comments = self.editor.comments();
@@ -897,6 +986,37 @@ impl SueWriter {
                 if self.editor.current().is_some() {
                     self.dialog = Some(Dialog::Comment(String::new()));
                 }
+            }
+            "review.track" => {
+                let target = self.project.or(self.editor.current());
+                if let Some(target) = target {
+                    let on = !self.tracking(cx);
+                    let step = sue_core::txn::Batch::new(if on {
+                        "Record Changes"
+                    } else {
+                        "Stop Recording Changes"
+                    })
+                    .then(project::set(
+                        target,
+                        sue_model::changes::TRACK,
+                        on.then_some(Value::Bool(true)),
+                    ));
+                    if cx.apply(ArenaEdit(step)).is_ok() {
+                        cx.notify(if on {
+                            "Recording changes"
+                        } else {
+                            "No longer recording changes"
+                        });
+                    }
+                }
+            }
+            "review.next_change" | "review.previous_change" => {
+                self.next_change(cx, command == "review.previous_change");
+            }
+            "review.accept" | "review.reject" | "review.accept_all" | "review.reject_all" => {
+                let keep = command.starts_with("review.accept");
+                let all = command.ends_with("_all");
+                self.settle_changes(cx, keep, all);
             }
             "review.comments" => {
                 let shown = self.inspector && self.comments;
@@ -1502,6 +1622,7 @@ impl SueWriter {
             (alt, Key::Num0, "style.body"),
             (alt, Key::F, "insert.footnote"),
             (alt, Key::C, "review.comment"),
+            (shift, Key::C, "review.track"),
             (command, Key::Enter, "insert.page_break"),
             (command, Key::K, "insert.link"),
             (command, Key::F, "edit.find"),

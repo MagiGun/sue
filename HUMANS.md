@@ -569,6 +569,16 @@ Comments carry the project's author (Project Settings). They go into Word
 and OpenDocument files as real comments with their replies, and into web
 pages as notes on the words.
 
+**Track changes** (Review, Track Changes, Record Changes, `Ctrl+Shift+C`)
+keeps every edit for someone to look over: what you type is underlined in
+blue, and what you delete stays, struck through in red, instead of
+disappearing (deleting something you typed while recording takes it out for
+good). Previous and Next Change step through them; Accept Change keeps one
+and Reject Change undoes it, or Accept All and Reject All do every one at
+once. Word files keep the changes with who made them and when, and web pages
+show them; PDFs and the other formats print the text with every change
+accepted.
+
 A **table of contents** comes from Insert, Table of Contents: give it a
 title and how many heading levels it lists. It shows every heading with its
 page and a dotted leader, set in by level, and it keeps up by itself as you

@@ -340,9 +340,18 @@ fn comments(arena: &Arena, sections: &[Section]) -> HashMap<EntityId, sue_model:
 /// # Errors
 /// If the format is unknown or a PDF font cannot be read.
 pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>, String> {
-    let sections = sections(arena, options, look);
+    let mut sections = sections(arena, options, look);
     if sections.is_empty() {
         return Err("there is nothing to compile: every document is left out".to_owned());
+    }
+    // Word and web pages show tracked changes; the rest print the text as
+    // it is with every change accepted.
+    if !matches!(options.format.as_str(), "docx" | "html") {
+        for section in &mut sections {
+            let (text, marks) = sue_model::changes::accepted(&section.text, &section.marks);
+            section.text = text;
+            section.marks = marks;
+        }
     }
     if options.format == "pdf" {
         let docs: Vec<PrintDoc<'_>> = sections

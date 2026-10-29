@@ -207,6 +207,20 @@ pub fn menus() -> Vec<Menu> {
                 item("Delete All Comments", "review.delete_all_comments"),
                 MenuItem::Separator,
                 item("Comments", "review.comments"),
+                MenuItem::sub(
+                    "Track Changes",
+                    vec![
+                        item("Record Changes", "review.track").key("Ctrl+Shift+C"),
+                        MenuItem::Separator,
+                        item("Previous Change", "review.previous_change"),
+                        item("Next Change", "review.next_change"),
+                        item("Accept Change", "review.accept"),
+                        item("Reject Change", "review.reject"),
+                        MenuItem::Separator,
+                        item("Accept All", "review.accept_all"),
+                        item("Reject All", "review.reject_all"),
+                    ],
+                ),
             ],
         ),
         Menu::new(

@@ -13,6 +13,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Track changes in Sue Writer (Review, Track Changes): typed text is
+  underlined, deleted text struck through, until each change is accepted
+  or rejected. Word files keep the changes with their authors.
 - Comments in Sue Writer (Review, New Comment, `Ctrl+Alt+C`): shown beside
   the text with their replies, to reply to, resolve or delete. They go into
   Word and OpenDocument files as comments.
