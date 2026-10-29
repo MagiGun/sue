@@ -161,3 +161,6 @@ kind-picture = Imagen
 kind-sound = Sonido
 kind-text-file = Archivo de texto
 kind-other-file = Otro archivo
+files-converted-failed-into-2 = { $count } archivos convertidos, { $failed } fallaron, en { $value }
+show-it-in = Mostrarlo en { $manager }
+show-result-when-done = Mostrar el resultado en { $manager } al terminar

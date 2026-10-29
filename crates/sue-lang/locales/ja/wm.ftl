@@ -69,3 +69,30 @@ pick-a-color = 色を選ぶ
 none = なし
 curve-pen-pressure = 筆圧
 curve-output = 出力
+
+## ハブの一覧
+
+ago-just-now = たった今
+ago-yesterday = 昨日
+ago-minutes = { $count } 分前
+ago-hours = { $count } 時間前
+ago-days = { $count } 日前
+click-to-show-it = {"。"}クリックで表示
+discard = 破棄
+really-discard = 本当に破棄
+recover = 復元
+files-projects-you-open-save-show = 開いたり保存したりしたファイルとプロジェクトがここに表示されます。
+in-folder = { $folder } の { $lead }
+kept-never-saved = { $value } に保管、未保存
+kept-newer-than = { $value } に保管、{ $value2 } より新しい
+open-recent = 最近使ったものを開く
+opened = 開いた
+projects-you-save-sue-menu-project = 保存したプロジェクト (Sue メニュー、プロジェクト、プロジェクトを保存) がここに表示されます。
+recent = 最近
+saved = { $name }{ $note }を保存しました{ $folder }{ $click }
+saved-2 = 保存
+saved-in-folder = {" "}({ $folder })
+saved-projects = 保存したプロジェクト
+unsaved-work = 未保存の作業
+untitled = 無題
+work-sue-keeps-you-before-saved = 保存前に Sue が保管している作業がここに表示されます。復元するか破棄できます。

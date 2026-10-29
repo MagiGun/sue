@@ -82,3 +82,4 @@ image-viewer-save-as-ellipsis = 画像ビューアー: 名前を付けて保存.
 image-viewer-re-encode-as-jpeg-ellipsis = 画像ビューアー: JPEG XL で再エンコード...
 image-viewer-rotate-right = 画像ビューアー: 右に回転
 image-viewer-crop = 画像ビューアー: 切り抜き
+cannot-write-2 = { $value } を書き込めません: { $error }
