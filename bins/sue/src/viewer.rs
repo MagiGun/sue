@@ -43,21 +43,23 @@ pub fn is_picture(entity: &Entity) -> bool {
 /// The viewer's menus, in Sue's top bar.
 fn menus() -> Vec<Menu> {
     let act = MenuItem::action;
+    let mut file = vec![
+        act("Open Picture...", "viewer.open").key("Ctrl+O"),
+        MenuItem::Separator,
+        act("Save As...", "viewer.save_as"),
+        act("Save Over the File...", "viewer.save"),
+        act("Re-encode as JPEG XL...", "viewer.reencode"),
+    ];
+    // Phones and tablets have no file manager to show the file in.
+    if sue_platform::file_manager().is_some() {
+        file.extend([MenuItem::Separator, act("Show in Folder", "viewer.show")]);
+    }
+    file.extend([
+        MenuItem::Separator,
+        act("Back to the Hub", "viewer.leave").key("Esc"),
+    ]);
     vec![
-        Menu::new(
-            "File",
-            vec![
-                act("Open Picture...", "viewer.open").key("Ctrl+O"),
-                MenuItem::Separator,
-                act("Save As...", "viewer.save_as"),
-                act("Save Over the File...", "viewer.save"),
-                act("Re-encode as JPEG XL...", "viewer.reencode"),
-                MenuItem::Separator,
-                act("Show in Folder", "viewer.show"),
-                MenuItem::Separator,
-                act("Back to the Hub", "viewer.leave").key("Esc"),
-            ],
-        ),
+        Menu::new("File", file),
         Menu::new(
             "Image",
             vec![

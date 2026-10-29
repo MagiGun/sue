@@ -179,7 +179,8 @@ file (the status bar's "Saved", the Image Viewer's info row and its Save
 over the original question, the Converter's output folder), it names what
 you chose, such as "Picture.png in Download", with its folder where the
 system says it. A phone has no file manager for Sue to show files in, so
-those messages are not clickable there.
+those messages are not clickable there, and Show in Folder and the
+Converter's "show the result" choice are left out.
 
 ### The command palette
 
