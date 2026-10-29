@@ -379,3 +379,28 @@ word-count = { $count ->
    *[other] { $count } words
 }
 word-count-change = { $change } words
+
+## menus.rs
+
+table = Table
+insert-table-ellipsis = Insert Table...
+rows-above = Rows Above
+rows-below = Rows Below
+columns-before = Columns Before
+columns-after = Columns After
+delete = Delete
+rows = Rows
+columns = Columns
+heading-row = Heading Row
+convert = Convert
+text-to-table = Text to Table
+table-to-text = Table to Text
+
+## studio.rs
+
+click-in-a-table-first = Click in a table first
+
+## ui.rs
+
+heading-row-repeated-each-page = Heading row, repeated on each page
+insert-table = Insert Table

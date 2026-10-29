@@ -1596,6 +1596,27 @@ very start). Character runs are read once for every view and format
 note's text, on the words it follows) and `embed` (an entity shown on an
 object replacement character).
 
+**Tables in the text (`sue-model::table`, `sue-type::tables`).** A word
+processor's table is an entity of class `sue.text_table` holding the shared
+`Table`, shown where an `embed` mark names it, on an object character in a
+paragraph of its own (as a picture is). `Table::grid` makes every cell an
+empty text so a new table's size is its shape; `sue.table.header_rows`
+(`Int`) and `sue.table.widths` (shares of the line) are properties of the
+entity. `Reshape` inserts and removes rows and columns as one undo step
+with its exact inverse (removed cells and column definitions come back).
+`sue-type::tables` lays a table out as one block whose rows are the block's
+rows, so page view breaks it between rows, and repeats the heading rows at
+the top of each later page; the editor paints it and hit-tests cells, and a
+caret in a cell (`CellCaret`) types there in place, recorded with
+`Typing::hold` so a burst in one cell is one undo step that the shell's
+`Ctrl+Z` sees like any other typing. `Tab` moves on and adds a row in the
+last cell. A copied document, a snapshot and a restored snapshot get copies
+of their tables, so they never share one. The typesetter sets tables for
+print with ruled cells and repeated heading rows; Word (`w:tbl`, a repeated
+`w:tblHeader`), OpenDocument (`table:table` with header rows and column
+widths), HTML and EPUB (`thead` and `tbody`), RTF (`\trowd` rows, `\trhdr`),
+Markdown (pipe tables) and plain text (tab-separated rows) write them.
+
 **Manuscripts (`sue-model::manuscript`).** A long work is an entity of class
 `sue.manuscript` whose ordered `sue.child` relations make a binder of folders
 and documents. Its top folders have a `manuscript.role`: `draft` (what is
@@ -1681,7 +1702,7 @@ text entity (`PublishFormat`). `zip` writes and reads the archives.
 
 | Part | What it holds |
 | --- | --- |
-| Menus | File, Edit, View, Insert, Format, Project, Help, in Sue's top bar after the Sue button; File, Back to the Hub. Each keeps to a dozen entries at most (a test checks): Format groups like LibreOffice Writer's (Text, Text Color, Highlight, Align Text, Line Spacing, Lists, Clear Direct Formatting), View puts the zooms in a submenu |
+| Menus | File, Edit, View, Insert, Format, Table, Project, Help, in Sue's top bar after the Sue button; Table as LibreOffice Writer's (Insert Table, rows and columns, delete, heading row, convert text and tables); File, Back to the Hub. Each keeps to a dozen entries at most (a test checks): Format groups like LibreOffice Writer's (Text, Text Color, Highlight, Align Text, Line Spacing, Lists, Clear Direct Formatting), View puts the zooms in a submenu |
 | Toolbar | what Word's mini toolbar and LibreOffice Writer's single toolbar (26.8) keep at hand: undo, redo, paragraph style, font (every installed family, searchable), size, bold, italic, underline, text color, highlight, alignment, lists, indents; Find at the right; it wraps onto a second row in a narrow window, and a tablet's buttons are 32 points |
 | Binder | the project's folders and documents: click to open (a folder shows its documents one after another), double-click to rename, drag to move (above, below or into a folder), a right-click menu (new, rename, duplicate, include in compile, snapshot, merge, label, status, trash, Open in Sue Paint for pictures) |
 | Text | the editor on pages that fit the window (until you zoom) or one column |

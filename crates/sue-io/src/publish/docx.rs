@@ -323,6 +323,11 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
             if let Some(align) = &para.align {
                 let _ = write!(props, "<w:jc w:val=\"{}\"/>", jc(align));
             }
+            if let Some(table) = book.table(&para) {
+                let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+                body.push_str(&table_xml(table, width));
+                continue;
+            }
             let _ = write!(body, "<w:p><w:pPr>{props}</w:pPr>");
             if let Some(id) = para.embed
                 && let Some(figure) = book.figures.get(&id)
@@ -824,9 +829,58 @@ pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
     Ok((text, marks))
 }
 
+/// A table as WordprocessingML, `width` points across: a grid of the
+/// column widths, single borders, the heading rows marked to repeat.
+fn table_xml(table: &crate::publish::PublishTable, width: f32) -> String {
+    let columns = table.columns().max(1);
+    let widths: Vec<i32> = (0..columns)
+        .map(|column| twips(width * table.share(column)))
+        .collect();
+    let mut out =
+        String::from("<w:tbl><w:tblPr><w:tblW w:w=\"5000\" w:type=\"pct\"/><w:tblBorders>");
+    for side in ["top", "left", "bottom", "right", "insideH", "insideV"] {
+        let _ = write!(
+            out,
+            "<w:{side} w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>"
+        );
+    }
+    out.push_str("</w:tblBorders><w:tblLayout w:type=\"fixed\"/></w:tblPr><w:tblGrid>");
+    for width in &widths {
+        let _ = write!(out, "<w:gridCol w:w=\"{width}\"/>");
+    }
+    out.push_str("</w:tblGrid>");
+    for (row, cells) in table.cells.iter().enumerate() {
+        let heading = row < table.header_rows;
+        out.push_str("<w:tr>");
+        if heading {
+            out.push_str("<w:trPr><w:tblHeader/></w:trPr>");
+        }
+        for (column, width) in widths.iter().enumerate() {
+            let _ = write!(
+                out,
+                "<w:tc><w:tcPr><w:tcW w:w=\"{width}\" w:type=\"dxa\"/></w:tcPr>"
+            );
+            let text = cells.get(column).map_or("", String::as_str);
+            for line in text.split('\n') {
+                out.push_str("<w:p>");
+                if !line.is_empty() {
+                    let bold = if heading { "<w:rPr><w:b/></w:rPr>" } else { "" };
+                    let _ = write!(out, "<w:r>{bold}{}</w:r>", run_text(line));
+                }
+                out.push_str("</w:p>");
+            }
+            out.push_str("</w:tc>");
+        }
+        out.push_str("</w:tr>");
+    }
+    out.push_str("</w:tbl>");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::tests::sample;
+    use super::super::tests::with_table;
     use super::*;
 
     #[test]
@@ -884,5 +938,22 @@ mod tests {
             .unwrap();
         assert_eq!(note.value.as_str(), Some("Or so they say."));
         assert!(from_docx(b"nope").is_err());
+    }
+
+    #[test]
+    fn word_tables_have_their_grid_borders_and_heading_row() {
+        let bytes = to_docx(&with_table());
+        let files: HashMap<String, Vec<u8>> = read_zip(&bytes).unwrap().into_iter().collect();
+        let xml = String::from_utf8(files["word/document.xml"].clone()).unwrap();
+        assert_eq!(
+            xml.matches("<w:tc>").count(),
+            xml.matches("</w:tc>").count()
+        );
+        assert!(xml.contains("<w:tbl>"), "{xml}");
+        assert_eq!(xml.matches("<w:gridCol ").count(), 2);
+        assert_eq!(xml.matches("<w:tr>").count(), 2);
+        assert_eq!(xml.matches("<w:tblHeader/>").count(), 1);
+        assert!(xml.contains("Count &amp; size"));
+        assert!(xml.contains("Bolt &lt;M8&gt;"));
     }
 }

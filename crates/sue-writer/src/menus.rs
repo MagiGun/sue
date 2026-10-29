@@ -154,6 +154,39 @@ pub fn menus() -> Vec<Menu> {
             ],
         ),
         Menu::new(
+            tr!("table"),
+            vec![
+                item(tr!("insert-table-ellipsis"), "table.insert").key("Ctrl+F12"),
+                MenuItem::Separator,
+                MenuItem::sub(
+                    tr!("insert"),
+                    vec![
+                        item(tr!("rows-above"), "table.row_above"),
+                        item(tr!("rows-below"), "table.row_below"),
+                        item(tr!("columns-before"), "table.column_left"),
+                        item(tr!("columns-after"), "table.column_right"),
+                    ],
+                ),
+                MenuItem::sub(
+                    tr!("delete"),
+                    vec![
+                        item(tr!("rows"), "table.delete_row"),
+                        item(tr!("columns"), "table.delete_column"),
+                        item(tr!("table"), "table.delete"),
+                    ],
+                ),
+                item(tr!("heading-row"), "table.header"),
+                MenuItem::Separator,
+                MenuItem::sub(
+                    tr!("convert"),
+                    vec![
+                        item(tr!("text-to-table"), "table.from_text"),
+                        item(tr!("table-to-text"), "table.to_text"),
+                    ],
+                ),
+            ],
+        ),
+        Menu::new(
             tr!("project"),
             vec![
                 item(tr!("split-at-selection"), "project.split").key("Ctrl+Shift+K"),

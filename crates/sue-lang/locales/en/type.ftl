@@ -43,3 +43,12 @@ notes = Notes
 sheet-standard = Standard
 sheet-manuscript = Manuscript
 sheet-screenplay = Screenplay
+
+## editor.rs
+
+insert-table = Insert Table
+heading-row = Heading Row
+
+## tables.rs
+
+table = Table

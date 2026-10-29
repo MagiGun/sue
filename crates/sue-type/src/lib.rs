@@ -15,6 +15,8 @@
 //!   input methods and lists.
 //! - [`caret`]: how that caret moves: it glides to its new place instead of
 //!   jumping, and blinks only at rest.
+//! - [`tables`]: tables in running text, on the shared `Table` model:
+//!   laid out, broken across pages, painted and typed in.
 //! - [`edit`]: the edits it makes, in place in the arena with their undo.
 //! - [`typeset`]: the same text set on pages for print, from the font files
 //!   themselves, which the PDF writer in `sue-io` draws.
@@ -33,6 +35,7 @@ pub mod editor;
 pub mod layout;
 pub mod raster;
 pub mod style;
+pub mod tables;
 pub mod typeset;
 
 pub use editor::{Caret, Editor, EditorOutput, EditorView, OutlineEntry};
