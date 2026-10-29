@@ -422,6 +422,7 @@ impl SueWriter {
             },
             "view.inspector" => ItemState::check(self.inspector && !self.comments),
             "review.comments" => ItemState::check(self.inspector && self.comments),
+            "review.track" => ItemState::check(self.tracking(cx)),
             "project.include" => ItemState {
                 enabled: self.selected.is_some(),
                 checked: self
@@ -1457,6 +1458,10 @@ impl SueWriter {
             gap: reflow.then_some(PHONE_GAP),
         };
         let mut area = ui.new_child(UiBuilder::new().max_rect(rect));
+        let tracking = self
+            .tracking(cx)
+            .then(|| sue_model::changes::Change::new(&self.author_name(cx), &project::today()));
+        self.editor.set_tracking(tracking);
         let output = self.editor.show(&mut area, cx, &docs, &view);
         if let Some(factor) = output.zoom {
             self.fit = false;

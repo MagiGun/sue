@@ -262,6 +262,7 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
     // end of them (or of their paragraph).
     let mut comments: Vec<sue_core::EntityId> = Vec::new();
     let mut open_comment: Option<usize> = None;
+    let mut revisions = 0;
     // Each numbered list starts again at 1: a numbering instance per list.
     let mut number_instances = 0_usize;
     let mut body = String::new();
@@ -382,7 +383,25 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
                         open_comment = Some(index);
                     }
                 }
-                let run = format!("<w:r>{}{}</w:r>", run_props(look), run_text(text));
+                let mut run = format!("<w:r>{}{}</w:r>", run_props(look), run_text(text));
+                // Tracked changes, with who made them and when.
+                for (change, tag) in [(&look.deleted, "w:del"), (&look.inserted, "w:ins")] {
+                    if let Some(change) = change {
+                        revisions += 1;
+                        if tag == "w:del" {
+                            run = run
+                                .replace("<w:t xml:space=", "<w:delText xml:space=")
+                                .replace("</w:t>", "</w:delText>");
+                        }
+                        run = format!(
+                            "<{tag} w:id=\"{}\" w:author=\"{}\" w:date=\"{}\">{run}</{tag}>",
+                            1000 + revisions,
+                            escape(&change.author),
+                            escape(&word_date(&change.date))
+                        );
+                        break;
+                    }
+                }
                 match &look.link {
                     Some(link) => {
                         let rel = format!("rIdLink{}", relations.len());
@@ -906,6 +925,15 @@ pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
     Ok((text, marks))
 }
 
+/// A date as Word writes it (`2026-10-29T00:00:00Z`).
+fn word_date(date: &str) -> String {
+    if date.len() == 10 {
+        format!("{date}T00:00:00Z")
+    } else {
+        date.to_owned()
+    }
+}
+
 /// The end of comment `index`'s words, and its mark in the text.
 fn comment_end(index: usize) -> String {
     format!(
@@ -1095,6 +1123,26 @@ fn table_xml(table: &crate::publish::PublishTable, width: f32) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn word_keeps_tracked_changes_with_their_authors() {
+        use sue_model::changes::Change;
+        let mut book = sample();
+        let change = Change::new("Ann", "2026-10-30");
+        book.sections[0]
+            .marks
+            .set(18..22, kind::DELETED, Some(change.value()));
+        book.sections[0]
+            .marks
+            .set(23..26, kind::INSERTED, Some(change.value()));
+        let bytes = to_docx(&book);
+        let files: HashMap<String, Vec<u8>> = read_zip(&bytes).unwrap().into_iter().collect();
+        let xml = String::from_utf8(files["word/document.xml"].clone()).unwrap();
+        assert!(xml.contains("<w:del w:id="), "{xml}");
+        assert!(xml.contains("w:author=\"Ann\" w:date=\"2026-10-30T00:00:00Z\""));
+        assert!(xml.contains("<w:delText xml:space=\"preserve\">dark</w:delText>"));
+        assert!(xml.contains("<w:ins w:id="));
+    }
+
     #[test]
     fn word_comments_mark_their_words_and_keep_their_replies() {
         let bytes = to_docx(&super::super::tests::with_comment());

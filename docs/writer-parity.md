@@ -212,9 +212,9 @@ of work is by how much people miss each one (the plan at the end).
 | --- | --- | --- | --- |
 | Comments: add, reply, resolve, delete | WL | done | Shared `sue_model::comments`; Word and OpenDocument export |
 | Next and previous comment, show comments | WL | done | Review menu and the Comments panel |
-| Track changes: record | WL | missing | |
-| Show markup, accept and reject one or all | WL | missing | |
-| Next and previous change, reviewing pane | WL | missing | |
+| Track changes: record | WL | done | Shared `sue_model::changes` |
+| Show markup, accept and reject one or all | WL | done | Markup always shown; Word keeps the changes |
+| Next and previous change, reviewing pane | WL | partial | Next and previous; no reviewing pane |
 | Protect tracked changes | WL | missing | |
 | Compare documents | WL | missing | Snapshots can be compared by eye only |
 | Combine (merge) documents | WL | missing | |

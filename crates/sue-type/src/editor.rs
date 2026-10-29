@@ -162,6 +162,11 @@ pub struct Editor {
     glide: CaretGlide,
     /// The caret in a table cell, while it is in one.
     cell: Option<CellCaret>,
+    /// Changes are recorded as made by this author on this date (track
+    /// changes), while set.
+    tracking: Option<sue_model::changes::Change>,
+    /// The deletion under way goes forward (the Delete key).
+    delete_forward: bool,
     /// A cell the caret left this frame, its typing still to record.
     left_cell: Option<CellCaret>,
 }
@@ -207,6 +212,8 @@ impl Editor {
             glide: CaretGlide::default(),
             cell: None,
             left_cell: None,
+            tracking: None,
+            delete_forward: false,
         }
     }
 
@@ -2074,8 +2081,14 @@ impl Editor {
         if range.is_empty() && text.is_empty() {
             return false;
         }
+        if let Some(change) = self.tracking.clone() {
+            return self.replace_tracked(cx, doc, range, text, source, &change);
+        }
         let format = std::mem::take(&mut self.pending);
-        let Some(end) = edit::replace(cx, doc, range, text, source, &format) else {
+        // Text typed while changes are not recorded is no one's insertion.
+        let mut applied = format.clone();
+        applied.push((kind::INSERTED.to_owned(), None));
+        let Some(end) = edit::replace(cx, doc, range, text, source, &applied) else {
             return false;
         };
         if text.is_empty() {
@@ -2084,6 +2097,110 @@ impl Editor {
         let caret = Caret {
             doc: self.caret.doc,
             offset: end,
+        };
+        self.caret = caret;
+        self.anchor = caret;
+        self.h_pos = None;
+        self.follow = true;
+        self.sync_text(cx);
+        true
+    }
+
+    /// Records changes as `change` (who and when) while it is set: typing
+    /// marks what it puts in as inserted, deleting strikes text through
+    /// instead of taking it out (text a change inserted goes for good).
+    pub fn set_tracking(&mut self, change: Option<sue_model::changes::Change>) {
+        self.tracking = change;
+    }
+
+    /// `true` while changes are recorded.
+    #[must_use]
+    pub fn tracking(&self) -> bool {
+        self.tracking.is_some()
+    }
+
+    /// Every tracked change in the shown documents, in order, with the
+    /// document it is in (an index into the shown documents).
+    #[must_use]
+    pub fn changes(&self) -> Vec<(usize, sue_model::changes::Tracked)> {
+        self.marks
+            .iter()
+            .enumerate()
+            .flat_map(|(doc, marks)| {
+                sue_model::changes::changes(marks)
+                    .into_iter()
+                    .map(move |tracked| (doc, tracked))
+            })
+            .collect()
+    }
+
+    /// [`Self::replace_selection`] while changes are recorded.
+    fn replace_tracked(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        doc: EntityId,
+        range: Range<usize>,
+        text: &str,
+        source: Option<&TextMarks>,
+        change: &sue_model::changes::Change,
+    ) -> bool {
+        let forward = std::mem::take(&mut self.delete_forward);
+        let format = std::mem::take(&mut self.pending);
+        let mut at = range.start;
+        let mut caret = range.start;
+        if !range.is_empty() {
+            let marks = self.marks[self.caret.doc].clone();
+            // What a change inserted goes; the rest is struck through.
+            let mut inserted: Vec<Range<usize>> = marks
+                .marks()
+                .iter()
+                .filter(|mark| mark.kind == kind::INSERTED)
+                .map(|mark| mark.range.start.max(range.start)..mark.range.end.min(range.end))
+                .filter(|part| !part.is_empty())
+                .collect();
+            inserted.sort_by_key(|part| part.start);
+            let mut kept = Vec::new();
+            let mut from = range.start;
+            for part in &inserted {
+                if part.start > from {
+                    kept.push(from..part.start);
+                }
+                from = from.max(part.end);
+            }
+            if from < range.end {
+                kept.push(from..range.end);
+            }
+            if !kept.is_empty() {
+                let value = change.value();
+                edit::reformat(cx, doc, "Delete", |_, marks| {
+                    for part in kept {
+                        marks.set(part, kind::DELETED, Some(value.clone()));
+                    }
+                });
+            }
+            let mut removed = 0;
+            for part in inserted.iter().rev() {
+                if edit::replace(cx, doc, part.clone(), "", None, &[]).is_some() {
+                    removed += part.len();
+                }
+            }
+            at = range.end - removed;
+            caret = if forward { at } else { range.start };
+        }
+        if text.is_empty() {
+            self.pending = format;
+        } else {
+            let mut applied = format;
+            applied.push((kind::INSERTED.to_owned(), Some(change.value())));
+            applied.push((kind::DELETED.to_owned(), None));
+            match edit::replace(cx, doc, at..at, text, source, &applied) {
+                Some(end) => caret = end,
+                None => return false,
+            }
+        }
+        let caret = Caret {
+            doc: self.caret.doc,
+            offset: caret,
         };
         self.caret = caret;
         self.anchor = caret;
@@ -2222,6 +2339,7 @@ impl Editor {
                     return self.replace_selection(cx, "", None);
                 }
                 let forward = key == Key::Delete;
+                self.delete_forward = forward;
                 let text = self.doc_text(self.caret.doc).to_owned();
                 let at = self.caret.offset;
                 // Backspace at the start of a list item ends the list first.

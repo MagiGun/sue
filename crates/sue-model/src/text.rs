@@ -78,6 +78,11 @@ pub mod kind {
     /// An entity shown in the text (a picture), on an [`super::OBJECT`]
     /// character.
     pub const EMBED: &str = "embed";
+    /// Text a tracked change inserted: who and when
+    /// ([`crate::changes::Change::value`]).
+    pub const INSERTED: &str = "inserted";
+    /// Text a tracked change deleted, kept until the change is accepted.
+    pub const DELETED: &str = "deleted";
 }
 
 /// The kinds that belong to whole paragraphs and travel with them.
@@ -194,7 +199,10 @@ impl Mark {
     /// A mark over `range`. Formatting kinds extend when typing at their end.
     pub fn new(range: Range<usize>, kind: impl Into<String>, value: impl Into<Value>) -> Self {
         let kind = kind.into();
-        let inclusive = !matches!(kind.as_str(), kind::LINK | kind::COMMENT | kind::MATH);
+        let inclusive = !matches!(
+            kind.as_str(),
+            kind::LINK | kind::COMMENT | kind::MATH | kind::DELETED
+        );
         Self {
             range,
             kind,
@@ -626,6 +634,10 @@ pub struct CharFormat {
     pub comment: Option<EntityId>,
     /// A footnote that follows this run.
     pub footnote: Option<String>,
+    /// A tracked change inserted this run.
+    pub inserted: Option<crate::changes::Change>,
+    /// A tracked change deleted this run.
+    pub deleted: Option<crate::changes::Change>,
 }
 
 /// The sRGB bytes of a color value.
@@ -688,6 +700,8 @@ pub fn char_format(marks: &[&Mark], range: &Range<usize>) -> CharFormat {
                 };
             }
             kind::LINK => look.link = mark.value.as_str().map(str::to_owned),
+            kind::INSERTED => look.inserted = Some(crate::changes::Change::of(&mark.value)),
+            kind::DELETED => look.deleted = Some(crate::changes::Change::of(&mark.value)),
             kind::COMMENT => {
                 look.comment = match mark.value {
                     Value::Entity(id) => Some(id),

@@ -13,6 +13,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Track changes in Sue Writer (Review, Track Changes): typed text is
+  underlined, deleted text struck through, until each change is accepted
+  or rejected. Word files keep the changes with their authors.
 - Sue speaks your language. It starts in your system's language when Sue
   has it; the Sue menu's Language changes it for every studio and tool at
   once, and Settings, Language lets any studio or tool keep a language of

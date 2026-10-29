@@ -5000,6 +5000,115 @@ f 2 3 4
     }
 
     #[test]
+    fn sue_writer_records_changes_and_accepts_them() {
+        let (mut runtime, root) = runtime("sue-writer-changes");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let writer = AppletId::new(sue_writer::ID).unwrap();
+        runtime.request(
+            ShellRequest::Create {
+                applet: writer.clone(),
+                key: "blank".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![egui::Event::Text("The cat".to_owned())]
+            } else {
+                Vec::new()
+            }
+        });
+        runtime.typing.flush(&mut runtime.engine.history);
+        let command = |runtime: &mut Runtime, command: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: writer.clone(),
+                    command: command.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let key = |key: egui::Key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let doc = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .find_map(|(_, entity)| {
+                    let text = entity.string_buffer()?.as_str().to_owned();
+                    text.starts_with("The")
+                        .then(|| (text, entity.ext::<sue_model::TextMarks>().cloned()))
+                })
+                .unwrap()
+        };
+        command(&mut runtime, "review.track");
+        // Typed while recording: inserted. Backspace takes an insertion out
+        // for good, then strikes "t" of the old text through.
+        frames(&mut runtime, &ctx, size, start, |frame| match frame {
+            1 => vec![egui::Event::Text("s sat".to_owned())],
+            2 => vec![key(egui::Key::Backspace), key(egui::Key::Backspace)],
+            3 => vec![key(egui::Key::Home)],
+            4 => vec![key(egui::Key::Delete)],
+            _ => Vec::new(),
+        });
+        let (text, marks) = doc(&runtime);
+        let marks = marks.unwrap();
+        assert_eq!(text, "The cats s\n", "{marks:?}");
+        let changes = sue_model::changes::changes(&marks);
+        assert!(
+            changes
+                .iter()
+                .any(|tracked| tracked.inserted && tracked.range == (7..10))
+        );
+        assert!(
+            changes
+                .iter()
+                .any(|tracked| !tracked.inserted && tracked.range == (0..1))
+        );
+        assert_eq!(changes[0].change.author, "Author");
+        // Accept All keeps the insertion and drops the struck "T".
+        command(&mut runtime, "review.accept_all");
+        let (text, marks) = doc_any(&runtime);
+        assert_eq!(text, "he cats s\n");
+        assert!(sue_model::changes::changes(&marks).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The first document's text and marks.
+    fn doc_any(runtime: &Runtime) -> (String, sue_model::TextMarks) {
+        runtime
+            .engine
+            .world
+            .arena
+            .iter()
+            .find_map(|(_, entity)| {
+                let text = entity.string_buffer()?.as_str().to_owned();
+                text.contains("cat").then(|| {
+                    (
+                        text,
+                        entity
+                            .ext::<sue_model::TextMarks>()
+                            .cloned()
+                            .unwrap_or_default(),
+                    )
+                })
+            })
+            .unwrap()
+    }
+
+    #[test]
     fn sue_writer_comments_go_on_words_and_come_off_with_undo() {
         let (mut runtime, root) = runtime("sue-writer-comments");
         let ctx = egui::Context::default();

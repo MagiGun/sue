@@ -232,6 +232,7 @@ style_heading3 = "Ctrl+Alt+3"  # @keybind Heading 3
 style_body = "Ctrl+Alt+0"      # @keybind Body Text
 insert_footnote = "Ctrl+Alt+F" # @keybind Footnote
 review_comment = "Ctrl+Alt+C"  # @keybind New Comment
+review_track = "Ctrl+Shift+C"  # @keybind Record Changes
 insert_page_break = "Ctrl+Enter" # @keybind Page Break
 insert_link = "Ctrl+K"         # @keybind Link
 edit_find = "Ctrl+F"           # @keybind Find

@@ -1711,6 +1711,20 @@ them in order. Word gets `w:commentRangeStart`, `w:commentRangeEnd` and a
 `office:annotation` and `office:annotation-end`, HTML a `mark` with the
 thread as its title.
 
+**Tracked changes (`sue-model::changes`).** Two mark kinds record changes:
+`inserted` over typed text and `deleted` over text kept until accepted
+(not extended by typing next to it), each holding a `Change` (author and
+date) as a map. `changes` lists them; `accept` and `reject` settle the ones
+a range touches into new text and marks (a kept deletion and a rejected
+insertion lose their text), and `accepted` gives the final text. While
+`Editor::set_tracking` holds a change, `replace_selection` marks typed text
+inserted and strikes deleted text through as a formatting step, taking out
+text a change inserted for good; typing without it clears `inserted`. The
+layout draws insertions underlined in blue and deletions struck through in
+red. A document or project records while `sue.track_changes` is `true`.
+Word writes `w:ins` and `w:del` (`w:delText`) with author and date, HTML
+`ins` and `del`; the compile gives the other formats the accepted text.
+
 **Tables of contents (`sue-model::contents`, `sue-type::contents`).** A
 table of contents is an entity of class `sue.text_contents` shown by an
 `embed` mark; it keeps only its settings (`sue.contents.title`,

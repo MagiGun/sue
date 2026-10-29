@@ -453,3 +453,23 @@ new-comment = New Comment
 by = By { $value }
 your-comment = Your comment
 add-comment = Add Comment
+
+## Track changes
+
+track-changes = Track Changes
+record-changes = Record Changes
+stop-recording-changes = Stop Recording Changes
+previous-change = Previous Change
+next-change = Next Change
+accept-change = Accept Change
+reject-change = Reject Change
+accept-all = Accept All
+reject-all = Reject All
+accept-all-changes = Accept All Changes
+reject-all-changes = Reject All Changes
+recording-changes = Recording changes
+no-longer-recording-changes = No longer recording changes
+no-changes = No changes
+no-changes-here = No changes here
+accepted-count = Accepted { $count }
+rejected-count = Rejected { $count }
