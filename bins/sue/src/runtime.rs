@@ -84,6 +84,14 @@ fn catalog_fingerprint(rice: &RiceSchema) -> String {
         rice.get(path)
             .map_or_else(String::new, |value| value.to_string())
     })
+    // The pages read in Sue's language and name each studio's own.
+    .chain(
+        rice.entries()
+            .iter()
+            .filter(|entry| entry.key() == "language")
+            .map(|entry| entry.parameter().value().to_string()),
+    )
+    .chain(std::iter::once(sue_lang::generation().to_string()))
     .collect::<Vec<_>>()
     .join("\u{1F}")
 }
@@ -217,6 +225,7 @@ impl Runtime {
 
     /// Builds one frame of the whole window into the root `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui, textures: &mut dyn TextureUpload, now: Instant) {
+        let _language = sue_lang::scope(&sue_wm::sue_language(&self.engine.world.rice));
         if !self.booted {
             self.booted = true;
             let mut io = shell_io!(self, textures);
@@ -320,6 +329,11 @@ impl Runtime {
             self.shell.notify(format!("Settings: {error}"), true);
             return;
         }
+        if self.interactive {
+            // Threads outside the frame (background jobs) read the global
+            // language; frames open a scope of their own.
+            sue_lang::set_language(&self.engine.config.language);
+        }
         let theme = Theme::from_rice(&self.engine.world.rice);
         self.shell
             .apply_config(self.engine.config.clone(), theme, self.engine.profile);
@@ -367,6 +381,7 @@ impl Runtime {
     /// Runs timed work that is due. Returns `true` if the window must be
     /// redrawn.
     pub fn timer(&mut self, textures: &mut dyn TextureUpload, now: Instant) -> bool {
+        let _language = sue_lang::scope(&sue_wm::sue_language(&self.engine.world.rice));
         let mut redraw = self.shell.expire(now);
         redraw |= self.poll_system_dialogs(textures, now);
         if self.typing.flush_if_paused(&mut self.engine.history, now) {

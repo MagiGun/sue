@@ -120,6 +120,12 @@ pub struct AppletManifest {
     pub icon: String,
     /// Sort key among applets of the same role (lower first).
     pub order: i32,
+    /// The namespace of the language database its text lives in, e.g.
+    /// `paint`. With one, its name and summary are read from the messages
+    /// `applet-name` and `applet-summary` there, in the language in use
+    /// ([`Self::title`], [`Self::blurb`]); `name` and `summary` are what
+    /// shows where no language has them.
+    pub namespace: Option<String>,
 }
 
 impl AppletManifest {
@@ -136,6 +142,33 @@ impl AppletManifest {
             role,
             icon: icon.to_owned(),
             order: 0,
+            namespace: None,
+        }
+    }
+
+    /// The same manifest, reading its name and summary from `namespace` in
+    /// the language database.
+    #[must_use]
+    pub fn localized(mut self, namespace: &str) -> Self {
+        self.namespace = Some(namespace.to_owned());
+        self
+    }
+
+    /// Its name in the language in use.
+    #[must_use]
+    pub fn title(&self) -> String {
+        match &self.namespace {
+            Some(namespace) => sue_lang::text_or(namespace, "applet-name", &self.name),
+            None => self.name.clone(),
+        }
+    }
+
+    /// What it does, in the language in use.
+    #[must_use]
+    pub fn blurb(&self) -> String {
+        match &self.namespace {
+            Some(namespace) => sue_lang::text_or(namespace, "applet-summary", &self.summary),
+            None => self.summary.clone(),
         }
     }
 }
@@ -243,6 +276,8 @@ pub enum ShellRequest {
     },
     /// Open the Sue menu.
     SueMenu,
+    /// Set Sue's language: a language tag, or `system` for the system's.
+    Language(String),
     /// Hand a file to an applet, as if it had picked it.
     SendFile {
         /// Who gets it.
@@ -396,7 +431,7 @@ impl FilePick {
             Vec::new()
         } else {
             vec![sue_platform::FileFilter {
-                name: "Files".to_owned(),
+                name: tr!("files"),
                 extensions: self.extensions.clone(),
             }]
         }

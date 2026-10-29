@@ -1,0 +1,19 @@
+[package]
+name = "sue-lang"
+description = "Sue's language database: every string Sue shows, in every language, as Project Fluent messages under one namespace per part of Sue, with English as the source and the fallback."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+license-file.workspace = true
+build = "build.rs"
+
+[dependencies]
+fluent-bundle.workspace = true
+fluent-syntax.workspace = true
+intl-memoizer.workspace = true
+unic-langid.workspace = true
+
+[lints]
+workspace = true

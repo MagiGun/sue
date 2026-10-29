@@ -318,6 +318,7 @@ impl Engine {
     #[allow(clippy::too_many_lines, reason = "the Settings pages, as data")]
     fn build_catalog(&self) -> Catalog {
         let rice = &self.world.rice;
+        let _language = sue_lang::scope(&sue_wm::sue_language(rice));
         let param = |path: &str| SettingsItem::Param(path.to_owned());
         let section = |name: &str| SettingsItem::Section(name.to_owned());
         let fact = |id: &str| SettingsItem::Fact(id.to_owned());
@@ -347,6 +348,31 @@ impl Engine {
                     group("Quitting", vec![param("general.confirm_on_exit")]),
                 ],
             ),
+            SettingsPage::new("language", "Language", {
+                let mut own: Vec<SettingsItem> = vec![SettingsItem::Note(
+                    "Each studio and tool follows Sue's language, or speaks one of its own."
+                        .to_owned(),
+                )];
+                own.extend(
+                    self.launchpad
+                        .manifests()
+                        .filter(|manifest| manifest.role.is_page())
+                        .map(|manifest| param(&sue_wm::language_key(&manifest.id))),
+                );
+                vec![
+                    group(
+                        "Sue",
+                        vec![
+                            SettingsItem::Note(
+                                "The language of Sue and of every studio and tool that follows it. System uses the system's language when Sue has it."
+                                    .to_owned(),
+                            ),
+                            param(sue_wm::LANGUAGE_KEY),
+                        ],
+                    ),
+                    group("Studios and Tools", own),
+                ]
+            }),
             SettingsPage::new(
                 "appearance",
                 "Appearance & Rice",
@@ -447,6 +473,8 @@ impl Engine {
                         ],
                     ),
                     group("Sue Paint Custom Colors", vec![section("sue_paint_colors")]),
+                    group("Image Viewer", vec![section("image_viewer")]),
+                    group("Converter", vec![section("convert")]),
                     group(
                         "Sue Writer",
                         vec![
@@ -513,9 +541,23 @@ impl Engine {
             self.launchpad
                 .manifests()
                 .filter(|manifest| manifest.role.is_page())
-                .map(|manifest| Choice::new(manifest.id.as_str(), manifest.name.clone())),
+                .map(|manifest| Choice::new(manifest.id.as_str(), manifest.title())),
         );
         catalog.choices.insert(sue_wm::PIN_KEY.to_owned(), pins);
+        // Languages: Sue's, and each studio's and tool's own.
+        catalog.choices.insert(
+            sue_wm::LANGUAGE_KEY.to_owned(),
+            sue_wm::sue_language_choices(),
+        );
+        let sue = sue_wm::sue_language(rice);
+        for manifest in self.launchpad.manifests() {
+            if manifest.role.is_page() {
+                catalog.choices.insert(
+                    sue_wm::language_key(&manifest.id),
+                    sue_wm::applet_language_choices(&sue),
+                );
+            }
+        }
         let mut devices = vec![Choice::new("", "System default")];
         devices.extend(
             self.options
@@ -565,11 +607,7 @@ impl Engine {
                             AppletRole::Tool => "Hub, Tools",
                             AppletRole::Window => "Window",
                         };
-                        vec![
-                            manifest.name.clone(),
-                            place.to_owned(),
-                            manifest.summary.clone(),
-                        ]
+                        vec![manifest.title(), place.to_owned(), manifest.blurb()]
                     })
                     .collect(),
                 empty: String::new(),
@@ -903,6 +941,7 @@ pub(crate) mod tests {
             titles,
             [
                 "General",
+                "Language",
                 "Appearance & Rice",
                 "Display & Graphics",
                 "Audio & DSP",

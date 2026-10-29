@@ -1965,7 +1965,7 @@ fn pressure_ui(ui: &mut Ui, pressure: &mut PressureDialog, theme: &Theme) -> Out
             "pen-pressure",
             &mut pressure.curve,
             150.0,
-            widgets::CurveLabels::PRESSURE,
+            widgets::CurveLabels::pressure(),
             theme,
         );
     }
@@ -2392,10 +2392,10 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
                 curve,
                 180.0,
                 widgets::CurveLabels {
-                    input: "Input",
-                    low: "0",
-                    high: "255",
-                    output: "Output",
+                    input: "Input".to_owned(),
+                    low: "0".to_owned(),
+                    high: "255".to_owned(),
+                    output: "Output".to_owned(),
                 },
                 theme,
             );

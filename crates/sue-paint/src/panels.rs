@@ -398,7 +398,7 @@ fn dynamics_ui(ui: &mut Ui, label: &str, dynamics: &mut Dynamics, theme: &Theme)
                     (label, "pressure"),
                     &mut dynamics.pressure_curve,
                     92.0,
-                    sue_wm::widgets::CurveLabels::PRESSURE,
+                    sue_wm::widgets::CurveLabels::pressure(),
                     theme,
                 );
             });
@@ -412,10 +412,10 @@ fn dynamics_ui(ui: &mut Ui, label: &str, dynamics: &mut Dynamics, theme: &Theme)
                     &mut dynamics.velocity_curve,
                     92.0,
                     sue_wm::widgets::CurveLabels {
-                        input: "Velocity",
-                        low: "Still",
-                        high: "Fast",
-                        output: "Output",
+                        input: "Velocity".to_owned(),
+                        low: "Still".to_owned(),
+                        high: "Fast".to_owned(),
+                        output: "Output".to_owned(),
                     },
                     theme,
                 );

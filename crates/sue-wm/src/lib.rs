@@ -15,7 +15,16 @@
 //! fields edit the arena in place through [`ArenaText`] and become undo
 //! steps through [`Typing`] (backbone rule 2).
 //!
+//! Every string the shell shows comes from the language database
+//! (`sue-lang`, namespace `wm`), in the language [`lang`] picks for Sue or
+//! for the studio or tool being drawn.
+//!
 //! Specification: `HUMANZ.md` §3.2 to §3.6.
+
+/// Text from the language database's `wm` namespace.
+macro_rules! tr {
+    ($($arg:tt)*) => { sue_lang::tr!("wm", $($arg)*) };
+}
 
 mod applet;
 pub mod brand;
@@ -25,6 +34,7 @@ mod config;
 mod error;
 pub mod fonts;
 pub mod keys;
+mod lang;
 mod launchpad;
 mod layout;
 mod menubar;
@@ -50,6 +60,10 @@ pub use catalog::{
 pub use color_pick::{ColorPick, alpha_bar, color_button, color_wheel, hsv_of, rgb_of, swatch};
 pub use config::{Keymap, WmConfig, register_rice, rice_declarations};
 pub use error::WmError;
+pub use lang::{
+    LANGUAGE_KEY, applet_language, applet_language_choices, language_declaration, language_key,
+    rice_section, sue_language, sue_language_choices,
+};
 pub use launchpad::{AppletFactory, Applets, Launchpad};
 pub use layout::{LayoutMetrics, LayoutRequest, LayoutSolution, bar_height, solve_layout};
 pub use menubar::{ItemState, Menu, MenuBar, MenuItem, context_items};

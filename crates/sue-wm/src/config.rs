@@ -53,6 +53,14 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
         )
         .labeled("Open At Launch"),
         declare(
+            crate::LANGUAGE_KEY,
+            RiceParameter::Text {
+                value: sue_lang::SYSTEM.to_owned(),
+            },
+            "Sue's language, which every studio and tool follows unless set apart (system follows the system's language)",
+        )
+        .labeled("Language"),
+        declare(
             "profile.hardware",
             choice("auto", &profiles),
             "Frame pacing and effect budget",
@@ -318,6 +326,8 @@ pub struct WmConfig {
     pub pinned: String,
     /// Points per wheel line in lists.
     pub wheel_line_px: f32,
+    /// `general.language`: a language tag, or `system`.
+    pub language: String,
 }
 
 impl WmConfig {
@@ -392,6 +402,11 @@ impl WmConfig {
                 .trim()
                 .to_owned(),
             wheel_line_px: number("input.wheel_line_px")?,
+            language: schema
+                .get_str(crate::LANGUAGE_KEY)
+                .unwrap_or(sue_lang::SYSTEM)
+                .trim()
+                .to_owned(),
         })
     }
 }

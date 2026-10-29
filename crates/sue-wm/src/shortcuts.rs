@@ -147,7 +147,7 @@ pub fn rows(rice: &RiceSchema, section: &str, table: &[Shortcut]) -> Vec<(String
         .map(|shortcut| {
             let chords = chords(rice, section, shortcut);
             let text = if chords.is_empty() {
-                "None".to_owned()
+                tr!("none")
             } else {
                 chords
                     .chords()

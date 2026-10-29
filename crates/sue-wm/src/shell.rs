@@ -165,6 +165,9 @@ pub struct Shell {
     /// Where the last frame drew the Hub's boxes and their pins.
     hub_boxes: Vec<(AppletId, Rect, Rect)>,
     booted: bool,
+    /// The languages in use when the fonts last covered them, and the
+    /// characters they (and every language's name) need.
+    scripts: (Vec<String>, String),
 }
 
 impl std::fmt::Debug for Shell {
@@ -188,11 +191,24 @@ fn sue_item(
     MenuItem::action(label, format!("sue:{}", runs.len() - 1))
 }
 
-/// Every applet's file templates, in applet order.
-fn templates(applets: &Applets) -> Vec<(AppletId, crate::FileTemplate)> {
+/// The title of a Sue menu submenu: Sue's own in the language in use,
+/// an applet's own as it named it (in its language).
+fn submenu_title(name: &str) -> String {
+    match name {
+        sue_menu::FILE => tr!("menu-file"),
+        sue_menu::PROJECT => tr!("menu-project"),
+        sue_menu::SEND_TO => tr!("menu-send-to"),
+        other => other.to_owned(),
+    }
+}
+
+/// Every applet's file templates, in applet order (each in its applet's
+/// language).
+fn templates(applets: &Applets, rice: &RiceSchema) -> Vec<(AppletId, crate::FileTemplate)> {
     applets
         .iter()
         .flat_map(|(manifest, applet)| {
+            let _language = sue_lang::scope(&crate::applet_language(rice, &manifest.id));
             applet
                 .templates()
                 .into_iter()
@@ -263,6 +279,7 @@ impl Shell {
             sue_button: Rect::NOTHING,
             hub_boxes: Vec::new(),
             booted: false,
+            scripts: (Vec::new(), String::new()),
             config,
             theme,
             applied_theme: None,
@@ -425,7 +442,12 @@ impl Shell {
             format!(" ({note})")
         };
         self.message = Some((
-            format!("Saved {name}{note} in {folder}. Click to show it"),
+            tr!(
+                "saved-click-show",
+                name = name,
+                note = note,
+                folder = folder
+            ),
             false,
             Instant::now() + self.config.message_duration.max(Duration::from_secs(10)),
         ));
@@ -545,7 +567,7 @@ impl Shell {
                 return;
             }
             _ => {
-                self.notify(format!("There is no studio or tool called {id}"), true);
+                self.notify(tr!("there-no-studio-tool-called", id = id), true);
                 return;
             }
         }
@@ -592,19 +614,65 @@ impl Shell {
         let name = id
             .as_ref()
             .and_then(|id| io.applets.manifest(id))
-            .map(|manifest| manifest.name.clone());
+            .map(|manifest| manifest.title());
         let txn = SetRiceValue::new(PIN_KEY, RiceValue::Text(value));
         io.typing.flush(io.history);
         match io.history.apply(io.world, RiceEdit(txn)) {
             Ok(_) => self.notify(
                 name.map_or_else(
-                    || "Sue opens on the Hub at launch".to_owned(),
-                    |name| format!("Sue opens in {name} at launch"),
+                    || tr!("sue-opens-hub-launch"),
+                    |name| tr!("sue-opens-in-at-launch", name = name),
                 ),
                 false,
             ),
-            Err(error) => self.notify(format!("Could not pin it: {error}"), true),
+            Err(error) => self.notify(tr!("could-not-pin-it", error = error), true),
         }
+    }
+
+    /// Sets Sue's language (a tag, or [`sue_lang::SYSTEM`]) as an undoable
+    /// rice edit; every studio and tool that follows Sue follows it at once.
+    pub fn set_language(&mut self, setting: &str, io: &mut ShellIo<'_>) {
+        if io.world.rice.get_str(crate::LANGUAGE_KEY).map(str::trim) == Some(setting) {
+            return;
+        }
+        let txn = SetRiceValue::new(crate::LANGUAGE_KEY, RiceValue::Text(setting.to_owned()));
+        io.typing.flush(io.history);
+        match io.history.apply(io.world, RiceEdit(txn)) {
+            Ok(_) => {
+                let _language = sue_lang::scope(&crate::sue_language(&io.world.rice));
+                self.notify(
+                    tr!(
+                        "language-changed",
+                        language = sue_lang::name(&sue_lang::current())
+                    ),
+                    false,
+                );
+            }
+            Err(error) => self.notify(tr!("could-not-change-language", error = error), true),
+        }
+    }
+
+    /// Makes sure the fonts draw the languages in use (Sue's and each
+    /// studio's and tool's) and every language's own name.
+    fn cover_scripts(&mut self, ctx: &egui::Context, io: &ShellIo<'_>) {
+        let mut tags = vec![crate::sue_language(&io.world.rice)];
+        for manifest in io.applets.manifests() {
+            let tag = crate::applet_language(&io.world.rice, &manifest.id);
+            if !tags.contains(&tag) {
+                tags.push(tag);
+            }
+        }
+        if tags != self.scripts.0 {
+            let mut text: String = sue_lang::languages()
+                .into_iter()
+                .map(|language| language.name)
+                .collect();
+            for tag in &tags {
+                text.push_str(&sue_lang::characters(tag));
+            }
+            self.scripts = (tags, text);
+        }
+        crate::fonts::cover(ctx, &self.scripts.1);
     }
 
     // ----- The Sue menu -----------------------------------------------------
@@ -613,18 +681,27 @@ impl Shell {
     /// tools, new files, files, projects, Send To for what the page works
     /// on, every submenu applets add to, the pin, the palette, Settings.
     fn build_sue_menu(&mut self, io: &ShellIo<'_>) {
+        let _language = sue_lang::scope(&crate::sue_language(&io.world.rice));
         let mut runs = Vec::new();
         let run = &mut runs;
         let keymap = &self.config.keymap;
-        let mut items = vec![sue_item(run, "Hub", ShellRequest::Hub, self.page.is_none())];
-        for (title, role) in [("Studios", AppletRole::Studio), ("Tools", AppletRole::Tool)] {
+        let mut items = vec![sue_item(
+            run,
+            tr!("hub"),
+            ShellRequest::Hub,
+            self.page.is_none(),
+        )];
+        for (title, role) in [
+            (tr!("studios"), AppletRole::Studio),
+            (tr!("tools"), AppletRole::Tool),
+        ] {
             let pages: Vec<MenuItem> = io
                 .applets
                 .with_role(role)
                 .map(|manifest| {
                     sue_item(
                         run,
-                        manifest.name.clone(),
+                        manifest.title(),
                         ShellRequest::Open(manifest.id.clone()),
                         self.page.as_ref() == Some(&manifest.id),
                     )
@@ -637,7 +714,7 @@ impl Shell {
         items.push(MenuItem::Separator);
         // New: a submenu per kind of file, each with its exact kinds.
         let mut kinds: Vec<(String, Vec<MenuItem>)> = Vec::new();
-        for (applet, template) in templates(io.applets) {
+        for (applet, template) in templates(io.applets, &io.world.rice) {
             let item = sue_item(
                 run,
                 template.label,
@@ -657,7 +734,7 @@ impl Shell {
         }
         if !kinds.is_empty() {
             items.push(MenuItem::sub(
-                "New",
+                tr!("new"),
                 kinds
                     .into_iter()
                     .map(|(kind, list)| MenuItem::sub(kind, list))
@@ -671,7 +748,7 @@ impl Shell {
                 vec![
                     sue_item(
                         run,
-                        "Open File...",
+                        tr!("open-file-ellipsis"),
                         ShellRequest::Command("file.open".to_owned()),
                         false,
                     )
@@ -683,22 +760,22 @@ impl Shell {
                 vec![
                     sue_item(
                         run,
-                        "Open Project...",
+                        tr!("open-project-ellipsis"),
                         ShellRequest::PickFile(
-                            FilePick::open(None, "open", "Open Project").extensions(&["sue"]),
+                            FilePick::open(None, "open", &tr!("open-project")).extensions(&["sue"]),
                         ),
                         false,
                     ),
                     sue_item(
                         run,
-                        "Save Project",
+                        tr!("save-project"),
                         ShellRequest::Command("file.save".to_owned()),
                         false,
                     )
                     .key(keymap.save.to_string()),
                     sue_item(
                         run,
-                        "Save Project As...",
+                        tr!("save-project-as-ellipsis"),
                         ShellRequest::Command("file.save_as".to_owned()),
                         false,
                     ),
@@ -727,7 +804,7 @@ impl Shell {
                 if manifest.role.is_page() && !current && applet.accepts(entity) {
                     let item = sue_item(
                         run,
-                        manifest.name.clone(),
+                        manifest.title(),
                         ShellRequest::OpenIn {
                             entity: id,
                             applet: manifest.id.clone(),
@@ -740,6 +817,7 @@ impl Shell {
         }
         for (manifest, applet) in io.applets.iter() {
             let current = self.page.as_ref() == Some(&manifest.id);
+            let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, &manifest.id));
             for action in applet.sue_actions(focus, current) {
                 let item = sue_item(run, action.label, action.request, false);
                 add(&mut named, &action.menu, item);
@@ -749,32 +827,53 @@ impl Shell {
             named
                 .into_iter()
                 .filter(|(_, list)| !list.is_empty())
-                .map(|(name, list)| MenuItem::sub(name, list)),
+                .map(|(name, list)| MenuItem::sub(submenu_title(&name), list)),
         );
+        // Language: Sue's own, which every studio and tool follows unless
+        // set apart in its own settings.
+        let setting = io
+            .world
+            .rice
+            .get_str(crate::LANGUAGE_KEY)
+            .map_or(sue_lang::SYSTEM, str::trim)
+            .to_owned();
+        let languages = crate::sue_language_choices()
+            .into_iter()
+            .map(|choice| {
+                let on = choice.value == setting;
+                sue_item(run, choice.label, ShellRequest::Language(choice.value), on)
+            })
+            .collect();
+        items.push(MenuItem::sub(tr!("language-menu"), languages));
         items.push(MenuItem::Separator);
         if let Some(page) = self.page.clone() {
             let pinned = pinned(&io.world.rice, io.applets).as_ref() == Some(&page);
             let name = io
                 .applets
                 .manifest(&page)
-                .map_or_else(String::new, |manifest| manifest.name.clone());
+                .map_or_else(String::new, |manifest| manifest.title());
             items.push(sue_item(
                 run,
-                format!("Open {name} at Launch"),
+                tr!("open-at-launch", name = name),
                 ShellRequest::Pin((!pinned).then_some(page)),
                 pinned,
             ));
         }
-        let palette = format!("Command Palette ({})", keymap.command_palette);
+        let palette = tr!("command-palette", command_palette = keymap.command_palette);
         items.push(sue_item(run, palette, ShellRequest::Palette, false));
         items.push(
-            sue_item(run, "Settings", ShellRequest::OpenSettings(None), false)
-                .key(keymap.open_settings.to_string()),
+            sue_item(
+                run,
+                tr!("settings"),
+                ShellRequest::OpenSettings(None),
+                false,
+            )
+            .key(keymap.open_settings.to_string()),
         );
         items.push(
             sue_item(
                 run,
-                "Quit Sue",
+                tr!("quit-sue"),
                 ShellRequest::Command("app.quit".to_owned()),
                 false,
             )
@@ -873,6 +972,7 @@ impl Shell {
         io: &mut ShellIo<'_>,
         now: Instant,
     ) -> Option<ShellRequest> {
+        let _language = sue_lang::scope(&crate::sue_language(&io.world.rice));
         match request {
             ShellRequest::OpenSettings(page) => {
                 let id = io
@@ -890,6 +990,7 @@ impl Shell {
             ShellRequest::Create { applet, key } => {
                 let view = self.view(now, 0.0);
                 let theme = self.theme.clone();
+                let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, &applet));
                 let (applets, mut cx) = split(io, &theme, view);
                 if let Some(target) = applets.get_mut(&applet) {
                     target.create(&key, &mut cx);
@@ -899,10 +1000,11 @@ impl Shell {
             ShellRequest::Open(id) => self.open(id, io.applets),
             ShellRequest::Hub => self.hub(),
             ShellRequest::Pin(id) => self.pin(id, io),
+            ShellRequest::Language(setting) => self.set_language(&setting, io),
             ShellRequest::SueMenu => self.open_sue_menu(io),
             ShellRequest::OpenIn { entity, applet } => {
                 if io.world.arena.get_by_id(entity).is_err() {
-                    self.notify("That is gone", true);
+                    self.notify(tr!("that-is-gone"), true);
                     return None;
                 }
                 if !io
@@ -910,12 +1012,14 @@ impl Shell {
                     .manifest(&applet)
                     .is_some_and(|manifest| manifest.role.is_page())
                 {
-                    self.notify(format!("There is no studio or tool called {applet}"), true);
+                    self.notify(tr!("there-no-studio-tool-called", id = applet), true);
                     return None;
                 }
                 {
                     let view = self.view(now, 0.0);
                     let theme = self.theme.clone();
+                    let _language =
+                        sue_lang::scope(&crate::applet_language(&io.world.rice, &applet));
                     let (applets, mut cx) = split(io, &theme, view);
                     if let Some(target) = applets.get_mut(&applet) {
                         target.take_entity("open", entity, &mut cx);
@@ -930,6 +1034,7 @@ impl Shell {
             } => {
                 let view = self.view(now, 0.0);
                 let theme = self.theme.clone();
+                let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, &to));
                 let (applets, mut cx) = split(io, &theme, view);
                 if let Some(applet) = applets.get_mut(&to) {
                     applet.take_entity(&purpose, entity, &mut cx);
@@ -941,17 +1046,19 @@ impl Shell {
             ShellRequest::AppletCommand { applet, command } => {
                 let view = self.view(now, 0.0);
                 let theme = self.theme.clone();
+                let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, &applet));
                 let (applets, mut cx) = split(io, &theme, view);
                 if let Some(target) = applets.get_mut(&applet)
                     && !target.command(&command, &mut cx)
                 {
-                    cx.fail(format!("{command} is not available"));
+                    cx.fail(tr!("is-not-available", command = command));
                 }
             }
             ShellRequest::SendFile { to, purpose, path } => {
                 let pick = FilePick::open(Some(to.clone()), &purpose, "");
                 let view = self.view(now, 0.0);
                 let theme = self.theme.clone();
+                let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, &to));
                 let (applets, mut cx) = split(io, &theme, view);
                 if let Some(applet) = applets.get_mut(&to) {
                     applet.picked(&pick, &path, &mut cx);
@@ -963,6 +1070,8 @@ impl Shell {
                 };
                 let view = self.view(now, 0.0);
                 let theme = self.theme.clone();
+                let _language =
+                    sue_lang::scope(&crate::applet_language(&io.world.rice, &requester));
                 let (applets, mut cx) = split(io, &theme, view);
                 if let Some(applet) = applets.get_mut(&requester) {
                     applet.picked(&pick, &path, &mut cx);
@@ -1000,13 +1109,13 @@ impl Shell {
             Ok(true) => {}
             Ok(false) => self.notify(
                 if redo {
-                    "Nothing to redo"
+                    tr!("nothing-to-redo")
                 } else {
-                    "Nothing to undo"
+                    tr!("nothing-to-undo")
                 },
                 false,
             ),
-            Err(error) => self.notify(format!("Undo failed: {error}"), true),
+            Err(error) => self.notify(tr!("undo-failed", error = error), true),
         }
         self.touch();
     }
@@ -1015,7 +1124,9 @@ impl Shell {
 
     /// Builds one frame into the root `ui`.
     pub fn ui(&mut self, root: &mut Ui, io: &mut ShellIo<'_>, now: Instant) {
+        let _language = sue_lang::scope(&crate::sue_language(&io.world.rice));
         let ctx = root.ctx().clone();
+        self.cover_scripts(&ctx, io);
         // Real wall-clock time, clamped; after a sleep, one nominal frame.
         let nominal = 1.0 / self.scheduler.target_hz().max(1) as f32;
         let raw_dt = self
@@ -1175,6 +1286,7 @@ impl Shell {
             page_ui.set_opacity(t * t * (3.0 - 2.0 * t));
         }
         page_ui.painter().rect_filled(area, 0.0, theme.void);
+        let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, id));
         let (applets, mut cx) = split(io, theme, view);
         match applets.get_mut(id) {
             Some(applet) => applet.page_ui(&mut page_ui, &mut cx),
@@ -1215,7 +1327,7 @@ impl Shell {
         let button = layout.sue_button;
         let response = root
             .interact(button, Id::unique("sue-button"), Sense::click())
-            .on_hover_text("Sue: the Hub, every studio and tool, files, projects and Settings");
+            .on_hover_text(tr!("sue-hub-every-studio-tool-files"));
         let open = self.sue_menu.is_open();
         let face = button.shrink2(vec2(4.0, 3.0));
         if open || response.hovered() {
@@ -1289,6 +1401,7 @@ impl Shell {
                     bar.set_opacity(self.reveal());
                     bar.disable();
                 }
+                let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, id));
                 let (applets, mut cx) = split(io, theme, view);
                 if let Some(applet) = applets.get_mut(id) {
                     applet.bar_ui(&mut bar, &mut cx);
@@ -1298,7 +1411,7 @@ impl Shell {
                 painter.text(
                     layout.menus.left_center() + vec2(theme.padding * 1.5, 0.0),
                     Align2::LEFT_CENTER,
-                    "Hub",
+                    tr!("hub"),
                     theme.font(theme.ui_size),
                     theme.muted,
                 );
@@ -1340,17 +1453,19 @@ impl Shell {
             .auto_shrink([false, false])
             .show(&mut ui, |ui| {
                 ui.add_space(margin * 0.75);
-                for (title, role) in [("Studios", AppletRole::Studio), ("Tools", AppletRole::Tool)]
-                {
+                for (title, role) in [
+                    (tr!("studios"), AppletRole::Studio),
+                    (tr!("tools"), AppletRole::Tool),
+                ] {
                     let boxes: Vec<(AppletId, String, String, String)> = io
                         .applets
                         .with_role(role)
                         .map(|manifest| {
                             (
                                 manifest.id.clone(),
-                                manifest.name.clone(),
+                                manifest.title(),
                                 manifest.icon.clone(),
-                                manifest.summary.clone(),
+                                manifest.blurb(),
                             )
                         })
                         .collect();
@@ -1418,9 +1533,9 @@ impl Shell {
         let pin_response = ui
             .interact(pin, ui.scope_id().with(("sue-hub-pin", name)), sense)
             .on_hover_text(if pinned {
-                "Pinned: Sue opens here at launch. Click to take the pin away"
+                tr!("pinned-sue-opens-here-launch-click")
             } else {
-                "Pin: Sue opens here at launch"
+                tr!("pin-sue-opens-here-launch")
             });
         let hovered = live && (response.hovered() || pin_response.hovered());
         let painter = ui.painter();
@@ -1534,6 +1649,7 @@ impl Shell {
                 Some(page) => {
                     let view = self.view(now, 0.0);
                     let theme = self.theme.clone();
+                    let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, &page));
                     let (applets, mut cx) = split(io, &theme, view);
                     applets
                         .get_mut(&page)
@@ -1582,7 +1698,7 @@ impl Shell {
             .page
             .as_ref()
             .and_then(|page| io.applets.manifest(page))
-            .map_or_else(|| "Hub".to_owned(), |manifest| manifest.name.clone());
+            .map_or_else(|| tr!("hub"), |manifest| manifest.title());
         let placed = painter.text(
             rect.left_center() + vec2(theme.padding, 0.0),
             Align2::LEFT_CENTER,
@@ -1591,12 +1707,12 @@ impl Shell {
             theme.muted,
         );
         let items = [
-            format!("{} entities", io.world.arena.len()),
-            format!("Undo {}", io.history.depth()),
+            tr!("entities", count = io.world.arena.len()),
+            tr!("undo-depth", depth = io.history.depth()),
             profile_label(self.profile),
             match io.fps {
-                Some(fps) if self.animating => format!("{fps} FPS"),
-                _ => "Idle".to_owned(),
+                Some(fps) if self.animating => tr!("fps", fps = fps),
+                _ => tr!("idle"),
             },
         ];
         let mut x = rect.right() - theme.padding;
@@ -1673,17 +1789,18 @@ impl Shell {
     /// Every palette entry: the Hub, every studio and tool, the pin, Sue's
     /// own actions, new files and the applets' own commands.
     fn palette_entries(&self, io: &ShellIo<'_>) -> Vec<(PaletteEntry, PaletteAction)> {
+        let _language = sue_lang::scope(&crate::sue_language(&io.world.rice));
         let keymap = &self.config.keymap;
         let request = PaletteAction::Request;
         let command = |name: &str| request(ShellRequest::Command(name.to_owned()));
         let mut entries = vec![(
-            entry("Go to the Hub", String::new()),
+            entry(&tr!("go-to-the-hub"), String::new()),
             request(ShellRequest::Hub),
         )];
         for manifest in io.applets.manifests() {
             if manifest.role.is_page() {
                 entries.push((
-                    entry(&format!("Open {}", manifest.name), String::new()),
+                    entry(&tr!("open", name = manifest.title()), String::new()),
                     request(ShellRequest::Open(manifest.id.clone())),
                 ));
             }
@@ -1695,58 +1812,62 @@ impl Shell {
             let name = io
                 .applets
                 .manifest(&page)
-                .map_or_else(String::new, |manifest| manifest.name.clone());
+                .map_or_else(String::new, |manifest| manifest.title());
             entries.push((
-                entry(&format!("Pin {name}: Open It at Launch"), String::new()),
+                entry(&tr!("pin-open-it-at-launch", name = name), String::new()),
                 request(ShellRequest::Pin(Some(page))),
             ));
         }
         if pinned.is_some() {
             entries.push((
-                entry("Unpin: Open the Hub at Launch", String::new()),
+                entry(&tr!("unpin-open-hub-launch"), String::new()),
                 request(ShellRequest::Pin(None)),
             ));
         }
         entries.extend([
             (
-                entry("Open Settings", keymap.open_settings.to_string()),
+                entry(&tr!("open-settings"), keymap.open_settings.to_string()),
                 request(ShellRequest::OpenSettings(None)),
             ),
             (
-                entry("Undo", keymap.undo.to_string()),
+                entry(&tr!("undo"), keymap.undo.to_string()),
                 PaletteAction::Undo(false),
             ),
             (
-                entry("Redo", keymap.redo.to_string()),
+                entry(&tr!("redo"), keymap.redo.to_string()),
                 PaletteAction::Undo(true),
             ),
             (
-                entry("Open File", keymap.open_file.to_string()),
+                entry(&tr!("open-file"), keymap.open_file.to_string()),
                 command("file.open"),
             ),
             (
-                entry("Open Project", String::new()),
+                entry(&tr!("open-project"), String::new()),
                 request(ShellRequest::PickFile(
-                    FilePick::open(None, "open", "Open Project").extensions(&["sue"]),
+                    FilePick::open(None, "open", &tr!("open-project")).extensions(&["sue"]),
                 )),
             ),
             (
-                entry("Save Project", keymap.save.to_string()),
+                entry(&tr!("save-project"), keymap.save.to_string()),
                 command("file.save"),
             ),
             (
-                entry("Save Project As", String::new()),
+                entry(&tr!("save-project-as"), String::new()),
                 command("file.save_as"),
             ),
             (
-                entry("Quit Sue", keymap.quit.to_string()),
+                entry(&tr!("quit-sue"), keymap.quit.to_string()),
                 command("app.quit"),
             ),
         ]);
-        for (applet, template) in templates(io.applets) {
+        for (applet, template) in templates(io.applets, &io.world.rice) {
             entries.push((
                 entry(
-                    &format!("New {}: {}", template.category, template.label),
+                    &tr!(
+                        "new-file-kind",
+                        category = template.category,
+                        label = template.label
+                    ),
                     String::new(),
                 ),
                 request(ShellRequest::Create {
@@ -1756,10 +1877,11 @@ impl Shell {
             ));
         }
         for (manifest, applet) in io.applets.iter() {
+            let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, &manifest.id));
             for command in applet.commands() {
                 entries.push((
                     PaletteEntry {
-                        label: format!("{}: {}", manifest.name, command.label),
+                        label: format!("{}: {}", manifest.title(), command.label),
                         command: command.command.clone(),
                         hint: command.hint.clone(),
                     },
@@ -1802,11 +1924,12 @@ impl Shell {
                 PaletteAction::Undo(redo) => self.undo(io, redo),
                 PaletteAction::Applet(id, command) => {
                     let view = self.view(now, 0.0);
+                    let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, &id));
                     let (applets, mut cx) = split(io, theme, view);
                     if let Some(applet) = applets.get_mut(&id)
                         && !applet.command(&command, &mut cx)
                     {
-                        cx.fail(format!("{command} is not available"));
+                        cx.fail(tr!("is-not-available", command = command));
                     }
                 }
             }
@@ -1849,7 +1972,7 @@ impl Shell {
         let name = io
             .applets
             .manifest(&id)
-            .map(|manifest| manifest.name.clone())
+            .map(|manifest| manifest.title())
             .unwrap_or_default();
         let view = self.view(now, dt);
         let mut close = false;
@@ -1879,7 +2002,7 @@ impl Shell {
                                 )
                                 .frame(false),
                             )
-                            .on_hover_text("Close (Esc)")
+                            .on_hover_text(tr!("close-esc"))
                             .clicked()
                         {
                             close = true;
@@ -1896,6 +2019,7 @@ impl Shell {
                             .layout(Layout::top_down(Align::Min)),
                     );
                     body_ui.set_clip_rect(body);
+                    let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, &id));
                     let (applets, mut cx) = split(io, theme, view);
                     if let Some(applet) = applets.get_mut(&id) {
                         applet.window_ui(&mut body_ui, &mut cx);
@@ -1912,9 +2036,15 @@ impl Shell {
     pub fn tick(&mut self, io: &mut ShellIo<'_>, now: Instant) -> crate::Tick {
         let view = self.view(now, 0.0);
         let theme = self.theme.clone();
+        let languages: Vec<String> = io
+            .applets
+            .manifests()
+            .map(|manifest| crate::applet_language(&io.world.rice, &manifest.id))
+            .collect();
         let (applets, mut cx) = split(io, &theme, view);
         let mut tick = crate::Tick::default();
-        for (_, applet) in applets.iter_mut() {
+        for ((_, applet), language) in applets.iter_mut().zip(&languages) {
+            let _language = sue_lang::scope(language);
             tick = tick.merge(applet.tick(&mut cx));
         }
         tick
