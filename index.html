@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sue</title>
+  <meta name="description" content="Sue, the Singular Unified Engine: one creative environment for painting, comics, animation, writing and sound, on every device.">
+  <meta property="og:title" content="Sue">
+  <meta property="og:description" content="One creative environment for painting, comics, animation, writing and sound, on every device.">
+  <meta property="og:image" content="https://magigun.github.io/sue/assets/sue_icon_512.png">
+  <link rel="icon" href="assets/sue_icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/sue_icon_512.png">
+  <style>
+    :root {
+      --bg: #0b0b0b;
+      --panel: #151515;
+      --line: #2a2a2a;
+      --text: #ededed;
+      --muted: #9a9a9a;
+      --strong: #ffffff;
+      --button: #ededed;
+      --button-text: #0b0b0b;
+      color-scheme: dark;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f6f6f6;
+        --panel: #ffffff;
+        --line: #dcdcdc;
+        --text: #1a1a1a;
+        --muted: #5c5c5c;
+        --strong: #000000;
+        --button: #111111;
+        --button-text: #ffffff;
+        color-scheme: light;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+    }
+    a { color: inherit; }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+    header {
+      position: sticky; top: 0; z-index: 1;
+      background: color-mix(in srgb, var(--bg) 88%, transparent);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line);
+    }
+    header .wrap { display: flex; align-items: center; gap: 20px; height: 60px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; text-decoration: none; color: var(--strong); }
+    .brand img { width: 28px; height: 28px; border-radius: 7px; }
+    nav { margin-left: auto; display: flex; gap: 18px; flex-wrap: wrap; }
+    nav a { color: var(--muted); text-decoration: none; font-size: 15px; }
+    nav a:hover { color: var(--strong); }
+    .hero { padding: 88px 0 64px; text-align: center; }
+    .hero img { width: 120px; height: 120px; border-radius: 28px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); }
+    h1 { font-size: clamp(40px, 7vw, 64px); line-height: 1.05; margin: 28px 0 12px; color: var(--strong); letter-spacing: -0.02em; }
+    .tagline { font-size: clamp(18px, 2.4vw, 21px); color: var(--muted); max-width: 640px; margin: 0 auto; }
+    .motto { font-style: italic; color: var(--muted); margin: 18px auto 0; max-width: 560px; font-size: 15px; }
+    .actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 34px; }
+    .button {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 12px 22px; border-radius: 999px; text-decoration: none; font-weight: 600;
+      border: 1px solid var(--line); color: var(--text); background: var(--panel);
+    }
+    .button.primary { background: var(--button); color: var(--button-text); border-color: var(--button); }
+    .button:hover { border-color: var(--muted); }
+    section { padding: 56px 0; border-top: 1px solid var(--line); }
+    h2 { font-size: 26px; margin: 0 0 8px; color: var(--strong); }
+    .lead { color: var(--muted); margin: 0 0 28px; max-width: 720px; }
+    .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+    .card h3 { margin: 0 0 6px; font-size: 17px; color: var(--strong); }
+    .card p { margin: 0; color: var(--muted); font-size: 15px; }
+    .platforms { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 24px; padding: 0; list-style: none; }
+    .platforms li { border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 14px; color: var(--muted); background: var(--panel); }
+    .links a.card { text-decoration: none; display: block; }
+    .links a.card:hover { border-color: var(--muted); }
+    .links a.card h3::after { content: " \2192"; color: var(--muted); }
+    footer { border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--muted); font-size: 14px; }
+    footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; }
+    @media (max-width: 560px) {
+      header .wrap { height: auto; padding-top: 10px; padding-bottom: 10px; flex-wrap: wrap; }
+      nav { margin-left: 0; gap: 14px; }
+      .hero { padding: 56px 0 44px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <a class="brand" href="#top"><img src="assets/sue_icon.svg" alt="">Sue</a>
+      <nav>
+        <a href="#what">What it is</a>
+        <a href="#download">Download</a>
+        <a href="#links">Docs</a>
+        <a href="https://discord.gg/h4Hp2bKrHd">Discord</a>
+        <a href="https://github.com/MagiGun/sue">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <div class="wrap hero">
+      <img src="assets/sue_icon.svg" alt="Sue's icon: a girl's silhouette in black and white">
+      <h1>Sue</h1>
+      <p class="tagline">The Singular Unified Engine. One creative environment for painting, comics, animation, writing and sound, on every device you own.</p>
+      <p class="motto">"A jack of all trades is a master of none, but oftentimes better than a master of one."</p>
+      <div class="actions">
+        <a class="button primary" href="https://github.com/MagiGun/sue/releases/latest">Download Sue</a>
+        <a class="button" href="https://discord.gg/h4Hp2bKrHd">Join the Discord</a>
+        <a class="button" href="https://github.com/MagiGun/sue">Source on GitHub</a>
+      </div>
+    </div>
+
+    <section id="what">
+      <div class="wrap">
+        <h2>What it is</h2>
+        <p class="lead">Every tool in Sue works on the same project, so a picture, a page and a sound are the same things wherever you use them. Nothing is copied or converted between apps.</p>
+        <div class="grid">
+          <div class="card">
+            <h3>Sue Paint</h3>
+            <p>Pressure-sensitive brushes, layers, vector lines, screen tones, filters and rulers, with comics, webtoons and frame-by-frame animation, laid out the way Clip Studio Paint users expect.</p>
+          </div>
+          <div class="card">
+            <h3>Sue Writer</h3>
+            <p>Write documents, novels, scripts and papers, then publish them as PDF, Word, EPUB and more.</p>
+          </div>
+          <div class="card">
+            <h3>One canvas</h3>
+            <p>Every file of your project side by side on an endless surface, with a file manager, a player and a converter close at hand.</p>
+          </div>
+          <div class="card">
+            <h3>Yours, offline</h3>
+            <p>No account and no cloud. Sue opens PNG, JPEG, JPEG XL, Photoshop and many more files, and its AI tools run on your own machine.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="download">
+      <div class="wrap">
+        <h2>Download</h2>
+        <p class="lead">Each release has a package for every system, with layouts made for computers, tablets and phones.</p>
+        <ul class="platforms">
+          <li>Windows</li>
+          <li>macOS</li>
+          <li>Linux: AppImage, Flatpak, .deb, .rpm, Arch</li>
+          <li>Android phones and tablets</li>
+          <li>iPhone and iPad</li>
+        </ul>
+        <a class="button primary" href="https://github.com/MagiGun/sue/releases/latest">Get the latest release</a>
+      </div>
+    </section>
+
+    <section id="links">
+      <div class="wrap links">
+        <h2>Learn and take part</h2>
+        <p class="lead">Questions, ideas, art to show? The Discord is where the community meets.</p>
+        <div class="grid">
+          <a class="card" href="https://discord.gg/h4Hp2bKrHd">
+            <h3>Discord</h3>
+            <p>Talk with the people who use and build Sue.</p>
+          </a>
+          <a class="card" href="https://github.com/MagiGun/sue/blob/main/HUMANS.md">
+            <h3>Guide</h3>
+            <p>What Sue is and how its screen works, in plain English.</p>
+          </a>
+          <a class="card" href="https://github.com/MagiGun/sue/blob/main/CONTRIBUTING.md">
+            <h3>Contribute</h3>
+            <p>Set up, find where a change goes, and send it in.</p>
+          </a>
+          <a class="card" href="https://github.com/MagiGun/sue/issues">
+            <h3>Report a problem</h3>
+            <p>Something not working? Tell us on GitHub.</p>
+          </a>
+          <a class="card" href="https://github.com/MagiGun/sue/blob/main/HUMANZ.md">
+            <h3>How it is built</h3>
+            <p>The architecture, for engineers.</p>
+          </a>
+          <a class="card" href="https://github.com/MagiGun/sue/blob/main/LICENSE">
+            <h3>License</h3>
+            <p>The Sayn License: MIT with one more condition.</p>
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>Sue is made by MagiGun and the community, under the Sayn License.</span>
+      <span><a href="https://github.com/MagiGun/sue">GitHub</a> &nbsp; <a href="https://discord.gg/h4Hp2bKrHd">Discord</a> &nbsp; <a href="https://github.com/MagiGun/sue/releases">Releases</a></span>
+    </div>
+  </footer>
+</body>
+</html>
