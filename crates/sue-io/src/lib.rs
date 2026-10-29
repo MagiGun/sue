@@ -44,7 +44,7 @@ pub use jxl::{
     DC_PREVIEW_SCALE, DecodedJxl, FourCc, JXL_CODESTREAM_SIGNATURE, JXL_CONTAINER_SIGNATURE,
     JxlError, JxlImageInfo, JxlPipeline, JxlProbe, NativeJxlPipeline, ProgressiveTarget, probe_jxl,
 };
-pub use pictures::{PictureFormat, decode_picture, encode_picture};
+pub use pictures::{PICTURE_SAVE_TYPES, PictureFormat, decode_picture, encode_as, encode_picture};
 pub use raster::{
     DecodedRaster, RasterInfo, decode_jpeg, decode_png, encode_jpeg, encode_png, encode_png_rgba,
 };

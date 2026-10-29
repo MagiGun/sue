@@ -788,6 +788,52 @@ impl ReversibleTransaction<Arena> for SetExtension {
     }
 }
 
+/// Puts another buffer of the same kind on an entity, keeping the one it
+/// replaces: a picture turned, cropped or resized changes its size, which a
+/// [`RasterEdit`] of rectangles cannot. Revert swaps the old one back, so
+/// the entity, its id and handle stay the same.
+#[derive(Debug)]
+pub struct ReplaceComponent {
+    id: EntityId,
+    data: ComponentData,
+    label: String,
+}
+
+impl ReplaceComponent {
+    /// Replaces the component of `data`'s kind on `id` with `data`.
+    pub fn new(id: EntityId, data: impl Into<ComponentData>, label: impl Into<String>) -> Self {
+        Self {
+            id,
+            data: data.into(),
+            label: label.into(),
+        }
+    }
+
+    fn swap(&mut self, arena: &mut Arena) -> Result<(), TxnError> {
+        let entity = arena.get_by_id_mut(self.id)?;
+        let kind = self.data.kind();
+        let slot = entity
+            .component_mut(kind)
+            .ok_or_else(|| TxnError::new(format!("the entity has no {kind:?} to replace")))?;
+        std::mem::swap(slot, &mut self.data);
+        Ok(())
+    }
+}
+
+impl ReversibleTransaction<Arena> for ReplaceComponent {
+    fn label(&self) -> String {
+        self.label.clone()
+    }
+
+    fn apply(&mut self, arena: &mut Arena) -> Result<(), TxnError> {
+        self.swap(arena)
+    }
+
+    fn revert(&mut self, arena: &mut Arena) -> Result<(), TxnError> {
+        self.swap(arena)
+    }
+}
+
 /// One rectangle of an 8-bit raster, before and after an edit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RasterPatch {
@@ -965,6 +1011,42 @@ impl ReversibleTransaction<Arena> for RasterEdit {
 mod tests {
     use super::*;
     use crate::{CHILD, OpaqueComponent, TimeSpan, UndoStack};
+
+    #[test]
+    fn a_replaced_component_comes_back_exactly_under_the_same_id() {
+        let mut arena = Arena::new();
+        let wide = RasterTile2D::new(4, 2, PixelFormat::Rgba8).unwrap();
+        let handle = arena.spawn("photo", wide.clone());
+        let id = arena.get(handle).unwrap().id();
+        let tall = RasterTile2D::new(2, 4, PixelFormat::Rgba8).unwrap();
+        let mut history = UndoStack::new();
+        history
+            .apply(&mut arena, ReplaceComponent::new(id, tall, "Rotate"))
+            .unwrap();
+        let size = |arena: &Arena| {
+            let raster = arena
+                .get(handle)
+                .unwrap()
+                .component(ComponentKind::RasterTile2D)
+                .and_then(ComponentData::as_raster)
+                .unwrap();
+            (raster.width(), raster.height())
+        };
+        assert_eq!(size(&arena), (2, 4));
+        history.undo(&mut arena).unwrap();
+        assert_eq!(size(&arena), (4, 2));
+        assert_eq!(arena.handle_of(id), Some(handle));
+        history.redo(&mut arena).unwrap();
+        assert_eq!(size(&arena), (2, 4));
+        // An entity without that kind refuses, and nothing changes.
+        let text = arena.spawn("note", StringBuffer::from("hi".to_owned()));
+        let text_id = arena.get(text).unwrap().id();
+        assert!(
+            history
+                .apply(&mut arena, ReplaceComponent::new(text_id, wide, "Oops"))
+                .is_err()
+        );
+    }
 
     #[test]
     fn raster_edits_store_only_their_rectangles_and_undo_exactly() {

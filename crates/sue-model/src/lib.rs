@@ -33,7 +33,7 @@ mod table;
 mod text;
 
 pub use blend::BlendMode;
-pub use curve::{Animation, Curve, Interpolation, Key};
+pub use curve::{Animation, Curve, Interpolation, Key, Response};
 pub use encoded::Encoded;
 pub use geometry::{AttributeData, Domain, Geometry, Prim, PrimKind, Transform};
 pub use graph::{GraphEdit, GraphOp, Link, Node, NodeGraph, NodeKey, NodeRegistry, NodeType, Port};

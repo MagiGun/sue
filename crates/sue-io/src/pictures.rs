@@ -154,6 +154,65 @@ pub fn decode_picture(bytes: &[u8], hint: Option<PictureFormat>) -> Result<Raste
         .map_err(|error| error.to_string())
 }
 
+/// Every picture format Sue saves, for a "save as type" list: what people
+/// read and the extensions, the usual one first.
+pub const PICTURE_SAVE_TYPES: &[(&str, &[&str])] = &[
+    ("PNG picture", &["png"]),
+    ("JPEG XL picture", &["jxl"]),
+    ("JPEG picture", &["jpg", "jpeg"]),
+    ("WebP picture", &["webp"]),
+    ("TIFF picture", &["tiff", "tif"]),
+    ("BMP picture", &["bmp"]),
+    ("TGA picture", &["tga"]),
+    ("GIF picture", &["gif"]),
+    ("QOI picture", &["qoi"]),
+];
+
+/// Encodes `tile` as the picture format of `extension` (any of
+/// [`PICTURE_SAVE_TYPES`]): JPEG at `jpeg_quality` over white, JPEG XL
+/// losslessly at `jxl_effort`.
+///
+/// # Errors
+/// If the extension is not a picture format Sue writes, or encoding fails.
+pub fn encode_as(
+    tile: &RasterTile2D,
+    extension: &str,
+    jpeg_quality: u8,
+    jxl_effort: u8,
+) -> Result<Vec<u8>, String> {
+    let extension = extension.trim_start_matches('.').to_ascii_lowercase();
+    match extension.as_str() {
+        "png" => crate::encode_png(tile),
+        "jpg" | "jpeg" => {
+            // JPEG has no transparency: lay the picture over white.
+            let mut flat = tile.clone();
+            if flat.format() == PixelFormat::Rgba8
+                && let Some(pixels) = flat.bytes_mut()
+            {
+                for pixel in pixels.as_chunks_mut::<4>().0 {
+                    let alpha = u32::from(pixel[3]);
+                    for channel in &mut pixel[..3] {
+                        *channel =
+                            ((u32::from(*channel) * alpha + 255 * (255 - alpha)) / 255) as u8;
+                    }
+                    pixel[3] = 255;
+                }
+            }
+            crate::encode_jpeg(&flat, jpeg_quality)
+        }
+        "jxl" => {
+            use crate::JxlPipeline;
+            crate::NativeJxlPipeline
+                .encode_layers(&[tile], jxl_effort)
+                .map_err(|error| error.to_string())
+        }
+        other => match PictureFormat::from_extension(other) {
+            Some(format) => encode_picture(tile, format),
+            None => Err(format!("Sue cannot write .{other} pictures")),
+        },
+    }
+}
+
 /// Writes an `Rgba8` (or `Gray8`) tile as `format`.
 ///
 /// # Errors
@@ -194,6 +253,26 @@ pub fn encode_picture(tile: &RasterTile2D, format: PictureFormat) -> Result<Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_save_type_writes_a_picture_that_reads_back() {
+        let mut tile = RasterTile2D::new(8, 6, PixelFormat::Rgba8).unwrap();
+        for (index, byte) in tile.bytes_mut().unwrap().iter_mut().enumerate() {
+            *byte = if index % 4 == 3 {
+                255
+            } else {
+                (index * 7) as u8
+            };
+        }
+        for (_, extensions) in PICTURE_SAVE_TYPES {
+            let bytes = encode_as(&tile, extensions[0], 90, 3)
+                .unwrap_or_else(|error| panic!("{}: {error}", extensions[0]));
+            assert!(bytes.len() > 16, "{}", extensions[0]);
+        }
+        let png = encode_as(&tile, "PNG", 90, 3).unwrap();
+        assert_eq!(crate::decode_png(&png).unwrap().tile.width(), 8);
+        assert!(encode_as(&tile, "doc", 90, 3).is_err());
+    }
 
     /// Eight by six pixels of four opaque colors and a see-through corner.
     fn tile(alpha: bool) -> RasterTile2D {
