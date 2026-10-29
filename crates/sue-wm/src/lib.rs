@@ -61,7 +61,7 @@ pub use config::{CanvasConfig, GridStyle, Keymap, WmConfig, register_rice, rice_
 pub use error::WmError;
 pub use launchpad::{AppletFactory, Applets, Launchpad};
 pub use layout::{LayoutMetrics, LayoutRequest, LayoutSolution, Topology, solve_layout};
-pub use menubar::{ItemState, Menu, MenuBar, MenuItem};
+pub use menubar::{ItemState, Menu, MenuBar, MenuItem, context_items};
 pub use palette::{Palette, PaletteOutcome, fuzzy_score};
 pub use radial::{Radial, RadialOutcome, wedge_at, wedge_point};
 pub use scene::{NodeId, SCENE_CHUNK, Scene, SceneNode};

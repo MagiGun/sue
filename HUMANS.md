@@ -448,6 +448,15 @@ familiar:
   from: pick the layer, then Register Selected Layer.
   File, Export Animation saves an animated GIF, a movie or every frame as a
   picture.
+- **Layer Property effects:** give a layer a **Border effect** (an outline
+  of any thickness and color round what is on it), a **Tone** (halftone
+  dots at the frequency and angle you choose), a **Layer color**, or show it
+  in gray or monochrome (**Expression color**). The drawing itself is not
+  changed, so effects can be turned off again.
+- **Right-click** a layer for the layer menu, a sub tool to duplicate,
+  delete or reset it, a canvas tab to save or close it, a material to paste
+  or delete it, or a swatch to add, replace or delete a color. On the canvas
+  a right-click picks a color, as in Clip Studio Paint.
 - **Materials** (the Material tab beside Color Set, or Window, Material):
   screentones and patterns ready to use, and your own pictures. Double-click
   one to put it on a new layer (tones and patterns in your drawing color).

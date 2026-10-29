@@ -458,6 +458,48 @@ impl MenuBar {
     }
 }
 
+/// Shows `items` as a right-click menu in `ui` (inside egui's context menu),
+/// nested menus opening to the side, each item grayed or checked as
+/// `state` says. Returns the command picked; the menu closes then.
+pub fn context_items(
+    ui: &mut Ui,
+    items: &[MenuItem],
+    state: &dyn Fn(&str) -> ItemState,
+) -> Option<String> {
+    let mut picked = None;
+    for item in items {
+        match item {
+            MenuItem::Action {
+                label,
+                command,
+                shortcut,
+            } => {
+                let now = state(command);
+                let mut button =
+                    egui::Button::new(label.as_str()).selected(now.checked == Some(true));
+                if !shortcut.is_empty() {
+                    button = button.shortcut_text(shortcut.as_str());
+                }
+                if ui.add_enabled(now.enabled, button).clicked() {
+                    picked = Some(command.clone());
+                    ui.close();
+                }
+            }
+            MenuItem::Sub { label, items } => {
+                ui.menu_button(label.as_str(), |ui| {
+                    if let Some(command) = context_items(ui, items, state) {
+                        picked = Some(command);
+                    }
+                });
+            }
+            MenuItem::Separator => {
+                ui.separator();
+            }
+        }
+    }
+    picked
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

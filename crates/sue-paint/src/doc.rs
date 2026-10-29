@@ -895,6 +895,13 @@ pub fn label(key: &str, value: &Value) -> String {
         picture::BLEND => "Blend Mode".to_owned(),
         picture::COLOR => "Paper Color".to_owned(),
         picture::X | picture::Y => "Move Layer".to_owned(),
+        crate::effects::BORDER => pick("Border Effect", "No Border Effect"),
+        crate::effects::BORDER_WIDTH | crate::effects::BORDER_COLOR => "Border Effect".to_owned(),
+        crate::effects::TONE => pick("Tone", "No Tone"),
+        crate::effects::TONE_LINES | crate::effects::TONE_ANGLE => "Tone".to_owned(),
+        crate::effects::COLOR => pick("Layer Color", "No Layer Color"),
+        crate::effects::COLOR_VALUE => "Layer Color".to_owned(),
+        crate::effects::EXPRESSION | crate::effects::THRESHOLD => "Expression Color".to_owned(),
         other => format!("Set {other}"),
     }
 }

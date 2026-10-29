@@ -763,18 +763,46 @@ impl SuePaint {
             egui::ScrollArea::vertical()
                 .id_salt("sue-paint-subs")
                 .show(&mut inner, |ui| {
+                    let mut action = None;
                     for (index, name) in names.iter().enumerate() {
                         let chosen = index == picked;
-                        if ui
-                            .add_sized(
-                                vec2(ui.available_width(), 24.0),
-                                egui::Button::selectable(chosen, name.as_str()),
-                            )
-                            .clicked()
-                        {
+                        let response = ui.add_sized(
+                            vec2(ui.available_width(), 24.0),
+                            egui::Button::selectable(chosen, name.as_str()),
+                        );
+                        if response.clicked() {
                             self.toolbox.pick_sub(tool, index);
                             self.tool_tab = 1;
                         }
+                        // Clip Studio Paint's sub tool menu.
+                        response.context_menu(|ui| {
+                            for (what, label) in [
+                                (0, "Duplicate Sub Tool"),
+                                (1, "Delete Sub Tool"),
+                                (2, "Reset to Initial Settings"),
+                            ] {
+                                if ui
+                                    .add_enabled(
+                                        what != 1 || names.len() > 1,
+                                        egui::Button::new(label),
+                                    )
+                                    .clicked()
+                                {
+                                    action = Some((what, index));
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
+                    match action {
+                        Some((0, index)) => self.toolbox.duplicate_sub(tool, index),
+                        Some((1, index)) => {
+                            self.toolbox.delete_sub(tool, index);
+                        }
+                        Some((_, index)) => {
+                            self.toolbox.reset_sub(tool, index);
+                        }
+                        None => {}
                     }
                 });
             return;
@@ -1588,6 +1616,18 @@ impl SuePaint {
                                 if response.double_clicked() {
                                     paste = Some((*material).clone());
                                 }
+                                response.context_menu(|ui| {
+                                    if ui.button("Paste to Canvas").clicked() {
+                                        paste = Some((*material).clone());
+                                        ui.close();
+                                    }
+                                    if material.kind == crate::materials::Kind::Image
+                                        && ui.button("Delete Material").clicked()
+                                    {
+                                        delete = Some((*material).clone());
+                                        ui.close();
+                                    }
+                                });
                                 ui.label(small(&material.name));
                             });
                         }
@@ -2065,6 +2105,7 @@ impl SuePaint {
         };
         let columns = ((body.width() / tile).floor() as usize).max(1);
         let cell = (body.width() / columns as f32).floor();
+        let mut swatch_menu = None;
         for (index, rgb) in swatches.iter().enumerate() {
             let (column, row) = (index % columns, index / columns);
             let rect = Rect::from_min_size(
@@ -2091,12 +2132,43 @@ impl SuePaint {
                     StrokeKind::Inside,
                 );
             }
-            if response.on_hover_text(color::hex(*rgb)).clicked() {
+            let response = response.on_hover_text(color::hex(*rgb));
+            if response.clicked() {
                 self.set_drawing_color(*rgb);
                 self.transparent = false;
                 if editing {
                     self.color_sets.selected = Some(index);
                 }
+            }
+            if editing {
+                response.context_menu(|ui| {
+                    for (what, label) in
+                        [(0, "Add Color"), (1, "Replace Color"), (2, "Delete Color")]
+                    {
+                        if ui.button(label).clicked() {
+                            swatch_menu = Some((what, index));
+                            ui.close();
+                        }
+                    }
+                });
+            }
+        }
+        if let Some((what, index)) = swatch_menu {
+            let drawing = self.drawing_color();
+            if let Some(colors) = self.color_sets.colors_mut() {
+                match what {
+                    0 => {
+                        colors.push(drawing);
+                        self.color_sets.selected = Some(colors.len() - 1);
+                    }
+                    1 if index < colors.len() => colors[index] = drawing,
+                    2 if index < colors.len() => {
+                        colors.remove(index);
+                        self.color_sets.selected = None;
+                    }
+                    _ => {}
+                }
+                self.save_color_sets(cx);
             }
         }
         if !editing {
@@ -2657,6 +2729,13 @@ impl SuePaint {
             .hline(list.x_range(), list.top(), theme.hairline());
         let mut list_ui = child(ui, list, "layer-list");
         let mut pick = None;
+        // Right-click on a layer: Clip Studio Paint's layer menu.
+        let layer_menu: Vec<sue_wm::MenuItem> = crate::menus::menus()
+            .into_iter()
+            .find(|menu| menu.title == "Layer")
+            .map(|menu| menu.items)
+            .unwrap_or_default();
+        let mut from_menu = None;
         let mut toggle = None;
         let mut rename_done = None;
         let mut fold = None;
@@ -2892,9 +2971,15 @@ impl SuePaint {
                         reopen = Some((info.id, filter, text));
                     } else if response.double_clicked() {
                         self.renaming = Some((info.id, info.name.clone()));
-                    } else if response.clicked() {
+                    } else if response.clicked() || response.secondary_clicked() {
                         pick = Some(info.id);
                     }
+                    let state = |command: &str| self.state(command, &cx.world.arena, cx.history);
+                    response.context_menu(|ui| {
+                        if let Some(command) = sue_wm::context_items(ui, &layer_menu, &state) {
+                            from_menu = Some(command);
+                        }
+                    });
                 }
             });
         if let Some(id) = pick
@@ -2907,6 +2992,9 @@ impl SuePaint {
         }
         if let Some((id, visible)) = toggle {
             Self::apply(cx, doc::set(id, picture::VISIBLE, visible));
+        }
+        if let Some(command) = from_menu {
+            self.run(&command, cx);
         }
         if let Some((id, open)) = fold {
             Self::apply(cx, doc::set(id, doc::OPEN, open));
@@ -3035,10 +3123,176 @@ impl SuePaint {
             }
             LayerKind::Other => {}
         }
-        ui.add_space(6.0);
-        ui.add_enabled_ui(false, |ui| {
-            ui.label(RichText::new("Effects: border, tone, layer color").color(theme.muted));
+        if info.kind == LayerKind::Raster {
+            ui.add_space(6.0);
+            self.layer_effects(ui, info, cx, theme);
+        }
+    }
+
+    /// Clip Studio Paint's Layer Property effects: Border effect, Tone and
+    /// Layer color, and the Expression color.
+    fn layer_effects(
+        &mut self,
+        ui: &mut Ui,
+        info: &doc::LayerInfo,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        use crate::effects::{self, Effects};
+        let small = |text: &str| RichText::new(text).color(theme.muted);
+        let Ok(entity) = cx.world.arena.get_by_id(info.id) else {
+            return;
+        };
+        let effects = Effects::of(entity, 72.0);
+        let number =
+            |key: &str, or: f64| entity.property(key).and_then(Value::as_f64).unwrap_or(or);
+        let (border_width, lines, angle, threshold) = (
+            number(effects::BORDER_WIDTH, 4.0),
+            number(effects::TONE_LINES, 60.0),
+            number(effects::TONE_ANGLE, 45.0),
+            number(effects::THRESHOLD, 0.5),
+        );
+        let color_of = |key: &str| match entity.property(key) {
+            Some(Value::Color(color)) => *color,
+            _ => effects::default_color(key),
+        };
+        let (border_color, layer_color) = (
+            color_of(effects::BORDER_COLOR),
+            color_of(effects::COLOR_VALUE),
+        );
+        ui.label(small("Effect"));
+        let mut toggle = None;
+        ui.horizontal(|ui| {
+            for (key, name, on) in [
+                (effects::BORDER, "Border effect", effects.border.is_some()),
+                (effects::TONE, "Tone", effects.tone.is_some()),
+                (effects::COLOR, "Layer color", effects.color.is_some()),
+            ] {
+                if ui.selectable_label(on, name).clicked() {
+                    toggle = Some((key, !on));
+                }
+            }
         });
+        if let Some((key, on)) = toggle {
+            Self::apply(cx, doc::set(info.id, key, on));
+        }
+        let color_row = |this: &mut Self,
+                         ui: &mut Ui,
+                         cx: &mut AppletContext<'_>,
+                         key: &str,
+                         color: sue_core::Color,
+                         salt: &str| {
+            let [r, g, b] = color::bytes(color.to_space(sue_core::ColorSpace::Srgb).rgb);
+            let mut rgba = [r, g, b, 255];
+            ui.horizontal(|ui| {
+                ui.label(small(if salt == "sue-paint-border" {
+                    "Edge color"
+                } else {
+                    "Layer color"
+                }));
+                let pick = sue_wm::color_button(ui, (salt, info.id), &mut rgba, false, theme);
+                let [r, g, b, _] = rgba;
+                this.live_value(
+                    cx,
+                    (
+                        pick.changed,
+                        pick.released || (pick.changed && !pick.dragging),
+                    ),
+                    info.id,
+                    key,
+                    Value::from(sue_core::Color::srgb8(r, g, b)),
+                );
+            });
+        };
+        if effects.border.is_some() {
+            let mut width = border_width as f32;
+            ui.horizontal(|ui| {
+                ui.label(small("Thickness of edge"));
+                let response = ui.add(egui::Slider::new(&mut width, 1.0..=50.0).suffix(" px"));
+                self.live_property(
+                    cx,
+                    &response,
+                    info.id,
+                    effects::BORDER_WIDTH,
+                    Value::Float(f64::from(width)),
+                );
+            });
+            color_row(
+                self,
+                ui,
+                cx,
+                effects::BORDER_COLOR,
+                border_color,
+                "sue-paint-border",
+            );
+        }
+        if effects.tone.is_some() {
+            let (mut lines, mut angle) = (lines as f32, angle as f32);
+            ui.horizontal(|ui| {
+                ui.label(small("Frequency"));
+                let response = ui.add(egui::Slider::new(&mut lines, 5.0..=300.0).suffix(" lpi"));
+                self.live_property(
+                    cx,
+                    &response,
+                    info.id,
+                    effects::TONE_LINES,
+                    Value::Float(f64::from(lines)),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label(small("Angle"));
+                let response = ui.add(egui::Slider::new(&mut angle, 0.0..=180.0).suffix(" deg"));
+                self.live_property(
+                    cx,
+                    &response,
+                    info.id,
+                    effects::TONE_ANGLE,
+                    Value::Float(f64::from(angle)),
+                );
+            });
+        }
+        if effects.color.is_some() {
+            color_row(
+                self,
+                ui,
+                cx,
+                effects::COLOR_VALUE,
+                layer_color,
+                "sue-paint-layer-color",
+            );
+        }
+        ui.add_space(4.0);
+        let mut expression = effects.expression;
+        ui.horizontal(|ui| {
+            ui.label(small("Expression color"));
+            egui::ComboBox::from_id_salt(("sue-paint-expression", info.id))
+                .selected_text(effects::EXPRESSIONS[usize::from(expression.min(2))])
+                .show_ui(ui, |ui| {
+                    for (index, name) in effects::EXPRESSIONS.iter().enumerate() {
+                        ui.selectable_value(&mut expression, index as u8, *name);
+                    }
+                });
+        });
+        if expression != effects.expression {
+            Self::apply(
+                cx,
+                doc::set(info.id, effects::EXPRESSION, i64::from(expression)),
+            );
+        }
+        if effects.expression == 2 {
+            let mut threshold = threshold as f32 * 100.0;
+            ui.horizontal(|ui| {
+                ui.label(small("Threshold"));
+                let response = ui.add(egui::Slider::new(&mut threshold, 1.0..=99.0).suffix(" %"));
+                self.live_property(
+                    cx,
+                    &response,
+                    info.id,
+                    effects::THRESHOLD,
+                    Value::Float(f64::from(threshold) / 100.0),
+                );
+            });
+        }
     }
 
     /// Applies a slider's value in place while it is dragged, and records

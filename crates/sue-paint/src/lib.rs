@@ -39,6 +39,7 @@ pub mod correct;
 mod dialogs;
 pub mod doc;
 mod dock;
+pub mod effects;
 pub mod fill;
 pub mod filters;
 mod icons;

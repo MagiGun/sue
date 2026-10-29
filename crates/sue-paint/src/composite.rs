@@ -114,6 +114,34 @@ struct Layer<'a> {
     mask: Option<&'a RasterTile2D>,
     /// Seen through a camera: where each picture pixel looks on the layer.
     warp: Option<[f32; 6]>,
+    /// Its Layer Property effects.
+    effects: crate::effects::Effects,
+    /// Its border's cover over the rectangle being drawn.
+    edge: Option<crate::effects::Edge>,
+}
+
+/// Works out the borders of `layers` with a border effect over `rect`.
+fn prepare(layers: &mut [Layer<'_>], rect: [u32; 4]) {
+    for layer in layers.iter_mut() {
+        let Some((width, _)) = layer.effects.border else {
+            continue;
+        };
+        if width <= 0.0 || !layer.style.visible {
+            continue;
+        }
+        let edge = crate::effects::Edge::build(
+            |x, y| {
+                if x < 0 || y < 0 {
+                    0.0
+                } else {
+                    layer.sample(x as u32, y as u32)[3]
+                }
+            },
+            rect,
+            width,
+        );
+        layer.edge = Some(edge);
+    }
 }
 
 impl Layer<'_> {
@@ -220,6 +248,12 @@ fn gather_view<'a>(
     options: RenderOptions,
     view: Option<&FrameView>,
 ) -> Vec<Layer<'a>> {
+    let dpi = arena
+        .get_by_id(picture)
+        .ok()
+        .and_then(|entity| entity.property(picture::DPI))
+        .and_then(sue_core::Value::as_f64)
+        .unwrap_or(72.0);
     picture::layers(arena, picture)
         .into_iter()
         .filter_map(|id| arena.get_by_id(id).ok())
@@ -285,12 +319,19 @@ fn gather_view<'a>(
                             .map(|(_, map)| *map)
                     })
             });
+            let effects = if matches!(source, Source::Raster { .. }) {
+                crate::effects::Effects::of(entity, dpi)
+            } else {
+                crate::effects::Effects::default()
+            };
             Some(Layer {
                 source,
                 style,
                 tint,
                 mask,
                 warp,
+                effects,
+                edge: None,
             })
         })
         .collect()
@@ -342,6 +383,22 @@ fn pixel(layers: &[Layer<'_>], x: u32, y: u32) -> [f32; 4] {
             for channel in 0..3 {
                 source[channel] += (color[channel] - source[channel]) * amount;
             }
+        }
+        if !layer.effects.is_plain() {
+            source = layer.effects.apply(source, x, y);
+        }
+        if let (Some(edge), Some((_, rim))) = (&layer.edge, layer.effects.border) {
+            // The border, under the layer.
+            let cover = edge.at(x, y);
+            let alpha = source[3] + cover * (1.0 - source[3]);
+            if alpha > 0.0 {
+                for channel in 0..3 {
+                    source[channel] = (source[channel] * source[3]
+                        + rim[channel] * cover * (1.0 - source[3]))
+                        / alpha;
+                }
+            }
+            source[3] = alpha;
         }
         source[3] *= layer.style.opacity;
         if layer.style.clip {
@@ -409,7 +466,8 @@ pub fn render_view(
     options: RenderOptions,
     view: Option<&FrameView>,
 ) -> Vec<u8> {
-    let layers = gather_view(arena, picture, options, view);
+    let mut layers = gather_view(arena, picture, options, view);
+    prepare(&mut layers, [x0, y0, x1, y1]);
     let (width, height) = (
         x1.saturating_sub(x0) as usize,
         y1.saturating_sub(y0) as usize,
@@ -603,12 +661,13 @@ impl Compositor {
     }
 
     fn paint(&mut self, arena: &Arena, [x0, y0, x1, y1]: [u32; 4]) {
-        let layers = gather_view(
+        let mut layers = gather_view(
             arena,
             self.picture,
             RenderOptions::default(),
             self.view.as_ref(),
         );
+        prepare(&mut layers, [x0, y0, x1, y1]);
         let stride = self.size[0] as usize * 4;
         let band = &mut self.display[y0 as usize * stride..y1 as usize * stride];
         let area = (x1.saturating_sub(x0) * y1.saturating_sub(y0)) as usize;
@@ -665,6 +724,8 @@ pub fn thumbnail(arena: &Arena, layer: EntityId, max: [u32; 2]) -> Option<(Vec<u
         tint: None,
         mask: None,
         warp: None,
+        effects: crate::effects::Effects::default(),
+        edge: None,
     };
     let scale = (max[0] as f32 / size[0].max(1) as f32).min(max[1] as f32 / size[1].max(1) as f32);
     let out = [

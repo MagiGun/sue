@@ -1262,6 +1262,21 @@ pressure. Each drag paints the layer again from its lines and records one
 step. Remove dust clears specks no larger than the dust size from a raster
 layer, in a dragged box or all of it.
 
+**Layer effects and right-click menus.** Layer Property has Clip Studio
+Paint's effects, each a layer property the compositor applies as it draws,
+leaving the pixels alone (`sue_paint::effects`): Border effect (a rim of
+its thickness and color round where the layer is at least half opaque,
+from an exact Euclidean distance transform over the rectangle being drawn,
+widened by the rim so a part sees the layer outside it), Tone (halftone dots
+on a turned grid, as large as the gray is dark, at the screen frequency over
+the picture's resolution), Layer color, and Expression color (gray, or
+monochrome at a threshold). Right-clicking a layer picks it and opens the
+Layer menu (drawn by the shared `sue_wm::context_items`, grayed and
+checked as the menu bar is); sub tools offer Duplicate, Delete and Reset to
+Initial Settings; canvas tabs Save, Save As and Close; materials Paste and
+Delete; swatches Add, Replace and Delete. A right-click on the canvas picks
+a color, as in Clip Studio Paint.
+
 **Materials.** The Material palette (a tab beside Color Set and Color
 History, or Window, Material) lists Sue Paint's own screentones (dots on a
 45 degree grid of 8 pixel cells sized to their share, lines, sand) and
@@ -1868,6 +1883,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: timelapse recording and export, and movies of animations (Motion JPEG AVI) | **Implemented**; unit tests for the AVI's headers and index and for frames kept, fitted and timed; an end-to-end run records a frame a stroke, exports a video and stops | `sue-io/src/video.rs`, `sue-paint/src/timelapse.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: camera folders with keyframed position, zoom and rotation | **Implemented**; unit tests for the camera's map and frame, keyframes in between, deleted and undone, and a dot rendered four times larger through the camera | `sue-paint/src/camera.rs`, `composite.rs`, `anim_ui.rs` |
 | §3.7 Sue Paint: the Material palette, built-in tones and patterns, Register Material, Image | **Implemented**; a unit test for a tone's coverage and color and a picture registered, cut, read back and placed; an end-to-end run registers a drawing and pastes it as a layer | `sue-paint/src/materials.rs`, `panels.rs`, `bins/sue/src/runtime.rs` |
+| §3.7 Sue Paint: Layer Property effects (border, tone, layer color, expression color) and right-click menus | **Implemented**; unit tests for the border's reach, rim and roundness, each effect's color, a tone's coverage, a border rendered round a dot with the pixels kept, and sub tools duplicated, reset and deleted | `sue-paint/src/effects.rs`, `composite.rs`, `panels.rs`, `tools.rs`, `sue-wm/src/menubar.rs` |
 | §3.7 Sue Paint: brush tip materials | Planned; the menu item is present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |

@@ -130,6 +130,7 @@ impl SuePaint {
         let font = theme.font(theme.small_size + 0.5);
         let mut x = strip.left() + 2.0;
         let mut pick = None;
+        let mut tab_menu = None;
         let mut close = None;
         for (index, doc) in self.docs.iter().enumerate() {
             let name = cx
@@ -213,9 +214,22 @@ impl SuePaint {
                 .clicked()
             {
                 close = Some(index);
-            } else if response.clicked() {
+            } else if response.clicked() || response.secondary_clicked() {
                 pick = Some(index);
             }
+            // Right-click on a tab: what can be done with that canvas.
+            response.context_menu(|ui| {
+                for (label, command) in [
+                    ("Save", "file.save"),
+                    ("Save As...", "file.save_as"),
+                    ("Close", "file.close"),
+                ] {
+                    if ui.button(label).clicked() {
+                        tab_menu = Some((index, command));
+                        ui.close();
+                    }
+                }
+            });
         }
         let plus = Rect::from_min_size(pos2(x + 2.0, strip.top() + 3.0), vec2(22.0, 22.0));
         if icon_button(ui, plus, Icon::NewLayer, true, false, "New (Ctrl+N)", theme) {
@@ -227,6 +241,10 @@ impl SuePaint {
         if let Some(index) = close {
             self.active = index;
             self.run("file.close", cx);
+        }
+        if let Some((index, command)) = tab_menu {
+            self.active = index;
+            self.run(command, cx);
         }
     }
 

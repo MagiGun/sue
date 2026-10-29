@@ -681,6 +681,55 @@ impl Toolbox {
         }
     }
 
+    /// Copies sub tool `index` of `tool` right after it, its name with a
+    /// number, and picks the copy (Duplicate Sub Tool).
+    pub fn duplicate_sub(&mut self, tool: Tool, index: usize) {
+        let set = self.set_mut(tool);
+        let Some(sub) = set.1.get(index).cloned() else {
+            return;
+        };
+        let taken: Vec<String> = set.1.iter().map(|sub| sub.name.clone()).collect();
+        let name = (2..)
+            .map(|n| format!("{} {n}", sub.name))
+            .find(|name| !taken.contains(name))
+            .unwrap_or_else(|| sub.name.clone());
+        set.1.insert(index + 1, SubTool { name, ..sub });
+        set.2 = index + 1;
+    }
+
+    /// Deletes sub tool `index` of `tool`; a tool keeps at least one.
+    pub fn delete_sub(&mut self, tool: Tool, index: usize) -> bool {
+        let set = self.set_mut(tool);
+        if set.1.len() <= 1 || index >= set.1.len() {
+            return false;
+        }
+        set.1.remove(index);
+        set.2 = set.2.min(set.1.len() - 1);
+        true
+    }
+
+    /// Puts sub tool `index` of `tool` back the way Sue Paint brings it
+    /// (Reset to Initial Settings); a copy goes back to what it copied.
+    pub fn reset_sub(&mut self, tool: Tool, index: usize) -> bool {
+        let set = self.set_mut(tool);
+        let Some(sub) = set.1.get(index) else {
+            return false;
+        };
+        let name = sub.name.clone();
+        let Some(original) = tool
+            .sub_tools()
+            .into_iter()
+            .filter(|original| {
+                name == original.name || name.starts_with(&format!("{} ", original.name))
+            })
+            .max_by_key(|original| original.name.len())
+        else {
+            return false;
+        };
+        set.1[index] = SubTool { name, ..original };
+        true
+    }
+
     /// The picked sub tool of the current tool.
     #[must_use]
     pub fn current(&self) -> &SubTool {
@@ -738,6 +787,37 @@ impl Toolbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sub_tools_duplicate_delete_and_reset() {
+        let mut toolbox = Toolbox::default();
+        let first = toolbox.subs(Tool::Pen).len();
+        let name = toolbox.subs(Tool::Pen)[0].name.clone();
+        toolbox.duplicate_sub(Tool::Pen, 0);
+        assert_eq!(toolbox.subs(Tool::Pen).len(), first + 1);
+        assert_eq!(toolbox.subs(Tool::Pen)[1].name, format!("{name} 2"));
+        assert_eq!(toolbox.picked(Tool::Pen), 1, "the copy is picked");
+        toolbox.pick(Tool::Pen);
+        toolbox.current_mut().tip.size = 99.0;
+        assert!(toolbox.reset_sub(Tool::Pen, 1));
+        assert_eq!(
+            toolbox.subs(Tool::Pen)[1].tip.size,
+            toolbox.subs(Tool::Pen)[0].tip.size,
+            "as it came"
+        );
+        assert_eq!(
+            toolbox.subs(Tool::Pen)[1].name,
+            format!("{name} 2"),
+            "keeping its name"
+        );
+        assert!(toolbox.delete_sub(Tool::Pen, 1));
+        assert_eq!(toolbox.subs(Tool::Pen).len(), first);
+        let mut one = Toolbox::default();
+        while one.subs(Tool::Text).len() > 1 {
+            one.delete_sub(Tool::Text, 0);
+        }
+        assert!(!one.delete_sub(Tool::Text, 0), "a tool keeps one");
+    }
 
     #[test]
     fn every_tool_has_sub_tools_and_keys_cycle() {
