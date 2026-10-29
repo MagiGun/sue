@@ -197,13 +197,18 @@ impl SueWriter {
         let mut center = body;
         let mut binder = None;
         if self.binder && !simple && has_project && body.width() > 520.0 {
-            let width = self.binder_width.clamp(150.0, body.width() * 0.4);
+            let width = self
+                .binder_width
+                .clamp(150.0, (body.width() * 0.4).max(150.0));
             let rect = Rect::from_min_max(body.min, pos2(body.left() + width, body.bottom()));
             center.min.x = rect.right() + 1.0;
             binder = Some(rect);
         }
-        // The inspector folds away before the text gets too narrow to write in.
-        let width = self.inspector_width.clamp(190.0, body.width() * 0.35);
+        // The inspector folds away before the text gets too narrow to write in
+        // (and a phone's narrow page never turns its bounds around).
+        let width = self
+            .inspector_width
+            .clamp(190.0, (body.width() * 0.35).max(190.0));
         let mut inspector = None;
         if self.inspector && center.width() - width >= 520.0 && (has_project || has_open) {
             let rect = Rect::from_min_max(pos2(body.right() - width, body.top()), body.max);
@@ -2842,4 +2847,24 @@ fn font_picker(ui: &mut Ui, salt: &str, font: &mut String, filter: &mut String) 
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_page_lays_out_on_a_phone_and_on_a_desktop() {
+        let writer = SueWriter::default();
+        // A phone's page: the text takes it all, the panels fold away.
+        let phone = Rect::from_min_size(pos2(0.0, 52.0), vec2(390.0, 760.0));
+        let places = writer.places(phone, false, true, true);
+        assert!(places.binder.is_none() && places.inspector.is_none());
+        assert_eq!(places.center.width(), 390.0);
+        // A desktop's page has room for the binder and the inspector.
+        let desktop = Rect::from_min_size(pos2(0.0, 28.0), vec2(1440.0, 850.0));
+        let places = writer.places(desktop, false, true, true);
+        assert!(places.binder.is_some() && places.inspector.is_some());
+        assert!(places.center.width() >= 520.0);
+    }
 }
