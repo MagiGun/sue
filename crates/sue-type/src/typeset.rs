@@ -906,7 +906,7 @@ fn set_pass(
         });
         let glyphs = shaped(
             &mut faces,
-            "Notes",
+            &tr!("notes"),
             &heading.font,
             heading.size,
             &CharFormat::default(),
@@ -921,7 +921,7 @@ fn set_pass(
                 look: heading,
                 lines,
                 label: None,
-                title: "Notes".to_owned(),
+                title: tr!("notes"),
             },
         ));
         let body = paragraph_look_of(sheet, "body");

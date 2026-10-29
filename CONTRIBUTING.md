@@ -69,8 +69,10 @@ backbone; section 8 maps every feature area onto it).
 8. **Tests with every backbone change**, and runtime tests (in
    `bins/sue/src/runtime.rs`) for user-facing flows where you can drive them.
 9. **House style.** Docs, interface text and comments use no em dashes, en
-   dashes or middle dots (a test scans for them). The window title is exactly
-   `Sue`. The default look is monochrome.
+   dashes or middle dots (a test scans for them, translations included). The
+   window title is exactly `Sue`. The default look is monochrome. Text
+   people read comes from the language database (`tr!`), never a string
+   literal in the code.
 10. **Docs move with the code.** Update `HUMANZ.md` for how a feature is
     built and `HUMANS.md` for how people use it, and say what changed for
     them under Unreleased in [`CHANGELOG.md`](CHANGELOG.md).
@@ -221,7 +223,53 @@ four checks, and make sure it did not touch the backbone without tests.
   `ShellRequest::PickFile` (the system's dialogs answer) and offers its
   actions through `sue_actions`.
 - **A setting**: a `RiceDeclaration` in the applet and the same key in
-  `crates/sue-rice/rice/default.suerice` (a test checks they match).
+  `crates/sue-rice/rice/default.suerice` (a test checks they match), and
+  its name and description in `crates/sue-lang/locales/en/rice.ftl` (a
+  test prints the lines to add).
+- **Text people read**: an English message in the crate's namespace,
+  `crates/sue-lang/locales/en/<namespace>.ftl`, read with the crate's
+  `tr!("key")` (or `tr!("key", name = value)` for variables). A test checks
+  every key the code reads exists in English with the same variables.
+
+## Adding or updating a language
+
+Every string Sue shows lives in `crates/sue-lang/locales/`, one folder per
+language (named by its tag: `es`, `pt-BR`, `zh-Hans`), one
+[Fluent](https://projectfluent.org/fluent/guide/) file per part of Sue.
+English (`en`) is the source; anything a language lacks shows in English.
+
+**Add a language.**
+
+1. Make the folder `crates/sue-lang/locales/<tag>/` and copy
+   `en/language.ftl` into it. Set `language-name` to the language's name in
+   its own script (`Deutsch`, `日本語`), `language-status = draft` until a
+   native speaker has reviewed it, and how it writes numbers
+   (`number-decimal`, `number-group`, and `number-group-min = 2` if it
+   writes `1000` but `10 000`).
+2. Run `cargo run -p sue --bin sue-cli -- lang check <tag>`. It prints every
+   message the language lacks, grouped by file, in Fluent, ready to paste
+   into `<tag>/<file>.ftl` and translate.
+3. Translate the text after `=` only. Keep the keys and every `{ $variable }`
+   as they are; move variables wherever the sentence needs them. Plurals
+   use Fluent's selectors (`{ $count -> [one] ... *[other] ... }`), with the
+   language's own plural forms.
+4. Run the check again until it lists nothing stale and no mismatched
+   variables, then `cargo test -p sue-lang`. Start Sue, choose the language
+   in the Sue menu's Language, and look at the Hub, a studio and Settings.
+
+Sue finds the folder when it builds; no code names the language. Only add
+a right-to-left language once the interface mirrors. If its script needs a
+font the system may not have, say so in the pull request.
+
+**Update a language after English changed.** `sue-cli lang check <tag>`
+lists what is missing (new English messages), what is stale (keys English
+dropped or renamed: delete or rename them) and messages whose variables
+differ. `sue-cli lang list` shows how far every language is.
+`cargo test -p sue-lang` fails on stale keys, mismatched variables and
+files that do not parse; missing messages only fall back to English.
+
+**Review a draft.** Fix what reads wrong, then set
+`language-status = reviewed` in its `language.ftl`.
 
 ## License
 

@@ -147,7 +147,7 @@ pub fn rows(rice: &RiceSchema, section: &str, table: &[Shortcut]) -> Vec<(String
         .map(|shortcut| {
             let chords = chords(rice, section, shortcut);
             let text = if chords.is_empty() {
-                "None".to_owned()
+                tr!("none")
             } else {
                 chords
                     .chords()
@@ -156,9 +156,21 @@ pub fn rows(rice: &RiceSchema, section: &str, table: &[Shortcut]) -> Vec<(String
                     .collect::<Vec<_>>()
                     .join(", ")
             };
-            (shortcut.label.clone(), text)
+            (label(section, shortcut), text)
         })
         .collect()
+}
+
+/// What `shortcut` is called in the language in use: its setting's
+/// description in the language database (`rice` namespace), else its
+/// English label.
+#[must_use]
+pub fn label(section: &str, shortcut: &Shortcut) -> String {
+    let key = format!(
+        "{}.description",
+        setting(section, shortcut.command).replace('.', "-")
+    );
+    sue_lang::text_or("rice", &key, &shortcut.label)
 }
 
 /// Lays out `rows` in two columns, what on the left and its keys on the
@@ -238,6 +250,12 @@ impl Bound {
             .iter()
             .flat_map(|shortcut| chords(rice, section, shortcut).chords().to_vec())
             .collect();
+    }
+
+    /// Makes the next [`Self::refresh`] write the keys into the menus
+    /// again (after the menus were built anew, in another language).
+    pub fn invalidate(&mut self) {
+        self.revision = None;
     }
 
     /// Every chord the shortcuts use (their defaults until the first

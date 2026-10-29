@@ -41,6 +41,9 @@ pub struct FontFace {
     pub italic: bool,
     /// `true` when every glyph is as wide.
     pub monospace: bool,
+    /// The Unicode blocks the face says it covers (its OS/2 table's
+    /// Unicode range bits; 0 when it says nothing).
+    pub ranges: u128,
 }
 
 /// A family and its faces.
@@ -113,6 +116,12 @@ struct Library {
     ui_font: String,
     /// Extra folders to scan (Sue's own fonts).
     extra_dirs: Vec<PathBuf>,
+    /// Faces that draw the scripts the bundled fonts lack (Japanese,
+    /// Chinese, Korean): name, file bytes, face index.
+    scripts: Vec<(String, Arc<Vec<u8>>, u32)>,
+    /// The text [`cover`] last made sure of, and whether the scan had
+    /// finished then.
+    covered: (String, bool),
 }
 
 fn library() -> MutexGuard<'static, Library> {
@@ -311,6 +320,18 @@ fn definitions_of(library: &Library) -> FontDefinitions {
         proportional.retain(|name| name != "Hack");
         proportional.insert(0, "Hack".to_owned());
     }
+    // The faces for other scripts come last, after the bundled ones, for
+    // every family.
+    for (key, bytes, index) in &library.scripts {
+        let mut data = FontData::from_owned(bytes.as_ref().clone());
+        data.index = *index;
+        fonts.font_data.insert(key.clone(), Arc::new(data));
+        for family in [FontFamily::Proportional, FontFamily::Monospace] {
+            if let Some(chain) = fonts.families.get_mut(&family) {
+                chain.push(key.clone());
+            }
+        }
+    }
     let fallbacks = fonts
         .families
         .get(&FontFamily::Proportional)
@@ -327,6 +348,104 @@ fn definitions_of(library: &Library) -> FontDefinitions {
             .insert(FontFamily::Name(key.clone().into()), chain);
     }
     fonts
+}
+
+// ----- Other scripts -----------------------------------------------------------
+
+/// `true` if one of the bundled fonts draws `ch`.
+fn bundled_has(ch: char) -> bool {
+    static BUNDLED: OnceLock<Vec<Vec<u8>>> = OnceLock::new();
+    let fonts = BUNDLED.get_or_init(|| {
+        FontDefinitions::default()
+            .font_data
+            .values()
+            .map(|data| (*data.font).as_ref().to_vec())
+            .collect()
+    });
+    fonts.iter().any(|bytes| {
+        ttf_parser::Face::parse(bytes, 0).is_ok_and(|face| face.glyph_index(ch).is_some())
+    })
+}
+
+/// Makes sure the interface's fonts draw every character of `text` (the
+/// languages in use and every language's name): for characters no bundled
+/// font has, the fewest installed faces that cover them join every family
+/// as fallbacks. Cheap when nothing changed; call it every frame.
+pub fn cover(ctx: &egui::Context, text: &str) {
+    let ready = ready();
+    {
+        let library = library();
+        if library.covered.0 == text && (library.covered.1 || !ready) {
+            return;
+        }
+    }
+    let mut missing: Vec<char> = text
+        .chars()
+        .filter(|ch| !ch.is_ascii() && !ch.is_whitespace() && !ch.is_control())
+        .collect();
+    missing.sort_unstable();
+    missing.dedup();
+    missing.retain(|&ch| !bundled_has(ch));
+    let mut library = library();
+    library.covered = (text.to_owned(), ready);
+    // What the faces already chosen draw.
+    let chosen: Vec<Arc<Vec<u8>>> = library
+        .scripts
+        .iter()
+        .map(|(_, bytes, _)| bytes.clone())
+        .collect();
+    let indices: Vec<u32> = library.scripts.iter().map(|(_, _, index)| *index).collect();
+    missing.retain(|&ch| {
+        !chosen.iter().zip(&indices).any(|(bytes, index)| {
+            ttf_parser::Face::parse(bytes, *index).is_ok_and(|face| face.glyph_index(ch).is_some())
+        })
+    });
+    let mut added = false;
+    while !missing.is_empty() {
+        // The upright, regular face whose blocks take the most of what is
+        // missing; ties go to the one listed first.
+        let families = library.families.clone();
+        let best = families
+            .iter()
+            .flat_map(|family| family.face(false, false))
+            .filter(|face| face.ranges != 0)
+            .map(|face| {
+                let ranges = ttf_parser::os2::UnicodeRanges(face.ranges);
+                let count = missing
+                    .iter()
+                    .filter(|&&ch| ranges.contains_char(ch))
+                    .count();
+                (count, face)
+            })
+            .filter(|(count, _)| *count > 0)
+            .max_by_key(|(count, _)| *count)
+            .map(|(_, face)| face.clone());
+        let Some(face) = best else {
+            break;
+        };
+        let Some(bytes) = library.file(&face.path) else {
+            break;
+        };
+        let Ok(parsed) = ttf_parser::Face::parse(&bytes, face.index) else {
+            break;
+        };
+        let before = missing.len();
+        missing.retain(|&ch| parsed.glyph_index(ch).is_none());
+        // Never the same face twice, even when its blocks promised more.
+        let ranges = ttf_parser::os2::UnicodeRanges(face.ranges);
+        missing.retain(|&ch| !ranges.contains_char(ch));
+        if missing.len() < before {
+            let key = format!("script:{}#{}", face.family, face.index);
+            library.scripts.push((key, bytes, face.index));
+            added = true;
+        }
+    }
+    if added {
+        let definitions = definitions_of(&library);
+        drop(library);
+        ctx.set_fonts(definitions);
+        ctx.request_repaint();
+    }
 }
 
 // ----- Scanning ------------------------------------------------------------
@@ -497,6 +616,7 @@ fn read_face(file: &mut File, path: &Path, index: u32, offset: u64) -> Option<Fo
         weight,
         italic,
         monospace,
+        ranges: os2.as_ref().map_or(0, |table| table.unicode_ranges().0),
     })
 }
 

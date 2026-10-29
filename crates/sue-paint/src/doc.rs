@@ -45,7 +45,7 @@ pub struct NewPicture {
 impl Default for NewPicture {
     fn default() -> Self {
         Self {
-            name: "Illustration".to_owned(),
+            name: tr!("illustration"),
             width: 1600,
             height: 1200,
             dpi: 72.0,
@@ -62,9 +62,11 @@ impl Default for NewPicture {
 /// If the size is zero or larger than [`MAX_SIDE`].
 pub fn create(spec: &NewPicture) -> Result<(Edit, EntityId), String> {
     if spec.width == 0 || spec.height == 0 || spec.width > MAX_SIDE || spec.height > MAX_SIDE {
-        return Err(format!(
-            "A picture must be 1 to {MAX_SIDE} pixels a side, not {} by {}",
-            spec.width, spec.height
+        return Err(tr!(
+            "picture-must-1-pixels-side-not",
+            width = spec.width,
+            height = spec.height,
+            MAX_SIDE = MAX_SIDE
         ));
     }
     let image = Entity::empty(spec.name.clone(), class::IMAGE)
@@ -73,10 +75,11 @@ pub fn create(spec: &NewPicture) -> Result<(Edit, EntityId), String> {
         .with_property(picture::DPI, spec.dpi)
         .with_property(crate::timelapse::RECORD, spec.timelapse);
     let id = image.id();
-    let mut edit = Edit::new(format!("New {}", spec.name)).then(SpawnEntity::new(image));
+    let mut edit = Edit::new(tr!("new", name = spec.name)).then(SpawnEntity::new(image));
     let mut keys = OrderKey::sequence(None, 2).into_iter();
     if let Some(color) = spec.paper {
-        let paper = Entity::empty("Paper", class::PAPER).with_property(picture::COLOR, color);
+        let paper =
+            Entity::empty(tr!("paper-2"), class::PAPER).with_property(picture::COLOR, color);
         let order = keys.next().unwrap_or_default();
         let paper_id = paper.id();
         edit = edit.then(
@@ -86,7 +89,7 @@ pub fn create(spec: &NewPicture) -> Result<(Edit, EntityId), String> {
     }
     let raster = RasterTile2D::new(spec.width, spec.height, PixelFormat::Rgba8)
         .map_err(|error| error.to_string())?;
-    let layer = Entity::new("Layer 1", raster).with_class(class::LAYER);
+    let layer = Entity::new(tr!("layer-number", number = 1), raster).with_class(class::LAYER);
     let layer_id = layer.id();
     let order = keys.next().unwrap_or_default();
     edit = edit.then(
@@ -102,25 +105,23 @@ pub fn create(spec: &NewPicture) -> Result<(Edit, EntityId), String> {
 /// # Errors
 /// If `layer` has no 8-bit color pixels, or already is a layer.
 pub fn adopt(arena: &Arena, layer: EntityId, name: &str) -> Result<(Edit, EntityId), String> {
-    let raster = raster(arena, layer).ok_or("this has no pixels to paint on")?;
+    let raster = raster(arena, layer).ok_or(tr!("has-no-pixels-paint"))?;
     if raster.format() != PixelFormat::Rgba8 {
-        return Err("only 8-bit color pictures can be painted on; convert it first".to_owned());
+        return Err(tr!("only-8-bit-color-pictures-can"));
     }
     if arena.relations().parent(layer, CHILD).is_some() {
-        return Err("this is already a layer of a picture".to_owned());
+        return Err(tr!("already-layer-picture"));
     }
     let (width, height) = (raster.width(), raster.height());
     if width > MAX_SIDE || height > MAX_SIDE {
-        return Err(format!(
-            "A picture must be at most {MAX_SIDE} pixels a side"
-        ));
+        return Err(tr!("picture-must-most-pixels-side", MAX_SIDE = MAX_SIDE));
     }
     let image = Entity::empty(name, class::IMAGE)
         .with_property(picture::WIDTH, i64::from(width))
         .with_property(picture::HEIGHT, i64::from(height))
         .with_property(picture::DPI, 72.0);
     let id = image.id();
-    let edit = Edit::new(format!("Open {name} in Sue Paint"))
+    let edit = Edit::new(tr!("open-in-sue-paint", name = name))
         .then(SpawnEntity::new(image))
         .then(Relate::new(
             Relation::new(id, CHILD, layer).ordered(OrderKey::default()),
@@ -268,9 +269,9 @@ pub fn resize_canvas(
 ) -> Result<Edit, String> {
     let [width, height] = size;
     if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE {
-        return Err(format!("A canvas must be 1 to {MAX_SIDE} pixels a side"));
+        return Err(tr!("canvas-must-1-pixels-side", MAX_SIDE = MAX_SIDE));
     }
-    let mut edit = Edit::new("Change Canvas Size")
+    let mut edit = Edit::new(tr!("change-canvas-size"))
         .then(SetProperty::new(picture, picture::WIDTH, i64::from(width)))
         .then(SetProperty::new(
             picture,
@@ -309,7 +310,7 @@ pub fn resize_canvas(
         edit = edit.then(sue_core::txn::ReplaceComponent::new(
             info.id,
             tile,
-            "Change Canvas Size",
+            tr!("change-canvas-size"),
         ));
         if info.style.offset != [0, 0] {
             edit = edit
@@ -363,11 +364,11 @@ pub fn resample(
 ) -> Result<Edit, String> {
     let [width, height] = size;
     if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE {
-        return Err(format!("A picture must be 1 to {MAX_SIDE} pixels a side"));
+        return Err(tr!("picture-must-1-pixels-side", MAX_SIDE = MAX_SIDE));
     }
     let [old_w, old_h] = size_of(arena, picture)?;
     let scale = [width as f32 / old_w as f32, height as f32 / old_h as f32];
-    let mut edit = Edit::new("Change Image Resolution")
+    let mut edit = Edit::new(tr!("change-image-resolution"))
         .then(SetProperty::new(picture, picture::WIDTH, i64::from(width)))
         .then(SetProperty::new(
             picture,
@@ -392,7 +393,7 @@ pub fn resample(
         edit = edit.then(sue_core::txn::ReplaceComponent::new(
             info.id,
             tile,
-            "Change Image Resolution",
+            tr!("change-image-resolution"),
         ));
         if info.style.offset != [0, 0] {
             edit = edit
@@ -432,7 +433,7 @@ pub fn new_correction(
     let correction = Entity::empty(name, CORRECTION).with_property(CORRECTION_FILTER, text);
     let id = correction.id();
     let order = key_above(arena, picture, layer);
-    let edit = Edit::new(format!("New {name}")).then(
+    let edit = Edit::new(tr!("new", name = name)).then(
         SpawnEntity::new(correction)
             .with_relation(Relation::new(picture, CHILD, id).ordered(order)),
     );
@@ -478,9 +479,9 @@ pub fn new_mask(
     show: impl Fn(i64, i64) -> f32,
 ) -> Result<(Edit, EntityId), String> {
     if mask_of(arena, layer).is_some() {
-        return Err("This layer has a mask already".to_owned());
+        return Err(tr!("layer-has-mask-already"));
     }
-    let tile = raster(arena, layer).ok_or("Only a raster layer takes a mask")?;
+    let tile = raster(arena, layer).ok_or(tr!("only-raster-layer-takes-mask"))?;
     let (width, height) = (tile.width(), tile.height());
     let offset = arena
         .get_by_id(layer)
@@ -495,13 +496,13 @@ pub fn new_mask(
         }
     }
     let mask = Entity::new(
-        "Mask",
+        tr!("mask"),
         RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels)
             .map_err(|error| error.to_string())?,
     )
     .with_class(MASK_CLASS);
     let id = mask.id();
-    let edit = Edit::new("New Layer Mask")
+    let edit = Edit::new(tr!("new-layer-mask"))
         .then(SpawnEntity::new(mask).with_relation(Relation::new(layer, MASK, id)))
         .then(SetProperty::new(layer, MASK_ON, true));
     Ok((edit, id))
@@ -511,7 +512,7 @@ pub fn new_mask(
 #[must_use]
 pub fn delete_mask(arena: &Arena, layer: EntityId) -> Option<Edit> {
     let mask = mask_of(arena, layer)?;
-    Some(Edit::new("Delete Mask").then(DespawnEntity::new(mask)))
+    Some(Edit::new(tr!("delete-mask")).then(DespawnEntity::new(mask)))
 }
 
 /// The edit that applies `layer`'s mask to its pixels, then deletes it.
@@ -519,16 +520,16 @@ pub fn delete_mask(arena: &Arena, layer: EntityId) -> Option<Edit> {
 /// # Errors
 /// If the layer or its mask has no pixels, or they differ in size.
 pub fn apply_mask(arena: &Arena, layer: EntityId) -> Result<Edit, String> {
-    let mask = mask_of(arena, layer).ok_or("This layer has no mask")?;
+    let mask = mask_of(arena, layer).ok_or(tr!("this-layer-has-no-mask"))?;
     let (tile, shape) = (
-        raster(arena, layer).ok_or("The layer has no pixels")?,
-        raster(arena, mask).ok_or("The mask has no pixels")?,
+        raster(arena, layer).ok_or(tr!("the-layer-has-no-pixels"))?,
+        raster(arena, mask).ok_or(tr!("the-mask-has-no-pixels"))?,
     );
     if [tile.width(), tile.height()] != [shape.width(), shape.height()] {
-        return Err("The mask and its layer differ in size".to_owned());
+        return Err(tr!("mask-layer-differ-size"));
     }
-    let mut pixels = tile.bytes().ok_or("The layer has no pixels")?.to_vec();
-    let alpha = shape.bytes().ok_or("The mask has no pixels")?;
+    let mut pixels = tile.bytes().ok_or(tr!("the-layer-has-no-pixels"))?.to_vec();
+    let alpha = shape.bytes().ok_or(tr!("the-mask-has-no-pixels"))?;
     for (pixel, cover) in pixels
         .as_chunks_mut::<4>()
         .0
@@ -539,11 +540,11 @@ pub fn apply_mask(arena: &Arena, layer: EntityId) -> Result<Edit, String> {
     }
     let applied = RasterTile2D::from_bytes(tile.width(), tile.height(), PixelFormat::Rgba8, pixels)
         .map_err(|error| error.to_string())?;
-    Ok(Edit::new("Apply Mask to Layer")
+    Ok(Edit::new(tr!("apply-mask-to-layer"))
         .then(sue_core::txn::ReplaceComponent::new(
             layer,
             applied,
-            "Apply Mask to Layer",
+            tr!("apply-mask-to-layer"),
         ))
         .then(DespawnEntity::new(mask)))
 }
@@ -619,13 +620,13 @@ pub fn new_folder(
         .filter(|info| is_folder(arena, info.id))
         .count();
     let folder =
-        Entity::empty(format!("Folder {}", count + 1), class::FOLDER).with_property(OPEN, true);
+        Entity::empty(tr!("folder", value = count + 1), class::FOLDER).with_property(OPEN, true);
     let id = folder.id();
     let order = key_above(arena, picture, layer);
     let mut edit = Edit::new(if insert {
-        "Create Folder and Insert Layer"
+        tr!("create-folder-and-insert-layer")
     } else {
-        "New Layer Folder"
+        tr!("new-layer-folder")
     })
     .then(SpawnEntity::new(folder).with_relation(Relation::new(picture, CHILD, id).ordered(order)));
     if let Some(layer) = layer.filter(|_| insert) {
@@ -648,9 +649,9 @@ pub fn set_folder(arena: &Arena, layer: EntityId, folder: Option<EntityId>) -> O
         return None;
     }
     let mut edit = Edit::new(if folder.is_some() {
-        "Into Folder"
+        tr!("into-folder")
     } else {
-        "Out of Folder"
+        tr!("out-of-folder")
     });
     if let Some(now) = now {
         edit = edit.then(Unrelate::new(now, MEMBER, layer));
@@ -664,7 +665,7 @@ pub fn set_folder(arena: &Arena, layer: EntityId, folder: Option<EntityId>) -> O
 /// The edit that removes `folder` and every layer in it.
 #[must_use]
 pub fn delete_folder(arena: &Arena, picture: EntityId, folder: EntityId) -> Edit {
-    let mut edit = Edit::new("Delete Folder");
+    let mut edit = Edit::new(tr!("delete-folder"));
     for layer in members(arena, picture, folder) {
         edit = edit.then(DespawnEntity::new(layer));
     }
@@ -693,15 +694,17 @@ pub fn raster_mut(arena: &mut Arena, layer: EntityId) -> Option<&mut RasterTile2
     }
 }
 
-/// A name like `Layer 3` that no layer of `picture` has yet.
+/// A name like `Layer 3`, in the language in use, that no layer of
+/// `picture` has yet (whatever language the others were named in, the
+/// number at their end counts).
 #[must_use]
 pub fn new_layer_name(arena: &Arena, picture: EntityId) -> String {
     let highest = layers(arena, picture)
         .iter()
-        .filter_map(|layer| layer.name.strip_prefix("Layer ")?.parse::<u32>().ok())
+        .filter_map(|layer| layer.name.rsplit(' ').next()?.parse::<u32>().ok())
         .max()
         .unwrap_or(0);
-    format!("Layer {}", highest + 1)
+    tr!("layer-number", number = highest + 1)
 }
 
 /// The order key for a new layer right above `below` (or at the top).
@@ -723,7 +726,7 @@ fn size_of(arena: &Arena, picture: EntityId) -> Result<[u32; 2], String> {
         .get_by_id(picture)
         .ok()
         .and_then(picture::size)
-        .ok_or_else(|| "The picture has no size".to_owned())
+        .ok_or_else(|| tr!("the-picture-has-no-size"))
 }
 
 /// A new raster layer right above `below` (or at the top), clear or filled
@@ -772,7 +775,7 @@ pub fn add_layer_pixels(
 ) -> Result<(SpawnEntity, EntityId), String> {
     let [width, height] = size_of(arena, picture)?;
     if raster.width() != width || raster.height() != height {
-        return Err("the layer is not the picture's size".to_owned());
+        return Err(tr!("layer-not-pictures-size"));
     }
     let layer = Entity::new(name, raster).with_class(class::LAYER);
     let id = layer.id();
@@ -795,11 +798,11 @@ pub fn rasterize(
     layer: EntityId,
 ) -> Result<(Edit, EntityId), String> {
     if !crate::vector::is_vector(arena, layer) {
-        return Err("Only vector layers rasterize".to_owned());
+        return Err(tr!("only-vector-layers-rasterize"));
     }
     let entity = arena.get_by_id(layer).map_err(|error| error.to_string())?;
     let raster = raster(arena, layer)
-        .ok_or("The layer has no pixels")?
+        .ok_or(tr!("the-layer-has-no-pixels"))?
         .clone();
     let mut fresh = Entity::new(entity.name(), raster).with_class(class::LAYER);
     for (key, value) in entity.properties().iter() {
@@ -807,7 +810,7 @@ pub fn rasterize(
     }
     let id = fresh.id();
     let order = key_above(arena, picture, Some(layer));
-    let mut edit = Edit::new("Rasterize").then(
+    let mut edit = Edit::new(tr!("rasterize")).then(
         SpawnEntity::new(fresh).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
     );
     if let Some(folder) = folder_of(arena, layer) {
@@ -841,7 +844,7 @@ pub fn add_layers_pixels(
     let (mut spawns, mut ids) = (Vec::new(), Vec::new());
     for (name, raster) in layers_in {
         if raster.width() != width || raster.height() != height {
-            return Err("the layer is not the picture's size".to_owned());
+            return Err(tr!("layer-not-pictures-size"));
         }
         let order = match (&low, &high) {
             (Some(low), Some(high)) if high > low => OrderKey::between(Some(low), Some(high)),
@@ -907,10 +910,10 @@ pub fn add_vector_layer(
 /// If the picture has no size or a layer will not turn.
 pub fn rotate_canvas(arena: &Arena, picture: EntityId, clockwise: bool) -> Result<Edit, String> {
     let [width, height] = size_of(arena, picture)?;
-    let label = if clockwise {
-        "Rotate 90 Degrees Right"
+    let label = &if clockwise {
+        tr!("rotate-90-degrees-right")
     } else {
-        "Rotate 90 Degrees Left"
+        tr!("rotate-90-degrees-left")
     };
     let mut edit = Edit::new(label)
         .then(SetProperty::new(picture, picture::WIDTH, i64::from(height)))
@@ -997,12 +1000,10 @@ pub fn merge_layers(
         })
         .collect();
     if chosen.len() < 2 {
-        return Err(
-            "Pick two or more raster layers to merge (Ctrl+click in the Layer palette)".to_owned(),
-        );
+        return Err(tr!("pick-two-more-raster-layers-merge"));
     }
     if let Some(locked) = chosen.iter().find(|info| info.locked) {
-        return Err(format!("{} is locked", locked.name));
+        return Err(tr!("is-locked", name = locked.name));
     }
     let mut color = vec![[0.0_f32; 4]; (width * height) as usize];
     for info in chosen.iter().filter(|info| info.style.visible) {
@@ -1034,11 +1035,11 @@ pub fn merge_layers(
     let tile = RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels)
         .map_err(|error| error.to_string())?;
     let into = chosen[0].id;
-    let mut edit = Edit::new("Merge Selected Layers")
+    let mut edit = Edit::new(tr!("merge-selected-layers"))
         .then(sue_core::txn::ReplaceComponent::new(
             into,
             tile,
-            "Merge Selected Layers",
+            tr!("merge-selected-layers"),
         ))
         .then(SetProperty::new(into, picture::X, 0_i64))
         .then(SetProperty::new(into, picture::Y, 0_i64))
@@ -1067,15 +1068,17 @@ pub fn vectorize(
     layer: EntityId,
 ) -> Result<(Edit, EntityId), String> {
     if crate::vector::is_vector(arena, layer) {
-        return Err("The layer is a vector layer already".to_owned());
+        return Err(tr!("layer-vector-layer-already"));
     }
     let entity = arena.get_by_id(layer).map_err(|error| error.to_string())?;
-    let source = raster(arena, layer).ok_or("Only raster layers convert to vector")?;
-    let bytes = source.bytes().ok_or("Only RGBA layers convert to vector")?;
+    let source = raster(arena, layer).ok_or(tr!("only-raster-layers-convert-vector"))?;
+    let bytes = source
+        .bytes()
+        .ok_or(tr!("only-rgba-layers-convert-vector"))?;
     let [ox, oy] = LayerStyle::of(entity).offset;
     let mut lines = crate::vector::trace(bytes, source.width(), source.height());
     if lines.is_empty() {
-        return Err("There is nothing on the layer to trace".to_owned());
+        return Err(tr!("there-nothing-layer-trace"));
     }
     for line in &mut lines {
         for sample in &mut line.samples {
@@ -1084,7 +1087,8 @@ pub fn vectorize(
         }
     }
     let [width, height] = size_of(arena, picture)?;
-    let drawn = crate::vector::render(&lines, width, height).ok_or("The lines cannot be drawn")?;
+    let drawn =
+        crate::vector::render(&lines, width, height).ok_or(tr!("the-lines-cannot-be-drawn"))?;
     let mut fresh = Entity::new(entity.name(), drawn)
         .with_class(crate::vector::CLASS)
         .with_ext(crate::vector::to_geometry(&lines));
@@ -1095,7 +1099,7 @@ pub fn vectorize(
     }
     let id = fresh.id();
     let order = key_above(arena, picture, Some(layer));
-    let mut edit = Edit::new("Convert Layer").then(
+    let mut edit = Edit::new(tr!("convert-layer")).then(
         SpawnEntity::new(fresh).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
     );
     if let Some(folder) = folder_of(arena, layer) {
@@ -1117,7 +1121,8 @@ pub fn add_vector_lines(
     lines: &[crate::vector::Line],
 ) -> Result<(SpawnEntity, EntityId), String> {
     let [width, height] = size_of(arena, picture)?;
-    let raster = crate::vector::render(lines, width, height).ok_or("The lines cannot be drawn")?;
+    let raster =
+        crate::vector::render(lines, width, height).ok_or(tr!("the-lines-cannot-be-drawn"))?;
     let layer = Entity::new(name, raster)
         .with_class(crate::vector::CLASS)
         .with_ext(crate::vector::to_geometry(lines));
@@ -1136,7 +1141,7 @@ pub fn add_paper(arena: &Arena, picture: EntityId, color: Color) -> (SpawnEntity
         .first()
         .map(|layer| layer.order.clone());
     let order = OrderKey::between(None, first.as_ref());
-    let paper = Entity::empty("Paper", class::PAPER).with_property(picture::COLOR, color);
+    let paper = Entity::empty(tr!("paper-2"), class::PAPER).with_property(picture::COLOR, color);
     let id = paper.id();
     (
         SpawnEntity::new(paper).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
@@ -1155,7 +1160,7 @@ pub fn duplicate(
 ) -> Result<(SpawnEntity, EntityId), String> {
     let source = arena.get_by_id(layer).map_err(|error| error.to_string())?;
     let mut copy = source.clone().with_id(EntityId::new());
-    copy.set_name(format!("{} copy", source.name()));
+    copy.set_name(tr!("copy", source = source.name()));
     let id = copy.id();
     let order = key_above(arena, picture, Some(layer));
     Ok((
@@ -1189,7 +1194,7 @@ pub fn reorder(arena: &Arena, picture: EntityId, layer: EntityId, index: usize) 
         (Some(low), Some(high)) if low >= high => return None,
         _ => OrderKey::between(low, high),
     };
-    Some(Edit::new("Move Layer").then(Relate::new(
+    Some(Edit::new(tr!("move-layer")).then(Relate::new(
         Relation::new(picture, CHILD, layer).ordered(order),
     )))
 }
@@ -1207,24 +1212,30 @@ pub fn label(key: &str, value: &Value) -> String {
     let on = value.as_bool().unwrap_or(true);
     let pick = |yes: &str, no: &str| if on { yes } else { no }.to_owned();
     match key {
-        picture::VISIBLE => pick("Show Layer", "Hide Layer"),
-        picture::LOCKED => pick("Lock Layer", "Unlock Layer"),
-        picture::ALPHA_LOCKED => pick("Lock Transparent Pixels", "Unlock Transparent Pixels"),
-        picture::CLIP => pick("Clip to Layer Below", "Release Clipping"),
-        picture::DRAFT => pick("Set as Draft Layer", "Unset Draft Layer"),
-        picture::OPACITY => "Layer Opacity".to_owned(),
-        picture::BLEND => "Blend Mode".to_owned(),
-        picture::COLOR => "Paper Color".to_owned(),
-        picture::X | picture::Y => "Move Layer".to_owned(),
-        crate::effects::BORDER => pick("Border Effect", "No Border Effect"),
-        crate::effects::BORDER_WIDTH | crate::effects::BORDER_COLOR => "Border Effect".to_owned(),
-        crate::effects::TONE => pick("Tone", "No Tone"),
-        crate::effects::TONE_LINES | crate::effects::TONE_ANGLE => "Tone".to_owned(),
-        crate::effects::COLOR => pick("Layer Color", "No Layer Color"),
-        crate::effects::COLOR_VALUE => "Layer Color".to_owned(),
-        crate::effects::EXPRESSION | crate::effects::THRESHOLD => "Expression Color".to_owned(),
-        REFERENCE => pick("Set as Reference Layer", "Unset Reference Layer"),
-        other => format!("Set {other}"),
+        picture::VISIBLE => pick(&tr!("show-layer"), &tr!("hide-layer")),
+        picture::LOCKED => pick(&tr!("lock-layer"), &tr!("unlock-layer")),
+        picture::ALPHA_LOCKED => pick(
+            &tr!("lock-transparent-pixels"),
+            &tr!("unlock-transparent-pixels"),
+        ),
+        picture::CLIP => pick(&tr!("clip-to-layer-below"), &tr!("release-clipping")),
+        picture::DRAFT => pick(&tr!("set-as-draft-layer"), &tr!("unset-draft-layer")),
+        picture::OPACITY => tr!("layer-opacity"),
+        picture::BLEND => tr!("blend-mode"),
+        picture::COLOR => tr!("paper-color-2"),
+        picture::X | picture::Y => tr!("move-layer"),
+        crate::effects::BORDER => pick(&tr!("border-effect"), &tr!("no-border-effect")),
+        crate::effects::BORDER_WIDTH | crate::effects::BORDER_COLOR => tr!("border-effect"),
+        crate::effects::TONE => pick(&tr!("tone"), &tr!("no-tone")),
+        crate::effects::TONE_LINES | crate::effects::TONE_ANGLE => tr!("tone"),
+        crate::effects::COLOR => pick(&tr!("layer-color"), &tr!("no-layer-color")),
+        crate::effects::COLOR_VALUE => tr!("layer-color"),
+        crate::effects::EXPRESSION | crate::effects::THRESHOLD => tr!("expression-color"),
+        REFERENCE => pick(
+            &tr!("set-as-reference-layer"),
+            &tr!("unset-reference-layer"),
+        ),
+        other => tr!("set", other = other),
     }
 }
 
@@ -1242,26 +1253,26 @@ pub fn merge_down(
     let index = stack
         .iter()
         .position(|info| info.id == layer)
-        .ok_or("The layer is not in this picture")?;
+        .ok_or(tr!("layer-not-picture"))?;
     let below = index
         .checked_sub(1)
         .and_then(|at| stack.get(at))
         .filter(|info| info.kind == LayerKind::Raster)
-        .ok_or("There is no raster layer below to merge into")?;
+        .ok_or(tr!("there-no-raster-layer-below-merge"))?;
     if below.locked {
-        return Err(format!("{} is locked", below.name));
+        return Err(tr!("is-locked", name = below.name));
     }
-    let upper = raster(arena, layer).ok_or("Only raster layers merge")?;
-    let lower = raster(arena, below.id).ok_or("Only raster layers merge")?;
+    let upper = raster(arena, layer).ok_or(tr!("only-raster-layers-merge"))?;
+    let lower = raster(arena, below.id).ok_or(tr!("only-raster-layers-merge"))?;
     if upper.format() != PixelFormat::Rgba8 || lower.format() != PixelFormat::Rgba8 {
-        return Err("Only RGBA layers merge".to_owned());
+        return Err(tr!("only-rgba-layers-merge"));
     }
     let style = stack[index].style;
-    let mut edit = Edit::new(format!("Merge {}", stack[index].name));
+    let mut edit = Edit::new(tr!("merge", name = stack[index].name));
     if style.visible
         && let Some(patch) = merged_patch(upper, style, lower, below.style.offset)
     {
-        edit = edit.then(RasterEdit::new(below.id, "Merge", vec![patch]));
+        edit = edit.then(RasterEdit::new(below.id, tr!("merge-2"), vec![patch]));
     }
     Ok((edit.then(DespawnEntity::new(layer)), below.id))
 }
@@ -1366,16 +1377,16 @@ pub fn merge_visible(
         .map_err(|error| error.to_string())?;
     let stack = layers(arena, picture);
     let name = if flatten {
-        "Layer 1".to_owned()
+        tr!("layer-number", number = 1)
     } else {
-        "Merged".to_owned()
+        tr!("merged")
     };
     let layer = Entity::new(name, raster).with_class(class::LAYER);
     let id = layer.id();
     let mut edit = Edit::new(if flatten {
-        "Flatten Image"
+        tr!("flatten-image")
     } else {
-        "Merge Visible to New Layer"
+        tr!("merge-visible-to-new-layer")
     });
     if flatten {
         for info in &stack {
@@ -1406,12 +1417,12 @@ pub fn rewrite(
     label: &str,
     change: impl FnOnce(&mut [u8], u32, u32),
 ) -> Result<Option<RasterEdit>, String> {
-    let source = raster(arena, layer).ok_or("Only raster layers can change")?;
+    let source = raster(arena, layer).ok_or(tr!("only-raster-layers-can-change"))?;
     if source.format() != PixelFormat::Rgba8 {
-        return Err("Only RGBA layers can change".to_owned());
+        return Err(tr!("only-rgba-layers-can-change"));
     }
     let (width, height) = (source.width(), source.height());
-    let before = source.bytes().ok_or("The layer is not 8-bit")?;
+    let before = source.bytes().ok_or(tr!("layer-not-8-bit"))?;
     let mut after = before.to_vec();
     change(&mut after, width, height);
     Ok(diff_patch(before, &after, width, height)

@@ -85,30 +85,30 @@ impl Tool {
 
     /// What people read.
     #[must_use]
-    pub const fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Zoom => "Zoom",
-            Self::Hand => "Hand",
-            Self::MoveLayer => "Move Layer",
-            Self::Select => "Selection",
-            Self::AutoSelect => "Auto Select",
-            Self::Eyedropper => "Eyedropper",
-            Self::Pen => "Pen",
-            Self::Pencil => "Pencil",
-            Self::Brush => "Brush",
-            Self::Airbrush => "Airbrush",
-            Self::Decoration => "Decoration",
-            Self::Eraser => "Eraser",
-            Self::Blend => "Blend",
-            Self::Fill => "Fill",
-            Self::Gradient => "Gradient",
-            Self::Figure => "Figure",
-            Self::Text => "Text",
-            Self::Balloon => "Balloon",
-            Self::Frame => "Frame Border",
-            Self::Ruler => "Ruler",
-            Self::CorrectLine => "Correct Line",
-            Self::Operation => "Operation",
+            Self::Zoom => tr!("zoom"),
+            Self::Hand => tr!("hand"),
+            Self::MoveLayer => tr!("move-layer"),
+            Self::Select => tr!("selection"),
+            Self::AutoSelect => tr!("auto-select"),
+            Self::Eyedropper => tr!("eyedropper"),
+            Self::Pen => tr!("pen"),
+            Self::Pencil => tr!("pencil"),
+            Self::Brush => tr!("brush"),
+            Self::Airbrush => tr!("airbrush"),
+            Self::Decoration => tr!("decoration"),
+            Self::Eraser => tr!("eraser"),
+            Self::Blend => tr!("blend"),
+            Self::Fill => tr!("fill"),
+            Self::Gradient => tr!("gradient"),
+            Self::Figure => tr!("figure"),
+            Self::Text => tr!("text"),
+            Self::Balloon => tr!("balloon"),
+            Self::Frame => tr!("frame-border"),
+            Self::Ruler => tr!("ruler"),
+            Self::CorrectLine => tr!("correct-line"),
+            Self::Operation => tr!("operation"),
         }
     }
 
@@ -164,15 +164,15 @@ impl Tool {
         };
         let plain = |name: &str, mode: u8| SubTool::new(self, name, mode, Tip::default());
         match self {
-            Self::Zoom => vec![plain("Zoom In", 0), plain("Zoom Out", 1)],
-            Self::Hand => vec![plain("Hand", 0), plain("Rotate", 1)],
-            Self::MoveLayer => vec![plain("Move Layer", 0)],
+            Self::Zoom => vec![plain(&tr!("zoom-in-2"), 0), plain(&tr!("zoom-out-2"), 1)],
+            Self::Hand => vec![plain(&tr!("hand"), 0), plain(&tr!("rotate"), 1)],
+            Self::MoveLayer => vec![plain(&tr!("move-layer"), 0)],
             // Clip Studio Paint's Selection area sub tools.
             Self::Select => vec![
-                plain("Rectangle", 0),
-                plain("Ellipse", 1),
-                plain("Lasso", 2),
-                plain("Polyline", 3),
+                plain(&tr!("rectangle"), 0),
+                plain(&tr!("ellipse"), 1),
+                plain(&tr!("lasso"), 2),
+                plain(&tr!("polyline"), 3),
                 SubTool::new(
                     self,
                     "Selection pen",
@@ -187,12 +187,12 @@ impl Tool {
                 ),
             ],
             Self::AutoSelect => vec![
-                plain("Refer Only Editing Layer", 0).tolerance(0.1),
-                plain("Refer Other Layers", 1).tolerance(0.1),
+                plain(&tr!("refer-only-editing-layer"), 0).tolerance(0.1),
+                plain(&tr!("refer-other-layers"), 1).tolerance(0.1),
             ],
             Self::Eyedropper => vec![
-                plain("Obtain Display Color", 0),
-                plain("Obtain Layer Color", 1),
+                plain(&tr!("obtain-display-color-2"), 0),
+                plain(&tr!("obtain-layer-color-2"), 1),
             ],
             Self::Pen => vec![
                 SubTool::new(
@@ -422,13 +422,13 @@ impl Tool {
                 },
             ],
             Self::Fill => vec![
-                plain("Refer Only Editing Layer", 0).tolerance(0.1),
-                plain("Refer Other Layers", 1).tolerance(0.1),
+                plain(&tr!("refer-only-editing-layer"), 0).tolerance(0.1),
+                plain(&tr!("refer-other-layers"), 1).tolerance(0.1),
             ],
             Self::Gradient => vec![
-                plain("Drawing Color to Transparent", 0),
-                plain("Main to Sub Color", 1),
-                plain("Radial", 2),
+                plain(&tr!("drawing-color-to-transparent"), 0),
+                plain(&tr!("main-to-sub-color"), 1),
+                plain(&tr!("radial"), 2),
             ],
             Self::Figure => {
                 let line = tip(6.0, |t| {
@@ -443,8 +443,8 @@ impl Tool {
                 ]
             }
             Self::Frame => vec![
-                plain("Rectangle Frame", 0),
-                plain("Frame Border Division", 1),
+                plain(&tr!("rectangle-frame"), 0),
+                plain(&tr!("frame-border-division"), 1),
             ],
             Self::Balloon => {
                 let outline = tip(3.0, |t| {
@@ -457,18 +457,18 @@ impl Tool {
             }
             // Clip Studio Paint's Create ruler group, in its order.
             Self::Ruler => vec![
-                plain("Linear Ruler", 5),
-                plain("Curve Ruler", 6),
-                plain("Figure Ruler", 7),
-                plain("Ruler Pen", 8),
-                plain("Special Ruler", 2),
-                plain("Perspective Ruler", 1),
+                plain(&tr!("linear-ruler"), 5),
+                plain(&tr!("curve-ruler"), 6),
+                plain(&tr!("figure-ruler"), 7),
+                plain(&tr!("ruler-pen"), 8),
+                plain(&tr!("special-ruler-2"), 2),
+                plain(&tr!("perspective-ruler"), 1),
                 SubTool {
                     lines: 2,
-                    ..plain("Symmetrical Ruler", 0)
+                    ..plain(&tr!("symmetrical-ruler"), 0)
                 },
             ],
-            Self::Text => vec![plain("Text", 0)],
+            Self::Text => vec![plain(&tr!("text"), 0)],
             Self::Blend => {
                 let soft = tip(60.0, |t| {
                     t.opacity = 0.6;
@@ -491,11 +491,11 @@ impl Tool {
                     })
                 };
                 vec![
-                    plain("Control point", 0),
+                    plain(&tr!("control-point"), 0),
                     SubTool {
                         level: 2,
                         amount: 30.0,
-                        ..plain("Pinch vector line", 1)
+                        ..plain(&tr!("pinch-vector-line"), 1)
                     },
                     SubTool {
                         level: 2,
@@ -506,18 +506,18 @@ impl Tool {
                         amount: 1.0,
                         ..SubTool::new(self, "Adjust line width", 4, brush(40.0))
                     },
-                    plain("Redraw vector line", 5).stabilization(6),
+                    plain(&tr!("redraw-vector-line"), 5).stabilization(6),
                     SubTool::new(self, "Redraw vector line width", 6, brush(10.0)),
                     SubTool {
                         amount: 10.0,
-                        ..plain("Remove dust", 7)
+                        ..plain(&tr!("remove-dust-2"), 7)
                     },
                 ]
             }
             // Clip Studio Paint's Operation group.
-            Self::Operation => vec![plain("Object", 0), plain("Select layer", 1)],
+            Self::Operation => vec![plain(&tr!("object"), 0), plain(&tr!("select-layer"), 1)],
             Self::Decoration => {
-                vec![plain(self.label(), 0)]
+                vec![plain(&self.label(), 0)]
             }
         }
     }

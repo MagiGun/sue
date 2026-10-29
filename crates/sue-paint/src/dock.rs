@@ -34,15 +34,15 @@ pub(crate) enum Palette {
 
 impl Palette {
     /// What its window and icon are called.
-    pub fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            Self::Tools => "Tool",
-            Self::SubTool => "Sub Tool",
-            Self::BrushSize => "Brush Size",
-            Self::Color => "Color Wheel",
-            Self::ColorSet => "Color Set",
-            Self::Navigator => "Navigator",
-            Self::Layer => "Layer",
+            Self::Tools => tr!("tool"),
+            Self::SubTool => tr!("sub-tool"),
+            Self::BrushSize => tr!("brush-size"),
+            Self::Color => tr!("color-wheel"),
+            Self::ColorSet => tr!("color-set"),
+            Self::Navigator => tr!("navigator"),
+            Self::Layer => tr!("layer-2"),
         }
     }
 
@@ -649,7 +649,7 @@ impl SuePaint {
             Icon::Menu,
             true,
             open,
-            &format!("{}: dock, float or collapse", palette.title()),
+            &tr!("dock-float-or-collapse", title = palette.title()),
             theme,
         ) {
             self.dock.menu = if open { None } else { Some(palette) };
@@ -674,18 +674,18 @@ impl SuePaint {
                             }
                         };
                         if side != Some(Side::Left) {
-                            item(ui, "Dock on the Left", "left");
+                            item(ui, &tr!("dock-on-the-left"), "left");
                         }
                         if side != Some(Side::Right) {
-                            item(ui, "Dock on the Right", "right");
+                            item(ui, &tr!("dock-on-the-right"), "right");
                         }
                         if !floating {
-                            item(ui, "Float in a Window", "float");
+                            item(ui, &tr!("float-in-a-window"), "float");
                         }
                         if !self.dock.iconized.contains(&palette) {
-                            item(ui, "Collapse to an Icon", "icon");
+                            item(ui, &tr!("collapse-to-an-icon"), "icon");
                         }
-                        item(ui, "Close", "close");
+                        item(ui, &tr!("close"), "close");
                     });
             });
         let inside = shown.response.rect;
@@ -939,7 +939,15 @@ impl SuePaint {
                 vec2(26.0, 26.0),
             );
             let open = self.dock.popped == Some(*palette);
-            if icon_button(ui, rect, palette.icon(), true, open, palette.title(), theme) {
+            if icon_button(
+                ui,
+                rect,
+                palette.icon(),
+                true,
+                open,
+                &palette.title(),
+                theme,
+            ) {
                 self.dock.popped = if open { None } else { Some(*palette) };
             }
         }
@@ -1010,7 +1018,15 @@ impl SuePaint {
                         pos2(area.right() - 22.0, area.top() + 3.0),
                         vec2(18.0, 18.0),
                     );
-                    if icon_button(ui, back, Icon::Up, true, false, "Dock it again", theme) {
+                    if icon_button(
+                        ui,
+                        back,
+                        Icon::Up,
+                        true,
+                        false,
+                        &tr!("dock-it-again"),
+                        theme,
+                    ) {
                         Some(true)
                     } else {
                         None

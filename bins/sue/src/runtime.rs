@@ -92,6 +92,14 @@ fn catalog_fingerprint(rice: &RiceSchema) -> String {
         rice.get(path)
             .map_or_else(String::new, |value| value.to_string())
     })
+    // The pages read in Sue's language and name each studio's own.
+    .chain(
+        rice.entries()
+            .iter()
+            .filter(|entry| entry.key() == "language")
+            .map(|entry| entry.parameter().value().to_string()),
+    )
+    .chain(std::iter::once(sue_lang::generation().to_string()))
     .collect::<Vec<_>>()
     .join("\u{1F}")
 }
@@ -298,6 +306,7 @@ impl Runtime {
 
     /// Builds one frame of the whole window into the root `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui, textures: &mut dyn TextureUpload, now: Instant) {
+        let _language = sue_lang::scope(&sue_wm::sue_language(&self.engine.world.rice));
         if !self.booted {
             self.booted = true;
             let mut io = shell_io!(self, textures);
@@ -329,7 +338,7 @@ impl Runtime {
             && let Some(Err(error)) = self.persist()
         {
             self.shell
-                .notify(format!("Could not save the rice: {error}"), true);
+                .notify(tr!("could-not-save-the-rice", error = error), true);
         }
     }
 
@@ -355,19 +364,21 @@ impl Runtime {
                         .inner_margin(egui::Margin::same(16))
                         .show(ui, |ui| {
                             ui.label(
-                                RichText::new("Quit Sue?")
+                                RichText::new(tr!("quit-sue"))
                                     .size(theme.heading_size)
                                     .color(theme.text),
                             );
                             ui.label(
-                                RichText::new("Your settings are saved first.").color(theme.muted),
+                                RichText::new(tr!("your-settings-are-saved-first"))
+                                    .color(theme.muted),
                             );
                             ui.add_space(theme.padding);
                             ui.horizontal(|ui| {
-                                if widgets::pill_button(ui, "Quit", true, &theme).clicked() {
+                                if widgets::pill_button(ui, &tr!("quit"), true, &theme).clicked() {
                                     answer = Some(true);
                                 }
-                                if widgets::pill_button(ui, "Cancel", false, &theme).clicked() {
+                                if widgets::pill_button(ui, &tr!("cancel"), false, &theme).clicked()
+                                {
                                     answer = Some(false);
                                 }
                             });
@@ -405,8 +416,14 @@ impl Runtime {
         }
         self.applied_revision = revision;
         if let Err(error) = self.engine.refresh_config() {
-            self.shell.notify(format!("Settings: {error}"), true);
+            self.shell
+                .notify(tr!("settings-error", error = error), true);
             return;
+        }
+        if self.interactive {
+            // Threads outside the frame (background jobs) read the global
+            // language; frames open a scope of their own.
+            sue_lang::set_language(&self.engine.config.language);
         }
         let theme = Theme::from_rice(&self.engine.world.rice);
         self.shell
@@ -456,6 +473,7 @@ impl Runtime {
     /// Runs timed work that is due. Returns `true` if the window must be
     /// redrawn.
     pub fn timer(&mut self, textures: &mut dyn TextureUpload, now: Instant) -> bool {
+        let _language = sue_lang::scope(&sue_wm::sue_language(&self.engine.world.rice));
         let mut redraw = self.shell.expire(now);
         redraw |= self.poll_system_dialogs(textures, now);
         if self.typing.flush_if_paused(&mut self.engine.history, now) {
@@ -600,7 +618,7 @@ impl Runtime {
             Ok(()) => self.kept_digest = Some(kept),
             Err(error) => self
                 .shell
-                .notify(format!("Could not keep the unsaved work: {error}"), true),
+                .notify(tr!("could-not-keep-unsaved-work", error = error), true),
         }
     }
 
@@ -700,7 +718,7 @@ impl Runtime {
     /// work it replaces is kept first if nobody saved it.
     fn recover(&mut self, id: &str, textures: &mut dyn TextureUpload, now: Instant) {
         let Some(kept) = self.work.autosave(id).cloned() else {
-            self.shell.notify("That unsaved work is gone", true);
+            self.shell.notify(tr!("that-unsaved-work-is-gone"), true);
             return;
         };
         let file = std::fs::read(&kept.file)
@@ -709,8 +727,10 @@ impl Runtime {
         let file = match file {
             Ok(file) => file,
             Err(error) => {
-                self.shell
-                    .notify(format!("Cannot recover {}: {error}", kept.title()), true);
+                self.shell.notify(
+                    tr!("cannot-recover", title = kept.title(), error = error),
+                    true,
+                );
                 return;
             }
         };
@@ -719,8 +739,10 @@ impl Runtime {
         self.transport
             .set_playing(false, self.engine.audio.as_deref_mut());
         if let Err(error) = self.engine.world.load_file(&file, &sue_model::registry()) {
-            self.shell
-                .notify(format!("Cannot recover {}: {error}", kept.title()), true);
+            self.shell.notify(
+                tr!("cannot-recover", title = kept.title(), error = error),
+                true,
+            );
             return;
         }
         self.engine.history = UndoStack::new();
@@ -734,10 +756,10 @@ impl Runtime {
         self.kept_digest = Some(digest(&bytes));
         self.autosave_seen = self.engine.world.arena.revision();
         self.shell.notify(
-            format!(
-                "Recovered {}; save it to keep it{}",
-                kept.title(),
-                if replaced { REPLACED } else { "" }
+            tr!(
+                "recovered-save-keep",
+                title = kept.title(),
+                value = if replaced { REPLACED } else { "" }
             ),
             false,
         );
@@ -751,10 +773,10 @@ impl Runtime {
             .autosave(id)
             .map_or_else(String::new, sue_wm::Autosave::title);
         match self.work.discard(id) {
-            Ok(()) => self.shell.notify(format!("Discarded {title}"), false),
+            Ok(()) => self.shell.notify(tr!("discarded", title = title), false),
             Err(error) => self
                 .shell
-                .notify(format!("Cannot discard {title}: {error}"), true),
+                .notify(tr!("cannot-discard", title = title, error = error), true),
         }
     }
 
@@ -762,7 +784,7 @@ impl Runtime {
     fn remember(&mut self, path: &Path, saved: bool, page: Option<AppletId>) {
         if let Err(error) = self.work.remember(path, saved, page, unix_now()) {
             self.shell
-                .notify(format!("Cannot remember the recent files: {error}"), true);
+                .notify(tr!("cannot-remember-the-recent-files", error = error), true);
         }
     }
 
@@ -855,7 +877,8 @@ impl Runtime {
                 } else if let Some(path) = other.strip_prefix("reveal-file:") {
                     self.reveal_file(Path::new(path));
                 } else {
-                    self.shell.notify(format!("Unknown command {other}"), true);
+                    self.shell
+                        .notify(tr!("unknown-command", other = other), true);
                 }
             }
         }
@@ -863,26 +886,24 @@ impl Runtime {
 
     fn reveal(&mut self, dir: &Path) {
         if !self.interactive {
-            self.shell
-                .notify(format!("Folder: {}", dir.display()), false);
+            self.shell.notify(tr!("folder", dir = dir.display()), false);
             return;
         }
         if let Err(error) = sue_platform::reveal_folder(dir) {
             self.shell
-                .notify(format!("Cannot open the folder: {error}"), true);
+                .notify(tr!("cannot-open-the-folder", error = error), true);
         }
     }
 
     /// Shows a file selected in the system file manager.
     fn reveal_file(&mut self, path: &Path) {
         if !self.interactive {
-            self.shell
-                .notify(format!("File: {}", path.display()), false);
+            self.shell.notify(tr!("file", path = path.display()), false);
             return;
         }
         if let Err(error) = sue_platform::reveal_file(path) {
             self.shell
-                .notify(format!("Cannot show the file: {error}"), true);
+                .notify(tr!("cannot-show-the-file", error = error), true);
         }
     }
 
@@ -893,7 +914,7 @@ impl Runtime {
             .push(ShellRequest::PickFile(FilePick::open(
                 None,
                 "open",
-                "Open File",
+                &tr!("open-file"),
             )));
     }
 
@@ -910,20 +931,22 @@ impl Runtime {
             "open" => self.open_path(path, textures, now),
             "save-project" => {
                 if let Err(error) = self.save_project_to(path) {
-                    self.shell
-                        .notify(format!("Cannot save {}: {error}", file_name(path)), true);
+                    self.shell.notify(
+                        tr!("cannot-save", value = file_name(path), error = error),
+                        true,
+                    );
                 }
             }
             "export-rice" => {
                 let text = self.engine.world.rice.to_suerice();
                 match write_atomic(path, text.as_bytes()) {
                     Ok(()) => self.shell.notify_saved(path, "rice"),
-                    Err(error) => self.shell.notify(format!("Export failed: {error}"), true),
+                    Err(error) => self.shell.notify(tr!("export-failed", error = error), true),
                 }
             }
             other => self
                 .shell
-                .notify(format!("Nothing asked for a file to {other}"), true),
+                .notify(tr!("nothing-asked-file", other = other), true),
         }
     }
 
@@ -934,7 +957,7 @@ impl Runtime {
     fn pick_with_system_dialog(&mut self, pick: FilePick) {
         if !self.interactive {
             self.shell
-                .notify("Choosing files needs the desktop window", false);
+                .notify(tr!("choosing-files-needs-desktop-window"), false);
             self.pending_pick = Some(pick);
             return;
         }
@@ -962,7 +985,7 @@ impl Runtime {
             Picking::Waiting => self.waiting_pick = Some(pick),
             Picking::Failed(why) => self
                 .shell
-                .notify(format!("Cannot choose a file: {why}"), true),
+                .notify(tr!("cannot-choose-a-file", why = why), true),
         }
     }
 
@@ -1040,16 +1063,23 @@ impl Runtime {
                     .and_then(|path| path.parent().map(Path::to_path_buf))
                     .unwrap_or_else(|| self.engine.paths.home_dir.clone());
                 self.engine.requests.push(ShellRequest::PickFile(
-                    FilePick::save(None, "save-project", "Save Project", "Untitled.sue")
-                        .types(vec![sue_wm::FileType::new("Sue project", &["sue"])])
-                        .starting_in(Some(start)),
+                    FilePick::save(
+                        None,
+                        "save-project",
+                        &tr!("save-project"),
+                        &tr!("untitled-sue"),
+                    )
+                    .types(vec![sue_wm::FileType::new(&tr!("sue-project"), &["sue"])])
+                    .starting_in(Some(start)),
                 ));
                 return;
             }
         };
         if let Err(error) = self.save_project_to(&path) {
-            self.shell
-                .notify(format!("Cannot save {}: {error}", file_name(&path)), true);
+            self.shell.notify(
+                tr!("cannot-save", value = file_name(&path), error = error),
+                true,
+            );
         }
     }
 
@@ -1100,10 +1130,10 @@ impl Runtime {
         self.kept_digest = None;
         self.autosave_seen = self.engine.world.arena.revision();
         self.shell.notify(
-            format!(
-                "Opened {}{}",
-                file_name(path),
-                if replaced { REPLACED } else { "" }
+            tr!(
+                "opened-2",
+                value = file_name(path),
+                value2 = if replaced { REPLACED } else { "" }
             ),
             false,
         );
@@ -1145,10 +1175,11 @@ impl Runtime {
             .unwrap_or(u64::MAX)
             .saturating_mul(1024 * 1024);
         let bytes = match std::fs::metadata(path) {
-            Ok(metadata) if metadata.is_dir() => Err("it is a folder".to_owned()),
-            Ok(metadata) if metadata.len() > limit => Err(format!(
-                "it is {}, over the {limit_mib} MiB limit (io.max_ingest_mib)",
-                human_bytes(metadata.len())
+            Ok(metadata) if metadata.is_dir() => Err(tr!("it-is-a-folder")),
+            Ok(metadata) if metadata.len() > limit => Err(tr!(
+                "over-mib-limit-io-max-ingest",
+                value = human_bytes(metadata.len()),
+                limit_mib = limit_mib
             )),
             Ok(_) => std::fs::read(path).map_err(|error| error.to_string()),
             Err(error) => Err(error.to_string()),
@@ -1157,7 +1188,7 @@ impl Runtime {
             Ok(bytes) => bytes,
             Err(reason) => {
                 self.shell
-                    .notify(format!("Cannot open {name}: {reason}"), true);
+                    .notify(tr!("cannot-open", name = name, reason = reason), true);
                 return;
             }
         };
@@ -1176,7 +1207,7 @@ impl Runtime {
                 }
                 Err(reason) => self
                     .shell
-                    .notify(format!("Cannot open {name}: {reason}"), true),
+                    .notify(tr!("cannot-open", name = name, reason = reason), true),
             }
             self.serve_requests(textures, now);
             return;
@@ -1200,7 +1231,7 @@ impl Runtime {
             Ok(ingested) => ingested,
             Err(error) => {
                 self.shell
-                    .notify(format!("Cannot open {name}: {error}"), true);
+                    .notify(tr!("cannot-open", name = name, reason = error), true);
                 return;
             }
         };
@@ -1220,7 +1251,7 @@ impl Runtime {
             // Nothing shows it: it does not stay in the project unseen.
             let _ = self.engine.world.arena.despawn(ingested.handle);
             self.shell
-                .notify(format!("No studio or tool opens {name} yet"), true);
+                .notify(tr!("no-studio-tool-opens-yet", name = name), true);
             return;
         };
         if let Some(note) = ingested.note {
@@ -1233,7 +1264,7 @@ impl Runtime {
     /// Opens (or reopens) the audio output with the riced device and format.
     fn open_audio(&mut self) {
         if !self.interactive {
-            self.engine.audio_error = Some("there is no audio device in this mode".to_owned());
+            self.engine.audio_error = Some(tr!("there-no-audio-device-mode"));
             self.engine.rebuild_catalog();
             return;
         }
@@ -1260,7 +1291,7 @@ impl Runtime {
                     .set_playing(playing, self.engine.audio.as_deref_mut());
             }
             Err(error) => {
-                self.shell.notify(format!("Audio: {error}"), true);
+                self.shell.notify(tr!("audio", error = error), true);
                 self.engine.audio_error = Some(error.to_string());
             }
         }
@@ -1274,8 +1305,10 @@ impl Runtime {
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
             Err(error) => {
-                self.shell
-                    .notify(format!("Cannot read {}: {error}", path.display()), true);
+                self.shell.notify(
+                    tr!("cannot-read", path = path.display(), error = error),
+                    true,
+                );
                 return;
             }
         };
@@ -1283,7 +1316,7 @@ impl Runtime {
             Ok(disk) => disk,
             Err(error) => {
                 self.shell
-                    .notify(format!("The rice file has an error: {error}"), true);
+                    .notify(tr!("rice-file-has-error", error = error), true);
                 return;
             }
         };
@@ -1298,11 +1331,11 @@ impl Runtime {
             .collect();
         if changes.is_empty() {
             self.shell
-                .notify("The rice file matches what Sue shows", false);
+                .notify(tr!("rice-file-matches-what-sue-shows"), false);
             return;
         }
         let count = changes.len();
-        let txn = SetRiceValues::new("Reload default.suerice", changes);
+        let txn = SetRiceValues::new(tr!("reload-default-suerice"), changes);
         self.typing.flush(&mut self.engine.history);
         match self
             .engine
@@ -1311,8 +1344,8 @@ impl Runtime {
         {
             Ok(_) => self
                 .shell
-                .notify(format!("Reloaded {count} values from disk"), false),
-            Err(error) => self.shell.notify(format!("Reload failed: {error}"), true),
+                .notify(tr!("reloaded-values-from-disk", count = count), false),
+            Err(error) => self.shell.notify(tr!("reload-failed", error = error), true),
         }
         self.refresh_rice();
     }
@@ -1321,7 +1354,7 @@ impl Runtime {
         // The system's dialog asks where; `picked` writes it.
         let start = self.engine.paths.home_dir.clone();
         self.engine.requests.push(ShellRequest::PickFile(
-            FilePick::save(None, "export-rice", "Export Rice", "my.suerice")
+            FilePick::save(None, "export-rice", &tr!("export-rice"), "my.suerice")
                 .extensions(&["suerice"])
                 .starting_in(Some(start)),
         ));
@@ -4967,6 +5000,92 @@ f 2 3 4
     }
 
     #[test]
+    fn sue_writer_comments_go_on_words_and_come_off_with_undo() {
+        let (mut runtime, root) = runtime("sue-writer-comments");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let writer = AppletId::new(sue_writer::ID).unwrap();
+        runtime.request(
+            ShellRequest::Create {
+                applet: writer.clone(),
+                key: "blank".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![egui::Event::Text("A dark and stormy night".to_owned())]
+            } else {
+                Vec::new()
+            }
+        });
+        runtime.typing.flush(&mut runtime.engine.history);
+        let command = |runtime: &mut Runtime, command: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: writer.clone(),
+                    command: command.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let key = |key: egui::Key, modifiers: egui::Modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        // New Comment on the word at the caret, typed and sent with
+        // Ctrl+Enter.
+        command(&mut runtime, "review.comment");
+        frames(&mut runtime, &ctx, size, start, |frame| match frame {
+            1 => vec![egui::Event::Text("Too much?".to_owned())],
+            2 => vec![key(egui::Key::Enter, egui::Modifiers::COMMAND)],
+            _ => Vec::new(),
+        });
+        let comments = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .filter(|(_, entity)| entity.class() == sue_model::comments::COMMENT)
+                .map(|(_, entity)| entity.id())
+                .collect::<Vec<_>>()
+        };
+        let found = comments(&runtime);
+        assert_eq!(found.len(), 1, "a comment was made");
+        let thread = sue_model::comments::thread(&runtime.engine.world.arena, found[0]).unwrap();
+        assert_eq!(thread.first.text, "Too much?");
+        let marked = runtime.engine.world.arena.iter().any(|(_, entity)| {
+            entity.ext::<sue_model::TextMarks>().is_some_and(|marks| {
+                marks.marks().iter().any(|mark| {
+                    mark.kind == sue_model::mark_kind::COMMENT
+                        && mark.value == sue_core::Value::Entity(found[0])
+                })
+            })
+        });
+        assert!(marked, "its words carry it");
+        // Delete it from the Review menu; undo brings it back.
+        command(&mut runtime, "review.delete_comment");
+        assert!(comments(&runtime).is_empty());
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]
+            } else {
+                Vec::new()
+            }
+        });
+        assert_eq!(comments(&runtime), found);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_writer_tables_take_typing_grow_with_tab_undo_and_export() {
         let (mut runtime, root) = runtime("sue-writer-tables");
         let ctx = egui::Context::default();
@@ -5084,6 +5203,97 @@ f 2 3 4
                 assert!(bytes.starts_with(b"PK"));
             }
         }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_sue_menu_changes_the_language_and_a_tool_can_keep_its_own() {
+        let (mut runtime, root) = runtime("language");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+
+        // Headless runs start in English; the Sue menu offers every language.
+        runtime.with_shell(&mut NoTextures, start, |shell, io, _| {
+            shell.open_sue_menu(io)
+        });
+        let languages = runtime.shell.sue_menu_labels(&["Language"]);
+        let japanese = sue_lang::name("ja");
+        assert!(languages.contains(&japanese), "{languages:?}");
+        assert!(languages.contains(&sue_lang::name("es")), "{languages:?}");
+
+        // Picking Japanese is an undoable rice edit, and the menu speaks it.
+        let picked = runtime.with_shell(&mut NoTextures, start, |shell, io, now| {
+            shell.sue_menu_pick(&["Language", &japanese], io, now)
+        });
+        assert!(picked);
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        assert_eq!(
+            runtime.engine.world.rice.get_str(sue_wm::LANGUAGE_KEY),
+            Some("ja")
+        );
+        runtime.with_shell(&mut NoTextures, start, |shell, io, _| {
+            shell.open_sue_menu(io)
+        });
+        let labels = runtime.shell.sue_menu_labels(&[]);
+        let settings = {
+            let _ja = sue_lang::scope("ja");
+            sue_lang::text("wm", "settings")
+        };
+        assert_ne!(settings, "Settings");
+        assert!(labels.contains(&settings), "{labels:?}");
+        runtime.shell.dismiss_overlays();
+
+        // The Image Viewer set apart in Spanish: what it says is Spanish,
+        // while Sue's own menu stays Japanese.
+        let viewer = AppletId::new(crate::viewer::ID).unwrap();
+        runtime
+            .engine
+            .world
+            .rice
+            .set(
+                &sue_wm::language_key(&viewer),
+                sue_rice::RiceValue::Text("es".to_owned()),
+            )
+            .unwrap();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: viewer,
+                command: "no.such.command".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        let spanish = {
+            let _es = sue_lang::scope("es");
+            sue_lang::tr!("wm", "is-not-available", command = "no.such.command")
+        };
+        assert_eq!(
+            runtime.shell.message().map(|(text, _)| text),
+            Some(spanish.as_str())
+        );
+        runtime.with_shell(&mut NoTextures, start, |shell, io, _| {
+            shell.open_sue_menu(io)
+        });
+        assert!(runtime.shell.sue_menu_labels(&[]).contains(&settings));
+
+        // English again: the menu reads English.
+        let _ = runtime.engine.world.rice.set(
+            sue_wm::LANGUAGE_KEY,
+            sue_rice::RiceValue::Text(sue_lang::ENGLISH.to_owned()),
+        );
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        runtime.with_shell(&mut NoTextures, start, |shell, io, _| {
+            shell.open_sue_menu(io)
+        });
+        assert!(
+            runtime
+                .shell
+                .sue_menu_labels(&[])
+                .contains(&"Settings".to_owned())
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

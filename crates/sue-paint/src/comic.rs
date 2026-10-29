@@ -98,7 +98,7 @@ impl SuePaint {
         }
         let id = layer.id();
         let order = cx.world.arena.relations().next_order(picture, CHILD);
-        let edit = Edit::new(format!("New {name}")).then(
+        let edit = Edit::new(tr!("new", name = name)).then(
             SpawnEntity::new(layer).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
         );
         if !Self::apply(cx, edit) {
@@ -114,7 +114,7 @@ impl SuePaint {
     /// Makes a frame border layer with `spec`'s layout.
     pub(crate) fn add_frame_layer(&mut self, cx: &mut AppletContext<'_>, spec: FrameSpec) {
         let Some((_, [width, height], paper)) = self.page(&cx.world.arena) else {
-            cx.fail("Open a page first");
+            cx.fail(tr!("open-a-page-first"));
             return;
         };
         let rows = manga::LAYOUTS[spec.layout.min(manga::LAYOUTS.len() - 1)].1;
@@ -129,7 +129,7 @@ impl SuePaint {
         let pixels = manga::render_frames(&panels, width, height, spec.border, paper);
         self.spawn_drawn_layer(
             cx,
-            "Frame",
+            &tr!("frame"),
             manga::FRAME,
             pixels,
             vec![
@@ -207,7 +207,7 @@ impl SuePaint {
                 b[0] = a[0];
             }
             let Some(layer) = existing else {
-                cx.fail("Make frame borders first: Layer, New Layer, Frame Border Folder");
+                cx.fail(tr!("make-frame-borders-first-layer-new"));
                 return;
             };
             let Some((panels, border, gutter)) = Self::frame_of(&cx.world.arena, layer) else {
@@ -233,14 +233,14 @@ impl SuePaint {
                 divided.retain(|panel| panel.len() >= 3);
                 divided
             }) else {
-                cx.notify("Drag across a panel to divide it");
+                cx.notify(tr!("drag-across-panel-divide"));
                 return;
             };
             let pixels = manga::render_frames(&divided, width, height, border, paper);
             self.redraw_layer(
                 cx,
                 layer,
-                "Divide Frame",
+                &tr!("divide-frame"),
                 manga::PANELS,
                 manga::encode_panels(&divided),
                 pixels,
@@ -261,7 +261,7 @@ impl SuePaint {
                 self.redraw_layer(
                     cx,
                     layer,
-                    "Rectangle Frame",
+                    &tr!("rectangle-frame"),
                     manga::PANELS,
                     manga::encode_panels(&panels),
                     pixels,
@@ -272,7 +272,7 @@ impl SuePaint {
                 let pixels = manga::render_frames(&panels, width, height, 6.0, paper);
                 self.spawn_drawn_layer(
                     cx,
-                    "Frame",
+                    &tr!("frame"),
                     manga::FRAME,
                     pixels,
                     vec![
@@ -319,7 +319,7 @@ impl SuePaint {
                 }
                 _ => None,
             }) else {
-                cx.fail("Start the tail inside a balloon");
+                cx.fail(tr!("start-tail-inside-balloon"));
                 return;
             };
             manga::tail(a, b, (balloon * 0.35).max(8.0))
@@ -341,16 +341,16 @@ impl SuePaint {
         match existing {
             Some(layer) => {
                 let label = if sub.mode == 1 {
-                    "Balloon Tail"
+                    tr!("balloon-tail")
                 } else {
-                    "Balloon"
+                    tr!("balloon")
                 };
-                self.redraw_layer(cx, layer, label, manga::SHAPES, text, pixels);
+                self.redraw_layer(cx, layer, &label, manga::SHAPES, text, pixels);
             }
             None => {
                 self.spawn_drawn_layer(
                     cx,
-                    "Balloon",
+                    &tr!("balloon"),
                     manga::BALLOON,
                     pixels,
                     vec![
@@ -369,7 +369,7 @@ impl SuePaint {
         };
         self.spawn_drawn_layer(
             cx,
-            "Balloon",
+            &tr!("balloon"),
             manga::BALLOON,
             vec![0; (width * height * 4) as usize],
             vec![

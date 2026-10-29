@@ -237,8 +237,8 @@ a Settings slider all go back in the order you did them.
 ### Settings
 
 The Sue menu's **Settings** (or `Ctrl+,`) opens Settings as a floating
-window. A list of categories runs down the left (General, Appearance & Rice,
-Display & Graphics, Audio & DSP, Files & Codecs, Studios, Packages & Updates,
+window. A list of categories runs down the left (General, Language,
+Appearance & Rice, Display & Graphics, Audio & DSP, Files & Codecs, Studios, Packages & Updates,
 Keymaps, MCP), and the right side shows only that category. Type in "Filter
 settings..." to search all of them.
 
@@ -253,6 +253,26 @@ one and Discrete the fast one. Sue shows which card it is drawing on and
 every card it found; the choice takes effect when Sue starts, so press
 **Restart Sue** after changing it. **MCP** (connecting Sue to AI tools) is
 not yet available.
+
+### Languages
+
+Sue speaks your language. The first time it starts it uses your system's
+language when Sue has it, and English otherwise. To change it, open the Sue
+menu and choose **Language**: pick a language by its own name, or
+**System** to follow your system again. Every studio and tool changes at
+once; nothing needs a restart.
+
+A studio or tool can also keep a language of its own: say Sue in English
+and Sue Paint in Japanese. Settings, **Language** lists Sue and every studio
+and tool; each one is **Follow Sue** unless you choose a language for it.
+The same choice sits in each studio's own settings (Settings, Studios, and
+Sue Paint's File, Preferences takes you there).
+
+Sue ships in English, with drafts in Spanish and Japanese so far, written
+without a native speaker and waiting for one to review them. Anything a
+language does not have yet shows in English. Names you type, such as layer
+and tool names, stay as you wrote them, and the window's title is always
+Sue. CONTRIBUTING.md explains how to add a language or improve one.
 
 ---
 
@@ -562,6 +582,15 @@ the heading row on and off, and converts text with tabs or commas into a
 table and back. A table that runs onto the next page breaks between rows and
 repeats its heading row at the top. Tables go into every format you compile
 to, PDF and Word included.
+
+**Comments** are in the Review menu. Select some words and choose New
+Comment (`Ctrl+Alt+C`); type it and press `Ctrl+Enter`. The words are shaded,
+and Review, Comments shows every comment beside the text: the words it is
+about (click them to go there), who wrote it and when, its replies, a box to
+reply in, Resolve and Delete. Previous and Next Comment step through them.
+Comments carry the project's author (Project Settings). They go into Word
+and OpenDocument files as real comments with their replies, and into web
+pages as notes on the words.
 
 A **table of contents** comes from Insert, Table of Contents: give it a
 title and how many heading levels it lists. It shows every heading with its

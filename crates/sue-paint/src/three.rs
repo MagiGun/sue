@@ -528,13 +528,14 @@ pub fn new_layer(
         .get_by_id(picture)
         .ok()
         .and_then(sue_model::picture::size)
-        .ok_or("The picture has no size")?;
+        .ok_or(tr!("the-picture-has-no-size"))?;
     let view = View3D::default();
     let mesh = model
         .ext::<Geometry>()
         .map(Geometry::to_mesh)
         .unwrap_or_default();
-    let raster = draw(&render_buffers(&mesh, &view, size), &view).ok_or("Cannot draw the model")?;
+    let raster =
+        draw(&render_buffers(&mesh, &view, size), &view).ok_or(tr!("cannot-draw-the-model"))?;
     let model_id = model.id();
     let mut layer = Entity::new(name, raster).with_class(CLASS);
     let id = layer.id();
@@ -561,7 +562,7 @@ pub fn new_layer(
     ] {
         layer = layer.with_property(key, value);
     }
-    let edit = Edit::new(format!("New 3D Layer {name}"))
+    let edit = Edit::new(tr!("new-3d-layer-2", name = name))
         .then(SpawnEntity::new(model))
         .then(
             SpawnEntity::new(layer)

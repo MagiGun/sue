@@ -13,6 +13,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue speaks your language. It starts in your system's language when Sue
+  has it; the Sue menu's Language changes it for every studio and tool at
+  once, and Settings, Language lets any studio or tool keep a language of
+  its own. Spanish and Japanese ship as drafts waiting for a native
+  speaker's review; anything not yet translated shows in English.
+- Comments in Sue Writer (Review, New Comment, `Ctrl+Alt+C`): shown beside
+  the text with their replies, to reply to, resolve or delete. They go into
+  Word and OpenDocument files as comments.
 - A table of contents in Sue Writer (Insert, Table of Contents): the
   headings with their pages, kept up as you write; click an entry to go
   there. It prints in PDFs and goes into Word, OpenDocument, web pages,

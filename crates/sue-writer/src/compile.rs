@@ -27,6 +27,24 @@ pub const FORMATS: &[(&str, &str, &str)] = &[
     ("txt", "Plain text", "txt"),
 ];
 
+/// The name of format `key` (one of [`FORMATS`]) in the language in use.
+#[must_use]
+pub fn format_name(key: &str) -> String {
+    match key {
+        "docx" => tr!("word-document"),
+        "odt" => tr!("opendocument-text"),
+        "epub" => tr!("epub-e-book"),
+        "html" => tr!("web-page"),
+        "rtf" => tr!("rich-text-format"),
+        "md" => tr!("markdown"),
+        "txt" => tr!("plain-text"),
+        other => FORMATS
+            .iter()
+            .find(|(format, ..)| *format == other)
+            .map_or_else(|| other.to_owned(), |(_, name, _)| (*name).to_owned()),
+    }
+}
+
 /// Which titles go into the text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Titles {
@@ -318,6 +336,23 @@ fn contents(arena: &Arena, sections: &[Section]) -> HashMap<EntityId, Contents> 
     out
 }
 
+/// The comment threads the sections' words carry, for the formats that
+/// keep comments.
+fn comments(arena: &Arena, sections: &[Section]) -> HashMap<EntityId, sue_model::comments::Thread> {
+    let mut out = HashMap::new();
+    for section in sections {
+        for mark in section.marks.marks() {
+            if mark.kind == kind::COMMENT
+                && let Value::Entity(id) = mark.value
+                && let Some(thread) = sue_model::comments::thread(arena, id)
+            {
+                out.insert(id, thread);
+            }
+        }
+    }
+    out
+}
+
 /// Compiles with `options` into the bytes of a file.
 ///
 /// # Errors
@@ -325,7 +360,7 @@ fn contents(arena: &Arena, sections: &[Section]) -> HashMap<EntityId, Contents> 
 pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>, String> {
     let sections = sections(arena, options, look);
     if sections.is_empty() {
-        return Err("there is nothing to compile: every document is left out".to_owned());
+        return Err(tr!("there-nothing-compile-every-document-left"));
     }
     if options.format == "pdf" {
         let docs: Vec<PrintDoc<'_>> = sections
@@ -375,6 +410,7 @@ pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>,
         figures: figures(arena, &sections),
         tables: tables(arena, &sections),
         contents: contents(arena, &sections),
+        comments: comments(arena, &sections),
         sections,
         styles: publish_styles(&look.sheet),
         page: look.page.size,
@@ -393,7 +429,7 @@ pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>,
         "rtf" => p::to_rtf(&book).into_bytes(),
         "md" => p::to_markdown(&book).into_bytes(),
         "txt" => p::to_text(&book).into_bytes(),
-        other => return Err(format!("Sue Writer cannot write {other} files")),
+        other => return Err(tr!("sue-writer-cannot-write-files", other = other)),
     })
 }
 
@@ -421,7 +457,7 @@ pub fn import(name: &str, bytes: &[u8]) -> Result<(String, TextMarks), String> {
             sue_model::ensure_final_newline(&mut text);
             Ok((text, TextMarks::new()))
         }
-        other => Err(format!("Sue Writer cannot read .{other} files yet")),
+        other => Err(tr!("sue-writer-cannot-read-files-yet", other = other)),
     }
 }
 

@@ -160,6 +160,8 @@ cargo run -p sue -- --self-check
 
 - Put values people may want to tune in the rice (`sue-rice`), so they appear
   in Settings by themselves.
+- Put every string people read in the language database (`sue-lang`, read
+  with `tr!`), English first; CONTRIBUTING.md says how languages are added.
 - Register applets, operators and presets instead of keeping lists by hand.
 - Sue owns every feature; studios use them. A studio never builds its own
   color picker, file dialog, converter, brush engine, font list, text

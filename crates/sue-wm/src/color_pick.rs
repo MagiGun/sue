@@ -279,7 +279,7 @@ pub fn color_button(
     }
     let response = response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text("Pick a color");
+        .on_hover_text(tr!("pick-a-color"));
     let id = ui.scope_id().with(id_salt);
     let open_id = id.with("open");
     let size_id = id.with("size");

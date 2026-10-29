@@ -91,6 +91,8 @@ pub(crate) enum Dialog {
     Furniture(Furniture),
     /// A new table of contents.
     Contents(sue_model::contents::Contents),
+    /// A new comment on the selection.
+    Comment(String),
     /// A new table: rows, columns, and whether the first row is headings.
     Table {
         rows: u32,
@@ -144,8 +146,14 @@ pub struct SueWriter {
     pub(crate) menus: Vec<Menu>,
     /// The shortcuts as Settings has them, for the menus and the shell.
     pub(crate) bound: sue_wm::shortcuts::Bound,
+    /// When to build the menus again, in another language.
+    pub(crate) language: sue_lang::Watch,
     pub(crate) binder: bool,
     pub(crate) inspector: bool,
+    /// The comments show where the inspector does.
+    pub(crate) comments: bool,
+    /// Resolved comments show too.
+    pub(crate) show_resolved: bool,
     pub(crate) binder_width: f32,
     pub(crate) inspector_width: f32,
     pub(crate) find: Option<Find>,
@@ -201,10 +209,13 @@ impl Default for SueWriter {
             menubar: MenuBar::new(),
             menus: crate::menus::menus(),
             bound: sue_wm::shortcuts::Bound::default(),
+            language: sue_lang::Watch::default(),
             binder: true,
             // Shown from View, Inspector: the page and the binder are what
             // a word processor opens with.
             inspector: false,
+            comments: false,
+            show_resolved: false,
             binder_width: 230.0,
             inspector_width: 260.0,
             find: None,
@@ -492,13 +503,13 @@ impl SueWriter {
             return;
         }
         self.open_project(cx, root, None);
-        cx.notify(format!("Made {title}"));
+        cx.notify(tr!("made", title = title));
     }
 
     /// Adds a new document (or folder) after the selection.
     pub(crate) fn add_item(&mut self, cx: &mut AppletContext<'_>, folder: bool) {
         let Some(root) = self.project else {
-            cx.notify("Open a project first");
+            cx.notify(tr!("open-a-project-first"));
             return;
         };
         let at = self
@@ -512,9 +523,9 @@ impl SueWriter {
             return;
         };
         let entity = if folder {
-            Entity::empty("New Folder", class::FOLDER)
+            Entity::empty(tr!("new-folder"), class::FOLDER)
         } else {
-            project::new_document("Untitled")
+            project::new_document(&tr!("untitled"))
         };
         let id = entity.id();
         let batch = project::add(
@@ -522,14 +533,23 @@ impl SueWriter {
             parent,
             index,
             entity,
-            if folder { "New Folder" } else { "New Document" },
+            &if folder {
+                tr!("new-folder")
+            } else {
+                tr!("new-document")
+            },
         );
         if self.apply(cx, batch) {
             self.expanded.insert(parent);
             self.selected = Some(id);
             self.renaming = Some((
                 id,
-                if folder { "New Folder" } else { "Untitled" }.to_owned(),
+                if folder {
+                    tr!("new-folder")
+                } else {
+                    tr!("untitled")
+                }
+                .to_owned(),
             ));
             if !folder {
                 self.open = Some(id);
@@ -551,7 +571,7 @@ impl SueWriter {
         if is_picture && self.editor.current().is_some() {
             self.view = View::Document;
             self.editor.insert_embed(cx, entity);
-            cx.notify("Put the picture in the text");
+            cx.notify(tr!("put-picture-text"));
             return;
         }
         if let Some(root) = self.project
@@ -565,7 +585,7 @@ impl SueWriter {
             let _ = end;
             if cx.apply(ArenaEdit(step)).is_ok() {
                 self.expanded.insert(research);
-                cx.notify("Added to Research");
+                cx.notify(tr!("added-to-research"));
             }
         }
     }
@@ -574,13 +594,13 @@ impl SueWriter {
     /// own).
     pub(crate) fn import(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
         let name = path.file_stem().map_or_else(
-            || "Imported".to_owned(),
+            || tr!("imported"),
             |stem| stem.to_string_lossy().into_owned(),
         );
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) => {
-                cx.fail(format!("Could not read {}: {error}", path.display()));
+                cx.fail(tr!("could-not-read", path = path.display(), error = error));
                 return;
             }
         };
@@ -608,12 +628,12 @@ impl SueWriter {
         });
         if let Some(doc) = target
             && let Some(batch) =
-                project::replace_all(cx.arena(), doc, &text, marks.clone(), "Import")
+                project::replace_all(cx.arena(), doc, &text, marks.clone(), &tr!("import"))
         {
             self.apply(cx, batch);
             let _ = cx.apply(ArenaEdit(project::rename(doc, &name)));
             self.editor.select(doc, 0..0);
-            cx.notify(format!("Imported {name}"));
+            cx.notify(tr!("imported-2", name = name));
             return;
         }
         let parent = self
@@ -626,12 +646,12 @@ impl SueWriter {
         if let Some((parent, index)) = parent {
             let entity = project::document_entity(&name, text, marks);
             let id = entity.id();
-            let batch = project::add(cx.arena(), parent, index, entity, "Import");
+            let batch = project::add(cx.arena(), parent, index, entity, &tr!("import"));
             if self.apply(cx, batch) {
                 self.open = Some(id);
                 self.selected = Some(id);
                 self.editor.select(id, 0..0);
-                cx.notify(format!("Imported {name}"));
+                cx.notify(tr!("imported-2", name = name));
             }
         }
     }
@@ -649,7 +669,7 @@ impl SueWriter {
         choices: &CompileChoices,
     ) {
         let Some(from) = self.compile_from(cx, choices.whole) else {
-            cx.fail("Nothing to compile");
+            cx.fail(tr!("nothing-to-compile"));
             return;
         };
         let options = compile::Options {
@@ -664,13 +684,14 @@ impl SueWriter {
         match compile::compile(cx.arena(), &options, &look) {
             Ok(bytes) => match std::fs::write(path, &bytes) {
                 Ok(()) => {
-                    let name = FORMATS[choices.format.min(FORMATS.len() - 1)].1;
+                    let name =
+                        compile::format_name(FORMATS[choices.format.min(FORMATS.len() - 1)].0);
                     cx.saved(
                         path.to_path_buf(),
-                        format!("{name}, {} KiB", bytes.len().div_ceil(1024)),
+                        tr!("kib", value = bytes.len().div_ceil(1024), name = name),
                     );
                 }
-                Err(error) => cx.fail(format!("Could not write {}: {error}", path.display())),
+                Err(error) => cx.fail(tr!("could-not-write", path = path.display(), error = error)),
             },
             Err(error) => cx.fail(error),
         }
@@ -713,15 +734,96 @@ impl SueWriter {
         }
     }
 
+    /// Who writes comments: the project's author.
+    pub(crate) fn author_name(&self, cx: &AppletContext<'_>) -> String {
+        let author = self.project_text(cx, manuscript::AUTHOR, "");
+        if author.trim().is_empty() {
+            tr!("author")
+        } else {
+            author
+        }
+    }
+
+    /// Puts a new comment saying `text` on the selection.
+    pub(crate) fn add_comment(&mut self, cx: &mut AppletContext<'_>, text: &str) {
+        let comment = sue_model::comments::comment(&self.author_name(cx), &project::today(), text);
+        if self.editor.add_comment(cx, comment) {
+            self.inspector = true;
+            self.comments = true;
+        } else {
+            cx.notify(tr!("select-words-comment"));
+        }
+    }
+
+    /// Replies `text` to comment `id`.
+    pub(crate) fn reply(&mut self, cx: &mut AppletContext<'_>, id: EntityId, text: &str) {
+        let reply = sue_model::comments::comment(&self.author_name(cx), &project::today(), text);
+        let reply_id = reply.id();
+        let order = cx
+            .arena()
+            .relations()
+            .next_order(id, sue_model::comments::REPLY);
+        let step = sue_core::txn::SpawnEntity::new(reply).with_relation(
+            sue_core::Relation::new(id, sue_model::comments::REPLY, reply_id).ordered(order),
+        );
+        let _ = cx.apply(ArenaEdit(
+            sue_core::txn::Batch::new(tr!("reply")).then(step),
+        ));
+    }
+
+    /// Resolves comment `id`, or opens it again.
+    pub(crate) fn resolve(&mut self, cx: &mut AppletContext<'_>, id: EntityId) {
+        let resolved =
+            sue_model::comments::thread(cx.arena(), id).is_some_and(|thread| thread.resolved);
+        let label = if resolved {
+            tr!("reopen-comment")
+        } else {
+            tr!("resolve-comment")
+        };
+        let step = sue_core::txn::Batch::new(label).then(project::set(
+            id,
+            sue_model::comments::RESOLVED,
+            (!resolved).then_some(Value::Bool(true)),
+        ));
+        let _ = cx.apply(ArenaEdit(step));
+    }
+
+    /// Selects the next (or previous) comment's words after the caret.
+    pub(crate) fn next_comment(&mut self, cx: &mut AppletContext<'_>, backward: bool) {
+        let comments = self.editor.comments();
+        let here = (self.editor.caret().doc, self.editor.selection().start);
+        let pick = if backward {
+            comments
+                .iter()
+                .rev()
+                .find(|(doc, range, _)| (*doc, range.start) < here)
+                .or(comments.last())
+        } else {
+            comments
+                .iter()
+                .find(|(doc, range, _)| (*doc, range.start) > here)
+                .or(comments.first())
+        };
+        let Some((doc, range, _)) = pick.cloned() else {
+            cx.notify(tr!("no-comments"));
+            return;
+        };
+        if let Some(id) = self.editor.docs().get(doc).copied() {
+            self.editor.select(id, range);
+            self.editor.focus();
+        }
+    }
+
     /// Asks where to save a compile in `format`.
     pub(crate) fn ask_compile(&mut self, cx: &mut AppletContext<'_>, choices: CompileChoices) {
-        let (key, name, ext) = FORMATS[choices.format.min(FORMATS.len() - 1)];
+        let (key, _, ext) = FORMATS[choices.format.min(FORMATS.len() - 1)];
+        let name = compile::format_name(key);
         let title = self.look(cx).title;
         let file = format!("{}.{ext}", sanitize(&title));
         let pick = FilePick::save(
             Some(me()),
             &format!("compile.{key}"),
-            &format!("Export as {name}"),
+            &tr!("export-as-2", name = name),
             &file,
         )
         .extensions(&[ext])
@@ -744,13 +846,13 @@ impl SueWriter {
             "file.new" => {
                 self.dialog = Some(Dialog::NewProject {
                     template: 1,
-                    title: "Untitled".to_owned(),
+                    title: tr!("untitled"),
                 });
             }
             "binder.new_doc" => self.add_item(cx, false),
             "binder.new_folder" => self.add_item(cx, true),
             "file.open" | "file.import" => {
-                let pick = FilePick::open(Some(me()), "import", "Import a Document")
+                let pick = FilePick::open(Some(me()), "import", &tr!("import-a-document"))
                     .extensions(&["docx", "md", "markdown", "txt", "html", "htm", "fountain"])
                     .starting_in(Self::export_dir(cx));
                 cx.request(ShellRequest::PickFile(pick));
@@ -806,6 +908,34 @@ impl SueWriter {
                     session: self.project_number(cx, project::SESSION_TARGET, 500.0) as i64,
                     font_filter: String::new(),
                 }));
+            }
+            "review.comment" => {
+                if self.editor.current().is_some() {
+                    self.dialog = Some(Dialog::Comment(String::new()));
+                }
+            }
+            "review.comments" => {
+                let shown = self.inspector && self.comments;
+                self.inspector = !shown;
+                self.comments = !shown;
+            }
+            "review.next_comment" | "review.previous_comment" => {
+                self.next_comment(cx, command == "review.previous_comment");
+            }
+            "review.resolve" => match self.editor.comment_here() {
+                Some(id) => self.resolve(cx, id),
+                None => cx.notify(tr!("put-caret-comments-words-first")),
+            },
+            "review.delete_comment" => match self.editor.comment_here() {
+                Some(id) => {
+                    self.editor.remove_comment(cx, id);
+                }
+                None => cx.notify(tr!("put-caret-comments-words-first")),
+            },
+            "review.delete_all_comments" => {
+                for (_, _, id) in self.editor.comments() {
+                    self.editor.remove_comment(cx, id);
+                }
             }
             "insert.contents" => {
                 self.dialog = Some(Dialog::Contents(sue_model::contents::Contents::default()));
@@ -910,31 +1040,33 @@ impl SueWriter {
                     _ => TableEdit::HeaderRow,
                 };
                 if self.editor.cell().is_none() {
-                    cx.notify("Click in a table first");
+                    cx.notify(tr!("click-in-a-table-first"));
                 } else {
                     self.editor.edit_table(cx, edit);
                 }
             }
             "table.to_text" => {
                 if !self.editor.table_to_text(cx) {
-                    cx.notify("Click in a table first");
+                    cx.notify(tr!("click-in-a-table-first"));
                 }
             }
             "table.from_text" => {
                 self.editor.text_to_table(cx);
             }
-            "format.bold" => self.editor.toggle(cx, kind::BOLD, "Bold"),
-            "format.italic" => self.editor.toggle(cx, kind::ITALIC, "Italic"),
-            "format.underline" => self.editor.toggle(cx, kind::UNDERLINE, "Underline"),
-            "format.strike" => self.editor.toggle(cx, kind::STRIKE, "Strikethrough"),
-            "format.code" => self.editor.toggle(cx, kind::CODE, "Code"),
+            "format.bold" => self.editor.toggle(cx, kind::BOLD, &tr!("bold")),
+            "format.italic" => self.editor.toggle(cx, kind::ITALIC, &tr!("italic")),
+            "format.underline" => self.editor.toggle(cx, kind::UNDERLINE, &tr!("underline")),
+            "format.strike" => self.editor.toggle(cx, kind::STRIKE, &tr!("strikethrough")),
+            "format.code" => self.editor.toggle(cx, kind::CODE, &tr!("code")),
             case if case.starts_with("format.case.") => {
                 let Some(case) = sue_type::case::Case::parse(&case["format.case.".len()..]) else {
                     return false;
                 };
                 self.editor.change_case(cx, case);
             }
-            "format.small_caps" => self.editor.toggle(cx, kind::SMALL_CAPS, "Small Capitals"),
+            "format.small_caps" => self
+                .editor
+                .toggle(cx, kind::SMALL_CAPS, &tr!("small-capitals")),
             "format.superscript" | "format.subscript" => {
                 let script = if command.ends_with("superscript") {
                     "super"
@@ -947,7 +1079,7 @@ impl SueWriter {
                     cx,
                     kind::SCRIPT,
                     (!on).then(|| Value::Text(script.to_owned())),
-                    "Raise or Lower",
+                    &tr!("raise-or-lower"),
                 );
             }
             "format.clear" => self.editor.clear_formatting(cx),
@@ -963,23 +1095,24 @@ impl SueWriter {
                     cx,
                     kind::HIGHLIGHT,
                     color.map(|hex| Value::Text(hex.to_owned())),
-                    "Highlight",
+                    &tr!("highlight"),
                 );
             }
             command if command.starts_with("format.color.") => {
                 let hex = &command["format.color.".len()..];
                 let value = (hex != "none").then(|| Value::Text(format!("#{hex}")));
-                self.editor.set_char(cx, kind::COLOR, value, "Text Color");
+                self.editor
+                    .set_char(cx, kind::COLOR, value, &tr!("text-color"));
             }
             command if command.starts_with("style.") => {
                 let key = &command["style.".len()..];
-                self.editor.set_style(cx, key, "Paragraph Style");
+                self.editor.set_style(cx, key, &tr!("paragraph-style"));
             }
             command if command.starts_with("align.") => {
                 let align = &command["align.".len()..];
                 let value = (align != "left").then(|| Value::Text(align.to_owned()));
                 self.editor
-                    .set_paragraph(cx, kind::ALIGN, value, "Alignment");
+                    .set_paragraph(cx, kind::ALIGN, value, &tr!("alignment"));
             }
             command if command.starts_with("spacing.") => {
                 let spacing: f64 = command["spacing.".len()..].parse().unwrap_or(1.0);
@@ -987,7 +1120,7 @@ impl SueWriter {
                     cx,
                     kind::LINE_SPACING,
                     Some(Value::Float(spacing)),
-                    "Line Spacing",
+                    &tr!("line-spacing"),
                 );
             }
             "list.bullet" | "list.number" => {
@@ -998,7 +1131,7 @@ impl SueWriter {
                     cx,
                     kind::LIST,
                     (!on).then(|| Value::Text(list.to_owned())),
-                    "List",
+                    &tr!("list"),
                 );
             }
             "indent.more" | "indent.less" => {
@@ -1013,7 +1146,7 @@ impl SueWriter {
                         cx,
                         kind::LEVEL,
                         Some(Value::Int(level as i64)),
-                        "List Level",
+                        &tr!("list-level"),
                     );
                 } else {
                     let style = sheet.get(&para.style).indent;
@@ -1027,7 +1160,7 @@ impl SueWriter {
                         cx,
                         kind::INDENT,
                         (next > 0.0).then(|| Value::Float(f64::from(style + next))),
-                        "Indent",
+                        &tr!("indent"),
                     );
                 }
             }
@@ -1037,7 +1170,7 @@ impl SueWriter {
                     cx,
                     kind::PAGE_BREAK,
                     Some(Value::Bool(true)),
-                    "Page Break",
+                    &tr!("page-break"),
                 );
             }
             "insert.scene_break" => {
@@ -1054,7 +1187,7 @@ impl SueWriter {
                         } else {
                             sue_type::BODY
                         },
-                        "Scene Break",
+                        &tr!("scene-break"),
                     );
                     self.editor.select(doc, caret.offset..caret.offset);
                 }
@@ -1071,13 +1204,13 @@ impl SueWriter {
             }
             "insert.footnote" => {
                 if self.editor.selection().is_empty() {
-                    cx.notify("Select the word the footnote follows");
+                    cx.notify(tr!("select-word-footnote-follows"));
                 } else {
                     self.dialog = Some(Dialog::Footnote(String::new()));
                 }
             }
             "insert.picture" => {
-                let pick = FilePick::open(Some(me()), "picture", "Insert a Picture")
+                let pick = FilePick::open(Some(me()), "picture", &tr!("insert-a-picture"))
                     .extensions(&[
                         "png", "jpg", "jpeg", "gif", "bmp", "webp", "tga", "tif", "tiff",
                     ])
@@ -1143,11 +1276,11 @@ impl SueWriter {
                     if let Some(batch) = project::take_snapshot(
                         cx.arena(),
                         doc,
-                        &format!("Snapshot {taken}"),
+                        &tr!("snapshot", taken = taken),
                         &taken,
                     ) && self.apply(cx, batch)
                     {
-                        cx.notify("Took a snapshot");
+                        cx.notify(tr!("took-a-snapshot"));
                     }
                 }
             }
@@ -1284,7 +1417,7 @@ impl SueWriter {
             }
         }
         if let Some(find) = &mut self.find {
-            find.message = "Not found".to_owned();
+            find.message = tr!("not-found");
         }
     }
 
@@ -1322,7 +1455,7 @@ impl SueWriter {
                 .filter(|id| cx.arena().get_by_id(*id).is_ok_and(manuscript::is_document))
                 .collect();
         }
-        let mut batch = sue_core::txn::Batch::new("Replace All");
+        let mut batch = sue_core::txn::Batch::new(tr!("replace-all"));
         let mut total = 0;
         for doc in docs {
             let text = sue_type::edit::text_of(cx.arena(), doc)
@@ -1344,16 +1477,18 @@ impl SueWriter {
                 marks.insert_text(&before, range.start, &with, None);
                 new.insert_str(range.start, &with);
             }
-            if let Some(step) = project::replace_all(cx.arena(), doc, &new, marks, "Replace All") {
+            if let Some(step) =
+                project::replace_all(cx.arena(), doc, &new, marks, &tr!("replace-all"))
+            {
                 batch.push(Box::new(step));
             }
         }
         if total > 0 && self.apply(cx, batch) {
             if let Some(find) = &mut self.find {
-                find.message = format!("Replaced {total}");
+                find.message = tr!("replaced", total = total);
             }
         } else if let Some(find) = &mut self.find {
-            find.message = "Not found".to_owned();
+            find.message = tr!("not-found");
         }
     }
 
@@ -1387,6 +1522,7 @@ impl SueWriter {
             (alt, Key::Num3, "style.heading3"),
             (alt, Key::Num0, "style.body"),
             (alt, Key::F, "insert.footnote"),
+            (alt, Key::C, "review.comment"),
             (command, Key::Enter, "insert.page_break"),
             (command, Key::K, "insert.link"),
             (command, Key::F, "edit.find"),
@@ -1476,17 +1612,14 @@ pub(crate) fn shortcut_table() -> &'static [sue_wm::shortcuts::Shortcut] {
             menus
                 .iter()
                 .find_map(|menu| find(&menu.items, command))
-                .unwrap_or_else(|| {
-                    match command {
-                        "style.heading1" => "Heading 1",
-                        "style.heading2" => "Heading 2",
-                        "style.heading3" => "Heading 3",
-                        "style.body" => "Body Text",
-                        "edit.find_next" => "Find Next",
-                        "edit.find_previous" => "Find Previous",
-                        other => other,
-                    }
-                    .to_owned()
+                .unwrap_or_else(|| match command {
+                    "style.heading1" => tr!("heading-1"),
+                    "style.heading2" => tr!("heading-2"),
+                    "style.heading3" => tr!("heading-3"),
+                    "style.body" => tr!("body-text"),
+                    "edit.find_next" => tr!("find-next"),
+                    "edit.find_previous" => tr!("find-previous"),
+                    other => other.to_owned(),
                 })
         })
     })
@@ -1506,7 +1639,7 @@ pub(crate) fn sanitize(title: &str) -> String {
         .collect();
     let clean = clean.trim().trim_end_matches('.').to_owned();
     if clean.is_empty() {
-        "Untitled".to_owned()
+        tr!("untitled")
     } else {
         clean
     }
@@ -1514,7 +1647,8 @@ pub(crate) fn sanitize(title: &str) -> String {
 
 impl SueApplet for SueWriter {
     fn manifest(&self) -> AppletManifest {
-        let mut manifest = AppletManifest::new(ID, "Sue Writer", AppletRole::Studio, "\u{1F4DD}");
+        let mut manifest = AppletManifest::new(ID, "Sue Writer", AppletRole::Studio, "\u{1F4DD}")
+            .localized("writer");
         manifest.summary = "Write documents, novels, scripts and papers, then publish them as PDF, Word, EPUB and more.".to_owned();
         manifest.order = 26;
         manifest
@@ -1570,6 +1704,7 @@ impl SueApplet for SueWriter {
     }
 
     fn bar_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        self.follow_language(cx);
         self.menu_bar(ui, cx);
     }
 
@@ -1586,7 +1721,9 @@ impl SueApplet for SueWriter {
     fn templates(&self) -> Vec<sue_wm::FileTemplate> {
         project::TEMPLATES
             .iter()
-            .map(|(key, label, _)| sue_wm::FileTemplate::new("Writing", *label, *key))
+            .map(|(key, ..)| {
+                sue_wm::FileTemplate::new(tr!("writing"), project::template_name(key), *key)
+            })
             .collect()
     }
 
@@ -1594,8 +1731,11 @@ impl SueApplet for SueWriter {
         let label = project::TEMPLATES
             .iter()
             .find(|(known, ..)| *known == key)
-            .map_or("Untitled", |(_, label, _)| *label);
-        self.new_project(cx, key, label);
+            .map_or_else(
+                || tr!("untitled"),
+                |(known, ..)| project::template_name(known),
+            );
+        self.new_project(cx, key, &label);
         cx.request(ShellRequest::Open(me()));
     }
 
@@ -1613,13 +1753,33 @@ impl SueApplet for SueWriter {
 
     fn commands(&self) -> Vec<PaletteEntry> {
         [
-            ("Sue Writer: New Project...", "file.new", ""),
-            ("Sue Writer: Import a Document...", "file.import", ""),
-            ("Sue Writer: Compile...", "compile.open", "Ctrl+Shift+E"),
-            ("Sue Writer: Export as PDF...", "compile.pdf", "Ctrl+P"),
-            ("Sue Writer: Composition Mode", "view.composition", "F11"),
-            ("Sue Writer: Writing Statistics", "project.statistics", ""),
-            ("Sue Writer: Keyboard Shortcuts", "help.shortcuts", ""),
+            (tr!("sue-writer-new-project-ellipsis"), "file.new", ""),
+            (
+                tr!("sue-writer-import-a-document-ellipsis"),
+                "file.import",
+                "",
+            ),
+            (
+                tr!("sue-writer-compile-ellipsis"),
+                "compile.open",
+                "Ctrl+Shift+E",
+            ),
+            (
+                tr!("sue-writer-export-as-pdf-ellipsis"),
+                "compile.pdf",
+                "Ctrl+P",
+            ),
+            (
+                tr!("sue-writer-composition-mode"),
+                "view.composition",
+                "F11",
+            ),
+            (
+                tr!("sue-writer-writing-statistics"),
+                "project.statistics",
+                "",
+            ),
+            (tr!("sue-writer-keyboard-shortcuts"), "help.shortcuts", ""),
         ]
         .into_iter()
         .map(|(label, command, hint)| PaletteEntry {
@@ -1774,7 +1934,7 @@ impl SueApplet for SueWriter {
                 match std::fs::read(path) {
                     Ok(bytes) => {
                         let name = path.file_name().map_or_else(
-                            || "Picture".to_owned(),
+                            || tr!("picture"),
                             |name| name.to_string_lossy().into_owned(),
                         );
                         match read_picture(&bytes) {
@@ -1788,10 +1948,12 @@ impl SueApplet for SueWriter {
                                     self.editor.insert_embed(cx, id);
                                 }
                             }
-                            Err(error) => cx.fail(format!("Could not read the picture: {error}")),
+                            Err(error) => cx.fail(tr!("could-not-read-the-picture", error = error)),
                         }
                     }
-                    Err(error) => cx.fail(format!("Could not read {}: {error}", path.display())),
+                    Err(error) => {
+                        cx.fail(tr!("could-not-read", path = path.display(), error = error))
+                    }
                 }
             }
             purpose if purpose.starts_with("compile.") => {

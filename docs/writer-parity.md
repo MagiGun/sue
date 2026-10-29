@@ -210,8 +210,8 @@ of work is by how much people miss each one (the plan at the end).
 
 | Feature | Source | Sue | Notes |
 | --- | --- | --- | --- |
-| Comments: add, reply, resolve, delete | WL | missing | `comment` mark kind exists in `sue-model` |
-| Next and previous comment, show comments | WL | missing | |
+| Comments: add, reply, resolve, delete | WL | done | Shared `sue_model::comments`; Word and OpenDocument export |
+| Next and previous comment, show comments | WL | done | Review menu and the Comments panel |
 | Track changes: record | WL | missing | |
 | Show markup, accept and reject one or all | WL | missing | |
 | Next and previous change, reviewing pane | WL | missing | |

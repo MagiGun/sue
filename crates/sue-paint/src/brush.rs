@@ -72,12 +72,12 @@ impl AntiAlias {
 
     /// What people read.
     #[must_use]
-    pub const fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::None => "None",
-            Self::Weak => "Weak",
-            Self::Medium => "Medium",
-            Self::Strong => "Strong",
+            Self::None => tr!("none"),
+            Self::Weak => tr!("weak"),
+            Self::Medium => tr!("medium"),
+            Self::Strong => tr!("strong"),
         }
     }
 }
@@ -183,11 +183,11 @@ impl TaperMode {
 
     /// What people read.
     #[must_use]
-    pub const fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Length => "Specify length",
-            Self::Percent => "By percentage",
-            Self::Fade => "Fade",
+            Self::Length => tr!("specify-length"),
+            Self::Percent => tr!("by-percentage"),
+            Self::Fade => tr!("fade"),
         }
     }
 }

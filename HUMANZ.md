@@ -34,17 +34,18 @@ style).
 
 ```text
 bins/sue      ──► every crate below                   + egui
-sue-writer    ──► sue-type, sue-paint, sue-wm, sue-io, sue-model, sue-rice, sue-core   + egui
-sue-paint     ──► sue-wm, sue-io, sue-model, sue-rice, sue-platform, sue-core   + egui
-sue-type      ──► sue-wm, sue-io, sue-model, sue-core   + egui, ttf-parser
-sue-wm        ──► sue-rice, sue-platform, sue-core   + egui, ttf-parser
+sue-writer    ──► sue-type, sue-paint, sue-wm, sue-lang, sue-io, sue-model, sue-rice, sue-core   + egui
+sue-paint     ──► sue-wm, sue-lang, sue-io, sue-model, sue-rice, sue-platform, sue-core   + egui
+sue-type      ──► sue-wm, sue-lang, sue-io, sue-model, sue-core   + egui, ttf-parser
+sue-wm        ──► sue-lang, sue-rice, sue-platform, sue-core   + egui, ttf-parser
+sue-lang      ──► fluent-bundle, fluent-syntax, intl-memoizer, unic-langid   (no engine crates)
 sue-ai        ──► sue-platform, sue-core
 sue-rice      ──► sue-platform, sue-core
 sue-io        ──► sue-model, sue-core                 + jxl-oxide, zune-jpegxl, zune-png, zune-jpeg, jpeg-encoder, symphonia, image, flacenc, miniz_oxide, ttf-parser
 sue-model     ──► sue-core
 sue-pkg       ──► sha2, ed25519-dalek, semver         (no engine crates)
 sue-core      ──► nothing                              (leaf)
-sue-platform  ──► winit, wgpu, egui, egui-winit, egui-wgpu, arboard, pollster, cpal, audio_thread_priority, rfd, open   (no engine crates)
+sue-platform  ──► winit, wgpu, egui, egui-winit, egui-wgpu, arboard, pollster, cpal, audio_thread_priority, rfd, open, sys-locale   (no engine crates)
 ```
 
 The graph is acyclic by construction. `sue-core` and `sue-platform` are leaves
@@ -1697,6 +1698,19 @@ print with ruled cells and repeated heading rows; Word (`w:tbl`, a repeated
 widths), HTML and EPUB (`thead` and `tbody`), RTF (`\trowd` rows, `\trhdr`),
 Markdown (pipe tables) and plain text (tab-separated rows) write them.
 
+**Comments (`sue-model::comments`).** A comment is an entity of class
+`sue.comment`: its text in its `StringBuffer`, `sue.comment.author`,
+`sue.comment.date` and `sue.comment.resolved` as properties; a `comment`
+mark names it over its words (`CharFormat::comment` is now the comment's
+entity). Replies are comments too, related in order by `sue.comment.reply`,
+and `thread` reads a comment with its replies. `Editor::add_comment` spawns
+one and marks the selection in one undo step, `remove_comment` takes the
+marks off and despawns the thread (undo restores both), `comments` lists
+them in order. Word gets `w:commentRangeStart`, `w:commentRangeEnd` and a
+`comments.xml` part (replies as named paragraphs), OpenDocument
+`office:annotation` and `office:annotation-end`, HTML a `mark` with the
+thread as its title.
+
 **Tables of contents (`sue-model::contents`, `sue-type::contents`).** A
 table of contents is an entity of class `sue.text_contents` shown by an
 `embed` mark; it keeps only its settings (`sue.contents.title`,
@@ -1821,7 +1835,7 @@ text entity (`PublishFormat`). `zip` writes and reads the archives.
 
 | Part | What it holds |
 | --- | --- |
-| Menus | File, Edit, View, Insert, Format, Table, Project, Help, in Sue's top bar after the Sue button; Table as LibreOffice Writer's (Insert Table, rows and columns, delete, heading row, convert text and tables); File, Back to the Hub. Each keeps to a dozen entries at most (a test checks): Format groups like LibreOffice Writer's (Text, Text Color, Highlight, Align Text, Line Spacing, Lists, Clear Direct Formatting), View puts the zooms in a submenu |
+| Menus | File, Edit, View, Insert, Format, Table, Review (comments), Project, Help, in Sue's top bar after the Sue button; Table as LibreOffice Writer's (Insert Table, rows and columns, delete, heading row, convert text and tables); File, Back to the Hub. Each keeps to a dozen entries at most (a test checks): Format groups like LibreOffice Writer's (Text, Text Color, Highlight, Align Text, Line Spacing, Lists, Clear Direct Formatting), View puts the zooms in a submenu |
 | Toolbar | what Word's mini toolbar and LibreOffice Writer's single toolbar (26.8) keep at hand: undo, redo, paragraph style, font (every installed family, searchable), size, bold, italic, underline, text color, highlight, alignment, lists, indents; Find at the right; it wraps onto a second row in a narrow window, and a tablet's buttons are 32 points |
 | Binder | the project's folders and documents: click to open (a folder shows its documents one after another), double-click to rename, drag to move (above, below or into a folder), a right-click menu (new, rename, duplicate, include in compile, snapshot, merge, label, status, trash, Open in Sue Paint for pictures) |
 | Text | the editor on pages that fit the window (until you zoom) or one column |
@@ -1867,6 +1881,78 @@ text at the caret, drawn with Sue Paint's compositing). Opening a Word,
 Markdown, HTML, Fountain or plain text file anywhere in Sue
 (`SueApplet::opens_file`) brings it into Sue Writer. Writing sessions are
 counted and kept on the project by day (`sue_writer.history`).
+
+### 3.9 Languages (`sue-lang`)
+
+Every string Sue shows lives in one language database, `sue-lang`: Project
+Fluent messages (plurals, variables, selectors) under
+`crates/sue-lang/locales/<tag>/`, one `.ftl` file per namespace. Each part of
+Sue reads its own namespace: `wm` (the shell), `sue` (the window, files and
+projects), `settings` (the Settings pages), `rice` (the settings themselves),
+`viewer`, `convert`, `type` (the text editor), `writer`, `paint`, `model`
+(blend modes) and `io` (codecs). The build script finds the language folders
+and embeds them, so no list in the code names a language; plug-ins add their
+own namespace, or a whole language, at runtime with
+`sue_lang::add_resource`. Each language describes itself in
+`language.ftl`: its name in its own script, `language-status = draft` until
+a native speaker has reviewed it, and how it writes numbers.
+
+```rust
+macro_rules! tr {                       // one line per crate (or module)
+    ($($arg:tt)*) => { sue_lang::tr!("paint", $($arg)*) };
+}
+ui.button(tr!("save-project"));
+cx.notify(tr!("files-converted", count = done, folder = name));
+sue_lang::translate("paint", &sub.name)  // English kept in data or a table
+```
+
+English is the source and the fallback: a lookup tries the language asked
+for, then any other of the same language and script (`pt-PT` reads `pt-BR`;
+Chinese in Taiwan, Hong Kong and Macau never reads simplified Chinese), then
+English, and never shows a blank or a raw key. Numbers in messages, and
+`sue_lang::number`, use the language's separators. Bidi isolation marks are
+off; no right-to-left language ships until the layout mirrors.
+
+**Which language.** Lookups read the thread's current language: the global
+one (`sue_lang::set_language`), or the innermost `sue_lang::scope`. Sue's
+language is the rice key `general.language` (`system`, the default, takes the
+first of the system's languages Sue has, read by
+`sue_platform::system_languages`). Every studio and tool also gets
+`<section>.language`, declared by the Launchpad: `sue` follows Sue, a tag
+sets it apart. The shell opens a scope around every call into an applet
+(`page_ui`, `bar_ui`, `tick`, `commands`, `sue_actions`, requests), so a studio
+set apart speaks its own language inside the same window, and Sue's own
+parts (the Hub, the Sue menu, Settings) speak Sue's. The Sue menu has a
+Language submenu, Settings a Language page, and each studio's section in
+Settings its own Language choice ("Follow Sue" plus every language). A
+change is an undoable rice edit and shows at once: applets that keep text
+(menus) rebuild it when `sue_lang::Watch::changed` says the language moved,
+manifests read their name and summary from their namespace
+(`AppletManifest::localized`), and the catalog is rebuilt.
+
+**What stays English.** Rice keys and their descriptions in
+`default.suerice`, stored names (Writer's statuses and labels, Paint's sub
+tools, materials and papers, blend modes in files) and technical error
+details from the backbone crates. Stored names are shown through
+`sue_lang::translate`, which finds a message by its English, so a name
+someone typed stays theirs. The window title is always `Sue`, and the
+command line and the self-check speak English.
+
+**Fonts.** The bundled fonts cover Latin, Greek and Cyrillic.
+`sue_wm::fonts::cover` reads every installed face's OS/2 Unicode ranges
+during the font scan and adds the fewest system faces that draw the
+characters of the languages in use and of every language's own name (so the
+language lists read correctly) to every family's fallback chain.
+
+**Checks.** `sue-lang`'s tests parse every file, require every language to
+name itself, forbid keys English lacks and variables English does not use,
+and scan the workspace's source for every `tr!` key, which must exist in
+English with the same variables. `bins/sue` tests that every setting has its
+English in `rice.ftl` (and prints the lines to add), Paint that every name it
+keeps in English has a message. `sue-cli lang list` and `sue-cli lang check
+[tag]` show how a language stands: missing messages ready to translate,
+stale ones and mismatched variables (CONTRIBUTING.md, "Adding or updating a
+language").
 
 ---
 
