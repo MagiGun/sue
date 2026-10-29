@@ -13,6 +13,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue speaks your language. It starts in your system's language when Sue
+  has it; the Sue menu's Language changes it for every studio and tool at
+  once, and Settings, Language lets any studio or tool keep a language of
+  its own. Spanish and Japanese ship as drafts waiting for a native
+  speaker's review; anything not yet translated shows in English.
 - Tables in Sue Writer: Table, Insert Table (`Ctrl+F12`), then type in the
   cells; `Tab` moves on and adds a row at the end. Insert and delete rows
   and columns, a heading row that repeats on every page, and text to table

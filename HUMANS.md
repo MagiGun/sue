@@ -197,8 +197,8 @@ a Settings slider all go back in the order you did them.
 ### Settings
 
 The Sue menu's **Settings** (or `Ctrl+,`) opens Settings as a floating
-window. A list of categories runs down the left (General, Appearance & Rice,
-Display & Graphics, Audio & DSP, Files & Codecs, Studios, Packages & Updates,
+window. A list of categories runs down the left (General, Language,
+Appearance & Rice, Display & Graphics, Audio & DSP, Files & Codecs, Studios, Packages & Updates,
 Keymaps, MCP), and the right side shows only that category. Type in "Filter
 settings..." to search all of them.
 
@@ -211,6 +211,26 @@ one and Discrete the fast one. Sue shows which card it is drawing on and
 every card it found; the choice takes effect when Sue starts, so press
 **Restart Sue** after changing it. **MCP** (connecting Sue to AI tools) is
 not yet available.
+
+### Languages
+
+Sue speaks your language. The first time it starts it uses your system's
+language when Sue has it, and English otherwise. To change it, open the Sue
+menu and choose **Language**: pick a language by its own name, or
+**System** to follow your system again. Every studio and tool changes at
+once; nothing needs a restart.
+
+A studio or tool can also keep a language of its own: say Sue in English
+and Sue Paint in Japanese. Settings, **Language** lists Sue and every studio
+and tool; each one is **Follow Sue** unless you choose a language for it.
+The same choice sits in each studio's own settings (Settings, Studios, and
+Sue Paint's File, Preferences takes you there).
+
+Sue ships in English, with drafts in Spanish and Japanese so far, written
+without a native speaker and waiting for one to review them. Anything a
+language does not have yet shows in English. Names you type, such as layer
+and tool names, stay as you wrote them, and the window's title is always
+Sue. CONTRIBUTING.md explains how to add a language or improve one.
 
 ---
 

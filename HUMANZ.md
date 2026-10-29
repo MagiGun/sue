@@ -34,17 +34,18 @@ style).
 
 ```text
 bins/sue      ──► every crate below                   + egui
-sue-writer    ──► sue-type, sue-paint, sue-wm, sue-io, sue-model, sue-rice, sue-core   + egui
-sue-paint     ──► sue-wm, sue-io, sue-model, sue-rice, sue-platform, sue-core   + egui
-sue-type      ──► sue-wm, sue-io, sue-model, sue-core   + egui, ttf-parser
-sue-wm        ──► sue-rice, sue-platform, sue-core   + egui, ttf-parser
+sue-writer    ──► sue-type, sue-paint, sue-wm, sue-lang, sue-io, sue-model, sue-rice, sue-core   + egui
+sue-paint     ──► sue-wm, sue-lang, sue-io, sue-model, sue-rice, sue-platform, sue-core   + egui
+sue-type      ──► sue-wm, sue-lang, sue-io, sue-model, sue-core   + egui, ttf-parser
+sue-wm        ──► sue-lang, sue-rice, sue-platform, sue-core   + egui, ttf-parser
+sue-lang      ──► fluent-bundle, fluent-syntax, intl-memoizer, unic-langid   (no engine crates)
 sue-ai        ──► sue-platform, sue-core
 sue-rice      ──► sue-platform, sue-core
 sue-io        ──► sue-model, sue-core                 + jxl-oxide, zune-jpegxl, zune-png, zune-jpeg, jpeg-encoder, symphonia, image, flacenc, miniz_oxide, ttf-parser
 sue-model     ──► sue-core
 sue-pkg       ──► sha2, ed25519-dalek, semver         (no engine crates)
 sue-core      ──► nothing                              (leaf)
-sue-platform  ──► winit, wgpu, egui, egui-winit, egui-wgpu, arboard, pollster, cpal, audio_thread_priority, rfd, open   (no engine crates)
+sue-platform  ──► winit, wgpu, egui, egui-winit, egui-wgpu, arboard, pollster, cpal, audio_thread_priority, rfd, open, sys-locale   (no engine crates)
 ```
 
 The graph is acyclic by construction. `sue-core` and `sue-platform` are leaves
@@ -1746,6 +1747,78 @@ text at the caret, drawn with Sue Paint's compositing). Opening a Word,
 Markdown, HTML, Fountain or plain text file anywhere in Sue
 (`SueApplet::opens_file`) brings it into Sue Writer. Writing sessions are
 counted and kept on the project by day (`sue_writer.history`).
+
+### 3.9 Languages (`sue-lang`)
+
+Every string Sue shows lives in one language database, `sue-lang`: Project
+Fluent messages (plurals, variables, selectors) under
+`crates/sue-lang/locales/<tag>/`, one `.ftl` file per namespace. Each part of
+Sue reads its own namespace: `wm` (the shell), `sue` (the window, files and
+projects), `settings` (the Settings pages), `rice` (the settings themselves),
+`viewer`, `convert`, `type` (the text editor), `writer`, `paint`, `model`
+(blend modes) and `io` (codecs). The build script finds the language folders
+and embeds them, so no list in the code names a language; plug-ins add their
+own namespace, or a whole language, at runtime with
+`sue_lang::add_resource`. Each language describes itself in
+`language.ftl`: its name in its own script, `language-status = draft` until
+a native speaker has reviewed it, and how it writes numbers.
+
+```rust
+macro_rules! tr {                       // one line per crate (or module)
+    ($($arg:tt)*) => { sue_lang::tr!("paint", $($arg)*) };
+}
+ui.button(tr!("save-project"));
+cx.notify(tr!("files-converted", count = done, folder = name));
+sue_lang::translate("paint", &sub.name)  // English kept in data or a table
+```
+
+English is the source and the fallback: a lookup tries the language asked
+for, then any other of the same language and script (`pt-PT` reads `pt-BR`;
+Chinese in Taiwan, Hong Kong and Macau never reads simplified Chinese), then
+English, and never shows a blank or a raw key. Numbers in messages, and
+`sue_lang::number`, use the language's separators. Bidi isolation marks are
+off; no right-to-left language ships until the layout mirrors.
+
+**Which language.** Lookups read the thread's current language: the global
+one (`sue_lang::set_language`), or the innermost `sue_lang::scope`. Sue's
+language is the rice key `general.language` (`system`, the default, takes the
+first of the system's languages Sue has, read by
+`sue_platform::system_languages`). Every studio and tool also gets
+`<section>.language`, declared by the Launchpad: `sue` follows Sue, a tag
+sets it apart. The shell opens a scope around every call into an applet
+(`page_ui`, `bar_ui`, `tick`, `commands`, `sue_actions`, requests), so a studio
+set apart speaks its own language inside the same window, and Sue's own
+parts (the Hub, the Sue menu, Settings) speak Sue's. The Sue menu has a
+Language submenu, Settings a Language page, and each studio's section in
+Settings its own Language choice ("Follow Sue" plus every language). A
+change is an undoable rice edit and shows at once: applets that keep text
+(menus) rebuild it when `sue_lang::Watch::changed` says the language moved,
+manifests read their name and summary from their namespace
+(`AppletManifest::localized`), and the catalog is rebuilt.
+
+**What stays English.** Rice keys and their descriptions in
+`default.suerice`, stored names (Writer's statuses and labels, Paint's sub
+tools, materials and papers, blend modes in files) and technical error
+details from the backbone crates. Stored names are shown through
+`sue_lang::translate`, which finds a message by its English, so a name
+someone typed stays theirs. The window title is always `Sue`, and the
+command line and the self-check speak English.
+
+**Fonts.** The bundled fonts cover Latin, Greek and Cyrillic.
+`sue_wm::fonts::cover` reads every installed face's OS/2 Unicode ranges
+during the font scan and adds the fewest system faces that draw the
+characters of the languages in use and of every language's own name (so the
+language lists read correctly) to every family's fallback chain.
+
+**Checks.** `sue-lang`'s tests parse every file, require every language to
+name itself, forbid keys English lacks and variables English does not use,
+and scan the workspace's source for every `tr!` key, which must exist in
+English with the same variables. `bins/sue` tests that every setting has its
+English in `rice.ftl` (and prints the lines to add), Paint that every name it
+keeps in English has a message. `sue-cli lang list` and `sue-cli lang check
+[tag]` show how a language stands: missing messages ready to translate,
+stale ones and mismatched variables (CONTRIBUTING.md, "Adding or updating a
+language").
 
 ---
 
