@@ -758,6 +758,31 @@ pub fn add_raster_layer(
     ))
 }
 
+/// A new raster layer named `name` right above `below` (or at the top),
+/// holding `raster` (the picture's size).
+///
+/// # Errors
+/// If `raster` is not the picture's size.
+pub fn add_layer_pixels(
+    arena: &Arena,
+    picture: EntityId,
+    below: Option<EntityId>,
+    name: String,
+    raster: RasterTile2D,
+) -> Result<(SpawnEntity, EntityId), String> {
+    let [width, height] = size_of(arena, picture)?;
+    if raster.width() != width || raster.height() != height {
+        return Err("the layer is not the picture's size".to_owned());
+    }
+    let layer = Entity::new(name, raster).with_class(class::LAYER);
+    let id = layer.id();
+    let order = key_above(arena, picture, below);
+    Ok((
+        SpawnEntity::new(layer).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
+        id,
+    ))
+}
+
 /// A new vector layer right above `below` (or at the top): clear pixels
 /// and no lines yet.
 ///

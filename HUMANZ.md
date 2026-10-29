@@ -1262,6 +1262,17 @@ pressure. Each drag paints the layer again from its lines and records one
 step. Remove dust clears specks no larger than the dust size from a raster
 layer, in a dragged box or all of it.
 
+**Materials.** The Material palette (a tab beside Color Set and Color
+History, or Window, Material) lists Sue Paint's own screentones (dots on a
+45 degree grid of 8 pixel cells sized to their share, lines, sand) and
+patterns (crosshatch, grid, checker, bricks, stripes, speckles), drawn at
+any size from a function a pixel, and the pictures registered with Edit,
+Register Material, Image: the current layer cut to what it covers, kept as
+a PNG in Sue Paint's folder (`materials/`) so every project has it
+(`sue_paint::materials`). Double-clicking one, or Paste to Canvas, puts it on
+a new layer above the current one: tones and patterns cover the canvas in
+the drawing color, pictures sit in the middle, shrunk to fit.
+
 **Camera folders.** A camera folder (Animation, New Animation Layer, Camera
 Folder) is a layer folder flagged `folder.camera` whose camera keyframes are
 the shared `Animation` on it, a curve each for `camera.x`, `camera.y` (the
@@ -1856,7 +1867,8 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: the Operation tool (Object for vector lines, Select layer), curve, figure and pen rulers | **Implemented**; a unit test for path rulers read back and holding strokes on a curve and round a rectangle's corner; the vector end-to-end run moves a line with Object, deletes and undoes it | `sue-paint/src/rulers.rs`, `canvas.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: timelapse recording and export, and movies of animations (Motion JPEG AVI) | **Implemented**; unit tests for the AVI's headers and index and for frames kept, fitted and timed; an end-to-end run records a frame a stroke, exports a video and stops | `sue-io/src/video.rs`, `sue-paint/src/timelapse.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: camera folders with keyframed position, zoom and rotation | **Implemented**; unit tests for the camera's map and frame, keyframes in between, deleted and undone, and a dot rendered four times larger through the camera | `sue-paint/src/camera.rs`, `composite.rs`, `anim_ui.rs` |
-| §3.7 Sue Paint: materials | Planned; their menu items are present and grayed out | n/a |
+| §3.7 Sue Paint: the Material palette, built-in tones and patterns, Register Material, Image | **Implemented**; a unit test for a tone's coverage and color and a picture registered, cut, read back and placed; an end-to-end run registers a drawing and pastes it as a layer | `sue-paint/src/materials.rs`, `panels.rs`, `bins/sue/src/runtime.rs` |
+| §3.7 Sue Paint: brush tip materials | Planned; the menu item is present and grayed out | n/a |
 | §3.6 Embedded web view | Planned (the Browser drawer of earlier builds was retired with the canvas) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |

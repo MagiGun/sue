@@ -376,6 +376,8 @@ pub(crate) enum Dialog {
     Onion(crate::anim::Onion),
     /// Export Timelapse: the video's size and length.
     Timelapse(crate::timelapse::Export),
+    /// Register Material, Image: its name.
+    Material(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -450,6 +452,7 @@ impl SuePaint {
             Dialog::Perspective(_) => ("Create Perspective Ruler", vec2(320.0, 190.0)),
             Dialog::Onion(_) => ("Onion Skin Settings", vec2(360.0, 330.0)),
             Dialog::Timelapse(_) => ("Export Timelapse", vec2(360.0, 230.0)),
+            Dialog::Material(_) => ("Register Material", vec2(360.0, 160.0)),
             Dialog::Correction(_, filter, ..) => (
                 filter.label(),
                 vec2(
@@ -506,6 +509,18 @@ impl SuePaint {
                             Dialog::Frame(frame) => outcome = frame_ui(ui, frame, theme),
                             Dialog::Text(_, lettering) => outcome = text_ui(ui, lettering, theme),
                             Dialog::Onion(onion) => outcome = onion_ui(ui, onion, theme),
+                            Dialog::Material(name) => {
+                                ui.horizontal(|ui| {
+                                    label(ui, "Material name:", theme);
+                                    ui.add(egui::TextEdit::singleline(name).desired_width(200.0));
+                                });
+                                ui.label(
+                                    RichText::new("The current layer goes into the Material palette, for every project")
+                                        .size(theme.small_size)
+                                        .color(theme.muted),
+                                );
+                                ok_cancel(ui, &mut outcome);
+                            }
                             Dialog::Timelapse(export) => {
                                 egui::Grid::new("sue-paint-timelapse-export")
                                     .num_columns(2)
@@ -710,6 +725,7 @@ impl SuePaint {
             (Dialog::Text(layer, lettering), Outcome::Ok) => self.put_text(cx, layer, &lettering),
             (Dialog::Perspective(count), Outcome::Ok) => self.make_perspective(cx, count),
             (Dialog::Timelapse(export), Outcome::Ok) => self.ask_export_timelapse(cx, export),
+            (Dialog::Material(name), Outcome::Ok) => self.register_material(cx, &name),
             (Dialog::Onion(onion), Outcome::Ok) => {
                 if let Some(picture) = self.picture() {
                     let edit = doc::Edit::new("Onion Skin Settings").then(
@@ -807,8 +823,13 @@ impl SuePaint {
                 | Dialog::Text(..),
                 Outcome::Cancel | Outcome::Ok,
             )
-            | (Dialog::Perspective(_) | Dialog::Onion(_) | Dialog::Timelapse(_), Outcome::Cancel) =>
-                {}
+            | (
+                Dialog::Perspective(_)
+                | Dialog::Onion(_)
+                | Dialog::Timelapse(_)
+                | Dialog::Material(_),
+                Outcome::Cancel,
+            ) => {}
         }
     }
 }

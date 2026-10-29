@@ -44,6 +44,7 @@ pub mod filters;
 mod icons;
 mod lettering;
 pub mod manga;
+pub mod materials;
 mod menus;
 mod pages;
 mod panels;

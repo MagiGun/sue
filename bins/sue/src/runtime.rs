@@ -2581,6 +2581,30 @@ pub(crate) mod tests {
         }
         assert_eq!(sue_paint::timelapse::frames(&dir).len(), 3);
         let _ = std::fs::remove_dir_all(&dir);
+
+        // Edit, Register Material, Image keeps the drawing in the Material
+        // palette; pasting it makes a new layer with it in the middle.
+        let materials = runtime.engine.catalog.folders["paint"].join("materials");
+        let _ = std::fs::remove_dir_all(&materials);
+        command(&mut runtime, "edit.material.image");
+        step(&mut runtime, Vec::new());
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        assert_eq!(
+            std::fs::read_dir(&materials).unwrap().count(),
+            1,
+            "one material file"
+        );
+        let before = sue_paint::doc::layers(&runtime.engine.world.arena, picture).len();
+        command(&mut runtime, "edit.material.paste");
+        let stack = sue_paint::doc::layers(&runtime.engine.world.arena, picture);
+        assert_eq!(stack.len(), before + 1);
+        let pasted =
+            sue_paint::doc::raster(&runtime.engine.world.arena, stack.last().unwrap().id).unwrap();
+        assert!(
+            pasted.bytes().unwrap().chunks(4).any(|pixel| pixel[3] > 0),
+            "with the drawing on it"
+        );
+        let _ = std::fs::remove_dir_all(&materials);
         let _ = std::fs::remove_dir_all(&root);
     }
 

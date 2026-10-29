@@ -448,6 +448,11 @@ familiar:
   from: pick the layer, then Register Selected Layer.
   File, Export Animation saves an animated GIF, a movie or every frame as a
   picture.
+- **Materials** (the Material tab beside Color Set, or Window, Material):
+  screentones and patterns ready to use, and your own pictures. Double-click
+  one to put it on a new layer (tones and patterns in your drawing color).
+  Edit, Register Material, Image keeps the current layer there for every
+  project.
 - **Camera folder** (Animation, New Animation Layer, Camera Folder): the
   layers in it are filmed by a camera that can move, zoom and turn over the
   timeline. With the Object tool (O) on it, drag its red frame (inside to

@@ -1488,6 +1488,148 @@ impl SuePaint {
         command
     }
 
+    /// The Material palette: Sue Paint's tones and patterns and the
+    /// pictures registered, to double-click onto the canvas.
+    fn material_panel(
+        &mut self,
+        ui: &mut Ui,
+        body: Rect,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        let folder = crate::colorsets::folder(cx);
+        let library = crate::materials::library(folder.as_deref());
+        let mut inner = child(ui, body, "materials");
+        let small = |text: &str| {
+            RichText::new(text)
+                .size(theme.small_size)
+                .color(theme.muted)
+        };
+        let kinds = ["All", "Tones", "Patterns", "Images"];
+        inner.horizontal(|ui| {
+            for (index, name) in kinds.iter().enumerate() {
+                ui.selectable_value(&mut self.material_kind, index as u8, *name);
+            }
+        });
+        let shown: Vec<&crate::materials::Material> = library
+            .iter()
+            .filter(|material| {
+                self.material_kind == 0
+                    || crate::materials::Kind::NAMES
+                        .get(usize::from(self.material_kind) - 1)
+                        .is_some_and(|name| {
+                            crate::materials::Kind::NAMES[match material.kind {
+                                crate::materials::Kind::Tone => 0,
+                                crate::materials::Kind::Pattern => 1,
+                                crate::materials::Kind::Image => 2,
+                            }] == *name
+                        })
+            })
+            .collect();
+        let mut paste = None;
+        let mut delete = None;
+        let side = 52.0;
+        egui::ScrollArea::vertical()
+            .id_salt("sue-paint-materials")
+            .max_height((body.height() - 70.0).max(40.0))
+            .show(&mut inner, |ui| {
+                let columns = ((ui.available_width() / (side + 10.0)).floor() as usize).max(1);
+                for row in shown.chunks(columns) {
+                    ui.horizontal(|ui| {
+                        for material in row {
+                            ui.vertical(|ui| {
+                                ui.set_width(side + 4.0);
+                                let (rect, response) =
+                                    ui.allocate_exact_size(vec2(side, side), Sense::click());
+                                let picked =
+                                    self.material_pick.as_deref() == Some(material.name.as_str());
+                                let key = {
+                                    use std::hash::{Hash, Hasher};
+                                    let mut hasher =
+                                        std::collections::hash_map::DefaultHasher::new();
+                                    material.name.hash(&mut hasher);
+                                    if let crate::materials::Source::File(path) = &material.source {
+                                        path.hash(&mut hasher);
+                                    }
+                                    hasher.finish()
+                                };
+                                let thumb = self
+                                    .material_thumbs
+                                    .entry(key)
+                                    .or_insert_with(|| material_thumb(material, side as u32));
+                                if let Some(texture) = cx.textures.texture(
+                                    key ^ 0x4d41_5445,
+                                    1,
+                                    [side as u32; 2],
+                                    4,
+                                    thumb,
+                                    false,
+                                ) {
+                                    ui.painter().image(
+                                        texture,
+                                        rect,
+                                        Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
+                                        Color32::WHITE,
+                                    );
+                                }
+                                ui.painter().rect_stroke(
+                                    rect,
+                                    0.0,
+                                    if picked {
+                                        Stroke::new(2.0, theme.border_active)
+                                    } else {
+                                        theme.hairline()
+                                    },
+                                    StrokeKind::Outside,
+                                );
+                                if response.clicked() {
+                                    self.material_pick = Some(material.name.clone());
+                                }
+                                if response.double_clicked() {
+                                    paste = Some((*material).clone());
+                                }
+                                ui.label(small(&material.name));
+                            });
+                        }
+                    });
+                }
+            });
+        let picked = shown
+            .iter()
+            .find(|material| self.material_pick.as_deref() == Some(material.name.as_str()))
+            .map(|material| (*material).clone());
+        inner.horizontal(|ui| {
+            if ui
+                .add_enabled(picked.is_some(), egui::Button::new("Paste to Canvas"))
+                .clicked()
+            {
+                paste = picked.clone();
+            }
+            if let Some(material) = picked
+                .as_ref()
+                .filter(|material| material.kind == crate::materials::Kind::Image)
+                && ui.button("Delete").clicked()
+            {
+                delete = Some(material.clone());
+            }
+        });
+        inner.label(small(
+            "Double-click to paste. Edit, Register Material, Image adds the current layer",
+        ));
+        if let Some(material) = paste {
+            self.paste_material(cx, &material);
+        }
+        if let Some(material) = delete
+            && let crate::materials::Source::File(path) = &material.source
+        {
+            match std::fs::remove_file(path) {
+                Ok(()) => cx.notify(format!("{} is no longer a material", material.name)),
+                Err(error) => cx.fail(format!("Cannot delete the material: {error}")),
+            }
+            self.material_pick = None;
+        }
+    }
+
     /// The Object tool's settings for a camera folder: where its camera
     /// stands at this frame, and its keyframes.
     fn camera_properties(
@@ -1789,10 +1931,18 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        let tabs = [("Color Set", true), ("Color History", true)];
+        let tabs = [
+            ("Color Set", true),
+            ("Color History", true),
+            ("Material", true),
+        ];
         let (body, clicked) = header(ui, rect, &tabs, self.set_tab, theme);
         if let Some(tab) = clicked {
             self.set_tab = tab;
+        }
+        if self.set_tab == 2 {
+            self.material_panel(ui, body.shrink(6.0), cx, theme);
+            return;
         }
         let body = body.shrink(6.0);
         let mut top = body.top();
@@ -3142,4 +3292,23 @@ pub(crate) fn tool_icon(tool: Tool) -> Icon {
         Tool::CorrectLine => Icon::CorrectLine,
         Tool::Operation => Icon::Operation,
     }
+}
+
+/// A material's thumbnail, `side` square, over white.
+fn material_thumb(material: &crate::materials::Material, side: u32) -> Vec<u8> {
+    let tile = match material.kind {
+        crate::materials::Kind::Image => crate::materials::layer(material, [side, side], [0; 3]),
+        _ => crate::materials::picture(material, [side, side], [0; 3]),
+    };
+    let mut out = vec![255_u8; (side * side * 4) as usize];
+    if let Some(bytes) = tile.as_ref().and_then(|tile| tile.bytes()) {
+        for (into, from) in out.chunks_mut(4).zip(bytes.chunks(4)) {
+            let alpha = u32::from(from[3]);
+            for channel in 0..3 {
+                into[channel] =
+                    ((u32::from(from[channel]) * alpha + 255 * (255 - alpha)) / 255) as u8;
+            }
+        }
+    }
+    out
 }

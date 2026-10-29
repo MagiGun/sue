@@ -329,6 +329,12 @@ pub struct SuePaint {
     /// A camera being set up and not keyed yet: its folder, the frame and
     /// where it stands.
     pub(crate) camera_pending: Option<(EntityId, u32, crate::camera::Camera)>,
+    /// The Material palette: the kind it shows (0 all, then by
+    /// `materials::Kind::NAMES`) and the material picked, by name.
+    pub(crate) material_kind: u8,
+    pub(crate) material_pick: Option<String>,
+    /// Material thumbnails, by a hash of the material.
+    pub(crate) material_thumbs: HashMap<u64, Vec<u8>>,
     /// Each recording picture's compositor version at its last timelapse
     /// frame, the version it is waiting to settle on, and its next frame
     /// number.
@@ -411,6 +417,9 @@ impl Default for SuePaint {
             picked_lines: None,
             curve_points: Vec::new(),
             camera_pending: None,
+            material_kind: 0,
+            material_pick: None,
+            material_thumbs: HashMap::new(),
             timelapse: HashMap::new(),
             timelapse_export: crate::timelapse::Export::default(),
             transform: None,
@@ -651,6 +660,9 @@ fn implemented(command: &str) -> bool {
             | "anim.frame.insert"
             | "anim.frame.delete"
             | "anim.onion"
+            | "edit.material.image"
+            | "edit.material.paste"
+            | "window.material"
             | "anim.layer.camera"
             | "anim.camera.key"
             | "anim.camera.unkey"
@@ -1015,6 +1027,69 @@ impl SuePaint {
             .and_then(picture::size)
             .unwrap_or([0, 0]);
         crate::camera::Camera::of(arena, folder, Some(time), size)
+    }
+
+    /// Keeps the current layer as a picture material named `name`.
+    pub(crate) fn register_material(&mut self, cx: &mut AppletContext<'_>, name: &str) {
+        let (Some(folder), Some(layer)) = (crate::colorsets::folder(cx), self.layer()) else {
+            return;
+        };
+        let Some(raster) = doc::raster(&cx.world.arena, layer) else {
+            return;
+        };
+        match crate::materials::register(&folder, name, raster) {
+            Ok(_) => {
+                cx.notify(format!("{name} is in the Material palette"));
+                self.panels.color_set = true;
+                self.set_tab = 2;
+                self.material_kind = 3;
+                self.material_pick = Some(name.to_owned());
+            }
+            Err(error) => cx.fail(error),
+        }
+    }
+
+    /// Puts `material` on the canvas as a new layer above the current one,
+    /// in the drawing color.
+    pub(crate) fn paste_material(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        material: &crate::materials::Material,
+    ) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let Some(size) = cx
+            .world
+            .arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(picture::size)
+        else {
+            return;
+        };
+        let Some(raster) = crate::materials::layer(material, size, self.drawing_color()) else {
+            cx.fail(format!("Cannot read the material {}", material.name));
+            return;
+        };
+        match doc::add_layer_pixels(
+            &cx.world.arena,
+            picture,
+            self.layer(),
+            material.name.clone(),
+            raster,
+        ) {
+            Ok((spawn, id)) => {
+                if Self::apply(
+                    cx,
+                    doc::Edit::new(format!("Paste {}", material.name)).then(spawn),
+                ) && let Some(doc) = self.doc_mut()
+                {
+                    doc.layer = Some(id);
+                }
+            }
+            Err(error) => cx.fail(error),
+        }
     }
 
     /// Picks the Ruler tool's sub tool of `mode`.
@@ -2088,6 +2163,7 @@ impl SuePaint {
             "window.color_wheel" => flag(self.panels.color && self.color_tab == 0),
             "window.color_slider" => flag(self.panels.color && self.color_tab == 1),
             "window.color_set" => flag(self.panels.color_set && self.set_tab == 0),
+            "window.material" => flag(self.panels.color_set && self.set_tab == 2),
             "window.color_history" => flag(self.panels.color_set && self.set_tab == 1),
             "window.navigator" => flag(self.panels.navigator),
             "window.layer" => flag(self.panels.layer && self.layer_tab == 0),
@@ -2524,6 +2600,27 @@ impl SuePaint {
                     Self::apply(cx, edit);
                 }
             }
+            "edit.material.paste" => {
+                let library = crate::materials::library(crate::colorsets::folder(cx).as_deref());
+                if let Some(material) = library
+                    .into_iter()
+                    .find(|material| self.material_pick.as_deref() == Some(material.name.as_str()))
+                {
+                    self.paste_material(cx, &material);
+                } else {
+                    cx.notify("Pick a material in the Material palette first");
+                }
+            }
+            "edit.material.image" => {
+                let name = self
+                    .layer_info(&cx.world.arena)
+                    .map_or_else(|| "Material".to_owned(), |info| info.name);
+                if self.paintable(&cx.world.arena).is_ok() {
+                    self.dialog = Some(Dialog::Material(name));
+                } else {
+                    cx.fail("Pick a raster layer to register as a material");
+                }
+            }
             "edit.canvas_size" | "edit.resolution" => {
                 let Some(old) = self
                     .picture()
@@ -2958,8 +3055,12 @@ impl SuePaint {
                     self.color_tab = tab;
                 }
             }
-            "window.color_set" | "window.color_history" => {
-                let tab = u8::from(command == "window.color_history");
+            "window.color_set" | "window.color_history" | "window.material" => {
+                let tab = match command {
+                    "window.color_history" => 1,
+                    "window.material" => 2,
+                    _ => 0,
+                };
                 if self.panels.color_set && self.set_tab == tab {
                     self.panels.color_set = false;
                 } else {
