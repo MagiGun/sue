@@ -95,6 +95,8 @@ pub(crate) enum Project {
     Illustration,
     /// A story of pages.
     Comic,
+    /// A picture with a timeline.
+    Animation,
 }
 
 /// The New dialog's fields.
@@ -105,6 +107,10 @@ pub(crate) struct NewDialog {
     pub pages: u32,
     /// A comic read right to left (manga).
     pub right_bound: bool,
+    /// Frames of an animation.
+    pub frames: u32,
+    /// Frames a second of an animation.
+    pub fps: u32,
     pub name: String,
     pub width: u32,
     pub height: u32,
@@ -122,6 +128,8 @@ impl NewDialog {
             project: Project::Illustration,
             pages: 8,
             right_bound: true,
+            frames: 24,
+            fps: 24,
             name: spec.name.clone(),
             width: spec.width,
             height: spec.height,
@@ -549,6 +557,7 @@ impl SuePaint {
                     Project::Comic => {
                         self.make_story(cx, &spec, new.pages as usize, new.right_bound);
                     }
+                    Project::Animation => self.make_animation(cx, &spec, new.frames, new.fps),
                 }
             }
             (Dialog::Pressure(pressure), Outcome::Ok) => {
@@ -789,7 +798,7 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
             (Icon::Duplicate, "Comic", Some(Project::Comic)),
             (Icon::Open, "Fanzine print", None),
             (Icon::NewFolder, "Show all comic settings", None),
-            (Icon::Play, "Animation", None),
+            (Icon::Play, "Animation", Some(Project::Animation)),
         ];
         for (icon, tip, project) in kinds {
             let enabled = project.is_some();
@@ -833,6 +842,18 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
             ui.add(egui::TextEdit::singleline(&mut new.name).desired_width(260.0));
             ui.end_row();
 
+            if new.project == Project::Animation {
+                label(ui, "Frames:", theme);
+                ui.add(egui::DragValue::new(&mut new.frames).range(1..=10_000));
+                ui.end_row();
+                label(ui, "Frame rate:", theme);
+                ui.add(
+                    egui::DragValue::new(&mut new.fps)
+                        .range(1..=120)
+                        .suffix(" fps"),
+                );
+                ui.end_row();
+            }
             if new.project == Project::Comic {
                 label(ui, "Pages:", theme);
                 ui.add(egui::DragValue::new(&mut new.pages).range(1..=500));

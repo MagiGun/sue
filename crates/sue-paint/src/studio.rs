@@ -46,6 +46,12 @@ pub(crate) struct Doc {
     pub view: View,
     pub compositor: Compositor,
     pub layer: Option<EntityId>,
+    /// The animation frame shown (from 0).
+    pub frame: u32,
+    /// The animation folder (timeline track) being edited.
+    pub track: usize,
+    /// Playing since then, from that frame.
+    pub playing: Option<(std::time::Instant, u32)>,
     pub selection: Option<Selection>,
     pub last_selection: Option<Selection>,
     pub edges: Option<Vec<[[f32; 2]; 2]>>,
@@ -58,6 +64,9 @@ impl Doc {
             view: View::default(),
             compositor: Compositor::new(picture),
             layer: None,
+            frame: 0,
+            track: 0,
+            playing: None,
             selection: None,
             last_selection: None,
             edges: None,
@@ -211,6 +220,10 @@ pub struct SuePaint {
     pub(crate) gesture: Option<Gesture>,
     /// Puppet warp, while it is on.
     pub(crate) warp: Option<WarpSession>,
+    /// Onion skin shows the cels around the current frame.
+    pub(crate) onion: bool,
+    /// Playback starts over at the end.
+    pub(crate) looping: bool,
     pub(crate) pressure: Option<f32>,
     /// The pen pressure curve every tool uses (Pen Pressure Settings).
     pub(crate) pen_curve: sue_model::Response,
@@ -271,6 +284,8 @@ impl Default for SuePaint {
             dialog: None,
             gesture: None,
             warp: None,
+            onion: false,
+            looping: true,
             pressure: None,
             pen_curve: sue_model::Response::LINEAR,
             panels: Panels::default(),
@@ -454,6 +469,21 @@ fn implemented(command: &str) -> bool {
             | "layer.new.tone"
             | "layer.new.frame"
             | "layer.new.balloon"
+            | "anim.timeline.new"
+            | "anim.layer.folder"
+            | "anim.cel.new"
+            | "anim.cel.assign"
+            | "anim.key.add"
+            | "anim.key.delete"
+            | "anim.frame.insert"
+            | "anim.frame.delete"
+            | "anim.onion"
+            | "anim.loop"
+            | "anim.play"
+            | "anim.next"
+            | "anim.prev"
+            | "file.export.gif"
+            | "file.export.sequence"
     ) || TOOL_KEYS.iter().any(|(known, _, _)| *known == command)
 }
 
@@ -1458,6 +1488,13 @@ impl SuePaint {
         if command.starts_with("story.") && self.story_command(command, cx) {
             return;
         }
+        if (command.starts_with("anim.")
+            || command.starts_with("file.export.gif")
+            || command == "file.export.sequence")
+            && self.anim_command(command, cx)
+        {
+            return;
+        }
         if !self.state(command, &cx.world.arena, cx.history).enabled {
             return;
         }
@@ -2090,6 +2127,7 @@ impl SuePaint {
             }
         }
         self.sync_docs(&cx.world.arena);
+        self.animate(cx, &ui.ctx().clone());
         if let Some(doc) = self.docs.get_mut(self.active) {
             doc.compositor.sync(&cx.world.arena);
         }
@@ -2157,7 +2195,7 @@ impl SuePaint {
             let top = center.bottom() - height * (1.0 - self.hide);
             let timeline =
                 Rect::from_min_max(pos2(center.left(), top), pos2(center.right(), top + height));
-            self.timeline_panel(ui, timeline, theme);
+            self.timeline_panel(ui, timeline, cx, theme);
             if self.ready {
                 self.timeline_splitter(ui, top, center.x_range(), theme);
             }
@@ -2554,6 +2592,8 @@ impl SueApplet for SuePaint {
             }
             "save-as" => self.save_as_to(cx, path),
             "story-pages" => self.export_pages(cx, path),
+            "anim-gif" => self.export_animation(cx, path, true),
+            "anim-sequence" => self.export_animation(cx, path, false),
             "subview" => self.add_reference(path, cx),
             "colorset-import" => match std::fs::read_to_string(path) {
                 Ok(text) => {

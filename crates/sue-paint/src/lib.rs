@@ -24,6 +24,8 @@
 //! functions over pixels with their own tests; the studio ([`SuePaint`])
 //! ties them to the interface.
 
+pub mod anim;
+mod anim_ui;
 pub mod brush;
 mod canvas;
 mod card;

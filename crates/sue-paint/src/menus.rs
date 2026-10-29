@@ -276,6 +276,8 @@ pub fn menus() -> Vec<Menu> {
                         act("Loop", "anim.loop"),
                         act("Next Frame", "anim.next"),
                         act("Previous Frame", "anim.prev"),
+                        act("First Frame", "anim.first"),
+                        act("Last Frame", "anim.last"),
                     ],
                 ),
             ],

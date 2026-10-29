@@ -250,9 +250,64 @@ pub fn encode_picture(tile: &RasterTile2D, format: PictureFormat) -> Result<Vec<
     Ok(out.into_inner())
 }
 
+/// An animated GIF of `frames` (RGBA8, all the same size), each shown
+/// `delay_ms` milliseconds, looping forever.
+///
+/// # Errors
+/// If there are no frames, they differ in size or format, or encoding
+/// fails.
+pub fn encode_gif_animation(frames: &[RasterTile2D], delay_ms: u32) -> Result<Vec<u8>, String> {
+    use image::codecs::gif::{GifEncoder, Repeat};
+    use image::{Delay, Frame};
+    let first = frames.first().ok_or("an animation needs frames")?;
+    let (width, height) = (first.width(), first.height());
+    let mut out = Vec::new();
+    {
+        let mut encoder = GifEncoder::new_with_speed(&mut out, 10);
+        encoder
+            .set_repeat(Repeat::Infinite)
+            .map_err(|error| error.to_string())?;
+        for tile in frames {
+            if tile.width() != width
+                || tile.height() != height
+                || tile.format() != PixelFormat::Rgba8
+            {
+                return Err("every frame must be the same size of RGBA pixels".to_owned());
+            }
+            let pixels = tile.bytes().ok_or("a frame has no pixels")?.to_vec();
+            let image =
+                RgbaImage::from_raw(width, height, pixels).ok_or("a frame's pixels do not fit")?;
+            let frame =
+                Frame::from_parts(image, 0, 0, Delay::from_numer_denom_ms(delay_ms.max(1), 1));
+            encoder
+                .encode_frame(frame)
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_animated_gif_keeps_every_frame() {
+        use image::AnimationDecoder;
+        let frame = |shade: u8| {
+            RasterTile2D::from_bytes(4, 3, PixelFormat::Rgba8, [shade, 0, 0, 255].repeat(12))
+                .unwrap()
+        };
+        let bytes = encode_gif_animation(&[frame(0), frame(120), frame(250)], 80).unwrap();
+        let decoder = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(bytes)).unwrap();
+        let frames = decoder.into_frames().collect_frames().unwrap();
+        assert_eq!(frames.len(), 3);
+        assert_eq!(frames[1].delay().numer_denom_ms(), (80, 1));
+        assert!(frames[2].buffer().get_pixel(0, 0)[0] > 200);
+        assert!(encode_gif_animation(&[], 80).is_err());
+        let other = RasterTile2D::from_bytes(2, 2, PixelFormat::Rgba8, vec![0; 16]).unwrap();
+        assert!(encode_gif_animation(&[frame(0), other], 80).is_err());
+    }
 
     #[test]
     fn every_save_type_writes_a_picture_that_reads_back() {

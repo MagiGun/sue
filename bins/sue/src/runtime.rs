@@ -1614,6 +1614,160 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_animates_cels_on_a_timeline_and_exports_them() {
+        let (mut runtime, root) = runtime("paint-anim");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Mode(sue_paint::ID.to_owned()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        step(&mut runtime, Vec::new());
+        let command = |runtime: &mut Runtime, name: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: name.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.studio_focus())
+            .unwrap();
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let middle = runtime.shell.canvas_rect().center() + vec2(17.0, -50.0);
+        let mut stroke = |runtime: &mut Runtime, y: f32| {
+            let (from, to) = (middle + vec2(-60.0, y), middle + vec2(60.0, y));
+            step(
+                runtime,
+                vec![egui::Event::PointerMoved(from), press(from, true)],
+            );
+            step(
+                runtime,
+                vec![
+                    egui::Event::PointerMoved(middle + vec2(0.0, y)),
+                    egui::Event::PointerMoved(to),
+                ],
+            );
+            step(runtime, vec![press(to, false)]);
+        };
+
+        // A cel at frame 1 drawn high, another from frame 4 drawn low.
+        command(&mut runtime, "anim.cel.new");
+        stroke(&mut runtime, -40.0);
+        for _ in 0..3 {
+            command(&mut runtime, "anim.next");
+        }
+        command(&mut runtime, "anim.cel.new");
+        stroke(&mut runtime, 40.0);
+        let arena = &runtime.engine.world.arena;
+        let sequence = sue_paint::anim::timeline(arena, picture).expect("a timeline");
+        let keys = sue_paint::anim::keys(&sequence.tracks[0], sequence.rate);
+        assert_eq!(
+            keys.iter().map(|(frame, _)| *frame).collect::<Vec<_>>(),
+            vec![0, 3]
+        );
+
+        // Onion skin and undo.
+        command(&mut runtime, "anim.onion");
+        let depth = runtime.engine.history.depth();
+        command(&mut runtime, "anim.cel.new");
+        assert_eq!(
+            runtime.engine.history.depth(),
+            depth + 1,
+            "a cel is one step"
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        assert_eq!(runtime.engine.history.depth(), depth);
+
+        // The image sequence shows one cel per frame.
+        std::fs::create_dir_all(&root).unwrap();
+        runtime.request(
+            ShellRequest::Picked {
+                pick: FilePick::save(
+                    Some(paint.clone()),
+                    "anim-sequence",
+                    "Export Animation",
+                    "Walk.png",
+                ),
+                path: root.join("Walk.png"),
+            },
+            &mut NoTextures,
+            start,
+        );
+        let ink = |frame: u32, upper: bool| {
+            let bytes = std::fs::read(root.join(format!("Walk-{frame:04}.png"))).unwrap();
+            let tile = sue_io::decode_png(&bytes).unwrap().tile;
+            let (width, height) = (tile.width(), tile.height());
+            let pixels = tile.bytes().unwrap();
+            let rows = if upper {
+                0..height / 2
+            } else {
+                height / 2..height
+            };
+            rows.flat_map(|y| (0..width).map(move |x| (x, y)))
+                .filter(|(x, y)| pixels[((y * width + x) * 4) as usize] < 100)
+                .count()
+        };
+        assert!(
+            ink(2, true) > 50 && ink(2, false) == 0,
+            "frame 2 shows the first cel"
+        );
+        assert!(
+            ink(5, false) > 50 && ink(5, true) == 0,
+            "frame 5 shows the second cel"
+        );
+        assert!(root.join("Walk-0024.png").exists(), "every frame");
+        runtime.request(
+            ShellRequest::Picked {
+                pick: FilePick::save(
+                    Some(paint.clone()),
+                    "anim-gif",
+                    "Export Animation",
+                    "Walk.gif",
+                ),
+                path: root.join("Walk.gif"),
+            },
+            &mut NoTextures,
+            start,
+        );
+        assert!(
+            std::fs::read(root.join("Walk.gif"))
+                .unwrap()
+                .starts_with(b"GIF8")
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_saves_as_a_project_or_any_picture_type() {
         let (mut runtime, root) = runtime("paint-save-as");
         let ctx = egui::Context::default();

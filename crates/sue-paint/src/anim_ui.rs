@@ -1,0 +1,678 @@
+//! Sue Paint's side of animation (Clip Studio Paint's Animation menu and
+//! Timeline palette): making timelines, folders and cels, stepping and
+//! playing frames, onion skin, and exporting an animated GIF or a
+//! sequence of pictures.
+
+use std::path::Path;
+
+use egui::{Align2, Rect, Sense, Stroke, Ui, pos2, vec2};
+use sue_core::txn::{Rename, SetProperty};
+use sue_core::{EntityId, Rate};
+use sue_model::Sequence;
+use sue_platform::write_atomic;
+use sue_wm::{AppletContext, FilePick, FileType, ShellRequest, Theme};
+
+use crate::anim;
+use crate::composite::{self, RenderOptions};
+use crate::doc::{self, NewPicture};
+use crate::icons::Icon;
+use crate::panels::icon_button;
+use crate::studio::SuePaint;
+
+type Edit = sue_core::txn::Batch<sue_core::Arena>;
+
+impl SuePaint {
+    /// The current picture's timeline, cloned, and its length.
+    fn timeline_here(&self, arena: &sue_core::Arena) -> Option<(EntityId, Sequence, u32)> {
+        let picture = self.picture()?;
+        let sequence = anim::timeline(arena, picture)?.clone();
+        Some((picture, sequence, anim::length(arena, picture)))
+    }
+
+    /// Makes a new animation of `frames` frames at `fps`: a picture with a
+    /// timeline whose first folder shows its first layer, renamed `1`.
+    pub(crate) fn make_animation(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        spec: &NewPicture,
+        frames: u32,
+        fps: u32,
+    ) {
+        let (edit, picture) = match doc::create(spec) {
+            Ok(made) => made,
+            Err(error) => {
+                cx.fail(error);
+                return;
+            }
+        };
+        if !Self::apply(cx, edit) {
+            return;
+        }
+        let timeline = anim::new_timeline(picture, fps, frames);
+        if Self::apply(cx, timeline) {
+            self.activate(&cx.world.arena, picture);
+            Self::place_picture(cx, picture);
+            if let Some(layer) = doc::layers(&cx.world.arena, picture)
+                .into_iter()
+                .rev()
+                .find(|info| info.kind == sue_model::picture::LayerKind::Raster)
+            {
+                Self::apply(cx, Edit::new("Name Cel").then(Rename::new(layer.id, "1")));
+                if let Some((_, sequence, length)) = self.timeline_here(&cx.world.arena) {
+                    let sequence = anim::assign(&sequence, 0, 0, Some(layer.id), picture, length);
+                    Self::apply(cx, anim::set(picture, sequence, "Specify Cel"));
+                }
+            }
+        }
+    }
+
+    /// Moves to `frame` (wrapped into the timeline) and makes the cel it
+    /// shows in the current folder the current layer.
+    pub(crate) fn go_to_frame(&mut self, arena: &sue_core::Arena, frame: i64) {
+        let Some((_, sequence, length)) = self.timeline_here(arena) else {
+            return;
+        };
+        let frame = frame.rem_euclid(i64::from(length)) as u32;
+        let Some(doc) = self.doc_mut() else {
+            return;
+        };
+        doc.frame = frame;
+        let folders = anim::folders(&sequence);
+        doc.track = doc.track.min(sequence.tracks.len().saturating_sub(1));
+        if let Some(cel) = folders
+            .contains(&doc.track)
+            .then(|| anim::cel_at(&sequence.tracks[doc.track], sequence.rate, frame))
+            .flatten()
+        {
+            doc.layer = Some(cel);
+        }
+    }
+
+    /// Keeps the shown frame up to date: plays, and tells the compositor
+    /// which cels this frame shows.
+    pub(crate) fn animate(&mut self, cx: &mut AppletContext<'_>, ctx: &egui::Context) {
+        let now = cx.view.now;
+        let Some((_, sequence, length)) = self.timeline_here(&cx.world.arena) else {
+            if let Some(doc) = self.doc_mut() {
+                doc.playing = None;
+                doc.compositor.set_view(None);
+            }
+            return;
+        };
+        let looping = self.looping;
+        let onion = self.onion;
+        let mut moved = None;
+        if let Some(doc) = self.doc_mut()
+            && let Some((started, from)) = doc.playing
+        {
+            let elapsed = now.saturating_duration_since(started).as_secs_f64();
+            let frame = i64::from(from) + (elapsed * anim::fps(&sequence)) as i64;
+            if !looping && frame >= i64::from(length) {
+                doc.playing = None;
+                moved = Some(i64::from(length) - 1);
+            } else {
+                moved = Some(frame);
+            }
+            ctx.request_repaint();
+        }
+        if let Some(frame) = moved {
+            self.go_to_frame(&cx.world.arena, frame);
+        }
+        if let Some(doc) = self.doc_mut() {
+            let playing = doc.playing.is_some();
+            doc.compositor
+                .set_view(Some(anim::view(&sequence, doc.frame, onion && !playing)));
+        }
+    }
+
+    /// Runs an Animation menu command; `false` if `command` is not one.
+    #[allow(clippy::too_many_lines, reason = "one arm per command")]
+    pub(crate) fn anim_command(&mut self, command: &str, cx: &mut AppletContext<'_>) -> bool {
+        let Some(picture) = self.picture() else {
+            return matches!(command, "anim.timeline.new");
+        };
+        let here = self.timeline_here(&cx.world.arena);
+        let (frame, track) = self.doc().map_or((0, 0), |doc| (doc.frame, doc.track));
+        match command {
+            "anim.timeline.new" => {
+                if here.is_some() {
+                    cx.notify("This canvas has a timeline: the Timeline palette edits it");
+                } else {
+                    Self::apply(cx, anim::new_timeline(picture, 24, 24));
+                    self.panels.timeline = true;
+                }
+            }
+            "anim.layer.folder" => {
+                let Some((_, sequence, _)) = here else {
+                    self.anim_command("anim.timeline.new", cx);
+                    return true;
+                };
+                let name = format!("Animation Folder {}", anim::folders(&sequence).len() + 1);
+                let edit = anim::set(
+                    picture,
+                    anim::with_folder(&sequence, &name),
+                    "New Animation Folder",
+                );
+                if Self::apply(cx, edit)
+                    && let Some(doc) = self.doc_mut()
+                {
+                    doc.track = sequence.tracks.len();
+                }
+            }
+            "anim.cel.new" => {
+                if here.is_none() {
+                    Self::apply(cx, anim::new_timeline(picture, 24, 24));
+                    self.panels.timeline = true;
+                }
+                let Some((_, sequence, length)) = self.timeline_here(&cx.world.arena) else {
+                    return true;
+                };
+                let track = if anim::folders(&sequence).contains(&track) {
+                    track
+                } else {
+                    anim::folders(&sequence).first().copied().unwrap_or(0)
+                };
+                let count = anim::keys(&sequence.tracks[track], sequence.rate)
+                    .iter()
+                    .filter(|(_, cel)| cel.is_some())
+                    .count();
+                let below = self.doc().and_then(|doc| doc.layer);
+                match doc::add_raster_layer(
+                    &cx.world.arena,
+                    picture,
+                    below,
+                    (count + 1).to_string(),
+                    None,
+                ) {
+                    Ok((spawn, cel)) => {
+                        let sequence =
+                            anim::assign(&sequence, track, frame, Some(cel), picture, length);
+                        let edit = Edit::new("New Animation Cel")
+                            .then(spawn)
+                            .then(sue_core::txn::SetExtension::set(picture, sequence));
+                        if Self::apply(cx, edit)
+                            && let Some(doc) = self.doc_mut()
+                        {
+                            doc.layer = Some(cel);
+                            doc.track = track;
+                        }
+                    }
+                    Err(error) => cx.fail(error),
+                }
+            }
+            "anim.cel.assign" | "anim.key.add" => {
+                let (Some((_, sequence, length)), Some(layer)) =
+                    (here, self.doc().and_then(|doc| doc.layer))
+                else {
+                    cx.fail("Make a timeline and pick a layer first");
+                    return true;
+                };
+                let sequence = anim::assign(&sequence, track, frame, Some(layer), picture, length);
+                Self::apply(cx, anim::set(picture, sequence, "Specify Cel"));
+            }
+            "anim.key.delete" => {
+                if let Some((_, sequence, length)) = here {
+                    let sequence = anim::unassign(&sequence, track, frame, length);
+                    Self::apply(cx, anim::set(picture, sequence, "Delete Key"));
+                }
+            }
+            "anim.frame.insert" | "anim.frame.delete" => {
+                let Some((_, sequence, length)) = here else {
+                    return true;
+                };
+                let (by, new_length) = if command == "anim.frame.insert" {
+                    (1, length + 1)
+                } else {
+                    (-1, length.saturating_sub(1).max(1))
+                };
+                let sequence = anim::shift(&sequence, frame, by, new_length);
+                let edit = Edit::new(if by > 0 {
+                    "Insert Frame"
+                } else {
+                    "Delete Frame"
+                })
+                .then(sue_core::txn::SetExtension::set(picture, sequence))
+                .then(SetProperty::new(
+                    picture,
+                    anim::LENGTH,
+                    i64::from(new_length),
+                ));
+                Self::apply(cx, edit);
+            }
+            "anim.onion" => self.onion = !self.onion,
+            "anim.loop" => self.looping = !self.looping,
+            "anim.play" => {
+                let now = cx.view.now;
+                if let Some(doc) = self.doc_mut() {
+                    doc.playing = match doc.playing {
+                        Some(_) => None,
+                        None => Some((now, doc.frame)),
+                    };
+                }
+            }
+            "anim.next" => self.go_to_frame(&cx.world.arena, i64::from(frame) + 1),
+            "anim.prev" => self.go_to_frame(&cx.world.arena, i64::from(frame) - 1),
+            "anim.first" => self.go_to_frame(&cx.world.arena, 0),
+            "anim.last" => self.go_to_frame(&cx.world.arena, -1),
+            "file.export.gif" | "file.export.sequence" => self.ask_export_animation(cx, command),
+            _ => return false,
+        }
+        true
+    }
+
+    /// Asks where to export the animation, as a GIF or as numbered pictures.
+    fn ask_export_animation(&mut self, cx: &mut AppletContext<'_>, command: &str) {
+        let Some((picture, _, _)) = self.timeline_here(&cx.world.arena) else {
+            cx.fail("Make a timeline first: Animation, Timeline, New Timeline");
+            return;
+        };
+        let name = cx.world.arena.get_by_id(picture).map_or_else(
+            |_| "Animation".to_owned(),
+            |entity| entity.name().to_owned(),
+        );
+        let (purpose, types, file) = if command == "file.export.gif" {
+            (
+                "anim-gif",
+                vec![FileType::new("Animated GIF", &["gif"])],
+                format!("{name}.gif"),
+            )
+        } else {
+            (
+                "anim-sequence",
+                sue_io::PICTURE_SAVE_TYPES
+                    .iter()
+                    .map(|(what, extensions)| FileType::new(what, extensions))
+                    .collect(),
+                format!("{name}.png"),
+            )
+        };
+        cx.request(ShellRequest::PickFile(
+            FilePick::save(
+                Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
+                purpose,
+                "Export Animation",
+                &file,
+            )
+            .types(types)
+            .starting_in(self.last_dir.clone()),
+        ));
+    }
+
+    /// Every frame of the timeline, flattened.
+    fn render_frames(&self, arena: &sue_core::Arena) -> Option<(Vec<sue_core::RasterTile2D>, f64)> {
+        let (picture, sequence, length) = self.timeline_here(arena)?;
+        let options = RenderOptions {
+            paper: true,
+            drafts: false,
+        };
+        let frames = (0..length)
+            .filter_map(|frame| {
+                composite::flatten_view(
+                    arena,
+                    picture,
+                    options,
+                    Some(&anim::view(&sequence, frame, false)),
+                )
+            })
+            .collect();
+        Some((frames, anim::fps(&sequence)))
+    }
+
+    /// Writes the animation to `path`: one GIF, or `Name-0001.png` and on.
+    pub(crate) fn export_animation(&mut self, cx: &mut AppletContext<'_>, path: &Path, gif: bool) {
+        let Some((frames, fps)) = self.render_frames(&cx.world.arena) else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        if gif {
+            let delay = (1000.0 / fps.max(1.0)).round() as u32;
+            match sue_io::encode_gif_animation(&frames, delay).and_then(|bytes| {
+                write_atomic(path, &bytes)
+                    .map_err(|error| error.to_string())
+                    .map(|()| bytes.len())
+            }) {
+                Ok(size) => cx.saved(
+                    path,
+                    format!("{} frames, {} KiB", frames.len(), size.div_ceil(1024)),
+                ),
+                Err(error) => cx.fail(format!("Cannot export the animation: {error}")),
+            }
+            return;
+        }
+        let extension = path.extension().map_or_else(
+            || "png".to_owned(),
+            |ext| ext.to_string_lossy().to_ascii_lowercase(),
+        );
+        let stem = path.file_stem().map_or_else(
+            || "Frame".to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        );
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        for (index, frame) in frames.iter().enumerate() {
+            let target = dir.join(format!("{stem}-{:04}.{extension}", index + 1));
+            if let Err(error) = sue_io::encode_as(frame, &extension, 90, 7)
+                .and_then(|bytes| write_atomic(&target, &bytes).map_err(|error| error.to_string()))
+            {
+                cx.fail(format!("Cannot export frame {}: {error}", index + 1));
+                return;
+            }
+        }
+        cx.notify(format!(
+            "Exported {} frames to {}",
+            frames.len(),
+            dir.display()
+        ));
+    }
+
+    /// The Timeline palette: its buttons, frame rate and length, and the
+    /// folders' keys frame by frame.
+    #[allow(clippy::too_many_lines, reason = "the whole palette")]
+    pub(crate) fn timeline_ui(
+        &mut self,
+        ui: &mut Ui,
+        bar: Rect,
+        tracks: Rect,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        let here = self.timeline_here(&cx.world.arena);
+        let has = here.is_some();
+        let playing = self.doc().is_some_and(|doc| doc.playing.is_some());
+        let buttons: [(Icon, &str, &str, bool, bool); 15] = [
+            (Icon::New, "New timeline", "anim.timeline.new", !has, false),
+            (
+                Icon::NewFolder,
+                "New animation folder",
+                "anim.layer.folder",
+                has,
+                false,
+            ),
+            (Icon::Cel, "New animation cel", "anim.cel.new", true, false),
+            (
+                Icon::Edit,
+                "Specify cel: show the current layer from this frame",
+                "anim.cel.assign",
+                has,
+                false,
+            ),
+            (
+                Icon::Minus,
+                "Delete the key on this frame",
+                "anim.key.delete",
+                has,
+                false,
+            ),
+            (
+                Icon::Add,
+                "Insert a frame here",
+                "anim.frame.insert",
+                has,
+                false,
+            ),
+            (
+                Icon::Delete,
+                "Delete this frame",
+                "anim.frame.delete",
+                has,
+                false,
+            ),
+            (Icon::Onion, "Onion skin", "anim.onion", has, self.onion),
+            (Icon::First, "First frame", "anim.first", has, false),
+            (Icon::Prev, "Previous frame", "anim.prev", has, false),
+            (Icon::Play, "Play", "anim.play", has && !playing, false),
+            (Icon::Stop, "Stop", "anim.play", has && playing, false),
+            (Icon::Next, "Next frame", "anim.next", has, false),
+            (Icon::Last, "Last frame", "anim.last", has, false),
+            (Icon::Loop, "Loop", "anim.loop", has, self.looping),
+        ];
+        let mut run = None;
+        let mut x = bar.left() + 8.0;
+        for (index, (icon, tip, command, enabled, active)) in buttons.iter().enumerate() {
+            if matches!(index, 3 | 7 | 8) {
+                ui.painter().vline(
+                    x + 1.0,
+                    bar.shrink2(vec2(0.0, 6.0)).y_range(),
+                    theme.hairline(),
+                );
+                x += 6.0;
+            }
+            let at = Rect::from_min_size(pos2(x, bar.top() + 3.0), vec2(22.0, 22.0));
+            if at.right() > bar.right() - 4.0 {
+                break;
+            }
+            if icon_button(ui, at, *icon, *enabled, *active, tip, theme) {
+                run = Some(*command);
+            }
+            x += 25.0;
+        }
+        // Frame rate and length.
+        if let Some((picture, sequence, length)) = &here {
+            let mut fps = anim::fps(sequence).round() as u32;
+            let mut frames = *length;
+            // Above the folder names, so every button fits in the bar.
+            let area = Rect::from_min_size(tracks.min + vec2(4.0, 1.0), vec2(154.0, 20.0));
+            let mut child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(area)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+            let fps_changed = child
+                .add(egui::DragValue::new(&mut fps).range(1..=120).suffix(" fps"))
+                .on_hover_text("Frame rate")
+                .changed();
+            let length_changed = child
+                .add(
+                    egui::DragValue::new(&mut frames)
+                        .range(1..=10_000)
+                        .suffix(" frames"),
+                )
+                .on_hover_text("Length of the timeline")
+                .changed();
+            if fps_changed {
+                let mut next = sequence.clone();
+                next.rate = Rate::new(fps.max(1), 1);
+                Self::apply(cx, anim::set(*picture, next, "Frame Rate"));
+            }
+            if length_changed {
+                Self::apply(
+                    cx,
+                    Edit::new("Timeline Length").then(SetProperty::new(
+                        *picture,
+                        anim::LENGTH,
+                        i64::from(frames),
+                    )),
+                );
+            }
+        }
+        if let Some(command) = run {
+            self.anim_command(command, cx);
+        }
+
+        // Folder names, then frames.
+        let names = Rect::from_min_max(tracks.min, pos2(tracks.left() + 160.0, tracks.bottom()));
+        ui.painter()
+            .vline(names.right(), tracks.y_range(), theme.hairline());
+        let Some((picture, sequence, length)) = self.timeline_here(&cx.world.arena) else {
+            ui.painter().text(
+                names.left_top() + vec2(10.0, 14.0),
+                Align2::LEFT_CENTER,
+                "No timeline",
+                theme.font(theme.small_size + 0.5),
+                theme.muted.gamma_multiply(0.7),
+            );
+            ui.painter().text(
+                pos2(names.right() + 16.0, tracks.top() + 30.0),
+                Align2::LEFT_CENTER,
+                "New timeline (or New animation cel) starts an animation; File, New, Animation makes one",
+                theme.font(theme.small_size + 0.5),
+                theme.muted,
+            );
+            return;
+        };
+        let (frame, track) = self.doc().map_or((0, 0), |doc| (doc.frame, doc.track));
+        let row_height = 22.0;
+        let ruler = 22.0;
+        let step = ((tracks.width() - 170.0) / length.max(1) as f32).clamp(10.0, 26.0);
+        let frames_area = Rect::from_min_max(pos2(names.right(), tracks.top()), tracks.max);
+        let shown = ((frames_area.width() / step).floor() as u32).max(1);
+        let first = frame
+            .saturating_sub(shown.saturating_sub(4))
+            .min(length.saturating_sub(shown));
+        let column = |at: u32| frames_area.left() + (at.saturating_sub(first)) as f32 * step;
+        let painter = ui.painter().with_clip_rect(tracks);
+        // The ruler and the current frame.
+        for at in first..(first + shown).min(length) {
+            let x = column(at);
+            painter.vline(
+                x,
+                frames_area.y_range(),
+                Stroke::new(1.0, theme.border.gamma_multiply(0.5)),
+            );
+            if (at + 1) % 6 == 1 || step >= 22.0 {
+                painter.text(
+                    pos2(x + 3.0, frames_area.top() + ruler / 2.0),
+                    Align2::LEFT_CENTER,
+                    (at + 1).to_string(),
+                    theme.font(theme.small_size - 1.0),
+                    theme.muted.gamma_multiply(0.8),
+                );
+            }
+        }
+        let current = Rect::from_min_size(
+            pos2(column(frame), frames_area.top()),
+            vec2(step, frames_area.height()),
+        );
+        painter.rect_filled(current, 0.0, theme.active.gamma_multiply(0.7));
+        let ruler_rect = Rect::from_min_size(frames_area.min, vec2(frames_area.width(), ruler));
+        let ruler_response = ui.interact(
+            ruler_rect,
+            ui.scope_id().with("timeline-ruler"),
+            Sense::click_and_drag(),
+        );
+        if let Some(pos) = ruler_response.interact_pointer_pos()
+            && (ruler_response.clicked() || ruler_response.dragged())
+        {
+            let at = first + ((pos.x - frames_area.left()) / step).max(0.0) as u32;
+            self.go_to_frame(&cx.world.arena, i64::from(at.min(length - 1)));
+        }
+        // One row per folder.
+        let mut action: Option<(usize, u32, Option<Option<EntityId>>)> = None;
+        for (row, index) in anim::folders(&sequence).into_iter().enumerate() {
+            let top = tracks.top() + ruler + row as f32 * row_height;
+            let name_rect =
+                Rect::from_min_size(pos2(names.left(), top), vec2(names.width(), row_height));
+            let chosen = index == track;
+            if chosen {
+                painter.rect_filled(name_rect, 0.0, theme.active);
+            }
+            painter.text(
+                name_rect.left_center() + vec2(10.0, 0.0),
+                Align2::LEFT_CENTER,
+                &sequence.tracks[index].name,
+                theme.font(theme.small_size + 0.5),
+                if chosen { theme.text } else { theme.muted },
+            );
+            if ui
+                .interact(
+                    name_rect,
+                    ui.scope_id().with(("timeline-folder", index)),
+                    Sense::click(),
+                )
+                .clicked()
+                && let Some(doc) = self.doc_mut()
+            {
+                doc.track = index;
+            }
+            let keys = anim::keys(&sequence.tracks[index], sequence.rate);
+            for (key, (at, cel)) in keys.iter().enumerate() {
+                if *at >= first + shown || *at >= length {
+                    continue;
+                }
+                let end = keys
+                    .get(key + 1)
+                    .map_or(length, |(next, _)| *next)
+                    .min(first + shown);
+                let x = column(*at);
+                let y = top + row_height / 2.0;
+                match cel {
+                    Some(cel) => {
+                        let name = cx
+                            .world
+                            .arena
+                            .get_by_id(*cel)
+                            .map_or_else(|_| "?".to_owned(), |entity| entity.name().to_owned());
+                        painter.circle_filled(pos2(x + 5.0, y), 3.0, theme.text);
+                        painter.text(
+                            pos2(x + 10.0, y),
+                            Align2::LEFT_CENTER,
+                            name,
+                            theme.font(theme.small_size),
+                            theme.text,
+                        );
+                        painter.hline(
+                            (x + 5.0)..=column(end) - 2.0,
+                            y + 7.0,
+                            Stroke::new(1.0, theme.muted),
+                        );
+                    }
+                    None => {
+                        painter.text(
+                            pos2(x + 3.0, y),
+                            Align2::LEFT_CENTER,
+                            "x",
+                            theme.font(theme.small_size),
+                            theme.muted,
+                        );
+                    }
+                }
+            }
+            // Cells: click to go there, double-click to show the current
+            // layer from there, right-click for more.
+            let cells = Rect::from_min_size(
+                pos2(frames_area.left(), top),
+                vec2(frames_area.width(), row_height),
+            );
+            let response = ui.interact(
+                cells,
+                ui.scope_id().with(("timeline-cells", index)),
+                Sense::click(),
+            );
+            let at_pointer = |pos: egui::Pos2| {
+                (first + ((pos.x - frames_area.left()) / step).max(0.0) as u32).min(length - 1)
+            };
+            if let Some(pos) = response.interact_pointer_pos() {
+                if response.double_clicked() {
+                    let layer = self.doc().and_then(|doc| doc.layer);
+                    action = Some((index, at_pointer(pos), Some(layer)));
+                } else if response.clicked() {
+                    action = Some((index, at_pointer(pos), None));
+                }
+            }
+            let pointer = response.hover_pos();
+            response.context_menu(|ui| {
+                let at = pointer.map_or(frame, at_pointer);
+                if ui.button("Show the current layer here").clicked() {
+                    action = Some((index, at, Some(self.doc().and_then(|doc| doc.layer))));
+                    ui.close();
+                }
+                if ui.button("Blank from here").clicked() {
+                    action = Some((index, at, Some(None)));
+                    ui.close();
+                }
+            });
+        }
+        if let Some((index, at, assign)) = action {
+            if let Some(doc) = self.doc_mut() {
+                doc.track = index;
+            }
+            self.go_to_frame(&cx.world.arena, i64::from(at));
+            if let Some(cel) = assign {
+                let sequence = anim::assign(&sequence, index, at, cel, picture, length);
+                Self::apply(cx, anim::set(picture, sequence, "Specify Cel"));
+                self.go_to_frame(&cx.world.arena, i64::from(at));
+            }
+        }
+    }
+}

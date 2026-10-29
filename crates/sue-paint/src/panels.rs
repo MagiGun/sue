@@ -2454,109 +2454,24 @@ impl SuePaint {
         );
     }
 
-    pub(crate) fn timeline_panel(&mut self, ui: &mut Ui, rect: Rect, theme: &Theme) {
+    pub(crate) fn timeline_panel(
+        &mut self,
+        ui: &mut Ui,
+        rect: Rect,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
         ui.painter().rect_filled(rect, 0.0, theme.panel);
         ui.painter()
             .hline(rect.x_range(), rect.top(), theme.hairline());
         let (body, _) = header(ui, rect, &[("Timeline", true)], 0, theme);
         let bar = Rect::from_min_size(body.min, vec2(body.width(), 28.0));
-        // The timeline to edit, then its tools and playback, as in Clip
-        // Studio Paint; they wait for animation to arrive.
-        let mut picker = child(
-            ui,
-            Rect::from_min_size(bar.min + vec2(6.0, 3.0), vec2(118.0, 22.0)),
-            "timeline-pick",
-        );
-        picker.add_enabled_ui(false, |ui| {
-            egui::ComboBox::from_id_salt("sue-paint-timeline-pick")
-                .selected_text("Timeline 1")
-                .width(110.0)
-                .show_ui(ui, |_| {});
-        });
-        let icons_row: [(Icon, &str); 16] = [
-            (Icon::New, "New timeline"),
-            (Icon::NewFolder, "New animation folder"),
-            (Icon::Cel, "New animation cel"),
-            (Icon::Edit, "Specify cels"),
-            (Icon::Delete, "Delete cel"),
-            (Icon::Add, "Add keyframe"),
-            (Icon::Minus, "Delete keyframe"),
-            (Icon::Onion, "Onion skin"),
-            (Icon::Layers, "Light table"),
-            (Icon::First, "First frame"),
-            (Icon::Prev, "Previous frame"),
-            (Icon::Play, "Play"),
-            (Icon::Stop, "Stop"),
-            (Icon::Next, "Next frame"),
-            (Icon::Last, "Last frame"),
-            (Icon::Loop, "Loop"),
-        ];
-        let mut x = bar.left() + 130.0;
-        for (index, (icon, tip)) in icons_row.iter().enumerate() {
-            if index == 9 || index == 5 {
-                ui.painter().vline(
-                    x + 1.0,
-                    bar.shrink2(vec2(0.0, 6.0)).y_range(),
-                    theme.hairline(),
-                );
-                x += 6.0;
-            }
-            let at = Rect::from_min_size(pos2(x, bar.top() + 3.0), vec2(22.0, 22.0));
-            if at.right() > bar.right() - 70.0 {
-                break;
-            }
-            icon_button(ui, at, *icon, false, false, tip, theme);
-            x += 25.0;
-        }
-        ui.painter().text(
-            pos2(bar.right() - 8.0, bar.center().y),
-            Align2::RIGHT_CENTER,
-            "24 fps",
-            theme.font(theme.small_size),
-            theme.muted.gamma_multiply(0.7),
-        );
         ui.painter()
             .hline(body.x_range(), bar.bottom(), theme.hairline());
         let tracks = Rect::from_min_max(pos2(body.left(), bar.bottom()), body.max);
-        let names = Rect::from_min_max(tracks.min, pos2(tracks.left() + 160.0, tracks.bottom()));
-        ui.painter()
-            .vline(names.right(), tracks.y_range(), theme.hairline());
-        ui.painter().text(
-            names.left_top() + vec2(10.0, 14.0),
-            Align2::LEFT_CENTER,
-            "No timeline",
-            theme.font(theme.small_size + 0.5),
-            theme.muted.gamma_multiply(0.7),
-        );
-        let frames = Rect::from_min_max(pos2(names.right(), tracks.top()), tracks.max);
-        let step = 24.0;
-        let mut x = frames.left();
-        let mut frame = 1;
-        while x < frames.right() {
-            ui.painter().vline(
-                x,
-                frames.y_range(),
-                Stroke::new(1.0, theme.border.gamma_multiply(0.5)),
-            );
-            if frame % 6 == 1 {
-                ui.painter().text(
-                    pos2(x + 3.0, frames.top() + 8.0),
-                    Align2::LEFT_CENTER,
-                    frame.to_string(),
-                    theme.font(theme.small_size - 1.0),
-                    theme.muted.gamma_multiply(0.6),
-                );
-            }
-            x += step;
-            frame += 1;
-        }
-        ui.painter().text(
-            frames.center(),
-            Align2::CENTER_CENTER,
-            "Animation timelines arrive in a later Sue Paint",
-            theme.font(theme.small_size + 0.5),
-            theme.muted,
-        );
+        // Clip Studio Paint's timeline: its tools and playback, then the
+        // folders' cels frame by frame.
+        self.timeline_ui(ui, bar, tracks, cx, theme);
     }
 }
 

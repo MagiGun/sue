@@ -7,6 +7,8 @@
 //! new layer) and only the painted rectangle while a stroke is drawn.
 //! Large areas are split into bands of rows composited on every core.
 
+use std::collections::HashSet;
+
 use sue_core::{Arena, ComponentKind, EntityId, PixelFormat, RasterTile2D};
 use sue_model::picture::{self, LayerKind, LayerStyle};
 
@@ -28,6 +30,16 @@ impl Default for RenderOptions {
     }
 }
 
+/// How an animation frame shows the layers: the cels it hides, and the
+/// ones shown faintly in one color around it (onion skin).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FrameView {
+    /// Cels not on this frame.
+    pub hidden: HashSet<EntityId>,
+    /// Cels shown anyway, tinted (sRGB, 0 to 1) at an opacity.
+    pub onion: Vec<(EntityId, [f32; 3], f32)>,
+}
+
 enum Source<'a> {
     Paper([f32; 3]),
     Raster {
@@ -39,6 +51,8 @@ enum Source<'a> {
 struct Layer<'a> {
     source: Source<'a>,
     style: LayerStyle,
+    /// Drawn in this color (onion skin), keeping its alpha.
+    tint: Option<[f32; 3]>,
 }
 
 impl Layer<'_> {
@@ -82,11 +96,32 @@ impl Layer<'_> {
 }
 
 fn gather(arena: &Arena, picture: EntityId, options: RenderOptions) -> Vec<Layer<'_>> {
+    gather_view(arena, picture, options, None)
+}
+
+fn gather_view<'a>(
+    arena: &'a Arena,
+    picture: EntityId,
+    options: RenderOptions,
+    view: Option<&FrameView>,
+) -> Vec<Layer<'a>> {
     picture::layers(arena, picture)
         .into_iter()
         .filter_map(|id| arena.get_by_id(id).ok())
         .filter_map(|entity| {
             let mut style = LayerStyle::of(entity);
+            let mut tint = None;
+            if let Some(view) = view
+                && view.hidden.contains(&entity.id())
+            {
+                match view.onion.iter().find(|(id, _, _)| *id == entity.id()) {
+                    Some((_, color, opacity)) => {
+                        style.opacity *= opacity;
+                        tint = Some(*color);
+                    }
+                    None => style.visible = false,
+                }
+            }
             if style.draft && !options.drafts {
                 style.visible = false;
             }
@@ -104,7 +139,11 @@ fn gather(arena: &Arena, picture: EntityId, options: RenderOptions) -> Vec<Layer
                 }
                 LayerKind::Other => return None,
             };
-            Some(Layer { source, style })
+            Some(Layer {
+                source,
+                style,
+                tint,
+            })
         })
         .collect()
 }
@@ -125,6 +164,9 @@ fn pixel(layers: &[Layer<'_>], x: u32, y: u32) -> [f32; 4] {
             continue;
         }
         let mut source = layer.sample(x, y);
+        if let Some([r, g, b]) = layer.tint {
+            source = [r, g, b, source[3]];
+        }
         source[3] *= layer.style.opacity;
         if layer.style.clip {
             source[3] *= base_alpha;
@@ -178,13 +220,20 @@ fn rows(
 /// Composites the rectangle `[x0, y0, x1, y1]` of `picture` as straight
 /// RGBA8, row by row.
 #[must_use]
-pub fn render(
+pub fn render(arena: &Arena, picture: EntityId, rect: [u32; 4], options: RenderOptions) -> Vec<u8> {
+    render_view(arena, picture, rect, options, None)
+}
+
+/// As [`render`], for one animation frame's `view` of the layers.
+#[must_use]
+pub fn render_view(
     arena: &Arena,
     picture: EntityId,
     [x0, y0, x1, y1]: [u32; 4],
     options: RenderOptions,
+    view: Option<&FrameView>,
 ) -> Vec<u8> {
-    let layers = gather(arena, picture, options);
+    let layers = gather_view(arena, picture, options, view);
     let (width, height) = (
         x1.saturating_sub(x0) as usize,
         y1.saturating_sub(y0) as usize,
@@ -201,8 +250,19 @@ pub fn render(
 /// The whole picture flattened into one straight RGBA8 raster.
 #[must_use]
 pub fn flatten(arena: &Arena, picture: EntityId, options: RenderOptions) -> Option<RasterTile2D> {
+    flatten_view(arena, picture, options, None)
+}
+
+/// As [`flatten`], for one animation frame's `view` of the layers.
+#[must_use]
+pub fn flatten_view(
+    arena: &Arena,
+    picture: EntityId,
+    options: RenderOptions,
+    view: Option<&FrameView>,
+) -> Option<RasterTile2D> {
     let [width, height] = picture::size(arena.get_by_id(picture).ok()?)?;
-    let pixels = render(arena, picture, [0, 0, width, height], options);
+    let pixels = render_view(arena, picture, [0, 0, width, height], options, view);
     RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels).ok()
 }
 
@@ -277,6 +337,7 @@ pub struct Compositor {
     display: Vec<u8>,
     seen: Vec<(EntityId, u64)>,
     version: u64,
+    view: Option<FrameView>,
 }
 
 impl Compositor {
@@ -289,6 +350,16 @@ impl Compositor {
             display: Vec::new(),
             seen: Vec::new(),
             version: 0,
+            view: None,
+        }
+    }
+
+    /// Shows the layers as animation frame `view` has them (`None`: all
+    /// of them); a change is composited on the next [`Self::sync`].
+    pub fn set_view(&mut self, view: Option<FrameView>) {
+        if self.view != view {
+            self.view = view;
+            self.seen.clear();
         }
     }
 
@@ -354,7 +425,12 @@ impl Compositor {
     }
 
     fn paint(&mut self, arena: &Arena, [x0, y0, x1, y1]: [u32; 4]) {
-        let layers = gather(arena, self.picture, RenderOptions::default());
+        let layers = gather_view(
+            arena,
+            self.picture,
+            RenderOptions::default(),
+            self.view.as_ref(),
+        );
         let stride = self.size[0] as usize * 4;
         let band = &mut self.display[y0 as usize * stride..y1 as usize * stride];
         let area = (x1.saturating_sub(x0) * y1.saturating_sub(y0)) as usize;
@@ -408,6 +484,7 @@ pub fn thumbnail(arena: &Arena, layer: EntityId, max: [u32; 2]) -> Option<(Vec<u
     let layer = Layer {
         source,
         style: LayerStyle::default(),
+        tint: None,
     };
     let scale = (max[0] as f32 / size[0].max(1) as f32).min(max[1] as f32 / size[1].max(1) as f32);
     let out = [

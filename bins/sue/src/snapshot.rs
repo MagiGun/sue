@@ -556,6 +556,26 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     if let Some(applet) = runtime.applets.get_mut(&studio) {
         applet.navigate("dialog/close");
     }
+    // 13d. The Timeline of a page: two cels, onion skin on.
+    for command in [
+        "anim.cel.new",
+        "anim.next",
+        "anim.next",
+        "anim.next",
+        "anim.cel.new",
+        "anim.layer.folder",
+        "anim.onion",
+    ] {
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: studio.clone(),
+                command: command.to_owned(),
+            },
+            &mut camera.painter,
+            camera.now,
+        );
+    }
+    shoot(&mut runtime, &mut camera, "13d-sue-paint-timeline")?;
 
     // 14. Back on the canvas, the same picture as a card.
     runtime.request(ShellRequest::CloseStudio, &mut camera.painter, camera.now);
