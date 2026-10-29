@@ -102,6 +102,11 @@ follow [Semantic Versioning](https://semver.org/).
 - On iPhone and iPad the on-screen keyboard no longer covers the bottom of
   Sue: Sue fits itself above the keyboard, as on Android, so the line you
   are writing in Sue Writer stays in sight.
+- On Android, a file you chose in the system's picker is named as you know
+  it, such as "Picture.png in Download", in the status bar, the Image
+  Viewer, the Converter and the Hub, instead of a path inside Sue's
+  cache. There the Image Viewer and the Converter no longer offer to
+  show files in Explorer, which a phone does not have.
 
 ## [0.0.3] - 2026-10-29
 

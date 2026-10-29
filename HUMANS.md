@@ -171,8 +171,8 @@ Choose where the results go (next to each file, or a folder you pick), how
 they are named (`{name}-small`, say), and whether to keep both or replace a
 file of the same name; the file being converted is never written over. Click
 Convert (or `Ctrl+Enter`): big files convert in the background, the list says
-where each one went (click it to see it in Explorer), and the status bar
-names the folder.
+where each one went (click it to see it in Explorer, or Finder on a Mac), and
+the status bar names the folder.
 
 ### Opening and saving files
 
@@ -204,7 +204,14 @@ ways: Sue reads the files in it (the Converter's Add a Folder) and each
 file Sue makes in it lands there (the Converter's results; Android lets
 you choose any folder but the top of Download). iPhone and iPad save
 first and then ask where in Files the file goes, each time you save; a
-folder you choose there is written to directly.
+folder you choose there is written to directly. Wherever Sue names such a
+file (the status bar's "Saved", the Image Viewer's info row and its Save
+over the original question, the Converter's output folder, the Hub's
+recent work), it names what
+you chose, such as "Picture.png in Download", with its folder where the
+system says it. A phone has no file manager for Sue to show files in, so
+those messages are not clickable there, and Show in Folder and the
+Converter's "show the result" choice are left out.
 
 ### The command palette
 

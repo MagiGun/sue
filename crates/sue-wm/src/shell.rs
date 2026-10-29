@@ -146,16 +146,22 @@ struct ListRow {
     kept: Option<String>,
 }
 
-/// The folder `path` is in, by its name.
-fn folder_name(path: &std::path::Path) -> String {
-    path.parent()
-        .map(|parent| {
+/// `lead` and the folder `path` is in, by its name: for a file a phone's
+/// picker chose, the folder people chose it in, where the system says it.
+fn in_folder(lead: String, path: &std::path::Path) -> String {
+    let folder = match sue_platform::shown_place(path) {
+        Some(shown) => shown.folder,
+        None => path.parent().map(|parent| {
             parent.file_name().map_or_else(
                 || parent.display().to_string(),
                 |name| name.to_string_lossy().into_owned(),
             )
-        })
-        .unwrap_or_default()
+        }),
+    };
+    match folder {
+        Some(folder) => format!("{lead} in {folder}"),
+        None => lead,
+    }
 }
 
 /// What a palette entry does.
@@ -463,25 +469,35 @@ impl Shell {
     }
 
     /// Says where a file was written, for long enough to read the folder;
-    /// a click on the message shows the file in its folder.
+    /// a click on the message shows the file in its folder, where the
+    /// system has a file manager. A file a phone's picker chose reads as
+    /// what was chosen (`Picture.png in Download`), not Sue's copy.
     pub fn notify_saved(&mut self, path: &std::path::Path, note: &str) {
-        let name = path
-            .file_name()
-            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-        let folder = path
-            .parent()
-            .map_or_else(String::new, |folder| folder.display().to_string());
+        let (name, folder) = match sue_platform::shown_place(path) {
+            Some(shown) => (shown.name, shown.folder),
+            None => (
+                path.file_name()
+                    .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+                Some(
+                    path.parent()
+                        .map_or_else(String::new, |folder| folder.display().to_string()),
+                ),
+            ),
+        };
         let note = if note.is_empty() {
             String::new()
         } else {
             format!(" ({note})")
         };
+        let folder = folder.map_or_else(String::new, |folder| format!(" in {folder}"));
+        let reveal = sue_platform::file_manager().is_some();
+        let click = if reveal { ". Click to show it" } else { "" };
         self.message = Some((
-            format!("Saved {name}{note} in {folder}. Click to show it"),
+            format!("Saved {name}{note}{folder}{click}"),
             false,
             Instant::now() + self.config.message_duration.max(Duration::from_secs(10)),
         ));
-        self.message_path = Some(path.to_path_buf());
+        self.message_path = reveal.then(|| path.to_path_buf());
         self.touch();
     }
 
@@ -1603,12 +1619,11 @@ impl Shell {
                             .map(|extension| extension.to_string_lossy().to_uppercase())
                             .unwrap_or_default()
                     },
-                    detail: format!(
-                        "{verb} {} in {}",
-                        crate::ago(file.last(), now),
-                        folder_name(&file.path)
+                    detail: in_folder(
+                        format!("{verb} {}", crate::ago(file.last(), now)),
+                        &file.path,
                     ),
-                    hover: file.path.display().to_string(),
+                    hover: sue_platform::shown_path(&file.path),
                     open: HubRow::Open(file.path.clone()),
                     kept: None,
                 }
@@ -1631,12 +1646,8 @@ impl Shell {
                 ListRow {
                     title: file.title(),
                     kind: Self::studio_name(io, file.page.as_ref()),
-                    detail: format!(
-                        "{verb} {} in {}",
-                        crate::ago(when, now),
-                        folder_name(&file.path)
-                    ),
-                    hover: file.path.display().to_string(),
+                    detail: in_folder(format!("{verb} {}", crate::ago(when, now)), &file.path),
+                    hover: sue_platform::shown_path(&file.path),
                     open: HubRow::Open(file.path.clone()),
                     kept: None,
                 }
