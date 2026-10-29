@@ -426,7 +426,7 @@ impl Convert {
         // Results that would stay in the cache need a folder first; the
         // run goes on once one is chosen.
         if self.strands_next_to(sue_platform::stays_in_cache) {
-            Self::pick(cx, "run", "Choose Where Converted Files Go", true);
+            Self::pick(cx, "run", &tr!("choose-where-converted-files-go"), true);
             return;
         }
         let options = self.settled_options();
@@ -1191,11 +1191,9 @@ impl Convert {
         if self.strands_next_to(sue_platform::stays_in_cache) {
             ui.add(
                 egui::Label::new(
-                    RichText::new(
-                        "Sue works on copies of files you pick one by one, so Convert first asks which folder the results go to.",
-                    )
-                    .size(theme.small_size)
-                    .color(theme.muted),
+                    RichText::new(tr!("picked-copies-ask-for-a-folder"))
+                        .size(theme.small_size)
+                        .color(theme.muted),
                 )
                 .wrap(),
             );

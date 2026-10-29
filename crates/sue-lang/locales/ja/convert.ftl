@@ -102,6 +102,7 @@ save-to = 保存先
 next-to-each-file = 各ファイルの隣
 this-folder = このフォルダー:
 choose-where-converted-files-go = 変換したファイルの保存先を選ぶ
+picked-copies-ask-for-a-folder = 1つずつ選んだファイルはSueがコピーで扱うため、変換の前に結果を保存するフォルダーを尋ねます。
 change = 変更
 open = 開く
 file-name = ファイル名

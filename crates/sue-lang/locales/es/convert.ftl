@@ -102,6 +102,7 @@ save-to = Guardar en
 next-to-each-file = Junto a cada archivo
 this-folder = Esta carpeta:
 choose-where-converted-files-go = Elegir dónde van los archivos convertidos
+picked-copies-ask-for-a-folder = Sue trabaja con copias de los archivos que eliges uno a uno, así que Convertir pregunta primero a qué carpeta van los resultados.
 change = Cambiar
 open = Abrir
 file-name = Nombre del archivo
