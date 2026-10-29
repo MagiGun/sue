@@ -718,13 +718,7 @@ mod tests {
             header_rows: 1,
             shares: vec![0.75, 0.25],
         };
-        let text = format!(
-            "Before
-{}
-After
-",
-            sue_model::OBJECT
-        );
+        let text = format!("Before\n{}\nAfter\n", sue_model::OBJECT);
         let mut marks = TextMarks::new();
         let at = text.find(sue_model::OBJECT).unwrap();
         marks.set(

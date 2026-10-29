@@ -61,10 +61,11 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false }
 objc2-ui-kit = { version = "0.3", default-features = false }
 
-# Typography and publishing: reading installed fonts, and the deflate
-# inside DOCX, EPUB, ODT and PDF files.
+# Typography and publishing: reading installed fonts, the deflate inside
+# DOCX, EPUB, ODT and PDF files, and regular expressions in find.
 miniz_oxide = "0.8"
 ttf-parser = "0.25"
+regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
 
 # The converter: more picture formats in and out, and FLAC out.
 flacenc = { version = "0.5", default-features = false }

@@ -2280,6 +2280,8 @@ impl SueWriter {
         }
         ui.checkbox(&mut find.case, "Match case");
         ui.checkbox(&mut find.words, "Whole words");
+        ui.checkbox(&mut find.regex, "Regular expressions")
+            .on_hover_text("Patterns such as \\d+ or ^Chapter; $1 in the replacement puts back what a group caught");
         if self.project.is_some() {
             ui.checkbox(&mut find.project, "Whole project");
         }

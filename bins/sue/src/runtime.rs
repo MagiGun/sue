@@ -4328,6 +4328,72 @@ f 2 3 4
         let _ = std::fs::remove_dir_all(&root);
     }
     #[test]
+    fn sue_writer_changes_case_keeping_formatting_and_undoes_it() {
+        let (mut runtime, root) = runtime("sue-writer-case");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let writer = AppletId::new(sue_writer::ID).unwrap();
+        runtime.request(
+            ShellRequest::Create {
+                applet: writer.clone(),
+                key: "blank".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![egui::Event::Text("the storm came".to_owned())]
+            } else {
+                Vec::new()
+            }
+        });
+        runtime.typing.flush(&mut runtime.engine.history);
+        let text = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .find_map(|(_, entity)| {
+                    entity
+                        .string_buffer()
+                        .map(|text| text.as_str().to_owned())
+                        .filter(|text| text.contains("storm"))
+                })
+                .unwrap_or_default()
+        };
+        assert_eq!(text(&runtime), "the storm came\n");
+        // Nothing selected: the word at the caret changes.
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: writer.clone(),
+                command: "format.case.upper".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(text(&runtime), "the storm CAME\n");
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![egui::Event::Key {
+                    key: egui::Key::Z,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::COMMAND,
+                }]
+            } else {
+                Vec::new()
+            }
+        });
+        assert_eq!(text(&runtime), "the storm came\n");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_writer_tables_take_typing_grow_with_tab_undo_and_export() {
         let (mut runtime, root) = runtime("sue-writer-tables");
         let ctx = egui::Context::default();

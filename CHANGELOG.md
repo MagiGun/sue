@@ -13,6 +13,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Find and Replace in Sue Writer takes regular expressions, and the
+  replacement can put back what a group caught (`$1`).
+- Change Case in Sue Writer (Format, Text): Sentence case, lowercase,
+  UPPERCASE, Capitalize Every Word and tOGGLE cASE.
 - Headers and footers in Sue Writer (Insert, Header and Footer): left,
   middle and right parts with the page number, page count, title, author
   and date, and a different first page. They print in PDFs and go into

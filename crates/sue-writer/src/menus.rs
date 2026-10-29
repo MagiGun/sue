@@ -100,6 +100,14 @@ pub fn menus() -> Vec<Menu> {
                         item("Subscript", "format.subscript").key("Ctrl+="),
                         item("Small Capitals", "format.small_caps"),
                         item("Code", "format.code"),
+                        MenuItem::Separator,
+                        MenuItem::sub(
+                            "Change Case",
+                            sue_type::case::Case::ALL
+                                .iter()
+                                .map(|(_, key, name)| item(*name, format!("format.case.{key}")))
+                                .collect(),
+                        ),
                     ],
                 ),
                 MenuItem::sub(
