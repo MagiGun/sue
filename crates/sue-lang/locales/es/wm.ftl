@@ -72,3 +72,39 @@ pick-a-color = Elegir un color
 none = Ninguno
 curve-pen-pressure = Presión del lápiz
 curve-output = Salida
+
+## Las listas del Hub
+
+ago-just-now = ahora mismo
+ago-yesterday = ayer
+ago-minutes = { $count ->
+    [one] hace un minuto
+   *[other] hace { $count } minutos
+}
+ago-hours = { $count ->
+    [one] hace una hora
+   *[other] hace { $count } horas
+}
+ago-days = { $count ->
+    [one] hace un día
+   *[other] hace { $count } días
+}
+click-to-show-it = {"."} Haz clic para mostrarlo
+discard = Descartar
+really-discard = Descartar de verdad
+recover = Recuperar
+files-projects-you-open-save-show = Aquí aparecen los archivos y proyectos que abres o guardas.
+in-folder = { $lead } en { $folder }
+kept-never-saved = Guardado { $value }, nunca guardado por ti
+kept-newer-than = Guardado { $value }, más reciente que { $value2 }
+open-recent = Abrir recientes
+opened = Abierto
+projects-you-save-sue-menu-project = Aquí aparecen los proyectos que guardas (menú Sue, Proyecto, Guardar proyecto).
+recent = Recientes
+saved = { $name }{ $note } guardado{ $folder }{ $click }
+saved-2 = Guardado
+saved-in-folder = {" "}en { $folder }
+saved-projects = Proyectos guardados
+unsaved-work = Trabajo sin guardar
+untitled = Sin título
+work-sue-keeps-you-before-saved = Aquí aparece el trabajo que Sue guarda por ti antes de que lo guardes, para recuperarlo o descartarlo.

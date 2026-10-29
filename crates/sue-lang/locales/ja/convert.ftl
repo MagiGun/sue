@@ -161,3 +161,6 @@ kind-picture = 画像
 kind-sound = 音
 kind-text-file = テキストファイル
 kind-other-file = その他のファイル
+files-converted-failed-into-2 = { $count } 件変換、{ $failed } 件失敗、保存先 { $value }
+show-it-in = { $manager } で表示
+show-result-when-done = 完了したら { $manager } で結果を表示

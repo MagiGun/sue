@@ -104,3 +104,5 @@ filter-settings-ellipsis = 設定を絞り込む...
 results-for = 「{ $filter }」の結果
 applet-name = 設定
 applet-summary = すべての設定とすべてのカスタマイズ項目。
+sue-keeps-work-you-have-not = Sue は保存していない作業を自動で保管します。ハブの「未保存の作業」から復元または破棄できます。
+unsaved-work = 未保存の作業

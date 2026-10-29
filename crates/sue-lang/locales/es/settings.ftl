@@ -104,3 +104,5 @@ filter-settings-ellipsis = Filtrar ajustes...
 results-for = Resultados para «{ $filter }»
 applet-name = Ajustes
 applet-summary = Todos los ajustes y todos los parámetros de estilo.
+sue-keeps-work-you-have-not = Sue guarda por sí mismo el trabajo que no has guardado. El Hub lo muestra en Trabajo sin guardar, para recuperarlo o descartarlo.
+unsaved-work = Trabajo sin guardar
