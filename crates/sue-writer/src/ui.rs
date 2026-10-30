@@ -812,19 +812,9 @@ impl SueWriter {
                 {
                     self.editor.set_char(cx, kind::FONT, None, &tr!("font"));
                 }
-                let needle = filter.to_lowercase();
-                for family in sue_wm::fonts::families() {
-                    if !needle.is_empty() && !family.to_lowercase().contains(&needle) {
-                        continue;
-                    }
-                    if ui.selectable_label(family == font, &family).clicked() {
-                        self.editor.set_char(
-                            cx,
-                            kind::FONT,
-                            Some(Value::Text(family.clone())),
-                            &tr!("font"),
-                        );
-                    }
+                if let Some(family) = sue_wm::fonts::list_ui(ui, &font, &filter) {
+                    self.editor
+                        .set_char(cx, kind::FONT, Some(Value::Text(family)), &tr!("font"));
                 }
             });
         let size = chars.size.unwrap_or(para.size);
@@ -3741,11 +3731,8 @@ fn font_picker(ui: &mut Ui, salt: &str, font: &mut String, filter: &mut String) 
         .width(180.0)
         .show_ui(ui, |ui| {
             ui.add(egui::TextEdit::singleline(filter).hint_text(tr!("search-fonts")));
-            let needle = filter.to_lowercase();
-            for family in sue_wm::fonts::families() {
-                if needle.is_empty() || family.to_lowercase().contains(&needle) {
-                    ui.selectable_value(font, family.clone(), family);
-                }
+            if let Some(family) = sue_wm::fonts::list_ui(ui, font, filter) {
+                *font = family;
             }
         });
 }

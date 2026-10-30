@@ -902,7 +902,7 @@ host:
 - plays sound through `cpal`'s Web Audio host, on the browser's own audio
   thread; seeds entity ids from the page (`random_seed`); runs background
   work where it is asked for (`THREADS` is `false`), and the font scan
-  finds nothing, so text uses the bundled Sue Sans and Sue Mono;
+  finds nothing, so text uses the bundled Ubuntu Light and Hack;
 - counts as a tablet or phone (by the shorter side) when touch is how the
   page is used (touch points and no fine pointer), else as a desktop;
   `OsFamily::Web`, and `GraphicsApi::WebGpu` or `Gles` (WebGL2).
@@ -1990,7 +1990,12 @@ and post tables and groups the faces into families with their weights and
 italics. `fonts::resolve` installs a face into egui the first time it is
 drawn (answering with the bundled family until egui has it) and says when
 bold or italic must be faked. `fonts::face_bytes` hands exporters the file.
-Sue's bundled fonts are always there as `Sue Sans` and `Sue Mono`.
+The two fonts egui bundles are always there under their own names,
+`Ubuntu Light` and `Hack` (documents that name them `Sue Sans` and `Sue
+Mono`, as older ones do, still find them through `fonts::canonical`).
+Every font menu is `fonts::list_ui`: each family's name drawn in that
+family. It lays out only the rows on screen, loads just their regular
+faces (`fonts::preview`) and keeps the newest few dozen.
 
 **Styles (`sue-type::style`).** A `StyleSheet` holds named paragraph styles
 (font, size, weight, alignment, indents, spacing, line spacing, page break,

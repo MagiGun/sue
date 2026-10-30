@@ -1745,7 +1745,7 @@ fn text_ui(ui: &mut Ui, lettering: &mut crate::lettering::Lettering, theme: &The
         .show(ui, |ui| {
             label(ui, &tr!("font"), theme);
             let shown = if lettering.font.is_empty() {
-                tr!("sue-ubuntu-light")
+                tr!("default-font-ubuntu-light")
             } else {
                 lettering.font.clone()
             };
@@ -1757,10 +1757,11 @@ fn text_ui(ui: &mut Ui, lettering: &mut crate::lettering::Lettering, theme: &The
                     ui.selectable_value(
                         &mut lettering.font,
                         String::new(),
-                        tr!("sue-ubuntu-light"),
+                        tr!("default-font-ubuntu-light"),
                     );
-                    for family in sue_wm::fonts::families() {
-                        ui.selectable_value(&mut lettering.font, family.clone(), family);
+                    let selected = lettering.font.clone();
+                    if let Some(family) = sue_wm::fonts::list_ui(ui, &selected, "") {
+                        lettering.font = family;
                     }
                 });
             ui.end_row();

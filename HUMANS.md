@@ -614,7 +614,8 @@ letter or a report.
 
 It looks like a word processor: pages that fit the window and one short
 toolbar, with what Word and LibreOffice Writer keep at hand: Undo and Redo,
-paragraph styles, every font installed on your computer, sizes, bold, italic,
+paragraph styles, every font installed on your computer (each one's name
+shown in that font in the menu), sizes, bold, italic,
 underline, colors, highlights, alignment, lists and indents. Everything else
 is one menu away, grouped the way LibreOffice groups it: Format, Text for
 strikethrough, raised and lowered text and small capitals, then Align Text,
@@ -866,7 +867,8 @@ Sue Writer, the Image Viewer and the Converter.
 What the browser version leaves out, because a web page cannot do it, or
 because it runs as plain files with no server behind it:
 
-- **Your installed fonts.** Text uses Sue's own fonts.
+- **Your installed fonts.** Text uses the two fonts Sue carries, Ubuntu
+  Light and Hack.
 - **Typing on phones and tablets.** The on-screen keyboard does not come up,
   so use a computer to write.
 - **Work in the background.** The Converter and other long jobs make the page

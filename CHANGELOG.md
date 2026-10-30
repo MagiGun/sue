@@ -117,6 +117,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Font menus in Sue Writer and Sue Paint show each font's name in that
+  font, so you can see what you pick.
+- The two fonts Sue carries go by their real names, Ubuntu Light and
+  Hack, instead of "Sue Sans" and "Sue Mono". Documents that use the
+  old names open as before.
+
 - Sue Paint's File, Open Recent now shows the pictures from Sue's one list
   of recent files, the same one the Hub shows.
 

@@ -7,10 +7,14 @@
 //! because the family lacks that face. [`face_bytes`] hands the font file to
 //! exporters that embed fonts (PDF, e-books).
 //!
-//! Two families are always there, from the fonts Sue bundles: [`SANS`] and
-//! [`MONO`].
+//! Two families are always there, the fonts egui bundles, under their own
+//! names: [`SANS`] (Ubuntu Light) and [`MONO`] (Hack). Older documents name
+//! them "Sue Sans" and "Sue Mono", which still find them.
+//!
+//! The font menus draw each family's name in that family ([`list_ui`]),
+//! loading only the faces of the rows on screen and keeping a few dozen.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -20,9 +24,24 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use egui::{FontData, FontDefinitions, FontFamily};
 
 /// The bundled proportional family.
-pub const SANS: &str = "Sue Sans";
+pub const SANS: &str = "Ubuntu Light";
 /// The bundled monospace family.
-pub const MONO: &str = "Sue Mono";
+pub const MONO: &str = "Hack";
+
+/// The names the bundled families had before, as documents saved them.
+const LEGACY: [(&str, &str); 2] = [("Sue Sans", SANS), ("Sue Mono", MONO)];
+
+/// How many faces the font menus keep loaded for their previews.
+const PREVIEW_FACES: usize = 48;
+
+/// `name`, or the bundled family an older name stands for.
+#[must_use]
+pub fn canonical(name: &str) -> &str {
+    LEGACY
+        .iter()
+        .find(|(old, _)| name.eq_ignore_ascii_case(old))
+        .map_or(name, |(_, new)| new)
+}
 
 /// One face of an installed font file.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,6 +129,9 @@ struct Library {
     families: Arc<Vec<FontFamilyInfo>>,
     /// Faces installed into egui: name, file bytes, face index.
     installed: Vec<(String, Arc<Vec<u8>>, u32)>,
+    /// Faces loaded only to preview their family in a font menu, oldest
+    /// first: name, file bytes, face index.
+    previews: VecDeque<(String, Arc<Vec<u8>>, u32)>,
     /// File contents read so far.
     files: HashMap<PathBuf, Arc<Vec<u8>>>,
     /// The font the interface uses.
@@ -194,7 +216,16 @@ pub fn families() -> Vec<String> {
     let mut library = library();
     library.poll();
     let mut names = vec![SANS.to_owned(), MONO.to_owned()];
-    names.extend(library.families.iter().map(|family| family.name.clone()));
+    // A system that has them installed too lists them once.
+    names.extend(
+        library
+            .families
+            .iter()
+            .filter(|family| {
+                !family.name.eq_ignore_ascii_case(SANS) && !family.name.eq_ignore_ascii_case(MONO)
+            })
+            .map(|family| family.name.clone()),
+    );
     names
 }
 
@@ -229,6 +260,7 @@ pub fn resolve(ctx: &egui::Context, name: &str, bold: bool, italic: bool) -> Res
         fake_bold: bold,
         fake_italic: italic,
     };
+    let name = canonical(name);
     if name.eq_ignore_ascii_case(MONO) {
         return bundled(FontFamily::Monospace);
     }
@@ -291,6 +323,7 @@ pub fn face_bytes(name: &str, bold: bool, italic: bool) -> Option<(Arc<Vec<u8>>,
         let data = definitions.font_data.get(font)?;
         Some((Arc::new((*data.font).as_ref().to_vec()), data.index))
     };
+    let name = canonical(name);
     if name.eq_ignore_ascii_case(MONO) {
         return bundled("Hack");
     }
@@ -337,7 +370,10 @@ fn definitions_of(library: &Library) -> FontDefinitions {
         .get(&FontFamily::Proportional)
         .cloned()
         .unwrap_or_default();
-    for (key, bytes, index) in &library.installed {
+    for (key, bytes, index) in library.installed.iter().chain(&library.previews) {
+        if fonts.font_data.contains_key(key) {
+            continue;
+        }
         let mut data = FontData::from_owned(bytes.as_ref().clone());
         data.index = *index;
         fonts.font_data.insert(key.clone(), Arc::new(data));
@@ -348,6 +384,117 @@ fn definitions_of(library: &Library) -> FontDefinitions {
             .insert(FontFamily::Name(key.clone().into()), chain);
     }
     fonts
+}
+
+// ----- Font menus ----------------------------------------------------------
+
+/// The key a family's regular face is installed under, with the face, or
+/// `None` for the bundled families and unknown names.
+fn regular_key(name: &str) -> Option<(String, FontFace)> {
+    let name = canonical(name);
+    if name.eq_ignore_ascii_case(SANS) || name.eq_ignore_ascii_case(MONO) {
+        return None;
+    }
+    let face = find(name)?.face(false, false)?.clone();
+    let key = format!(
+        "{}#{}{}",
+        face.family,
+        face.weight,
+        if face.italic { "i" } else { "" }
+    );
+    Some((key, face))
+}
+
+/// Loads the regular faces of `names` so the next frame can draw each name
+/// in its own font. Only the newest [`PREVIEW_FACES`] stay loaded.
+pub fn preview(ctx: &egui::Context, names: &[String]) {
+    let wanted: Vec<(String, FontFace)> = names.iter().filter_map(|n| regular_key(n)).collect();
+    let mut library = library();
+    let mut changed = false;
+    for (key, face) in &wanted {
+        let known = library.installed.iter().any(|(k, ..)| k == key)
+            || library.previews.iter().any(|(k, ..)| k == key);
+        if known {
+            continue;
+        }
+        // Read without keeping the bytes in the file cache: a preview is
+        // dropped again when the menu scrolls on.
+        let bytes = match library.files.get(&face.path) {
+            Some(bytes) => bytes.clone(),
+            None => match sue_platform::fs::read(&face.path) {
+                Ok(bytes) => Arc::new(bytes),
+                Err(_) => continue,
+            },
+        };
+        library.previews.push_back((key.clone(), bytes, face.index));
+        changed = true;
+    }
+    let keep = PREVIEW_FACES.max(wanted.len());
+    while library.previews.len() > keep {
+        library.previews.pop_front();
+        changed = true;
+    }
+    if changed {
+        let definitions = definitions_of(&library);
+        drop(library);
+        ctx.set_fonts(definitions);
+        ctx.request_repaint();
+    }
+}
+
+/// The egui family that draws `name`'s own name: its regular face once
+/// [`preview`] loaded it, else the interface font.
+#[must_use]
+pub fn preview_family(ctx: &egui::Context, name: &str) -> FontFamily {
+    let name = canonical(name);
+    if name.eq_ignore_ascii_case(MONO) {
+        return FontFamily::Monospace;
+    }
+    let Some((key, _)) = regular_key(name) else {
+        return FontFamily::Proportional;
+    };
+    let family = FontFamily::Name(key.into());
+    if ctx.fonts(|fonts| fonts.definitions().families.contains_key(&family)) {
+        family
+    } else {
+        FontFamily::Proportional
+    }
+}
+
+/// The installed families as a list for a font menu, each name drawn in
+/// its own font, filtered by `filter` (any case) and with `selected`
+/// marked. Only the rows on screen are laid out and loaded. Answers the
+/// family clicked.
+pub fn list_ui(ui: &mut egui::Ui, selected: &str, filter: &str) -> Option<String> {
+    let needle = filter.to_lowercase();
+    let names: Vec<String> = families()
+        .into_iter()
+        .filter(|name| needle.is_empty() || name.to_lowercase().contains(&needle))
+        .collect();
+    let selected = canonical(selected);
+    let size = ui.style().text_styles[&egui::TextStyle::Body].size * 1.15;
+    let row = (size * 1.6).max(ui.spacing().interact_size.y);
+    let mut picked = None;
+    egui::ScrollArea::vertical()
+        .id_salt("sue-font-list")
+        .max_height(340.0)
+        .auto_shrink([false, true])
+        .show_rows(ui, row, names.len(), |ui, rows| {
+            let shown = &names[rows];
+            preview(ui.ctx(), shown);
+            for name in shown {
+                let family = preview_family(ui.ctx(), name);
+                let text = egui::RichText::new(name.as_str()).font(egui::FontId::new(size, family));
+                let response = ui.add_sized(
+                    [ui.available_width(), row],
+                    egui::Button::selectable(name.eq_ignore_ascii_case(selected), text),
+                );
+                if response.clicked() {
+                    picked = Some(name.clone());
+                }
+            }
+        });
+    picked
 }
 
 // ----- Other scripts -----------------------------------------------------------
@@ -669,5 +816,41 @@ mod tests {
         );
         assert!(face_bytes(SANS, false, false).is_some_and(|(bytes, _)| bytes.len() > 1000));
         assert_eq!(&families()[..2], &[SANS.to_owned(), MONO.to_owned()]);
+    }
+
+    #[test]
+    fn older_names_of_the_bundled_families_still_resolve() {
+        let ctx = egui::Context::default();
+        assert_eq!(canonical("Sue Sans"), SANS);
+        assert_eq!(canonical("sue mono"), MONO);
+        assert_eq!(canonical("Georgia"), "Georgia");
+        assert_eq!(
+            resolve(&ctx, "Sue Mono", false, false).family,
+            FontFamily::Monospace
+        );
+        assert_eq!(
+            face_bytes("Sue Sans", false, false),
+            face_bytes(SANS, false, false)
+        );
+        assert!(!families().iter().any(|name| name.starts_with("Sue ")));
+    }
+
+    #[test]
+    fn a_font_menu_draws_the_bundled_names_in_their_fonts() {
+        let ctx = egui::Context::default();
+        assert_eq!(preview_family(&ctx, MONO), FontFamily::Monospace);
+        assert_eq!(preview_family(&ctx, SANS), FontFamily::Proportional);
+        // An unknown family is never loaded and draws in the interface font.
+        preview(&ctx, &["No Such Family 123".to_owned()]);
+        assert_eq!(
+            preview_family(&ctx, "No Such Family 123"),
+            FontFamily::Proportional
+        );
+        let mut picked = None;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            picked = list_ui(ui, SANS, "hack");
+        });
+        output.textures_delta.clear();
+        assert_eq!(picked, None);
     }
 }
