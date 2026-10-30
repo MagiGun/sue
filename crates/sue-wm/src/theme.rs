@@ -308,7 +308,11 @@ impl Theme {
         visuals.button_frame = true;
         visuals.striped = false;
         visuals.slider_trailing_fill = true;
-        visuals.handle_shape = egui::style::HandleShape::Circle;
+        // Slider handles are drawn as rectangles of this unusual shape so
+        // that [`reshape_handles`] can find them and give them Sue's look.
+        visuals.handle_shape = egui::style::HandleShape::Rect {
+            aspect_ratio: HANDLE_MARK,
+        };
         visuals.indent_has_left_vline = false;
         visuals
     }
@@ -351,9 +355,127 @@ impl Theme {
     }
 }
 
+/// The width over height egui draws slider handles at, so that
+/// [`reshape_handles`] knows them from every other rectangle.
+pub const HANDLE_MARK: f32 = 0.314_159;
+
+/// A slider handle's height, as a share of the circle egui would draw.
+const HANDLE_HEIGHT: f32 = 0.72;
+/// A slider handle's width, as a share of that circle.
+const HANDLE_WIDTH: f32 = 0.3;
+
+/// Gives every slider handle painted this frame Sue's look: a thin,
+/// slightly tall rectangle `---[]---`, a little shorter than egui's circle
+/// was. egui sizes a handle from the slider's height alone, so the handles
+/// are drawn in an unusual shape ([`HANDLE_MARK`]) and resized here, every
+/// slider in Sue at once. Call it once the frame's interface is drawn.
+pub fn reshape_handles(ctx: &egui::Context) {
+    let layers: Vec<egui::LayerId> = ctx.memory(|memory| memory.layer_ids().collect());
+    ctx.graphics_mut(|graphics| {
+        for layer in layers {
+            let Some(list) = graphics.get_mut(layer) else {
+                continue;
+            };
+            for index in 0..list.next_idx().0 {
+                list.mutate_shape(egui::layers::ShapeIdx(index), |clipped| {
+                    reshape(&mut clipped.shape);
+                });
+            }
+        }
+    });
+}
+
+/// [`reshape_handles`] for one shape and the shapes inside it.
+fn reshape(shape: &mut egui::Shape) {
+    match shape {
+        egui::Shape::Vec(shapes) => shapes.iter_mut().for_each(reshape),
+        egui::Shape::Rect(rect) => {
+            let size = rect.rect.size();
+            if size.x <= 0.0 || size.y <= 0.0 {
+                return;
+            }
+            // Across the rail and along it: a vertical slider's handle
+            // lies on its side.
+            let (across, along, upright) = if size.x <= size.y {
+                (size.y, size.x, true)
+            } else {
+                (size.x, size.y, false)
+            };
+            if ((along / across) - HANDLE_MARK).abs() > 1e-3 {
+                return;
+            }
+            let height = across * HANDLE_HEIGHT;
+            let width = (across * HANDLE_WIDTH).max(3.0);
+            let size = if upright {
+                egui::vec2(width, height)
+            } else {
+                egui::vec2(height, width)
+            };
+            rect.rect = egui::Rect::from_center_size(rect.rect.center(), size);
+            // Square, not a pill: `[]`.
+            rect.corner_radius = CornerRadius::same(1);
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slider_handles_become_thin_and_a_little_shorter() {
+        let ctx = egui::Context::default();
+        let mut rice = RiceSchema::parse(sue_rice::DEFAULT_RICE).unwrap();
+        crate::register_rice(&mut rice).unwrap();
+        Theme::from_rice(&rice).apply(&ctx, None, None);
+        let mut value = 0.5_f32;
+        let mut tall = 0.5_f32;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.add(egui::Slider::new(&mut value, 0.0..=1.0));
+            ui.add(egui::Slider::new(&mut tall, 0.0..=1.0).vertical());
+            ui.add(egui::Button::new("A button"));
+            reshape_handles(ui.ctx());
+        });
+        output.textures_delta.clear();
+        let mut handles = Vec::new();
+        let mut collect = |shape: &egui::Shape| {
+            if let egui::Shape::Rect(rect) = shape {
+                handles.push(rect.rect);
+            }
+        };
+        for clipped in &output.shapes {
+            match &clipped.shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(&mut collect),
+                shape => collect(shape),
+            }
+        }
+        let thin: Vec<_> = handles
+            .iter()
+            .filter(|rect| {
+                let (long, short) = (
+                    rect.width().max(rect.height()),
+                    rect.width().min(rect.height()),
+                );
+                (short / long - HANDLE_WIDTH / HANDLE_HEIGHT).abs() < 0.01
+            })
+            .collect();
+        assert_eq!(thin.len(), 2, "both handles: {handles:?}");
+        assert!(
+            thin[0].height() > thin[0].width(),
+            "upright on a level slider"
+        );
+        assert!(
+            thin[1].width() > thin[1].height(),
+            "on its side on a vertical one"
+        );
+        // Nothing keeps egui's own shape.
+        assert!(
+            handles
+                .iter()
+                .all(|rect| ((rect.width() / rect.height()) - HANDLE_MARK).abs() > 1e-3)
+        );
+    }
 
     #[test]
     fn studios_wear_a_preset_sues_theme_or_their_own_colors() {

@@ -13,6 +13,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Slider handles are thin rectangles, a little shorter than the circles
+  they were: `---[]---`.
 - Huge brushes and erasers in Sue Paint keep up: painting with a 2000
   pixel brush on a large picture with many layers takes about a
   millisecond a frame, where it used to take a quarter of a second, in

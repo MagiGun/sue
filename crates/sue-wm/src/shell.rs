@@ -1488,6 +1488,7 @@ impl Shell {
         if io.typing.flush_if_paused(io.history, now) {
             self.touch();
         }
+        crate::theme::reshape_handles(&ctx);
     }
 
     /// The theme a page wears: its own (its rice section's `theme`), or
