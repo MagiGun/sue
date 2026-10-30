@@ -747,6 +747,37 @@ impl Tip {
     }
 }
 
+/// A soft tip's coverage looked up by squared distance over squared
+/// radius, so a pixel costs no square root and no smoothstep.
+#[derive(Clone, Debug)]
+struct Falloff(Vec<f32>);
+
+impl Falloff {
+    const STEPS: usize = 4096;
+
+    /// The table for `tip`, or `None` for a hard tip (worked out exactly).
+    fn of(tip: &Tip) -> Option<Self> {
+        (tip.hardness < 0.99).then(|| {
+            Self(
+                (0..=Self::STEPS)
+                    .map(|i| tip.coverage((i as f32 / Self::STEPS as f32).sqrt(), 1.0))
+                    .collect(),
+            )
+        })
+    }
+
+    /// Coverage at squared distance over squared radius `u`.
+    fn at(&self, u: f32) -> f32 {
+        if u >= 1.0 {
+            return 0.0;
+        }
+        let f = u.max(0.0) * Self::STEPS as f32;
+        let i = (f as usize).min(Self::STEPS - 1);
+        let w = f - i as f32;
+        self.0[i] + (self.0[i + 1] - self.0[i]) * w
+    }
+}
+
 /// Deterministic paper grain at a pixel, 0 to 1.
 fn grain_at(x: u32, y: u32) -> f32 {
     let mut h = x.wrapping_mul(0x9E37_79B1) ^ y.wrapping_mul(0x85EB_CA77);
@@ -796,8 +827,10 @@ struct TileState {
     /// Where its pixels changed since the screen last looked,
     /// `[x0, y0, x1, y1]` in layer pixels.
     fresh: Option<[u32; 4]>,
-    /// How many of its pixels the stroke covers fully.
-    full: u32,
+    /// The least coverage any of its pixels has from a pen's stroke: a
+    /// tile already covered this much gets nothing more from a dab or line
+    /// no stronger, and is passed over whole.
+    least: f32,
 }
 
 /// How painted coverage turns into pixels.
@@ -845,6 +878,11 @@ pub struct Stroke {
     pending: Option<Sample>,
     /// Painting the waiting point now, however close.
     flushing: bool,
+    /// The radius and strength the line last ended with, at the point it
+    /// goes on from: what is behind that point is painted already.
+    ended: Option<(f32, f32)>,
+    /// The tip's soft edge, looked up.
+    falloff: Option<std::sync::Arc<Falloff>>,
 }
 
 impl Stroke {
@@ -876,6 +914,8 @@ impl Stroke {
             copies: vec![SAME],
             pending: None,
             flushing: false,
+            ended: None,
+            falloff: Falloff::of(&tip).map(std::sync::Arc::new),
         }
     }
 
@@ -1010,14 +1050,17 @@ impl Stroke {
         };
         match self.samples.last().copied() {
             None => {
+                let mut ended = None;
                 for copy in &copies {
                     let sample = through(copy, sample);
                     if self.tip.dabbed() {
                         self.dab(raster, sample, 0.0, selection);
                     } else {
-                        self.capsule(raster, sample, sample, 0.0, 0.0, selection);
+                        ended =
+                            Some(self.capsule(raster, sample, sample, 0.0, 0.0, None, selection));
                     }
                 }
+                self.ended = ended;
             }
             Some(last) => {
                 let length = distance(last.at, at);
@@ -1027,9 +1070,20 @@ impl Stroke {
                 // A continuous line redraws the brush's whole width for
                 // each point, so a big brush waits until it has moved a
                 // twenty-fifth of its width: a 1500 pixel brush paints
-                // every 30 pixels, not every 3, and looks the same.
+                // every 30 pixels, not every 3, and looks the same. A soft
+                // brush redraws its whole fading front each time for
+                // changes too faint to see, so it waits up to three times
+                // as long.
                 let radius = self.tip.size * 0.5 * self.width;
-                if !self.tip.dabbed() && !self.flushing && length < radius * 0.04 {
+                let mut wait = 0.04 + 0.08 * (1.0 - self.tip.hardness.clamp(0.0, 1.0));
+                if self.total.is_some() {
+                    // Finishing: the path is a smooth curve already, and
+                    // nobody waits on its head, so it goes in longer
+                    // steps (an eighth of the width bends a curve less
+                    // than a pixel at any width).
+                    wait = wait.max(0.12);
+                }
+                if !self.tip.dabbed() && !self.flushing && length < radius * wait {
                     self.pending = Some(sample);
                     return;
                 }
@@ -1038,6 +1092,7 @@ impl Stroke {
                 // Every copy starts from the same dab spacing.
                 let since = self.since_dab;
                 let mut after = since;
+                let (before, mut ended) = (self.ended, None);
                 for (index, copy) in copies.iter().enumerate() {
                     let (a, b) = (through(copy, last), through(copy, sample));
                     if self.tip.dabbed() {
@@ -1047,9 +1102,18 @@ impl Stroke {
                             after = self.since_dab;
                         }
                     } else {
-                        self.capsule(raster, a, b, start, start + length, selection);
+                        ended = Some(self.capsule(
+                            raster,
+                            a,
+                            b,
+                            start,
+                            start + length,
+                            before,
+                            selection,
+                        ));
                     }
                 }
+                self.ended = ended;
                 self.since_dab = after;
                 self.travelled += length;
             }
@@ -1098,6 +1162,9 @@ impl Stroke {
             mean(&self.samples[..count.min(6)]),
             mean(&self.samples[count.saturating_sub(6)..]),
         ));
+        // What the screen shows now, to tell it afterwards only what the
+        // finished stroke changed (its ends, mostly), not the whole stroke.
+        let shown = self.shown(raster);
         self.restart(raster);
         self.total = Some(length(&path));
         self.flicked = self.total.unwrap_or(0.0) - before;
@@ -1110,6 +1177,77 @@ impl Stroke {
         self.total = None;
         self.flicked = 0.0;
         self.end_speeds = None;
+        self.changed_since(raster, shown);
+    }
+
+    /// Each tile's pixels as they are, with what the screen has yet to be
+    /// told about it.
+    #[allow(clippy::type_complexity)]
+    fn shown(&self, raster: &RasterTile2D) -> Vec<((u32, u32), Vec<u8>, Option<[u32; 4]>)> {
+        let Some(bytes) = raster.bytes() else {
+            return Vec::new();
+        };
+        let stride = raster.width() as usize * 4;
+        self.tiles
+            .iter()
+            .map(|(key, tile)| {
+                let [x, y, w, h] = tile.rect;
+                let row = w as usize * 4;
+                let mut pixels = Vec::with_capacity(row * h as usize);
+                for line in 0..h as usize {
+                    let at = (y as usize + line) * stride + x as usize * 4;
+                    pixels.extend_from_slice(&bytes[at..at + row]);
+                }
+                (*key, pixels, tile.fresh)
+            })
+            .collect()
+    }
+
+    /// Marks in each tile of `shown` (see [`Self::shown`]) just where its
+    /// pixels now differ from then, with what was not yet told before.
+    #[allow(clippy::type_complexity)]
+    fn changed_since(
+        &mut self,
+        raster: &RasterTile2D,
+        shown: Vec<((u32, u32), Vec<u8>, Option<[u32; 4]>)>,
+    ) {
+        let Some(bytes) = raster.bytes() else {
+            return;
+        };
+        let stride = raster.width() as usize * 4;
+        for (key, pixels, untold) in shown {
+            let Some(tile) = self.tiles.get_mut(&key) else {
+                continue;
+            };
+            let [x, y, w, h] = tile.rect;
+            let row = w as usize * 4;
+            let mut differs: Option<[u32; 4]> = untold;
+            for line in 0..h as usize {
+                let at = (y as usize + line) * stride + x as usize * 4;
+                let now = &bytes[at..at + row];
+                let then = &pixels[line * row..(line + 1) * row];
+                if now == then {
+                    continue;
+                }
+                let first = now
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(then.as_chunks::<4>().0)
+                    .position(|(a, b)| a != b)
+                    .unwrap_or(0) as u32;
+                let last = now
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(then.as_chunks::<4>().0)
+                    .rposition(|(a, b)| a != b)
+                    .unwrap_or(0) as u32;
+                let yy = y + line as u32;
+                differs = Some(union(differs, [x + first, yy, x + last + 1, yy + 1]));
+            }
+            tile.fresh = differs;
+        }
     }
 
     /// Paints the point that was waiting for the pen to move further, so
@@ -1146,7 +1284,7 @@ impl Stroke {
                     bytes[at..at + row].copy_from_slice(&tile.before[line * row..(line + 1) * row]);
                 }
                 tile.mask.fill(0.0);
-                tile.full = 0;
+                tile.least = 0.0;
                 tile.fresh = Some([x, y, x + w, y + h]);
                 self.dirty = Some(union(self.dirty, [x, y, x + w, y + h]));
             }
@@ -1156,6 +1294,7 @@ impl Stroke {
         self.since_dab = 0.0;
         self.carried = self.color;
         self.last_dab = None;
+        self.ended = None;
     }
 
     /// How much of its size the stroke has at arc length `s`: it grows over
@@ -1213,7 +1352,11 @@ impl Stroke {
         up.min(down)
     }
 
-    /// Paints the tapered capsule from `a` (arc length `s0`) to `b` (`s1`).
+    /// Paints the tapered capsule from `a` (arc length `s0`) to `b` (`s1`),
+    /// and answers the radius and strength it ends with. `ended` is what
+    /// the line before it ended with at `a`: when `a` starts the same,
+    /// what lies behind `a` is that line's end already, and is passed over.
+    #[allow(clippy::too_many_arguments)]
     fn capsule(
         &mut self,
         raster: &mut RasterTile2D,
@@ -1221,8 +1364,9 @@ impl Stroke {
         b: Sample,
         s0: f32,
         s1: f32,
+        ended: Option<(f32, f32)>,
         selection: Option<&Selection>,
-    ) {
+    ) -> (f32, f32) {
         let (ra, sa) = self.tip.dab_at(a.pressure, a.speed, self.chance(s0));
         let (rb, sb) = self.tip.dab_at(b.pressure, b.speed, self.chance(s1));
         let (ra, sa) = (ra * a.width, sa * a.alpha);
@@ -1252,7 +1396,25 @@ impl Stroke {
         // The most any pixel gets: thin lines keep their weight as lighter
         // ink, so their strength never passes the larger end's.
         let peak = sa.max(sb).min(1.0);
-        let span = |py: f32| capsule_span(a.at, b.at, reach, py);
+        // Behind `a` the nearest point of the segment is `a` itself, so
+        // there the capsule is the disc the line before ended with.
+        let ahead = length_sq > 0.0 && ended == Some((ra, sa));
+        let span = |py: f32| {
+            let (mut from, mut to) = capsule_span(a.at, b.at, reach, py)?;
+            if ahead {
+                // (px - ax) * dx + (py - ay) * dy > 0.
+                let along = (py - ay) * dy;
+                if dx > 1e-6 {
+                    from = from.max(ax - along / dx);
+                } else if dx < -1e-6 {
+                    to = to.min(ax - along / dx);
+                } else if along <= 0.0 {
+                    return None;
+                }
+            }
+            (from <= to).then_some((from, to))
+        };
+        let falloff = self.falloff.clone();
         self.apply(raster, rect, selection, Mode::Max, peak, span, |px, py| {
             let t = if length_sq > 0.0 {
                 (((px - ax) * dx + (py - ay) * dy) / length_sq).clamp(0.0, 1.0)
@@ -1267,7 +1429,6 @@ impl Stroke {
             if radius >= 0.7 && d2 < inner * inner {
                 return strength;
             }
-            let d = d2.sqrt();
             // A line thinner than a pixel keeps its weight as lighter ink,
             // unless it is never to get thinner than a pixel.
             if tip.at_least_one {
@@ -1276,8 +1437,12 @@ impl Stroke {
                 strength *= radius / 0.7;
                 radius = 0.7;
             }
-            tip.coverage(d, radius) * strength
+            match &falloff {
+                Some(falloff) => falloff.at(d2 / (radius * radius)) * strength,
+                None => tip.coverage(d2.sqrt(), radius) * strength,
+            }
         });
+        (rb, sb)
     }
 
     /// Stamps dabs every `spacing` from `a` (arc length `start`) to `b`.
@@ -1374,6 +1539,8 @@ impl Stroke {
         let inner = tip.inner(radius);
         // A picture tip fills its square; a round one, its disc.
         let round = shaped.is_none();
+        let falloff = self.falloff.clone();
+        let radius_sq = radius * radius;
         let span = move |py: f32| {
             if !round {
                 return Some((x - reach, x + reach));
@@ -1398,7 +1565,10 @@ impl Stroke {
                 if d2 < inner * inner {
                     return strength;
                 }
-                tip.coverage(d2.sqrt(), radius) * strength
+                match &falloff {
+                    Some(falloff) => falloff.at(d2 / radius_sq) * strength,
+                    None => tip.coverage(d2.sqrt(), radius) * strength,
+                }
             },
         );
     }
@@ -1458,7 +1628,7 @@ impl Stroke {
             if tip.eraser {
                 None
             } else {
-                Some(color.map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8))
+                Some(color.map(to_byte))
             }
         });
         let Some(bytes) = raster.bytes_mut() else {
@@ -1486,7 +1656,7 @@ impl Stroke {
                         before,
                         mask: vec![0.0; rect[2] as usize * rect[3] as usize],
                         fresh: None,
-                        full: 0,
+                        least: 0.0,
                     }
                 });
             }
@@ -1507,7 +1677,11 @@ impl Stroke {
                 bands[(ty - ty0) as usize].2.push(state);
             }
         }
+        let max = matches!(mode, Mode::Max);
         let work = |band_y: u32, band: &mut [u8], tiles: &mut [&mut TileState]| {
+            // For each tile: how many of its pixels this pass went over, and
+            // the least coverage among them.
+            let mut seen: Vec<(u32, f32)> = vec![(0, f32::INFINITY); tiles.len()];
             for y in y0.max(band_y)..y1.min(band_y + TILE) {
                 let fy = y as f32 + 0.5;
                 let Some((from, to)) = span(fy) else {
@@ -1520,82 +1694,121 @@ impl Stroke {
                     continue;
                 }
                 let line = (y - band_y) as usize * stride;
-                for state in tiles.iter_mut() {
-                    let [rx, ry, rw, rh] = state.rect;
+                for (index, state) in tiles.iter_mut().enumerate() {
+                    let [rx, ry, rw, _] = state.rect;
                     let (sx0, sx1) = (row_x0.max(rx), row_x1.min(rx + rw));
                     if sx0 >= sx1 {
                         continue;
                     }
-                    // A tile the stroke covers fully already gets nothing
-                    // more from a pen.
-                    if matches!(mode, Mode::Max) && peak <= 1.0 && state.full == rw * rh {
+                    // A tile the stroke covers this much already gets
+                    // nothing more from a pen.
+                    if max && peak <= state.least {
                         continue;
                     }
                     let local_row = ((y - ry) * rw) as usize;
                     let (mut low, mut high) = (u32::MAX, 0);
+                    let mut least = f32::INFINITY;
                     for x in sx0..sx1 {
                         let local = local_row + (x - rx) as usize;
                         let old = state.mask[local];
-                        if matches!(mode, Mode::Max) && old >= peak {
+                        if max && old >= peak {
+                            least = least.min(old);
                             continue;
                         }
                         let mut cover = amount(x as f32 + 0.5, fy);
                         if cover <= 0.0 {
+                            least = least.min(old);
                             continue;
                         }
+                        // Paper grain and the selection are the same for a
+                        // pixel all stroke long: a pen's coverage keeps
+                        // without them (so it reaches the full strength and
+                        // is passed over after), and they shade the pixel.
+                        let mut shade = 1.0;
                         if tip.grain > 0.0 {
-                            cover *= 1.0 - tip.grain * grain_at(x, y);
+                            shade = 1.0 - tip.grain * grain_at(x, y);
                         }
                         if let Some(selection) = selection {
-                            cover *= selection.at(x, y);
+                            shade *= selection.at(x, y);
+                        }
+                        if !max {
+                            cover *= shade;
                         }
                         let at = line + x as usize * 4;
-                        let mask = &mut state.mask[local];
                         let pixel = match mode {
                             Mode::Max | Mode::Accumulate => {
-                                *mask = match mode {
-                                    Mode::Max => old.max(cover),
-                                    _ => old + (1.0 - old) * cover,
+                                let mask = &mut state.mask[local];
+                                *mask = if max {
+                                    old.max(cover)
+                                } else {
+                                    old + (1.0 - old) * cover
                                 };
+                                least = least.min(*mask);
                                 if (*mask - old).abs() < 1e-6 {
                                     continue;
                                 }
-                                if *mask >= 1.0 && old < 1.0 {
-                                    state.full += 1;
-                                }
+                                let amount = if max { *mask * shade } else { *mask };
                                 let before = &state.before[local * 4..local * 4 + 4];
                                 match solid {
-                                    Some(paint) if *mask >= 1.0 => match paint {
+                                    Some(paint) if amount >= 1.0 => match paint {
                                         Some([r, g, b]) => [r, g, b, 255],
                                         None => [before[0], before[1], before[2], 0],
                                     },
-                                    _ => paint_pixel(before, *mask, color, tip.eraser, alpha_lock),
+                                    _ => paint_pixel(before, amount, color, tip.eraser, alpha_lock),
                                 }
                             }
                             Mode::Direct(rgb) => {
-                                *mask = old + (1.0 - old) * cover;
-                                if *mask >= 1.0 && old < 1.0 {
-                                    state.full += 1;
-                                }
                                 let now = [band[at], band[at + 1], band[at + 2], band[at + 3]];
                                 paint_pixel(&now, cover, rgb, tip.eraser, alpha_lock)
                             }
                         };
+                        // A pixel that comes out the same is not new to the
+                        // screen.
+                        if band[at..at + 4] == pixel {
+                            continue;
+                        }
                         band[at..at + 4].copy_from_slice(&pixel);
                         low = low.min(x);
                         high = x + 1;
                     }
+                    let tile = &mut seen[index];
+                    tile.0 += sx1 - sx0;
+                    tile.1 = tile.1.min(least);
                     if high > 0 {
                         state.fresh = Some(union(state.fresh, [low, y, high, y + 1]));
                     }
                 }
             }
+            // A pen's pass that went over a whole tile knows the least
+            // coverage in it.
+            if max {
+                for (state, (count, least)) in tiles.iter_mut().zip(seen) {
+                    if count == state.rect[2] * state.rect[3] && least.is_finite() {
+                        state.least = state.least.max(least);
+                    }
+                }
+            }
         };
-        let area = (x1 - x0) as usize * (y1 - y0) as usize;
-        let threads = if area < 1 << 17 || bands.len() < 2 {
+        // The pixels there is work for: the tiles a pen has not covered
+        // this much already. Starting threads costs more than a few tiles'
+        // work, so only that much work goes to every core.
+        let work_area: usize = bands
+            .iter()
+            .flat_map(|(_, _, tiles)| tiles.iter())
+            .filter(|state| !(max && peak <= state.least))
+            .map(|state| {
+                let [rx, ry, rw, rh] = state.rect;
+                let w = (x1.min(rx + rw)).saturating_sub(x0.max(rx));
+                let h = (y1.min(ry + rh)).saturating_sub(y0.max(ry));
+                w as usize * h as usize
+            })
+            .sum();
+        let threads = if work_area < 1 << 16 || bands.len() < 2 {
             1
         } else {
-            crate::composite::workers().min(bands.len())
+            crate::composite::workers()
+                .min(bands.len())
+                .min(work_area >> 15)
         };
         if threads <= 1 {
             for (band_y, band, mut tiles) in bands {
@@ -1770,7 +1983,21 @@ fn average(raster: &RasterTile2D, center: [f32; 2], radius: f32) -> Option<([f32
     ))
 }
 
-/// The pixel `before` becomes under a stroke covering it by `amount`.
+/// Bytes to 0 to 1, as `f32::from(byte) / 255.0` gives them.
+fn unit(byte: u8) -> f32 {
+    static TABLE: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| std::array::from_fn(|i| i as f32 / 255.0))[usize::from(byte)]
+}
+
+/// 0 to 1 to a byte, rounded to the nearest (without the slow library
+/// rounding a pixel loop cannot afford).
+fn to_byte(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
+}
+
+/// The pixel `before` becomes under a stroke covering it by `amount`: the
+/// paint laid over it (`BlendMode::Normal`), taken out of it (an eraser),
+/// or mixed into its color (locked alpha).
 fn paint_pixel(
     before: &[u8],
     amount: f32,
@@ -1778,31 +2005,35 @@ fn paint_pixel(
     eraser: bool,
     alpha_lock: bool,
 ) -> [u8; 4] {
-    let to_byte = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
-    let old = [
-        f32::from(before[0]) / 255.0,
-        f32::from(before[1]) / 255.0,
-        f32::from(before[2]) / 255.0,
-        f32::from(before[3]) / 255.0,
-    ];
+    if amount <= 0.0 {
+        return [before[0], before[1], before[2], before[3]];
+    }
+    let below = unit(before[3]);
     if eraser {
         return [
             before[0],
             before[1],
             before[2],
-            to_byte(old[3] * (1.0 - amount)),
+            to_byte(below * (1.0 - amount)),
         ];
     }
     if alpha_lock {
-        let mix = |channel: usize| old[channel] + (color[channel] - old[channel]) * amount;
+        let mix = |channel: usize| {
+            let old = unit(before[channel]);
+            old + (color[channel] - old) * amount
+        };
         return [to_byte(mix(0)), to_byte(mix(1)), to_byte(mix(2)), before[3]];
     }
-    let out = sue_model::BlendMode::Normal.composite(old, [color[0], color[1], color[2], amount]);
+    // Straight color over straight color.
+    let keep = below * (1.0 - amount);
+    let alpha = amount + keep;
+    let scale = 1.0 / alpha;
+    let channel = |index: usize| (amount * color[index] + keep * unit(before[index])) * scale;
     [
-        to_byte(out[0]),
-        to_byte(out[1]),
-        to_byte(out[2]),
-        to_byte(out[3]),
+        to_byte(channel(0)),
+        to_byte(channel(1)),
+        to_byte(channel(2)),
+        to_byte(alpha),
     ]
 }
 
@@ -2105,28 +2336,43 @@ fn catmull_rom([p0, p1, p2, p3]: [[f32; 2]; 4], u: f32) -> [f32; 2] {
 
 // ----- Stabilization ------------------------------------------------------------------
 
-/// Smooths the pointer: the brush follows it through a time-based filter
-/// (`level` 0 follows exactly, 100 trails far behind). With adjust by speed,
-/// the filter loosens as the pen speeds up, so quick lines stay snappy while
-/// slow ones lose their tremor.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Smooths the pointer as Clip Studio does: the brush follows the average
+/// of the pen's own path over a stretch behind it, measured along the path
+/// (`level` 0 follows exactly, 100 averages the most). The line keeps the
+/// same small distance behind the pen however fast it moves, takes no
+/// shortcuts across the curve, and when the pen lifts it finishes along
+/// the path to where the pen lifted.
+///
+/// With adjust by speed, the stretch shortens as the pen speeds up, so
+/// quick lines stay snappy while slow ones lose their tremor.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Stabilizer {
     level: u32,
     by_speed: bool,
-    at: Option<[f32; 2]>,
+    /// The pen's path behind it, one point every [`Self::STEP`] screen
+    /// points, the newest last.
+    path: std::collections::VecDeque<[f32; 2]>,
     raw: Option<[f32; 2]>,
+    /// Screen points per layer pixel, as last told.
+    scale: f32,
     speed: f32,
 }
 
 impl Stabilizer {
+    /// Distance between the path's points, in screen points.
+    const STEP: f32 = 1.5;
+    /// The stretch averaged at level 100, in screen points.
+    const MOST: f32 = 160.0;
+
     /// A stabilizer of `level` 0 to 100.
     #[must_use]
     pub fn new(level: u32, by_speed: bool) -> Self {
         Self {
             level: level.min(100),
             by_speed,
-            at: None,
+            path: std::collections::VecDeque::new(),
             raw: None,
+            scale: 1.0,
             speed: 0.0,
         }
     }
@@ -2137,52 +2383,115 @@ impl Stabilizer {
         self.speed
     }
 
-    /// The smoothed position for a raw sample (layer pixels). `scale` is
-    /// screen points per layer pixel (the zoom) and `dt` the seconds since
-    /// the previous sample.
-    pub fn sample(&mut self, raw: [f32; 2], scale: f32, dt: f32) -> [f32; 2] {
-        let dt = dt.clamp(1e-4, 0.1);
-        if let Some(previous) = self.raw {
-            let now = distance(previous, raw) * scale.max(1e-3) / dt;
-            self.speed = self.speed * 0.6 + now * 0.4;
-        }
-        self.raw = Some(raw);
+    /// How many of the path's points are averaged now.
+    fn window(&self) -> usize {
         let mut level = self.level as f32;
         if self.by_speed {
             let fast = ((self.speed - 150.0) / 1350.0).clamp(0.0, 1.0);
             level *= 1.0 - 0.9 * fast;
         }
-        let lag = level * 0.004;
-        let follow = if lag <= 0.0 {
-            1.0
-        } else {
-            1.0 - (-dt / lag).exp()
-        };
-        let next = match self.at {
-            Some(at) => [
-                at[0] + (raw[0] - at[0]) * follow,
-                at[1] + (raw[1] - at[1]) * follow,
-            ],
-            None => raw,
-        };
-        self.at = Some(next);
-        next
+        let stretch = Self::MOST * level / 100.0;
+        ((stretch / Self::STEP).round() as usize).max(1)
     }
 
-    /// Points that close the gap to `raw` when the pen lifts.
-    pub fn catch_up(&mut self, raw: [f32; 2]) -> Vec<[f32; 2]> {
-        let Some(at) = self.at else {
-            return vec![raw];
+    /// The average of the newest points of the path, the newest weighing
+    /// most (a triangle, so the line leans toward the pen).
+    fn average(&self) -> Option<[f32; 2]> {
+        let count = self.window().min(self.path.len());
+        if count == 0 {
+            return None;
+        }
+        let mut sum = [0.0_f32; 2];
+        let mut total = 0.0;
+        for (age, point) in self.path.iter().rev().take(count).enumerate() {
+            let weight = (count - age) as f32;
+            sum[0] += point[0] * weight;
+            sum[1] += point[1] * weight;
+            total += weight;
+        }
+        Some([sum[0] / total, sum[1] / total])
+    }
+
+    /// Adds the path from its last point to `to` (layer pixels), a point
+    /// every [`Self::STEP`] screen points, and the smoothed points it
+    /// gives.
+    fn extend(&mut self, to: [f32; 2], out: &mut Vec<[f32; 2]>) {
+        let step = Self::STEP / self.scale.max(1e-3);
+        let Some(&last) = self.path.back() else {
+            self.path.push_back(to);
+            out.extend(self.average());
+            return;
         };
-        let steps = ((distance(at, raw) / 2.0).ceil() as usize).clamp(1, 48);
-        let points = (1..=steps)
-            .map(|step| {
-                let t = step as f32 / steps as f32;
-                [at[0] + (raw[0] - at[0]) * t, at[1] + (raw[1] - at[1]) * t]
-            })
-            .collect();
-        self.at = Some(raw);
-        points
+        let length = distance(last, to);
+        if length < step {
+            return;
+        }
+        // Exactly a step apart, the rest left for the next sample; a long
+        // jump (a fast mouse) in at most 256 points.
+        let step = step.max(length / 256.0);
+        let unit = [(to[0] - last[0]) / length, (to[1] - last[1]) / length];
+        let mut along = step;
+        while along <= length {
+            self.path
+                .push_back([last[0] + unit[0] * along, last[1] + unit[1] * along]);
+            if let Some(point) = self.average() {
+                out.push(point);
+            }
+            along += step;
+        }
+        let keep = (Self::MOST / Self::STEP) as usize + 1;
+        while self.path.len() > keep {
+            self.path.pop_front();
+        }
+    }
+
+    /// The smoothed points for a raw sample (layer pixels): none while the
+    /// pen has barely moved, several after a long move. `scale` is screen
+    /// points per layer pixel (the zoom) and `dt` the seconds since the
+    /// previous sample.
+    pub fn sample(&mut self, raw: [f32; 2], scale: f32, dt: f32) -> Vec<[f32; 2]> {
+        let dt = dt.clamp(1e-4, 0.1);
+        self.scale = scale.max(1e-3);
+        if let Some(previous) = self.raw {
+            let now = distance(previous, raw) * self.scale / dt;
+            self.speed = self.speed * 0.6 + now * 0.4;
+        }
+        self.raw = Some(raw);
+        if self.level == 0 {
+            return vec![raw];
+        }
+        let mut out = Vec::new();
+        self.extend(raw, &mut out);
+        out
+    }
+
+    /// The points that finish the line as the pen lifts at `raw`: the
+    /// average slides along the path's own end to `raw`, so the line ends
+    /// where the pen lifted without a straight jump across the curve.
+    pub fn catch_up(&mut self, raw: [f32; 2]) -> Vec<[f32; 2]> {
+        if self.level == 0 || self.path.is_empty() {
+            return vec![raw];
+        }
+        let mut out = Vec::new();
+        self.extend(raw, &mut out);
+        // The newest point again and again, until the average is there.
+        let count = self.window().min(self.path.len());
+        for _ in 0..count {
+            self.path.push_back(raw);
+            if self.path.len() > count {
+                self.path.pop_front();
+            }
+            if let Some(point) = self.average() {
+                out.push(point);
+            }
+        }
+        out.push(raw);
+        out.dedup_by(|a, b| distance(*a, *b) < 0.05);
+        // Exactly where the pen lifted (a point a hair away was kept for it).
+        if let Some(last) = out.last_mut() {
+            *last = raw;
+        }
+        out
     }
 }
 
@@ -3025,36 +3334,56 @@ mod tests {
     }
 
     #[test]
-    fn the_stabilizer_lags_when_slow_and_keeps_up_when_fast() {
+    fn the_stabilizer_trails_a_steady_distance_and_ends_where_the_pen_lifts() {
         let mut free = Stabilizer::new(0, false);
-        assert_eq!(free.sample([10.0, 0.0], 1.0, 0.008), [10.0, 0.0]);
-        assert_eq!(free.sample([20.0, 0.0], 1.0, 0.008), [20.0, 0.0]);
-        // The same level, moving slowly and moving fast.
-        let lag = |by_speed: bool, step: f32| {
-            let mut steady = Stabilizer::new(30, by_speed);
+        assert_eq!(free.sample([10.0, 0.0], 1.0, 0.008), vec![[10.0, 0.0]]);
+        assert_eq!(free.sample([20.0, 0.0], 1.0, 0.008), vec![[20.0, 0.0]]);
+        // How far behind the pen the line is after a straight stroke, at
+        // a speed of `step` layer pixels a sample.
+        let lag = |level: u32, by_speed: bool, step: f32| {
+            let mut steady = Stabilizer::new(level, by_speed);
             let mut at = [0.0, 0.0];
             let mut x = 0.0;
-            for _ in 0..40 {
+            for _ in 0..200 {
                 x += step;
-                at = steady.sample([x, 0.0], 1.0, 0.005);
+                if let Some(&last) = steady.sample([x, 0.0], 1.0, 0.008).last() {
+                    at = last;
+                }
             }
             x - at[0]
         };
-        let slow = lag(true, 0.5) / 0.5;
-        let fast = lag(true, 20.0) / 20.0;
-        assert!(
-            fast < slow / 3.0,
-            "fast strokes trail fewer samples: {fast} vs {slow}"
-        );
-        assert!(
-            lag(false, 20.0) / 20.0 > fast * 2.0,
-            "without adjust by speed it lags"
-        );
-        let mut steady = Stabilizer::new(30, true);
-        steady.sample([0.0, 0.0], 1.0, 0.005);
-        steady.sample([100.0, 0.0], 1.0, 0.005);
-        let rest = steady.catch_up([100.0, 0.0]);
-        assert_eq!(rest.last(), Some(&[100.0, 0.0]));
+        // The same distance behind, slow or fast: it never falls further
+        // back as the pen speeds up.
+        let (slow, fast) = (lag(50, false, 2.0), lag(50, false, 12.0));
+        assert!(slow > 5.0, "it smooths: {slow}");
+        assert!((fast - slow).abs() < 3.0, "the same lag: {slow} and {fast}");
+        // Adjust by speed trails less on a quick stroke.
+        assert!(lag(50, true, 12.0) < fast * 0.5);
+        // Higher levels trail more, low ones little.
+        assert!(lag(100, false, 4.0) > lag(50, false, 4.0));
+        assert!(lag(5, false, 4.0) < 4.0);
+
+        // Lifting at the end of a curve: the line finishes along the curve
+        // to the pen, never cutting across it.
+        let mut steady = Stabilizer::new(80, false);
+        let curve = |t: f32| [200.0 * t.cos(), 200.0 * t.sin()];
+        let mut drawn = Vec::new();
+        for step in 0..=150 {
+            drawn.extend(steady.sample(curve(step as f32 / 100.0), 1.0, 0.008));
+        }
+        let lift = curve(1.5);
+        let rest = steady.catch_up(lift);
+        assert_eq!(rest.last(), Some(&lift));
+        for pair in rest.windows(2) {
+            assert!(
+                distance(pair[0], pair[1]) < 6.0,
+                "no straight jump: {pair:?}"
+            );
+        }
+        for point in &rest {
+            let radius = point[0].hypot(point[1]);
+            assert!(radius > 185.0, "it stays near the curve: {point:?}");
+        }
     }
 }
 
@@ -3087,8 +3416,9 @@ mod sheet {
             let p = curve(t);
             raw = [p[0] + jx * tremor, p[1] + jy * tremor];
             let pressure = (t * std::f32::consts::PI).sin().powf(0.6).max(0.05);
-            let at = stabilizer.sample(raw, 1.0, 0.006);
-            stroke.to(raster, at, pressure, None);
+            for at in stabilizer.sample(raw, 1.0, 0.006) {
+                stroke.to(raster, at, pressure, None);
+            }
         }
         for at in stabilizer.catch_up(raw) {
             stroke.to(raster, at, 0.1, None);
@@ -3304,6 +3634,17 @@ mod speed {
     use std::time::Instant;
 
     fn run(name: &str, tip: Tip, samples: usize, step: f32) {
+        run_with(name, tip, samples, step, |_| {}, None);
+    }
+
+    fn run_with(
+        name: &str,
+        tip: Tip,
+        samples: usize,
+        step: f32,
+        setup: impl FnOnce(&mut Stroke),
+        selection: Option<&Selection>,
+    ) {
         let mut raster = RasterTile2D::new(4000, 3000, sue_core::PixelFormat::Rgba8).unwrap();
         if let Some(bytes) = raster.bytes_mut() {
             for pixel in bytes.as_chunks_mut::<4>().0 {
@@ -3311,6 +3652,7 @@ mod speed {
             }
         }
         let mut stroke = Stroke::new(EntityId::new(), tip, [0.1, 0.2, 0.9], false);
+        setup(&mut stroke);
         let start = Instant::now();
         let mut worst = 0.0_f64;
         for i in 0..samples {
@@ -3319,12 +3661,19 @@ mod speed {
                 1500.0 + (i as f32 * 0.05).sin() * 200.0,
             ];
             let one = Instant::now();
-            stroke.to(&mut raster, at, 0.8, None);
+            stroke.to(&mut raster, at, 0.8, selection);
             worst = worst.max(one.elapsed().as_secs_f64());
         }
         let painting = start.elapsed().as_secs_f64();
         let ending = Instant::now();
-        stroke.end(&mut raster, Finish::default(), None);
+        stroke.end(&mut raster, Finish::default(), selection);
+        let ended = ending.elapsed().as_secs_f64() * 1000.0;
+        let dirty = stroke.take_dirty_tiles();
+        let area: u64 = dirty
+            .iter()
+            .map(|r| u64::from(r[2] - r[0]) * u64::from(r[3] - r[1]))
+            .sum();
+        println!("    end {ended:.2} ms, then {area} px to show");
         let edit = stroke.finish(&raster, "Stroke");
         println!(
             "{name:<28} {:>7.2} ms per sample, worst {:>7.2} ms, finish {:>7.2} ms, {} patches",
@@ -3364,5 +3713,123 @@ mod speed {
             };
             run(&format!("airbrush {size}"), air, 200, 3.0);
         }
+    }
+
+    /// Every setting and effect of the brush engine on its own, at a size
+    /// people paint big areas with (`SUE_BRUSH_SIZE`, 400 by default).
+    #[test]
+    #[ignore = "a benchmark"]
+    fn brush_effects_speed() {
+        let size = std::env::var("SUE_BRUSH_SIZE")
+            .ok()
+            .and_then(|size| size.parse().ok())
+            .unwrap_or(400.0);
+        let base = Tip {
+            size,
+            size_by: Dynamics::NONE,
+            ..Tip::default()
+        };
+        let cases: Vec<(&str, Tip)> = vec![
+            ("plain", base),
+            (
+                "opacity 50",
+                Tip {
+                    opacity: 0.5,
+                    ..base
+                },
+            ),
+            (
+                "opacity by pressure",
+                Tip {
+                    opacity_by: Dynamics::pressure(0.2),
+                    ..base
+                },
+            ),
+            (
+                "hardness 50",
+                Tip {
+                    hardness: 0.5,
+                    ..base
+                },
+            ),
+            (
+                "hardness 0",
+                Tip {
+                    hardness: 0.0,
+                    ..base
+                },
+            ),
+            ("color mixing 20", Tip { mix: 0.2, ..base }),
+            ("color mixing 90", Tip { mix: 0.9, ..base }),
+            ("paper grain 20", Tip { grain: 0.2, ..base }),
+            ("paper grain 90", Tip { grain: 0.9, ..base }),
+            (
+                "tip color jitter",
+                Tip {
+                    jitter: Jitter {
+                        tip: true,
+                        hue: 0.2,
+                        ..Jitter::default()
+                    },
+                    ..base
+                },
+            ),
+            (
+                "airbrush",
+                Tip {
+                    build_up: true,
+                    flow: 0.3,
+                    hardness: 0.0,
+                    ..base
+                },
+            ),
+            (
+                "eraser soft",
+                Tip {
+                    eraser: true,
+                    hardness: 0.3,
+                    ..base
+                },
+            ),
+            (
+                "taper 200",
+                Tip {
+                    taper_start: 200.0,
+                    taper_end: 200.0,
+                    ..base
+                },
+            ),
+            (
+                "size by pressure",
+                Tip {
+                    size_by: Dynamics::pressure(0.2),
+                    ..base
+                },
+            ),
+            (
+                "everything at once",
+                Tip {
+                    opacity: 0.6,
+                    hardness: 0.4,
+                    mix: 0.5,
+                    grain: 0.5,
+                    ..base
+                },
+            ),
+        ];
+        for (name, tip) in cases {
+            run(name, tip, 300, 3.0);
+        }
+        let mut selection = Selection::all(4000, 3000);
+        selection.disc([2000.0, 1500.0], 900.0, false);
+        run_with("selection", base, 300, 3.0, |_| {}, Some(&selection));
+        run_with(
+            "symmetry 4",
+            base,
+            300,
+            3.0,
+            |stroke| stroke.set_copies(symmetry([2000.0, 1500.0], 0.0, 4, false)),
+            None,
+        );
     }
 }

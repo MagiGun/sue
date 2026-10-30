@@ -608,9 +608,19 @@ fn raster_row(raster: &RasterTile2D, offset: [i64; 2], y: u32) -> (&[u8], i64) {
 /// its row: the same steps and the same arithmetic, without looking up the
 /// layer's format, size and mask for every pixel.
 fn pixel_plain(layers: &[Layer<'_>], rows: &[RowSource<'_>], x: u32, y: u32) -> [f32; 4] {
-    let mut color = [0.0; 4];
-    let mut base_alpha = 1.0;
-    let mut base_visible = true;
+    let mut stack = Stack::EMPTY;
+    fold_plain(layers, rows, x, y, &mut stack);
+    stack.color
+}
+
+/// [`fold`] for plain layers (see [`Layer::plain`]), reading each from its
+/// row, as [`pixel_plain`] does.
+fn fold_plain(layers: &[Layer<'_>], rows: &[RowSource<'_>], x: u32, y: u32, state: &mut Stack) {
+    let Stack {
+        mut color,
+        mut base_alpha,
+        mut base_visible,
+    } = *state;
     for (layer, row) in layers.iter().zip(rows) {
         if let RowSource::Correction(correction) = row {
             if layer.style.visible && color[3] > 0.0 {
@@ -669,7 +679,11 @@ fn pixel_plain(layers: &[Layer<'_>], rows: &[RowSource<'_>], x: u32, y: u32) -> 
         }
         color = layer.style.blend.composite(color, source);
     }
-    color
+    *state = Stack {
+        color,
+        base_alpha,
+        base_visible,
+    };
 }
 
 /// The [`Focus`] tiles `wanted`, made on every core: each pixel's stack
@@ -783,8 +797,7 @@ fn shown(color: [f32; 4], x: u32, y: u32) -> [u8; 4] {
     let alpha = color[3];
     let mut out = [255; 4];
     for (slot, value) in out.iter_mut().zip(color).take(3) {
-        let value = value * alpha + under * (1.0 - alpha);
-        *slot = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+        *slot = to_byte(value * alpha + under * (1.0 - alpha));
     }
     out
 }
@@ -802,6 +815,9 @@ fn focused_span(
     row: &mut [u8],
 ) {
     let ty = y / FOCUS_TILE;
+    // A plain painted layer is read along its row, as the fast path does.
+    let plain = layers[index].plain();
+    let source = [layers[index].row(y)];
     let mut x = x0;
     while x < x1 {
         let tx = x / FOCUS_TILE;
@@ -811,9 +827,35 @@ fn focused_span(
             .then(|| focus.above.get(&(tx, ty)))
             .flatten()
             .map(AsRef::as_ref);
-        for x in x..end {
-            let color = focused_color(layers, below, above, index, x, y);
-            row[x as usize * 4..x as usize * 4 + 4].copy_from_slice(&shown(color, x, y));
+        match below.filter(|_| plain) {
+            Some(below) => {
+                for x in x..end {
+                    let at = ((y % FOCUS_TILE) * FOCUS_TILE + x % FOCUS_TILE) as usize;
+                    let [r, g, b, a, base, shows] = below[at];
+                    let mut stack = Stack {
+                        color: [unit(r), unit(g), unit(b), unit(a)],
+                        base_alpha: unit(base),
+                        base_visible: shows != 0,
+                    };
+                    fold_plain(&layers[index..=index], &source, x, y, &mut stack);
+                    let color = match above {
+                        Some(above) => {
+                            sue_model::BlendMode::Normal.composite(stack.color, above[at].map(unit))
+                        }
+                        None => {
+                            fold(&layers[index + 1..], x, y, &mut stack);
+                            stack.color
+                        }
+                    };
+                    row[x as usize * 4..x as usize * 4 + 4].copy_from_slice(&shown(color, x, y));
+                }
+            }
+            None => {
+                for x in x..end {
+                    let color = focused_color(layers, below, above, index, x, y);
+                    row[x as usize * 4..x as usize * 4 + 4].copy_from_slice(&shown(color, x, y));
+                }
+            }
         }
         x = end;
     }
@@ -838,8 +880,7 @@ fn composite_span(layers: &[Layer<'_>], y: u32, x0: u32, x1: u32, row: &mut [u8]
         let under = checker(x, y);
         let alpha = color[3];
         for (channel, value) in slot.iter_mut().zip(color) {
-            let shown = value * alpha + under * (1.0 - alpha);
-            *channel = (shown.clamp(0.0, 1.0) * 255.0).round() as u8;
+            *channel = to_byte(value * alpha + under * (1.0 - alpha));
         }
         slot[3] = 255;
     }
@@ -1037,8 +1078,10 @@ struct Focus {
     above: std::collections::HashMap<(u32, u32), Box<[[u8; 4]]>>,
 }
 
+/// 0 to 1 to a byte, rounded to the nearest (without the library rounding,
+/// slow in a pixel loop).
 fn to_byte(value: f32) -> u8 {
-    (value.clamp(0.0, 1.0) * 255.0).round() as u8
+    (value.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
 }
 
 /// `true` when the layers over the focused one can be flattened ahead:
@@ -2281,5 +2324,182 @@ mod speed {
                 start.elapsed().as_secs_f64() * 1000.0 / f64::from(runs)
             );
         }
+    }
+
+    /// Frames of a stroke with each brush setting and effect: the brush,
+    /// then the screen, and how many pixels the screen had to redo
+    /// (`cargo test --release -p sue-paint stroke_frames -- --ignored
+    /// --nocapture`; `SUE_BRUSH_SIZE` sets the size, 400 by default).
+    #[test]
+    #[ignore = "a benchmark"]
+    fn stroke_frames() {
+        use crate::brush::{Dynamics, Jitter, Stroke, Tip};
+        let size = std::env::var("SUE_BRUSH_SIZE")
+            .ok()
+            .and_then(|size| size.parse().ok())
+            .unwrap_or(400.0);
+        let base = Tip {
+            size,
+            size_by: Dynamics::NONE,
+            ..Tip::default()
+        };
+        let cases: Vec<(&str, Tip)> = vec![
+            ("plain", base),
+            (
+                "opacity 50",
+                Tip {
+                    opacity: 0.5,
+                    ..base
+                },
+            ),
+            (
+                "opacity 90",
+                Tip {
+                    opacity: 0.9,
+                    ..base
+                },
+            ),
+            (
+                "hardness 90",
+                Tip {
+                    hardness: 0.9,
+                    ..base
+                },
+            ),
+            (
+                "hardness 50",
+                Tip {
+                    hardness: 0.5,
+                    ..base
+                },
+            ),
+            (
+                "hardness 0",
+                Tip {
+                    hardness: 0.0,
+                    ..base
+                },
+            ),
+            ("color mixing 20", Tip { mix: 0.2, ..base }),
+            ("color mixing 90", Tip { mix: 0.9, ..base }),
+            ("paper grain 20", Tip { grain: 0.2, ..base }),
+            ("paper grain 90", Tip { grain: 0.9, ..base }),
+            (
+                "tip color jitter",
+                Tip {
+                    jitter: Jitter {
+                        tip: true,
+                        hue: 0.2,
+                        ..Jitter::default()
+                    },
+                    ..base
+                },
+            ),
+            (
+                "airbrush",
+                Tip {
+                    build_up: true,
+                    flow: 0.3,
+                    hardness: 0.0,
+                    ..base
+                },
+            ),
+            (
+                "eraser soft",
+                Tip {
+                    eraser: true,
+                    hardness: 0.3,
+                    ..base
+                },
+            ),
+            (
+                "size by pressure",
+                Tip {
+                    size_by: Dynamics::pressure(0.2),
+                    ..base
+                },
+            ),
+            (
+                "everything at once",
+                Tip {
+                    opacity: 0.6,
+                    hardness: 0.4,
+                    mix: 0.5,
+                    grain: 0.5,
+                    ..base
+                },
+            ),
+        ];
+        for (name, tip) in cases {
+            let (mut arena, picture, top) = big_picture();
+            let mut compositor = Compositor::new(picture);
+            compositor.sync(&arena);
+            let mut stroke = Stroke::new(top, tip, [0.1, 0.2, 0.9], false);
+            let frames: u32 = 120;
+            let (mut brush, mut screen, mut worst, mut area) = (0.0, 0.0, 0.0_f64, 0_u64);
+            for frame in 0..frames {
+                let begun = Instant::now();
+                for step in 0..2 {
+                    let i = (frame * 2 + step) as f32;
+                    let raster = doc::raster_mut(&mut arena, top).unwrap();
+                    let pressure = 0.6 + 0.3 * (i * 0.07).sin();
+                    stroke.to(
+                        raster,
+                        [900.0 + i * 3.0, 1500.0 + (i * 0.05).sin() * 200.0],
+                        pressure,
+                        None,
+                    );
+                }
+                let painted = begun.elapsed().as_secs_f64();
+                let rects = stroke.take_dirty_tiles();
+                area += rects
+                    .iter()
+                    .map(|r| u64::from(r[2] - r[0]) * u64::from(r[3] - r[1]))
+                    .sum::<u64>();
+                compositor.refresh_rects(&arena, &rects, Some(top));
+                let total = begun.elapsed().as_secs_f64();
+                brush += painted;
+                screen += total - painted;
+                worst = worst.max(total);
+            }
+            let per = |seconds: f64| seconds * 1000.0 / f64::from(frames);
+            println!(
+                "{name:<20} brush {:>6.2} ms  screen {:>6.2} ms  worst {:>6.2} ms  {:>8} px a frame",
+                per(brush),
+                per(screen),
+                worst * 1000.0,
+                area / u64::from(frames),
+            );
+        }
+    }
+
+    /// A 4000 by 3000 picture of eight layers, the top one to paint on.
+    fn big_picture() -> (Arena, EntityId, EntityId) {
+        let mut arena = Arena::new();
+        let (mut edit, picture) = doc::create(&NewPicture {
+            name: "Big".to_owned(),
+            width: 4000,
+            height: 3000,
+            dpi: 72.0,
+            paper: Some(Color::srgb8(255, 255, 255)),
+            timelapse: false,
+        })
+        .unwrap();
+        edit.apply(&mut arena).unwrap();
+        let mut below = doc::layers(&arena, picture).last().map(|info| info.id);
+        for i in 0..6 {
+            let (mut spawn, layer) =
+                doc::add_raster_layer(&arena, picture, below, format!("L{i}"), None).unwrap();
+            spawn.apply(&mut arena).unwrap();
+            if let Some(bytes) = doc::raster_mut(&mut arena, layer).and_then(|r| r.bytes_mut()) {
+                for (n, pixel) in bytes.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                    if (n / 4000 + n % 4000 + i * 300) % 900 < 400 {
+                        pixel.copy_from_slice(&[(i * 40) as u8, 90, 200, 180]);
+                    }
+                }
+            }
+            below = Some(layer);
+        }
+        (arena, picture, below.unwrap())
     }
 }

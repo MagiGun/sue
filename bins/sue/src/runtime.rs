@@ -4146,6 +4146,40 @@ f 2 3 4
     #[test]
     #[ignore = "a benchmark"]
     fn paint_frame_speed() {
+        let (mean, worst, lift, after) = paint_stroke_frames(&[], 40);
+        println!(
+            "4000x3000, 8 layers, brush huge: frame mean {mean:.2} ms, worst {worst:.2} ms, lift {lift:.2} ms, next {after:.2} ms"
+        );
+    }
+
+    /// Frames of a stroke with Sue Paint's own brushes, each picked by its
+    /// shortcut (P for the pencil, B for the brushes, E for the eraser)
+    /// and made big (`cargo test --release -p sue paint_tools_frame_speed
+    /// -- --ignored --nocapture`).
+    #[test]
+    #[ignore = "a benchmark"]
+    fn paint_tools_frame_speed() {
+        use egui::Key::{B, E, P};
+        for (name, keys) in [
+            ("G-Pen", &[][..]),
+            ("Pencil", &[P][..]),
+            ("Watercolor", &[B][..]),
+            ("Airbrush", &[B, B][..]),
+            ("Eraser", &[E][..]),
+        ] {
+            for bigger in [15, 25, 32] {
+                let (mean, worst, lift, _) = paint_stroke_frames(keys, bigger);
+                println!(
+                    "{name:<12} {bigger} sizes up: frame mean {mean:>6.2} ms, worst {worst:>7.2} ms, lift {lift:>7.2} ms"
+                );
+            }
+        }
+    }
+
+    /// A 4000 by 3000 picture of eight layers, `keys` pressed to pick a
+    /// tool, the brush `bigger` steps bigger, and a stroke across it: the
+    /// mean and worst frame, the lift and the frame after, in ms.
+    fn paint_stroke_frames(keys: &[egui::Key], bigger: usize) -> (f64, f64, f64, f64) {
         let (mut runtime, root) = runtime("paint-speed");
         let ctx = egui::Context::default();
         let start = Instant::now();
@@ -4183,8 +4217,11 @@ f 2 3 4
                 )],
             );
         }
+        for &pick in keys {
+            step(&mut runtime, vec![key(pick, egui::Modifiers::NONE)]);
+        }
         // ] makes the brush bigger: from 8 pixels to the largest.
-        for _ in 0..40 {
+        for _ in 0..bigger {
             step(
                 &mut runtime,
                 vec![key(egui::Key::CloseBracket, egui::Modifiers::NONE)],
@@ -4223,10 +4260,8 @@ f 2 3 4
         println!("slowest frames: {:?}", &slowest[..5]);
         let mean = times.iter().sum::<f64>() / times.len() as f64;
         let worst = times.iter().copied().fold(0.0, f64::max);
-        println!(
-            "4000x3000, 8 layers, brush huge: frame mean {mean:.2} ms, worst {worst:.2} ms, lift {lift:.2} ms, next {after:.2} ms"
-        );
         let _ = std::fs::remove_dir_all(&root);
+        (mean, worst, lift, after)
     }
 
     #[test]

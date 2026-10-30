@@ -38,11 +38,10 @@ impl BlendKind {
     }
 }
 
-/// How much a dab acts at `distance` from its middle, 1 there to 0 at
-/// `radius`.
-fn falloff(distance: f32, radius: f32) -> f32 {
-    let t = (distance / radius.max(0.5)).clamp(0.0, 1.0);
-    let u = 1.0 - t * t;
+/// How much a dab acts at a squared distance from its middle over its
+/// squared radius: 1 in the middle to 0 at the rim.
+fn falloff_sq(t_sq: f32) -> f32 {
+    let u = 1.0 - t_sq.clamp(0.0, 1.0);
     u * u
 }
 
@@ -87,12 +86,24 @@ pub fn dab(
     }
     let read = |x: f32, y: f32| crate::warp::sample(&patch, pw, ph, x - x0 as f32, y - y0 as f32);
     let strength = strength.clamp(0.0, 1.0);
-    let mut changed = false;
+    // Only the disc changes: each row from where it meets the circle to
+    // where it leaves, and the weight from the squared distance.
+    let reach_sq = radius.max(0.5) * radius.max(0.5);
+    let mut changed: Option<[u32; 4]> = None;
     for y in y0..y1 {
-        for x in x0..x1 {
-            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-            let (dx, dy) = (px - center[0], py - center[1]);
-            let weight = falloff(dx.hypot(dy), radius) * strength;
+        let py = y as f32 + 0.5;
+        let dy = py - center[1];
+        let half_sq = reach_sq - dy * dy;
+        if half_sq <= 0.0 {
+            continue;
+        }
+        let half = half_sq.sqrt();
+        let from = clamp((center[0] - half - 0.5).floor(), width).max(x0);
+        let to = clamp((center[0] + half + 0.5).ceil() + 1.0, width).min(x1);
+        for x in from..to {
+            let px = x as f32 + 0.5;
+            let dx = px - center[0];
+            let weight = falloff_sq((dx * dx + dy * dy) / reach_sq) * strength;
             if weight <= 0.0 {
                 continue;
             }
@@ -149,11 +160,13 @@ pub fn dab(
             };
             if new != here {
                 pixels[at..at + 4].copy_from_slice(&new);
-                changed = true;
+                changed = Some(changed.map_or([x, y, x + 1, y + 1], |[a, b, c, d]| {
+                    [a.min(x), b.min(y), c.max(x + 1), d.max(y + 1)]
+                }));
             }
         }
     }
-    changed.then_some([x0, y0, x1, y1])
+    changed
 }
 
 /// `a` moved `t` (0 to 1) of the way to `b`, over premultiplied alpha.
@@ -166,13 +179,13 @@ fn mix(a: [u8; 4], b: [u8; 4], t: f32) -> [u8; 4] {
     let channel = |index: usize| {
         let value =
             f32::from(a[index]) * aa + (f32::from(b[index]) * ba - f32::from(a[index]) * aa) * t;
-        (value / alpha).round().clamp(0.0, 255.0) as u8
+        (value / alpha + 0.5).clamp(0.0, 255.0) as u8
     };
     [
         channel(0),
         channel(1),
         channel(2),
-        (alpha * 255.0).round() as u8,
+        (alpha * 255.0 + 0.5) as u8,
     ]
 }
 
