@@ -431,6 +431,7 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     for (command, name) in [
         ("filter.quick.layer", "08l-sue-paint-quick-filters"),
         ("filter.effects.layer", "08m-sue-paint-quick-effects"),
+        ("edit.advanced_fill", "08n-sue-paint-advanced-fill"),
     ] {
         runtime.request(
             ShellRequest::AppletCommand {

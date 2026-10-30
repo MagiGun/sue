@@ -386,6 +386,8 @@ pub struct SuePaint {
     pub(crate) ruler_bar: bool,
     /// The canvas's scrollbars show (View, Scroll Bar).
     pub(crate) scroll_bars: bool,
+    /// Edit, Advanced Fill's settings, kept between uses.
+    pub(crate) advanced_fill: crate::dialogs::AdvancedFill,
     /// `display.interface` as the rice has it (for the Interface menu).
     pub(crate) interface: String,
     /// Strokes near a grid line follow it (View, Snap to Grid).
@@ -598,6 +600,7 @@ impl Default for SuePaint {
             bar_extra: Vec::new(),
             ruler_bar: false,
             scroll_bars: true,
+            advanced_fill: crate::dialogs::AdvancedFill::default(),
             interface: "auto".to_owned(),
             snap_grid: false,
             crop_frame: true,
@@ -982,6 +985,7 @@ fn implemented(command: &str) -> bool {
             | "filter.crystallize"
             | "filter.lens_blur"
             | "edit.smart_smoothing"
+            | "edit.advanced_fill"
             | "filter.quick.layer"
             | "filter.quick.all"
             | "filter.effects.layer"
@@ -1101,6 +1105,65 @@ pub(crate) struct WarpSession {
 }
 
 impl SuePaint {
+    /// Edit, Advanced Fill with its settings: in the selection (or the
+    /// whole canvas), looking at the current layer or every shown one.
+    pub(crate) fn advanced_fill_now(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(selection) = self.selection_or_all(&cx.world.arena) else {
+            return;
+        };
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let size = selection.size();
+        let settings = self.advanced_fill.clone();
+        let reference = if settings.refer_all {
+            crate::composite::render(
+                &cx.world.arena,
+                picture,
+                [0, 0, size[0], size[1]],
+                crate::composite::RenderOptions {
+                    paper: false,
+                    drafts: true,
+                },
+            )
+        } else {
+            match self.layer_on_picture(&cx.world.arena, size) {
+                Some(pixels) => pixels,
+                None => return,
+            }
+        };
+        let region: Vec<u8> = (0..size[1])
+            .flat_map(|y| (0..size[0]).map(move |x| (x, y)))
+            .map(|(x, y)| (selection.at(x, y) * 255.0).round() as u8)
+            .collect();
+        let mask = crate::fill::advanced_mask(&reference, size, &region, &settings.area);
+        let color = match settings.color {
+            0 => Some(self.main),
+            1 => Some(self.sub),
+            2 => None,
+            _ => Some(settings.rgb),
+        }
+        .map(|rgb| rgb.map(|value| f32::from(value) / 255.0));
+        let (offset, alpha_lock) = self
+            .layer_info(&cx.world.arena)
+            .map_or(([0, 0], false), |info| {
+                (info.style.offset, info.alpha_locked)
+            });
+        self.rewrite(cx, &tr!("advanced-fill"), |pixels, width, height| {
+            crate::fill::paint_blended(
+                pixels,
+                [width, height],
+                offset,
+                &mask,
+                size,
+                color,
+                settings.opacity / 100.0,
+                settings.blend,
+                alpha_lock,
+            );
+        });
+    }
+
     /// Edit, Align/Distribute: moves the current layer so its drawn
     /// pixels line up with the canvas's `edge` (left, hcenter, right, top,
     /// vcenter or bottom), one undo step.
@@ -4289,6 +4352,13 @@ impl SuePaint {
             ),
             "filter.crystallize" => self.filter_dialog(cx, Filter::Crystallize { size: 20 }),
             "filter.lens_blur" => self.filter_dialog(cx, Filter::LensBlur { radius: 8 }),
+            "edit.advanced_fill" => {
+                if let Err(error) = self.paintable(&cx.world.arena) {
+                    cx.fail(error);
+                    return;
+                }
+                self.dialog = Some(Dialog::AdvancedFill);
+            }
             "edit.smart_smoothing" => {
                 self.filter_dialog(cx, Filter::SmartSmooth { strength: 0.5 });
             }

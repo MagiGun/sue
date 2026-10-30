@@ -3006,6 +3006,37 @@ impl SuePaint {
         }
     }
 
+    /// The current layer's pixels where they sit on a picture of `size`
+    /// (straight RGBA8), for fills that look at it.
+    pub(crate) fn layer_on_picture(
+        &self,
+        arena: &sue_core::Arena,
+        size: [u32; 2],
+    ) -> Option<Vec<u8>> {
+        let info = self.layer_info(arena)?;
+        let raster = doc::raster(arena, info.id)?;
+        let bytes = raster.bytes()?;
+        if info.style.offset == [0, 0] && [raster.width(), raster.height()] == size {
+            return Some(bytes.to_vec());
+        }
+        let mut placed = vec![0_u8; (size[0] * size[1] * 4) as usize];
+        for y in 0..raster.height() {
+            for x in 0..raster.width() {
+                let (px, py) = (
+                    i64::from(x) + info.style.offset[0],
+                    i64::from(y) + info.style.offset[1],
+                );
+                if px < 0 || py < 0 || px >= i64::from(size[0]) || py >= i64::from(size[1]) {
+                    continue;
+                }
+                let from = ((y * raster.width() + x) * 4) as usize;
+                let to = ((py as u32 * size[0] + px as u32) * 4) as usize;
+                placed[to..to + 4].copy_from_slice(&bytes[from..from + 4]);
+            }
+        }
+        Some(placed)
+    }
+
     /// The area a flood fill from `p` reaches, as a picture-sized mask.
     fn flood_mask(
         &self,
@@ -3049,30 +3080,7 @@ impl SuePaint {
                 },
             )
         } else {
-            let info = self.layer_info(arena)?;
-            let raster = doc::raster(arena, info.id)?;
-            let bytes = raster.bytes()?;
-            if info.style.offset == [0, 0] && [raster.width(), raster.height()] == size {
-                bytes.to_vec()
-            } else {
-                let mut placed = vec![0_u8; (size[0] * size[1] * 4) as usize];
-                for y in 0..raster.height() {
-                    for x in 0..raster.width() {
-                        let (px, py) = (
-                            i64::from(x) + info.style.offset[0],
-                            i64::from(y) + info.style.offset[1],
-                        );
-                        if px < 0 || py < 0 || px >= i64::from(size[0]) || py >= i64::from(size[1])
-                        {
-                            continue;
-                        }
-                        let from = ((y * raster.width() + x) * 4) as usize;
-                        let to = ((py as u32 * size[0] + px as u32) * 4) as usize;
-                        placed[to..to + 4].copy_from_slice(&bytes[from..from + 4]);
-                    }
-                }
-                placed
-            }
+            self.layer_on_picture(arena, size)?
         };
         let mut mask = fill::flood_closing(
             &reference,

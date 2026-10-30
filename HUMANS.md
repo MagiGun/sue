@@ -510,6 +510,11 @@ Once a canvas is open:
   line art (a small scan, or lines drawn without anti-aliasing) while
   keeping each line as thick and as dark as it was. Works on a layer of
   lines on clear, or ink on white.
+- **Advanced Fill:** Edit, Advanced Fill fills the selection, or the whole
+  canvas, in one go: choose the color (main, sub, transparent or any),
+  its opacity and blending mode, which colors it fills, and whether it
+  fills only areas closed in by lines (with small gaps closed). Area
+  scaling tucks the fill under the lines. It remembers its settings.
 - **Align a layer:** Edit, Align/Distribute lines the layer's drawing up
   with the canvas's left, right, top or bottom edge, or its middle.
 - **Arrange the palettes your way:** drag the edge of a column to make it

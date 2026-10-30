@@ -249,6 +249,7 @@ pub fn menus() -> Vec<Menu> {
                 act(&tr!("delete-outside-selection"), "edit.clear_outside").key("Shift+Del"),
                 act(&tr!("smart-smoothing-ellipsis"), "edit.smart_smoothing"),
                 act(&tr!("fill"), "edit.fill").key("Alt+Del"),
+                act(&tr!("advanced-fill-ellipsis"), "edit.advanced_fill"),
                 act(&tr!("convert-to-drawing-color"), "edit.recolor"),
                 act(&tr!("outline-selection-ellipsis"), "edit.outline_selection"),
                 act(&tr!("convert-brightness-to-opacity"), "edit.luma_to_alpha"),

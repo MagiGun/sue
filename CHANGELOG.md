@@ -13,6 +13,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Edit, Advanced Fill, as in Clip Studio Paint: fill the selection (or
+  the canvas) with the main, sub, transparent or a chosen color at an
+  opacity and blending mode, only where the target color is (all,
+  transparent, black, white and transparent, or what they surround), in
+  closed areas with gaps closed, grown or shrunk under the lines, looking
+  at the current layer or every shown one. Its settings are kept.
 - Edit, Smart Smoothing, as in Clip Studio Paint: jagged, stair-stepped
   line art becomes smooth, with lines kept as thick and as dark, previewed
   on the canvas as you set its strength.

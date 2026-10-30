@@ -352,6 +352,333 @@ pub fn gradient(
     }
 }
 
+/// Which colors Advanced Fill (and its Target color) fills.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// Everything in the area.
+    All,
+    /// Only see-through pixels.
+    Transparent,
+    /// Anything not see-through.
+    NotTransparent,
+    /// Only black ink.
+    Black,
+    /// Anything but black ink.
+    NotBlack,
+    /// White and see-through pixels.
+    WhiteOrClear,
+    /// Anything but white or see-through.
+    NotWhiteOrClear,
+    /// Areas see-through pixels close in (with Fill closed area).
+    SurroundedByClear,
+    /// Areas black ink closes in (with Fill closed area).
+    SurroundedByBlack,
+    /// Areas white and see-through pixels close in (with Fill closed area).
+    SurroundedByWhite,
+    /// See-through pixels, the faintly covered edges of lines counted as
+    /// see-through too.
+    SemiClear,
+}
+
+impl Target {
+    /// Every target, in Clip Studio Paint's order.
+    pub const ALL: [Self; 11] = [
+        Self::All,
+        Self::Transparent,
+        Self::NotTransparent,
+        Self::SurroundedByClear,
+        Self::Black,
+        Self::NotBlack,
+        Self::SurroundedByBlack,
+        Self::WhiteOrClear,
+        Self::NotWhiteOrClear,
+        Self::SurroundedByWhite,
+        Self::SemiClear,
+    ];
+
+    /// Whether the dialog offers it: "Other than" without Fill closed
+    /// area, "Area surrounded by" only with it, as Clip Studio Paint does.
+    #[must_use]
+    pub fn offered(self, closed: bool) -> bool {
+        match self {
+            Self::NotTransparent | Self::NotBlack | Self::NotWhiteOrClear => !closed,
+            Self::SurroundedByClear | Self::SurroundedByBlack | Self::SurroundedByWhite => closed,
+            _ => true,
+        }
+    }
+
+    /// `pixel` (straight RGBA8) is one this target fills, `tolerance` (0
+    /// to 1) widening what counts.
+    #[must_use]
+    pub fn matches(self, pixel: [u8; 4], tolerance: f32) -> bool {
+        let alpha = f32::from(pixel[3]) / 255.0;
+        let luma = (0.299 * f32::from(pixel[0])
+            + 0.587 * f32::from(pixel[1])
+            + 0.114 * f32::from(pixel[2]))
+            / 255.0;
+        let clear = alpha <= tolerance.max(1.0 / 255.0);
+        let black = alpha >= 0.5 && luma <= tolerance.max(0.05);
+        let white = clear || luma >= 1.0 - tolerance.max(0.05);
+        match self {
+            Self::All => true,
+            Self::Transparent => clear,
+            Self::NotTransparent => !clear,
+            Self::Black => black,
+            Self::NotBlack => !black,
+            Self::WhiteOrClear => white,
+            Self::NotWhiteOrClear => !white,
+            // Inside what surrounds it: everything but the surrounding.
+            Self::SurroundedByClear => !clear,
+            Self::SurroundedByBlack => !black,
+            Self::SurroundedByWhite => !white,
+            Self::SemiClear => alpha < 0.98,
+        }
+    }
+}
+
+/// Advanced Fill's settings that decide where it fills.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AdvancedArea {
+    /// Which colors are filled.
+    pub target: Target,
+    /// 0 to 1.
+    pub tolerance: f32,
+    /// Pixels the area grows (or, below 0, shrinks) by.
+    pub scaling: i32,
+    /// Grow and shrink with rounded corners (else square).
+    pub round: bool,
+    /// Fill only the closed areas inside the selection.
+    pub closed: bool,
+    /// Gaps in lines this wide hold a closed area in.
+    pub gap: u32,
+    /// The canvas's edge counts as a line.
+    pub border: bool,
+    /// The fill's edge is softened.
+    pub anti_alias: bool,
+}
+
+impl Default for AdvancedArea {
+    fn default() -> Self {
+        Self {
+            target: Target::All,
+            tolerance: 0.1,
+            scaling: 0,
+            round: false,
+            closed: false,
+            gap: 0,
+            border: false,
+            anti_alias: true,
+        }
+    }
+}
+
+/// `mask` grown by `steps` pixels (square, or near round when `round`),
+/// staying where `allowed` is set.
+fn grow_area(
+    mask: &[bool],
+    size: [u32; 2],
+    steps: u32,
+    round: bool,
+    allowed: &[bool],
+) -> Vec<bool> {
+    let (w, h) = (size[0] as usize, size[1] as usize);
+    let mut now = mask.to_vec();
+    for step in 0..steps {
+        // Rounded: every other step reaches only the four sides.
+        let diagonal = !round || step % 2 == 1;
+        let before = now.clone();
+        for y in 0..h {
+            for x in 0..w {
+                let at = y * w + x;
+                if before[at] || !allowed[at] {
+                    continue;
+                }
+                let mut near = false;
+                for (dx, dy) in [
+                    (-1, 0),
+                    (1, 0),
+                    (0, -1),
+                    (0, 1),
+                    (-1, -1),
+                    (1, -1),
+                    (-1, 1),
+                    (1, 1),
+                ] {
+                    if !diagonal && dx != 0 && dy != 0 {
+                        continue;
+                    }
+                    let (nx, ny) = (x as i64 + dx, y as i64 + dy);
+                    if nx >= 0
+                        && ny >= 0
+                        && (nx as usize) < w
+                        && (ny as usize) < h
+                        && before[ny as usize * w + nx as usize]
+                    {
+                        near = true;
+                        break;
+                    }
+                }
+                now[at] = near;
+            }
+        }
+    }
+    now
+}
+
+/// Where Advanced Fill fills: one coverage byte per pixel of `size`.
+/// `reference` is what it looks at (straight RGBA8), `region` the
+/// selection's coverage (or 255 everywhere).
+#[must_use]
+pub fn advanced_mask(
+    reference: &[u8],
+    size: [u32; 2],
+    region: &[u8],
+    area: &AdvancedArea,
+) -> Vec<u8> {
+    let (w, h) = (size[0] as usize, size[1] as usize);
+    let count = w * h;
+    if reference.len() < count * 4 || region.len() < count {
+        return vec![0; count];
+    }
+    let inside: Vec<bool> = region.iter().map(|cover| *cover > 127).collect();
+    let matches: Vec<bool> = reference
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .take(count)
+        .map(|pixel| area.target.matches(*pixel, area.tolerance))
+        .collect();
+    let everywhere = vec![true; count];
+    let mut fill: Vec<bool> = (0..count).map(|at| inside[at] && matches[at]).collect();
+    if area.closed {
+        // Lines (what is not filled), thickened by the gap, hold areas in.
+        let lines: Vec<bool> = matches.iter().map(|matched| !matched).collect();
+        let thick = grow_area(&lines, size, area.gap, true, &everywhere);
+        let open: Vec<bool> = (0..count).map(|at| fill[at] && !thick[at]).collect();
+        // Keep the pieces that touch neither the area's edge nor (unless
+        // it counts as a line) the canvas's.
+        let mut kept = vec![false; count];
+        let mut seen = vec![false; count];
+        for start in 0..count {
+            if !open[start] || seen[start] {
+                continue;
+            }
+            let mut piece = vec![start];
+            let mut stack = vec![start];
+            seen[start] = true;
+            let mut leaks = false;
+            while let Some(at) = stack.pop() {
+                let (x, y) = (at % w, at / w);
+                for (dx, dy) in [(-1_i64, 0_i64), (1, 0), (0, -1), (0, 1)] {
+                    let (nx, ny) = (x as i64 + dx, y as i64 + dy);
+                    if nx < 0 || ny < 0 || nx as usize >= w || ny as usize >= h {
+                        leaks |= !area.border;
+                        continue;
+                    }
+                    let next = ny as usize * w + nx as usize;
+                    if !inside[next] {
+                        leaks = true;
+                    } else if open[next] && !seen[next] {
+                        seen[next] = true;
+                        stack.push(next);
+                        piece.push(next);
+                    }
+                }
+            }
+            if !leaks {
+                for at in piece {
+                    kept[at] = true;
+                }
+            }
+        }
+        // Back up to the lines the gap kept it from.
+        fill = grow_area(&kept, size, area.gap, true, &fill);
+    }
+    if area.scaling > 0 {
+        fill = grow_area(&fill, size, area.scaling as u32, area.round, &inside);
+    } else if area.scaling < 0 {
+        let outside: Vec<bool> = fill.iter().map(|filled| !filled).collect();
+        let eaten = grow_area(
+            &outside,
+            size,
+            area.scaling.unsigned_abs(),
+            area.round,
+            &everywhere,
+        );
+        fill = eaten.iter().map(|out| !out).collect();
+    }
+    (0..count)
+        .map(|at| {
+            if fill[at] {
+                return 255;
+            }
+            if !area.anti_alias || !inside[at] {
+                return 0;
+            }
+            // A soft edge: part covered by how much of the fill is next to it.
+            let (x, y) = (at % w, at / w);
+            let mut near = 0_u32;
+            for dy in -1_i64..=1 {
+                for dx in -1_i64..=1 {
+                    let (nx, ny) = (x as i64 + dx, y as i64 + dy);
+                    if nx >= 0
+                        && ny >= 0
+                        && (nx as usize) < w
+                        && (ny as usize) < h
+                        && fill[ny as usize * w + nx as usize]
+                    {
+                        near += 1;
+                    }
+                }
+            }
+            (near * 255 / 18) as u8
+        })
+        .collect()
+}
+
+/// Lays `color` (sRGB 0 to 1, or `None` to erase) at `opacity` in `blend`
+/// over the layer pixels `mask` covers, as [`paint_mask`] places them.
+#[allow(clippy::too_many_arguments, reason = "a fill names its whole setting")]
+pub fn paint_blended(
+    pixels: &mut [u8],
+    layer_size: [u32; 2],
+    offset: [i64; 2],
+    mask: &[u8],
+    picture_size: [u32; 2],
+    color: Option<[f32; 3]>,
+    opacity: f32,
+    blend: sue_model::BlendMode,
+    alpha_lock: bool,
+) {
+    for y in 0..layer_size[1] {
+        for x in 0..layer_size[0] {
+            let (px, py) = (i64::from(x) + offset[0], i64::from(y) + offset[1]);
+            if px < 0
+                || py < 0
+                || px >= i64::from(picture_size[0])
+                || py >= i64::from(picture_size[1])
+            {
+                continue;
+            }
+            let cover = f32::from(mask[(py as u32 * picture_size[0] + px as u32) as usize]) / 255.0;
+            if cover <= 0.0 {
+                continue;
+            }
+            let at = ((y * layer_size[0] + x) * 4) as usize;
+            let old = crate::doc::unit(&pixels[at..at + 4]);
+            let amount = cover * opacity;
+            let mut out = match color {
+                None => [old[0], old[1], old[2], old[3] * (1.0 - amount)],
+                Some([r, g, b]) => blend.composite(old, [r, g, b, amount]),
+            };
+            if alpha_lock {
+                out[3] = old[3];
+            }
+            pixels[at..at + 4].copy_from_slice(&crate::doc::bytes(out));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -453,5 +780,66 @@ mod tests {
         );
         assert!(ramp[3] > ramp[9 * 4 + 3], "fades out to the right");
         assert!(ramp[3] > 200 && ramp[9 * 4 + 3] < 30);
+    }
+
+    #[test]
+    fn advanced_fill_fills_targets_closed_areas_and_scales() {
+        // A 20 by 20 clear layer with a black ring (an open gap of two
+        // pixels on its right) around 8 by 8 clear pixels.
+        let size = [20_u32, 20];
+        let mut layer = vec![0_u8; 20 * 20 * 4];
+        for y in 4..16_u32 {
+            for x in 4..16_u32 {
+                let ring = x == 4 || x == 15 || y == 4 || y == 15;
+                let gap = x == 15 && (9..11).contains(&y);
+                if ring && !gap {
+                    let at = ((y * 20 + x) * 4) as usize;
+                    layer[at..at + 4].copy_from_slice(&[0, 0, 0, 255]);
+                }
+            }
+        }
+        let all = vec![255_u8; 400];
+        let at = |x: u32, y: u32| (y * 20 + x) as usize;
+        let mut area = AdvancedArea {
+            anti_alias: false,
+            ..AdvancedArea::default()
+        };
+        // All: everything in the selection.
+        assert!(
+            advanced_mask(&layer, size, &all, &area)
+                .iter()
+                .all(|c| *c == 255)
+        );
+        // Only black: just the ring.
+        area.target = Target::Black;
+        let ring = advanced_mask(&layer, size, &all, &area);
+        assert_eq!(ring[at(4, 4)], 255);
+        assert_eq!(ring[at(8, 8)], 0);
+        // Closed areas of clear: the gap lets it out, until Close gap holds it.
+        area.target = Target::Transparent;
+        area.closed = true;
+        let leaking = advanced_mask(&layer, size, &all, &area);
+        assert_eq!(leaking[at(8, 8)], 0, "the ring is open");
+        area.gap = 2;
+        let held = advanced_mask(&layer, size, &all, &area);
+        assert_eq!(held[at(8, 8)], 255, "the gap is closed");
+        assert_eq!(held[at(1, 1)], 0, "outside stays empty");
+        // Area scaling grows it under the ring, not past the selection.
+        area.scaling = 1;
+        let grown = advanced_mask(&layer, size, &all, &area);
+        assert_eq!(grown[at(4, 8)], 255);
+        let mut half = vec![255_u8; 400];
+        for y in 0..20 {
+            for x in 10..20 {
+                half[at(x, y)] = 0;
+            }
+        }
+        area = AdvancedArea {
+            anti_alias: false,
+            ..AdvancedArea::default()
+        };
+        let left = advanced_mask(&layer, size, &half, &area);
+        assert_eq!(left[at(2, 2)], 255);
+        assert_eq!(left[at(12, 2)], 0, "only the selection");
     }
 }
