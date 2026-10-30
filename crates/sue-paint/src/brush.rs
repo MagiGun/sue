@@ -782,6 +782,9 @@ struct TileState {
     rect: [u32; 4],
     before: Vec<u8>,
     mask: Vec<f32>,
+    /// Where its pixels changed since the screen last looked,
+    /// `[x0, y0, x1, y1]` in layer pixels.
+    fresh: Option<[u32; 4]>,
 }
 
 /// How painted coverage turns into pixels.
@@ -1123,6 +1126,7 @@ impl Stroke {
                     bytes[at..at + row].copy_from_slice(&tile.before[line * row..(line + 1) * row]);
                 }
                 tile.mask.fill(0.0);
+                tile.fresh = Some([x, y, x + w, y + h]);
                 self.dirty = Some(union(self.dirty, [x, y, x + w, y + h]));
             }
         }
@@ -1441,6 +1445,7 @@ impl Stroke {
                         rect,
                         before,
                         mask: vec![0.0; rect[2] as usize * rect[3] as usize],
+                        fresh: None,
                     }
                 });
             }
@@ -1481,6 +1486,7 @@ impl Stroke {
                         continue;
                     }
                     let local_row = ((y - ry) * rw) as usize;
+                    let (mut low, mut high) = (u32::MAX, 0);
                     for x in sx0..sx1 {
                         let local = local_row + (x - rx) as usize;
                         let old = state.mask[local];
@@ -1518,6 +1524,11 @@ impl Stroke {
                             }
                         };
                         band[at..at + 4].copy_from_slice(&pixel);
+                        low = low.min(x);
+                        high = x + 1;
+                    }
+                    if high > 0 {
+                        state.fresh = Some(union(state.fresh, [low, y, high, y + 1]));
                     }
                 }
             }
@@ -1557,7 +1568,34 @@ impl Stroke {
     /// The rectangle `[x0, y0, x1, y1]` (layer pixels) painted since the
     /// last call.
     pub fn take_dirty(&mut self) -> Option<[u32; 4]> {
+        for tile in self.tiles.values_mut() {
+            tile.fresh = None;
+        }
         self.dirty.take()
+    }
+
+    /// The rectangles `[x0, y0, x1, y1]` (layer pixels) whose pixels
+    /// changed since the last call: in each tile, just where it changed,
+    /// side by side whole ones joined. A big brush moving a little changes
+    /// its rim, so this is far less than the square around it that
+    /// [`Self::take_dirty`] gives.
+    pub fn take_dirty_tiles(&mut self) -> Vec<[u32; 4]> {
+        self.dirty = None;
+        let mut out: Vec<[u32; 4]> = Vec::new();
+        for tile in self.tiles.values_mut() {
+            let Some(rect) = tile.fresh.take() else {
+                continue;
+            };
+            // Tiles come row by row, left to right: join a neighbor of the
+            // same height.
+            match out.last_mut() {
+                Some(last) if last[1] == rect[1] && last[3] == rect[3] && last[2] == rect[0] => {
+                    last[2] = rect[2];
+                }
+                _ => out.push(rect),
+            }
+        }
+        out
     }
 
     /// Ends the stroke: the undo step holding the tiles it changed.
@@ -2186,6 +2224,14 @@ mod tests {
         assert_eq!(alpha(&raster, 32, 2), 0, "outside the tip");
         assert!(stroke.take_dirty().is_some());
         assert!(stroke.take_dirty().is_none());
+        assert!(
+            stroke.take_dirty_tiles().is_empty(),
+            "taken with the square"
+        );
+        stroke.to(&mut raster, [30.0, 10.0], 1.0, None);
+        let tiles = stroke.take_dirty_tiles();
+        assert!(!tiles.is_empty());
+        assert!(stroke.take_dirty_tiles().is_empty());
     }
 
     #[test]

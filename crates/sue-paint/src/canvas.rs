@@ -899,17 +899,13 @@ impl SuePaint {
         }
         // Show what the stroke painted this frame.
         if let Some(Gesture::Stroke { stroke, offset, .. }) = &mut self.gesture
-            && let Some([x0, y0, x1, y1]) = stroke.take_dirty()
             && let Some(doc) = self.docs.get_mut(self.active)
         {
-            let shift = |value: u32, by: i64| (i64::from(value) + by).max(0) as u32;
-            let rect = [
-                shift(x0, offset[0]),
-                shift(y0, offset[1]),
-                shift(x1, offset[0]),
-                shift(y1, offset[1]),
-            ];
-            doc.compositor.refresh(&cx.world.arena, rect);
+            // Only the tiles the stroke changed this frame.
+            let rects = shift_rects(&stroke.take_dirty_tiles(), *offset);
+            if !rects.is_empty() {
+                doc.compositor.refresh_rects(&cx.world.arena, &rects);
+            }
         }
         if self.gesture.is_some() {
             ctx.request_repaint();
@@ -2461,17 +2457,9 @@ impl SuePaint {
                     drawn = vector.then(|| stroke.samples().to_vec());
                     stroke.end(raster, finish, selection);
                 }
-                if let Some([x0, y0, x1, y1]) = stroke.take_dirty() {
-                    let shift = |value: u32, by: i64| (i64::from(value) + by).max(0) as u32;
-                    doc.compositor.refresh(
-                        &cx.world.arena,
-                        [
-                            shift(x0, offset[0]),
-                            shift(y0, offset[1]),
-                            shift(x1, offset[0]),
-                            shift(y1, offset[1]),
-                        ],
-                    );
+                let rects = shift_rects(&stroke.take_dirty_tiles(), offset);
+                if !rects.is_empty() {
+                    doc.compositor.refresh_rects(&cx.world.arena, &rects);
                 }
                 let eraser = stroke.tip().eraser;
                 let kept = drawn.map(|samples| crate::vector::Line::of(&stroke, samples, finish));
@@ -3210,15 +3198,26 @@ impl SuePaint {
                 version = version.wrapping_mul(8).wrapping_add(profile as u64);
             }
         }
+        // While painting only what the stroke changed goes to the GPU; a
+        // proofed picture changes everywhere, so it goes whole.
+        let compositor = &doc.compositor;
+        let changed = |since: u64| {
+            if salt == 0 {
+                compositor.changed_since(since)
+            } else {
+                None
+            }
+        };
         let texture = (display_size == size)
             .then(|| {
-                cx.textures.texture(
+                cx.textures.texture_changed(
                     texture_key(doc.picture, salt),
                     version,
                     size,
                     4,
                     pixels,
                     doc.view.zoom >= 2.0,
+                    &changed,
                 )
             })
             .flatten();
@@ -4005,4 +4004,20 @@ fn ruler_overlay(
             5.0,
         ));
     }
+}
+
+/// Layer rectangles moved by the layer's `offset` onto the picture.
+fn shift_rects(rects: &[[u32; 4]], offset: [i64; 2]) -> Vec<[u32; 4]> {
+    let shift = |value: u32, by: i64| (i64::from(value) + by).max(0) as u32;
+    rects
+        .iter()
+        .map(|[x0, y0, x1, y1]| {
+            [
+                shift(*x0, offset[0]),
+                shift(*y0, offset[1]),
+                shift(*x1, offset[0]),
+                shift(*y1, offset[1]),
+            ]
+        })
+        .collect()
 }

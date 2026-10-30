@@ -411,6 +411,161 @@ fn pixel(layers: &[Layer<'_>], x: u32, y: u32) -> [f32; 4] {
     color
 }
 
+/// Bytes to 0 to 1, as `f32::from(byte) / 255.0` gives them.
+fn unit(byte: u8) -> f32 {
+    static TABLE: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| std::array::from_fn(|i| i as f32 / 255.0))[usize::from(byte)]
+}
+
+/// A layer as the fast path reads it along one row: the row's pixels and
+/// mask, found once instead of per pixel.
+enum RowSource<'a> {
+    Paper([f32; 3]),
+    Correction(&'a Correction),
+    Pixels {
+        /// The layer's row (empty when the row misses the layer).
+        bytes: &'a [u8],
+        /// The picture x of the row's first pixel.
+        left: i64,
+        mask: Option<(&'a [u8], i64)>,
+    },
+}
+
+impl Layer<'_> {
+    /// `true` for what the fast path handles: plain 8-bit pixels, paper or
+    /// a correction, with no camera, tint, effect or border.
+    fn plain(&self) -> bool {
+        let source = match &self.source {
+            Source::Paper(_) | Source::Correction(_) => true,
+            Source::Raster { raster, .. } => {
+                raster.format() == PixelFormat::Rgba8 && raster.bytes().is_some()
+            }
+        };
+        source
+            && self.warp.is_none()
+            && self.tint.is_none()
+            && self.effects.is_plain()
+            && self.edge.is_none()
+            && self
+                .mask
+                .is_none_or(|mask| mask.format() == PixelFormat::Rgba8 && mask.bytes().is_some())
+    }
+
+    /// The layer along picture row `y`.
+    fn row(&self, y: u32) -> RowSource<'_> {
+        match &self.source {
+            Source::Paper(rgb) => RowSource::Paper(*rgb),
+            Source::Correction(correction) => RowSource::Correction(correction),
+            Source::Raster { raster, offset } => {
+                let (bytes, left) = raster_row(raster, *offset, y);
+                let mask = self.mask.map(|mask| raster_row(mask, self.style.offset, y));
+                RowSource::Pixels { bytes, left, mask }
+            }
+        }
+    }
+}
+
+/// Row `y` of the picture in `raster` placed at `offset`: its pixels (empty
+/// when the row misses it) and the picture x of the first.
+fn raster_row(raster: &RasterTile2D, offset: [i64; 2], y: u32) -> (&[u8], i64) {
+    let ly = i64::from(y) - offset[1];
+    let bytes = raster.bytes().unwrap_or_default();
+    if ly < 0 || ly >= i64::from(raster.height()) {
+        return (&[], offset[0]);
+    }
+    let stride = raster.width() as usize * 4;
+    let start = ly as usize * stride;
+    (
+        bytes.get(start..start + stride).unwrap_or_default(),
+        offset[0],
+    )
+}
+
+/// [`pixel`] for plain layers (see [`Layer::plain`]), reading each from
+/// its row: the same steps and the same arithmetic, without looking up the
+/// layer's format, size and mask for every pixel.
+fn pixel_plain(layers: &[Layer<'_>], rows: &[RowSource<'_>], x: u32) -> [f32; 4] {
+    let mut color = [0.0; 4];
+    let mut base_alpha = 1.0;
+    let mut base_visible = true;
+    for (layer, row) in layers.iter().zip(rows) {
+        if let RowSource::Correction(correction) = row {
+            if layer.style.visible && color[3] > 0.0 {
+                let fixed = correction.apply([color[0], color[1], color[2]]);
+                for channel in 0..3 {
+                    color[channel] += (fixed[channel] - color[channel]) * layer.style.opacity;
+                }
+            }
+            continue;
+        }
+        if !layer.style.clip {
+            base_visible = layer.style.visible;
+        }
+        if !layer.style.visible || (layer.style.clip && !base_visible) {
+            if !layer.style.clip {
+                base_alpha = 0.0;
+            }
+            continue;
+        }
+        let mut source = match row {
+            RowSource::Paper(rgb) => [rgb[0], rgb[1], rgb[2], 1.0],
+            RowSource::Correction(_) => [0.0; 4],
+            RowSource::Pixels { bytes, left, mask } => {
+                let lx = i64::from(x) - left;
+                let mut source = if lx >= 0 && (lx as usize) * 4 < bytes.len() {
+                    let p = &bytes[lx as usize * 4..lx as usize * 4 + 4];
+                    [unit(p[0]), unit(p[1]), unit(p[2]), unit(p[3])]
+                } else {
+                    [0.0; 4]
+                };
+                if let Some((mask, mask_left)) = mask {
+                    let mx = i64::from(x) - mask_left;
+                    source[3] *= if mx >= 0 && (mx as usize) * 4 < mask.len() {
+                        unit(mask[mx as usize * 4 + 3])
+                    } else {
+                        0.0
+                    };
+                }
+                source
+            }
+        };
+        source[3] *= layer.style.opacity;
+        if layer.style.clip {
+            source[3] *= base_alpha;
+        } else {
+            base_alpha = source[3];
+        }
+        color = layer.style.blend.composite(color, source);
+    }
+    color
+}
+
+/// Composites pixels `x0..x1` of row `y` into `row` (the whole row of the
+/// screen image), over the checkerboard.
+fn composite_span(layers: &[Layer<'_>], y: u32, x0: u32, x1: u32, row: &mut [u8]) {
+    let plain = layers.iter().all(Layer::plain);
+    let rows: Vec<RowSource<'_>> = if plain {
+        layers.iter().map(|layer| layer.row(y)).collect()
+    } else {
+        Vec::new()
+    };
+    let span = &mut row[x0 as usize * 4..x1 as usize * 4];
+    for (x, slot) in (x0..x1).zip(span.as_chunks_mut::<4>().0) {
+        let color = if plain {
+            pixel_plain(layers, &rows, x)
+        } else {
+            pixel(layers, x, y)
+        };
+        let under = checker(x, y);
+        let alpha = color[3];
+        for (channel, value) in slot.iter_mut().zip(color) {
+            let shown = value * alpha + under * (1.0 - alpha);
+            *channel = (shown.clamp(0.0, 1.0) * 255.0).round() as u8;
+        }
+        slot[3] = 255;
+    }
+}
+
 /// Runs `work(y, row)` for each `stride`-byte row of `buffer` (row `y0`
 /// first), spread over the cores when the area is large.
 fn rows(
@@ -574,19 +729,36 @@ pub struct Compositor {
     seen: Vec<(EntityId, u64)>,
     version: u64,
     view: Option<FrameView>,
+    /// The rectangles repainted lately, by the version each made, so a
+    /// texture can take just what changed (see [`Self::changed_since`]).
+    changes: std::collections::VecDeque<(u64, Vec<[u32; 4]>)>,
+    /// The newest version no longer on record: what changed up to it is
+    /// unknown.
+    forgotten: u64,
+}
+
+/// Versions come from one count for every compositor, so a texture made
+/// from another one (a picture closed and opened again) never passes for
+/// this one's.
+fn next_version() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl Compositor {
     /// A compositor for `picture`; it renders on the first [`Self::sync`].
     #[must_use]
     pub fn new(picture: EntityId) -> Self {
+        let version = next_version();
         Self {
             picture,
             size: [0, 0],
             display: Vec::new(),
             seen: Vec::new(),
-            version: 0,
+            version,
             view: None,
+            changes: std::collections::VecDeque::new(),
+            forgotten: version,
         }
     }
 
@@ -620,6 +792,36 @@ impl Compositor {
         }
         let at = (y as usize * self.size[0] as usize + x as usize) * 4;
         self.display.get(at..at + 4)?.try_into().ok()
+    }
+
+    /// The rectangles `[x0, y0, x1, y1]` holding every pixel that changed
+    /// since `version` (none when nothing did), or `None` when that is too
+    /// long ago to know.
+    #[must_use]
+    pub fn changed_since(&self, version: u64) -> Option<Vec<[u32; 4]>> {
+        if version == self.version {
+            return Some(Vec::new());
+        }
+        // Every change after `version` must still be on record.
+        if version < self.forgotten || version > self.version {
+            return None;
+        }
+        let mut rects: Vec<[u32; 4]> = self
+            .changes
+            .iter()
+            .filter(|(made, _)| *made > version)
+            .flat_map(|(_, rects)| rects.iter().copied())
+            .collect();
+        // Many small pieces cost more to send one by one than together.
+        if rects.len() > 256 {
+            let all = rects
+                .iter()
+                .fold(rects[0], |[a, b, c, d], [x0, y0, x1, y1]| {
+                    [a.min(*x0), b.min(*y0), c.max(*x1), d.max(*y1)]
+                });
+            rects = vec![all];
+        }
+        Some(rects)
     }
 
     fn signature(&self, arena: &Arena) -> Vec<(EntityId, u64)> {
@@ -660,6 +862,70 @@ impl Compositor {
         self.seen = self.signature(arena);
     }
 
+    /// Recomposites the rectangles `[x0, y0, x1, y1]` after an edit made in
+    /// place (the tiles a stroke changed), gathering the layers once, and
+    /// takes the edit as seen.
+    pub fn refresh_rects(&mut self, arena: &Arena, rects: &[[u32; 4]]) {
+        if self.size == [0, 0] {
+            self.sync(arena);
+            return;
+        }
+        let [width, height] = self.size;
+        let rects: Vec<[u32; 4]> = rects
+            .iter()
+            .map(|r| {
+                [
+                    r[0].min(width),
+                    r[1].min(height),
+                    r[2].min(width),
+                    r[3].min(height),
+                ]
+            })
+            .filter(|r| r[0] < r[2] && r[1] < r[3])
+            .collect();
+        if rects.is_empty() {
+            return;
+        }
+        let bounds = rects
+            .iter()
+            .fold(rects[0], |[a, b, c, d], [x0, y0, x1, y1]| {
+                [a.min(*x0), b.min(*y0), c.max(*x1), d.max(*y1)]
+            });
+        let mut layers = gather_view(
+            arena,
+            self.picture,
+            RenderOptions::default(),
+            self.view.as_ref(),
+        );
+        prepare(&mut layers, bounds);
+        let stride = width as usize * 4;
+        // Each row's spans, then the rows painted on every core.
+        let mut spans: Vec<Vec<(u32, u32)>> = vec![Vec::new(); (bounds[3] - bounds[1]) as usize];
+        for [x0, y0, x1, y1] in &rects {
+            for y in *y0..*y1 {
+                spans[(y - bounds[1]) as usize].push((*x0, *x1));
+            }
+        }
+        let area: usize = rects
+            .iter()
+            .map(|[x0, y0, x1, y1]| ((x1 - x0) * (y1 - y0)) as usize)
+            .sum();
+        let band = &mut self.display[bounds[1] as usize * stride..bounds[3] as usize * stride];
+        rows(band, stride, bounds[1], area, |y, row| {
+            for &(x0, x1) in &spans[(y - bounds[1]) as usize] {
+                composite_span(&layers, y, x0, x1, row);
+            }
+        });
+        self.version = next_version();
+        self.changes.push_back((self.version, rects));
+        if self.changes.len() > 64
+            && let Some((version, _)) = self.changes.pop_front()
+        {
+            self.forgotten = version;
+        }
+        self.seen = self.signature(arena);
+    }
+
     fn paint(&mut self, arena: &Arena, [x0, y0, x1, y1]: [u32; 4]) {
         let mut layers = gather_view(
             arena,
@@ -672,19 +938,16 @@ impl Compositor {
         let band = &mut self.display[y0 as usize * stride..y1 as usize * stride];
         let area = (x1.saturating_sub(x0) * y1.saturating_sub(y0)) as usize;
         rows(band, stride, y0, area, |y, row| {
-            let span = &mut row[x0 as usize * 4..x1 as usize * 4];
-            for (x, slot) in (x0..x1).zip(span.as_chunks_mut::<4>().0) {
-                let color = pixel(&layers, x, y);
-                let under = checker(x, y);
-                let alpha = color[3];
-                for (channel, value) in slot.iter_mut().zip(color) {
-                    let shown = value * alpha + under * (1.0 - alpha);
-                    *channel = (shown.clamp(0.0, 1.0) * 255.0).round() as u8;
-                }
-                slot[3] = 255;
-            }
+            composite_span(&layers, y, x0, x1, row);
         });
-        self.version += 1;
+        self.version = next_version();
+        self.changes
+            .push_back((self.version, vec![[x0, y0, x1, y1]]));
+        if self.changes.len() > 64
+            && let Some((version, _)) = self.changes.pop_front()
+        {
+            self.forgotten = version;
+        }
     }
 }
 
@@ -843,6 +1106,45 @@ mod tests {
     }
 
     #[test]
+    fn the_fast_path_composites_exactly_as_the_full_one() {
+        let (mut arena, picture, base) = picture();
+        let (mut spawn, top) =
+            doc::add_raster_layer(&arena, picture, Some(base), "Top".to_owned(), None).unwrap();
+        spawn.apply(&mut arena).unwrap();
+        let (mut spawn, clipped) =
+            doc::add_raster_layer(&arena, picture, Some(top), "Clipped".to_owned(), None).unwrap();
+        spawn.apply(&mut arena).unwrap();
+        SetProperty::new(clipped, picture::CLIP, true)
+            .apply(&mut arena)
+            .unwrap();
+        SetProperty::new(top, picture::OPACITY, 0.6)
+            .apply(&mut arena)
+            .unwrap();
+        for (i, layer) in [base, top, clipped].into_iter().enumerate() {
+            for x in 0..8 {
+                for y in 0..4 {
+                    if !(x + y + i as u32).is_multiple_of(3) {
+                        let v = (x * 31 + y * 17 + i as u32 * 50) as u8;
+                        paint(&mut arena, layer, x, y, [v, 255 - v, 90, 60 + v / 2]);
+                    }
+                }
+            }
+        }
+        let layers = gather(&arena, picture, RenderOptions::default());
+        assert!(layers.iter().all(Layer::plain));
+        for y in 0..4 {
+            let rows: Vec<RowSource<'_>> = layers.iter().map(|layer| layer.row(y)).collect();
+            for x in 0..8 {
+                assert_eq!(
+                    pixel_plain(&layers, &rows, x),
+                    pixel(&layers, x, y),
+                    "{x},{y}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn the_compositor_follows_the_arena() {
         let (mut arena, picture, layer) = picture();
         let mut compositor = Compositor::new(picture);
@@ -854,6 +1156,36 @@ mod tests {
         compositor.refresh(&arena, [3, 2, 4, 3]);
         assert_eq!(compositor.pixel(3, 2), Some([0, 0, 0, 255]));
         assert!(!compositor.sync(&arena), "the refresh saw the edit");
+        // A texture at the first version takes just the refreshed pixel.
+        assert_eq!(compositor.changed_since(first), Some(vec![[3, 2, 4, 3]]));
+        assert_eq!(
+            compositor.changed_since(compositor.display().2),
+            Some(Vec::new())
+        );
+        compositor.refresh(&arena, [0, 0, 1, 1]);
+        assert_eq!(
+            compositor.changed_since(first),
+            Some(vec![[3, 2, 4, 3], [0, 0, 1, 1]])
+        );
+        // Several pieces at once: each is composited, and only they.
+        paint(&mut arena, layer, 6, 0, [0, 0, 0, 255]);
+        paint(&mut arena, layer, 1, 3, [0, 0, 0, 255]);
+        let before = compositor.display().2;
+        compositor.refresh_rects(&arena, &[[6, 0, 7, 1], [1, 3, 2, 4]]);
+        assert_eq!(compositor.pixel(6, 0), Some([0, 0, 0, 255]));
+        assert_eq!(compositor.pixel(1, 3), Some([0, 0, 0, 255]));
+        assert_eq!(
+            compositor.changed_since(before),
+            Some(vec![[6, 0, 7, 1], [1, 3, 2, 4]])
+        );
+        for _ in 0..70 {
+            compositor.refresh(&arena, [0, 0, 1, 1]);
+        }
+        assert_eq!(compositor.changed_since(first), None, "too long ago");
+        // Another compositor's versions never pass for this one's.
+        let other = Compositor::new(picture);
+        assert_eq!(compositor.changed_since(other.display().2), None);
+        assert_eq!(other.changed_since(compositor.display().2), None);
         let mut hide = SetProperty::new(layer, picture::VISIBLE, false);
         hide.apply(&mut arena).unwrap();
         assert!(compositor.sync(&arena), "a hidden layer recomposites");
@@ -915,6 +1247,47 @@ mod speed {
             "full composite 4000x3000, 8 layers: {:.1} ms",
             start.elapsed().as_secs_f64() * 1000.0
         );
+        // Frames of a big stroke on the top layer: the brush, then the
+        // screen, the old way (the square around what changed) and the new
+        // (just the changed tiles).
+        let top = below.unwrap();
+        for (soft, size) in [(false, 1500.0), (true, 1500.0), (false, 300.0)] {
+            for tiles in [false, true] {
+                let tip = crate::brush::Tip {
+                    size,
+                    hardness: if soft { 0.3 } else { 1.0 },
+                    eraser: soft,
+                    size_by: crate::brush::Dynamics::NONE,
+                    ..crate::brush::Tip::default()
+                };
+                let mut stroke = crate::brush::Stroke::new(top, tip, [0.1, 0.1, 0.1], false);
+                let frames = 60;
+                let start = Instant::now();
+                for frame in 0..frames {
+                    for step in 0..2 {
+                        let i = (frame * 2 + step) as f32;
+                        let raster = doc::raster_mut(&mut arena, top).unwrap();
+                        stroke.to(raster, [900.0 + i * 3.0, 1500.0], 1.0, None);
+                    }
+                    if tiles {
+                        let rects = stroke.take_dirty_tiles();
+                        compositor.refresh_rects(&arena, &rects);
+                    } else if let Some(rect) = stroke.take_dirty() {
+                        compositor.refresh(&arena, rect);
+                    }
+                }
+                println!(
+                    "{} {size} stroke frame, {}: {:.2} ms",
+                    if soft { "soft eraser" } else { "hard pen" },
+                    if tiles {
+                        "changed tiles"
+                    } else {
+                        "whole square"
+                    },
+                    start.elapsed().as_secs_f64() * 1000.0 / f64::from(frames)
+                );
+            }
+        }
         for side in [100_u32, 500, 1500] {
             let start = Instant::now();
             let runs = 10;

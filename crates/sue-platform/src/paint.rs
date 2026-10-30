@@ -23,6 +23,27 @@ pub trait TextureUpload {
         pixels: &[u8],
         nearest: bool,
     ) -> Option<egui::TextureId>;
+
+    /// [`Self::texture`] for an image that changes a little at a time (a
+    /// canvas being painted): when the texture already holds an older
+    /// version, `changed` is asked for the rectangles `[x0, y0, x1, y1]`
+    /// that differ since that version and only they are sent again
+    /// (`None` from it sends everything). Hosts without partial uploads
+    /// send everything.
+    #[allow(clippy::too_many_arguments)]
+    fn texture_changed(
+        &mut self,
+        key: u64,
+        version: u64,
+        size: [u32; 2],
+        channels: u8,
+        pixels: &[u8],
+        nearest: bool,
+        changed: &dyn Fn(u64) -> Option<Vec<[u32; 4]>>,
+    ) -> Option<egui::TextureId> {
+        let _ = changed;
+        self.texture(key, version, size, channels, pixels, nearest)
+    }
 }
 
 /// For hosts without a GPU: images draw as placeholders.
@@ -315,6 +336,63 @@ impl EguiPainter {
 }
 
 impl TextureUpload for EguiPainter {
+    fn texture_changed(
+        &mut self,
+        key: u64,
+        version: u64,
+        size: [u32; 2],
+        channels: u8,
+        pixels: &[u8],
+        nearest: bool,
+        changed: &dyn Fn(u64) -> Option<Vec<[u32; 4]>>,
+    ) -> Option<egui::TextureId> {
+        // Only the changed rectangles go up when the texture holds this
+        // picture at full size already: a stroke sends what it painted,
+        // not the whole canvas every frame.
+        let [width, height] = size;
+        let partial = self.images.get(&key).and_then(|image| {
+            let fits = image.size == size
+                && image.nearest == nearest
+                && channels == 4
+                && image.version != version
+                && pixels.len() >= width as usize * height as usize * 4;
+            fits.then(|| changed(image.version)).flatten()
+        });
+        let Some(rects) = partial else {
+            return self.texture(key, version, size, channels, pixels, nearest);
+        };
+        let image = self.images.get_mut(&key)?;
+        for [x0, y0, x1, y1] in rects {
+            let (x1, y1) = (x1.min(width), y1.min(height));
+            if x0 >= x1 || y0 >= y1 {
+                continue;
+            }
+            let offset = (y0 as usize * width as usize + x0 as usize) * 4;
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &image.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x: x0, y: y0, z: 0 },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &pixels[offset..],
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width * 4),
+                    rows_per_image: Some(y1 - y0),
+                },
+                wgpu::Extent3d {
+                    width: x1 - x0,
+                    height: y1 - y0,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+        image.version = version;
+        image.used = true;
+        Some(image.id)
+    }
+
     fn texture(
         &mut self,
         key: u64,
