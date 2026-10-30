@@ -99,6 +99,39 @@ pub fn solve_layout(request: &LayoutRequest) -> LayoutSolution {
     }
 }
 
+/// Where a floating window such as Settings goes inside `area` (the
+/// window less its safe area), by the screen's real size and shape: a
+/// phone's fills it, a tablet's is a large sheet shaped to how the tablet is
+/// held, and a desktop's is a dialog with a sensible largest size.
+#[must_use]
+pub fn sheet_rect(form_factor: FormFactor, area: Rect) -> Rect {
+    let (width, height) = (area.width().max(0.0), area.height().max(0.0));
+    let size = match form_factor {
+        FormFactor::Mobile => return area,
+        FormFactor::Tablet => {
+            let margin = (width.min(height) * 0.04).clamp(12.0, 40.0);
+            if height >= width {
+                // Upright: the whole width, most of the height.
+                egui::vec2(
+                    width - margin * 2.0,
+                    (height * 0.82).min(height - margin * 2.0),
+                )
+            } else {
+                // On its side: most of the width, the whole height.
+                egui::vec2(
+                    (width * 0.8).min(1180.0).min(width - margin * 2.0),
+                    height - margin * 2.0,
+                )
+            }
+        }
+        FormFactor::Desktop => egui::vec2(
+            (width - 48.0).min(980.0).max(width.min(320.0)),
+            (height - 64.0).min(720.0).max(height.min(320.0)),
+        ),
+    };
+    Rect::from_center_size(area.center(), size.max(egui::Vec2::ZERO))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,6 +189,31 @@ mod tests {
         let solution = solve_layout(&asked);
         assert_eq!(solution.bar.top(), 47.0);
         assert_eq!(solution.status.bottom(), 810.0);
+    }
+
+    #[test]
+    fn sheets_fit_every_screen_and_its_shape() {
+        let screen = |w: f32, h: f32| Rect::from_min_size(egui::Pos2::ZERO, vec2(w, h));
+        // A phone's fills the screen, upright or on its side.
+        for area in [screen(393.0, 851.0), screen(851.0, 393.0)] {
+            assert_eq!(sheet_rect(FormFactor::Mobile, area), area);
+        }
+        // A tablet upright: the whole width less a margin; on its side,
+        // the whole height less a margin.
+        let upright = sheet_rect(FormFactor::Tablet, screen(800.0, 1280.0));
+        assert!(upright.width() > 720.0 && upright.height() < 1100.0);
+        let side = sheet_rect(FormFactor::Tablet, screen(1280.0, 800.0));
+        assert!(side.height() > 720.0 && side.width() < 1100.0);
+        // A desktop's has a largest size, centered, and shrinks into small
+        // windows without spilling out.
+        let big = sheet_rect(FormFactor::Desktop, screen(2560.0, 1440.0));
+        assert_eq!(big.size(), vec2(980.0, 720.0));
+        assert_eq!(big.center(), egui::pos2(1280.0, 720.0));
+        for (w, h) in [(300.0, 200.0), (500.0, 900.0), (1440.0, 900.0)] {
+            let area = screen(w, h);
+            let sheet = sheet_rect(FormFactor::Desktop, area);
+            assert!(area.contains_rect(sheet), "{sheet:?} in {area:?}");
+        }
     }
 
     #[test]

@@ -107,6 +107,7 @@ none = None
 add-another-shortcut-as-many-as = Add another shortcut for this (as many as you like)
 filter-settings-ellipsis = Filter settings...
 results-for = Results for "{ $filter }"
+all-settings = All settings
 
 applet-name = Settings
 applet-summary = Every setting and every rice parameter.

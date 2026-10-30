@@ -249,6 +249,14 @@ Appearance & Rice, Display & Graphics, Audio & DSP, Files & Codecs, Studios, Pac
 Keymaps, MCP), and the right side shows only that category. Type in "Filter
 settings..." to search all of them.
 
+Settings fits the screen it is on. On a phone it fills the screen: held
+upright, the categories are a list, a tap opens one, and **All settings** at
+the top goes back, with each setting's control under its name; on its side,
+the categories run down the left. Everything is big enough for a thumb. On a tablet it is a large sheet with the categories at
+the left, as wide as the tablet upright and as tall as it on its side. On a
+computer it is a window that grows with yours up to a comfortable size and
+shrinks into a small one.
+
 Under General, **Open At Launch** is the Hub's pin: the Hub, or the studio or
 tool Sue opens straight into. **Recent Files on the Hub** says how many the
 Hub's Recent list shows (0 hides it), and **Autosave Every** how soon after a

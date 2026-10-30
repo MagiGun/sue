@@ -1323,7 +1323,7 @@ status bar, then the floating surfaces:
 | --- | --- |
 | Sue menu | A drop-down under the Sue button, built for what is open; submenus open on hover; `Esc` or a click outside closes it. |
 | Command palette | `Tab` or `/` when no text field has focus (unless the page keeps the key): fuzzy search (in-order letters, bonuses for runs and word starts) over the Hub, every studio and tool, the pin, Sue's own actions, every template (`New Picture: Square Post`) and the applets' `commands`. |
-| Settings window | Over a scrim; 190 px category sidebar, filter field, one page at a time (§4.3). |
+| Settings window | Over a scrim, sized to the screen by `sheet_rect`; category sidebar (190 px on a desktop, 30% on a tablet) or, on a phone, a list that opens one page at a time; filter field (§4.3). |
 | Quit dialog | When `general.confirm_on_exit` is on. |
 
 A file dropped anywhere opens as above.
@@ -2229,6 +2229,19 @@ menu's Settings, or `keys.open_settings`, `Ctrl+,`). A
 category sidebar (`layout.settings_sidebar_width`, 190 px) lists the pages; the
 right pane shows only the chosen page, under a "Filter settings..." field.
 While a filter is active, matching parameters from every page are listed.
+
+The sheet takes its size from `sheet_rect` (`sue-wm` `layout.rs`), by the
+screen's real width, height and shape (less its safe area): a phone's fills
+it; a tablet's is the whole width less a margin and 82% of the height when
+upright, 80% of the width (at most 1180) and the whole height less a margin
+on its side; a desktop's is the window less a margin, at most 980 by 720.
+Its title bar is 36, 44 or 52 points tall, with a finger-sized close button
+on touch. Inside, an upright phone (or any sheet under 560 points wide) shows
+the pages as a list that opens one page at a time behind an "All settings" back
+row, with each control under its name across the full width and choices
+that do not fit as a list; a tablet, or a phone on its side, sizes the
+sidebar to 30% of the sheet (180 to 300 points). Rows and controls are at least 44 points tall on a
+phone and 36 on a tablet.
 
 The pages are data the engine registers in its `Catalog`, like applets, so
 packages can add their own:

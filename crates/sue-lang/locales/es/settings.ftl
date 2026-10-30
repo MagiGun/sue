@@ -102,6 +102,7 @@ none = Ninguno
 add-another-shortcut-as-many-as = Añadir otro atajo para esto (tantos como quieras)
 filter-settings-ellipsis = Filtrar ajustes...
 results-for = Resultados para «{ $filter }»
+all-settings = Todos los ajustes
 applet-name = Ajustes
 applet-summary = Todos los ajustes y todos los parámetros de estilo.
 sue-keeps-work-you-have-not = Sue guarda por sí mismo el trabajo que no has guardado. El Hub lo muestra en Trabajo sin guardar, para recuperarlo o descartarlo.

@@ -102,6 +102,7 @@ none = なし
 add-another-shortcut-as-many-as = この操作に別のショートカットを追加 (いくつでも)
 filter-settings-ellipsis = 設定を絞り込む...
 results-for = 「{ $filter }」の結果
+all-settings = すべての設定
 applet-name = 設定
 applet-summary = すべての設定とすべてのカスタマイズ項目。
 sue-keeps-work-you-have-not = Sue は保存していない作業を自動で保管します。ハブの「未保存の作業」から復元または破棄できます。

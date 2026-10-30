@@ -235,6 +235,8 @@ pub struct Shell {
     page_rect: Rect,
     /// Where the last frame drew the Sue button.
     sue_button: Rect,
+    /// Where the last frame drew the floating window (Settings).
+    window_rect: Rect,
     /// Where the last frame drew the Hub's boxes and their pins.
     hub_boxes: Vec<(AppletId, Rect, Rect)>,
     /// Where the last frame drew the rows (and buttons) of the Hub's lists.
@@ -354,6 +356,7 @@ impl Shell {
             animating: true,
             page_rect: Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 720.0)),
             sue_button: Rect::NOTHING,
+            window_rect: Rect::NOTHING,
             hub_boxes: Vec::new(),
             hub_rows: Vec::new(),
             discard_armed: None,
@@ -425,6 +428,13 @@ impl Shell {
         } else {
             window
         }
+    }
+
+    /// Where the last frame drew the floating window (Settings), if one is
+    /// open.
+    #[must_use]
+    pub fn window_rect(&self) -> Option<Rect> {
+        self.window.as_ref().map(|_| self.window_rect)
     }
 
     /// Where the last frame drew the Sue button.
@@ -2555,11 +2565,32 @@ impl Shell {
         if scrim {
             self.close_window();
         }
-        let size = vec2(
-            (screen.width() - 48.0).clamp(320.0, 980.0),
-            (screen.height() - 64.0).clamp(320.0, 700.0),
+        // Sized by the screen's real size and shape: a phone's fills it,
+        // clear of notches; a tablet's is shaped to how it is held.
+        let form = self.form_factor();
+        let insets = self.safe_area;
+        let area = Rect::from_min_max(
+            pos2(screen.left() + insets.left, screen.top() + insets.top),
+            pos2(
+                screen.right() - insets.right,
+                screen.bottom() - insets.bottom,
+            ),
         );
-        let at = screen.center() - size / 2.0 + vec2(0.0, (1.0 - appear) * 18.0);
+        let sheet = crate::sheet_rect(form, area);
+        let size = sheet.size();
+        let rise = if form == FormFactor::Mobile {
+            size.y * 0.2
+        } else {
+            18.0
+        };
+        let at = sheet.min + vec2(0.0, (1.0 - appear) * rise);
+        self.window_rect = sheet;
+        // Its title bar holds a finger-sized close button on touch layouts.
+        let bar_height = match form {
+            FormFactor::Desktop => 36.0,
+            FormFactor::Tablet => 44.0,
+            FormFactor::Mobile => 52.0,
+        };
         let name = io
             .applets
             .manifest(&id)
@@ -2576,7 +2607,7 @@ impl Shell {
                 widgets::window_frame(theme).show(ui, |ui| {
                     ui.set_min_size(size);
                     ui.set_max_size(size);
-                    let bar = Rect::from_min_size(ui.min_rect().min, vec2(size.x, 36.0));
+                    let bar = Rect::from_min_size(ui.min_rect().min, vec2(size.x, bar_height));
                     let mut bar_ui = ui.new_child(
                         UiBuilder::new()
                             .max_rect(bar.shrink2(vec2(theme.padding * 1.5, 0.0)))
@@ -2584,14 +2615,20 @@ impl Shell {
                     );
                     bar_ui.label(RichText::new(&name).size(theme.ui_size).color(theme.text));
                     bar_ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let (glyph, target) = if form == FormFactor::Desktop {
+                            (1.3, Vec2::ZERO)
+                        } else {
+                            (1.8, Vec2::splat(bar_height - 8.0))
+                        };
                         if ui
                             .add(
                                 egui::Button::new(
                                     RichText::new("\u{00D7}")
-                                        .size(theme.ui_size * 1.3)
+                                        .size(theme.ui_size * glyph)
                                         .color(theme.muted),
                                 )
-                                .frame(false),
+                                .frame(false)
+                                .min_size(target),
                             )
                             .on_hover_text(tr!("close-esc"))
                             .clicked()

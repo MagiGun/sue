@@ -5455,6 +5455,46 @@ f 2 3 4
     }
 
     #[test]
+    fn settings_fits_each_screen_and_how_it_is_held() {
+        let (mut runtime, root) = runtime("settings-sheets");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let sheet = |runtime: &mut Runtime, interface: &str, w: f32, h: f32| {
+            runtime
+                .engine
+                .world
+                .rice
+                .set(
+                    sue_wm::INTERFACE_KEY,
+                    sue_rice::RiceValue::Text(interface.to_owned()),
+                )
+                .unwrap();
+            frames(runtime, &ctx, vec2(w, h), start, |_| Vec::new());
+            runtime.request(ShellRequest::OpenSettings(None), &mut NoTextures, start);
+            frames(runtime, &ctx, vec2(w, h), start, |_| Vec::new());
+            runtime.shell.window_rect().expect("Settings is open")
+        };
+        // A phone's fills the screen, upright and on its side.
+        for (w, h) in [(393.0, 851.0), (851.0, 393.0)] {
+            let rect = sheet(&mut runtime, "phone", w, h);
+            assert_eq!(rect.size(), vec2(w, h), "{rect:?}");
+        }
+        // A tablet's: nearly the whole width upright, the whole height on
+        // its side, and never past the screen.
+        let upright = sheet(&mut runtime, "tablet", 800.0, 1280.0);
+        assert!(upright.width() > 700.0 && upright.height() < 1280.0 * 0.9);
+        let side = sheet(&mut runtime, "tablet", 1280.0, 800.0);
+        assert!(side.height() > 700.0 && side.width() < 1280.0 * 0.9);
+        // A desktop's keeps a largest size, and fits a small window.
+        let big = sheet(&mut runtime, "desktop", 1920.0, 1080.0);
+        assert_eq!(big.size(), vec2(980.0, 720.0));
+        let small = sheet(&mut runtime, "desktop", 600.0, 420.0);
+        let window = egui::Rect::from_min_size(Pos2::ZERO, vec2(600.0, 420.0));
+        assert!(window.contains_rect(small), "{small:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn the_sue_menu_changes_the_language_and_a_tool_can_keep_its_own() {
         let (mut runtime, root) = runtime("language");
         let ctx = egui::Context::default();

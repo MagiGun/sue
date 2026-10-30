@@ -1,6 +1,8 @@
 //! Settings: a floating window over the page (the Sue menu's Settings, or
 //! `Ctrl+,`). A category sidebar on the left; on the right only the chosen
-//! category's controls, under a live filter. Pages are registered data from
+//! category's controls, under a live filter. On a phone (or any sheet too
+//! narrow for two panes) the categories are a list that opens one page at a
+//! time with a back arrow, and each control sits under its name. Pages are registered data from
 //! the engine's catalog; a rice section no page claims lands on a final
 //! "Other" page, so every parameter stays reachable. Every edit is
 //! an undoable rice transaction; a slider previews live while dragged and
@@ -14,6 +16,7 @@ macro_rules! tr {
 use std::collections::HashMap;
 
 use egui::{Align, Layout, RichText, ScrollArea, Sense, Stroke, Ui, vec2};
+use sue_platform::FormFactor;
 use sue_rice::{Keybind, RiceEntry, RiceParameter, RiceSchema, RiceValue, SetRiceValue};
 use sue_wm::{
     AppletContext, AppletManifest, AppletRole, Catalog, RiceEdit, SettingsGroup, SettingsItem,
@@ -173,6 +176,13 @@ pub struct Settings {
     recording: Option<(String, Option<usize>)>,
     texts: HashMap<String, String>,
     error: Option<String>,
+    /// On a phone: a page is open (with a back arrow) instead of the list
+    /// of pages.
+    opened: bool,
+    /// This frame's rows put the control under the label (narrow sheets).
+    stacked: bool,
+    /// How wide choices and text fields are this frame.
+    field: f32,
 }
 
 impl Settings {
@@ -223,7 +233,7 @@ impl Settings {
             let mut picked = None;
             egui::ComboBox::from_id_salt(("sue-choice", entry.path()))
                 .selected_text(text)
-                .width(200.0)
+                .width(self.field)
                 .show_ui(ui, |ui| {
                     for choice in choices {
                         let on = choice.value == current;
@@ -252,7 +262,10 @@ impl Settings {
                         .font(theme.mono(theme.ui_size))
                         .color(theme.text),
                 );
-                let response = ui.add(egui::Slider::new(&mut number, min..=max).show_value(false));
+                let response = slider(
+                    ui,
+                    egui::Slider::new(&mut number, min..=max).show_value(false),
+                );
                 slider_edit(&response, path, RiceValue::Int(number), number != *value)
             }
             RiceParameter::FloatRange { value, min, max } => {
@@ -263,7 +276,10 @@ impl Settings {
                         .font(theme.mono(theme.ui_size))
                         .color(theme.text),
                 );
-                let response = ui.add(egui::Slider::new(&mut number, min..=max).show_value(false));
+                let response = slider(
+                    ui,
+                    egui::Slider::new(&mut number, min..=max).show_value(false),
+                );
                 let rounded = (number * 100.0).round() / 100.0;
                 slider_edit(
                     &response,
@@ -297,7 +313,14 @@ impl Settings {
                     .map(|option| choice_of(entry.path(), option))
                     .collect();
                 let selected = options.iter().position(|option| option == value);
-                let short = labels.len() <= 5 && labels.iter().map(String::len).sum::<usize>() < 48;
+                // Side by side when they fit the row, else a list to pick from.
+                let room = labels
+                    .iter()
+                    .map(|label| label.chars().count() as f32 * theme.ui_size * 0.6 + 24.0)
+                    .sum::<f32>();
+                let short = labels.len() <= 5
+                    && labels.iter().map(String::len).sum::<usize>() < 48
+                    && (!self.stacked || room <= self.field);
                 if short {
                     widgets::segmented(ui, &labels, selected, theme)
                         .map(|index| Edit::Set(path, RiceValue::Text(options[index].clone())))
@@ -307,7 +330,7 @@ impl Settings {
                         .selected_text(
                             selected.map_or_else(String::new, |index| labels[index].clone()),
                         )
-                        .width(200.0)
+                        .width(self.field)
                         .show_ui(ui, |ui| {
                             for (index, label) in labels.iter().enumerate() {
                                 if ui
@@ -401,7 +424,10 @@ impl Settings {
                     .texts
                     .entry(path.clone())
                     .or_insert_with(|| value.clone());
-                let response = ui.add(egui::TextEdit::singleline(text).desired_width(240.0));
+                let response = ui.add(
+                    egui::TextEdit::singleline(text)
+                        .desired_width(self.field.max(240.0).min(ui.available_width())),
+                );
                 if response.lost_focus() {
                     let typed = self.texts.remove(&path).unwrap_or_default();
                     return (typed != *value).then_some(Edit::Set(path, RiceValue::Text(typed)));
@@ -465,10 +491,69 @@ impl Settings {
         let theme = cx.theme.clone();
         let width = ui.available_width();
         let mut edit = None;
+        let switch = matches!(entry.parameter(), RiceParameter::Bool { .. });
+        if self.stacked && !switch {
+            // Narrow: the name and what it does, then the control under
+            // them across the whole width.
+            self.field = width;
+            ui.label(
+                RichText::new(label_of(entry))
+                    .size(theme.ui_size)
+                    .color(theme.text),
+            );
+            if let Some(description) = description_of(entry) {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(description)
+                            .size(theme.small_size)
+                            .color(theme.muted),
+                    )
+                    .wrap(),
+                );
+            }
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(width);
+                ui.spacing_mut().slider_width = (width - 72.0).max(80.0);
+                edit = self.control(ui, entry, cx);
+            });
+        } else {
+            self.field = if self.stacked { width } else { 200.0 };
+            self.side_by_side(ui, entry, width, &mut edit, cx);
+        }
+        ui.add_space(4.0);
+        let line = ui.available_rect_before_wrap();
+        ui.painter().hline(
+            line.x_range(),
+            line.top(),
+            Stroke::new(theme.border_width, theme.border),
+        );
+        ui.add_space(6.0);
+        if let Some(edit) = edit {
+            self.apply(cx, edit);
+        }
+    }
+
+    /// A row with the name and what it does at the left and the control at
+    /// the right.
+    fn side_by_side(
+        &mut self,
+        ui: &mut Ui,
+        entry: &RiceEntry,
+        width: f32,
+        edit: &mut Option<Edit>,
+        cx: &mut AppletContext<'_>,
+    ) {
+        let theme = cx.theme.clone();
+        let label_width = if self.stacked {
+            (width - 64.0).max(80.0)
+        } else {
+            (width * 0.5).max(160.0)
+        };
         ui.horizontal(|ui| {
             ui.set_width(width);
             ui.vertical(|ui| {
-                ui.set_width((width * 0.5).max(160.0));
+                ui.set_width(label_width);
                 ui.label(
                     RichText::new(label_of(entry))
                         .size(theme.ui_size)
@@ -486,20 +571,9 @@ impl Settings {
                 }
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                edit = self.control(ui, entry, cx);
+                *edit = self.control(ui, entry, cx);
             });
         });
-        ui.add_space(4.0);
-        let line = ui.available_rect_before_wrap();
-        ui.painter().hline(
-            line.x_range(),
-            line.top(),
-            Stroke::new(theme.border_width, theme.border),
-        );
-        ui.add_space(6.0);
-        if let Some(edit) = edit {
-            self.apply(cx, edit);
-        }
     }
 
     fn item(&mut self, ui: &mut Ui, item: &SettingsItem, needle: &str, cx: &mut AppletContext<'_>) {
@@ -589,6 +663,17 @@ impl Settings {
     }
 }
 
+/// A slider whose knob stays a comfortable size when the controls around
+/// it are tall for fingers (its track still takes the whole row).
+fn slider(ui: &mut Ui, slider: egui::Slider<'_>) -> egui::Response {
+    ui.scope(|ui| {
+        let spacing = ui.spacing_mut();
+        spacing.interact_size.y = spacing.interact_size.y.min(26.0);
+        ui.add(slider)
+    })
+    .inner
+}
+
 /// A slider's edit: live while dragged, one undo step on release.
 fn slider_edit(
     response: &egui::Response,
@@ -629,15 +714,64 @@ impl SueApplet for Settings {
     fn window_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
         let theme = cx.theme.clone();
         let pages = all_pages(cx.catalog, cx.rice());
-        if let Some(target) = self.pending.take()
-            && let Some(index) = pages.iter().position(|page| page.id == target)
-        {
-            self.page = index;
+        // A page by its id opens it; anything else shows the list of pages.
+        if let Some(target) = self.pending.take() {
+            match pages.iter().position(|page| page.id == target) {
+                Some(index) => {
+                    self.page = index;
+                    self.opened = true;
+                }
+                None => self.opened = false,
+            }
         }
         self.page = self.page.min(pages.len().saturating_sub(1));
         let full = ui.max_rect();
-        let sidebar =
-            egui::Rect::from_min_size(full.min, vec2(theme.settings_sidebar_width, full.height()));
+        let form = cx.view.form_factor;
+        // Fingers get rows and controls at least 44 points tall on a
+        // phone, 36 on a tablet.
+        let target = match form {
+            FormFactor::Desktop => None,
+            FormFactor::Tablet => Some(36.0),
+            FormFactor::Mobile => Some(44.0),
+        };
+        let row = target.unwrap_or(theme.ui_size * 2.1);
+        // An upright phone, or any sheet too narrow for two panes, lists
+        // the pages and opens one at a time; wider sheets (a phone on its
+        // side too) keep the list at the left, sized to the sheet.
+        let upright = full.height() >= full.width();
+        if (form == FormFactor::Mobile && upright) || full.width() < 560.0 {
+            self.stacked = true;
+            let mut body =
+                ui.new_child(egui::UiBuilder::new().max_rect(full.shrink(theme.padding * 1.5)));
+            fingers(&mut body, target);
+            if self.opened || !self.filter.trim().is_empty() {
+                if back_row(&mut body, row, &theme) {
+                    self.opened = false;
+                    self.filter.clear();
+                }
+                self.page_ui(&mut body, &pages, cx);
+            } else {
+                self.filter_box(&mut body, &theme);
+                body.add_space(theme.padding);
+                ScrollArea::vertical()
+                    .id_salt("sue-settings-list")
+                    .auto_shrink([false, false])
+                    .show(&mut body, |ui| {
+                        if let Some(index) = page_list(ui, &pages, None, row, true, &theme) {
+                            self.page = index;
+                            self.opened = true;
+                        }
+                    });
+            }
+            return;
+        }
+        self.stacked = false;
+        let width = if form == FormFactor::Desktop {
+            theme.settings_sidebar_width
+        } else {
+            (full.width() * 0.3).clamp(180.0, 300.0)
+        };
+        let sidebar = egui::Rect::from_min_size(full.min, vec2(width, full.height()));
         let pane =
             egui::Rect::from_min_max(egui::pos2(sidebar.right() + 1.0, full.top()), full.max);
         ui.painter()
@@ -647,41 +781,123 @@ impl SueApplet for Settings {
 
         let mut side = ui.new_child(egui::UiBuilder::new().max_rect(sidebar.shrink(theme.padding)));
         side.spacing_mut().item_spacing.y = 2.0;
-        for (index, page) in pages.iter().enumerate() {
-            let chosen = index == self.page && self.filter.trim().is_empty();
-            let (rect, response) = side.allocate_exact_size(
-                vec2(side.available_width(), theme.ui_size * 2.1),
-                Sense::click(),
-            );
-            if chosen || response.hovered() {
-                side.painter().rect_filled(
-                    rect,
-                    theme.control_radius,
-                    if chosen { theme.active } else { theme.hover },
-                );
-            }
-            side.painter().text(
-                rect.left_center() + vec2(theme.padding, 0.0),
-                egui::Align2::LEFT_CENTER,
-                &page.title,
-                theme.font(theme.ui_size),
-                if chosen { theme.text } else { theme.muted },
-            );
-            if response.clicked() {
-                self.page = index;
-                self.filter.clear();
-            }
-        }
+        let chosen = self.filter.trim().is_empty().then_some(self.page);
+        ScrollArea::vertical()
+            .id_salt("sue-settings-pages")
+            .auto_shrink([false, false])
+            .show(&mut side, |ui| {
+                if let Some(index) = page_list(ui, &pages, chosen, row, false, &theme) {
+                    self.page = index;
+                    self.filter.clear();
+                }
+            });
 
         let mut right =
             ui.new_child(egui::UiBuilder::new().max_rect(pane.shrink(theme.padding * 1.5)));
-        right.add(
+        fingers(&mut right, target);
+        self.filter_box(&mut right, &theme);
+        right.add_space(theme.padding);
+        self.page_ui(&mut right, &pages, cx);
+    }
+}
+
+/// Controls at least `target` points tall, for fingers.
+fn fingers(ui: &mut Ui, target: Option<f32>) {
+    if let Some(height) = target {
+        ui.spacing_mut().interact_size.y = height;
+        ui.spacing_mut().button_padding = vec2(10.0, 8.0);
+    }
+}
+
+/// The list of Settings pages, one row each; returns the one clicked.
+/// `arrows` marks each row as opening a page (on a phone).
+fn page_list(
+    ui: &mut Ui,
+    pages: &[SettingsPage],
+    chosen: Option<usize>,
+    row: f32,
+    arrows: bool,
+    theme: &Theme,
+) -> Option<usize> {
+    let mut clicked = None;
+    for (index, page) in pages.iter().enumerate() {
+        let on = chosen == Some(index);
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(ui.available_width(), row), Sense::click());
+        if on || response.hovered() {
+            ui.painter().rect_filled(
+                rect,
+                theme.control_radius,
+                if on { theme.active } else { theme.hover },
+            );
+        }
+        ui.painter().text(
+            rect.left_center() + vec2(theme.padding, 0.0),
+            egui::Align2::LEFT_CENTER,
+            &page.title,
+            theme.font(theme.ui_size),
+            if on || arrows {
+                theme.text
+            } else {
+                theme.muted
+            },
+        );
+        if arrows {
+            ui.painter().text(
+                rect.right_center() - vec2(theme.padding, 0.0),
+                egui::Align2::RIGHT_CENTER,
+                "\u{203A}",
+                theme.font(theme.ui_size * 1.4),
+                theme.muted,
+            );
+            ui.painter().hline(
+                rect.x_range(),
+                rect.bottom() + 1.0,
+                Stroke::new(theme.border_width, theme.border),
+            );
+        }
+        if response.clicked() {
+            clicked = Some(index);
+        }
+    }
+    clicked
+}
+
+/// A phone's back arrow to the list of pages; `true` when tapped.
+fn back_row(ui: &mut Ui, row: f32, theme: &Theme) -> bool {
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), row), Sense::click());
+    if response.hovered() {
+        ui.painter()
+            .rect_filled(rect, theme.control_radius, theme.hover);
+    }
+    ui.painter().text(
+        rect.left_center() + vec2(theme.padding * 0.5, 0.0),
+        egui::Align2::LEFT_CENTER,
+        format!("\u{2039}  {}", tr!("all-settings")),
+        theme.font(theme.ui_size),
+        theme.text,
+    );
+    response.clicked()
+}
+
+impl Settings {
+    fn filter_box(&mut self, ui: &mut Ui, theme: &Theme) {
+        let height = ui.spacing().interact_size.y;
+        ui.add(
             egui::TextEdit::singleline(&mut self.filter)
                 .id(egui::Id::unique("sue-settings-filter"))
                 .hint_text(tr!("filter-settings-ellipsis"))
-                .desired_width(f32::INFINITY),
+                .desired_width(f32::INFINITY)
+                .min_size(vec2(0.0, height))
+                .align(egui::Align2::LEFT_CENTER)
+                .font(theme.font(theme.ui_size)),
         );
-        right.add_space(theme.padding);
+    }
+
+    /// The open page's title and its groups of settings, or every page's
+    /// settings that match the filter.
+    fn page_ui(&mut self, ui: &mut Ui, pages: &[SettingsPage], cx: &mut AppletContext<'_>) {
+        let theme = cx.theme.clone();
         let needle = self.filter.trim().to_lowercase();
         let title = if needle.is_empty() {
             pages
@@ -690,15 +906,18 @@ impl SueApplet for Settings {
         } else {
             tr!("results-for", filter = self.filter.trim())
         };
-        right.label(
-            RichText::new(title)
-                .size(theme.heading_size)
-                .color(theme.text),
+        ui.add(
+            egui::Label::new(
+                RichText::new(title)
+                    .size(theme.heading_size)
+                    .color(theme.text),
+            )
+            .wrap(),
         );
         if let Some(error) = &self.error {
-            right.label(RichText::new(format!("! {error}")).color(theme.text));
+            ui.add(egui::Label::new(RichText::new(format!("! {error}")).color(theme.text)).wrap());
         }
-        right.add_space(theme.padding * 0.5);
+        ui.add_space(theme.padding * 0.5);
         let shown: Vec<&SettingsPage> = if needle.is_empty() {
             pages.get(self.page).into_iter().collect()
         } else {
@@ -707,7 +926,7 @@ impl SueApplet for Settings {
         ScrollArea::vertical()
             .id_salt("sue-settings-scroll")
             .auto_shrink([false, false])
-            .show(&mut right, |ui| {
+            .show(ui, |ui| {
                 for page in shown {
                     for group in &page.groups {
                         let visible = needle.is_empty()

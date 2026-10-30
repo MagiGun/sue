@@ -674,6 +674,49 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
             )?;
         }
     }
+    // 24 to 26. Settings shaped to each screen: a phone's list and page,
+    // upright and on its side; a tablet's two panes, upright and on its
+    // side; a small desktop window.
+    for (interface, size, page, name) in [
+        ("phone", [393_u32, 851_u32], "", "24-phone-settings"),
+        ("phone", [393, 851], "display", "24a-phone-settings-display"),
+        (
+            "phone",
+            [851, 393],
+            "appearance",
+            "24b-phone-on-its-side-settings",
+        ),
+        (
+            "tablet",
+            [800, 1280],
+            "appearance",
+            "25-tablet-upright-settings",
+        ),
+        (
+            "tablet",
+            [1280, 800],
+            "display",
+            "25a-tablet-on-its-side-settings",
+        ),
+        ("desktop", [720, 520], "display", "26-small-window-settings"),
+    ] {
+        let _ = runtime.engine.world.rice.set(
+            sue_wm::INTERFACE_KEY,
+            sue_rice::RiceValue::Text(interface.to_owned()),
+        );
+        camera.size = size;
+        runtime.request(
+            ShellRequest::OpenSettings(Some(page.to_owned())),
+            &mut camera.painter,
+            camera.now,
+        );
+        shoot(&mut runtime, &mut camera, name)?;
+    }
+    runtime.shell.close_window();
+    let _ = runtime.engine.world.rice.set(
+        sue_wm::INTERFACE_KEY,
+        sue_rice::RiceValue::Text("auto".to_owned()),
+    );
     written.extend(entering);
     let _ = std::fs::remove_dir_all(&root);
     Ok(written)

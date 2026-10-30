@@ -13,6 +13,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Settings fits every screen: full screen on a phone, with the categories
+  as a list that opens one page at a time and controls big enough for a
+  thumb; a large sheet with the categories at the side on a tablet, upright
+  or on its side; and a window that never spills out of a small one on a
+  computer.
 - The Sue menu's **Layout** switches all of Sue, on a computer or in the
   browser, to the Tablet or Phone layout (the same buttons, bars and sheets
   as on a tablet or phone) and back, at once. **Phone Shaped** keeps the

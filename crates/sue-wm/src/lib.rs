@@ -70,7 +70,9 @@ pub use lang::{
     rice_section, sue_language, sue_language_choices,
 };
 pub use launchpad::{AppletFactory, Applets, Launchpad};
-pub use layout::{LayoutMetrics, LayoutRequest, LayoutSolution, bar_height, solve_layout};
+pub use layout::{
+    LayoutMetrics, LayoutRequest, LayoutSolution, bar_height, sheet_rect, solve_layout,
+};
 pub use menubar::{ItemState, Menu, MenuBar, MenuItem, context_items};
 pub use palette::{Palette, PaletteOutcome, fuzzy_score};
 pub use scheduler::{Damage, FrameScheduler, FrameTicket, RenderDemand};
