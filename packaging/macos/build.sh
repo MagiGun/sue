@@ -53,7 +53,12 @@ done
 iconutil -c icns "$iconset" -o "$app/Contents/Resources/sue.icns"
 
 codesign --force --deep --sign "${SUE_SIGN_IDENTITY:--}" "$app"
-hdiutil create -volname Sue -srcfolder "$app" -ov -format UDZO "$out/Sue-$version-macos-universal.dmg"
+# hdiutil sizes the image from the folder and can guess too small for a
+# large program ("No space left on device" inside the image), so it gets
+# twice the app's size and some room.
+size_mb=$(( $(du -sm "$app" | cut -f1) * 2 + 32 ))
+hdiutil create -volname Sue -srcfolder "$app" -size "${size_mb}m" -ov -format UDZO \
+  "$out/Sue-$version-macos-universal.dmg"
 
 # The command line program, for a terminal: --self-check, --version.
 codesign --force --sign "${SUE_SIGN_IDENTITY:--}" "$cli/sue-cli"
