@@ -1988,3 +1988,13 @@ crystallize-ellipsis = Crystallize...
 amplitude = Amplitude
 folds = Folds
 cell-size = Cell size
+printing-of-fanzine = Printing of fanzine
+ok = OK
+custom = Custom
+register-preset = Register preset
+delete-preset = Delete preset
+working-profile = Working profile
+comic-settings = Comic settings
+animation-settings = Animation settings
+animated-illustration-hint = To create an animated illustration,
+    turn this option on and specify the number of cels.

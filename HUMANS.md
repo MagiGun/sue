@@ -579,9 +579,11 @@ Once a canvas is open:
   their tails as one outlined shape. Filter, Render has focus lines, speed
   lines and screentone, and Layer, New Layer, Tone makes a layer of tone.
 - **Animation:** File, New, Animation (or New Animation Cel on any picture)
-  starts a timeline. The Timeline palette makes folders and cels, plays and
-  stops (with loop), steps frame by frame and sets the frame rate and length.
-  Click a frame to go there; double-click to show the current layer from
+  starts a timeline. The Timeline palette, laid out as Clip Studio Paint's,
+  makes folders and cels, plays and stops (with loop), steps frame by frame
+  and zooms; each folder's row shows its cels as pictures, every other
+  second is a lighter band and the current frame is a red bar. Edit
+  Timeline sets the frame rate and length. Click a frame to go there; double-click to show the current layer from
   there. Onion skin shows the drawing before in blue and after in green;
   Onion Skin Settings choose how many, their colors and how faint they
   get. The **light table** (Animation, Light Table, or the Animation Cels
@@ -595,6 +597,9 @@ Once a canvas is open:
   to move it, Ctrl and drag to come nearer; Tool Property sets the camera,
   light and whether it draws shaded, as line art or both. Layer, Convert to
   Lines and Tones makes clean line art and tone from it to draw over.
+- **New:** File, New is laid out as Clip Studio Paint's, with its six
+  projects: Illustration, Webtoon, Comic, Printing of fanzine (A5 pages),
+  Show all comic settings and Animation, each starting at its usual size.
 - **Webtoons:** File, New has a tall Webtoon canvas, and File, Export
   Webtoon cuts it into numbered pictures at the height and width you
   choose, ready to upload.

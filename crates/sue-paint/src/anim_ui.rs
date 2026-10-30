@@ -5,9 +5,9 @@
 
 use std::path::Path;
 
-use egui::{Align2, Rect, Sense, Stroke, Ui, pos2, vec2};
+use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, pos2, vec2};
+use sue_core::EntityId;
 use sue_core::txn::{Rename, SetProperty};
-use sue_core::{EntityId, Rate};
 use sue_model::Sequence;
 use sue_platform::write_atomic;
 use sue_wm::{AppletContext, FilePick, FileType, ShellRequest, Theme};
@@ -20,6 +20,10 @@ use crate::panels::icon_button;
 use crate::studio::SuePaint;
 
 type Edit = sue_core::txn::Batch<sue_core::Arena>;
+
+/// A timeline button: its icon, hint, command, whether it can be used and
+/// whether it is on.
+type Button<'a> = (Icon, String, &'a str, bool, bool);
 
 impl SuePaint {
     /// The current picture's timeline, cloned, and its length.
@@ -692,6 +696,62 @@ impl SuePaint {
     /// The Timeline palette: its buttons, frame rate and length, and the
     /// folders' keys frame by frame.
     #[allow(clippy::too_many_lines, reason = "the whole palette")]
+    /// The picture of `id` in `rect` (kept to its aspect), from the same
+    /// thumbnails the layer palette keeps.
+    fn cel_thumb(
+        &mut self,
+        painter: &egui::Painter,
+        rect: Rect,
+        id: EntityId,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        let Ok(entity) = cx.world.arena.get_by_id(id) else {
+            return;
+        };
+        let revision = entity.revision();
+        if self
+            .thumbs
+            .get(&id)
+            .is_none_or(|(had, _, _)| *had != revision)
+            && let Some((pixels, size)) = composite::thumbnail(&cx.world.arena, id, [96, 72])
+        {
+            self.thumbs.insert(id, (revision, pixels, size));
+        }
+        let Some((revision, pixels, size)) = self.thumbs.get(&id) else {
+            return;
+        };
+        let aspect = size[0] as f32 / size[1].max(1) as f32;
+        let fit = if aspect > rect.width() / rect.height() {
+            vec2(rect.width(), rect.width() / aspect)
+        } else {
+            vec2(rect.height() * aspect, rect.height())
+        };
+        let image = Rect::from_min_size(rect.min, fit);
+        painter.rect_filled(image, 0.0, Color32::WHITE);
+        if let Some(texture) = cx.textures.texture(
+            crate::studio::texture_key(id, 0x7448_554d_4253),
+            *revision,
+            *size,
+            4,
+            pixels,
+            false,
+        ) {
+            painter.image(
+                texture,
+                image,
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+        painter.rect_stroke(image, 0.0, theme.hairline(), egui::StrokeKind::Outside);
+    }
+
+    /// Clip Studio Paint's Timeline palette: its buttons, then a column
+    /// of tracks (each with its eye, name and thumbnail) beside the frames,
+    /// where every second is a band, every key shows its cel's picture and
+    /// the current frame is a red bar.
+    #[allow(clippy::too_many_lines, reason = "the whole Timeline palette")]
     pub(crate) fn timeline_ui(
         &mut self,
         ui: &mut Ui,
@@ -703,88 +763,110 @@ impl SuePaint {
         let here = self.timeline_here(&cx.world.arena);
         let has = here.is_some();
         let playing = self.doc().is_some_and(|doc| doc.playing.is_some());
-        let buttons: [(Icon, &str, &str, bool, bool); 14] = [
-            (
+        // Clip Studio Paint's order: the timeline, zoom, playback, cels,
+        // onion skin. A group starts after each `None`.
+        let buttons: Vec<Option<Button<'_>>> = vec![
+            Some((
                 Icon::New,
-                &tr!("new-timeline-2"),
+                tr!("new-timeline-2"),
                 "anim.timeline.new",
                 !has,
                 false,
-            ),
-            (
+            )),
+            Some((
+                Icon::Timeline,
+                tr!("edit-timeline"),
+                "anim.timeline.edit",
+                has,
+                false,
+            )),
+            Some((
                 Icon::NewFolder,
-                &tr!("new-animation-folder"),
+                tr!("new-animation-folder"),
                 "anim.layer.folder",
                 has,
                 false,
-            ),
-            (
+            )),
+            None,
+            Some((
+                Icon::ZoomOut,
+                tr!("zoom-out"),
+                "timeline.zoom_out",
+                has,
+                false,
+            )),
+            Some((Icon::ZoomIn, tr!("zoom-in"), "timeline.zoom_in", has, false)),
+            None,
+            Some((Icon::First, tr!("first-frame"), "anim.first", has, false)),
+            Some((Icon::Prev, tr!("previous-frame"), "anim.prev", has, false)),
+            // One button, as in Clip Studio Paint: Play, and Stop while it plays.
+            Some(if playing {
+                (Icon::Stop, tr!("stop"), "anim.play", has, true)
+            } else {
+                (Icon::Play, tr!("play"), "anim.play", has, false)
+            }),
+            Some((Icon::Next, tr!("next-frame"), "anim.next", has, false)),
+            Some((Icon::Last, tr!("last-frame"), "anim.last", has, false)),
+            Some((Icon::Loop, tr!("loop"), "anim.loop", has, self.looping)),
+            None,
+            Some((
                 Icon::Cel,
-                &tr!("new-animation-cel-2"),
+                tr!("new-animation-cel-2"),
                 "anim.cel.new",
                 true,
                 false,
-            ),
-            (
+            )),
+            Some((
                 Icon::Edit,
-                &tr!("specify-cel-show-current-layer-frame"),
+                tr!("specify-cel-show-current-layer-frame"),
                 "anim.cel.assign",
                 has,
                 false,
-            ),
-            (
+            )),
+            Some((
                 Icon::Minus,
-                &tr!("delete-key-frame"),
+                tr!("delete-key-frame"),
                 "anim.key.delete",
                 has,
                 false,
-            ),
-            (
+            )),
+            Some((
                 Icon::Add,
-                &tr!("insert-a-frame-here"),
+                tr!("insert-a-frame-here"),
                 "anim.frame.insert",
                 has,
                 false,
-            ),
-            (
+            )),
+            Some((
                 Icon::Delete,
-                &tr!("delete-this-frame"),
+                tr!("delete-this-frame"),
                 "anim.frame.delete",
                 has,
                 false,
-            ),
-            (
+            )),
+            None,
+            Some((
                 Icon::Onion,
-                &tr!("onion-skin"),
+                tr!("onion-skin"),
                 "anim.onion",
                 has,
                 self.onion,
-            ),
-            (Icon::First, &tr!("first-frame"), "anim.first", has, false),
-            (Icon::Prev, &tr!("previous-frame"), "anim.prev", has, false),
-            // One button, as in Clip Studio Paint: Play, and Stop while it plays.
-            if playing {
-                (Icon::Stop, &tr!("stop"), "anim.play", has, true)
-            } else {
-                (Icon::Play, &tr!("play"), "anim.play", has, false)
-            },
-            (Icon::Next, &tr!("next-frame"), "anim.next", has, false),
-            (Icon::Last, &tr!("last-frame"), "anim.last", has, false),
-            (Icon::Loop, &tr!("loop"), "anim.loop", has, self.looping),
+            )),
         ];
         let mut run = None;
         let mut x = bar.left() + 8.0;
-        for (index, (icon, tip, command, enabled, active)) in buttons.iter().enumerate() {
-            if matches!(index, 3 | 7 | 8) {
+        for button in &buttons {
+            let Some((icon, tip, command, enabled, active)) = button else {
                 ui.painter().vline(
                     x + 1.0,
                     bar.shrink2(vec2(0.0, 6.0)).y_range(),
                     theme.hairline(),
                 );
-                x += 6.0;
-            }
+                x += 8.0;
+                continue;
+            };
             let at = Rect::from_min_size(pos2(x, bar.top() + 3.0), vec2(22.0, 22.0));
-            if at.right() > bar.right() - 4.0 {
+            if at.right() > bar.right() - 150.0 {
                 break;
             }
             if icon_button(ui, at, *icon, *enabled, *active, tip, theme) {
@@ -792,55 +874,33 @@ impl SuePaint {
             }
             x += 25.0;
         }
-        // Frame rate and length.
-        if let Some((picture, sequence, length)) = &here {
-            let mut fps = anim::fps(sequence).round() as u32;
-            let mut frames = *length;
-            // Above the folder names, so every button fits in the bar.
-            let area = Rect::from_min_size(tracks.min + vec2(4.0, 1.0), vec2(154.0, 20.0));
-            let mut child = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(area)
-                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        // At the right, as Clip Studio Paint: the current frame, then the
+        // first and last frames played.
+        if let Some((_, _, length)) = &here {
+            let frame = self.doc().map_or(0, |doc| doc.frame);
+            ui.painter().text(
+                pos2(bar.right() - 12.0, bar.center().y),
+                Align2::RIGHT_CENTER,
+                format!("{}   /   1   /   {length}", frame + 1),
+                theme.font(theme.small_size + 0.5),
+                theme.text,
             );
-            let fps_changed = child
-                .add(
-                    egui::DragValue::new(&mut fps)
-                        .range(1..=120)
-                        .suffix(tr!("fps")),
-                )
-                .on_hover_text(tr!("frame-rate"))
-                .changed();
-            let length_changed = child
-                .add(
-                    egui::DragValue::new(&mut frames)
-                        .range(1..=10_000)
-                        .suffix(tr!("frames")),
-                )
-                .on_hover_text(tr!("length-of-the-timeline"))
-                .changed();
-            if fps_changed {
-                let mut next = sequence.clone();
-                next.rate = Rate::new(fps.max(1), 1);
-                Self::apply(cx, anim::set(*picture, next, "Frame Rate"));
-            }
-            if length_changed {
-                Self::apply(
-                    cx,
-                    Edit::new(tr!("timeline-length")).then(SetProperty::new(
-                        *picture,
-                        anim::LENGTH,
-                        i64::from(frames),
-                    )),
-                );
-            }
         }
-        if let Some(command) = run {
-            self.anim_command(command, cx);
+        match run {
+            Some("timeline.zoom_out") => {
+                self.timeline_step = Some((self.timeline_step.unwrap_or(15.0) / 1.25).max(4.0));
+            }
+            Some("timeline.zoom_in") => {
+                self.timeline_step = Some((self.timeline_step.unwrap_or(15.0) * 1.25).min(60.0));
+            }
+            Some(command) => {
+                self.anim_command(command, cx);
+            }
+            None => {}
         }
 
-        // Folder names, then frames.
-        let names = Rect::from_min_max(tracks.min, pos2(tracks.left() + 160.0, tracks.bottom()));
+        // The track column, then the frames.
+        let names = Rect::from_min_max(tracks.min, pos2(tracks.left() + 190.0, tracks.bottom()));
         ui.painter()
             .vline(names.right(), tracks.y_range(), theme.hairline());
         let Some((picture, sequence, length)) = self.timeline_here(&cx.world.arena) else {
@@ -861,39 +921,110 @@ impl SuePaint {
             return;
         };
         let (frame, track) = self.doc().map_or((0, 0), |doc| (doc.frame, doc.track));
-        let row_height = 22.0;
-        let ruler = 22.0;
-        let step = ((tracks.width() - 170.0) / length.max(1) as f32).clamp(10.0, 26.0);
+        let fps = anim::fps(&sequence).round().max(1.0) as u32;
+        let row_height = 74.0;
+        let ruler = 34.0;
         let frames_area = Rect::from_min_max(pos2(names.right(), tracks.top()), tracks.max);
-        let shown = ((frames_area.width() / step).floor() as u32).max(1);
+        let step = self.timeline_step.unwrap_or_else(|| {
+            ((frames_area.width() - 8.0) / length.max(1) as f32).clamp(10.0, 26.0)
+        });
+        let shown = ((frames_area.width() / step).ceil() as u32).max(1);
         let first = frame
             .saturating_sub(shown.saturating_sub(4))
-            .min(length.saturating_sub(shown));
-        let column = |at: u32| frames_area.left() + (at.saturating_sub(first)) as f32 * step;
-        let painter = ui.painter().with_clip_rect(tracks);
-        // The ruler and the current frame.
-        for at in first..(first + shown).min(length) {
-            let x = column(at);
-            painter.vline(
-                x,
-                frames_area.y_range(),
-                Stroke::new(1.0, theme.border.gamma_multiply(0.5)),
+            .min(length.saturating_sub(shown.saturating_sub(1)));
+        let column = |at: u32| frames_area.left() + (at as f32 - first as f32) * step;
+        let painter = ui.painter().with_clip_rect(frames_area);
+        let below = Rect::from_min_max(
+            pos2(frames_area.left(), frames_area.top() + ruler),
+            frames_area.max,
+        );
+        // The timeline's name above the tracks, as Clip Studio Paint's
+        // timeline list.
+        let title = Rect::from_min_size(
+            names.min + vec2(6.0, 6.0),
+            vec2(names.width() - 12.0, ruler - 12.0),
+        );
+        ui.painter().rect_filled(title, 2.0, theme.pill);
+        ui.painter()
+            .rect_stroke(title, 2.0, theme.hairline(), egui::StrokeKind::Inside);
+        let timeline_name = cx
+            .world
+            .arena
+            .get_by_id(picture)
+            .map_or_else(|_| tr!("timeline"), |entity| entity.name().to_owned());
+        ui.painter().text(
+            title.center(),
+            Align2::CENTER_CENTER,
+            timeline_name,
+            theme.font(theme.small_size + 0.5),
+            theme.text,
+        );
+        // Every other second a lighter band, its number above it.
+        let last = (first + shown).min(length);
+        for second in (first / fps)..=(last / fps) {
+            let (from, to) = (second * fps, ((second + 1) * fps).min(length));
+            let band = Rect::from_min_max(
+                pos2(column(from), frames_area.top() + 14.0),
+                pos2(column(to), frames_area.bottom()),
             );
-            if (at + 1) % 6 == 1 || step >= 22.0 {
+            if second % 2 == 1 {
+                painter.rect_filled(band, 0.0, theme.hover);
+            }
+            if second > 0 {
+                painter.vline(
+                    column(from),
+                    frames_area.top()..=frames_area.top() + 14.0,
+                    Stroke::new(1.0, theme.muted),
+                );
                 painter.text(
-                    pos2(x + 3.0, frames_area.top() + ruler / 2.0),
+                    pos2(column(from) + 3.0, frames_area.top() + 7.0),
                     Align2::LEFT_CENTER,
-                    (at + 1).to_string(),
+                    second.to_string(),
                     theme.font(theme.small_size - 1.0),
-                    theme.muted.gamma_multiply(0.8),
+                    theme.text,
                 );
             }
         }
-        let current = Rect::from_min_size(
-            pos2(column(frame), frames_area.top()),
-            vec2(step, frames_area.height()),
+        painter.hline(
+            frames_area.x_range(),
+            frames_area.top() + 14.0,
+            theme.hairline(),
         );
-        painter.rect_filled(current, 0.0, theme.active.gamma_multiply(0.7));
+        // The frames: a line each, numbered every third (or sparser when
+        // small), as Clip Studio Paint numbers them.
+        let every = ((24.0 / step).ceil() as u32).max(1);
+        let every = if every <= 3 { 3 } else { every.div_ceil(3) * 3 };
+        for at in first..last {
+            let x = column(at);
+            painter.vline(
+                x,
+                below.y_range(),
+                Stroke::new(1.0, theme.border.gamma_multiply(0.35)),
+            );
+            if at % every == 0 {
+                painter.vline(
+                    x,
+                    frames_area.top() + 26.0..=frames_area.top() + ruler,
+                    Stroke::new(1.0, theme.muted),
+                );
+                painter.text(
+                    pos2(x + 2.0, frames_area.top() + 22.0),
+                    Align2::LEFT_CENTER,
+                    (at + 1).to_string(),
+                    theme.font(theme.small_size - 1.0),
+                    theme.muted,
+                );
+            }
+        }
+        painter.hline(frames_area.x_range(), below.top(), theme.hairline());
+        // The end of the timeline: what lies past it is darker.
+        if length < first + shown {
+            painter.rect_filled(
+                Rect::from_min_max(pos2(column(length), frames_area.top()), frames_area.max),
+                0.0,
+                theme.void.gamma_multiply(0.6),
+            );
+        }
         let ruler_rect = Rect::from_min_size(frames_area.min, vec2(frames_area.width(), ruler));
         let ruler_response = ui.interact(
             ruler_rect,
@@ -906,75 +1037,99 @@ impl SuePaint {
             let at = first + ((pos.x - frames_area.left()) / step).max(0.0) as u32;
             self.go_to_frame(&cx.world.arena, i64::from(at.min(length - 1)));
         }
-        // One row per folder.
+        // One tall row per folder: its name and the picture it shows now in
+        // the column, and each key's cel as a picture in the frames.
         let mut action: Option<(usize, u32, Option<Option<EntityId>>)> = None;
+        let names_painter = ui.painter().with_clip_rect(names);
         for (row, index) in anim::folders(&sequence).into_iter().enumerate() {
             let top = tracks.top() + ruler + row as f32 * row_height;
             let name_rect =
                 Rect::from_min_size(pos2(names.left(), top), vec2(names.width(), row_height));
             let chosen = index == track;
             if chosen {
-                painter.rect_filled(name_rect, 0.0, theme.active);
+                names_painter.rect_filled(name_rect, 0.0, theme.active);
+                painter.rect_filled(
+                    Rect::from_min_size(
+                        pos2(frames_area.left(), top),
+                        vec2(frames_area.width(), row_height),
+                    ),
+                    0.0,
+                    theme.active.gamma_multiply(0.35),
+                );
             }
-            painter.text(
-                name_rect.left_center() + vec2(10.0, 0.0),
+            names_painter.hline(names.x_range(), name_rect.bottom(), theme.hairline());
+            painter.hline(frames_area.x_range(), name_rect.bottom(), theme.hairline());
+            let line = pos2(name_rect.left() + 8.0, top + 11.0);
+            crate::icons::paint(
+                &names_painter,
+                Rect::from_center_size(line + vec2(6.0, 0.0), vec2(14.0, 14.0)),
+                Icon::Eye,
+                theme.muted,
+            );
+            crate::icons::paint(
+                &names_painter,
+                Rect::from_center_size(line + vec2(26.0, 0.0), vec2(14.0, 14.0)),
+                Icon::NewFolder,
+                theme.muted,
+            );
+            names_painter.text(
+                line + vec2(40.0, 0.0),
                 Align2::LEFT_CENTER,
-                &sequence.tracks[index].name,
+                format!("{} :", sequence.tracks[index].name),
                 theme.font(theme.small_size + 0.5),
                 if chosen { theme.text } else { theme.muted },
             );
-            if ui
-                .interact(
-                    name_rect,
-                    ui.scope_id().with(("timeline-folder", index)),
-                    Sense::click(),
-                )
-                .clicked()
-                && let Some(doc) = self.doc_mut()
-            {
-                doc.track = index;
-            }
             let keys = anim::keys(&sequence.tracks[index], sequence.rate);
+            let thumb =
+                |x: f32| Rect::from_min_size(pos2(x, top + 24.0), vec2(64.0, row_height - 30.0));
+            if let Some(cel) = anim::cel_at(&sequence.tracks[index], sequence.rate, frame) {
+                self.cel_thumb(
+                    &names_painter,
+                    thumb(name_rect.left() + 22.0),
+                    cel,
+                    cx,
+                    theme,
+                );
+            }
             for (key, (at, cel)) in keys.iter().enumerate() {
-                if *at >= first + shown || *at >= length {
+                if *at >= last || *at >= length {
                     continue;
                 }
                 let end = keys
                     .get(key + 1)
                     .map_or(length, |(next, _)| *next)
-                    .min(first + shown);
+                    .min(last);
                 let x = column(*at);
-                let y = top + row_height / 2.0;
-                match cel {
-                    Some(cel) => {
-                        let name = cx
-                            .world
+                // The cel's name over its picture, and a line for as long
+                // as it shows.
+                let name = cel.map_or_else(
+                    || "x".to_owned(),
+                    |cel| {
+                        cx.world
                             .arena
-                            .get_by_id(*cel)
-                            .map_or_else(|_| "?".to_owned(), |entity| entity.name().to_owned());
-                        painter.circle_filled(pos2(x + 5.0, y), 3.0, theme.text);
-                        painter.text(
-                            pos2(x + 10.0, y),
-                            Align2::LEFT_CENTER,
-                            name,
-                            theme.font(theme.small_size),
-                            theme.text,
-                        );
-                        painter.hline(
-                            (x + 5.0)..=column(end) - 2.0,
-                            y + 7.0,
-                            Stroke::new(1.0, theme.muted),
-                        );
-                    }
-                    None => {
-                        painter.text(
-                            pos2(x + 3.0, y),
-                            Align2::LEFT_CENTER,
-                            "x",
-                            theme.font(theme.small_size),
-                            theme.muted,
-                        );
-                    }
+                            .get_by_id(cel)
+                            .map_or_else(|_| "?".to_owned(), |entity| entity.name().to_owned())
+                    },
+                );
+                painter.text(
+                    pos2(x + 3.0, top + 11.0),
+                    Align2::LEFT_CENTER,
+                    name,
+                    theme.font(theme.small_size),
+                    theme.text,
+                );
+                if let Some(cel) = cel {
+                    let width = ((end - at) as f32 * step - 2.0).clamp(8.0, 64.0);
+                    let rect = Rect::from_min_size(
+                        pos2(x + 1.0, top + 24.0),
+                        vec2(width, row_height - 30.0),
+                    );
+                    self.cel_thumb(&painter, rect, *cel, cx, theme);
+                    painter.hline(
+                        (x + 1.0)..=column(end) - 1.0,
+                        top + 20.0,
+                        Stroke::new(1.0, theme.muted),
+                    );
                 }
             }
             // Cells: click to go there, double-click to show the current
@@ -988,6 +1143,16 @@ impl SuePaint {
                 ui.scope_id().with(("timeline-cells", index)),
                 Sense::click(),
             );
+            let name_click = ui.interact(
+                name_rect,
+                ui.scope_id().with(("timeline-folder", index)),
+                Sense::click(),
+            );
+            if name_click.clicked()
+                && let Some(doc) = self.doc_mut()
+            {
+                doc.track = index;
+            }
             let at_pointer = |pos: egui::Pos2| {
                 (first + ((pos.x - frames_area.left()) / step).max(0.0) as u32).min(length - 1)
             };
@@ -1012,6 +1177,24 @@ impl SuePaint {
                 }
             });
         }
+        // The current frame: a red bar down the frames, as Clip Studio
+        // Paint marks it.
+        let red = Color32::from_rgb(196, 64, 64);
+        let current = Rect::from_min_size(
+            pos2(column(frame), frames_area.top() + 14.0),
+            vec2(step.min(14.0), frames_area.height() - 14.0),
+        );
+        painter.rect_filled(current, 0.0, red.gamma_multiply(0.75));
+        painter.text(
+            current.center_top() + vec2(0.0, 8.0),
+            Align2::CENTER_CENTER,
+            (frame + 1).to_string(),
+            theme.font(theme.small_size - 1.0),
+            Color32::WHITE,
+        );
+        let row_height = 26.0;
+        let ruler = ruler + anim::folders(&sequence).len() as f32 * 74.0
+            - anim::folders(&sequence).len() as f32 * row_height;
         // One row per audio track: its clip as a bar to drag, and a menu.
         let rows = anim::folders(&sequence).len();
         let mut audio_edit: Option<(sue_model::Sequence, String)> = None;
@@ -1020,7 +1203,7 @@ impl SuePaint {
             let track_ref = &sequence.tracks[index];
             let name_rect =
                 Rect::from_min_size(pos2(names.left(), top), vec2(names.width(), row_height));
-            painter.text(
+            names_painter.text(
                 name_rect.left_center() + vec2(10.0, 0.0),
                 Align2::LEFT_CENTER,
                 format!(

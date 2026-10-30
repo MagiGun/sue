@@ -454,6 +454,9 @@ pub struct SuePaint {
     /// An audio clip being dragged in the timeline: its track, where the
     /// drag began (frame) and the clip's start then.
     pub(crate) audio_drag: Option<(usize, i64, i64)>,
+    /// How wide a frame is on the timeline, once zoomed; `None` fits
+    /// the timeline to the palette.
+    pub(crate) timeline_step: Option<f32>,
     /// A 3D layer's view being changed in Tool Property, and its view and
     /// pixels from before.
     pub(crate) view3d_before: Option<(EntityId, crate::three::View3D, Vec<u8>)>,
@@ -616,6 +619,7 @@ impl Default for SuePaint {
             audio_mix: None,
             audio_lap: None,
             audio_drag: None,
+            timeline_step: None,
             camera_pending: None,
             view3d_before: None,
             pending_view3d: None,

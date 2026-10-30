@@ -13,6 +13,13 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint's Timeline looks and works like Clip Studio Paint's: tall
+  tracks with the picture each folder shows, every key's cel as a picture,
+  alternating second bands, a red current frame, zoom buttons and the
+  frame counter. The New dialog is laid out as Clip Studio's, with OK and
+  Cancel beside the Project row, and has all six projects: Illustration,
+  Webtoon, Comic, Printing of fanzine, Show all comic settings and
+  Animation.
 - Sue Paint's Navigator, Animation Cels and Layer Property look and work
   like Clip Studio Paint's: wedge sliders for zoom, rotation and opacity,
   the light table's buttons (reverse its layers, Color mode, lock the cel

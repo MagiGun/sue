@@ -1,7 +1,7 @@
 //! Sue Paint's dialogs: New (a canvas from presets, paper sizes and
 //! units), the filter dialogs with a live preview, and the shortcut list.
 
-use egui::{Align, Id, Layout, Order, RichText, Sense, Ui, vec2};
+use egui::{Align, Id, Layout, Order, Rect, RichText, Sense, Ui, pos2, vec2};
 use sue_core::{Color, EntityId, Preset, PresetLibrary, Properties, RasterTile2D};
 use sue_wm::{AppletContext, ArenaEdit, Theme, widgets};
 
@@ -94,10 +94,55 @@ pub(crate) enum Project {
     /// One picture.
     #[default]
     Illustration,
+    /// One tall picture to scroll down (Webtoon).
+    Webtoon,
     /// A story of pages.
     Comic,
+    /// A story of pages sized for a printed fanzine.
+    Fanzine,
+    /// A story of pages with every comic setting shown.
+    ComicAll,
     /// A picture with a timeline.
     Animation,
+}
+
+impl Project {
+    /// Every project, in the order of Clip Studio Paint's Project row.
+    pub(crate) const ALL: [Self; 6] = [
+        Self::Illustration,
+        Self::Webtoon,
+        Self::Comic,
+        Self::Fanzine,
+        Self::ComicAll,
+        Self::Animation,
+    ];
+
+    pub(crate) fn icon(self) -> Icon {
+        match self {
+            Self::Illustration => Icon::ProjectIllustration,
+            Self::Webtoon => Icon::ProjectWebtoon,
+            Self::Comic => Icon::ProjectComic,
+            Self::Fanzine => Icon::ProjectFanzine,
+            Self::ComicAll => Icon::ProjectComicAll,
+            Self::Animation => Icon::ProjectAnimation,
+        }
+    }
+
+    pub(crate) fn label(self) -> String {
+        match self {
+            Self::Illustration => tr!("illustration"),
+            Self::Webtoon => tr!("webtoon"),
+            Self::Comic => tr!("comic"),
+            Self::Fanzine => tr!("printing-of-fanzine"),
+            Self::ComicAll => tr!("show-all-comic-settings"),
+            Self::Animation => tr!("animation"),
+        }
+    }
+
+    /// A story of pages.
+    pub(crate) fn is_comic(self) -> bool {
+        matches!(self, Self::Comic | Self::Fanzine | Self::ComicAll)
+    }
 }
 
 /// The New dialog's fields.
@@ -126,6 +171,31 @@ pub(crate) struct NewDialog {
 }
 
 impl NewDialog {
+    /// Chooses `project`, with the canvas Clip Studio Paint starts it at.
+    pub(crate) fn choose(&mut self, project: Project) {
+        if project == self.project {
+            return;
+        }
+        self.project = project;
+        self.preset = None;
+        self.size = 0;
+        let (width, height, dpi, name) = match project {
+            Project::Illustration => (1600, 1200, 72.0, tr!("illustration")),
+            Project::Webtoon => (690, 20_000, 350.0, tr!("webtoon")),
+            // B5 and A5 at 600 and 350 dots an inch.
+            Project::Comic | Project::ComicAll => (4299, 6070, 600.0, tr!("comic")),
+            Project::Fanzine => (2039, 2894, 350.0, tr!("comic")),
+            Project::Animation => (1920, 1080, 72.0, tr!("animation")),
+        };
+        self.width = width;
+        self.height = height;
+        self.dpi = dpi;
+        self.name = name;
+        if project == Project::Fanzine {
+            self.pages = 16;
+        }
+    }
+
     pub(crate) fn new(spec: &NewPicture) -> Self {
         Self {
             project: Project::Illustration,
@@ -526,7 +596,7 @@ impl SuePaint {
                     .rect_filled(screen, 0.0, theme.shadow.gamma_multiply(0.45));
             });
         let (title, size) = match &dialog {
-            Dialog::New(_) => (tr!("new-2"), vec2(560.0, 560.0)),
+            Dialog::New(_) => (tr!("new-2"), vec2(500.0, 690.0)),
             Dialog::Filter(filter) => (
                 filter.filter.label(),
                 vec2(
@@ -1514,8 +1584,8 @@ impl SuePaint {
             (Dialog::New(new), Outcome::Ok) => {
                 let spec = new.spec();
                 match new.project {
-                    Project::Illustration => self.make_picture(cx, &spec),
-                    Project::Comic => {
+                    Project::Illustration | Project::Webtoon => self.make_picture(cx, &spec),
+                    Project::Comic | Project::Fanzine | Project::ComicAll => {
                         self.make_story(cx, &spec, new.pages as usize, new.right_bound);
                     }
                     Project::Animation => self.make_animation(cx, &spec, new.frames, new.fps),
@@ -2068,232 +2138,300 @@ fn label(ui: &mut Ui, text: &str, theme: &Theme) {
     ui.label(RichText::new(text).color(theme.muted));
 }
 
-/// The New dialog's body.
+/// A label right-aligned in a cell `width` wide, as Clip Studio Paint
+/// sets its dialogs' labels.
+fn right_label(ui: &mut Ui, text: &str, width: f32, theme: &Theme) {
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
+    ui.painter().text(
+        rect.right_center(),
+        egui::Align2::RIGHT_CENTER,
+        format!("{}:", text.trim_end_matches(':')),
+        theme.font(theme.ui_size),
+        theme.text,
+    );
+}
+
+/// A section's name with a line running to the right of it.
+fn section(ui: &mut Ui, text: &str, theme: &Theme) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(text).color(theme.text));
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
+        ui.painter()
+            .hline(rect.x_range(), rect.center().y, theme.hairline());
+    });
+}
+
+/// The New dialog's body, laid out as Clip Studio Paint's: the Project
+/// row with OK and Cancel beside it, the file name and preset, the Canvas,
+/// then the project's own settings and Record timelapse at the bottom.
+#[allow(clippy::too_many_lines, reason = "the whole New dialog")]
 fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
     let mut outcome = Outcome::Open;
     let presets = new_presets();
     ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+    let column = 82.0;
+    // Project, and OK and Cancel at the right.
     ui.horizontal(|ui| {
-        label(ui, &tr!("project"), theme);
-        let kinds = [
-            (
-                Icon::Paper,
-                tr!("illustration"),
-                Some(Project::Illustration),
-            ),
-            (Icon::Frame, tr!("webtoon"), None),
-            (Icon::Duplicate, tr!("comic"), Some(Project::Comic)),
-            (Icon::Open, tr!("fanzine-print"), None),
-            (Icon::NewFolder, tr!("show-all-comic-settings"), None),
-            (Icon::Play, tr!("animation"), Some(Project::Animation)),
-        ];
-        for (icon, tip, project) in kinds {
-            let enabled = project.is_some();
-            let (rect, response) = ui.allocate_exact_size(vec2(38.0, 34.0), Sense::click());
-            if let Some(project) = project
-                && response.clicked()
-            {
-                new.project = project;
+        right_label(ui, &tr!("project"), 72.0, theme);
+        let group = ui.available_width() - 100.0;
+        let side = ((group - 22.0) / 6.0).clamp(30.0, 44.0);
+        let (strip, _) =
+            ui.allocate_exact_size(vec2(side * 6.0 + 20.0, side + 4.0), Sense::hover());
+        ui.painter().rect_filled(strip, 2.0, theme.pill);
+        for (index, project) in Project::ALL.into_iter().enumerate() {
+            let rect = Rect::from_min_size(
+                strip.min + vec2(2.0 + index as f32 * side, 2.0),
+                vec2(side, side),
+            );
+            let response = ui
+                .interact(
+                    rect,
+                    Id::unique(("sue-paint-new-project", index)),
+                    Sense::click(),
+                )
+                .on_hover_text(project.label());
+            if new.project == project {
+                ui.painter().rect_filled(rect, 2.0, theme.selection);
+            } else if response.hovered() {
+                ui.painter().rect_filled(rect, 2.0, theme.hover);
             }
-            let chosen = project == Some(new.project);
-            let fill = if chosen {
-                theme.active
-            } else if enabled && response.hovered() {
-                theme.hover
+            icons::paint(
+                ui.painter(),
+                rect.shrink(side * 0.12),
+                project.icon(),
+                theme.text,
+            );
+            if response.clicked() {
+                new.choose(project);
+            }
+        }
+        // The list of projects by name, as the arrow at the row's end.
+        let arrow = Rect::from_min_max(
+            pos2(strip.right() - 18.0, strip.top()),
+            strip.right_bottom(),
+        );
+        let response = ui.interact(arrow, Id::unique("sue-paint-new-projects"), Sense::click());
+        icons::paint(
+            ui.painter(),
+            Rect::from_center_size(arrow.center(), vec2(10.0, 10.0)),
+            Icon::Down,
+            theme.muted,
+        );
+        egui::Popup::menu(&response).show(|ui| {
+            ui.set_min_width(240.0);
+            for project in Project::ALL {
+                let row = ui.horizontal(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
+                    icons::paint(ui.painter(), rect.shrink(3.0), project.icon(), theme.text);
+                    ui.label(RichText::new(project.label()).color(theme.text));
+                    ui.allocate_space(vec2(ui.available_width(), 0.0));
+                });
+                let pick = ui.interact(
+                    row.response.rect,
+                    Id::unique(("sue-paint-new-project-row", project.label())),
+                    Sense::click(),
+                );
+                if new.project == project || pick.hovered() {
+                    ui.painter().rect_filled(
+                        row.response.rect,
+                        2.0,
+                        theme.selection.gamma_multiply(0.5),
+                    );
+                }
+                if pick.clicked() {
+                    new.choose(project);
+                    ui.close();
+                }
+            }
+        });
+        ui.with_layout(Layout::top_down(Align::Max), |ui| {
+            ui.spacing_mut().item_spacing.y = 6.0;
+            if ui
+                .add(
+                    egui::Button::new(
+                        RichText::new(tr!("ok"))
+                            .strong()
+                            .color(theme.selection_text),
+                    )
+                    .fill(theme.selection)
+                    .min_size(vec2(80.0, 24.0)),
+                )
+                .clicked()
+            {
+                outcome = Outcome::Ok;
+            }
+            if ui
+                .add(egui::Button::new(tr!("cancel")).min_size(vec2(80.0, 24.0)))
+                .clicked()
+            {
+                outcome = Outcome::Cancel;
+            }
+        });
+    });
+    ui.horizontal(|ui| {
+        right_label(ui, &tr!("file-name"), 72.0, theme);
+        ui.add(egui::TextEdit::singleline(&mut new.name).desired_width(260.0));
+    });
+    ui.add_space(6.0);
+    // Preset, with Register and Delete, and Unit at the right.
+    ui.horizontal(|ui| {
+        right_label(ui, &tr!("preset"), 72.0, theme);
+        let shown = new.preset.clone().unwrap_or_else(|| tr!("custom"));
+        let mut picked = None;
+        egui::ComboBox::from_id_salt("sue-paint-preset")
+            .selected_text(shown)
+            .width(190.0)
+            .show_ui(ui, |ui| {
+                for preset in presets.for_target(NEW_PRESET_TARGET) {
+                    let chosen = new.preset.as_deref() == Some(preset.name.as_str());
+                    if ui.selectable_label(chosen, &preset.name).clicked() {
+                        picked = Some(preset.clone());
+                    }
+                }
+            });
+        if let Some(preset) = picked {
+            new.apply_preset(&preset);
+        }
+        for (icon, tip) in [
+            (Icon::Import, tr!("register-preset")),
+            (Icon::Delete, tr!("delete-preset")),
+        ] {
+            let (rect, _) = ui.allocate_exact_size(vec2(24.0, 22.0), Sense::hover());
+            crate::panels::icon_button(
+                ui,
+                rect,
+                icon,
+                false,
+                false,
+                &tr!("not-available-yet", tip = tip),
+                theme,
+            );
+        }
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            egui::ComboBox::from_id_salt("sue-paint-unit")
+                .selected_text(new.unit.label())
+                .width(50.0)
+                .show_ui(ui, |ui| {
+                    for unit in Unit::ALL {
+                        ui.selectable_value(&mut new.unit, unit, unit.label());
+                    }
+                });
+            ui.label(
+                RichText::new(format!("{}:", tr!("unit").trim_end_matches(':'))).color(theme.text),
+            );
+        });
+    });
+    // Canvas: turn it on its side, its size and resolution, and a preview.
+    section(ui, &tr!("canvas"), theme);
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            let (rect, _) = ui.allocate_exact_size(vec2(26.0, 40.0), Sense::hover());
+            if crate::panels::icon_button(
+                ui,
+                rect,
+                Icon::Swap,
+                true,
+                false,
+                &tr!("swap-width-and-height"),
+                theme,
+            ) {
+                std::mem::swap(&mut new.width, &mut new.height);
+                new.size = 0;
+            }
+        });
+        ui.vertical(|ui| {
+            let mut picked = None;
+            ui.horizontal(|ui| {
+                right_label(ui, &tr!("width"), column, theme);
+                if length_field(ui, &mut new.width, new.unit, new.dpi) {
+                    new.size = 0;
+                }
+                egui::ComboBox::from_id_salt("sue-paint-size")
+                    .selected_text(crate::localize(SIZES[new.size].0))
+                    .width(100.0)
+                    .show_ui(ui, |ui| {
+                        for (index, (name, ..)) in SIZES.iter().enumerate().skip(1) {
+                            if ui
+                                .selectable_label(new.size == index, crate::localize(name))
+                                .clicked()
+                            {
+                                picked = Some(index);
+                            }
+                        }
+                    });
+            });
+            ui.horizontal(|ui| {
+                right_label(ui, &tr!("height"), column, theme);
+                if length_field(ui, &mut new.height, new.unit, new.dpi) {
+                    new.size = 0;
+                }
+            });
+            ui.horizontal(|ui| {
+                right_label(ui, &tr!("resolution"), column, theme);
+                ui.add(
+                    egui::DragValue::new(&mut new.dpi)
+                        .range(1.0..=2400.0)
+                        .max_decimals(0),
+                );
+                egui::ComboBox::from_id_salt("sue-paint-dpi")
+                    .selected_text("")
+                    .width(24.0)
+                    .show_ui(ui, |ui| {
+                        for dpi in [72.0, 150.0, 300.0, 350.0, 600.0, 1200.0] {
+                            if ui
+                                .selectable_label(new.dpi == dpi, format!("{dpi:.0}"))
+                                .clicked()
+                            {
+                                new.dpi = dpi;
+                            }
+                        }
+                    });
+            });
+            ui.horizontal(|ui| {
+                right_label(ui, &tr!("basic-expression-color"), column + 48.0, theme);
+                egui::ComboBox::from_id_salt("sue-paint-color-mode")
+                    .selected_text(tr!("color-2"))
+                    .width(96.0)
+                    .show_ui(ui, |ui| {
+                        let _ = ui.selectable_label(true, tr!("color-2"));
+                        ui.add_enabled(false, egui::Button::selectable(false, tr!("gray")));
+                        ui.add_enabled(false, egui::Button::selectable(false, tr!("monochrome")));
+                    });
+            });
+            if let Some(index) = picked {
+                let (_, width, height, dpi) = SIZES[index];
+                new.width = width;
+                new.height = height;
+                new.dpi = dpi;
+                new.size = index;
+                new.preset = None;
+            }
+        });
+        // A preview of the canvas's shape and paper.
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let (rect, _) = ui.allocate_exact_size(vec2(80.0, 100.0), Sense::hover());
+            let aspect = new.width.max(1) as f32 / new.height.max(1) as f32;
+            let shape = if aspect >= 0.8 {
+                vec2(66.0, 66.0 / aspect)
+            } else {
+                vec2(88.0 * aspect, 88.0)
+            };
+            let page = Rect::from_center_size(rect.center(), shape);
+            let [r, g, b] = new.paper_color;
+            let fill = if new.paper {
+                egui::Color32::from_rgb(r, g, b)
             } else {
                 theme.pill
             };
-            ui.painter().rect_filled(rect, theme.control_radius, fill);
-            icons::paint(
-                ui.painter(),
-                rect.shrink(8.0),
-                icon,
-                if enabled {
-                    theme.text
-                } else {
-                    theme.muted.gamma_multiply(0.6)
-                },
-            );
-            response.on_hover_text(if enabled {
-                tip.to_owned()
-            } else {
-                tr!("not-available-yet", tip = tip)
-            });
-        }
-    });
-    egui::Grid::new("sue-paint-new")
-        .num_columns(2)
-        .spacing(vec2(12.0, 8.0))
-        .show(ui, |ui| {
-            label(ui, &tr!("file-name"), theme);
-            ui.add(egui::TextEdit::singleline(&mut new.name).desired_width(260.0));
-            ui.end_row();
-
-            if new.project == Project::Animation {
-                label(ui, &tr!("frames-2"), theme);
-                ui.add(egui::DragValue::new(&mut new.frames).range(1..=10_000));
-                ui.end_row();
-                label(ui, &tr!("frame-rate-2"), theme);
-                ui.add(
-                    egui::DragValue::new(&mut new.fps)
-                        .range(1..=120)
-                        .suffix(tr!("fps")),
-                );
-                ui.end_row();
-            }
-            if new.project == Project::Comic {
-                label(ui, &tr!("pages"), theme);
-                ui.add(egui::DragValue::new(&mut new.pages).range(1..=500));
-                ui.end_row();
-                label(ui, &tr!("binding"), theme);
-                ui.horizontal(|ui| {
-                    ui.selectable_value(
-                        &mut new.right_bound,
-                        true,
-                        tr!("right-manga-right-to-left"),
-                    );
-                    ui.selectable_value(&mut new.right_bound, false, tr!("left-left-to-right"));
-                });
-                ui.end_row();
-            }
-
-            label(ui, &tr!("preset"), theme);
-            ui.horizontal(|ui| {
-                let shown = new.preset.clone().unwrap_or_else(|| "Custom".to_owned());
-                let mut picked = None;
-                egui::ComboBox::from_id_salt("sue-paint-preset")
-                    .selected_text(shown)
-                    .width(200.0)
-                    .show_ui(ui, |ui| {
-                        for preset in presets.for_target(NEW_PRESET_TARGET) {
-                            let chosen = new.preset.as_deref() == Some(preset.name.as_str());
-                            if ui.selectable_label(chosen, &preset.name).clicked() {
-                                picked = Some(preset.clone());
-                            }
-                        }
-                    });
-                if let Some(preset) = picked {
-                    new.apply_preset(&preset);
-                }
-                ui.add_enabled(false, egui::Button::new(tr!("register")))
-                    .on_disabled_hover_text(tr!("saving-your-own-presets-arrives-later"));
-                label(ui, &tr!("unit"), theme);
-                egui::ComboBox::from_id_salt("sue-paint-unit")
-                    .selected_text(new.unit.label())
-                    .width(56.0)
-                    .show_ui(ui, |ui| {
-                        for unit in Unit::ALL {
-                            ui.selectable_value(&mut new.unit, unit, unit.label());
-                        }
-                    });
-            });
-            ui.end_row();
+            ui.painter().rect_filled(page, 0.0, fill);
+            ui.painter()
+                .rect_stroke(page, 0.0, theme.hairline(), egui::StrokeKind::Outside);
         });
-    ui.separator();
-    label(ui, &tr!("canvas"), theme);
-    ui.horizontal(|ui| {
-        ui.vertical(|ui| {
-            egui::Grid::new("sue-paint-canvas")
-                .num_columns(3)
-                .spacing(vec2(10.0, 8.0))
-                .show(ui, |ui| {
-                    label(ui, &tr!("width"), theme);
-                    if length_field(ui, &mut new.width, new.unit, new.dpi) {
-                        new.size = 0;
-                    }
-                    let size_name = crate::localize(SIZES[new.size].0);
-                    let mut picked = None;
-                    egui::ComboBox::from_id_salt("sue-paint-size")
-                        .selected_text(size_name)
-                        .width(170.0)
-                        .show_ui(ui, |ui| {
-                            for (index, (name, ..)) in SIZES.iter().enumerate().skip(1) {
-                                if ui
-                                    .selectable_label(new.size == index, crate::localize(name))
-                                    .clicked()
-                                {
-                                    picked = Some(index);
-                                }
-                            }
-                        });
-                    ui.end_row();
-                    label(ui, &tr!("height"), theme);
-                    if length_field(ui, &mut new.height, new.unit, new.dpi) {
-                        new.size = 0;
-                    }
-                    if ui
-                        .button(tr!("swap"))
-                        .on_hover_text(tr!("swap-width-and-height"))
-                        .clicked()
-                    {
-                        std::mem::swap(&mut new.width, &mut new.height);
-                    }
-                    ui.end_row();
-                    label(ui, &tr!("resolution"), theme);
-                    ui.add(
-                        egui::DragValue::new(&mut new.dpi)
-                            .range(1.0..=2400.0)
-                            .max_decimals(0)
-                            .suffix(tr!("dpi")),
-                    );
-                    egui::ComboBox::from_id_salt("sue-paint-dpi")
-                        .selected_text(tr!("common"))
-                        .width(90.0)
-                        .show_ui(ui, |ui| {
-                            for dpi in [72.0, 150.0, 300.0, 350.0, 600.0] {
-                                if ui
-                                    .selectable_label(new.dpi == dpi, format!("{dpi:.0}"))
-                                    .clicked()
-                                {
-                                    new.dpi = dpi;
-                                }
-                            }
-                        });
-                    ui.end_row();
-                    label(ui, &tr!("basic-expression-color"), theme);
-                    egui::ComboBox::from_id_salt("sue-paint-color-mode")
-                        .selected_text(tr!("color-2"))
-                        .width(110.0)
-                        .show_ui(ui, |ui| {
-                            let _ = ui.selectable_label(true, tr!("color-2"));
-                            ui.add_enabled(false, egui::Button::selectable(false, tr!("gray")));
-                            ui.add_enabled(
-                                false,
-                                egui::Button::selectable(false, tr!("monochrome")),
-                            );
-                        });
-                    ui.end_row();
-                    if let Some(index) = picked {
-                        let (_, width, height, dpi) = SIZES[index];
-                        new.width = width;
-                        new.height = height;
-                        new.dpi = dpi;
-                        new.size = index;
-                        new.preset = None;
-                    }
-                });
-        });
-        // A preview of the canvas's shape and paper.
-        let (rect, _) = ui.allocate_exact_size(vec2(110.0, 110.0), Sense::hover());
-        let aspect = new.width.max(1) as f32 / new.height.max(1) as f32;
-        let shape = if aspect >= 1.0 {
-            vec2(96.0, 96.0 / aspect)
-        } else {
-            vec2(96.0 * aspect, 96.0)
-        };
-        let page = egui::Rect::from_center_size(rect.center(), shape);
-        let [r, g, b] = new.paper_color;
-        let fill = if new.paper {
-            egui::Color32::from_rgb(r, g, b)
-        } else {
-            theme.pill
-        };
-        ui.painter().rect_filled(page, 0.0, fill);
-        ui.painter()
-            .rect_stroke(page, 0.0, theme.hairline(), egui::StrokeKind::Outside);
     });
     ui.horizontal(|ui| {
+        ui.add_space(30.0);
         ui.checkbox(&mut new.paper, tr!("paper-color"));
+        ui.add_space(24.0);
         ui.add_enabled_ui(new.paper, |ui| {
             let [r, g, b] = new.paper_color;
             let mut rgba = [r, g, b, 255];
@@ -2302,23 +2440,67 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
             }
         });
     });
-    ui.add_enabled_ui(false, |ui| {
-        ui.checkbox(&mut false, tr!("template"));
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut false, tr!("color-profile"));
-            label(ui, &tr!("working-profile-srgb"), theme);
-        });
-        ui.checkbox(&mut false, tr!("create-animated-illustration"));
-    });
     ui.horizontal(|ui| {
-        label(ui, &tr!("record-timelapse"), theme);
-        egui::ComboBox::from_id_salt("sue-paint-timelapse")
-            .selected_text(if new.timelapse { tr!("on") } else { tr!("off") })
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut new.timelapse, false, tr!("off"));
-                ui.selectable_value(&mut new.timelapse, true, tr!("on"));
-            });
+        ui.add_space(30.0);
+        ui.add_enabled(false, egui::Checkbox::new(&mut false, tr!("template")));
     });
+    ui.add_enabled_ui(false, |ui| {
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut false, "");
+            section(ui, &tr!("color-profile"), theme);
+        });
+        ui.horizontal(|ui| {
+            right_label(ui, &tr!("working-profile"), 150.0, theme);
+            ui.label("sRGB");
+        });
+    });
+    // The project's own settings.
+    if new.project.is_comic() {
+        section(ui, &tr!("comic-settings"), theme);
+        ui.horizontal(|ui| {
+            right_label(ui, &tr!("pages"), column, theme);
+            ui.add(egui::DragValue::new(&mut new.pages).range(1..=500));
+        });
+        ui.horizontal(|ui| {
+            right_label(ui, &tr!("binding"), column, theme);
+            ui.selectable_value(&mut new.right_bound, true, tr!("right-manga-right-to-left"));
+            ui.selectable_value(&mut new.right_bound, false, tr!("left-left-to-right"));
+        });
+    } else if new.project == Project::Animation {
+        section(ui, &tr!("animation-settings"), theme);
+        ui.horizontal(|ui| {
+            right_label(ui, &tr!("frames-2"), column, theme);
+            ui.add(egui::DragValue::new(&mut new.frames).range(1..=10_000));
+            right_label(ui, &tr!("frame-rate-2"), column, theme);
+            ui.add(
+                egui::DragValue::new(&mut new.fps)
+                    .range(1..=120)
+                    .suffix(tr!("fps")),
+            );
+        });
+    } else {
+        ui.add_enabled_ui(false, |ui| {
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut false, "");
+                section(ui, &tr!("create-animated-illustration"), theme);
+            });
+        });
+        egui::Frame::new()
+            .fill(theme.pill)
+            .corner_radius(2.0)
+            .inner_margin(8.0)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
+                    icons::paint(ui.painter(), rect, Icon::Info, theme.text);
+                    ui.label(
+                        RichText::new(tr!("animated-illustration-hint"))
+                            .size(theme.small_size)
+                            .color(theme.text),
+                    );
+                });
+            });
+    }
     ui.label(
         RichText::new(tr!(
             "x-px-mb-per-layer",
@@ -2332,16 +2514,15 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
         .size(theme.small_size)
         .color(theme.muted),
     );
-    ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
-        if ui.button(tr!("cancel")).clicked() {
-            outcome = Outcome::Cancel;
-        }
-        if ui
-            .add(egui::Button::new(RichText::new("OK").strong()).min_size(vec2(72.0, 0.0)))
-            .clicked()
-        {
-            outcome = Outcome::Ok;
-        }
+    ui.horizontal(|ui| {
+        right_label(ui, &tr!("record-timelapse"), 110.0, theme);
+        egui::ComboBox::from_id_salt("sue-paint-timelapse")
+            .selected_text(if new.timelapse { tr!("on") } else { tr!("off") })
+            .width(180.0)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut new.timelapse, false, tr!("off"));
+                ui.selectable_value(&mut new.timelapse, true, tr!("on"));
+            });
     });
     outcome
 }
