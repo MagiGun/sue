@@ -1509,6 +1509,31 @@ impl SuePaint {
                 let Some(layer) = self.layer() else {
                     return;
                 };
+                // A drawing figure: a body part under the pointer bends at
+                // its joint (Shift twists it).
+                if let Some(joint) = self.figure_part_at(&cx.world.arena, layer, p, size) {
+                    let model = crate::figure::of_layer(&cx.world.arena, layer);
+                    let (Some(base), Some(before)) = (
+                        model
+                            .and_then(|model| cx.world.arena.get_by_id(model).ok())
+                            .map(crate::figure::Pose::of),
+                        doc::raster(&cx.world.arena, layer)
+                            .and_then(|raster| raster.bytes())
+                            .map(<[u8]>::to_vec),
+                    ) else {
+                        return;
+                    };
+                    self.figure_joint = Some(joint);
+                    self.gesture = Some(Gesture::Pose {
+                        layer,
+                        joint,
+                        start: pos,
+                        base,
+                        before,
+                        twist: modifiers.shift,
+                    });
+                    return;
+                }
                 let (Some(base), Some(before)) = (
                     cx.world
                         .arena
@@ -2272,6 +2297,37 @@ impl SuePaint {
             }
             return;
         }
+        if let Some(Gesture::Pose {
+            layer,
+            joint,
+            start,
+            base,
+            twist,
+            ..
+        }) = &self.gesture
+        {
+            let (layer, joint, twist) = (*layer, *joint, *twist);
+            let (dx, dy) = (pos.x - start.x, pos.y - start.y);
+            let mut pose = base.clone();
+            // Seen from behind, sideways drags swing the other way.
+            let behind = cx
+                .world
+                .arena
+                .get_by_id(layer)
+                .ok()
+                .map(crate::three::View3D::of)
+                .is_some_and(|view| view.yaw.to_radians().cos() < 0.0);
+            let side = if behind { -1.0 } else { 1.0 };
+            let turn = &mut pose.0[joint];
+            if twist {
+                turn[1] = base.0[joint][1] + dx * 0.6;
+            } else {
+                turn[0] = (base.0[joint][0] + dy * 0.5).clamp(-180.0, 180.0);
+                turn[2] = (base.0[joint][2] + dx * 0.5 * side).clamp(-180.0, 180.0);
+            }
+            self.preview_pose(cx, layer, &pose);
+            return;
+        }
         if let Some(Gesture::Orbit {
             layer,
             start,
@@ -2517,7 +2573,8 @@ impl SuePaint {
             | Gesture::Correct { .. }
             | Gesture::MoveLines { .. }
             | Gesture::Camera { .. }
-            | Gesture::Orbit { .. } => {}
+            | Gesture::Orbit { .. }
+            | Gesture::Pose { .. } => {}
         }
     }
 
@@ -2840,6 +2897,12 @@ impl SuePaint {
                 before,
                 ..
             } => self.finish_view3d(cx, layer, base, &before),
+            Gesture::Pose {
+                layer,
+                base,
+                before,
+                ..
+            } => self.finish_pose(cx, layer, &base, &before),
             Gesture::RulerHandle { handle, before } => {
                 let Some(picture) = self.picture() else {
                     return;
@@ -3035,6 +3098,42 @@ impl SuePaint {
             }
         }
         Some(placed)
+    }
+
+    /// The drawing figure's body part (its joint) under picture point `p`
+    /// on 3D layer `layer`, if there is one near enough.
+    pub(crate) fn figure_part_at(
+        &self,
+        arena: &sue_core::Arena,
+        layer: sue_core::EntityId,
+        p: Pos2,
+        size: [u32; 2],
+    ) -> Option<usize> {
+        let model = crate::figure::of_layer(arena, layer)?;
+        let pose = crate::figure::Pose::of(arena.get_by_id(model).ok()?);
+        let view = crate::three::View3D::of(arena.get_by_id(layer).ok()?);
+        let raster = doc::raster(arena, layer)?;
+        let lens = crate::three::Camera::new(
+            &view,
+            [raster.width(), raster.height()],
+            crate::figure::FRAME,
+        );
+        let offset = self
+            .layer_info(arena)
+            .map_or([0, 0], |info| info.style.offset);
+        let local = [p.x - offset[0] as f32, p.y - offset[1] as f32];
+        let zoom = self.doc().map_or(1.0, |doc| doc.view.zoom).max(0.01);
+        let reach = (16.0 / zoom).max(size[0].min(size[1]) as f32 * 0.004);
+        crate::figure::bones(&pose)
+            .iter()
+            .enumerate()
+            .filter_map(|(joint, (start, end))| {
+                let (a, b) = (lens.project(*start)?, lens.project(*end)?);
+                let distance = segment_distance(local, a, b);
+                (distance <= reach).then_some((joint, distance))
+            })
+            .min_by(|x, y| x.1.total_cmp(&y.1))
+            .map(|(joint, _)| joint)
     }
 
     /// The area a flood fill from `p` reaches, as a picture-sized mask.
@@ -3777,6 +3876,59 @@ impl SuePaint {
             );
         }
         if tool == Tool::Operation
+            && let Some(layer) = doc.layer
+            && let Some(model) = crate::figure::of_layer(&cx.world.arena, layer)
+            && let (Ok(model), Ok(entity), Some(raster)) = (
+                cx.world.arena.get_by_id(model),
+                cx.world.arena.get_by_id(layer),
+                doc::raster(&cx.world.arena, layer),
+            )
+        {
+            // The figure's skeleton: its bones faint, its joints as dots,
+            // the one being posed lit.
+            let pose = crate::figure::Pose::of(model);
+            let lens = crate::three::Camera::new(
+                &crate::three::View3D::of(entity),
+                [raster.width(), raster.height()],
+                crate::figure::FRAME,
+            );
+            let offset = doc::layers(&cx.world.arena, doc.picture)
+                .into_iter()
+                .find(|info| info.id == layer)
+                .map_or([0, 0], |info| info.style.offset);
+            let place = |point: [f32; 3]| {
+                lens.project(point)
+                    .map(|[x, y]| screen([x + offset[0] as f32, y + offset[1] as f32]))
+            };
+            let chosen = self.figure_joint;
+            for (joint, (start, end)) in crate::figure::bones(&pose).iter().enumerate() {
+                let (Some(a), Some(b)) = (place(*start), place(*end)) else {
+                    continue;
+                };
+                let lit = chosen == Some(joint);
+                painter.line_segment(
+                    [a, b],
+                    Stroke::new(
+                        if lit { 2.5 } else { 1.0 },
+                        if lit {
+                            Color32::from_rgb(255, 170, 40)
+                        } else {
+                            Color32::from_rgba_unmultiplied(80, 160, 255, 150)
+                        },
+                    ),
+                );
+                painter.circle_filled(
+                    a,
+                    if lit { 5.0 } else { 3.5 },
+                    if lit {
+                        Color32::from_rgb(255, 170, 40)
+                    } else {
+                        Color32::from_rgb(80, 160, 255)
+                    },
+                );
+            }
+        }
+        if tool == Tool::Operation
             && let Some((layer, picked)) = &self.picked_lines
             && doc.layer == Some(*layer)
             && !picked.is_empty()
@@ -4050,6 +4202,18 @@ fn scrollbar(
     let p = if horizontal { pointer.x } else { pointer.y };
     let t = ((p - start(bar) - thumb / 2.0) / (length - thumb).max(1.0)).clamp(0.0, 1.0);
     Some(reach - t * 2.0 * reach)
+}
+
+/// How far point `p` is from the segment `a` to `b`.
+fn segment_distance(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let length = dx * dx + dy * dy;
+    let t = if length > 0.0 {
+        (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (p[0] - a[0] - t * dx).hypot(p[1] - a[1] - t * dy)
 }
 
 /// Draws `rulers` (picture pixels, `screen` maps them) in Clip Studio

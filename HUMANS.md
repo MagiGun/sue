@@ -637,6 +637,13 @@ Once a canvas is open:
   from: pick the layer, then Register Selected Layer.
   File, Export Animation saves an animated GIF, a movie or every frame as a
   picture.
+- **3D drawing figures:** Layer, New Layer, 3D Drawing Figure puts a
+  posable figure on a 3D layer. With the Object tool, drag a body part to
+  bend it at its joint (Shift twists it) and drag anywhere else to turn
+  the camera; the joints show as dots, the one you are posing lit. Tool
+  Settings has pose presets, Flip pose, Reset pose and the picked joint's
+  Bend, Twist and Swing. Convert to Lines and Tones makes line art from
+  the pose to draw over.
 - **3D layers:** Layer, New Layer, 3D Layer puts a cube, sphere, cylinder,
   cone or plane on the canvas, and File, Import, 3D Data brings in an OBJ
   model. With the Object tool (O), drag to turn the camera, Shift and drag

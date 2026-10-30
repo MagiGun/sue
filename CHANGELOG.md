@@ -13,6 +13,13 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- 3D drawing figures in Sue Paint (Layer, New Layer, 3D Drawing Figure),
+  as in Clip Studio Paint: a body of seventeen joints to pose by dragging
+  a body part with the Object tool (Shift twists it), or by its Bend,
+  Twist and Swing in Tool Settings, with pose presets (Stand, T-pose,
+  Walk, Run, Sit, Arms up, Think), Flip pose and Reset pose. Figures draw
+  shaded, as line art or both, and Convert to Lines and Tones turns them
+  into line art and tone to draw over.
 - Draft translations into French, German, Arabic, Italian, Brazilian
   Portuguese and Simplified Chinese, and Sue Writer in Spanish and
   Japanese, each waiting for a native speaker's review. Pick one in

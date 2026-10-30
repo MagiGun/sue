@@ -1353,6 +1353,15 @@ impl SuePaint {
         if let Some((layer, view)) = self.pending_view3d.take() {
             self.preview_view3d(cx, layer, &view);
         }
+        // A figure's pose from Tool Property: shown now, kept when let go.
+        if let Some((layer, pose)) = self.pending_pose.take() {
+            self.preview_pose(cx, layer, &pose);
+        }
+        if std::mem::take(&mut self.pose_release)
+            && let Some((layer, base, before)) = self.pose_before.take()
+        {
+            self.finish_pose(cx, layer, &base, &before);
+        }
         if std::mem::take(&mut self.view3d_release)
             && let Some((layer, base, before)) = self.view3d_before.take()
         {
@@ -2557,6 +2566,11 @@ impl SuePaint {
                 .size(theme.small_size)
                 .color(theme.muted),
         );
+        if let Some(model) = crate::figure::of_layer(arena, layer)
+            && let Ok(model) = arena.get_by_id(model)
+        {
+            self.figure_properties(ui, layer, &crate::figure::Pose::of(model), arena, theme);
+        }
         if view != now {
             if self
                 .view3d_before
@@ -2573,6 +2587,109 @@ impl SuePaint {
         }
         if released {
             self.view3d_release = true;
+        }
+    }
+
+    /// A drawing figure's settings, as Clip Studio Paint's: a preset pose,
+    /// Flip pose and Reset pose, and the picked joint's turns.
+    fn figure_properties(
+        &mut self,
+        ui: &mut Ui,
+        layer: sue_core::EntityId,
+        pose: &crate::figure::Pose,
+        arena: &sue_core::Arena,
+        theme: &Theme,
+    ) {
+        use crate::figure::{JOINTS, PRESETS, preset};
+        ui.separator();
+        ui.label(RichText::new(tr!("drawing-figure")).color(theme.text));
+        let mut next: Option<crate::figure::Pose> = None;
+        let mut released = false;
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr!("pose")).color(theme.muted));
+            egui::ComboBox::from_id_salt(("sue-paint-figure-preset", layer))
+                .selected_text(tr!("choose-a-pose"))
+                .show_ui(ui, |ui| {
+                    for (index, name) in PRESETS.iter().enumerate() {
+                        if ui.selectable_label(false, crate::localize(name)).clicked() {
+                            next = Some(preset(index));
+                            released = true;
+                        }
+                    }
+                });
+        });
+        ui.horizontal(|ui| {
+            if ui.button(tr!("flip-pose")).clicked() {
+                next = Some(pose.flipped());
+                released = true;
+            }
+            if ui.button(tr!("reset-pose")).clicked() {
+                next = Some(crate::figure::Pose::default());
+                released = true;
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr!("joint")).color(theme.muted));
+            let shown = self
+                .figure_joint
+                .and_then(|joint| JOINTS.get(joint))
+                .map_or_else(|| tr!("none"), |joint| crate::localize(joint.name));
+            egui::ComboBox::from_id_salt(("sue-paint-figure-joint", layer))
+                .selected_text(shown)
+                .height(400.0)
+                .show_ui(ui, |ui| {
+                    for (index, joint) in JOINTS.iter().enumerate() {
+                        if ui
+                            .selectable_label(
+                                self.figure_joint == Some(index),
+                                crate::localize(joint.name),
+                            )
+                            .clicked()
+                        {
+                            self.figure_joint = Some(index);
+                        }
+                    }
+                });
+        });
+        if let Some(joint) = self.figure_joint.filter(|joint| *joint < JOINTS.len()) {
+            let mut turned = pose.clone();
+            for (axis, name) in [tr!("bend"), tr!("twist"), tr!("swing")].iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(name).color(theme.muted));
+                    let response = ui.add(
+                        egui::Slider::new(&mut turned.0[joint][axis], -180.0..=180.0)
+                            .suffix(tr!("deg")),
+                    );
+                    if response.drag_stopped() || (response.changed() && !response.dragged()) {
+                        released = true;
+                    }
+                });
+            }
+            if turned != *pose {
+                next = Some(turned);
+            }
+        }
+        ui.label(
+            RichText::new(tr!("drag-body-part-bend-shift-twists"))
+                .size(theme.small_size)
+                .color(theme.muted),
+        );
+        if let Some(next) = next {
+            if self
+                .pose_before
+                .as_ref()
+                .is_none_or(|(id, _, _)| *id != layer)
+            {
+                let before = crate::doc::raster(arena, layer)
+                    .and_then(|raster| raster.bytes())
+                    .map(<[u8]>::to_vec)
+                    .unwrap_or_default();
+                self.pose_before = Some((layer, pose.clone(), before));
+            }
+            self.pending_pose = Some((layer, next));
+        }
+        if released {
+            self.pose_release = true;
         }
     }
 

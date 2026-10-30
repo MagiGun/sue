@@ -225,6 +225,16 @@ pub(crate) enum Gesture {
         before: Vec<u8>,
         mode: u8,
     },
+    /// Posing a drawing figure: bending (or, with `twist`, twisting) its
+    /// `joint`; its pose and pixels from before.
+    Pose {
+        layer: EntityId,
+        joint: usize,
+        start: Pos2,
+        base: crate::figure::Pose,
+        before: Vec<u8>,
+        twist: bool,
+    },
     /// Dragging a ruler's handle: the ruler's text from before.
     RulerHandle {
         handle: crate::rulers::Handle,
@@ -478,6 +488,13 @@ pub struct SuePaint {
     /// slider was let go.
     pub(crate) pending_view3d: Option<(EntityId, crate::three::View3D)>,
     pub(crate) view3d_release: bool,
+    /// The drawing figure's joint picked to pose.
+    pub(crate) figure_joint: Option<usize>,
+    /// A figure's pose being changed in Tool Property, its pose and pixels
+    /// from before; the pose asked for this frame; and whether it is let go.
+    pub(crate) pose_before: Option<(EntityId, crate::figure::Pose, Vec<u8>)>,
+    pub(crate) pending_pose: Option<(EntityId, crate::figure::Pose)>,
+    pub(crate) pose_release: bool,
     /// A camera being set up and not keyed yet: its folder, the frame and
     /// where it stands.
     pub(crate) camera_pending: Option<(EntityId, u32, crate::camera::Camera)>,
@@ -643,6 +660,10 @@ impl Default for SuePaint {
             camera_pending: None,
             view3d_before: None,
             pending_view3d: None,
+            figure_joint: None,
+            pose_before: None,
+            pending_pose: None,
+            pose_release: false,
             view3d_release: false,
             material_kind: 0,
             material_pick: None,
@@ -792,6 +813,9 @@ fn implemented(command: &str) -> bool {
             | "edit.align.bottom"
             | "view.scroll_bar"
             | "layer.new.raster_top"
+            | "layer.new.figure"
+            | "figure.flip"
+            | "figure.reset"
             | "file.new_clipboard"
             | "view.transform_launcher"
             | "edit.transform.cancel"
@@ -1085,6 +1109,7 @@ fn implemented(command: &str) -> bool {
             | "window.item_bank"
             | "window.info"
     ) || command.starts_with("file.recent.open.")
+        || command.starts_with("figure.preset.")
         || command.starts_with("window.workspace.use.")
         || TOOL_KEYS.iter().any(|(known, _, _)| *known == command)
 }
@@ -1909,6 +1934,92 @@ impl SuePaint {
         if let Some(doc) = self.doc_mut() {
             doc.compositor
                 .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+        }
+    }
+
+    /// Shows the drawing figure of 3D layer `layer` posed as `pose`, in
+    /// place (while it is being posed; [`Self::finish_pose`] records it).
+    pub(crate) fn preview_pose(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        layer: EntityId,
+        pose: &crate::figure::Pose,
+    ) {
+        let Some(model) = crate::figure::of_layer(&cx.world.arena, layer) else {
+            return;
+        };
+        if let Ok(entity) = cx.world.arena.get_by_id_mut(model) {
+            entity
+                .properties_mut()
+                .set(crate::figure::POSE, pose.to_text());
+        }
+        let Some(raster) = doc::raster(&cx.world.arena, layer) else {
+            return;
+        };
+        let size = [raster.width(), raster.height()];
+        let Some(view) = cx
+            .world
+            .arena
+            .get_by_id(layer)
+            .ok()
+            .map(crate::three::View3D::of)
+        else {
+            return;
+        };
+        let Some(drawn) = crate::three::buffers_of(&cx.world.arena, layer, &view, size)
+            .and_then(|buffers| crate::three::draw(&buffers, &view))
+        else {
+            return;
+        };
+        if let (Some(into), Some(from)) = (
+            doc::raster_mut(&mut cx.world.arena, layer).and_then(sue_core::RasterTile2D::bytes_mut),
+            drawn.bytes(),
+        ) {
+            into.copy_from_slice(from);
+        }
+        if let Some(doc) = self.doc_mut() {
+            doc.compositor
+                .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+        }
+    }
+
+    /// Records a figure's pose change as one step: back to `base` and
+    /// `before` (its pixels), then the new pose.
+    pub(crate) fn finish_pose(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        layer: EntityId,
+        base: &crate::figure::Pose,
+        before: &[u8],
+    ) {
+        let Some(model) = crate::figure::of_layer(&cx.world.arena, layer) else {
+            return;
+        };
+        let Some(now) = cx
+            .world
+            .arena
+            .get_by_id(model)
+            .ok()
+            .map(crate::figure::Pose::of)
+        else {
+            return;
+        };
+        if now == *base {
+            return;
+        }
+        if let Ok(entity) = cx.world.arena.get_by_id_mut(model) {
+            entity
+                .properties_mut()
+                .set(crate::figure::POSE, base.to_text());
+        }
+        if let Some(into) =
+            doc::raster_mut(&mut cx.world.arena, layer).and_then(sue_core::RasterTile2D::bytes_mut)
+            && into.len() == before.len()
+        {
+            into.copy_from_slice(before);
+        }
+        if let Some(edit) = crate::figure::set_pose(&cx.world.arena, layer, &now, &tr!("pose")) {
+            Self::apply(cx, edit);
         }
     }
 
@@ -4832,6 +4943,46 @@ impl SuePaint {
                 if self.picture().is_some() {
                     self.dialog = Some(Dialog::Shape3D(0));
                 }
+            }
+            // A drawing figure's pose by name: a preset, flipped or reset.
+            figure if figure.starts_with("figure.") => {
+                let Some(layer) = self.layer() else {
+                    return;
+                };
+                let Some(model) = crate::figure::of_layer(&cx.world.arena, layer) else {
+                    cx.notify(tr!("pick-a-drawing-figure-layer"));
+                    return;
+                };
+                let Some(now) = cx
+                    .world
+                    .arena
+                    .get_by_id(model)
+                    .ok()
+                    .map(crate::figure::Pose::of)
+                else {
+                    return;
+                };
+                let next = match &figure["figure.".len()..] {
+                    "flip" => now.flipped(),
+                    "reset" => crate::figure::Pose::default(),
+                    other => match other
+                        .strip_prefix("preset.")
+                        .and_then(|index| index.parse::<usize>().ok())
+                    {
+                        Some(index) => crate::figure::preset(index),
+                        None => return,
+                    },
+                };
+                if let Some(edit) =
+                    crate::figure::set_pose(&cx.world.arena, layer, &next, &tr!("pose"))
+                {
+                    Self::apply(cx, edit);
+                }
+            }
+            // Clip Studio Paint's 3D drawing figure, standing, to pose.
+            "layer.new.figure" => {
+                let name = tr!("drawing-figure");
+                self.add_3d_layer(cx, &name, crate::figure::new_model(&name));
             }
             "file.import.audio" => {
                 if self

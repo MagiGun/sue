@@ -446,6 +446,40 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
             applet.navigate("dialog/close");
         }
     }
+    // 08o. A 3D drawing figure on its own layer, its joints shown.
+    runtime.request(
+        ShellRequest::AppletCommand {
+            applet: paint.clone(),
+            command: "layer.new.figure".to_owned(),
+        },
+        &mut camera.painter,
+        camera.now,
+    );
+    runtime.request(
+        ShellRequest::AppletCommand {
+            applet: paint.clone(),
+            command: "figure.preset.2".to_owned(),
+        },
+        &mut camera.painter,
+        camera.now,
+    );
+    shoot(&mut runtime, &mut camera, "08o-sue-paint-figure")?;
+    runtime.request(
+        ShellRequest::AppletCommand {
+            applet: paint.clone(),
+            command: "edit.undo".to_owned(),
+        },
+        &mut camera.painter,
+        camera.now,
+    );
+    runtime.request(
+        ShellRequest::AppletCommand {
+            applet: paint.clone(),
+            command: "edit.undo".to_owned(),
+        },
+        &mut camera.painter,
+        camera.now,
+    );
     runtime.request(ShellRequest::SueMenu, &mut camera.painter, camera.now);
     shoot(&mut runtime, &mut camera, "09-sue-menu-in-paint")?;
     runtime.shell.dismiss_overlays();

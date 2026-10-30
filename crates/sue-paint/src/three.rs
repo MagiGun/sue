@@ -315,11 +315,124 @@ impl Buffers {
     }
 }
 
+/// How the camera of a 3D layer sees: where the model's middle is and how
+/// it is scaled into the box the camera orbits, the camera's place and
+/// axes, and its lens.
+#[derive(Clone, Copy, Debug)]
+pub struct Camera {
+    middle: [f32; 3],
+    scale: f32,
+    eye: [f32; 3],
+    right: [f32; 3],
+    up: [f32; 3],
+    forward: [f32; 3],
+    focal: f32,
+    size: [f32; 2],
+}
+
+impl Camera {
+    /// The camera `view` makes on a `size` canvas for a model whose
+    /// middle and largest extent are `frame`.
+    #[must_use]
+    pub fn new(view: &View3D, size: [u32; 2], frame: ([f32; 3], f32)) -> Self {
+        let (middle, extent) = frame;
+        let (yaw, pitch) = (view.yaw.to_radians(), view.pitch.to_radians());
+        let eye = [
+            view.distance * pitch.cos() * yaw.sin(),
+            view.distance * pitch.sin(),
+            view.distance * pitch.cos() * yaw.cos(),
+        ];
+        let forward = normalized(sub([0.0; 3], eye));
+        let right = normalized(cross(forward, [0.0, 1.0, 0.0]));
+        let up = cross(right, forward);
+        let eye =
+            [0, 1, 2].map(|axis| eye[axis] - right[axis] * view.pan[0] + up[axis] * view.pan[1]);
+        Self {
+            middle,
+            scale: 2.0 / extent.max(1e-6),
+            eye,
+            right,
+            up,
+            forward,
+            focal: (size[1] as f32 / 2.0) / (view.fov.to_radians() / 2.0).tan(),
+            size: [size[0] as f32, size[1] as f32],
+        }
+    }
+
+    /// The camera for `mesh`, framed by its own bounds.
+    #[must_use]
+    pub fn fitting(mesh: &MeshBuffer3D, view: &View3D, size: [u32; 2]) -> Self {
+        let (mut min, mut max) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+        for p in mesh.positions() {
+            for axis in 0..3 {
+                min[axis] = min[axis].min(p[axis]);
+                max[axis] = max[axis].max(p[axis]);
+            }
+        }
+        if !min[0].is_finite() {
+            return Self::new(view, size, ([0.0; 3], 2.0));
+        }
+        let middle = [0, 1, 2].map(|axis| (min[axis] + max[axis]) / 2.0);
+        let extent = (0..3)
+            .map(|axis| max[axis] - min[axis])
+            .fold(0.0_f32, f32::max);
+        Self::new(view, size, (middle, extent))
+    }
+
+    /// `p` (model units) in the world the camera orbits, and in the
+    /// camera's own axes (across, up, away).
+    fn see(&self, p: [f32; 3]) -> ([f32; 3], [f32; 3]) {
+        let world = [0, 1, 2].map(|axis| (p[axis] - self.middle[axis]) * self.scale);
+        let rel = sub(world, self.eye);
+        (
+            world,
+            [
+                dot(rel, self.right),
+                dot(rel, self.up),
+                dot(rel, self.forward),
+            ],
+        )
+    }
+
+    /// Camera axes to canvas pixels, with the distance kept.
+    fn screen(&self, c: [f32; 3]) -> [f32; 3] {
+        [
+            self.size[0] / 2.0 + c[0] / c[2] * self.focal,
+            self.size[1] / 2.0 - c[1] / c[2] * self.focal,
+            c[2],
+        ]
+    }
+
+    /// Where model point `p` shows on the canvas, in pixels; `None` behind
+    /// the camera.
+    #[must_use]
+    pub fn project(&self, p: [f32; 3]) -> Option<[f32; 2]> {
+        let (_, c) = self.see(p);
+        (c[2] > 0.05).then(|| {
+            let s = self.screen(c);
+            [s[0], s[1]]
+        })
+    }
+}
+
 /// The model `mesh` as `view` sees it on a `size` canvas: the depth,
 /// normal and light of every pixel. The model is fitted to a box 2 wide
 /// round the middle first, so any model shows whole.
 #[must_use]
 pub fn render_buffers(mesh: &MeshBuffer3D, view: &View3D, size: [u32; 2]) -> Buffers {
+    render_framed(mesh, view, size, None)
+}
+
+/// [`render_buffers`], framed by `frame` (a middle and a size) instead of
+/// the model's own bounds when given, so a model that moves (a posed
+/// figure) keeps its scale.
+#[must_use]
+pub fn render_framed(
+    mesh: &MeshBuffer3D,
+    view: &View3D,
+    size: [u32; 2],
+    frame: Option<([f32; 3], f32)>,
+) -> Buffers {
     let (w, h) = (size[0] as usize, size[1] as usize);
     let mut buffers = Buffers {
         size,
@@ -331,46 +444,15 @@ pub fn render_buffers(mesh: &MeshBuffer3D, view: &View3D, size: [u32; 2]) -> Buf
     if positions.is_empty() || w == 0 || h == 0 {
         return buffers;
     }
-    // Fit the model.
-    let (mut min, mut max) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
-    for p in positions {
-        for axis in 0..3 {
-            min[axis] = min[axis].min(p[axis]);
-            max[axis] = max[axis].max(p[axis]);
-        }
-    }
-    let middle = [0, 1, 2].map(|axis| (min[axis] + max[axis]) / 2.0);
-    let extent = (0..3)
-        .map(|axis| max[axis] - min[axis])
-        .fold(0.0_f32, f32::max)
-        .max(1e-6);
-    let scale = 2.0 / extent;
-    // The camera, orbiting the middle.
-    let (yaw, pitch) = (view.yaw.to_radians(), view.pitch.to_radians());
-    let eye = [
-        view.distance * pitch.cos() * yaw.sin(),
-        view.distance * pitch.sin(),
-        view.distance * pitch.cos() * yaw.cos(),
-    ];
-    let forward = normalized(sub([0.0; 3], eye));
-    let right = normalized(cross(forward, [0.0, 1.0, 0.0]));
-    let up = cross(right, forward);
-    let eye = [0, 1, 2].map(|axis| eye[axis] - right[axis] * view.pan[0] + up[axis] * view.pan[1]);
+    let lens = match frame {
+        Some(frame) => Camera::new(view, size, frame),
+        None => Camera::fitting(mesh, view, size),
+    };
+    let eye = lens.eye;
     let light_angle = view.light.to_radians();
     let light = normalized([light_angle.sin(), 0.8, light_angle.cos()]);
-    let focal = (h as f32 / 2.0) / (view.fov.to_radians() / 2.0).tan();
-    let camera = |p: [f32; 3]| {
-        let world = [0, 1, 2].map(|axis| (p[axis] - middle[axis]) * scale);
-        let rel = sub(world, eye);
-        (world, [dot(rel, right), dot(rel, up), dot(rel, forward)])
-    };
-    let project = |c: [f32; 3]| {
-        [
-            w as f32 / 2.0 + c[0] / c[2] * focal,
-            h as f32 / 2.0 - c[1] / c[2] * focal,
-            c[2],
-        ]
-    };
+    let camera = |p: [f32; 3]| lens.see(p);
+    let project = |c: [f32; 3]| lens.screen(c);
     for triangle in mesh.indices().as_chunks::<3>().0 {
         let [(a_world, a), (b_world, b), (c_world, c)] =
             [0, 1, 2].map(|k| camera(positions[triangle[k] as usize]));
@@ -507,8 +589,17 @@ pub fn buffers_of(
     view: &View3D,
     size: [u32; 2],
 ) -> Option<Buffers> {
-    let model = model_of(arena, layer)?;
-    let mesh = arena.get_by_id(model).ok()?.ext::<Geometry>()?.to_mesh();
+    let model = arena.get_by_id(model_of(arena, layer)?).ok()?;
+    if crate::figure::is_figure(model) {
+        let pose = crate::figure::Pose::of(model);
+        return Some(render_framed(
+            &crate::figure::mesh(&pose),
+            view,
+            size,
+            Some(crate::figure::FRAME),
+        ));
+    }
+    let mesh = model.ext::<Geometry>()?.to_mesh();
     Some(render_buffers(&mesh, view, size))
 }
 
@@ -529,13 +620,33 @@ pub fn new_layer(
         .ok()
         .and_then(sue_model::picture::size)
         .ok_or(tr!("the-picture-has-no-size"))?;
-    let view = View3D::default();
-    let mesh = model
-        .ext::<Geometry>()
-        .map(Geometry::to_mesh)
-        .unwrap_or_default();
-    let raster =
-        draw(&render_buffers(&mesh, &view, size), &view).ok_or(tr!("cannot-draw-the-model"))?;
+    let figure = crate::figure::is_figure(&model);
+    let view = if figure {
+        View3D {
+            yaw: 18.0,
+            pitch: 6.0,
+            distance: 4.4,
+            ..View3D::default()
+        }
+    } else {
+        View3D::default()
+    };
+    let buffers = if figure {
+        let pose = crate::figure::Pose::of(&model);
+        render_framed(
+            &crate::figure::mesh(&pose),
+            &view,
+            size,
+            Some(crate::figure::FRAME),
+        )
+    } else {
+        let mesh = model
+            .ext::<Geometry>()
+            .map(Geometry::to_mesh)
+            .unwrap_or_default();
+        render_buffers(&mesh, &view, size)
+    };
+    let raster = draw(&buffers, &view).ok_or(tr!("cannot-draw-the-model"))?;
     let model_id = model.id();
     let mut layer = Entity::new(name, raster).with_class(CLASS);
     let id = layer.id();
