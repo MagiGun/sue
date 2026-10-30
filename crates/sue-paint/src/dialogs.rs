@@ -411,6 +411,8 @@ pub(crate) enum Dialog {
     Modifiers([usize; 3]),
     /// Command Bar Settings.
     CommandBar(String),
+    /// File, Preferences: Sue Paint's own, page by page.
+    Preferences(crate::prefs::Preferences),
     /// Canvas Properties.
     CanvasProperties(CanvasProperties),
     /// Color Profile Preview Settings: which profile.
@@ -564,6 +566,7 @@ impl SuePaint {
             Dialog::Print(_, true) => (tr!("print"), vec2(380.0, 330.0)),
             Dialog::Print(_, false) => (tr!("print-settings"), vec2(380.0, 330.0)),
             Dialog::Modifiers(_) => (tr!("modifier-key-settings"), vec2(400.0, 230.0)),
+            Dialog::Preferences(_) => (tr!("preferences"), vec2(780.0, 540.0)),
             Dialog::CommandBar(_) => (tr!("command-bar-settings"), vec2(420.0, 460.0)),
             Dialog::CanvasProperties(_) => (tr!("canvas-properties"), vec2(380.0, 230.0)),
             Dialog::Proof(_) => (tr!("color-profile-preview-settings"), vec2(400.0, 230.0)),
@@ -722,6 +725,11 @@ impl SuePaint {
                                 }
                                 ok_cancel(ui, &mut outcome);
                             }
+                            Dialog::Preferences(prefs) => match prefs.ui(ui, theme) {
+                                Some(true) => outcome = Outcome::Ok,
+                                Some(false) => outcome = Outcome::Cancel,
+                                None => {}
+                            },
                             Dialog::Modifiers(chosen) => {
                                 for ((key, name, choices), pick) in MODIFIERS.iter().zip(chosen.iter_mut()) {
                                     // Each choice reads as Settings names it.
@@ -1255,6 +1263,17 @@ impl SuePaint {
                 }
             }
             (Dialog::CommandBar(_), _) => self.save_extras(cx),
+            (Dialog::Preferences(_), Outcome::Cancel) => {}
+            (Dialog::Preferences(prefs), _) => {
+                for (key, value) in prefs.changes() {
+                    if cx.rice().get(key).as_ref() == Some(&value) {
+                        continue;
+                    }
+                    if let Err(error) = cx.edit_rice(SetRiceValue::new(key, value)) {
+                        cx.fail(tr!("cannot-keep-the-preferences", error = error));
+                    }
+                }
+            }
             (
                 Dialog::CanvasProperties(_)
                 | Dialog::Convert(..)

@@ -3852,7 +3852,9 @@ impl SuePaint {
             "file.export.jpg" => self.export(cx, "jpg"),
             "file.export.jxl" => self.export(cx, "jxl"),
             "file.preferences" => {
-                cx.request(ShellRequest::OpenSettings(Some("studios".to_owned())))
+                self.dialog = Some(Dialog::Preferences(crate::prefs::Preferences::read(
+                    cx.rice(),
+                )));
             }
             "file.shortcuts" => cx.request(ShellRequest::OpenSettings(Some("keymaps".to_owned()))),
             "edit.transform.puppet" => self.start_warp(cx),
@@ -4815,7 +4817,15 @@ impl SuePaint {
                             .then(spawn)
                             .then(SetProperty::new(id, SELECTION_LAYER, true))
                             .then(SetProperty::new(id, picture::DRAFT, true))
-                            .then(SetProperty::new(id, picture::OPACITY, 0.5));
+                            .then(SetProperty::new(
+                                id,
+                                picture::OPACITY,
+                                cx.rice()
+                                    .get_i64("sue_paint.selection_layer_opacity")
+                                    .unwrap_or(50)
+                                    .clamp(0, 100) as f64
+                                    / 100.0,
+                            ));
                         if Self::apply(cx, edit)
                             && let Some(doc) = self.doc_mut()
                         {
@@ -5026,11 +5036,19 @@ impl SuePaint {
                     doc.set_selection(selection.flatten());
                 }
             }
-            "view.rotate_left" => {
-                self.with_view(cx, |view, rect, size| view.rotate_by(rect, size, -15.0))
-            }
-            "view.rotate_right" => {
-                self.with_view(cx, |view, rect, size| view.rotate_by(rect, size, 15.0))
+            "view.rotate_left" | "view.rotate_right" => {
+                // Preferences, Canvas: the angle each turn takes.
+                let step = cx
+                    .rice()
+                    .get_i64("sue_paint.rotate_step")
+                    .unwrap_or(15)
+                    .clamp(1, 90) as f32;
+                let step = if command == "view.rotate_left" {
+                    -step
+                } else {
+                    step
+                };
+                self.with_view(cx, |view, rect, size| view.rotate_by(rect, size, step));
             }
             "view.rotate_reset" => {
                 self.with_view(cx, |view, rect, size| view.set_rotation(rect, size, 0.0))
@@ -5789,6 +5807,49 @@ impl SueApplet for SuePaint {
                 "Pen pressure curve for every tool, as pressure,output points (File, Pen Pressure Settings draws it)",
             ),
         ];
+        // File, Preferences: what Sue Paint honors of Clip Studio's.
+        let choice = |value: &str, options: &[&str]| RiceParameter::EnumChoice {
+            value: value.to_owned(),
+            options: options.iter().map(|option| (*option).to_owned()).collect(),
+        };
+        declarations.extend([
+            RiceDeclaration::new(
+                "sue_paint.shift_line",
+                RiceParameter::Bool { value: true },
+                "Shift and drag draws a straight line, shown as it is drawn (Preferences, Tools)",
+            )
+            .labeled("Shift for straight lines"),
+            RiceDeclaration::new(
+                "sue_paint.two_finger_tap",
+                choice("undo", &["undo", "none"]),
+                "What a quick tap of two fingers on the canvas does (Preferences, Touch gestures)",
+            )
+            .labeled("Two-finger tap"),
+            RiceDeclaration::new(
+                "sue_paint.three_finger_tap",
+                choice("redo", &["redo", "none"]),
+                "What a quick tap of three fingers on the canvas does (Preferences, Touch gestures)",
+            )
+            .labeled("Three-finger tap"),
+            RiceDeclaration::new(
+                "sue_paint.brush_cursor",
+                choice("brush", &["brush", "crosshair", "dot"]),
+                "The pointer over the canvas while painting: the brush's outline, a crosshair or a dot (Preferences, Cursor)",
+            )
+            .labeled("Brush cursor"),
+            RiceDeclaration::new(
+                "sue_paint.selection_layer_opacity",
+                int(50, 0, 100),
+                "Opacity of a new selection layer (%; Preferences, Layer/Frame)",
+            )
+            .labeled("Opacity of selection layers"),
+            RiceDeclaration::new(
+                "sue_paint.rotate_step",
+                int(15, 1, 90),
+                "How far Rotate Left and Rotate Right turn the view (degrees; Preferences, Canvas)",
+            )
+            .labeled("Rotation step"),
+        ]);
         for (key, name, choices) in crate::dialogs::MODIFIERS {
             declarations.push(RiceDeclaration::new(
                 key,
@@ -6113,6 +6174,13 @@ impl SueApplet for SuePaint {
         match target {
             "dialog/new" => {
                 self.dialog = Some(Dialog::New(NewDialog::new(&NewPicture::default())));
+                true
+            }
+            "dialog/preferences" => {
+                let Ok(rice) = sue_rice::RiceSchema::parse(sue_rice::DEFAULT_RICE) else {
+                    return false;
+                };
+                self.dialog = Some(Dialog::Preferences(crate::prefs::Preferences::read(&rice)));
                 true
             }
             "dialog/pages" => {

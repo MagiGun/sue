@@ -384,6 +384,7 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         ("menu/Layer", "10-sue-paint-menu"),
         ("dialog/new", "11-sue-paint-new"),
         ("dialog/pressure", "11b-sue-paint-pressure"),
+        ("dialog/preferences", "11e-sue-paint-preferences"),
     ] {
         if let Some(applet) = runtime.applets.get_mut(&paint) {
             applet.navigate("dialog/close");

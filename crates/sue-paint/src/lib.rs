@@ -63,6 +63,7 @@ mod mobile;
 mod pages;
 mod panels;
 mod phone;
+mod prefs;
 pub mod print;
 pub mod proof;
 pub mod psd_io;

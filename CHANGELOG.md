@@ -11,6 +11,18 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Sue Paint's palettes look and work like Clip Studio Paint's: tabs show
+  an icon and their name, the Sub Tool list shows each brush's own
+  stroke, the tool palette has a Brush Size grid of sizes, History lists
+  every step to go back or forward to with a click, and the layer
+  buttons are Clip Studio's (with Transfer To Lower Layer).
+- Icons in Sue Paint are bigger and two-toned.
+- File, Preferences in Sue Paint opens its own Preferences, page by page
+  as in Clip Studio Paint, instead of Sue's Settings. Options Sue Paint
+  does not do yet are shown greyed out.
+
 ### Fixed
 
 - Sue Paint's stabilization never lets the line fall far behind the pen,

@@ -222,9 +222,15 @@ impl SuePaint {
                     && (tap.view.0 - view.0).abs() <= tap.view.0 * 0.01
                     && (tap.view.1 - view.1).length() < 2.0
                 {
+                    // Preferences, Touch gestures: what each tap does.
+                    let does = |key: &str, default: &str| {
+                        cx.rice().get_str(key).unwrap_or(default) != "none"
+                    };
                     match tap.most {
-                        2 => self.run("edit.undo", cx),
-                        3 => self.run("edit.redo", cx),
+                        2 if does("sue_paint.two_finger_tap", "undo") => self.run("edit.undo", cx),
+                        3 if does("sue_paint.three_finger_tap", "redo") => {
+                            self.run("edit.redo", cx)
+                        }
                         _ => {}
                     }
                 }
@@ -1267,7 +1273,9 @@ impl SuePaint {
                     trail: vec![(self.clock.0, local)],
                     correction: sub.correction,
                     flick: sub.flick,
-                    line: modifiers.shift,
+                    // Preferences, Tools: Shift draws a straight line.
+                    line: modifiers.shift
+                        && cx.rice().get_bool("sue_paint.shift_line").unwrap_or(true),
                     snap,
                     vector,
                 });
@@ -3788,17 +3796,36 @@ impl SuePaint {
             && let Some(pointer) = self.pointer
         {
             let radius = (self.toolbox.current().tip.size * 0.5 * view.zoom).max(1.5);
-            painter.circle_stroke(
-                pointer,
-                radius,
-                Stroke::new(2.0, Color32::from_black_alpha(140)),
-            );
-            painter.circle_stroke(
-                pointer,
-                radius,
-                Stroke::new(1.0, Color32::from_white_alpha(220)),
-            );
-            painter.circle_filled(pointer, 1.0, Color32::WHITE);
+            // Preferences, Cursor: the brush's outline, a crosshair or a dot.
+            let shape = cx
+                .rice()
+                .get_str("sue_paint.brush_cursor")
+                .unwrap_or("brush");
+            let dark = Stroke::new(2.0, Color32::from_black_alpha(140));
+            let light = Stroke::new(1.0, Color32::from_white_alpha(220));
+            match shape {
+                "crosshair" => {
+                    for stroke in [dark, light] {
+                        painter.line_segment(
+                            [pointer - vec2(8.0, 0.0), pointer + vec2(8.0, 0.0)],
+                            stroke,
+                        );
+                        painter.line_segment(
+                            [pointer - vec2(0.0, 8.0), pointer + vec2(0.0, 8.0)],
+                            stroke,
+                        );
+                    }
+                }
+                "dot" => {
+                    painter.circle_filled(pointer, 2.5, Color32::from_black_alpha(160));
+                    painter.circle_filled(pointer, 1.5, Color32::WHITE);
+                }
+                _ => {
+                    painter.circle_stroke(pointer, radius, dark);
+                    painter.circle_stroke(pointer, radius, light);
+                    painter.circle_filled(pointer, 1.0, Color32::WHITE);
+                }
+            }
         }
         let _ = cx;
     }

@@ -3829,8 +3829,16 @@ f 2 3 4
             middle - vec2(15.0, 0.0),
         );
         let arena = &runtime.engine.world.arena;
+        // The row the stroke ran along, wherever the canvas sits on screen.
+        let row = {
+            let raster = sue_paint::doc::raster(arena, layer).unwrap();
+            let bytes = raster.bytes().unwrap();
+            (0..raster.height())
+                .max_by_key(|y| bytes[((y * raster.width() + 880) * 4 + 3) as usize])
+                .unwrap()
+        };
         let alpha_of = |raster: &sue_core::RasterTile2D, x: u32| {
-            raster.bytes().unwrap()[((600 * raster.width() + x) * 4 + 3) as usize]
+            raster.bytes().unwrap()[((row * raster.width() + x) * 4 + 3) as usize]
         };
         let options = sue_paint::composite::RenderOptions {
             paper: false,

@@ -116,6 +116,12 @@ pen_pressure = "0,0 0.4,0.5 1,1" # @text Pen pressure curve for every tool, as p
 alt_tool = "eyedropper"        # {eyedropper|eraser|none} What Alt while drawing does on the canvas (File, Modifier Key Settings)
 space_tool = "hand"            # {hand|none} What Space does on the canvas (File, Modifier Key Settings)
 ctrl_shift = "pick_layer"      # {pick_layer|none} What Ctrl+Shift click does on the canvas (File, Modifier Key Settings)
+shift_line = true              # Shift and drag draws a straight line, shown as it is drawn (Preferences, Tools)
+two_finger_tap = "undo"        # {undo|none} What a quick tap of two fingers on the canvas does (Preferences, Touch gestures)
+three_finger_tap = "redo"      # {redo|none} What a quick tap of three fingers on the canvas does (Preferences, Touch gestures)
+brush_cursor = "brush"         # {brush|crosshair|dot} The pointer over the canvas while painting: the brush's outline, a crosshair or a dot (Preferences, Cursor)
+selection_layer_opacity = 50   # [0..100] Opacity of a new selection layer (%; Preferences, Layer/Frame)
+rotate_step = 15               # [1..90] How far Rotate Left and Rotate Right turn the view (degrees; Preferences, Canvas)
 language = "sue"              # @text Language: sue follows Sue's language, a language tag sets this one apart
 
 [sue_paint_colors]
