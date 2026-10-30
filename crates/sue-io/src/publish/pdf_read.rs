@@ -931,7 +931,8 @@ pub fn from_pdf(bytes: &[u8]) -> Result<(String, TextMarks), String> {
     }
     let body = sizes
         .into_iter()
-        .max_by_key(|(_, count)| *count)
+        // A tie goes to the smaller size: headings are the big ones.
+        .max_by_key(|(size, count)| (*count, std::cmp::Reverse(*size)))
         .map_or(12.0, |(size, _)| f64::from(size) / 2.0);
     // Running heads and page numbers are not the text: a line of only a
     // number, or a small first or last line that (numbers aside) is at

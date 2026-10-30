@@ -401,7 +401,10 @@ fn reshape(shape: &mut egui::Shape) {
             } else {
                 (size.x, size.y, false)
             };
-            if ((along / across) - HANDLE_MARK).abs() > 1e-3 {
+            // egui makes a handle exactly that shape (to float rounding);
+            // a looser test caught other boxes that came near it, such as a
+            // 140 by 44 list on a phone, and shrank them.
+            if ((along / across) - HANDLE_MARK).abs() > 2e-5 {
                 return;
             }
             let height = across * HANDLE_HEIGHT;
@@ -469,6 +472,17 @@ mod tests {
             thin[1].width() > thin[1].height(),
             "on its side on a vertical one"
         );
+        // A box that only comes near the mark keeps its size.
+        let mut near = egui::Shape::rect_filled(
+            egui::Rect::from_min_size(egui::pos2(4.0, 838.0), egui::vec2(140.0, 44.0)),
+            4.0,
+            egui::Color32::GRAY,
+        );
+        reshape(&mut near);
+        let egui::Shape::Rect(near) = near else {
+            panic!("still a rectangle");
+        };
+        assert_eq!(near.rect.width(), 140.0);
         // Nothing keeps egui's own shape.
         assert!(
             handles
