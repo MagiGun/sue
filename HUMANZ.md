@@ -2720,7 +2720,11 @@ own ways of working, and many ideas below may never ship. This section exists
 so that whichever features do arrive, they arrive as parts of **one** app. For
 each area it names the entity classes, the backbone pieces (§1) it builds on,
 the formats involved, and what the feature itself must still add. Programs are
-named only to say which kind of work is meant.
+named only to say which kind of work is meant. Where a studio is catching up
+with one of those programs, its parity list in `docs/` tracks the gap feature
+by feature: [`docs/paint-parity.md`](docs/paint-parity.md) (Sue Paint against
+Clip Studio Paint EX), [`docs/writer-parity.md`](docs/writer-parity.md) (Sue
+Writer against WordCraft and LibreOffice Writer).
 
 ### 8.1 How a feature plugs in
 

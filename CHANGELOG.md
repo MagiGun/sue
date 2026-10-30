@@ -11,6 +11,15 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Draft translations into French, German, Arabic, Italian, Brazilian
+  Portuguese and Simplified Chinese, and Sue Writer in Spanish and
+  Japanese, each waiting for a native speaker's review. Pick one in
+  Settings, Language.
+- `docs/paint-parity.md`: every Clip Studio Paint feature with where Sue
+  Paint stands on it, for people and agents choosing what to build next.
+
 ### Changed
 
 - Sue Paint's tool palette is Clip Studio Paint's: Downloads, Pen,

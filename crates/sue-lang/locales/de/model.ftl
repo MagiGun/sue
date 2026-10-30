@@ -1,0 +1,27 @@
+## Gemeinsame Datenmodelle
+blend-normal = Normal
+blend-darken = Abdunkeln
+blend-multiply = Multiplizieren
+blend-color-burn = Farbig nachbelichten
+blend-linear-burn = Linear nachbelichten
+blend-subtract = Subtrahieren
+blend-darker-color = Dunklere Farbe
+blend-lighten = Aufhellen
+blend-screen = Negativ multiplizieren
+blend-color-dodge = Farbig abwedeln
+blend-add = Addieren
+blend-lighter-color = Hellere Farbe
+blend-overlay = Ineinanderkopieren
+blend-soft-light = Weiches Licht
+blend-hard-light = Hartes Licht
+blend-vivid-light = Strahlendes Licht
+blend-linear-light = Lineares Licht
+blend-pin-light = Lichtpunkt
+blend-hard-mix = Hart mischen
+blend-difference = Differenz
+blend-exclusion = Ausschluss
+blend-divide = Division
+blend-hue = Farbton
+blend-saturation = Sättigung
+blend-color = Farbe
+blend-luminosity = Luminanz

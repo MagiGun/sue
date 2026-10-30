@@ -23,6 +23,7 @@ the board is the `sue-agents` folder in it. Make it if it is missing.
 sue-agents/
   claims/<agent>.md        one file per agent, written only by that agent
   messages/<time>-<from>-to-<to>.md   one file per message, never edited
+  tasks/<agent>.md         work handed to an agent, with how to check it
 ```
 
 `<agent>` is a short name that stays the same for the whole piece of
@@ -64,8 +65,9 @@ shared:
 
 ## The rules
 
-1. **Read before you start.** Read every claim and every message to you
-   or to `all` that is newer than your last look. Then write or refresh
+1. **Read before you start.** Read your task in `tasks/` if there is
+   one, every claim, and every message to you or to `all` that is newer
+   than your last look. Then write or refresh
    your own claim, before changing any file.
 2. **Stay out of what others own.** Never edit a path in another agent's
    `own` list. When your work needs it, send that agent a message saying

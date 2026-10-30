@@ -310,8 +310,10 @@ not yet available.
 
 ### Languages
 
-Sue speaks your language. The first time it starts it uses your system's
-language when Sue has it, and English otherwise. To change it, open the Sue
+Sue speaks your language. English, Spanish, Japanese, Arabic, German, French, Italian,
+Brazilian Portuguese and Simplified Chinese are available, with new
+languages marked as drafts awaiting native-speaker review. The first time it starts it uses your system's language when Sue has
+it, and English otherwise. To change it, open the Sue
 menu and choose **Language**: pick a language by its own name, or
 **System** to follow your system again. Every studio and tool changes at
 once; nothing needs a restart.
@@ -334,6 +336,9 @@ Sue. CONTRIBUTING.md explains how to add a language or improve one.
 
 Click **Sue Paint** in the Hub (or find it with `Tab`) and the page becomes a
 painting studio. If you have used a painting app, it will feel familiar.
+How close it is to Clip Studio Paint EX is tracked in
+[`docs/paint-parity.md`](docs/paint-parity.md), a row for every feature,
+with percentages and how to check and update it.
 
 **The start page.** On a computer, Sue Paint opens on its start page
 while no canvas is open (and File, **Start Page** brings it back). Down

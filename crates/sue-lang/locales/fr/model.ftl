@@ -1,0 +1,27 @@
+## Modèles de données partagés
+blend-normal = Normal
+blend-darken = Assombrir
+blend-multiply = Multiplier
+blend-color-burn = Densité couleur moins
+blend-linear-burn = Densité linéaire moins
+blend-subtract = Soustraire
+blend-darker-color = Couleur plus foncée
+blend-lighten = Éclaircir
+blend-screen = Écran
+blend-color-dodge = Densité couleur plus
+blend-add = Ajouter
+blend-lighter-color = Couleur plus claire
+blend-overlay = Incrustation
+blend-soft-light = Lumière tamisée
+blend-hard-light = Lumière crue
+blend-vivid-light = Lumière vive
+blend-linear-light = Lumière linéaire
+blend-pin-light = Lumière ponctuelle
+blend-hard-mix = Mélange maximal
+blend-difference = Différence
+blend-exclusion = Exclusion
+blend-divide = Division
+blend-hue = Teinte
+blend-saturation = Saturation
+blend-color = Couleur
+blend-luminosity = Luminosité
