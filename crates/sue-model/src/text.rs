@@ -73,6 +73,9 @@ pub mod kind {
     pub const SCRIPT: &str = "script";
     /// Small capitals (value `true`).
     pub const SMALL_CAPS: &str = "small_caps";
+    /// All capitals (value `true`): shown and printed in capitals, typed
+    /// and kept as written.
+    pub const CAPS: &str = "caps";
     /// A footnote after the marked text: the note itself, as text.
     pub const FOOTNOTE: &str = "footnote";
     /// An entity shown in the text (a picture), on an [`super::OBJECT`]
@@ -618,6 +621,8 @@ pub struct CharFormat {
     pub code: bool,
     /// Small capitals.
     pub small_caps: bool,
+    /// All capitals.
+    pub caps: bool,
     /// Another font family.
     pub font: Option<String>,
     /// Another size, in points.
@@ -688,6 +693,7 @@ pub fn char_format(marks: &[&Mark], range: &Range<usize>) -> CharFormat {
             kind::STRIKE => look.strike = on,
             kind::CODE => look.code = on,
             kind::SMALL_CAPS => look.small_caps = on,
+            kind::CAPS => look.caps = on,
             kind::FONT => look.font = mark.value.as_str().map(str::to_owned),
             kind::SIZE => look.size = points_of(&mark.value),
             kind::COLOR => look.color = rgb_of(&mark.value),

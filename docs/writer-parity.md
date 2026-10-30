@@ -22,13 +22,13 @@ of work is by how much people miss each one (the plan at the end).
 | Bold, italic, underline, strikethrough | WL | done | |
 | Superscript, subscript | WL | done | |
 | Small capitals | WL | done | |
-| All capitals | WL | missing | |
+| All capitals | WL | done | Word, OpenDocument, RTF, HTML too |
 | Hidden text | WL | missing | |
 | Double underline, underline color | WL | missing | |
 | Double strikethrough | W | missing | |
 | Overline | L | missing | |
 | Font family | WL | done | Installed fonts from `sue_wm::fonts` |
-| Font size, grow and shrink | WL | partial | Size box; no grow and shrink commands |
+| Font size, grow and shrink | WL | done | Ctrl+] and Ctrl+[ |
 | Text color | WL | done | Five swatches; no full color picker |
 | Highlight | WL | done | |
 | Character shading and border | WL | missing | |
@@ -297,7 +297,7 @@ of work is by how much people miss each one (the plan at the end).
 | Structures (fractions, scripts, radicals, matrices) | WL | missing | |
 | Inline and display equations, numbering | WL | missing | |
 | Symbols and special characters | WL | missing | |
-| Non-breaking space, hyphen, soft hyphen | WL | missing | |
+| Non-breaking space, hyphen, soft hyphen | WL | done | Insert, Formatting Mark |
 
 ## File formats
 

@@ -142,6 +142,9 @@ pub(crate) fn para_html(
         if look.small_caps {
             css.push_str("font-variant: small-caps;");
         }
+        if look.caps {
+            css.push_str("text-transform: uppercase;");
+        }
         if !css.is_empty() {
             piece = format!("<span style=\"{css}\">{piece}</span>");
         }

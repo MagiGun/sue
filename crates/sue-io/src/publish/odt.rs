@@ -102,6 +102,9 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
         if look.small_caps {
             props.push_str(" fo:font-variant=\"small-caps\"");
         }
+        if look.caps {
+            props.push_str(" fo:text-transform=\"uppercase\"");
+        }
         match look.script {
             1 => props.push_str(" style:text-position=\"super 58%\""),
             -1 => props.push_str(" style:text-position=\"sub 58%\""),

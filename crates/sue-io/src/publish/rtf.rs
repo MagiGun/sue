@@ -144,6 +144,9 @@ pub fn to_rtf(book: &Book) -> String {
                 if look.small_caps {
                     body.push_str("\\scaps");
                 }
+                if look.caps {
+                    body.push_str("\\caps");
+                }
                 match look.script {
                     1 => body.push_str("\\super"),
                     -1 => body.push_str("\\sub"),

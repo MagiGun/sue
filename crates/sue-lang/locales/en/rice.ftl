@@ -491,6 +491,12 @@ sue_writer_keys-review_track = Review track
     .description = Record Changes
 sue_writer_keys-review_next_misspelling = Review next misspelling
     .description = Next Misspelling
+sue_writer_keys-format_grow = Format grow
+    .description = Grow Font
+sue_writer_keys-format_shrink = Format shrink
+    .description = Shrink Font
+sue_writer_keys-insert_mark_nbsp = Insert mark nbsp
+    .description = Non-breaking Space
 
 ## [image_viewer_keys]
 

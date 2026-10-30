@@ -82,6 +82,9 @@ fn run_props(look: &sue_model::CharFormat) -> String {
     if look.small_caps {
         props.push_str("<w:smallCaps/>");
     }
+    if look.caps {
+        props.push_str("<w:caps/>");
+    }
     if let Some(color) = look.color {
         let _ = write!(props, "<w:color w:val=\"{}\"/>", hex(color));
     } else if look.link.is_some() {
@@ -752,6 +755,8 @@ fn read_docx_into(bytes: &[u8], keep_tables: bool) -> Result<Imported, String> {
         italic: bool,
         underline: bool,
         strike: bool,
+        caps: bool,
+        small_caps: bool,
         script: Option<&'static str>,
         color: Option<String>,
         size: Option<f32>,
@@ -888,6 +893,8 @@ fn read_docx_into(bytes: &[u8], keep_tables: bool) -> Result<Imported, String> {
                 "w:i" if in_run_props => run.italic = on(&event),
                 "w:u" if in_run_props => run.underline = on(&event),
                 "w:strike" | "w:dstrike" if in_run_props => run.strike = on(&event),
+                "w:caps" if in_run_props => run.caps = on(&event),
+                "w:smallCaps" if in_run_props => run.small_caps = on(&event),
                 "w:vertAlign" if in_run_props => {
                     run.script = match event.attr("w:val") {
                         Some("superscript") => Some("super"),
@@ -956,6 +963,12 @@ fn read_docx_into(bytes: &[u8], keep_tables: bool) -> Result<Imported, String> {
                 }
                 if run.strike {
                     set(kind::STRIKE, Value::Bool(true));
+                }
+                if run.caps {
+                    set(kind::CAPS, Value::Bool(true));
+                }
+                if run.small_caps {
+                    set(kind::SMALL_CAPS, Value::Bool(true));
                 }
                 if let Some(script) = run.script {
                     set(kind::SCRIPT, Value::Text(script.to_owned()));

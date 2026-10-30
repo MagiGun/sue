@@ -24,6 +24,32 @@ use crate::project;
 pub const ID: &str = "sue-writer";
 
 /// The studio's applet id.
+/// The next font size up (or down) the usual ladder: 8, 9, 10, 10.5, 11,
+/// 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72, then by tens.
+pub(crate) fn font_step(now: f32, up: bool) -> f32 {
+    const SIZES: [f32; 17] = [
+        8.0, 9.0, 10.0, 10.5, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 36.0,
+        48.0, 72.0,
+    ];
+    if up {
+        SIZES
+            .iter()
+            .copied()
+            .find(|size| *size > now + 0.01)
+            .unwrap_or(((now / 10.0).floor() + 1.0) * 10.0)
+            .min(1638.0)
+    } else if now > 72.0 + 0.01 {
+        (((now / 10.0).ceil() - 1.0) * 10.0).max(72.0)
+    } else {
+        SIZES
+            .iter()
+            .rev()
+            .copied()
+            .find(|size| *size < now - 0.01)
+            .unwrap_or(1.0)
+    }
+}
+
 /// The rice key that turns spelling as you type on and off.
 pub(crate) const SPELL_CHECK: &str = "sue_writer.spell_check";
 
@@ -1283,6 +1309,29 @@ impl SueWriter {
                 };
                 self.editor.change_case(cx, case);
             }
+            "format.caps" => self.editor.toggle(cx, kind::CAPS, &tr!("all-capitals")),
+            "format.grow" | "format.shrink" => {
+                let (para, chars) = self.editor.look_here(&sheet);
+                let now = chars.size.unwrap_or(para.size);
+                let next = font_step(now, command == "format.grow");
+                self.editor.set_char(
+                    cx,
+                    kind::SIZE,
+                    Some(Value::Float(f64::from(next))),
+                    &tr!("font-size"),
+                );
+            }
+            mark if mark.starts_with("insert.mark.") => {
+                let ch = match &mark["insert.mark.".len()..] {
+                    "nbsp" => "\u{A0}",
+                    "nbhyphen" => "\u{2011}",
+                    "soft_hyphen" => "\u{AD}",
+                    "narrow" => "\u{202F}",
+                    "zwsp" => "\u{200B}",
+                    _ => return false,
+                };
+                self.editor.insert(cx, ch);
+            }
             "format.small_caps" => self
                 .editor
                 .toggle(cx, kind::SMALL_CAPS, &tr!("small-capitals")),
@@ -1743,6 +1792,9 @@ impl SueWriter {
             (alt, Key::F, "insert.footnote"),
             (alt, Key::C, "review.comment"),
             (shift, Key::C, "review.track"),
+            (command, Key::CloseBracket, "format.grow"),
+            (command, Key::OpenBracket, "format.shrink"),
+            (shift, Key::Space, "insert.mark.nbsp"),
             (Modifiers::NONE, Key::F7, "review.next_misspelling"),
             (command, Key::Enter, "insert.page_break"),
             (command, Key::K, "insert.link"),
@@ -2200,5 +2252,20 @@ impl SueApplet for SueWriter {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fonts_grow_and_shrink_along_the_usual_sizes() {
+        assert_eq!(font_step(12.0, true), 14.0);
+        assert_eq!(font_step(12.0, false), 11.0);
+        assert_eq!(font_step(13.0, true), 14.0);
+        assert_eq!(font_step(72.0, true), 80.0);
+        assert_eq!(font_step(80.0, false), 72.0);
+        assert_eq!(font_step(8.0, false), 1.0);
     }
 }

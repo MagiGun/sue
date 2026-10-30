@@ -740,7 +740,7 @@ fn set_pass(
                     link: format.link.clone(),
                 });
                 let text = &doc.text[piece];
-                let text = if format.small_caps {
+                let text = if format.small_caps || format.caps {
                     text.to_uppercase()
                 } else {
                     text.to_owned()

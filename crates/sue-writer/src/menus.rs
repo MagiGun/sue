@@ -85,6 +85,16 @@ pub fn menus() -> Vec<Menu> {
                 item(tr!("link-ellipsis"), "insert.link").key("Ctrl+K"),
                 item(tr!("picture-ellipsis"), "insert.picture"),
                 item(tr!("todays-date"), "insert.date"),
+                MenuItem::sub(
+                    tr!("formatting-mark"),
+                    vec![
+                        item(tr!("non-breaking-space"), "insert.mark.nbsp").key("Ctrl+Shift+Space"),
+                        item(tr!("non-breaking-hyphen"), "insert.mark.nbhyphen"),
+                        item(tr!("soft-hyphen"), "insert.mark.soft_hyphen"),
+                        item(tr!("narrow-non-breaking-space"), "insert.mark.narrow"),
+                        item(tr!("zero-width-space"), "insert.mark.zwsp"),
+                    ],
+                ),
             ],
         ),
         Menu::new(
@@ -100,6 +110,9 @@ pub fn menus() -> Vec<Menu> {
                         item(tr!("superscript"), "format.superscript").key("Ctrl+Shift+="),
                         item(tr!("subscript"), "format.subscript").key("Ctrl+="),
                         item(tr!("small-capitals"), "format.small_caps"),
+                        item(tr!("all-capitals"), "format.caps"),
+                        item(tr!("grow-font"), "format.grow").key("Ctrl+]"),
+                        item(tr!("shrink-font"), "format.shrink").key("Ctrl+["),
                         item(tr!("code"), "format.code"),
                         MenuItem::Separator,
                         MenuItem::sub(

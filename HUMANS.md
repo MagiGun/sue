@@ -583,6 +583,12 @@ table and back. A table that runs onto the next page breaks between rows and
 repeats its heading row at the top. Tables go into every format you compile
 to, PDF and Word included.
 
+Format, Text also has **All Capitals** (shown and printed in capitals,
+kept as typed) and **Grow Font** and **Shrink Font** (`Ctrl+]` and `Ctrl+[`,
+along the usual sizes). Insert, Formatting Mark puts in a non-breaking space
+(`Ctrl+Shift+Space`), a non-breaking hyphen, a soft hyphen, a narrow
+non-breaking space or a zero width space.
+
 **Spelling** is checked as you type: a misspelled word gets a red wavy
 underline (not the word you are still typing). Right-click it for what you
 may have meant, **Ignore All** for this sitting, or **Add to Dictionary**,

@@ -440,7 +440,9 @@ pub fn lay_document(
         } else {
             for (piece, run) in pieces {
                 let mut chunk = text[piece.clone()].to_owned();
-                if run.small_caps && chunk.chars().all(|ch| ch.to_uppercase().count() == 1) {
+                if (run.small_caps || run.caps)
+                    && chunk.chars().all(|ch| ch.to_uppercase().count() == 1)
+                {
                     chunk = chunk.to_uppercase();
                 }
                 let start = job.text.len();
