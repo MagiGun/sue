@@ -80,6 +80,7 @@ pub fn menus() -> Vec<Menu> {
                 item(tr!("page-break"), "insert.page_break").key("Ctrl+Enter"),
                 item(tr!("scene-break"), "insert.scene_break"),
                 item(tr!("footnote-ellipsis"), "insert.footnote").key("Ctrl+Alt+F"),
+                item(tr!("endnote-ellipsis"), "insert.endnote").key("Ctrl+Alt+D"),
                 item(tr!("header-and-footer-ellipsis"), "insert.header_footer"),
                 item(tr!("table-of-contents-ellipsis"), "insert.contents"),
                 item(tr!("link-ellipsis"), "insert.link").key("Ctrl+K"),

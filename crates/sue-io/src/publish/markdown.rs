@@ -88,7 +88,7 @@ pub fn to_markdown(book: &Book) -> String {
                     piece = format!("{lead}{core}{trail}");
                 }
                 line.push_str(&piece);
-                if let Some(note) = &look.footnote {
+                if let Some(note) = look.footnote.as_ref().or(look.endnote.as_ref()) {
                     notes.push(note.clone());
                     line.push_str(&format!("[^{}]", notes.len()));
                 }

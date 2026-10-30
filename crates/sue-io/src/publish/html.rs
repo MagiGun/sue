@@ -162,7 +162,7 @@ pub(crate) fn para_html(
             );
         }
         inner.push_str(&piece);
-        if let Some(note) = &look.footnote {
+        if let Some(note) = look.footnote.as_ref().or(look.endnote.as_ref()) {
             notes.push(note.clone());
             let n = notes.len();
             let _ = write!(

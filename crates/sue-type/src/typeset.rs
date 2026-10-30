@@ -3,7 +3,8 @@
 //! font's own widths, justified, paginated (headings kept with what
 //! follows, no lone first lines at the foot of a page), with lists,
 //! pictures, tables (broken between rows, their heading rows repeated),
-//! links, footnotes gathered as notes at the end, page numbers and a
+//! links, footnotes at the foot of their page and endnotes gathered at
+//! the end, page numbers and a
 //! running head, then handed to the PDF writer in `sue-io`.
 
 use std::collections::HashMap;
@@ -133,6 +134,8 @@ struct Glyph {
     advance: f32,
     rise: f32,
     look: Arc<Look>,
+    /// The footnote this glyph calls (its number's first glyph).
+    note: Option<usize>,
 }
 
 /// How a run is drawn.
@@ -187,6 +190,68 @@ enum Block {
         rows: Vec<SetRow>,
         header_rows: usize,
     },
+}
+
+/// `number` in small roman numerals (endnotes are counted so).
+fn roman(mut number: usize) -> String {
+    const PLACES: [(usize, &str); 13] = [
+        (1000, "m"),
+        (900, "cm"),
+        (500, "d"),
+        (400, "cd"),
+        (100, "c"),
+        (90, "xc"),
+        (50, "l"),
+        (40, "xl"),
+        (10, "x"),
+        (9, "ix"),
+        (5, "v"),
+        (4, "iv"),
+        (1, "i"),
+    ];
+    let mut out = String::new();
+    for (value, letters) in PLACES {
+        while number >= value {
+            out.push_str(letters);
+            number -= value;
+        }
+    }
+    out
+}
+
+/// Draws the footnotes `notes` (indices into `lines`) from `top` down,
+/// under a short rule, `width` points across from `left`.
+fn draw_footnotes(
+    items: &mut Vec<PdfItem>,
+    lines: &[Vec<Line>],
+    notes: &[usize],
+    left: f32,
+    top: f32,
+    width: f32,
+) {
+    if notes.is_empty() {
+        return;
+    }
+    items.push(PdfItem::Line {
+        from: [left, top + 4.0],
+        to: [left + width / 3.0, top + 4.0],
+        width: 0.5,
+        color: [0x44, 0x44, 0x44],
+    });
+    let mut y = top + 10.0;
+    for note in notes {
+        for line in lines.get(*note).into_iter().flatten() {
+            let baseline = y + line.ascent;
+            let placed: Vec<(Glyph, f32)> = line
+                .glyphs
+                .iter()
+                .map(|(glyph, x)| (glyph.clone(), left + x))
+                .collect();
+            push_runs(items, placed.into_iter(), baseline);
+            y += line.height;
+        }
+        y += 2.0;
+    }
 }
 
 /// A table of contents' row, set: its title's lines, set in, and its page
@@ -492,6 +557,7 @@ fn shaped(
             advance,
             rise,
             look: look.clone(),
+            note: None,
         });
     }
     out
@@ -653,6 +719,7 @@ fn set_pass(
     let mut images = Vec::new();
     let mut blocks: Vec<(usize, Block)> = Vec::new();
     let mut notes: Vec<String> = Vec::new();
+    let mut footnotes: Vec<String> = Vec::new();
     let width = page.text_width();
     for (doc_index, doc) in docs.iter().enumerate() {
         let paragraphs = sue_model::paragraphs(doc.text);
@@ -764,25 +831,41 @@ fn set_pass(
                 glyphs.extend(shaped(
                     &mut faces, &text, &family, size, &format, &look, rise, &run_look,
                 ));
-                if let Some(note) = &format.footnote {
-                    notes.push(note.clone());
-                    let mark = Arc::new(Look {
-                        underline: false,
-                        strike: false,
-                        highlight: None,
-                        link: None,
-                        ..(*run_look).clone()
-                    });
-                    glyphs.extend(shaped(
+                let mark = Arc::new(Look {
+                    underline: false,
+                    strike: false,
+                    highlight: None,
+                    link: None,
+                    ..(*run_look).clone()
+                });
+                // A footnote's number calls its note at the foot of the
+                // page; an endnote's (in small roman numerals) the notes
+                // at the end.
+                for (note, foot) in [(&format.footnote, true), (&format.endnote, false)] {
+                    let Some(note) = note else {
+                        continue;
+                    };
+                    let number = if foot {
+                        footnotes.push(note.clone());
+                        footnotes.len().to_string()
+                    } else {
+                        notes.push(note.clone());
+                        roman(notes.len())
+                    };
+                    let mut call = shaped(
                         &mut faces,
-                        &notes.len().to_string(),
+                        &number,
                         &look.font,
                         look.size * 0.66,
                         &CharFormat::default(),
                         &look,
                         look.size * 0.33,
                         &mark,
-                    ));
+                    );
+                    if foot && let Some(first) = call.first_mut() {
+                        first.note = Some(footnotes.len() - 1);
+                    }
+                    glyphs.extend(call);
                 }
             }
             if glyphs.is_empty() {
@@ -942,7 +1025,7 @@ fn set_pass(
         ));
         let body = paragraph_look_of(sheet, "body");
         for (index, note) in notes.iter().enumerate() {
-            let text = format!("{}. {note}", index + 1);
+            let text = format!("{}. {note}", roman(index + 1));
             let glyphs = shaped(
                 &mut faces,
                 &text,
@@ -972,9 +1055,47 @@ fn set_pass(
         }
     }
 
+    // Footnotes, set for the foot of the page.
+    let foot_look = paragraph_look_of(sheet, "body");
+    let foot_ink = Arc::new(Look {
+        color: INK,
+        slant: false,
+        embolden: false,
+        underline: false,
+        strike: false,
+        highlight: None,
+        link: None,
+    });
+    let foot_lines: Vec<Vec<Line>> = footnotes
+        .iter()
+        .enumerate()
+        .map(|(index, note)| {
+            let glyphs = shaped(
+                &mut faces,
+                &format!("{} {note}", index + 1),
+                &foot_look.font,
+                (foot_look.size * 0.8).max(6.0),
+                &CharFormat::default(),
+                &foot_look,
+                0.0,
+                &foot_ink,
+            );
+            break_lines(&faces, glyphs, width, 0.0, 1.1)
+        })
+        .collect();
+    let note_height = |index: usize| -> f32 {
+        foot_lines.get(index).map_or(0.0, |lines| {
+            lines.iter().map(|line| line.height).sum::<f32>() + 2.0
+        })
+    };
+    // The room above a page's footnotes: a short rule and a gap.
+    const FOOT_RULE: f32 = 10.0;
+
     // Pages.
     let [top, _, _, left] = page.margins;
-    let height = page.text_height();
+    let full = page.text_height();
+    let mut page_notes: Vec<usize> = Vec::new();
+    let mut notes_height = 0.0_f32;
     let mut pages: Vec<PdfPage> = vec![PdfPage {
         size: page.size,
         items: Vec::new(),
@@ -990,12 +1111,30 @@ fn set_pass(
         });
         *y = 0.0;
     };
+    // Draws the page's footnotes at its foot, then starts the next page.
+    macro_rules! next_page {
+        () => {{
+            let page_index = pages.len() - 1;
+            draw_footnotes(
+                &mut pages[page_index].items,
+                &foot_lines,
+                &page_notes,
+                left,
+                top + full - notes_height,
+                width,
+            );
+            page_notes.clear();
+            notes_height = 0.0;
+            new_page(&mut pages, &mut y);
+        }};
+    }
     for index in 0..blocks.len() {
+        let height = full - notes_height;
         let doc_index = blocks[index].0;
         let starts_doc = doc_index != last_doc;
         last_doc = doc_index;
         if starts_doc && docs.get(doc_index).is_some_and(|doc| doc.new_page) && y > 0.0 {
-            new_page(&mut pages, &mut y);
+            next_page!();
         }
         block_pages[index] = pages.len() - 1;
         match &blocks[index].1 {
@@ -1008,7 +1147,7 @@ fn set_pass(
                 let x = left + look.indent;
                 for row in rows {
                     if y + row.height > height + 0.5 && y > 0.0 {
-                        new_page(&mut pages, &mut y);
+                        next_page!();
                     }
                     let page_index = pages.len() - 1;
                     draw_listing_row(&mut pages[page_index].items, &faces, row, x, top + y, room);
@@ -1030,7 +1169,7 @@ fn set_pass(
                 let x = left + look.indent;
                 for (row_index, row) in rows.iter().enumerate() {
                     if y + row.0 > height + 0.5 && y > 0.0 {
-                        new_page(&mut pages, &mut y);
+                        next_page!();
                         // The heading rows again at the top of the page.
                         if row_index >= headings && repeat + row.0 <= height {
                             for heading in &rows[..headings] {
@@ -1067,7 +1206,7 @@ fn set_pass(
                     y += look.space_before;
                 }
                 if y + size[1] > height && y > 0.0 {
-                    new_page(&mut pages, &mut y);
+                    next_page!();
                 }
                 let room = width - look.indent - look.indent_right;
                 let x = left + look.indent + (room - size[0]).max(0.0) / 2.0;
@@ -1085,7 +1224,7 @@ fn set_pass(
                 title,
             } => {
                 if look.page_break && y > 0.0 {
-                    new_page(&mut pages, &mut y);
+                    next_page!();
                 }
                 if y > 0.0 {
                     y += look.space_before;
@@ -1106,12 +1245,12 @@ fn set_pass(
                         None => 0.0,
                     };
                     if y + total + next > height && total + next <= height {
-                        new_page(&mut pages, &mut y);
+                        next_page!();
                     }
                 }
                 // No lone first line at the foot of a page.
                 if lines.len() > 2 && y > 0.0 && y + lines[0].height + lines[1].height > height {
-                    new_page(&mut pages, &mut y);
+                    next_page!();
                 }
                 if starts_doc
                     && look.outline.is_none()
@@ -1137,9 +1276,25 @@ fn set_pass(
                 }
                 let room = width - look.indent - look.indent_right;
                 for (line_index, line) in lines.iter().enumerate() {
-                    if y + line.height > height + 0.5 && y > 0.0 {
-                        new_page(&mut pages, &mut y);
+                    // The footnotes this line calls go on its page too.
+                    let calls: Vec<usize> = line
+                        .glyphs
+                        .iter()
+                        .filter_map(|(glyph, _)| glyph.note)
+                        .collect();
+                    let needs = |page_notes: &Vec<usize>| {
+                        let notes: f32 = calls.iter().map(|note| note_height(*note)).sum();
+                        if notes > 0.0 && page_notes.is_empty() {
+                            notes + FOOT_RULE
+                        } else {
+                            notes
+                        }
+                    };
+                    if y + line.height + notes_height + needs(&page_notes) > full + 0.5 && y > 0.0 {
+                        next_page!();
                     }
+                    notes_height += needs(&page_notes);
+                    page_notes.extend(calls.iter().copied());
                     let first = line_index == 0;
                     let indent = look.indent
                         + if first {
@@ -1203,6 +1358,15 @@ fn set_pass(
             }
         }
     }
+    let last = pages.len() - 1;
+    draw_footnotes(
+        &mut pages[last].items,
+        &foot_lines,
+        &page_notes,
+        left,
+        top + full - notes_height,
+        width,
+    );
     // The running header and footer.
     let numbers_look = paragraph_look_of(sheet, "body");
     let plain = Arc::new(Look {
@@ -1423,9 +1587,9 @@ mod tests {
                 }
             }
         }
-        // The notes come at the end.
-        let last = pdf.pages.last().unwrap();
-        let words: String = last
+        // The footnote prints at the foot of the page that calls it.
+        let first = &pdf.pages[0];
+        let words: String = first
             .items
             .iter()
             .filter_map(|item| match item {
@@ -1438,7 +1602,8 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(words.contains("Notes"), "{words}");
+        assert!(words.contains("1Anote."), "{words}");
+        assert!(!words.contains("Notes"));
         let bytes = sue_io::pdf::write_pdf(&pdf).unwrap();
         assert!(bytes.starts_with(b"%PDF-1.7"));
     }

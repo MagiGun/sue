@@ -470,7 +470,11 @@ pub fn footnotes(book: &Book) -> Vec<String> {
     book.sections
         .iter()
         .flat_map(|section| paragraphs(&section.text, &section.marks))
-        .flat_map(|para| para.runs.into_iter().filter_map(|(_, look)| look.footnote))
+        .flat_map(|para| {
+            para.runs
+                .into_iter()
+                .filter_map(|(_, look)| look.footnote.or(look.endnote))
+        })
         .collect()
 }
 
@@ -513,7 +517,7 @@ pub fn to_text(book: &Book) -> String {
             }
             for (text, look) in &para.runs {
                 out.push_str(&text.replace(sue_model::LINE_BREAK, "\n"));
-                if let Some(note) = &look.footnote {
+                if let Some(note) = look.footnote.as_ref().or(look.endnote.as_ref()) {
                     notes.push(note.clone());
                     out.push_str(&format!("[{}]", notes.len()));
                 }

@@ -313,7 +313,7 @@ pub(crate) fn format(
         background = Color32::from_rgba_unmultiplied(0xf2, 0xc0, 0x3a, 0x55);
     } else if run.code {
         background = ink.shade;
-    } else if run.footnote.is_some() {
+    } else if run.footnote.is_some() || run.endnote.is_some() {
         // A footnote's words, faintly: the note itself prints at the end.
         background = Color32::from_rgba_unmultiplied(0x3a, 0x7b, 0xd5, 0x2c);
     }

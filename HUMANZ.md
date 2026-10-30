@@ -1673,7 +1673,8 @@ paragraph keeps the first's marks, unless the deletion took that one from its
 very start). Character runs are read once for every view and format
 (`runs`, `CharFormat`, `marks_by_paragraph`). New kinds: `align`, `indent`,
 `indent_right`, `first_indent`, `line_spacing`, `space_before`, `space_after`,
-`page_break`, `level`, `highlight`, `script`, `small_caps`, `caps` (all
+`page_break`, `level`, `highlight`, `script`, `small_caps`, `endnote` (as
+`footnote`, printed at the end), `caps` (all
 capitals: shown and printed upper case, kept as typed), `footnote` (the
 note's text, on the words it follows) and `embed` (an entity shown on an
 object replacement character).
@@ -1864,7 +1865,9 @@ word at the caret as one undo step, keeping the marks.
 **Typesetting and PDF (`sue-type::typeset`, `sue-io::pdf`).** For print, the
 same styles and marks are set from the font files themselves (`ttf-parser`
 widths): lines broken at spaces, justified, paginated with the same rules,
-lists, pictures, links, footnotes gathered as notes at the end, page numbers
+lists, pictures, links, footnotes at the foot of the page that calls them
+(the room they need kept free as each line is placed, under a short rule),
+endnotes gathered as notes at the end, page numbers
 and a running head. `sue-io::pdf` writes it: fonts embedded whole as
 CID-keyed fonts (a collection's face pulled out on its own), text that copies
 out as Unicode, pictures, links and bookmarks, every stream deflated.

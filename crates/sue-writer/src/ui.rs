@@ -2659,6 +2659,7 @@ impl SueWriter {
             Dialog::Settings(_) => tr!("project-settings"),
             Dialog::Link(_) => tr!("link"),
             Dialog::Footnote(_) => tr!("footnote"),
+            Dialog::Endnote(_) => tr!("endnote"),
             Dialog::Table { .. } => tr!("insert-table"),
             Dialog::Furniture(_) => tr!("header-and-footer"),
             Dialog::Contents(_) => tr!("table-of-contents"),
@@ -2822,8 +2823,35 @@ impl SueWriter {
                             }
                         });
                     }
-                    Dialog::Footnote(note) => {
+                    Dialog::Endnote(note) => {
                         ui.label(tr!("note-printed-end"));
+                        ui.add(
+                            egui::TextEdit::multiline(note)
+                                .desired_rows(4)
+                                .desired_width(340.0),
+                        );
+                        ui.horizontal(|ui| {
+                            if ui.button(tr!("add-endnote")).clicked() {
+                                let note = note.trim().to_owned();
+                                after = Some(Box::new(move |me: &mut Self, cx| {
+                                    if !note.is_empty() {
+                                        me.editor.set_char(
+                                            cx,
+                                            kind::ENDNOTE,
+                                            Some(Value::Text(note)),
+                                            &tr!("endnote"),
+                                        );
+                                    }
+                                }));
+                                keep = false;
+                            }
+                            if ui.button(tr!("cancel")).clicked() {
+                                keep = false;
+                            }
+                        });
+                    }
+                    Dialog::Footnote(note) => {
+                        ui.label(tr!("note-printed-foot"));
                         ui.add(
                             egui::TextEdit::multiline(note)
                                 .desired_rows(4)

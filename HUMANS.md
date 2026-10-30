@@ -583,6 +583,11 @@ table and back. A table that runs onto the next page breaks between rows and
 repeats its heading row at the top. Tables go into every format you compile
 to, PDF and Word included.
 
+**Footnotes** (Insert, Footnote, `Ctrl+Alt+F`) print at the foot of the
+page that calls them, under a short rule; **endnotes** (Insert, Endnote,
+`Ctrl+Alt+D`) are numbered i, ii, iii and gathered under Notes at the end.
+Word and OpenDocument files keep both kinds.
+
 `Shift+Enter` starts a new line without starting a new paragraph (for
 addresses and verse); it keeps its place in every format Sue writes.
 

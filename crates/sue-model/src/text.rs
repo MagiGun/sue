@@ -76,8 +76,12 @@ pub mod kind {
     /// All capitals (value `true`): shown and printed in capitals, typed
     /// and kept as written.
     pub const CAPS: &str = "caps";
-    /// A footnote after the marked text: the note itself, as text.
+    /// A footnote after the marked text: the note itself, as text. It
+    /// prints at the foot of the page.
     pub const FOOTNOTE: &str = "footnote";
+    /// An endnote after the marked text: the note itself, as text. It
+    /// prints with the others at the end.
+    pub const ENDNOTE: &str = "endnote";
     /// An entity shown in the text (a picture), on an [`super::OBJECT`]
     /// character.
     pub const EMBED: &str = "embed";
@@ -643,6 +647,8 @@ pub struct CharFormat {
     pub comment: Option<EntityId>,
     /// A footnote that follows this run.
     pub footnote: Option<String>,
+    /// An endnote that follows this run.
+    pub endnote: Option<String>,
     /// A tracked change inserted this run.
     pub inserted: Option<crate::changes::Change>,
     /// A tracked change deleted this run.
@@ -720,6 +726,9 @@ pub fn char_format(marks: &[&Mark], range: &Range<usize>) -> CharFormat {
             }
             kind::FOOTNOTE if mark.range.end == range.end => {
                 look.footnote = mark.value.as_str().map(str::to_owned);
+            }
+            kind::ENDNOTE if mark.range.end == range.end => {
+                look.endnote = mark.value.as_str().map(str::to_owned);
             }
             _ => {}
         }

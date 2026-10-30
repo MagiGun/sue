@@ -13,6 +13,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Footnotes in Sue Writer's PDFs print at the foot of their page, and
+  endnotes (Insert, Endnote) gather at the end; Word and OpenDocument keep
+  both.
 - `Shift+Enter` in Sue Writer starts a new line inside a paragraph.
 - Sue Writer opens OpenDocument (`.odt`) files from LibreOffice, with their
   styles, lists, links, footnotes, tables and table of contents.

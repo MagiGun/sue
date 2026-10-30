@@ -129,8 +129,8 @@ of work is by how much people miss each one (the plan at the end).
 | Page numbers | WL | done | Live fields in Word, OpenDocument and RTF |
 | Page number format (roman, letters), start at | WL | missing | |
 | Different first page, different odd and even | WL | partial | Different first page; not odd and even |
-| Footnotes | WL | done | |
-| Endnotes | WL | missing | |
+| Footnotes | WL | done | At the foot of the page in print |
+| Endnotes | WL | done | Word and OpenDocument keep them |
 | Footnote and endnote options (numbering, place) | WL | missing | |
 | Next and previous footnote | WL | missing | |
 

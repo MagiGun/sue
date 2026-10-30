@@ -288,6 +288,7 @@ pub fn read_odt(bytes: &[u8]) -> Result<Imported, String> {
     let mut link: Option<(usize, String)> = None;
     let mut note: Option<String> = None;
     let mut citation = false;
+    let mut end_note = false;
     let mut skip = 0_usize;
     let mut table_depth = 0_usize;
     let mut table: Option<TableRead> = None;
@@ -433,6 +434,7 @@ pub fn read_odt(bytes: &[u8]) -> Result<Imported, String> {
         match &event {
             XmlEvent::Open { name, empty, .. } if name == "text:note" && !*empty => {
                 note = Some(String::new());
+                end_note = event.attr("text:note-class") == Some("endnote");
                 continue;
             }
             XmlEvent::Open { name, empty, .. } if name == "text:note-citation" && !*empty => {
@@ -450,7 +452,12 @@ pub fn read_odt(bytes: &[u8]) -> Result<Imported, String> {
                     if end > start
                         && let Some((at, _)) = text[..end].char_indices().next_back()
                     {
-                        marks.set(at..end, kind::FOOTNOTE, Some(body.trim().to_owned().into()));
+                        let kind = if end_note {
+                            kind::ENDNOTE
+                        } else {
+                            kind::FOOTNOTE
+                        };
+                        marks.set(at..end, kind, Some(body.trim().to_owned().into()));
                     }
                 }
                 continue;

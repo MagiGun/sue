@@ -116,6 +116,8 @@ pub(crate) enum Dialog {
     Link(String),
     /// A footnote on the selection.
     Footnote(String),
+    /// An endnote on the selection.
+    Endnote(String),
     /// The running header and footer.
     Furniture(Furniture),
     /// A new table of contents.
@@ -1472,11 +1474,13 @@ impl SueWriter {
                     look.link.unwrap_or_else(|| "https://".to_owned()),
                 ));
             }
-            "insert.footnote" => {
+            "insert.footnote" | "insert.endnote" => {
                 if self.editor.selection().is_empty() {
                     cx.notify(tr!("select-word-footnote-follows"));
-                } else {
+                } else if command == "insert.footnote" {
                     self.dialog = Some(Dialog::Footnote(String::new()));
+                } else {
+                    self.dialog = Some(Dialog::Endnote(String::new()));
                 }
             }
             "insert.picture" => {
@@ -1793,6 +1797,7 @@ impl SueWriter {
             (alt, Key::Num0, "style.body"),
             (alt, Key::F, "insert.footnote"),
             (alt, Key::C, "review.comment"),
+            (alt, Key::D, "insert.endnote"),
             (shift, Key::C, "review.track"),
             (command, Key::CloseBracket, "format.grow"),
             (command, Key::OpenBracket, "format.shrink"),

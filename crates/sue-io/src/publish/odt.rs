@@ -236,13 +236,15 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
                     );
                 }
                 inner.push_str(&piece);
-                if let Some(note) = &look.footnote {
-                    notes += 1;
-                    let _ = write!(
-                        inner,
-                        "<text:note text:id=\"note{notes}\" text:note-class=\"footnote\"><text:note-citation>{notes}</text:note-citation><text:note-body><text:p text:style-name=\"Footnote\">{}</text:p></text:note-body></text:note>",
-                        escape(note)
-                    );
+                for (note, class) in [(&look.footnote, "footnote"), (&look.endnote, "endnote")] {
+                    if let Some(note) = note {
+                        notes += 1;
+                        let _ = write!(
+                            inner,
+                            "<text:note text:id=\"note{notes}\" text:note-class=\"{class}\"><text:note-citation>{notes}</text:note-citation><text:note-body><text:p text:style-name=\"Footnote\">{}</text:p></text:note-body></text:note>",
+                            escape(note)
+                        );
+                    }
                 }
             }
             if let Some(open) = open_comment.take() {

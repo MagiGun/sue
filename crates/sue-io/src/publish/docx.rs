@@ -273,6 +273,7 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
     }
     let mut images: Vec<(String, Vec<u8>)> = Vec::new();
     let mut notes: Vec<String> = Vec::new();
+    let mut endnotes: Vec<String> = Vec::new();
     // Comments: each opens once, before its first words, and closes at the
     // end of them (or of their paragraph).
     let mut comments: Vec<sue_core::EntityId> = Vec::new();
@@ -433,12 +434,28 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
                         notes.len()
                     );
                 }
+                if let Some(note) = &look.endnote {
+                    endnotes.push(note.clone());
+                    let _ = write!(
+                        body,
+                        "<w:r><w:rPr><w:vertAlign w:val=\"superscript\"/></w:rPr><w:endnoteReference w:id=\"{}\"/></w:r>",
+                        endnotes.len()
+                    );
+                }
             }
             if let Some(index) = open_comment.take() {
                 body.push_str(&comment_end(index));
             }
             body.push_str("</w:p>");
         }
+    }
+    if !endnotes.is_empty() {
+        relations.push((
+            "rIdEndnotes".into(),
+            "endnotes".into(),
+            "endnotes.xml".into(),
+            false,
+        ));
     }
     if !comments.is_empty() {
         relations.push((
@@ -538,6 +555,18 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
         );
     }
     footnotes.push_str("</w:footnotes>");
+    let mut endnotes_xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:endnotes xmlns:w=\"{W}\"><w:endnote w:type=\"separator\" w:id=\"-1\"><w:p><w:r><w:separator/></w:r></w:p></w:endnote><w:endnote w:type=\"continuationSeparator\" w:id=\"0\"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:endnote>"
+    );
+    for (index, note) in endnotes.iter().enumerate() {
+        let _ = write!(
+            endnotes_xml,
+            "<w:endnote w:id=\"{}\"><w:p><w:pPr><w:pStyle w:val=\"EndnoteText\"/></w:pPr><w:r><w:rPr><w:vertAlign w:val=\"superscript\"/></w:rPr><w:endnoteRef/></w:r><w:r>{}</w:r></w:p></w:endnote>",
+            index + 1,
+            run_text(&format!(" {note}"))
+        );
+    }
+    endnotes_xml.push_str("</w:endnotes>");
 
     // Word fills in a table of contents' page numbers when it opens.
     let update = if book.contents.is_empty() {
@@ -579,6 +608,12 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
             "<Override PartName=\"/word/header1.xml\" ContentType=\"{main}.header+xml\"/>"
         );
     }
+    if !endnotes.is_empty() {
+        let _ = write!(
+            types,
+            "<Override PartName=\"/word/endnotes.xml\" ContentType=\"{main}.endnotes+xml\"/>"
+        );
+    }
     if !comments.is_empty() {
         let _ = write!(
             types,
@@ -616,6 +651,9 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
     }
     if !comments.is_empty() {
         zip.add_text("word/comments.xml", &comments_xml);
+    }
+    if !endnotes.is_empty() {
+        zip.add_text("word/endnotes.xml", &endnotes_xml);
     }
     if has_footer {
         zip.add_text("word/footer1.xml", &footer);
@@ -693,6 +731,28 @@ fn read_docx_into(bytes: &[u8], keep_tables: bool) -> Result<Imported, String> {
                 && event.attr("TargetMode") == Some("External")
             {
                 links.insert(id.to_owned(), target.to_owned());
+            }
+        }
+    }
+    let mut endnotes: HashMap<String, String> = HashMap::new();
+    if let Some(xml) = read("word/endnotes.xml") {
+        let mut current: Option<(String, String)> = None;
+        for event in parse(&xml) {
+            match &event {
+                XmlEvent::Open { name, .. } if name == "w:endnote" => {
+                    current = event.attr("w:id").map(|id| (id.to_owned(), String::new()));
+                }
+                XmlEvent::Text(text) => {
+                    if let Some((_, note)) = &mut current {
+                        note.push_str(text);
+                    }
+                }
+                XmlEvent::Close(name) if name == "w:endnote" => {
+                    if let Some((id, note)) = current.take() {
+                        endnotes.insert(id, note.trim().to_owned());
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -943,6 +1003,18 @@ fn read_docx_into(bytes: &[u8], keep_tables: bool) -> Result<Imported, String> {
                         .attr("r:id")
                         .and_then(|id| links.get(id))
                         .map(|target| (text.len(), target.clone()));
+                }
+                "w:endnoteReference" => {
+                    if let Some(note) = event.attr("w:id").and_then(|id| endnotes.get(id))
+                        && text.len() > para.as_ref().map_or(0, |para| para.start)
+                    {
+                        let end = text.len();
+                        let start = text[..end]
+                            .char_indices()
+                            .next_back()
+                            .map_or(0, |(at, _)| at);
+                        marks.set(start..end, kind::ENDNOTE, Some(note.clone().into()));
+                    }
                 }
                 "w:footnoteReference" => {
                     if let Some(note) = event.attr("w:id").and_then(|id| notes.get(id))
@@ -1263,6 +1335,24 @@ fn table_xml(table: &crate::publish::PublishTable, width: f32) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn word_endnotes_go_out_and_come_back() {
+        let mut book = sample();
+        book.sections[0]
+            .marks
+            .set(12..15, kind::ENDNOTE, Some("The end of it.".into()));
+        let bytes = to_docx(&book);
+        let files: HashMap<String, Vec<u8>> = read_zip(&bytes).unwrap().into_iter().collect();
+        assert!(files.contains_key("word/endnotes.xml"));
+        let (_, marks) = from_docx(&bytes).unwrap();
+        assert!(
+            marks.marks().iter().any(|mark| mark.kind == kind::ENDNOTE
+                && mark.value == Value::Text("The end of it.".into()))
+        );
+        let (_, marks) = crate::publish::from_odt(&crate::publish::to_odt(&book)).unwrap();
+        assert!(marks.marks().iter().any(|mark| mark.kind == kind::ENDNOTE));
+    }
+
     #[test]
     fn word_tables_come_back_as_tables() {
         let bytes = to_docx(&super::super::tests::with_table());

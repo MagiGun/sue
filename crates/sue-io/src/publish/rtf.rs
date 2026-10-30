@@ -181,6 +181,13 @@ pub fn to_rtf(book: &Book) -> String {
                         escape(note)
                     );
                 }
+                if let Some(note) = &look.endnote {
+                    let _ = write!(
+                        body,
+                        "{{\\super\\chftn}}{{\\footnote\\ftnalt\\pard\\plain\\fs20 {{\\super\\chftn}} {}}}",
+                        escape(note)
+                    );
+                }
             }
             body.push_str("\\par\n");
         }
