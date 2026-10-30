@@ -1667,6 +1667,8 @@ pub(crate) mod tests {
             let output = ctx.run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
             let mut found = None;
             let mut selected = false;
+            let mut bar = false;
+            let mut tall = 0.0;
             for clipped in &output.shapes {
                 let mut look = |shape: &egui::Shape| {
                     if let egui::Shape::Text(text) = shape {
@@ -1674,6 +1676,8 @@ pub(crate) mod tests {
                         if words.contains("Summary") {
                             found = Some(text.pos.y);
                         }
+                        tall = f32::max(tall, text.galley.size().y);
+                        bar |= words == "Copy";
                         // The status bar counts what is selected.
                         selected |= words
                             .split('|')
@@ -1686,7 +1690,7 @@ pub(crate) mod tests {
                 }
             }
             output.drop_without_applying_deltas();
-            (found, selected)
+            (found, selected, bar, tall)
         };
         let mut before = None;
         for _ in 0..200 {
@@ -1745,7 +1749,7 @@ pub(crate) mod tests {
         let mut after = None;
         let mut selected = false;
         for _ in 0..5 {
-            let (found, any) = step(&mut runtime, Vec::new());
+            let (found, any, _, _) = step(&mut runtime, Vec::new());
             after = found.or(after);
             selected |= any;
         }
@@ -1779,6 +1783,7 @@ pub(crate) mod tests {
                 egui::Event::PointerMoved(to),
             ],
         );
+        // A phone's lift takes the pointer away too.
         step(
             &mut runtime,
             vec![
@@ -1789,10 +1794,74 @@ pub(crate) mod tests {
                     pressed: false,
                     modifiers: egui::Modifiers::NONE,
                 },
+                egui::Event::PointerGone,
             ],
         );
-        let (_, selected) = step(&mut runtime, Vec::new());
+        let (_, selected, _, _) = step(&mut runtime, Vec::new());
         assert!(selected, "a long press and a drag select");
+        // The bar over the selection: Cut, Copy, Paste, Select All.
+        let (_, _, bar, tall) = step(&mut runtime, Vec::new());
+        assert!(bar, "the Copy bar shows over the selection");
+        // Two fingers spread apart zoom the page in.
+        let finger = |id, phase, pos| egui::Event::Touch {
+            device_id: egui::TouchDeviceId(1),
+            id: egui::TouchId(id),
+            phase,
+            pos,
+            force: None,
+        };
+        let (mut a, mut b) = (Pos2::new(160.0, 400.0), Pos2::new(260.0, 400.0));
+        step(
+            &mut runtime,
+            vec![
+                finger(1, egui::TouchPhase::Start, a),
+                egui::Event::PointerMoved(a),
+                egui::Event::PointerButton {
+                    pos: a,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                finger(2, egui::TouchPhase::Start, b),
+            ],
+        );
+        for _ in 0..15 {
+            a.x -= 5.0;
+            b.x += 5.0;
+            step(
+                &mut runtime,
+                vec![
+                    finger(1, egui::TouchPhase::Move, a),
+                    egui::Event::PointerMoved(a),
+                    finger(2, egui::TouchPhase::Move, b),
+                ],
+            );
+        }
+        step(
+            &mut runtime,
+            vec![
+                finger(1, egui::TouchPhase::End, a),
+                finger(2, egui::TouchPhase::End, b),
+                egui::Event::PointerButton {
+                    pos: a,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerGone,
+            ],
+        );
+        let mut zoomed = 0.0;
+        for _ in 0..3 {
+            let (_, _, _, now) = step(&mut runtime, Vec::new());
+            if now > 0.0 {
+                zoomed = now;
+            }
+        }
+        assert!(
+            zoomed > tall * 1.5,
+            "a pinch zooms the page in: its tallest text was {tall}, then {zoomed}"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

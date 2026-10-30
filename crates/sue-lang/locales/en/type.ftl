@@ -78,3 +78,10 @@ delete = Delete
 no-suggestions = No suggestions
 ignore-all = Ignore All
 add-to-dictionary = Add to Dictionary
+
+## editor.rs: the bar over a finger selection
+
+cut = Cut
+copy = Copy
+paste = Paste
+select-all = Select All

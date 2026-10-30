@@ -20,6 +20,9 @@ use crate::studio::{Dialog, Figure, Furniture, ID, Settings, SueWriter, View};
 use crate::templates::{Group, Template};
 
 const TOOLBAR_HEIGHT: f32 = 36.0;
+/// What a tool button senses: clicks, but never the keyboard's focus,
+/// which stays with the text.
+const TOOL: Sense = Sense::CLICK.union(Sense::HOVER);
 const STATUS_HEIGHT: f32 = 24.0;
 const FIND_HEIGHT: f32 = 34.0;
 /// A thumb-sized button on a phone.
@@ -228,6 +231,17 @@ impl SueWriter {
         if let Some(command) = picked {
             self.run_typing(&command, cx);
         }
+        // A tablet's top bar has room past the menus for quick tools.
+        if cx.view.form_factor == sue_platform::FormFactor::Tablet {
+            let tools = Rect::from_min_max(
+                pos2(rect.left() + rect.width() * 0.55, rect.top()),
+                rect.max,
+            );
+            self.tablet_tools(ui, tools, cx, &theme);
+            if let Some(command) = self.pending_command.take() {
+                self.run_typing(&command, cx);
+            }
+        }
     }
 
     /// Runs `command`, and gives the keyboard back to the text after one
@@ -312,6 +326,7 @@ impl SueWriter {
                 run = Some("edit.find".to_owned());
             }
         }
+        let mut right = 1;
         if self.project.is_some()
             && !self.simple(cx)
             && thumb(ui, slot(1, true), self.phone_binder, true, theme, book_icon)
@@ -320,7 +335,84 @@ impl SueWriter {
         {
             run = Some("view.binder".to_owned());
         }
+        if self.project.is_some() && !self.simple(cx) {
+            right += 1;
+        }
+        // The room between: pages or flowing text, a picture, the
+        // comments and a PDF, as many as fit.
+        if self.project.is_some() {
+            let room = slot(2, false).right() + 4.0;
+            for (tool, hint) in self.quick_tools() {
+                let place = slot(right, true);
+                if place.left() < room {
+                    break;
+                }
+                right += 1;
+                if thumb(ui, place, tool.on(self), true, theme, |p, r, c| {
+                    tool.draw(p, r, c)
+                })
+                .on_hover_text(hint)
+                .clicked()
+                {
+                    run = Some(tool.command(self).to_owned());
+                }
+            }
+        }
         run
+    }
+
+    /// The tools a phone's or a tablet's top bar adds in its spare room,
+    /// most wanted first.
+    fn quick_tools(&self) -> Vec<(QuickTool, String)> {
+        vec![
+            (
+                QuickTool::Pages,
+                if self.pages_shown() {
+                    tr!("quick-draft-view")
+                } else {
+                    tr!("quick-page-view")
+                },
+            ),
+            (QuickTool::Picture, tr!("quick-picture")),
+            (QuickTool::Comments, tr!("comments")),
+            (QuickTool::Pdf, tr!("quick-export-pdf")),
+            (QuickTool::Table, tr!("quick-table")),
+        ]
+    }
+
+    /// A tablet's quick tools at the right of the menus: Find, then the
+    /// phone's.
+    fn tablet_tools(&mut self, ui: &mut Ui, rect: Rect, cx: &AppletContext<'_>, theme: &Theme) {
+        if self.project.is_none() {
+            return;
+        }
+        let size = rect.height().min(THUMB) - 4.0;
+        let mut x = rect.right() - 4.0;
+        let mut run = None;
+        let mut tools: Vec<(QuickTool, String)> = vec![(QuickTool::Find, tr!("find"))];
+        tools.extend(self.quick_tools());
+        for (tool, hint) in tools {
+            let place = Rect::from_min_size(
+                pos2(x - size, rect.center().y - size / 2.0),
+                vec2(size, size),
+            );
+            if place.left() < rect.left() {
+                break;
+            }
+            x -= size + 2.0;
+            if thumb(ui, place, tool.on(self), true, theme, |p, r, c| {
+                tool.draw(p, r, c)
+            })
+            .on_hover_text(hint)
+            .clicked()
+            {
+                run = Some(tool.command(self).to_owned());
+            }
+        }
+        let _ = cx;
+        if let Some(command) = run {
+            self.pending_command = Some(command);
+        }
     }
 
     /// Where everything goes in `full`: the bars, the binder and inspector
@@ -572,8 +664,13 @@ impl SueWriter {
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         row.set_clip_rect(rect.intersect(ui.clip_rect()));
+        // A finger slides the row sideways, over its buttons too.
         egui::ScrollArea::horizontal()
             .id_salt("writer-phone-toolbar")
+            .scroll_source(egui::scroll_area::ScrollSource {
+                drag: egui::scroll_area::DragScroll::Always,
+                ..egui::scroll_area::ScrollSource::default()
+            })
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .show(&mut row, |ui| {
                 ui.horizontal_centered(|ui| {
@@ -779,6 +876,40 @@ impl SueWriter {
                 widgets::pill_divider(ui, theme);
                 self.font_controls(ui, cx, theme, &para, &chars);
                 self.color_controls(ui, cx, theme, &chars, run);
+                // Then what the menus hold that a phone reaches for: more
+                // formatting, and what goes into the text.
+                widgets::pill_divider(ui, theme);
+                let strike = RichText::new("S").strikethrough();
+                if ui
+                    .add_sized(
+                        vec2(size, size),
+                        egui::Button::new(strike).selected(chars.strike).sense(TOOL),
+                    )
+                    .on_hover_text(tr!("strikethrough"))
+                    .clicked()
+                {
+                    *run = Some("format.strike".to_owned());
+                }
+                for (label, command) in [
+                    (tr!("quick-clear"), "format.clear"),
+                    (tr!("quick-link"), "insert.link"),
+                    (tr!("quick-picture"), "insert.picture"),
+                    (tr!("quick-table"), "table.insert"),
+                    (tr!("quick-footnote"), "insert.footnote"),
+                    (tr!("quick-comment"), "review.comment"),
+                    (tr!("quick-page-break"), "insert.page_break"),
+                ] {
+                    if ui
+                        .add(
+                            egui::Button::new(label)
+                                .min_size(vec2(size, size))
+                                .sense(TOOL),
+                        )
+                        .clicked()
+                    {
+                        *run = Some(command.to_owned());
+                    }
+                }
             }
         });
     }
@@ -3583,7 +3714,9 @@ fn icon(
     theme: &Theme,
     draw: impl FnOnce(&Painter, Rect, Color32),
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::click());
+    // Not focusable, so the text keeps the keyboard (on a phone, a tap on
+    // Bold leaves the on-screen keyboard up).
+    let (rect, response) = ui.allocate_exact_size(vec2(size, size), TOOL);
     paint_button(ui, rect, &response, on, ui.is_enabled(), theme, draw);
     response
 }
@@ -3597,11 +3730,7 @@ fn thumb(
     theme: &Theme,
     draw: impl FnOnce(&Painter, Rect, Color32),
 ) -> egui::Response {
-    let sense = if enabled {
-        Sense::click()
-    } else {
-        Sense::hover()
-    };
+    let sense = if enabled { TOOL } else { Sense::hover() };
     let id = ui
         .scope_id()
         .with(("writer-thumb", rect.min.x as i32, rect.min.y as i32));
@@ -3759,6 +3888,126 @@ fn indent_icon(painter: &Painter, rect: Rect, color: Color32, more: bool) {
         color,
         Stroke::NONE,
     ));
+}
+
+/// A tool in a phone's or a tablet's top bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum QuickTool {
+    Find,
+    Pages,
+    Picture,
+    Comments,
+    Pdf,
+    Table,
+}
+
+impl QuickTool {
+    fn command(self, writer: &SueWriter) -> &'static str {
+        match self {
+            Self::Find => "edit.find",
+            Self::Pages if writer.pages_shown() => "view.draft",
+            Self::Pages => "view.page",
+            Self::Picture => "insert.picture",
+            Self::Comments => "review.comments",
+            Self::Pdf => "compile.pdf",
+            Self::Table => "table.insert",
+        }
+    }
+
+    fn on(self, writer: &SueWriter) -> bool {
+        match self {
+            Self::Find => writer.find.is_some(),
+            Self::Pages => writer.pages_shown(),
+            Self::Comments => writer.comments,
+            _ => false,
+        }
+    }
+
+    fn draw(self, painter: &Painter, rect: Rect, color: Color32) {
+        match self {
+            Self::Find => find_icon(painter, rect, color),
+            Self::Pages => page_icon(painter, rect, color, false),
+            Self::Picture => picture_icon(painter, rect, color),
+            Self::Comments => comment_icon(painter, rect, color),
+            Self::Pdf => export_icon(painter, rect, color),
+            Self::Table => table_icon(painter, rect, color),
+        }
+    }
+}
+
+/// A speech bubble: the comments.
+fn comment_icon(painter: &Painter, rect: Rect, color: Color32) {
+    let bubble = Rect::from_min_max(
+        rect.min,
+        pos2(rect.right(), rect.bottom() - rect.height() * 0.25),
+    );
+    painter.rect_stroke(
+        bubble.shrink(0.5),
+        2.0,
+        Stroke::new(1.2, color),
+        StrokeKind::Inside,
+    );
+    let foot = bubble.left() + bubble.width() * 0.3;
+    painter.line_segment(
+        [pos2(foot, bubble.bottom()), pos2(foot - 1.0, rect.bottom())],
+        Stroke::new(1.2, color),
+    );
+    painter.line_segment(
+        [
+            pos2(foot - 1.0, rect.bottom()),
+            pos2(foot + rect.width() * 0.25, bubble.bottom()),
+        ],
+        Stroke::new(1.2, color),
+    );
+}
+
+/// A page with an arrow out of it: save as PDF.
+fn export_icon(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.2, color);
+    let tray = rect.shrink2(vec2(1.0, 0.5));
+    let mid = tray.center().x;
+    painter.line_segment(
+        [
+            pos2(tray.left(), tray.center().y),
+            pos2(tray.left(), tray.bottom()),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            pos2(tray.left(), tray.bottom()),
+            pos2(tray.right(), tray.bottom()),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            pos2(tray.right(), tray.bottom()),
+            pos2(tray.right(), tray.center().y),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [pos2(mid, tray.bottom() - 3.0), pos2(mid, tray.top())],
+        stroke,
+    );
+    painter.line_segment(
+        [pos2(mid - 3.0, tray.top() + 3.0), pos2(mid, tray.top())],
+        stroke,
+    );
+    painter.line_segment(
+        [pos2(mid + 3.0, tray.top() + 3.0), pos2(mid, tray.top())],
+        stroke,
+    );
+}
+
+/// A grid: a table.
+fn table_icon(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.2, color);
+    let grid = rect.shrink(1.0);
+    painter.rect_stroke(grid, 1.0, stroke, StrokeKind::Inside);
+    painter.hline(grid.x_range(), grid.center().y, stroke);
+    painter.vline(grid.center().x, grid.y_range(), stroke);
 }
 
 fn page_icon(painter: &Painter, rect: Rect, color: Color32, empty: bool) {

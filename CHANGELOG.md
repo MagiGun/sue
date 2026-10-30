@@ -23,6 +23,14 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Writer opens PDF files (their text, paragraphs and headings) and
   Word and LibreOffice templates (`.dotx`, `.ott`).
 - Pages on their side: Sue Writer's Project Settings, Orientation.
+- Selecting text with a finger in Sue Writer works as on phones: two
+  handles to drag, and a bar with Cut, Copy, Paste and Select All. On
+  Android, Copy and Paste use the system clipboard, so text moves to and
+  from other apps.
+- More of Sue Writer on phones and tablets: the formatting row slides
+  sideways to more tools (strikethrough, Clear, Link, Picture, Table,
+  Footnote, Comment, Page Break), and the top bar holds Page View,
+  Picture, Comments, Save as PDF and, on tablets, Find and Table.
 - Sue keeps itself up to date. When it starts it looks for a newer
   release, at most once a day, and a small window in the corner shows
   what is new; **Check for Updates** is in the Sue menu and in Settings,
@@ -57,9 +65,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Sue Writer on a phone shows the whole page across the screen, upright
   or turned, instead of a strip of text; tablets fit the whole page too.
-- Dragging a finger on Sue Writer's page scrolls it instead of
-  selecting text. Tap to place the caret, double tap for a word, and
-  press and hold, then drag, to select.
+- Dragging a finger on Sue Writer's page scrolls it, exactly as far as
+  the finger moves, instead of selecting text; pinching zooms. Tap to
+  place the caret, double tap for a word, and press and hold to select.
+- The on-screen keyboard no longer closes and reopens when you tap the
+  text or the toolbar in Sue Writer.
 - The paragraph style box on a phone's toolbar holds its name and arrow
   again (some boxes near the shape of a slider handle were drawn too
   narrow).

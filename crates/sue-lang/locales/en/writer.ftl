@@ -560,3 +560,16 @@ action-items = Action Items
 orientation = Orientation
 portrait = Portrait
 landscape = Landscape
+
+## ui.rs: the quick tools on phones and tablets
+
+quick-clear = Clear
+quick-link = Link
+quick-picture = Picture
+quick-table = Table
+quick-footnote = Footnote
+quick-comment = Comment
+quick-page-break = Page Break
+quick-page-view = Page View
+quick-draft-view = Draft View
+quick-export-pdf = Save as PDF

@@ -29,6 +29,30 @@ use crate::style::{CharFormat, ParagraphLook, StyleSheet, char_format, paragraph
 pub use crate::tables::TableEdit;
 use crate::tables::{CellCaret, TableSource, paint_table};
 
+/// Gives `id` the keyboard unless it has it: egui's `request_focus` also
+/// interrupts the input method, which on Android hides the on-screen
+/// keyboard and shows it again, so asking again on every tap made it
+/// flicker.
+fn take_focus(ctx: &egui::Context, id: Id) {
+    if !ctx.memory(|memory| memory.has_focus(id)) {
+        ctx.memory_mut(|memory| memory.request_focus(id));
+    }
+}
+
+/// The radius of a finger selection's handle knob.
+const HANDLE: f32 = 9.0;
+/// The color of the handles, the selection's own blue.
+const HANDLE_COLOR: Color32 = Color32::from_rgb(0x3a, 0x7b, 0xd5);
+
+/// What the bar over a finger's selection does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TouchAction {
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
+}
+
 /// A place in the shown documents: which one, and a byte offset in it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Caret {
@@ -147,8 +171,26 @@ pub struct Editor {
     /// every phone's word processor), a tap places the caret, and a long
     /// press selects a word for the drag to grow.
     touch: bool,
-    /// A long press began a selection that the finger now drags.
+    /// A long press, or a selection handle, began a selection that the
+    /// finger now drags.
     touch_select: bool,
+    /// How far the finger is from the selection end it drags (a handle
+    /// is held below its line, which must not hide under the finger).
+    grab: Vec2,
+    /// Where a long press selected its word: the selection keeps the
+    /// whole word until the finger moves away from there.
+    pressed_at: Option<Pos2>,
+    /// The Cut, Copy, Paste and Select All bar over a finger's selection.
+    bar: bool,
+    /// The bar was drawn last frame (egui sizes a new area unseen first,
+    /// so its first frame asks for another).
+    bar_shown: bool,
+    /// Where the bar was drawn last frame.
+    bar_rect: Rect,
+    /// The finger now down landed on the bar.
+    bar_press: bool,
+    /// Two fingers pinched, and have not both lifted yet.
+    pinched: bool,
     /// A finger down on the page, scrolling it as it moves: where it
     /// was last frame, and its recent moves (when, how far) for a flick.
     finger: Option<(Pos2, Vec<(f64, Vec2)>)>,
@@ -216,6 +258,13 @@ impl Editor {
             clicks: (f64::NEG_INFINITY, Pos2::ZERO, 0),
             touch: false,
             touch_select: false,
+            grab: Vec2::ZERO,
+            pressed_at: None,
+            bar: false,
+            bar_shown: false,
+            bar_rect: Rect::NOTHING,
+            bar_press: false,
+            pinched: false,
             finger: None,
             docs: Vec::new(),
             texts: Vec::new(),
@@ -993,7 +1042,7 @@ impl Editor {
             ..EditorOutput::default()
         };
         if self.want_focus {
-            ctx.memory_mut(|memory| memory.request_focus(self.id));
+            take_focus(&ctx, self.id);
             self.want_focus = false;
         }
         // A finger's drag is the editor's to read (a scroll, or a
@@ -1627,18 +1676,47 @@ impl Editor {
         } else {
             Sense::click_and_drag()
         };
+        // A press on the bar over a finger's selection is not a press
+        // elsewhere: the editor keeps the keyboard through it.
+        // (egui gives the focus up on the click, as the finger lifts, and a
+        // phone's lift has no position: the press says where it was.)
+        let (landed, lifted, at) = ui.input(|input| {
+            (
+                input.pointer.any_pressed(),
+                input.pointer.any_released(),
+                input.pointer.latest_pos(),
+            )
+        });
+        if landed {
+            self.bar_press = self.bar_shown && at.is_some_and(|at| self.bar_rect.contains(at));
+        }
+        let on_bar = self.bar_press && (landed || lifted);
+        if lifted && !landed {
+            self.bar_press = false;
+        }
+        let surrender = ui
+            .ctx()
+            .options(|options| options.input_options.surrender_focus_on);
+        if on_bar {
+            ui.ctx().options_mut(|options| {
+                options.input_options.surrender_focus_on = egui::SurrenderFocusOn::Never;
+            });
+        }
         let response = ui.interact(rect, self.id, sense);
+        if on_bar {
+            ui.ctx()
+                .options_mut(|options| options.input_options.surrender_focus_on = surrender);
+        }
         let ctx = ui.ctx().clone();
         if std::mem::take(&mut self.hold) && self.had_focus {
-            ctx.memory_mut(|memory| memory.request_focus(self.id));
+            take_focus(&ctx, self.id);
         }
 
-        // Ctrl and the wheel zoom.
-        if response.hovered() {
-            let zoom = ui.input(|input| input.zoom_delta());
-            if (zoom - 1.0).abs() > 1e-3 {
-                output.zoom = Some(zoom);
-            }
+        // Ctrl and the wheel zoom, and so do two fingers pinching.
+        let (zoom, pinching) =
+            ui.input(|input| (input.zoom_delta(), input.multi_touch().is_some()));
+        if (response.hovered() || pinching) && (zoom - 1.0).abs() > 1e-3 {
+            output.zoom = Some(zoom);
         }
         self.pointer(ui, &response, output);
         if let Some(mut left) = self.left_cell.take() {
@@ -1685,6 +1763,12 @@ impl Editor {
         }
         let caret = self.caret_look(ui, view, focused, response.dragged());
         self.paint(ui, view, focused, caret);
+        self.paint_handles(ui);
+        if !view.read_only && self.touch_bar(ui, cx) {
+            output.changed = true;
+            let docs = self.docs.clone();
+            self.prepare(&ctx, cx, &docs, view);
+        }
         if let Some(target) = self.scroll_target.take() {
             self.caret = self.clamp(target);
             self.follow = true;
@@ -2004,6 +2088,189 @@ impl Editor {
 
     // ----- Input -------------------------------------------------------------------
 
+    /// A finger selection's handles, as phones draw them: for its start
+    /// and its end, the caret's line and the knob's center below it.
+    fn handle_places(&self) -> Option<[(Rect, Pos2); 2]> {
+        if !self.touch || self.cell.is_some() {
+            return None;
+        }
+        let range = self.selection();
+        if range.is_empty() {
+            return None;
+        }
+        let doc = self.caret.doc;
+        // The start's knob leans left and the end's right, as Android's
+        // teardrops do, so the two stay apart on a short word.
+        let place = |offset, lean: f32| {
+            self.caret_rect(Caret { doc, offset }).map(|line| {
+                (
+                    line,
+                    pos2(line.left() + lean * HANDLE, line.bottom() + HANDLE),
+                )
+            })
+        };
+        Some([place(range.start, -1.0)?, place(range.end, 1.0)?])
+    }
+
+    /// A finger pressed on a selection handle takes that end of the
+    /// selection to drag (the other end stays). `true` when it did.
+    fn grab_handle(&mut self, ui: &Ui) -> bool {
+        let (pressed, at) =
+            ui.input(|input| (input.pointer.any_pressed(), input.pointer.latest_pos()));
+        let (true, Some(at), Some(places)) = (pressed, at, self.handle_places()) else {
+            return false;
+        };
+        let Some(index) = places.iter().position(|(line, knob)| {
+            knob.distance(at) < HANDLE * 2.6 || line.expand2(vec2(10.0, 4.0)).contains(at)
+        }) else {
+            return false;
+        };
+        let range = self.selection();
+        let doc = self.caret.doc;
+        let (fixed, moving) = if index == 0 {
+            (range.end, range.start)
+        } else {
+            (range.start, range.end)
+        };
+        self.anchor = Caret { doc, offset: fixed };
+        self.caret = Caret {
+            doc,
+            offset: moving,
+        };
+        self.grab = at - places[index].0.center();
+        self.pressed_at = None;
+        self.touch_select = true;
+        self.finger = None;
+        true
+    }
+
+    /// Draws a finger selection's handles: a line through each end and a
+    /// round knob below it to hold.
+    fn paint_handles(&self, ui: &Ui) {
+        let Some(places) = self.handle_places() else {
+            return;
+        };
+        let painter = ui.painter();
+        for (line, knob) in places {
+            let base = pos2(line.left(), line.bottom());
+            painter.line_segment([line.left_top(), base], Stroke::new(2.0, HANDLE_COLOR));
+            // A round knob with a square corner pointing at the line: a
+            // teardrop.
+            painter.rect_filled(Rect::from_two_pos(base, knob), 0.0, HANDLE_COLOR);
+            painter.circle_filled(knob, HANDLE, HANDLE_COLOR);
+        }
+    }
+
+    /// The bar phones show over a finger's selection: Cut, Copy, Paste and
+    /// Select All, above the selection (or below it at the top of the
+    /// view). Hidden while the page scrolls or a handle moves. `true` when
+    /// the text changed.
+    fn touch_bar(&mut self, ui: &Ui, cx: &mut AppletContext<'_>) -> bool {
+        let shown = std::mem::take(&mut self.bar_shown);
+        if !self.touch
+            || !self.bar
+            || self.touch_select
+            || self.finger.is_some()
+            || self.cell.is_some()
+        {
+            return false;
+        }
+        let range = self.selection();
+        let doc = self.caret.doc;
+        let (Some(first), Some(last)) = (
+            self.caret_rect(Caret {
+                doc,
+                offset: range.start,
+            }),
+            self.caret_rect(Caret {
+                doc,
+                offset: range.end,
+            }),
+        ) else {
+            return false;
+        };
+        let view = self.viewport;
+        if last.bottom() < view.top() || first.top() > view.bottom() {
+            return false;
+        }
+        let height = 44.0;
+        let mut y = first.top() - height - 12.0;
+        if y < view.top() + 4.0 {
+            y = last.bottom() + HANDLE * 2.0 + 12.0;
+        }
+        let x = (first.left() - 24.0).clamp(
+            view.left() + 8.0,
+            (view.right() - 300.0).max(view.left() + 8.0),
+        );
+        let selected = !range.is_empty();
+        let mut chosen = None;
+        self.bar_shown = true;
+        if !shown {
+            ui.ctx().request_repaint();
+        }
+        self.bar_rect = egui::Area::new(self.id.with("touch-bar"))
+            .order(egui::Order::Foreground)
+            .movable(false)
+            .fixed_pos(pos2(x, y))
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().button_padding = vec2(10.0, 8.0);
+                        let actions = [
+                            (selected, TouchAction::Cut, tr!("cut")),
+                            (selected, TouchAction::Copy, tr!("copy")),
+                            (true, TouchAction::Paste, tr!("paste")),
+                            (true, TouchAction::SelectAll, tr!("select-all")),
+                        ];
+                        for (shown, action, label) in actions {
+                            // Not focusable: the text keeps the keyboard.
+                            let button = egui::Button::new(label)
+                                .frame(false)
+                                .sense(Sense::CLICK | Sense::HOVER);
+                            if shown && ui.add(button).clicked() {
+                                chosen = Some(action);
+                            }
+                        }
+                    });
+                });
+            })
+            .response
+            .rect;
+        let Some(action) = chosen else {
+            return false;
+        };
+        match action {
+            TouchAction::Cut => {
+                self.copy(ui);
+                self.bar = false;
+                self.replace_selection(cx, "", None)
+            }
+            TouchAction::Copy => {
+                self.copy(ui);
+                self.bar = false;
+                false
+            }
+            TouchAction::Paste => {
+                self.bar = false;
+                let text = sue_platform::paste_text().or_else(|| {
+                    clipboard()
+                        .lock()
+                        .ok()
+                        .and_then(|clip| clip.as_ref().map(|(text, _)| text.clone()))
+                });
+                text.is_some_and(|text| self.paste(cx, &text))
+            }
+            TouchAction::SelectAll => {
+                self.anchor = Caret { doc, offset: 0 };
+                self.caret = Caret {
+                    doc,
+                    offset: self.last_offset(doc),
+                };
+                false
+            }
+        }
+    }
+
     /// A finger on a touch screen moves the page with it, point for point
     /// and at once (egui's eased scrolling would lag it and lose some of
     /// the way), and a flick sends the page on as far as the finger's
@@ -2060,6 +2327,42 @@ impl Editor {
     }
 
     fn pointer(&mut self, ui: &Ui, response: &egui::Response, output: &mut EditorOutput) {
+        // Two fingers zoom (above); neither scrolls, selects nor taps
+        // until both have lifted.
+        if ui.input(|input| input.multi_touch().is_some()) {
+            self.pinched = true;
+            self.finger = None;
+            self.touch_select = false;
+            return;
+        }
+        if self.pinched {
+            if !ui.input(|input| input.pointer.any_down()) {
+                self.pinched = false;
+            }
+            return;
+        }
+        // A finger acts when it lifts, but egui lets go of the keyboard
+        // as it lands: with the keyboard already up, keep it, so a tap or
+        // a scroll never closes and reopens it.
+        if self.touch
+            && self.had_focus
+            && response.hovered()
+            && ui.input(|input| input.pointer.any_pressed())
+        {
+            take_focus(ui.ctx(), self.id);
+        }
+        // A lifted finger ends its selection even when the lift took the
+        // pointer away with it (a phone reports no position after a lift).
+        if self.touch_select && !ui.input(|input| input.pointer.any_down()) {
+            self.touch_select = false;
+            self.grab = Vec2::ZERO;
+            self.bar = true;
+            ui.ctx().request_repaint();
+            return;
+        }
+        if self.touch && !self.touch_select && self.grab_handle(ui) {
+            return;
+        }
         if self.touch && !self.touch_select {
             self.finger_scroll(ui, response);
         }
@@ -2075,19 +2378,20 @@ impl Editor {
         let (pressed, modifiers, time) =
             ui.input(|input| (input.pointer.primary_pressed(), input.modifiers, input.time));
         if self.touch {
-            let down = ui.input(|input| input.pointer.any_down());
             if self.touch_select {
-                // The finger moves the selection's end; lifting it ends
-                // the selection (it is no tap).
-                if down {
-                    let mut caret = self.hit(pos);
-                    if caret.doc != self.anchor.doc {
-                        caret = self.anchor;
+                // The finger, still down (its lift is handled above),
+                // moves the selection's end once it moves away.
+                if let Some(at) = self.pressed_at {
+                    if at.distance(pos) < 10.0 {
+                        return;
                     }
-                    self.caret = self.clamp(caret);
-                } else {
-                    self.touch_select = false;
+                    self.pressed_at = None;
                 }
+                let mut caret = self.hit(pos - self.grab);
+                if caret.doc != self.anchor.doc {
+                    caret = self.anchor;
+                }
+                self.caret = self.clamp(caret);
                 return;
             }
             if response.long_touched() {
@@ -2096,6 +2400,9 @@ impl Editor {
                 // so the page does not move under the finger.
                 self.cell = None;
                 self.finger = None;
+                self.grab = Vec2::ZERO;
+                self.pressed_at = Some(pos);
+                self.bar = true;
                 let caret = self.hit(pos);
                 let text = self.doc_text(caret.doc);
                 let (start, end) = word_around(text, caret.offset);
@@ -2122,7 +2429,8 @@ impl Editor {
             pressed && response.is_pointer_button_down_on()
         };
         if pressed {
-            ui.ctx().memory_mut(|memory| memory.request_focus(self.id));
+            self.bar = false;
+            take_focus(ui.ctx(), self.id);
             let (last, at, count) = self.clicks;
             let count = if time - last < 0.45 && at.distance(pos) < 6.0 {
                 count % 3 + 1

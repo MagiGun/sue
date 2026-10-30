@@ -801,9 +801,16 @@ plain text. `Ctrl+P` goes straight to PDF.
 **Sue Writer on a phone** shows the whole page across the screen, upright or
 turned on its side, and pinching zooms in and out (View, Draft View flows
 the text to the width of the screen at a size you can read instead, on
-paper that fills the screen). Drag a finger to scroll; tap to put the
-caret there, double tap to select a word, or press and hold on a word and
-drag to select more. The top bar has the Sue button, a menu button with every
+paper that fills the screen). Drag a finger to scroll, and pinch with two to zoom. Tap
+to put the caret there, double tap to select a word, or press and hold on a
+word: it is selected between two handles you can drag, under a bar with Cut,
+Copy, Paste and Select All (Copy and Paste use your phone's clipboard, so
+text moves to and from other apps). The keyboard stays up while you tap
+around the text or the toolbar. The top bar also holds Page View, Insert
+Picture, Comments and Save as PDF when there is room, and the formatting row
+at the bottom slides sideways to strikethrough, Clear, Link, Picture, Table,
+Footnote, Comment and Page Break. A tablet's top bar has Find, Page View,
+Picture, Comments, Save as PDF and Table beside the menus. The top bar has the Sue button, a menu button with every
 menu, Undo, Redo, the binder and Find. The formatting is a row of big
 buttons at the bottom (style, bold, italic, underline, alignment, lists,
 indents, font, size and colors; swipe it sideways for the rest), so it sits

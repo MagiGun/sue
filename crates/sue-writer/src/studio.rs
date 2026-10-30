@@ -227,6 +227,8 @@ pub struct SueWriter {
     pub(crate) top_bar: Option<Rect>,
     /// The templates new documents start from (Sue's and people's own).
     pub(crate) templates: Templates,
+    /// A command a top bar tool chose this frame, run once it is drawn.
+    pub(crate) pending_command: Option<String>,
 }
 
 impl Default for SueWriter {
@@ -276,6 +278,7 @@ impl Default for SueWriter {
             bars: Vec::new(),
             top_bar: None,
             templates: Templates::load(),
+            pending_command: None,
         }
     }
 }
