@@ -816,6 +816,11 @@ impl SuePaint {
 
     // ----- Tool strip -------------------------------------------------------------
 
+    /// Clip Studio Paint's tool palette: its tools in its order (with
+    /// Frame border and Balloon as Comic, and Hand, Zoom and Move layer as
+    /// Move; clicking one again goes to the next), then the main and sub
+    /// colors as overlapping circles with their swap, and the transparent
+    /// color.
     pub(crate) fn tool_strip(
         &mut self,
         ui: &mut Ui,
@@ -827,39 +832,152 @@ impl SuePaint {
         ui.painter().rect_filled(strip, 0.0, theme.panel);
         ui.painter()
             .vline(strip.right(), strip.y_range(), theme.hairline());
-        let mut y = strip.top() + 6.0;
+        // (icon, name, tools; none for Downloads), and None between groups.
+        let entries: [Option<(Icon, String, &[Tool])>; 23] = [
+            Some((Icon::Import, tr!("downloads"), &[])),
+            Some((Icon::Pen, tr!("pen"), &[Tool::Pen])),
+            Some((Icon::Pencil, tr!("sketch"), &[Tool::Pencil])),
+            Some((Icon::Brush, tr!("brush"), &[Tool::Brush])),
+            Some((Icon::Eraser, tr!("eraser"), &[Tool::Eraser])),
+            Some((Icon::Airbrush, tr!("airbrush"), &[Tool::Airbrush])),
+            Some((Icon::Decoration, tr!("decoration"), &[Tool::Decoration])),
+            Some((Icon::Blend, tr!("blend"), &[Tool::Blend])),
+            Some((Icon::Replace, tr!("liquify"), &[Tool::Blend])),
+            None,
+            Some((Icon::Select, tr!("selection-area"), &[Tool::Select])),
+            Some((Icon::AutoSelect, tr!("auto-select"), &[Tool::AutoSelect])),
+            Some((Icon::Fill, tr!("fill"), &[Tool::Fill])),
+            Some((Icon::Gradient, tr!("gradient"), &[Tool::Gradient])),
+            None,
+            Some((Icon::Operation, tr!("operation"), &[Tool::Operation])),
+            Some((Icon::Figure, tr!("figure"), &[Tool::Figure])),
+            Some((Icon::Text, tr!("text"), &[Tool::Text])),
+            Some((Icon::Frame, tr!("comic"), &[Tool::Frame, Tool::Balloon])),
+            Some((Icon::Ruler, tr!("ruler"), &[Tool::Ruler])),
+            Some((Icon::CorrectLine, tr!("correct-line"), &[Tool::CorrectLine])),
+            Some((
+                Icon::Hand,
+                tr!("move"),
+                &[Tool::Hand, Tool::Zoom, Tool::MoveLayer],
+            )),
+            Some((Icon::Eyedropper, tr!("eyedropper"), &[Tool::Eyedropper])),
+        ];
         let current = self.toolbox.tool();
-        // As roomy as the strip allows, every tool always in it.
-        let room = strip.height() - 6.0 - 70.0;
-        let step = (room / Tool::ALL.len() as f32).clamp(24.0, 36.0);
-        for tool in Tool::ALL {
-            let rect = Rect::from_min_size(pos2(strip.left() + 4.0, y), vec2(38.0, step - 2.0));
-            y += step;
-            if y > strip.bottom() - 70.0 {
+        // Liquify is Blend's liquify sub tools; Blend the others.
+        let liquify = current == Tool::Blend && self.toolbox.picked(Tool::Blend) >= 2;
+        let room = strip.height() - 12.0 - 96.0;
+        let buttons = entries.iter().flatten().count() as f32;
+        let gaps = (entries.len() as f32 - buttons) * 8.0;
+        let step = ((room - gaps) / buttons).clamp(20.0, 34.0);
+        let mut y = strip.top() + 6.0;
+        for entry in &entries {
+            let Some((icon, name, tools)) = entry else {
+                ui.painter().hline(
+                    strip.shrink2(vec2(8.0, 0.0)).x_range(),
+                    y + 3.0,
+                    theme.hairline(),
+                );
+                y += 8.0;
+                continue;
+            };
+            if y + step > strip.bottom() - 96.0 {
                 break;
             }
-            let tip = match tool.key() {
-                Some(key) => format!("{} ({key})", tool.label()),
-                None => tool.label().to_owned(),
+            let rect = Rect::from_min_size(pos2(strip.left() + 4.0, y), vec2(38.0, step - 2.0));
+            y += step;
+            let is_liquify = *icon == Icon::Replace;
+            let active = match tools.first() {
+                Some(Tool::Blend) => liquify == is_liquify && current == Tool::Blend,
+                Some(_) => tools.contains(&current),
+                None => false,
             };
-            if icon_button(
-                ui,
-                rect,
-                tool_icon(tool),
-                tool.available(),
-                tool == current,
-                &tip,
-                theme,
-            ) {
-                self.toolbox.pick(tool);
+            let key = tools.first().and_then(|tool| tool.key());
+            let tip = match key {
+                Some(key) => format!("{name} ({key})"),
+                None => name.clone(),
+            };
+            if !icon_button(ui, rect, *icon, true, active, &tip, theme) {
+                continue;
+            }
+            match tools {
+                // Downloads (Clip Studio Paint's materials from its site):
+                // not in Sue Paint yet.
+                [] => {}
+                [Tool::Blend] => {
+                    self.toolbox.pick(Tool::Blend);
+                    let picked = self.toolbox.picked(Tool::Blend);
+                    if is_liquify && picked < 2 {
+                        self.toolbox.pick_sub(Tool::Blend, 2);
+                    } else if !is_liquify && picked >= 2 {
+                        self.toolbox.pick_sub(Tool::Blend, 0);
+                    }
+                }
+                // A group: the next of its tools when one is already out.
+                group => {
+                    let next = group
+                        .iter()
+                        .position(|tool| *tool == current)
+                        .map_or(group[0], |at| group[(at + 1) % group.len()]);
+                    self.toolbox.pick(next);
+                }
             }
         }
-        // Main and sub color chips.
-        let base = pos2(strip.left() + 6.0, strip.bottom() - 42.0);
-        let main = Rect::from_min_size(base, vec2(20.0, 20.0));
-        let sub = Rect::from_min_size(base + vec2(10.0, 12.0), vec2(20.0, 20.0));
-        self.color_chips(ui, main, sub, theme);
-        let swap = Rect::from_min_size(base + vec2(16.0, -20.0), vec2(16.0, 16.0));
+        // The main and sub colors as overlapping circles, the sub behind.
+        let (main_at, sub_at) = (
+            pos2(strip.left() + 17.0, strip.bottom() - 68.0),
+            pos2(strip.left() + 29.0, strip.bottom() - 56.0),
+        );
+        let radius = 12.0;
+        let disc = |ui: &mut Ui, at: Pos2, rgb: [u8; 3], chosen: bool, tip: &str| {
+            let rect = Rect::from_center_size(at, egui::Vec2::splat(radius * 2.0));
+            let response = ui.interact(
+                rect,
+                Id::unique(("sue-paint-strip-color", tip)),
+                Sense::click(),
+            );
+            let [r, g, b] = rgb;
+            ui.painter()
+                .circle_filled(at, radius, Color32::from_rgb(r, g, b));
+            ui.painter().circle_stroke(
+                at,
+                radius,
+                Stroke::new(
+                    if chosen { 2.0 } else { 1.0 },
+                    if chosen {
+                        theme.border_active
+                    } else {
+                        theme.border
+                    },
+                ),
+            );
+            response.on_hover_text(tip).clicked()
+        };
+        if disc(
+            ui,
+            sub_at,
+            self.sub,
+            self.sub_active && !self.transparent,
+            &tr!("sub-color"),
+        ) {
+            self.sub_active = true;
+            self.transparent = false;
+            self.hex = color::hex(self.sub);
+        }
+        if disc(
+            ui,
+            main_at,
+            self.main,
+            !self.sub_active && !self.transparent,
+            &tr!("main-color"),
+        ) {
+            self.sub_active = false;
+            self.transparent = false;
+            self.hex = color::hex(self.main);
+        }
+        let swap = Rect::from_min_size(
+            pos2(strip.left() + 30.0, main_at.y - 22.0),
+            vec2(14.0, 14.0),
+        );
         if icon_button(
             ui,
             swap,
@@ -871,6 +989,54 @@ impl SuePaint {
         ) {
             std::mem::swap(&mut self.main, &mut self.sub);
             self.hex = color::hex(self.drawing_color());
+        }
+        // The transparent color: a checker; brushes erase with it on.
+        let clear = Rect::from_min_size(
+            pos2(strip.left() + 7.0, strip.bottom() - 30.0),
+            vec2(32.0, 14.0),
+        );
+        let response = ui
+            .interact(
+                clear,
+                Id::unique("sue-paint-strip-transparent"),
+                Sense::click(),
+            )
+            .on_hover_text(tr!("transparent-color"));
+        let cell = 7.0;
+        for row in 0..2 {
+            for column in 0..5 {
+                let light = (row + column) % 2 == 0;
+                let square = Rect::from_min_size(
+                    clear.min + vec2(column as f32 * cell, row as f32 * cell),
+                    egui::Vec2::splat(cell),
+                )
+                .intersect(clear);
+                ui.painter().rect_filled(
+                    square,
+                    0.0,
+                    if light {
+                        Color32::from_gray(230)
+                    } else {
+                        Color32::from_gray(150)
+                    },
+                );
+            }
+        }
+        ui.painter().rect_stroke(
+            clear,
+            1.0,
+            Stroke::new(
+                if self.transparent { 2.0 } else { 1.0 },
+                if self.transparent {
+                    theme.border_active
+                } else {
+                    theme.border
+                },
+            ),
+            StrokeKind::Outside,
+        );
+        if response.clicked() {
+            self.transparent = !self.transparent;
         }
     }
 
@@ -972,9 +1138,9 @@ impl SuePaint {
     ) {
         let tool = self.toolbox.tool();
         let tabs = [
-            (tr!("sub-tool"), Icon::SubTool, self.panels.sub_tool),
+            (tr!("tool-group"), Icon::SubTool, self.panels.sub_tool),
             (
-                tr!("tool-property"),
+                tr!("tool-settings"),
                 Icon::Sliders,
                 self.panels.tool_property,
             ),
@@ -995,10 +1161,27 @@ impl SuePaint {
         }
         let mut inner = child(ui, body.shrink2(vec2(8.0, 6.0)), "tool-panel");
         if self.tool_tab == 0 {
-            inner.label(
-                RichText::new(tool.label())
-                    .color(theme.muted)
-                    .size(theme.small_size + 0.5),
+            let (group, _) = inner.allocate_exact_size(
+                vec2(inner.available_width().min(140.0), 22.0),
+                Sense::hover(),
+            );
+            inner.painter().rect_filled(
+                group,
+                theme.control_radius,
+                theme.selection.gamma_multiply(0.6),
+            );
+            icons::paint(
+                inner.painter(),
+                Rect::from_center_size(group.left_center() + vec2(12.0, 0.0), vec2(14.0, 14.0)),
+                crate::panels::tool_icon(tool),
+                theme.text,
+            );
+            inner.painter().text(
+                group.left_center() + vec2(24.0, 0.0),
+                Align2::LEFT_CENTER,
+                tool.label(),
+                theme.font(theme.small_size + 0.5),
+                theme.text,
             );
             let picked = self.toolbox.picked(tool);
             let names: Vec<String> = self
@@ -1109,6 +1292,19 @@ impl SuePaint {
                         }
                         None => {}
                     }
+                    // Clip Studio Paint's Add from downloads: sub tools from
+                    // CLIP STUDIO ASSETS, not in Sue Paint yet.
+                    ui.add_space(6.0);
+                    ui.vertical_centered(|ui| {
+                        let _ = ui.add(
+                            egui::Button::new(
+                                RichText::new(format!("+  {}", tr!("add-from-downloads")))
+                                    .size(theme.small_size + 0.5)
+                                    .color(theme.text),
+                            )
+                            .frame(false),
+                        );
+                    });
                 });
             return;
         }
@@ -1268,7 +1464,7 @@ impl SuePaint {
         }
         let pixels = cache.get(&key)?;
         cx.textures
-            .texture(0x5355_4253_5452_4b45, key, size, 4, pixels, false)
+            .texture(0x5355_4253_5452_4b45 ^ key, 1, size, 4, pixels, false)
     }
 
     /// A sample stroke with `tip` in white over nothing, `size` pixels.

@@ -4287,7 +4287,7 @@ f 2 3 4
     fn paint_tools_frame_speed() {
         use egui::Key::{B, E, P};
         for (name, keys) in [
-            ("G-Pen", &[][..]),
+            ("G-pen", &[][..]),
             ("Pencil", &[P][..]),
             ("Watercolor", &[B][..]),
             ("Airbrush", &[B, B][..]),

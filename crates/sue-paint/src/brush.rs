@@ -1113,6 +1113,25 @@ impl Stroke {
         selection: Option<&Selection>,
     ) {
         self.flush(raster, selection);
+        // A tap (the pen down and up in one place) leaves one dot as large
+        // as the brush, as Clip Studio Paint does, whatever the tapers say.
+        if let Some(first) = self.samples.first().copied()
+            && (self.samples.len() < 2 || self.travelled < 1.0)
+        {
+            self.total = Some(0.0);
+            for copy in self.copies.clone() {
+                let dot = Sample {
+                    at: copied(&copy, first.at),
+                    ..first
+                };
+                if self.tip.dabbed() {
+                    self.dab(raster, dot, 0.0, selection);
+                } else {
+                    self.capsule(raster, dot, dot, 0.0, 0.0, None, selection);
+                }
+            }
+            return;
+        }
         let finishing = finish.correction > 0
             || finish.flick.is_some()
             || self.tip.taper_end > 0.0
@@ -2529,6 +2548,22 @@ mod tests {
         let alpha = |x: u32, y: u32| raster.bytes().unwrap()[((y * 40 + x) * 4 + 3) as usize];
         assert!(alpha(20, 14) > 100, "the plus reaches up");
         assert!(alpha(14, 14) < 30, "but not into the corner");
+    }
+
+    #[test]
+    fn a_tap_leaves_a_dot_as_large_as_the_brush() {
+        let mut raster = layer(64, 64);
+        let tip = Tip {
+            taper_start: 20.0,
+            taper_end: 20.0,
+            ..flat_pen(16.0)
+        };
+        let mut stroke = Stroke::new(EntityId::new(), tip, [0.0, 0.0, 0.0], false);
+        stroke.to(&mut raster, [32.0, 32.0], 1.0, None);
+        stroke.end(&mut raster, Finish::default(), None);
+        assert!(alpha(&raster, 32, 32) > 200, "the middle is inked");
+        assert!(alpha(&raster, 32, 26) > 100, "out to the brush's size");
+        assert_eq!(alpha(&raster, 32, 12), 0, "and no further");
     }
 
     #[test]

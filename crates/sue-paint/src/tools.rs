@@ -94,7 +94,7 @@ impl Tool {
             Self::AutoSelect => tr!("auto-select"),
             Self::Eyedropper => tr!("eyedropper"),
             Self::Pen => tr!("pen"),
-            Self::Pencil => tr!("pencil"),
+            Self::Pencil => tr!("sketch"),
             Self::Brush => tr!("brush"),
             Self::Airbrush => tr!("airbrush"),
             Self::Decoration => tr!("decoration"),
@@ -194,41 +194,42 @@ impl Tool {
                 plain(&tr!("obtain-display-color-2"), 0),
                 plain(&tr!("obtain-layer-color-2"), 1),
             ],
+            // Clip Studio Paint's Pen tool: its sub tools in its order. Pen
+            // pressure thins them; none tapers on its own, so a mouse draws
+            // them at full size from the first point.
             Self::Pen => vec![
+                SubTool::new(self, "G-pen", 0, tip(8.0, |_| {}))
+                    .stabilization(6)
+                    .correction(2)
+                    .flick(),
                 SubTool::new(
                     self,
-                    "G-Pen",
+                    "Real G-Pen",
                     0,
                     tip(8.0, |t| {
-                        t.taper_start = 14.0;
-                        t.taper_end = 26.0;
+                        t.size_by.pressure_min = 0.05;
+                        t.grain = 0.08;
+                        t.aa = AntiAlias::Medium;
                     }),
                 )
                 .stabilization(6)
-                .correction(2)
-                .flick(),
+                .correction(1),
                 SubTool::new(
                     self,
-                    "Mapping Pen",
+                    "Mapping pen",
                     0,
-                    tip(4.0, |t| {
-                        t.size_by.pressure_min = 0.05;
-                        t.taper_start = 10.0;
-                        t.taper_end = 20.0;
-                    }),
+                    tip(4.0, |t| t.size_by.pressure_min = 0.05),
                 )
                 .stabilization(8)
                 .correction(3)
                 .flick(),
                 SubTool::new(
                     self,
-                    "Turnip Pen",
+                    "Turnip pen",
                     0,
                     tip(14.0, |t| {
                         t.size_by.pressure_min = 0.3;
                         t.aa = AntiAlias::Medium;
-                        t.taper_start = 10.0;
-                        t.taper_end = 18.0;
                     }),
                 )
                 .stabilization(4)
@@ -236,16 +237,80 @@ impl Tool {
                 .flick(),
                 SubTool::new(
                     self,
-                    "Marker",
+                    "Textured pen",
                     0,
                     tip(10.0, |t| {
-                        t.size_by.pressure = false;
+                        t.size_by.pressure_min = 0.2;
+                        t.grain = 0.35;
+                    }),
+                )
+                .stabilization(4),
+                SubTool::new(
+                    self,
+                    "Rough pen",
+                    0,
+                    tip(10.0, |t| {
+                        t.size_by.pressure_min = 0.2;
+                        t.grain = 0.6;
+                        t.hardness = 0.8;
+                    }),
+                )
+                .stabilization(3),
+                SubTool::new(
+                    self,
+                    "Calligraphy",
+                    0,
+                    tip(16.0, |t| {
+                        t.size_by.pressure_min = 0.15;
+                        t.size_by.velocity = true;
+                        t.size_by.velocity_min = 0.4;
                         t.aa = AntiAlias::Strong;
                     }),
                 )
-                .stabilization(3)
+                .stabilization(6),
+                SubTool::new(
+                    self,
+                    "Milli pen",
+                    0,
+                    tip(2.0, |t| t.size_by.pressure = false),
+                )
+                .stabilization(6)
                 .correction(1),
+                SubTool::new(
+                    self,
+                    "Felt pen",
+                    0,
+                    tip(8.0, |t| {
+                        t.size_by.pressure = false;
+                        t.opacity = 0.9;
+                        t.hardness = 0.8;
+                        t.aa = AntiAlias::Strong;
+                    }),
+                )
+                .stabilization(4),
+                SubTool::new(
+                    self,
+                    "Dot pen",
+                    0,
+                    tip(1.0, |t| {
+                        t.size_by.pressure = false;
+                        t.aa = AntiAlias::None;
+                        t.at_least_one = true;
+                    }),
+                ),
+                SubTool::new(
+                    self,
+                    "Flat marker",
+                    0,
+                    tip(12.0, |t| {
+                        t.size_by.pressure = false;
+                        t.opacity = 0.85;
+                        t.aa = AntiAlias::Strong;
+                    }),
+                )
+                .stabilization(3),
             ],
+            // Clip Studio Paint's Sketch tool (once the Pencil tool).
             Self::Pencil => vec![
                 SubTool::new(
                     self,
@@ -256,13 +321,12 @@ impl Tool {
                         t.hardness = 0.85;
                         t.size_by.pressure_min = 0.4;
                         t.opacity_by.pressure = true;
-                        t.taper_end = 6.0;
                     }),
                 )
                 .stabilization(3),
                 SubTool::new(
                     self,
-                    "Mechanical Pencil",
+                    "Mechanical pencil",
                     0,
                     tip(3.0, |t| {
                         t.grain = 0.3;
@@ -273,13 +337,49 @@ impl Tool {
                 .stabilization(3),
                 SubTool::new(
                     self,
-                    "Rough Pencil",
+                    "Charcoal",
                     0,
-                    tip(12.0, |t| {
-                        t.grain = 0.7;
-                        t.hardness = 0.6;
+                    tip(20.0, |t| {
+                        t.grain = 0.8;
+                        t.hardness = 0.5;
+                        t.size_by.pressure_min = 0.5;
                         t.opacity_by.pressure = true;
-                        t.taper_end = 10.0;
+                    }),
+                )
+                .stabilization(2),
+                SubTool::new(
+                    self,
+                    "Crayon",
+                    0,
+                    tip(14.0, |t| {
+                        t.grain = 0.65;
+                        t.hardness = 0.75;
+                        t.size_by.pressure_min = 0.6;
+                        t.opacity_by.pressure = true;
+                    }),
+                )
+                .stabilization(2),
+                SubTool::new(
+                    self,
+                    "Pastel",
+                    0,
+                    tip(24.0, |t| {
+                        t.grain = 0.5;
+                        t.hardness = 0.4;
+                        t.size_by.pressure_min = 0.6;
+                        t.opacity_by.pressure = true;
+                    }),
+                )
+                .stabilization(2),
+                SubTool::new(
+                    self,
+                    "Chalk",
+                    0,
+                    tip(22.0, |t| {
+                        t.grain = 0.75;
+                        t.hardness = 0.6;
+                        t.size_by.pressure_min = 0.7;
+                        t.opacity_by.pressure = true;
                     }),
                 )
                 .stabilization(2),
@@ -879,6 +979,6 @@ mod tests {
         assert_eq!(toolbox.current().tip.size, 99.0);
         toolbox.pick_sub(Tool::Brush, 99);
         assert_eq!(toolbox.picked(Tool::Brush), 2);
-        assert_eq!(toolbox.of(Tool::Pen).name, "G-Pen");
+        assert_eq!(toolbox.of(Tool::Pen).name, "G-pen");
     }
 }

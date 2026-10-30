@@ -486,6 +486,12 @@ Once a canvas is open:
 - **Dialogs are windows:** on a computer, Sue Paint's dialogs (New,
   Preferences, the filters and the rest) open as windows of their own,
   which you can move anywhere, outside Sue's window too, and resize.
+- **Tools as in Clip Studio Paint:** the tool palette at the left has
+  Clip Studio's tools in its order; Comic holds the frame border and
+  balloon tools and Move the hand, zoom and move layer tools (click again
+  for the next). Below them are the main and sub colors, their swap, and
+  the transparent color. A tap with a pen leaves a dot the size of the
+  brush.
 - **Laid out like Clip Studio Paint:** Sue Paint starts with the same
   frame: tools, Sub Tool, the color wheel and color set at the left, Tool
   Sliders beside them, the Navigator and layers at the right, and a strip

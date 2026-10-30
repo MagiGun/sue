@@ -143,3 +143,14 @@ opt-level = 3
 
 [profile.dev.package.sue-model]
 opt-level = 3
+
+# The interface, the project file reader and the format codecs run on every
+# click and every project opened; unoptimized, `cargo run` stalls on them.
+[profile.dev.package.sue-wm]
+opt-level = 2
+
+[profile.dev.package.sue-core]
+opt-level = 2
+
+[profile.dev.package.sue-io]
+opt-level = 2

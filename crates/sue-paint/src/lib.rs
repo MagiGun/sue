@@ -186,7 +186,7 @@ pub fn sample_picture(cx: &mut AppletContext<'_>, width: u32, height: u32) -> Op
             ]
         })
         .collect();
-    paint_path(cx, ink, pen, [0.08, 0.08, 0.1], &wave, "G-Pen");
+    paint_path(cx, ink, pen, [0.08, 0.08, 0.1], &wave, "G-pen");
     for (center, radius) in [
         ([0.34, 0.45], 0.1),
         ([0.62, 0.38], 0.08),
@@ -201,7 +201,7 @@ pub fn sample_picture(cx: &mut AppletContext<'_>, width: u32, height: u32) -> Op
                 ]
             })
             .collect();
-        paint_path(cx, ink, pen, [0.08, 0.08, 0.1], &ring, "G-Pen");
+        paint_path(cx, ink, pen, [0.08, 0.08, 0.1], &ring, "G-pen");
     }
     Some(picture)
 }

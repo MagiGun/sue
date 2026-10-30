@@ -13,6 +13,20 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint's tool palette is Clip Studio Paint's: Downloads, Pen,
+  Sketch, Brush, Eraser, Airbrush, Decoration, Blend, Liquify, Selection
+  area, Auto select, Fill, Gradient, Operation, Figure, Text, Comic, Ruler,
+  Correct line, Move and Eyedropper, then the main and sub colors as
+  circles with their swap and the transparent color. The Pen tool has
+  Clip Studio's eleven pens (G-pen to Flat marker) and Sketch its six
+  (Pencil, Mechanical pencil, Charcoal, Crayon, Pastel, Chalk).
+- The Tool Group palette (once Sub Tool) shows each brush's own stroke and
+  has Add from downloads.
+- A tap with a pen leaves a dot as large as the brush, and pens no longer
+  start thin with a mouse.
+- `cargo run` builds the interface, the project reader and the format
+  codecs optimized, so a debug build no longer stalls on clicks and
+  projects.
 - Edit, Advanced Fill, as in Clip Studio Paint: fill the selection (or
   the canvas) with the main, sub, transparent or a chosen color at an
   opacity and blending mode, only where the target color is (all,
