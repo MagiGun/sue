@@ -55,6 +55,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Sue Writer on a phone shows the whole page across the screen, upright
   or turned, instead of a strip of text; tablets fit the whole page too.
+- Dragging a finger on Sue Writer's page scrolls it instead of
+  selecting text. Tap to place the caret, double tap for a word, and
+  press and hold, then drag, to select.
 - The paragraph style box on a phone's toolbar holds its name and arrow
   again (some boxes near the shape of a slider handle were drawn too
   narrow).

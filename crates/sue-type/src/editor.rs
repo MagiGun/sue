@@ -143,6 +143,14 @@ pub struct Editor {
     preedit: Option<String>,
     /// The last press: when, where and how many in a row.
     clicks: (f64, Pos2, u32),
+    /// The last press was a finger's: a drag scrolls the page (as in
+    /// every phone's word processor), a tap places the caret, and a long
+    /// press selects a word for the drag to grow.
+    touch: bool,
+    /// A long press began a selection that the finger now drags.
+    touch_select: bool,
+    /// A finger is down on the page, scrolling it as it moves.
+    finger: bool,
     docs: Vec<EntityId>,
     texts: Vec<String>,
     marks: Vec<TextMarks>,
@@ -205,6 +213,9 @@ impl Editor {
             pending: Vec::new(),
             preedit: None,
             clicks: (f64::NEG_INFINITY, Pos2::ZERO, 0),
+            touch: false,
+            touch_select: false,
+            finger: false,
             docs: Vec::new(),
             texts: Vec::new(),
             marks: Vec::new(),
@@ -984,8 +995,14 @@ impl Editor {
             ctx.memory_mut(|memory| memory.request_focus(self.id));
             self.want_focus = false;
         }
+        // A finger's drag is the editor's to read (a scroll, or a
+        // selection after a long press), never egui's as well.
         let scroll = egui::ScrollArea::both()
             .id_salt(self.id.with("scroll"))
+            .scroll_source(egui::scroll_area::ScrollSource {
+                drag: egui::scroll_area::DragScroll::Never,
+                ..egui::scroll_area::ScrollSource::default()
+            })
             .auto_shrink([false, false]);
         scroll.show_viewport(ui, |ui, _viewport| {
             self.frame(ui, cx, view, &mut output);
@@ -1597,7 +1614,19 @@ impl Editor {
         // again, so the line being written is never hidden.
         let resized = (ui.clip_rect().size() - self.viewport.size()).length() > 1.0;
         self.viewport = ui.clip_rect();
-        let response = ui.interact(rect, self.id, Sense::click_and_drag());
+        // A finger's drag is left to the scroll area around the page,
+        // unless a long press began a selection.
+        let (touching, pressed) =
+            ui.input(|input| (input.any_touches(), input.pointer.any_pressed()));
+        if pressed {
+            self.touch = touching;
+        }
+        let sense = if self.touch {
+            Sense::click()
+        } else {
+            Sense::click_and_drag()
+        };
+        let response = ui.interact(rect, self.id, sense);
         let ctx = ui.ctx().clone();
         if std::mem::take(&mut self.hold) && self.had_focus {
             ctx.memory_mut(|memory| memory.request_focus(self.id));
@@ -1986,7 +2015,75 @@ impl Editor {
         }
         let (pressed, modifiers, time) =
             ui.input(|input| (input.pointer.primary_pressed(), input.modifiers, input.time));
-        if pressed && response.is_pointer_button_down_on() {
+        if self.touch {
+            let (down, delta, velocity) = ui.input(|input| {
+                (
+                    input.pointer.any_down(),
+                    input.pointer.delta(),
+                    input.pointer.velocity(),
+                )
+            });
+            if self.touch_select {
+                // The finger moves the selection's end; lifting it ends
+                // the selection (it is no tap).
+                if down {
+                    let mut caret = self.hit(pos);
+                    if caret.doc != self.anchor.doc {
+                        caret = self.anchor;
+                    }
+                    self.caret = self.clamp(caret);
+                } else {
+                    self.touch_select = false;
+                }
+                return;
+            }
+            // The page follows the finger, and glides on a little after a
+            // flick.
+            if !self.touch_select {
+                if response.is_pointer_button_down_on() {
+                    self.finger = true;
+                    if delta != Vec2::ZERO {
+                        ui.scroll_with_delta(delta);
+                    }
+                } else if std::mem::take(&mut self.finger) && velocity.length() > 300.0 {
+                    ui.scroll_with_delta_animation(
+                        velocity * 0.3,
+                        egui::style::ScrollAnimation::duration(0.5),
+                    );
+                }
+            }
+            if !self.touch_select && response.long_touched() {
+                // A long press selects the word under the finger; dragging
+                // on grows the selection from it. The keyboard stays down,
+                // so the page does not move under the finger.
+                self.cell = None;
+                self.finger = false;
+                let caret = self.hit(pos);
+                let text = self.doc_text(caret.doc);
+                let (start, end) = word_around(text, caret.offset);
+                self.anchor = Caret {
+                    doc: caret.doc,
+                    offset: start,
+                };
+                self.caret = Caret {
+                    doc: caret.doc,
+                    offset: end,
+                };
+                self.clicks = (time, pos, 1);
+                self.touch_select = true;
+                self.h_pos = None;
+                self.pending.clear();
+                return;
+            }
+        }
+        // A finger acts when it lifts without having dragged (the drag was
+        // a scroll); a mouse as its button goes down.
+        let pressed = if self.touch {
+            response.clicked()
+        } else {
+            pressed && response.is_pointer_button_down_on()
+        };
+        if pressed {
             ui.ctx().memory_mut(|memory| memory.request_focus(self.id));
             let (last, at, count) = self.clicks;
             let count = if time - last < 0.45 && at.distance(pos) < 6.0 {

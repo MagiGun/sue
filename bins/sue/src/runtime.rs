@@ -1634,6 +1634,164 @@ pub(crate) mod tests {
     }
 
     /// One frame of `size` with `events`, at `now`.
+    #[test]
+    fn a_finger_drag_scrolls_sue_writers_page_on_a_phone() {
+        let (mut runtime, root) = runtime("writer-touch");
+        let _ = runtime.engine.world.rice.set(
+            "display.interface",
+            sue_rice::RiceValue::Text("phone".to_owned()),
+        );
+        let ctx = egui::Context::default();
+        let size = vec2(430.0, 932.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        runtime.request(
+            ShellRequest::Create {
+                applet: AppletId::new(sue_writer::ID).unwrap(),
+                key: "report".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        // One frame; where the "Summary" heading was drawn, if it was.
+        let mut now = start;
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, size)),
+                events,
+                time: Some(ctx.input(|input| input.time) + 0.016),
+                ..egui::RawInput::default()
+            };
+            now += Duration::from_millis(16);
+            let output = ctx.run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
+            let mut found = None;
+            let mut selected = false;
+            for clipped in &output.shapes {
+                let mut look = |shape: &egui::Shape| {
+                    if let egui::Shape::Text(text) = shape {
+                        let words = text.galley.text();
+                        if words.contains("Summary") {
+                            found = Some(text.pos.y);
+                        }
+                        // The status bar counts what is selected.
+                        selected |= words
+                            .split('|')
+                            .any(|part| part.contains(" of ") && part.contains("words"));
+                    }
+                };
+                match &clipped.shape {
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(&mut look),
+                    shape => look(shape),
+                }
+            }
+            output.drop_without_applying_deltas();
+            (found, selected)
+        };
+        let mut before = None;
+        for _ in 0..200 {
+            before = step(&mut runtime, Vec::new()).0.or(before);
+        }
+        let before = before.expect("the report's Summary heading is drawn");
+        let touch = |phase, pos| egui::Event::Touch {
+            device_id: egui::TouchDeviceId(1),
+            id: egui::TouchId(1),
+            phase,
+            pos,
+            force: None,
+        };
+        let from = Pos2::new(215.0, 600.0);
+        step(
+            &mut runtime,
+            vec![
+                touch(egui::TouchPhase::Start, from),
+                egui::Event::PointerMoved(from),
+                egui::Event::PointerButton {
+                    pos: from,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        let mut at = from;
+        for _ in 0..20 {
+            at.y -= 12.0;
+            step(
+                &mut runtime,
+                vec![
+                    touch(egui::TouchPhase::Move, at),
+                    egui::Event::PointerMoved(at),
+                ],
+            );
+        }
+        step(
+            &mut runtime,
+            vec![
+                touch(egui::TouchPhase::End, at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerGone,
+            ],
+        );
+        let mut after = None;
+        let mut selected = false;
+        for _ in 0..5 {
+            let (found, any) = step(&mut runtime, Vec::new());
+            after = found.or(after);
+            selected |= any;
+        }
+        let after = after.expect("still drawn");
+        assert!(
+            after < before - 100.0,
+            "the page scrolls with the finger: {before} then {after}"
+        );
+        assert!(!selected, "a scroll selects nothing");
+        // A long press on the heading selects it, and the finger's drag
+        // grows the selection.
+        let on = Pos2::new(90.0, after + 8.0);
+        let mut press = vec![
+            touch(egui::TouchPhase::Start, on),
+            egui::Event::PointerMoved(on),
+            egui::Event::PointerButton {
+                pos: on,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ];
+        for _ in 0..70 {
+            step(&mut runtime, std::mem::take(&mut press));
+        }
+        let to = on + vec2(0.0, 60.0);
+        step(
+            &mut runtime,
+            vec![
+                touch(egui::TouchPhase::Move, to),
+                egui::Event::PointerMoved(to),
+            ],
+        );
+        step(
+            &mut runtime,
+            vec![
+                touch(egui::TouchPhase::End, to),
+                egui::Event::PointerButton {
+                    pos: to,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        let (_, selected) = step(&mut runtime, Vec::new());
+        assert!(selected, "a long press and a drag select");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     fn frame_with(
         runtime: &mut Runtime,
         ctx: &egui::Context,
