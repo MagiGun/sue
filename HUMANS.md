@@ -326,6 +326,18 @@ shows or changes where your materials are kept, has a Maintenance Menu
 gone) and shows Sue Paint's version. Nothing on the start page goes
 online.
 
+**Saving is Clip Studio's format.** File, Save keeps a picture as a Clip
+Studio Paint `.clip` file, and saves to the same file from then on. Clip
+Studio Paint opens it with its layers, folders, blend modes, opacity and
+clipping, and Sue opens it again with everything, vector lines and tones
+included, because the file also carries Sue's own copy of the picture.
+File, Save As can make a Sue project, a Photoshop document or a flat
+picture instead, and Settings (Sue Paint, Save format) makes a Sue project
+what Save writes. Sue Paint also opens `.clip` files from Clip Studio:
+pixel, text and vector layers come in as the pixels Clip Studio last drew
+for them, and correction, gradient and fill layers as empty layers in their
+places, since Sue cannot redo those effects yet.
+
 **On a phone or tablet** the start page is laid out for fingers. The top
 bar shows Sue Paint with Help and Settings; Projects starts with three big
 buttons, **Create new file**, **New from device storage** (a picture

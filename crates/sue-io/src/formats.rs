@@ -976,6 +976,15 @@ impl KeptFormat {
                 class::IMAGE,
             ),
             make(
+                "clip",
+                "Clip Studio Paint file",
+                &["clip"],
+                "application/x-clip-studio-paint",
+                "Image",
+                NativeFormat::Clip,
+                class::IMAGE,
+            ),
+            make(
                 "avif",
                 "AVIF image",
                 &["avif"],

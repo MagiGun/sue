@@ -3879,7 +3879,7 @@ f 2 3 4
         );
         step(&mut runtime, Vec::new());
         let paint = AppletId::new(sue_paint::ID).unwrap();
-        let pick = FilePick::save(Some(paint), "save-as", "Save As", "Picture.sue");
+        let pick = FilePick::save(Some(paint.clone()), "save-as", "Save As", "Picture.sue");
         std::fs::create_dir_all(&root).unwrap();
 
         // A picture type writes the flattened picture in that format.
@@ -3917,6 +3917,90 @@ f 2 3 4
         step(&mut runtime, Vec::new());
         assert_eq!(runtime.project(), Some(project.as_path()));
         assert!(sue_core::SueFile::from_bytes(&std::fs::read(&project).unwrap()).is_ok());
+
+        // Clip Studio's type writes a .clip with the picture's layers and
+        // Sue's own copy of it, and Save writes that file again from then on.
+        let clip = root.join("Picture.clip");
+        runtime.request(
+            ShellRequest::Picked {
+                pick: FilePick::save(Some(paint.clone()), "save-as", "Save As", "Picture.clip"),
+                path: clip.clone(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        step(&mut runtime, Vec::new());
+        let read = sue_io::clip::decode_clip(&std::fs::read(&clip).unwrap()).unwrap();
+        assert_eq!((read.psd.width, read.psd.height), (1600, 1200));
+        assert!(read.sue.is_some(), "Sue's copy rides along");
+        std::fs::remove_file(&clip).unwrap();
+        step(
+            &mut runtime,
+            vec![key(egui::Key::S, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, Vec::new());
+        assert!(clip.exists(), "Save wrote the .clip again");
+
+        // A .clip made elsewhere opens as a new canvas with its layers.
+        let mut layer = sue_io::psd::PsdLayer::pixels(
+            "Ink",
+            10,
+            20,
+            30,
+            40,
+            [12_u8, 34, 56, 255].repeat(30 * 40),
+        );
+        layer.opacity = 128;
+        let foreign = root.join("Elsewhere.clip");
+        let psd = sue_io::psd::Psd {
+            width: 200,
+            height: 100,
+            layers: vec![layer],
+            merged: Vec::new(),
+        };
+        std::fs::write(
+            &foreign,
+            sue_io::clip::encode_clip(&psd, 350.0, None).unwrap(),
+        )
+        .unwrap();
+        let pictures = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .filter(|(_, entity)| sue_model::picture::is_picture(entity))
+                .count()
+        };
+        let before = pictures(&runtime);
+        runtime.request(
+            ShellRequest::Picked {
+                pick: FilePick::open(Some(paint), "open", "Open"),
+                path: foreign,
+            },
+            &mut NoTextures,
+            start,
+        );
+        step(&mut runtime, Vec::new());
+        assert_eq!(
+            pictures(&runtime),
+            before + 1,
+            "the .clip opened as a canvas"
+        );
+        let arena = &runtime.engine.world.arena;
+        let opened = arena
+            .iter()
+            .find(|(_, entity)| entity.name() == "Elsewhere")
+            .map(|(_, entity)| entity.id())
+            .expect("named after its file");
+        let layers = sue_model::picture::layers(arena, opened);
+        assert!(
+            layers
+                .iter()
+                .filter_map(|id| arena.get_by_id(*id).ok())
+                .any(|entity| entity.name() == "Ink"),
+            "its layer came along"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

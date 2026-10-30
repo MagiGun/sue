@@ -369,6 +369,16 @@ fn thumbnail(path: &Path, side: u32, job: &sue_core::JobContext) -> Option<Thumb
                 drafts: false,
             },
         )?
+    } else if sue_io::clip::sniff(&bytes) {
+        let (arena, picture) = crate::clip_io::picture_arena(&bytes)?;
+        crate::composite::flatten(
+            &arena,
+            picture,
+            crate::composite::RenderOptions {
+                paper: true,
+                drafts: false,
+            },
+        )?
     } else if bytes.starts_with(b"8BPS") {
         let psd = sue_io::psd::decode_psd(&bytes).ok()?;
         sue_core::RasterTile2D::from_bytes(

@@ -41,7 +41,7 @@ pub const ID: &str = "sue-paint";
 
 /// The picture files Sue Paint opens as canvases.
 const OPENS: &[&str] = &[
-    "png", "jpg", "jpeg", "jxl", "psd", "psb", "webp", "tif", "tiff", "bmp",
+    "clip", "png", "jpg", "jpeg", "jxl", "psd", "psb", "webp", "tif", "tiff", "bmp",
 ];
 
 /// `true` for a picture file Sue Paint opens as a canvas.
@@ -340,6 +340,9 @@ pub struct SuePaint {
     /// Where in the undo history each picture was last saved or opened
     /// (File, Revert goes back there).
     pub(crate) saved_at: HashMap<EntityId, sue_core::NodeId>,
+    /// The `.clip` file each picture was opened from or saved to (Save
+    /// writes it again).
+    pub(crate) clip_paths: HashMap<EntityId, PathBuf>,
     /// The pictures opened or saved lately, newest first (File, Open
     /// Recent), from the work Sue remembers.
     pub(crate) recent_files: Vec<PathBuf>,
@@ -535,6 +538,7 @@ impl Default for SuePaint {
             hue: 0.0,
             recent: History::default(),
             saved_at: HashMap::new(),
+            clip_paths: HashMap::new(),
             recent_files: Vec::new(),
             recent_seen: None,
             auto: crate::extras::AutoActions::default(),
@@ -2479,7 +2483,14 @@ impl SuePaint {
             .arena
             .get_by_id(picture)
             .map_or_else(|_| tr!("picture"), |entity| entity.name().to_owned());
-        let mut types = vec![FileType::new(&tr!("sue-project"), &["sue"])];
+        let clip = FileType::new(&tr!("clip-studio-paint-file"), &["clip"]);
+        let sue = FileType::new(&tr!("sue-project"), &["sue"]);
+        let saves_clip = crate::clip_io::saves_clip(cx);
+        let mut types = if saves_clip {
+            vec![clip, sue]
+        } else {
+            vec![sue, clip]
+        };
         types.extend(
             sue_io::PICTURE_SAVE_TYPES
                 .iter()
@@ -2491,7 +2502,7 @@ impl SuePaint {
                 Some(me_id()),
                 "save-as",
                 &tr!("save-as"),
-                &format!("{name}.sue"),
+                &format!("{name}.{}", if saves_clip { "clip" } else { "sue" }),
             )
             .types(types)
             .starting_in(Some(start)),
@@ -2507,6 +2518,12 @@ impl SuePaint {
             .unwrap_or_default();
         if let Some(dir) = path.parent() {
             self.last_dir = Some(dir.to_path_buf());
+        }
+        if extension == "clip" {
+            if let Some(picture) = self.picture() {
+                self.write_clip(cx, picture, path);
+            }
+            return;
         }
         if extension == "sue" || extension.is_empty() {
             let path = if extension.is_empty() {
@@ -2542,6 +2559,41 @@ impl SuePaint {
                 }
             }
             Err(error) => cx.fail(tr!("cannot-save-as", extension = extension, error = error)),
+        }
+    }
+
+    /// Save when Sue Paint saves `.clip` files: the picture's own `.clip`
+    /// again, or Save As for one never saved.
+    fn save_clip(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        match self.clip_paths.get(&picture).cloned() {
+            Some(path) => self.write_clip(cx, picture, &path),
+            None => self.save_as(cx),
+        }
+    }
+
+    /// Writes `picture` as a `.clip` at `path`, and remembers it there.
+    fn write_clip(&mut self, cx: &mut AppletContext<'_>, picture: EntityId, path: &Path) {
+        let bytes = match crate::clip_io::encode(&cx.world.arena, picture) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                cx.fail(tr!("cannot-save-as", extension = "clip", error = error));
+                return;
+            }
+        };
+        if self.write_export(cx, path, &bytes) {
+            self.clip_paths.insert(picture, path.to_path_buf());
+            self.saved_at.insert(picture, cx.history.cursor());
+            if let Some(doc) = self.docs.iter().find(|doc| doc.picture == picture) {
+                let (_, _, version) = doc.compositor.display();
+                self.clean.insert(picture, version);
+            }
+            cx.request(ShellRequest::Remember {
+                path: path.to_path_buf(),
+                saved: true,
+            });
         }
     }
 
@@ -2679,6 +2731,9 @@ impl SuePaint {
         if bytes.starts_with(b"8BPS") {
             return self.open_psd(cx, &name, &file, bytes, as_layer);
         }
+        if sue_io::clip::sniff(bytes) {
+            return self.open_clip(cx, path, &name, &file, bytes, as_layer);
+        }
         let formats = sue_io::formats(sue_model::registry());
         let bundle = formats
             .import(bytes, &file, &Properties::new())
@@ -2741,18 +2796,65 @@ impl SuePaint {
     ) -> Result<(), String> {
         let psd = sue_io::psd::decode_psd(bytes)
             .map_err(|error| tr!("cannot-open", file = file, error = error))?;
+        self.open_layers(cx, name, file, &psd, 72.0, as_layer)
+            .map(|_| ())
+    }
+
+    /// Opens a Clip Studio file. One Sue saved comes back whole, from the
+    /// Sue project it carries; any other opens with its layers and folders.
+    /// Save writes the file again.
+    fn open_clip(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        path: &Path,
+        name: &str,
+        file: &str,
+        bytes: &[u8],
+        as_layer: bool,
+    ) -> Result<(), String> {
+        let clip = sue_io::clip::decode_clip(bytes)
+            .map_err(|error| tr!("cannot-open", file = file, error = error))?;
+        if !as_layer
+            && let Some(sue) = &clip.sue
+            && let Some((edit, picture)) =
+                crate::clip_io::embedded(&cx.world.arena, sue, &tr!("open-3", file = file))
+        {
+            if edit.is_none_or(|edit| Self::apply(cx, edit)) {
+                self.activate(&cx.world.arena, picture);
+                self.saved_at.insert(picture, cx.history.cursor());
+                self.clip_paths.insert(picture, path.to_path_buf());
+            }
+            return Ok(());
+        }
+        if let Some(picture) = self.open_layers(cx, name, file, &clip.psd, clip.dpi, as_layer)? {
+            self.clip_paths.insert(picture, path.to_path_buf());
+        }
+        Ok(())
+    }
+
+    /// Opens layered `psd` as a new canvas at `dpi`, or into the current
+    /// one above the current layer. Answers the new canvas.
+    fn open_layers(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        name: &str,
+        file: &str,
+        psd: &sue_io::psd::Psd,
+        dpi: f64,
+        as_layer: bool,
+    ) -> Result<Option<EntityId>, String> {
         if let Some(picture) = self.picture().filter(|_| as_layer) {
             let below = self.doc().and_then(|doc| doc.layer);
-            let edit = crate::psd_io::import(&cx.world.arena, picture, below, &psd)?;
+            let edit = crate::psd_io::import(&cx.world.arena, picture, below, psd)?;
             Self::apply(cx, edit);
-            return Ok(());
+            return Ok(None);
         }
         let image = Entity::empty(name.to_owned(), class::IMAGE)
             .with_property(picture::WIDTH, i64::from(psd.width))
             .with_property(picture::HEIGHT, i64::from(psd.height))
-            .with_property(picture::DPI, 72.0);
+            .with_property(picture::DPI, dpi);
         let picture = image.id();
-        let layers = crate::psd_io::import(&cx.world.arena, picture, None, &psd)?;
+        let layers = crate::psd_io::import(&cx.world.arena, picture, None, psd)?;
         let edit = Batch::new(tr!("open-3", file = file))
             .then(SpawnEntity::new(image))
             .then(layers);
@@ -2768,8 +2870,9 @@ impl SuePaint {
             {
                 doc.layer = Some(top);
             }
+            return Ok(Some(picture));
         }
-        Ok(())
+        Ok(None)
     }
 
     /// File, Import, Vector, Movie or Pattern from Image: the file at
@@ -3579,6 +3682,9 @@ impl SuePaint {
                     self.active = self.active.min(self.docs.len().saturating_sub(1));
                 }
             }
+            "file.save" if crate::clip_io::saves_clip(cx) && self.picture().is_some() => {
+                self.save_clip(cx);
+            }
             "file.save" => {
                 cx.request(ShellRequest::Command("file.save".to_owned()));
                 self.mark_clean();
@@ -3707,7 +3813,8 @@ impl SuePaint {
                         &tr!("import-image-as-separate-layers"),
                     )
                     .extensions(&[
-                        "psd", "psb", "png", "jpg", "jpeg", "jxl", "webp", "tif", "tiff", "bmp",
+                        "clip", "psd", "psb", "png", "jpg", "jpeg", "jxl", "webp", "tif", "tiff",
+                        "bmp",
                     ])
                     .starting_in(start),
                 ));
@@ -5602,6 +5709,14 @@ impl SueApplet for SuePaint {
                     value: String::new(),
                 },
                 "Where Sue Paint keeps its materials and brush tips (empty: its own folder)",
+            ),
+            RiceDeclaration::new(
+                crate::clip_io::SAVE_FORMAT_KEY,
+                RiceParameter::EnumChoice {
+                    value: "clip".to_owned(),
+                    options: vec!["clip".to_owned(), "sue".to_owned()],
+                },
+                "How Save keeps a picture: a Clip Studio Paint .clip file, or a Sue project",
             ),
             RiceDeclaration::new(
                 crate::simple::MODE_KEY,

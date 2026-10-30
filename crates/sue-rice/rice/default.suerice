@@ -98,6 +98,7 @@ width = 1600                   # [1..10000] Width of new illustrations (px)
 height = 1200                  # [1..10000] Height of new illustrations (px)
 dpi = 72                       # [1..2400] Resolution of new illustrations (dpi)
 materials_dir = ""             # @text Where Sue Paint keeps its materials and brush tips (empty: its own folder)
+save_format = "clip"           # {clip|sue} How Save keeps a picture: a Clip Studio Paint .clip file, or a Sue project
 touch_mode = "simple"          # {simple|studio} Sue Paint on phones and tablets: Simple Mode or Studio Mode
 custom_key_1 = "edit.undo"     # @text The command Studio Mode's key T1 runs
 custom_key_2 = "edit.redo"     # @text The command Studio Mode's key T2 runs

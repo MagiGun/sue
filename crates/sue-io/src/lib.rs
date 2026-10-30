@@ -19,6 +19,7 @@
 
 mod audio;
 mod bytemap;
+pub mod clip;
 mod formats;
 mod ingest;
 mod jxl;
@@ -28,6 +29,7 @@ pub mod psd;
 pub mod publish;
 mod raster;
 mod sniff;
+pub mod sqlite;
 pub mod svg;
 mod tile_cache;
 mod video;

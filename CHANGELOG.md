@@ -13,6 +13,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint opens and saves Clip Studio Paint `.clip` files. Save keeps a
+  picture as a `.clip` that Clip Studio Paint opens with its layers,
+  folders, blend modes, opacity and clipping, and that Sue opens again
+  with everything. Settings can make Save write a Sue project instead.
+
 - Settings fits every screen: full screen on a phone, with the categories
   as a list that opens one page at a time and controls big enough for a
   thumb; a large sheet with the categories at the side on a tablet, upright

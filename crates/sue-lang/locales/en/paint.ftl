@@ -1177,6 +1177,7 @@ this-picture-has-no-size = This picture has no size
 export-failed = Export failed: { $error }
 export = Export
 sue-project = Sue project
+clip-studio-paint-file = Clip Studio Paint file
 save-as = Save As
 cannot-save-as = Cannot save as .{ $extension }: { $error }
 kib = { $value } KiB

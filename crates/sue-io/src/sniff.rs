@@ -43,6 +43,8 @@ pub enum NativeFormat {
     Tiff,
     /// Photoshop document.
     Psd,
+    /// Clip Studio Paint file.
+    Clip,
     /// Windows icon.
     Ico,
     /// AVIF.
@@ -90,6 +92,7 @@ impl NativeFormat {
             | Self::Bmp
             | Self::Tiff
             | Self::Psd
+            | Self::Clip
             | Self::Ico
             | Self::Avif
             | Self::Heif => ComponentKind::RasterTile2D,
@@ -217,6 +220,7 @@ impl NativeFormat {
             Self::Bmp => "BMP",
             Self::Tiff => "TIFF",
             Self::Psd => "PSD",
+            Self::Clip => "CLIP",
             Self::Ico => "ICO",
             Self::Avif => "AVIF",
             Self::Heif => "HEIF",
@@ -316,6 +320,8 @@ fn sniff_native(bytes: &[u8]) -> Option<NativeFormat> {
         NativeFormat::Gif
     } else if starts(b"8BPS") {
         NativeFormat::Psd
+    } else if starts(b"CSFCHUNK") {
+        NativeFormat::Clip
     } else if starts(b"II*\0") || starts(b"MM\0*") {
         NativeFormat::Tiff
     } else if starts(b"fLaC") {

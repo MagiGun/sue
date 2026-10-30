@@ -1821,7 +1821,18 @@ and PSB, PackBits, folders as section dividers, blend keys, opacity,
 visibility, clipping, Unicode names), an SVG shape reader (`svg`: every path
 command, the basic shapes, transforms and the view box) and `decode_frames`
 (animated GIF, PNG and WebP, Motion JPEG AVI), each with round trip or read
-back tests. Sue Paint maps them onto layers (`psd_io`), vector lines
+back tests. Clip Studio Paint files have their own codec (`clip`), on a
+small SQLite reader and writer in plain Rust (`sqlite`: table b-trees,
+overflow chains, records; no C, so it builds for every target, the browser
+included). A `.clip` is chunks: `Head`, one `Exta` per bitmap (256 pixel
+tiles, each zlib'd as an alpha plane then BGRx), the `SQLi` database (canvas,
+layer tree by first child and next index, mipmap, offscreen) and `Foot`.
+`decode_clip` answers the same `Psd` records, so Sue Paint opens it through
+`psd_io`; `encode_clip` writes the tables Clip Studio needs (checked by
+opening the files in Clip Studio Paint 5) plus a `SueProject` table holding
+the picture's own `.sue` bytes, which `clip_io::embedded` spawns back with
+the same entity ids. `.clip` is how Sue Paint saves (`sue_paint.save_format`,
+`clip` or `sue`). Sue Paint maps them onto layers (`psd_io`), vector lines
 (`vector::from_svg`) and animation cels (`anim::import_frames`). Convert Layer
 traces raster pixels to vector center lines (`vector::trace`: Zhang and Suen
 thinning, chains walked between ends and joins, widths from a chamfer distance,

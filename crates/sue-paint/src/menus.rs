@@ -140,7 +140,7 @@ pub fn menus() -> Vec<Menu> {
                 ),
                 act(&tr!("close"), "file.close").key("Ctrl+W"),
                 SEP,
-                act(&tr!("save-project"), "file.save").key("Ctrl+S"),
+                act(&tr!("save"), "file.save").key("Ctrl+S"),
                 act(&tr!("save-project-as-ellipsis"), "file.save_as"),
                 sub(
                     &tr!("save-duplicate"),

@@ -2264,8 +2264,24 @@ impl Shell {
             }
         }
         if save {
-            io.requests
-                .push(ShellRequest::Command("file.save".to_owned()));
+            // The page saves its own way first (Sue Paint writes the
+            // picture's .clip); else the project is saved.
+            let handled = match self.page.clone() {
+                Some(page) => {
+                    let view = self.view(now, 0.0);
+                    let theme = self.theme.clone();
+                    let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, &page));
+                    let (applets, mut cx) = split(io, &theme, view);
+                    applets
+                        .get_mut(&page)
+                        .is_some_and(|applet| applet.command("file.save", &mut cx))
+                }
+                None => false,
+            };
+            if !handled {
+                io.requests
+                    .push(ShellRequest::Command("file.save".to_owned()));
+            }
         }
         if quit {
             io.requests

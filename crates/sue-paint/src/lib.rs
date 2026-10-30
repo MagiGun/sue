@@ -41,6 +41,7 @@ pub mod blend;
 pub mod brush;
 pub mod camera;
 mod canvas;
+pub mod clip_io;
 pub mod color;
 mod colorsets;
 mod comic;
