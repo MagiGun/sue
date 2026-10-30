@@ -29,7 +29,7 @@ use sue_platform::{
 use sue_rice::{RiceSchema, SetRiceValues};
 use sue_wm::{
     AppletId, AppletRole, Applets, FilePick, RiceEdit, Shell, ShellIo, ShellRequest, Theme,
-    Transport, Typing, WorkList, unix_now, widgets,
+    TransferKind, Transfers, Transport, Typing, WorkList, unix_now, widgets,
 };
 
 use crate::engine::Engine;
@@ -40,6 +40,8 @@ const FEED_INTERVAL: Duration = Duration::from_millis(40);
 /// How often a file dialog open beside Sue (phones and tablets) is asked
 /// for its answer.
 const PICK_POLL: Duration = Duration::from_millis(200);
+/// How often running transfers report their progress.
+const TRANSFER_POLL: Duration = Duration::from_millis(100);
 
 /// Frame-rate telemetry for the status bar.
 #[derive(Debug, Default)]
@@ -118,6 +120,7 @@ macro_rules! shell_io {
             transport: &mut $runtime.transport,
             requests: &mut $runtime.engine.requests,
             work: &$runtime.work,
+            transfers: &mut $runtime.transfers,
             fps: ($runtime.telemetry.fps() > 0).then(|| $runtime.telemetry.fps()),
         }
     };
@@ -163,6 +166,10 @@ pub struct Runtime {
     project_file: SueFile,
     /// The files of late and the work Sue kept (the Hub's lists).
     work: WorkList,
+    /// The files brought in, written out and copied in this run.
+    transfers: Transfers,
+    /// When to read running transfers' progress next.
+    next_transfer_poll: Option<Instant>,
     /// The arena's revision when the work was last looked at for keeping.
     autosave_seen: u64,
     /// When to keep the work next, while a change waits for it.
@@ -229,6 +236,8 @@ impl Runtime {
             project: None,
             project_file: SueFile::new(),
             work: WorkList::default(),
+            transfers: Transfers::default(),
+            next_transfer_poll: None,
             autosave_seen: 0,
             next_autosave: None,
             saved_digest: None,
@@ -463,6 +472,7 @@ impl Runtime {
             self.next_tick,
             self.next_pick_poll,
             self.next_autosave,
+            self.next_transfer_poll,
         ]
         .into_iter()
         .flatten()
@@ -516,6 +526,15 @@ impl Runtime {
             self.next_autosave = None;
             self.autosave();
             redraw = true;
+        }
+        if self.next_transfer_poll.is_none_or(|due| due <= now) {
+            let seen = self.transfers.revision();
+            self.next_transfer_poll = self.transfers.poll().then_some(now + TRANSFER_POLL);
+            if self.transfers.revision() != seen {
+                // The start pages show the progress.
+                self.shell.touch();
+                redraw = true;
+            }
         }
         self.schedule_autosave(now);
         redraw
@@ -782,6 +801,13 @@ impl Runtime {
 
     /// Puts `path` first in the files of late.
     fn remember(&mut self, path: &Path, saved: bool, page: Option<AppletId>) {
+        if !saved {
+            self.transfers.done(
+                TransferKind::Import,
+                &file_name(path),
+                Some(path.to_path_buf()),
+            );
+        }
         if let Err(error) = self.work.remember(path, saved, page, unix_now()) {
             self.shell
                 .notify(tr!("cannot-remember-the-recent-files", error = error), true);
@@ -830,9 +856,20 @@ impl Runtime {
                     }
                     Some(ShellRequest::Recover(id)) => self.recover(&id, textures, now),
                     Some(ShellRequest::Discard(id)) => self.discard(&id),
+                    Some(ShellRequest::Labels(edit)) => {
+                        if let Err(error) = self.work.edit_labels(&edit) {
+                            self.shell.notify(
+                                tr!("cannot-remember-the-recent-files", error = error),
+                                true,
+                            );
+                        }
+                    }
                     Some(_) | None => {}
                 }
             }
+        }
+        if self.transfers.running() > 0 {
+            self.next_transfer_poll.get_or_insert(now + TRANSFER_POLL);
         }
         // Files just written to paths a dialog chose go on to the place
         // the person chose, where the system keeps it apart (phones and
@@ -876,11 +913,25 @@ impl Runtime {
                     self.reveal(Path::new(path));
                 } else if let Some(path) = other.strip_prefix("reveal-file:") {
                     self.reveal_file(Path::new(path));
+                } else if let Some(link) = other.strip_prefix("open-url:") {
+                    self.open_url(link);
                 } else {
                     self.shell
                         .notify(tr!("unknown-command", other = other), true);
                 }
             }
+        }
+    }
+
+    /// Opens a web page in the system's browser.
+    fn open_url(&mut self, link: &str) {
+        if !self.interactive {
+            self.shell.notify(tr!("link", link = link), false);
+            return;
+        }
+        if let Err(error) = sue_platform::open_url(link) {
+            self.shell
+                .notify(tr!("cannot-open-the-link", error = error), true);
         }
     }
 
@@ -1100,6 +1151,11 @@ impl Runtime {
         let _ = self.work.release();
         let page = self.shell.page().cloned();
         self.remember(path, true, page);
+        self.transfers.done(
+            TransferKind::Export,
+            &file_name(path),
+            Some(path.to_path_buf()),
+        );
         self.shell.notify_saved(path, "project");
         Ok(())
     }
@@ -5429,6 +5485,98 @@ f 2 3 4
                 .sue_menu_labels(&[])
                 .contains(&"Settings".to_owned())
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn sue_paint_opens_on_its_start_page_where_draw_opens_the_last_picture_or_a_new_one() {
+        let (mut runtime, root) = runtime("paint-start");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let pictures = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .filter(|(_, entity)| sue_model::picture::is_picture(entity))
+                .count()
+        };
+        let click = |at: Pos2| {
+            move |frame: usize| {
+                let button = |pressed| egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                match frame {
+                    0 => vec![egui::Event::PointerMoved(at)],
+                    1 => vec![button(true)],
+                    2 => vec![button(false)],
+                    _ => Vec::new(),
+                }
+            }
+        };
+        runtime.request(ShellRequest::Open(paint.clone()), &mut NoTextures, start);
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        // The round Draw button at the top of the start page's rail.
+        let draw = runtime.shell.page_rect().min + vec2(42.0, 40.0);
+
+        // No canvas and no picture worked on lately: Draw asks for a new one.
+        frames(&mut runtime, &ctx, size, start, click(draw));
+        assert!(runtime.applets.captures_keys(), "Draw shows the New dialog");
+        assert_eq!(pictures(&runtime), 0);
+        if let Some(applet) = runtime.applets.get_mut(&paint) {
+            applet.navigate("dialog/close");
+        }
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+
+        // With a picture opened lately, Draw opens it as a canvas.
+        std::fs::create_dir_all(&root).unwrap();
+        let photo = root.join("photo.png");
+        let pixels = vec![120_u8; 8 * 6 * 4];
+        std::fs::write(&photo, sue_io::encode_png_rgba(8, 6, &pixels).unwrap()).unwrap();
+        runtime.request(
+            ShellRequest::Remember {
+                path: photo.clone(),
+                saved: false,
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, click(draw));
+        assert_eq!(pictures(&runtime), 1, "Draw opened the last picture");
+        assert!(!runtime.applets.captures_keys());
+        assert_eq!(
+            runtime.shell.page().map(AppletId::as_str),
+            Some(sue_paint::ID)
+        );
+        // Opening it is a transfer the start page lists.
+        assert!(
+            runtime
+                .transfers
+                .list()
+                .iter()
+                .any(|transfer| transfer.label == "photo.png")
+        );
+        // The pages and popups open by name, File, Start Page included.
+        let applet = runtime.applets.get_mut(&paint).unwrap();
+        for target in ["start/materials", "start/help", "start/close"] {
+            assert!(applet.navigate(target), "{target}");
+        }
+        // File, Start Page is a command Sue Paint has.
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: paint,
+                command: "file.start_page".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        assert!(runtime.shell.message().is_none_or(|(_, error)| !error));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

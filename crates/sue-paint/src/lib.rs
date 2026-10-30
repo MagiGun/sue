@@ -66,6 +66,7 @@ pub mod proof;
 pub mod psd_io;
 pub mod rulers;
 pub mod select;
+mod start;
 pub mod story;
 mod studio;
 mod subview;
@@ -212,12 +213,16 @@ mod language_tests {
                 .into_iter()
                 .map(|material| material.name),
         );
-        let tables: [&[&str]; 8] = [
+        names.extend(
+            crate::materials::MaterialKinds::builtin()
+                .iter()
+                .map(|kind| kind.name.clone()),
+        );
+        let tables: [&[&str]; 7] = [
             &crate::anim::Onion::MODES,
             &crate::vector::Erase::NAMES,
             &crate::rulers::Special::NAMES,
             &crate::correct::Widen::NAMES,
-            &crate::materials::Kind::NAMES,
             &crate::effects::EXPRESSIONS,
             &crate::three::STYLES,
             &crate::three::SHAPES,

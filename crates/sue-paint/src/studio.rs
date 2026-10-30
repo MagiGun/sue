@@ -45,7 +45,7 @@ const OPENS: &[&str] = &[
 ];
 
 /// `true` for a picture file Sue Paint opens as a canvas.
-fn opens(path: &Path) -> bool {
+pub(crate) fn opens(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| OPENS.contains(&extension.to_ascii_lowercase().as_str()))
@@ -442,12 +442,16 @@ pub struct SuePaint {
     /// A camera being set up and not keyed yet: its folder, the frame and
     /// where it stands.
     pub(crate) camera_pending: Option<(EntityId, u32, crate::camera::Camera)>,
-    /// The Material palette: the kind it shows (0 all, then by
-    /// `materials::Kind::NAMES`) and the material picked, by name.
+    /// The Material palette: the kind it shows (0 all, then by the kinds
+    /// registered) and the material picked, by name.
     pub(crate) material_kind: u8,
     pub(crate) material_pick: Option<String>,
     /// Material thumbnails, by a hash of the material.
     pub(crate) material_thumbs: HashMap<u64, Vec<u8>>,
+    /// The kinds of material, registered at start.
+    pub(crate) material_kinds: crate::materials::MaterialKinds,
+    /// The start page, shown on the desktop while no canvas is open.
+    pub(crate) start: crate::start::StartPage,
     /// Each recording picture's compositor version at its last timelapse
     /// frame, the version it is waiting to settle on, and its next frame
     /// number.
@@ -573,6 +577,8 @@ impl Default for SuePaint {
             material_kind: 0,
             material_pick: None,
             material_thumbs: HashMap::new(),
+            material_kinds: crate::materials::MaterialKinds::builtin(),
+            start: crate::start::StartPage::default(),
             timelapse: HashMap::new(),
             timelapse_export: crate::timelapse::Export::default(),
             transform: None,
@@ -655,6 +661,7 @@ fn implemented(command: &str) -> bool {
         command,
         "file.new"
             | "file.open"
+            | "file.start_page"
             | "file.close"
             | "file.save"
             | "file.save_as"
@@ -1298,7 +1305,7 @@ impl SuePaint {
 
     /// Keeps the current layer as a picture material named `name`.
     pub(crate) fn register_material(&mut self, cx: &mut AppletContext<'_>, name: &str) {
-        let (Some(folder), Some(layer)) = (crate::colorsets::folder(cx), self.layer()) else {
+        let (Some(folder), Some(layer)) = (crate::materials::location(cx), self.layer()) else {
             return;
         };
         let Some(raster) = doc::raster(&cx.world.arena, layer) else {
@@ -1309,7 +1316,12 @@ impl SuePaint {
                 cx.notify(tr!("is-in-the-material-palette", name = name));
                 self.panels.color_set = true;
                 self.set_tab = 2;
-                self.material_kind = 3;
+                self.material_kind = self
+                    .material_kinds
+                    .iter()
+                    .position(|kind| kind.id == crate::materials::IMAGE)
+                    .map_or(0, |index| index as u8 + 1);
+                self.start.materials_changed();
                 self.material_pick = Some(name.to_owned());
             }
             Err(error) => cx.fail(error),
@@ -2615,7 +2627,7 @@ impl SuePaint {
     }
 
     /// Opens the picture file at `path` as a new canvas, or as a new layer.
-    fn open_picked(&mut self, cx: &mut AppletContext<'_>, path: &Path, as_layer: bool) {
+    pub(crate) fn open_picked(&mut self, cx: &mut AppletContext<'_>, path: &Path, as_layer: bool) {
         if let Some(dir) = path.parent() {
             self.last_dir = Some(dir.to_path_buf());
         }
@@ -2886,7 +2898,7 @@ impl SuePaint {
         let Some(shape) = crate::brush::TipShape::from_rgba(&name, &cut, cw, ch) else {
             return;
         };
-        if let Some(folder) = crate::colorsets::folder(cx).map(|folder| folder.join("tips"))
+        if let Some(folder) = crate::materials::location(cx).map(|folder| folder.join("tips"))
             && let Ok(png) = sue_io::encode_png_rgba(cw, ch, &cut)
         {
             let _ = std::fs::create_dir_all(&folder)
@@ -3090,7 +3102,7 @@ impl SuePaint {
     }
 
     /// A New dialog filled from the rice.
-    fn new_dialog(cx: &AppletContext<'_>) -> NewDialog {
+    pub(crate) fn new_dialog(cx: &AppletContext<'_>) -> NewDialog {
         let rice = cx.rice();
         let mut spec = NewPicture::default();
         if let Some(width) = rice
@@ -3552,6 +3564,10 @@ impl SuePaint {
                 }
             }
             "file.revert" => self.revert(cx),
+            "file.start_page" => {
+                self.start.forced = true;
+                self.dialog = None;
+            }
             "file.recent.clear" => {
                 for path in std::mem::take(&mut self.recent_files) {
                     cx.request(ShellRequest::Forget(path));
@@ -4142,7 +4158,9 @@ impl SuePaint {
                 }
             }
             "edit.material.paste" => {
-                let library = crate::materials::library(crate::colorsets::folder(cx).as_deref());
+                let library = self
+                    .material_kinds
+                    .scan(crate::materials::location(cx).as_deref());
                 if let Some(material) = library
                     .into_iter()
                     .find(|material| self.material_pick.as_deref() == Some(material.name.as_str()))
@@ -5205,6 +5223,14 @@ impl SuePaint {
             }
             return;
         }
+        // On the desktop the start page shows while no canvas is open.
+        if form == sue_platform::FormFactor::Desktop && self.start.shows(self.docs.is_empty()) {
+            self.start_ui(ui, full, cx, &theme);
+            if self.ready {
+                self.dialog_ui(&ctx, cx, &theme);
+            }
+            return;
+        }
         if form == sue_platform::FormFactor::Tablet {
             // Bigger targets for fingers and pens.
             ui.spacing_mut().interact_size.y = 32.0;
@@ -5434,7 +5460,7 @@ pub fn mirror(pixels: &mut [u8], width: u32, height: u32, flip_h: bool, flip_v: 
 }
 
 /// An 8-bit RGBA copy of any raster (gray and float pictures convert).
-fn to_rgba(raster: &RasterTile2D) -> RasterTile2D {
+pub(crate) fn to_rgba(raster: &RasterTile2D) -> RasterTile2D {
     let (width, height) = (raster.width(), raster.height());
     let pixels = match (raster.format(), raster.bytes(), raster.f32_samples()) {
         (PixelFormat::Rgba8, Some(bytes), _) => bytes.to_vec(),
@@ -5528,6 +5554,13 @@ impl SueApplet for SuePaint {
                 "Resolution of new illustrations (dpi)",
             ),
             RiceDeclaration::new(
+                crate::materials::LOCATION_KEY,
+                RiceParameter::Text {
+                    value: String::new(),
+                },
+                "Where Sue Paint keeps its materials and brush tips (empty: its own folder)",
+            ),
+            RiceDeclaration::new(
                 "sue_paint.theme",
                 RiceParameter::EnumChoice {
                     value: "gray".to_owned(),
@@ -5588,7 +5621,11 @@ impl SueApplet for SuePaint {
             }
             return;
         }
-        if self.menus_hidden {
+        // The start page has no menus; everything is on its buttons.
+        if self.menus_hidden
+            || (cx.view.form_factor == sue_platform::FormFactor::Desktop
+                && self.start.shows(self.docs.is_empty()))
+        {
             return;
         }
         let mut menubar = std::mem::take(&mut self.menubar);
@@ -5686,6 +5723,9 @@ impl SueApplet for SuePaint {
             && cx.view.page.as_ref().map(AppletId::as_str) != Some(ID)
         {
             cx.request(ShellRequest::Open(me_id()));
+        }
+        if self.start_picked(&pick.purpose, path, cx) {
+            return;
         }
         match pick.purpose.as_str() {
             "open" => self.open_picked(cx, path, false),
@@ -5807,6 +5847,7 @@ impl SueApplet for SuePaint {
         [
             (tr!("new-illustration-ellipsis"), "file.new", "Ctrl+N"),
             (tr!("open-picture-ellipsis"), "file.open", ""),
+            (tr!("start-page"), "file.start_page", ""),
             (tr!("export-as-png-ellipsis"), "file.export.png", ""),
             (tr!("keyboard-shortcuts"), "help.shortcuts", ""),
         ]
@@ -5859,6 +5900,7 @@ impl SueApplet for SuePaint {
                 self.dialog = Some(Dialog::Pressure(pressure));
                 true
             }
+            start if start.starts_with("start/") => self.start.navigate(start),
             "dialog/close" => {
                 self.dialog = None;
                 self.menubar.close();

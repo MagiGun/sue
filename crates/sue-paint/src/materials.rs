@@ -1,38 +1,162 @@
-//! Materials, as in Clip Studio Paint's Material palette: tones, patterns
-//! and pictures ready to put on the canvas. Sue Paint brings screentones
-//! and patterns of its own, drawn at any size; pictures registered with
-//! Edit, Register Material are PNG files in Sue Paint's folder
-//! (`materials/`), so every project has them.
+//! Materials, as in Clip Studio Paint's Material palette: tones, patterns,
+//! pictures and brush tips ready to put on the canvas. Sue Paint brings
+//! screentones and patterns of its own, drawn at any size; pictures
+//! registered with Edit, Register Material are PNG files in the materials
+//! location (`materials/`), and brush tips made from pictures sit beside
+//! them (`tips/`), so every project has them.
+//!
+//! The kinds of material are not a fixed list: each registers in a
+//! [`MaterialKinds`] registry with how it is found and placed, and a later
+//! kind (3D models, brushes) registers the same way. The materials found
+//! are entities of a [`Library`], an arena of its own beside the project,
+//! whose favorites and use change through transactions.
 
 use std::path::{Path, PathBuf};
 
-use sue_core::{PixelFormat, RasterTile2D};
+use sue_core::txn::SetProperty;
+use sue_core::{Arena, Entity, EntityId, PixelFormat, RasterTile2D, SueFile, UndoStack, Value};
+use sue_wm::start::Glyph;
 
-/// What a material is.
+/// How a material goes onto a canvas.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    /// A screentone: dots or lines of one density.
-    Tone,
-    /// A pattern that repeats.
-    Pattern,
-    /// A picture of its own, registered by the person.
-    Image,
+pub enum Placement {
+    /// It covers the canvas (tones and patterns), in the drawing color.
+    Cover,
+    /// It sits in the middle, shrunk to fit (pictures).
+    Fit,
 }
 
-impl Kind {
-    /// What people read, in the palette's order.
-    pub const NAMES: [&str; 3] = ["Tones", "Patterns", "Images"];
+/// Finds the materials of a kind in the materials location, if any.
+pub type Scan = fn(Option<&Path>) -> Vec<Material>;
+
+/// A kind of material, registered with [`MaterialKinds::register`].
+#[derive(Clone, Debug)]
+pub struct MaterialKind {
+    /// Its id, under the registering feature's namespace, e.g.
+    /// `sue_paint.tone`.
+    pub id: String,
+    /// What people read, kept in English (`localize` shows it).
+    pub name: String,
+    /// Its picture in lists.
+    pub glyph: Glyph,
+    /// How it goes onto a canvas.
+    pub placement: Placement,
+    /// Finds its materials.
+    pub scan: Scan,
 }
+
+/// The kinds of material Sue Paint knows, in the order they register.
+#[derive(Clone, Debug, Default)]
+pub struct MaterialKinds {
+    kinds: Vec<MaterialKind>,
+}
+
+impl MaterialKinds {
+    /// Sue Paint's own kinds: tones, patterns, pictures and brush tips.
+    #[must_use]
+    pub fn builtin() -> Self {
+        let mut kinds = Self::default();
+        let own: [(&str, &str, Glyph, Placement, Scan); 4] = [
+            (TONE, "Tones", Glyph::Tone, Placement::Cover, scan_tones),
+            (
+                PATTERN,
+                "Patterns",
+                Glyph::Pattern,
+                Placement::Cover,
+                scan_patterns,
+            ),
+            (IMAGE, "Images", Glyph::Picture, Placement::Fit, scan_images),
+            (TIP, "Brush tips", Glyph::Brush, Placement::Fit, scan_tips),
+        ];
+        for (id, name, glyph, placement, scan) in own {
+            kinds
+                .register(MaterialKind {
+                    id: id.to_owned(),
+                    name: name.to_owned(),
+                    glyph,
+                    placement,
+                    scan,
+                })
+                .expect("distinct built-in kinds");
+        }
+        kinds
+    }
+
+    /// Adds a kind.
+    ///
+    /// # Errors
+    /// If a kind with its id is already registered.
+    pub fn register(&mut self, kind: MaterialKind) -> Result<(), String> {
+        if self.get(&kind.id).is_some() {
+            return Err(format!("material kind {} is already registered", kind.id));
+        }
+        self.kinds.push(kind);
+        Ok(())
+    }
+
+    /// The kind with `id`.
+    #[must_use]
+    pub fn get(&self, id: &str) -> Option<&MaterialKind> {
+        self.kinds.iter().find(|kind| kind.id == id)
+    }
+
+    /// Every kind, in order.
+    pub fn iter(&self) -> impl Iterator<Item = &MaterialKind> {
+        self.kinds.iter()
+    }
+
+    /// Every material of every kind found in `folder` (the materials
+    /// location), kind by kind.
+    #[must_use]
+    pub fn scan(&self, folder: Option<&Path>) -> Vec<Material> {
+        self.kinds
+            .iter()
+            .flat_map(|kind| (kind.scan)(folder))
+            .collect()
+    }
+}
+
+/// Sue Paint's screentones.
+pub const TONE: &str = "sue_paint.tone";
+/// Sue Paint's patterns.
+pub const PATTERN: &str = "sue_paint.pattern";
+/// Pictures registered as materials.
+pub const IMAGE: &str = "sue_paint.image";
+/// Brush tips made from pictures.
+pub const TIP: &str = "sue_paint.tip";
 
 /// One material in the library.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Material {
     /// Its name.
     pub name: String,
-    /// What it is.
-    pub kind: Kind,
+    /// Its kind's id.
+    pub kind: String,
+    /// How it goes onto a canvas.
+    pub placement: Placement,
     /// Where it comes from.
     pub source: Source,
+}
+
+impl Material {
+    /// `true` for one the person added (a file), which they may delete.
+    #[must_use]
+    pub fn removable(&self) -> bool {
+        matches!(self.source, Source::File(_))
+    }
+
+    /// What tells it apart from every other material, kept with its
+    /// favorite and when it was used.
+    #[must_use]
+    pub fn key(&self) -> String {
+        match &self.source {
+            Source::Builtin(index) => format!(
+                "builtin:{}",
+                BUILTIN.get(*index).map_or("", |(name, ..)| *name)
+            ),
+            Source::File(path) => format!("file:{}", path.display()),
+        }
+    }
 }
 
 /// Where a material comes from.
@@ -46,7 +170,7 @@ pub enum Source {
 
 /// Sue Paint's own tones and patterns: a name, a kind and how much ink
 /// each pixel has.
-type Builtin = (&'static str, Kind, fn(f32, f32) -> f32);
+type Builtin = (&'static str, &'static str, fn(f32, f32) -> f32);
 
 /// Halftone dots on a 45 degree grid of 8 pixel cells covering `share`.
 fn dots(x: f32, y: f32, share: f32) -> f32 {
@@ -69,36 +193,40 @@ fn noise(x: f32, y: f32) -> f32 {
 }
 
 const BUILTIN: [Builtin; 12] = [
-    ("Dot 10%", Kind::Tone, |x, y| dots(x, y, 0.1)),
-    ("Dot 20%", Kind::Tone, |x, y| dots(x, y, 0.2)),
-    ("Dot 30%", Kind::Tone, |x, y| dots(x, y, 0.3)),
-    ("Dot 50%", Kind::Tone, |x, y| dots(x, y, 0.5)),
-    ("Lines 20%", Kind::Tone, |_, y| {
+    ("Dot 10%", TONE, |x, y| dots(x, y, 0.1)),
+    ("Dot 20%", TONE, |x, y| dots(x, y, 0.2)),
+    ("Dot 30%", TONE, |x, y| dots(x, y, 0.3)),
+    ("Dot 50%", TONE, |x, y| dots(x, y, 0.5)),
+    ("Lines 20%", TONE, |_, y| {
         if y.rem_euclid(6.0) < 1.2 { 1.0 } else { 0.0 }
     }),
-    ("Sand", Kind::Tone, |x, y| {
-        if noise(x, y) > 0.82 { 1.0 } else { 0.0 }
-    }),
-    ("Crosshatch", Kind::Pattern, |x, y| {
+    (
+        "Sand",
+        TONE,
+        |x, y| {
+            if noise(x, y) > 0.82 { 1.0 } else { 0.0 }
+        },
+    ),
+    ("Crosshatch", PATTERN, |x, y| {
         let a = (x + y).rem_euclid(8.0) < 1.0;
         let b = (x - y).rem_euclid(8.0) < 1.0;
         if a || b { 1.0 } else { 0.0 }
     }),
-    ("Grid", Kind::Pattern, |x, y| {
+    ("Grid", PATTERN, |x, y| {
         if x.rem_euclid(16.0) < 1.0 || y.rem_euclid(16.0) < 1.0 {
             1.0
         } else {
             0.0
         }
     }),
-    ("Checker", Kind::Pattern, |x, y| {
+    ("Checker", PATTERN, |x, y| {
         if ((x / 16.0).floor() + (y / 16.0).floor()).rem_euclid(2.0) < 1.0 {
             1.0
         } else {
             0.0
         }
     }),
-    ("Bricks", Kind::Pattern, |x, y| {
+    ("Bricks", PATTERN, |x, y| {
         let row = (y / 12.0).floor();
         let shift = if row.rem_euclid(2.0) < 1.0 { 0.0 } else { 12.0 };
         if y.rem_euclid(12.0) < 1.5 || (x + shift).rem_euclid(24.0) < 1.5 {
@@ -107,51 +235,80 @@ const BUILTIN: [Builtin; 12] = [
             0.0
         }
     }),
-    ("Stripes", Kind::Pattern, |x, y| {
+    ("Stripes", PATTERN, |x, y| {
         if (x + y).rem_euclid(12.0) < 4.0 {
             1.0
         } else {
             0.0
         }
     }),
-    ("Speckles", Kind::Pattern, |x, y| noise(x, y) * 0.6),
+    ("Speckles", PATTERN, |x, y| noise(x, y) * 0.6),
 ];
 
-/// Every material: Sue Paint's own, then the pictures registered in
-/// Sue Paint's `folder`.
+/// Every material of Sue Paint's own kinds found in `folder`, the
+/// materials location.
 #[must_use]
 pub fn library(folder: Option<&Path>) -> Vec<Material> {
-    let mut out: Vec<Material> = BUILTIN
+    MaterialKinds::builtin().scan(folder)
+}
+
+/// Sue Paint's own materials of `kind`.
+fn scan_builtin(kind: &str, placement: Placement) -> Vec<Material> {
+    BUILTIN
         .iter()
         .enumerate()
-        .map(|(index, (name, kind, _))| Material {
+        .filter(|(_, (_, of, _))| *of == kind)
+        .map(|(index, (name, _, _))| Material {
             name: (*name).to_owned(),
-            kind: *kind,
+            kind: kind.to_owned(),
+            placement,
             source: Source::Builtin(index),
         })
+        .collect()
+}
+
+fn scan_tones(_: Option<&Path>) -> Vec<Material> {
+    scan_builtin(TONE, Placement::Cover)
+}
+
+fn scan_patterns(_: Option<&Path>) -> Vec<Material> {
+    scan_builtin(PATTERN, Placement::Cover)
+}
+
+fn scan_images(folder: Option<&Path>) -> Vec<Material> {
+    scan_pngs(folder.map(|folder| folder.join("materials")), IMAGE)
+}
+
+fn scan_tips(folder: Option<&Path>) -> Vec<Material> {
+    scan_pngs(folder.map(|folder| folder.join("tips")), TIP)
+}
+
+/// The PNG files in `dir` as materials of `kind`, by name.
+fn scan_pngs(dir: Option<PathBuf>, kind: &str) -> Vec<Material> {
+    let Some(entries) = dir.and_then(|dir| std::fs::read_dir(dir).ok()) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+        })
         .collect();
-    if let Some(dir) = folder.map(|folder| folder.join("materials"))
-        && let Ok(entries) = std::fs::read_dir(dir)
-    {
-        let mut files: Vec<PathBuf> = entries
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
-            })
-            .collect();
-        files.sort();
-        out.extend(files.into_iter().map(|path| Material {
+    files.sort();
+    files
+        .into_iter()
+        .map(|path| Material {
             name: path.file_stem().map_or_else(
                 || tr!("material"),
                 |stem| stem.to_string_lossy().into_owned(),
             ),
-            kind: Kind::Image,
+            kind: kind.to_owned(),
+            placement: Placement::Fit,
             source: Source::File(path),
-        }));
-    }
-    out
+        })
+        .collect()
 }
 
 /// `ink` (0 to 1 a pixel) as black on clear, `size`.
@@ -186,7 +343,7 @@ pub fn picture(material: &Material, size: [u32; 2], color: [u8; 3]) -> Option<Ra
 /// cover it (in `color`), pictures sit in the middle, shrunk to fit.
 #[must_use]
 pub fn layer(material: &Material, size: [u32; 2], color: [u8; 3]) -> Option<RasterTile2D> {
-    if material.kind != Kind::Image {
+    if material.placement == Placement::Cover {
         return picture(material, size, color);
     }
     let tile = picture(material, size, color)?;
@@ -296,6 +453,242 @@ pub fn register(folder: &Path, name: &str, tile: &RasterTile2D) -> Result<PathBu
     Ok(path)
 }
 
+/// The class of a material entity in a [`Library`].
+pub const CLASS: &str = "sue_paint.material";
+/// A material's kind id (text).
+pub const KIND_KEY: &str = "sue_paint.material.kind";
+/// What tells a material apart ([`Material::key`], text).
+pub const SOURCE_KEY: &str = "sue_paint.material.source";
+/// `true` for a favorite.
+pub const FAVORITE_KEY: &str = "sue_paint.material.favorite";
+/// When it was last used, in seconds since 1970.
+pub const USED_KEY: &str = "sue_paint.material.used";
+/// When it was added, in seconds since 1970 (0 for Sue Paint's own).
+pub const ADDED_KEY: &str = "sue_paint.material.added";
+/// The file in the materials location keeping the library's entities.
+const LIBRARY_FILE: &str = "library.sue";
+/// The rice key of the materials location ("" is Sue Paint's folder).
+pub const LOCATION_KEY: &str = "sue_paint.materials_dir";
+
+/// Where the materials are kept: the folder Settings names, or Sue
+/// Paint's own folder.
+#[must_use]
+pub fn location(cx: &sue_wm::AppletContext<'_>) -> Option<PathBuf> {
+    let chosen = cx.rice().get_str(LOCATION_KEY).unwrap_or("").trim();
+    if chosen.is_empty() {
+        crate::colorsets::folder(cx)
+    } else {
+        Some(PathBuf::from(chosen))
+    }
+}
+
+/// One material of a [`Library`], as its entity says.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Entry {
+    /// Its entity.
+    pub id: EntityId,
+    /// The material.
+    pub material: Material,
+    /// `true` for a favorite.
+    pub favorite: bool,
+    /// When it was last used (0: never).
+    pub used: i64,
+    /// When it was added (0 for Sue Paint's own).
+    pub added: i64,
+}
+
+/// Every material found, as entities of an arena of its own: their kind,
+/// favorite and use are properties, changed through transactions on the
+/// library's own history, and kept in the materials location so the ids
+/// and favorites survive a restart.
+#[derive(Debug)]
+pub struct Library {
+    arena: Arena,
+    history: UndoStack<Arena>,
+    materials: Vec<(EntityId, Material)>,
+    folder: Option<PathBuf>,
+}
+
+impl Library {
+    /// Finds every material of `kinds` in `folder`, keeping the entities,
+    /// favorites and use an earlier run kept there.
+    #[must_use]
+    pub fn scan(kinds: &MaterialKinds, folder: Option<&Path>) -> Self {
+        let kept: Vec<Entity> = folder
+            .and_then(|folder| std::fs::read(folder.join(LIBRARY_FILE)).ok())
+            .and_then(|bytes| SueFile::from_bytes(&bytes).ok())
+            .and_then(|file| file.arena(&sue_model::registry()).ok())
+            .map(|arena| {
+                arena
+                    .iter()
+                    .filter(|(_, entity)| entity.class() == CLASS)
+                    .map(|(_, entity)| entity.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut arena = Arena::new();
+        let mut materials = Vec::new();
+        for material in kinds.scan(folder) {
+            let key = material.key();
+            let entity = match kept.iter().find(|entity| {
+                entity.property(SOURCE_KEY).and_then(Value::as_str) == Some(key.as_str())
+            }) {
+                Some(entity) => entity.clone(),
+                None => {
+                    let added = match &material.source {
+                        Source::File(path) => std::fs::metadata(path)
+                            .and_then(|metadata| metadata.modified())
+                            .ok()
+                            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map_or(0, |since| i64::try_from(since.as_secs()).unwrap_or(0)),
+                        Source::Builtin(_) => 0,
+                    };
+                    Entity::empty(material.name.clone(), CLASS)
+                        .with_property(SOURCE_KEY, key)
+                        .with_property(ADDED_KEY, added)
+                }
+            }
+            .with_property(KIND_KEY, material.kind.clone());
+            let id = entity.id();
+            if arena.insert_keep_id(entity).is_ok() {
+                materials.push((id, material));
+            }
+        }
+        Self {
+            arena,
+            history: UndoStack::new(),
+            materials,
+            folder: folder.map(Path::to_path_buf),
+        }
+    }
+
+    /// The library's arena.
+    #[must_use]
+    pub fn arena(&self) -> &Arena {
+        &self.arena
+    }
+
+    /// Every material, as found.
+    #[must_use]
+    pub fn entries(&self) -> Vec<Entry> {
+        self.materials
+            .iter()
+            .filter_map(|(id, material)| {
+                let entity = self.arena.get_by_id(*id).ok()?;
+                let int = |key: &str| entity.property(key).and_then(Value::as_i64).unwrap_or(0);
+                Some(Entry {
+                    id: *id,
+                    material: material.clone(),
+                    favorite: entity
+                        .property(FAVORITE_KEY)
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    used: int(USED_KEY),
+                    added: int(ADDED_KEY),
+                })
+            })
+            .collect()
+    }
+
+    /// The material of entity `id`.
+    #[must_use]
+    pub fn material(&self, id: EntityId) -> Option<&Material> {
+        self.materials
+            .iter()
+            .find(|(of, _)| *of == id)
+            .map(|(_, material)| material)
+    }
+
+    /// Makes `id` a favorite (`on`) or not, and keeps it.
+    ///
+    /// # Errors
+    /// If it is not in the library or the library cannot be written.
+    pub fn set_favorite(&mut self, id: EntityId, on: bool) -> Result<(), String> {
+        self.set(id, FAVORITE_KEY, Value::Bool(on))
+    }
+
+    /// Notes that `id` was used at `now` (seconds since 1970).
+    ///
+    /// # Errors
+    /// If it is not in the library or the library cannot be written.
+    pub fn used(&mut self, id: EntityId, now: u64) -> Result<(), String> {
+        self.set(
+            id,
+            USED_KEY,
+            Value::Int(i64::try_from(now).unwrap_or(i64::MAX)),
+        )
+    }
+
+    fn set(&mut self, id: EntityId, key: &str, value: Value) -> Result<(), String> {
+        self.history
+            .apply(&mut self.arena, SetProperty::new(id, key, value))
+            .map_err(|error| error.to_string())?;
+        self.save()
+    }
+
+    /// Takes back the last change (`redo` puts it back). Returns `true`
+    /// if there was one.
+    ///
+    /// # Errors
+    /// If the change cannot be reverted or the library written.
+    pub fn undo(&mut self, redo: bool) -> Result<bool, String> {
+        let done = if redo {
+            self.history.redo(&mut self.arena)
+        } else {
+            self.history.undo(&mut self.arena)
+        }
+        .map_err(|error| error.to_string())?;
+        self.save()?;
+        Ok(done)
+    }
+
+    /// Writes the library's entities into the materials location.
+    ///
+    /// # Errors
+    /// If the file cannot be written.
+    pub fn save(&self) -> Result<(), String> {
+        let Some(folder) = &self.folder else {
+            return Ok(());
+        };
+        let mut file = SueFile::new();
+        file.set_arena(&self.arena);
+        std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+        sue_platform::write_atomic(&folder.join(LIBRARY_FILE), &file.to_bytes())
+            .map_err(|error| error.to_string())
+    }
+}
+
+/// Copies the picture file `from` into the materials location as a
+/// material of `kind` (images or brush tips), under a name not taken.
+///
+/// # Errors
+/// If it is not a PNG or cannot be copied.
+pub fn add_file(folder: &Path, kind: &str, from: &Path) -> Result<PathBuf, String> {
+    let png = from
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("png"));
+    if !png {
+        return Err(tr!("materials-are-png-files"));
+    }
+    let dir = folder.join(if kind == TIP { "tips" } else { "materials" });
+    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let name = from
+        .file_name()
+        .map_or_else(|| "material.png".into(), |name| name.to_os_string());
+    let mut to = dir.join(&name);
+    let stem = to
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut n = 2;
+    while to.exists() {
+        to = dir.join(format!("{stem} ({n}).png"));
+        n += 1;
+    }
+    std::fs::copy(from, &to).map_err(|error| error.to_string())?;
+    Ok(to)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,12 +705,8 @@ mod tests {
     #[test]
     fn tones_cover_their_share_and_pictures_register_and_place() {
         let library = library(None);
-        assert!(library.iter().any(|material| material.kind == Kind::Tone));
-        assert!(
-            library
-                .iter()
-                .any(|material| material.kind == Kind::Pattern)
-        );
+        assert!(library.iter().any(|material| material.kind == TONE));
+        assert!(library.iter().any(|material| material.kind == PATTERN));
         // A 30% dot tone covers about 30% of the canvas, in its color.
         let dot = library
             .iter()
@@ -344,7 +733,7 @@ mod tests {
         register(&folder, "Red / box", &tile).unwrap();
         let mine: Vec<Material> = super::library(Some(&folder))
             .into_iter()
-            .filter(|material| material.kind == Kind::Image)
+            .filter(|material| material.kind == IMAGE)
             .collect();
         assert_eq!(mine.len(), 1);
         assert_eq!(mine[0].name, "Red _ box");
@@ -355,6 +744,86 @@ mod tests {
         let at = |x: usize, y: usize| placed.bytes().unwrap()[(y * 100 + x) * 4 + 3];
         assert_eq!(at(50, 25), 255);
         assert_eq!(at(5, 5), 0);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn kinds_register_once_and_the_library_keeps_favorites_and_ids() {
+        let mut kinds = MaterialKinds::builtin();
+        let tones = kinds.get(TONE).unwrap().clone();
+        assert!(kinds.register(tones).is_err());
+        kinds
+            .register(MaterialKind {
+                id: "test.nothing".to_owned(),
+                name: "Nothing".to_owned(),
+                glyph: Glyph::Cube,
+                placement: Placement::Fit,
+                scan: |_| Vec::new(),
+            })
+            .unwrap();
+        assert_eq!(kinds.iter().count(), 5);
+
+        let folder = std::env::temp_dir().join(format!("sue-library-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let mut pixels = vec![0_u8; 8 * 8 * 4];
+        pixels[3] = 255;
+        let tile = RasterTile2D::from_bytes(8, 8, PixelFormat::Rgba8, pixels).unwrap();
+        register(&folder, "Mine", &tile).unwrap();
+        let mut library = Library::scan(&kinds, Some(&folder));
+        let entries = library.entries();
+        assert!(entries.iter().any(|entry| entry.material.kind == TONE));
+        let mine = entries
+            .iter()
+            .find(|entry| entry.material.name == "Mine")
+            .unwrap()
+            .clone();
+        assert!(mine.material.removable() && mine.added > 0);
+        let entity = library.arena().get_by_id(mine.id).unwrap();
+        assert_eq!(entity.class(), CLASS);
+        assert_eq!(
+            entity.property(KIND_KEY).and_then(Value::as_str),
+            Some(IMAGE)
+        );
+
+        // A favorite is a transaction: undone and redone, and kept.
+        library.set_favorite(mine.id, true).unwrap();
+        library.used(mine.id, 1_000).unwrap();
+        assert!(library.undo(false).unwrap());
+        assert_eq!(
+            library
+                .entries()
+                .iter()
+                .find(|entry| entry.id == mine.id)
+                .unwrap()
+                .used,
+            0
+        );
+        assert!(library.undo(true).unwrap());
+        let again = Library::scan(&kinds, Some(&folder));
+        let back = again
+            .entries()
+            .into_iter()
+            .find(|entry| entry.material.name == "Mine")
+            .unwrap();
+        assert_eq!(back.id, mine.id, "the entity keeps its id");
+        assert!(back.favorite);
+        assert_eq!(back.used, 1_000);
+
+        // A PNG copies in under a free name; anything else does not.
+        let copied = add_file(&folder, TIP, &folder.join("materials").join("Mine.png")).unwrap();
+        assert!(copied.ends_with("tips/Mine.png") || copied.ends_with("tips\\Mine.png"));
+        let twice = add_file(&folder, TIP, &copied).unwrap();
+        assert!(twice.to_string_lossy().contains("Mine (2)"));
+        assert!(add_file(&folder, IMAGE, Path::new("notes.txt")).is_err());
+        let found = Library::scan(&kinds, Some(&folder));
+        assert_eq!(
+            found
+                .entries()
+                .iter()
+                .filter(|entry| entry.material.kind == TIP)
+                .count(),
+            2
+        );
         let _ = std::fs::remove_dir_all(&folder);
     }
 }

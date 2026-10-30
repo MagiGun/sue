@@ -19,6 +19,8 @@ const RECENT_HEADER: &str = "# Sue recent files, format 1";
 const NOTE_HEADER: &str = "# Sue autosave, format 1";
 /// How many files the list remembers at most.
 const KEEP: usize = 100;
+/// The first line of `labels.txt`.
+const LABELS_HEADER: &str = "# Sue labels, format 1";
 
 /// Seconds since 1970, as the list keeps times.
 #[must_use]
@@ -190,7 +192,112 @@ pub struct WorkList {
     own: Option<String>,
     /// How many ids this run made, so each is new.
     made: u32,
+    /// The labels people sort their work into, and what wears them.
+    labels: Labels,
     revision: u64,
+}
+
+/// The labels people sort their work into (Work, and any they add), the
+/// files each one is on, and the files marked as favorites.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Labels {
+    names: Vec<String>,
+    /// A label and a file it is on.
+    marks: Vec<(String, PathBuf)>,
+    favorites: Vec<PathBuf>,
+}
+
+impl Default for Labels {
+    fn default() -> Self {
+        Self {
+            names: vec![tr!("label-work")],
+            marks: Vec::new(),
+            favorites: Vec::new(),
+        }
+    }
+}
+
+impl Labels {
+    /// Reads `labels.txt`: `label`, `mark` and `favorite` lines, split by
+    /// tabs, each path last.
+    fn parse(text: &str) -> Option<Self> {
+        let mut lines = text.lines();
+        if lines.next()?.trim() != LABELS_HEADER {
+            return None;
+        }
+        let mut labels = Self {
+            names: Vec::new(),
+            marks: Vec::new(),
+            favorites: Vec::new(),
+        };
+        for line in lines {
+            let mut parts = line.splitn(3, '\t');
+            match (parts.next(), parts.next(), parts.next()) {
+                (Some("label"), Some(name), None) if !name.is_empty() => {
+                    labels.names.push(name.to_owned());
+                }
+                (Some("mark"), Some(name), Some(path)) if !path.is_empty() => {
+                    labels.marks.push((name.to_owned(), PathBuf::from(path)));
+                }
+                (Some("favorite"), Some(path), None) if !path.is_empty() => {
+                    labels.favorites.push(PathBuf::from(path));
+                }
+                _ => {}
+            }
+        }
+        Some(labels)
+    }
+
+    fn text(&self) -> String {
+        let mut text = format!("{LABELS_HEADER}\n");
+        for name in &self.names {
+            text.push_str(&format!("label\t{name}\n"));
+        }
+        for (name, path) in &self.marks {
+            text.push_str(&format!("mark\t{name}\t{}\n", path.display()));
+        }
+        for path in &self.favorites {
+            text.push_str(&format!("favorite\t{}\n", path.display()));
+        }
+        text
+    }
+}
+
+/// A label's name as kept: one line, no tabs, trimmed.
+fn label_name(name: &str) -> String {
+    one_line(name).replace('\t', " ").trim().to_owned()
+}
+
+/// A change to the labels of the work Sue remembers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LabelEdit {
+    /// Adds a label.
+    Add(String),
+    /// Renames a label, keeping what it is on.
+    Rename {
+        /// Its name now.
+        from: String,
+        /// Its new name.
+        to: String,
+    },
+    /// Removes a label from the list and from every file.
+    Remove(String),
+    /// Puts a label on a file (`on`) or takes it off.
+    Mark {
+        /// The file.
+        path: PathBuf,
+        /// The label.
+        label: String,
+        /// On or off.
+        on: bool,
+    },
+    /// Marks a file as a favorite (`on`) or not.
+    Favorite {
+        /// The file.
+        path: PathBuf,
+        /// On or off.
+        on: bool,
+    },
 }
 
 impl WorkList {
@@ -222,6 +329,104 @@ impl WorkList {
         self.dir.as_ref().map(|dir| dir.join("recent.txt"))
     }
 
+    fn labels_path(&self) -> Option<PathBuf> {
+        self.dir.as_ref().map(|dir| dir.join("labels.txt"))
+    }
+
+    fn read_labels(&mut self) {
+        if let Some(labels) = self
+            .labels_path()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|text| Labels::parse(&text))
+        {
+            self.labels = labels;
+        }
+    }
+
+    fn write_labels(&self) -> std::io::Result<()> {
+        let Some(path) = self.labels_path() else {
+            return Ok(());
+        };
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        sue_platform::write_atomic(&path, self.labels.text().as_bytes())
+    }
+
+    /// The labels people sort their work into, in their order.
+    #[must_use]
+    pub fn labels(&self) -> &[String] {
+        &self.labels.names
+    }
+
+    /// `true` when `label` is on `path`.
+    #[must_use]
+    pub fn has_label(&self, path: &Path, label: &str) -> bool {
+        self.labels
+            .marks
+            .iter()
+            .any(|(name, marked)| name == label && marked == path)
+    }
+
+    /// `true` when `path` is a favorite.
+    #[must_use]
+    pub fn is_favorite(&self, path: &Path) -> bool {
+        self.labels.favorites.iter().any(|marked| marked == path)
+    }
+
+    /// Changes the labels and writes them.
+    ///
+    /// # Errors
+    /// If the labels cannot be written; the change still holds for this
+    /// run.
+    pub fn edit_labels(&mut self, edit: &LabelEdit) -> std::io::Result<()> {
+        let labels = &mut self.labels;
+        match edit {
+            LabelEdit::Add(name) => {
+                let name = label_name(name);
+                if name.is_empty() || labels.names.contains(&name) {
+                    return Ok(());
+                }
+                labels.names.push(name);
+            }
+            LabelEdit::Rename { from, to } => {
+                let to = label_name(to);
+                if to.is_empty() || labels.names.contains(&to) {
+                    return Ok(());
+                }
+                for name in labels
+                    .names
+                    .iter_mut()
+                    .chain(labels.marks.iter_mut().map(|(name, _)| name))
+                {
+                    if name == from {
+                        name.clone_from(&to);
+                    }
+                }
+            }
+            LabelEdit::Remove(name) => {
+                labels.names.retain(|known| known != name);
+                labels.marks.retain(|(known, _)| known != name);
+            }
+            LabelEdit::Mark { path, label, on } => {
+                labels
+                    .marks
+                    .retain(|(name, marked)| !(name == label && marked == path));
+                if *on && labels.names.contains(label) {
+                    labels.marks.push((label.clone(), path.clone()));
+                }
+            }
+            LabelEdit::Favorite { path, on } => {
+                labels.favorites.retain(|marked| marked != path);
+                if *on {
+                    labels.favorites.push(path.clone());
+                }
+            }
+        }
+        self.revision += 1;
+        self.write_labels()
+    }
+
     fn autosave_dir(&self) -> Option<PathBuf> {
         self.dir.as_ref().map(|dir| dir.join("autosave"))
     }
@@ -233,6 +438,7 @@ impl WorkList {
             .map(|text| parse_recent(&text))
             .unwrap_or_default();
         self.read_autosaves();
+        self.read_labels();
         self.revision += 1;
     }
 
@@ -277,6 +483,7 @@ impl WorkList {
                 .map(|text| parse_recent(&text))
                 .unwrap_or_default();
             self.read_autosaves();
+            self.read_labels();
         }
         let before = self.files.len();
         self.files.retain(|file| file.path.exists());
@@ -649,5 +856,55 @@ mod tests {
         assert_eq!(ago(now - 30 * 86_400, now), "2025-09-29");
         assert_eq!(civil_date(0), (1970, 1, 1));
         assert_eq!(civil_date(19_782), (2024, 2, 29));
+    }
+
+    #[test]
+    fn labels_sort_work_and_survive_a_restart() {
+        let root = temp("labels");
+        let picture = root.join("cat.png");
+        let mut list = WorkList::open(root.join("work"));
+        // A first run has Work.
+        assert_eq!(list.labels().len(), 1);
+        let work = list.labels()[0].clone();
+        list.edit_labels(&LabelEdit::Add("Comics	".to_owned()))
+            .unwrap();
+        list.edit_labels(&LabelEdit::Add("Comics".to_owned()))
+            .unwrap();
+        assert_eq!(list.labels(), [work.clone(), "Comics".to_owned()]);
+        for label in [&work, "Comics", "Nowhere"] {
+            list.edit_labels(&LabelEdit::Mark {
+                path: picture.clone(),
+                label: label.to_owned(),
+                on: true,
+            })
+            .unwrap();
+        }
+        list.edit_labels(&LabelEdit::Favorite {
+            path: picture.clone(),
+            on: true,
+        })
+        .unwrap();
+        // A label that is not in the list is not put on anything.
+        assert!(!list.has_label(&picture, "Nowhere"));
+        list.edit_labels(&LabelEdit::Rename {
+            from: "Comics".to_owned(),
+            to: "Manga".to_owned(),
+        })
+        .unwrap();
+        let again = WorkList::open(root.join("work"));
+        assert_eq!(again.labels(), [work.clone(), "Manga".to_owned()]);
+        assert!(again.has_label(&picture, "Manga") && again.has_label(&picture, &work));
+        assert!(again.is_favorite(&picture));
+        // Removing a label takes it off every file.
+        list.edit_labels(&LabelEdit::Remove(work.clone())).unwrap();
+        list.edit_labels(&LabelEdit::Favorite {
+            path: picture.clone(),
+            on: false,
+        })
+        .unwrap();
+        let again = WorkList::open(root.join("work"));
+        assert_eq!(again.labels(), ["Manga".to_owned()]);
+        assert!(!again.has_label(&picture, &work) && !again.is_favorite(&picture));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

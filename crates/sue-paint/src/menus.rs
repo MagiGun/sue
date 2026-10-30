@@ -131,6 +131,7 @@ pub fn menus() -> Vec<Menu> {
         Menu::new(
             tr!("file"),
             vec![
+                act(&tr!("start-page"), "file.start_page"),
                 act(&tr!("new-ellipsis"), "file.new").key("Ctrl+N"),
                 act(&tr!("open-ellipsis"), "file.open").key("Ctrl+O"),
                 sub(

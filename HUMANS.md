@@ -279,7 +279,39 @@ Sue. CONTRIBUTING.md explains how to add a language or improve one.
 ## Sue Paint: painting and illustration
 
 Click **Sue Paint** in the Hub (or find it with `Tab`) and the page becomes a
-painting studio. If you have used a painting app, it will feel familiar:
+painting studio. If you have used a painting app, it will feel familiar.
+
+**The start page.** On a computer, Sue Paint opens on its start page
+while no canvas is open (and File, **Start Page** brings it back). Down
+the left side:
+
+- **Draw** (the round button) opens the picture or project you worked on
+  last, or, when there is none, the New dialog to make a canvas.
+- **Projects** shows your pictures, Sue Paint projects and unsaved work as
+  cards with pictures, newest first, or by name, as large cards or a
+  list. **All**, **Favorite** and **Work** sort them, and the buttons over
+  that list add, delete and rename labels of your own. Search by name,
+  choose a type (Picture, Project, Unsaved work), tick several cards (or
+  **Select All**) to **Move to** a label or **Remove from list** (the
+  files stay where they are). The heart makes a card a favorite and `>`
+  shows its details. Click a card to open it. These are the same lists
+  the Hub shows.
+- **Manage Materials** shows every material: Sue Paint's own tones and
+  patterns, your pictures and your brush tips, under All materials, by
+  kind, Favorite and Recently used, as large or small cards or a list.
+  With a canvas open, a click puts a material on it; `+` copies a PNG
+  picture in as a material.
+
+At the top right: **Data Transfers** (two arrows) lists the files Sue
+opened, saved, exported and copied in this run, with **Clear Completed
+Transfers**; **Help** links to tips, this guide, questions, contact and
+feedback on the Sue site and GitHub; **Settings** turns dark mode on or off,
+shows or changes where your materials are kept, has a Maintenance Menu
+(draw thumbnails again, look for materials again, forget projects that are
+gone) and shows Sue Paint's version. Nothing on the start page goes
+online. On phones and tablets Sue Paint opens straight on its canvas.
+
+Once a canvas is open:
 
 - **Menus along the top,** right after the Sue button: File, Edit, Story,
   Animation, Layer, Select, View, Filter, Window and Help. Everything Sue Paint can do is in them. Items shown
@@ -478,10 +510,11 @@ painting studio. If you have used a painting app, it will feel familiar:
   or delete it, or a swatch to add, replace or delete a color. On the canvas
   a right-click picks a color, as in Clip Studio Paint.
 - **Materials** (the Material tab beside Color Set, or Window, Material):
-  screentones and patterns ready to use, and your own pictures. Double-click
-  one to put it on a new layer (tones and patterns in your drawing color).
-  Edit, Register Material, Image keeps the current layer there for every
-  project.
+  screentones and patterns ready to use, your own pictures and your brush
+  tips. Double-click one to put it on a new layer (tones and patterns in
+  your drawing color). Edit, Register Material, Image keeps the current
+  layer there for every project. Settings (or the start page's Settings)
+  can keep them in a folder of your choice.
 - **Camera folder** (Animation, New Animation Layer, Camera Folder): the
   layers in it are filmed by a camera that can move, zoom and turn over the
   timeline. With the Object tool (O) on it, drag its red frame (inside to

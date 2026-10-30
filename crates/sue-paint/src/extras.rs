@@ -265,9 +265,8 @@ impl SuePaint {
         self.item_bank = read(folder.as_deref(), "item_bank.txt")
             .map(|text| text.lines().filter_map(Item::from_line).collect())
             .unwrap_or_default();
-        // The brush tips made from pictures.
-        if let Some(entries) = folder
-            .as_ref()
+        // The brush tips made from pictures, in the materials location.
+        if let Some(entries) = crate::materials::location(cx)
             .and_then(|folder| std::fs::read_dir(folder.join("tips")).ok())
         {
             for entry in entries.flatten() {

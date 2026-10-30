@@ -311,6 +311,9 @@ pub enum ShellRequest {
     Recover(String),
     /// Throw away work Sue kept by itself (an autosave, by its id).
     Discard(String),
+    /// Change the labels of the work Sue remembers (favorites, Work and
+    /// the labels people add).
+    Labels(crate::LabelEdit),
 }
 
 /// A request for a file, answered by the system's own open or save dialog:
@@ -579,6 +582,9 @@ pub struct AppletContext<'a> {
     /// The files of late and the work Sue kept; change it with
     /// [`ShellRequest::Remember`] and [`ShellRequest::Forget`].
     pub work: &'a WorkList,
+    /// The files brought in, written out and copied in this run; long
+    /// transfers run here as background jobs.
+    pub transfers: &'a mut crate::Transfers,
     /// What the shell shows.
     pub view: ShellView,
 }

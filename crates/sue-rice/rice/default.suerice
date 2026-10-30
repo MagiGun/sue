@@ -96,6 +96,7 @@ require_signatures = true      # Only accept packages with a valid Ed25519 signa
 width = 1600                   # [1..10000] Width of new illustrations (px)
 height = 1200                  # [1..10000] Height of new illustrations (px)
 dpi = 72                       # [1..2400] Resolution of new illustrations (dpi)
+materials_dir = ""             # @text Where Sue Paint keeps its materials and brush tips (empty: its own folder)
 theme = "gray"                 # {gray|sue-theme|void|graphite|paper|custom} Sue Paint's colors: Gray, Sue's own theme (follows it), a preset, or Custom (below)
 pen_pressure = "0,0 1,1"       # @text Pen pressure curve for every tool, as pressure,output points (File, Pen Pressure Settings draws it)
 alt_tool = "eyedropper"        # {eyedropper|eraser|none} What Alt while drawing does on the canvas (File, Modifier Key Settings)

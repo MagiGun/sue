@@ -1112,6 +1112,34 @@ first, at most 100, under a format line. The runtime remembers every file
 gone drop off when the Hub opens (`WorkList::refresh`). On first use the list
 takes over Sue Paint's old `paint/recent.txt`.
 
+**Labels.** The same list keeps labels for its files (`labels.txt`, under a
+format line: `label`, `mark` and `favorite` lines, each path last): a
+first run has Work, people add, rename and remove their own, and any file
+can be a favorite. Applets change them with `ShellRequest::Labels`
+(`LabelEdit::{Add, Rename, Remove, Mark, Favorite}`); the runtime writes
+them; `WorkList::{labels, has_label, is_favorite}` read them. Sue Paint's
+start page sorts its projects with them.
+
+**Data transfers.** `sue_wm::Transfers` lists what this run brought in,
+wrote out and copied (`TransferKind::{Import, Export, Copy}`), newest
+first: the runtime notes every file it opens and every project it saves,
+the shell every `ShellRequest::Saved`, and an applet runs a long transfer
+with `AppletContext::transfers.spawn`, a `JobPool` job reporting progress
+that the runtime polls every 100 ms while one runs. `clear_completed`
+forgets the finished ones. A start page shows it in its Data Transfers
+popup.
+
+**Start pages** (`sue_wm::start`). Shared widgets for the page a studio
+opens on: a rail of large buttons with labels (`rail`, the first round),
+icon buttons (`icon_button`, `glyph` draws Sue's own monochrome glyphs),
+a search box, chips, a tri-state check (`check`), toolbar actions, a
+dropdown, category rows and trees (`category`), cards with a picture, a
+tick, a heart and a `>` (`card`, `list_row`), and popups (`popup`) centered
+over the dimmed page with a title, an X and grouped rows (`group`, `Row`,
+`Trailing::{More, External, Switch, Text}`). Sharp corners and theme
+colors, as on the Hub. `ShellRequest::Command("open-url:<link>")` opens a
+web page in the system's browser.
+
 **Autosave.** Work nobody saved is kept by itself: `general.autosave_seconds`
 (60; 0 turns it off) after the arena's revision changes, and at quit
 (`Runtime::shutdown`), the runtime writes the project as it would be saved
@@ -1477,12 +1505,44 @@ a color, as in Clip Studio Paint.
 History, or Window, Material) lists Sue Paint's own screentones (dots on a
 45 degree grid of 8 pixel cells sized to their share, lines, sand) and
 patterns (crosshatch, grid, checker, bricks, stripes, speckles), drawn at
-any size from a function a pixel, and the pictures registered with Edit,
-Register Material, Image: the current layer cut to what it covers, kept as
-a PNG in Sue Paint's folder (`materials/`) so every project has it
-(`sue_paint::materials`). Double-clicking one, or Paste to Canvas, puts it on
-a new layer above the current one: tones and patterns cover the canvas in
-the drawing color, pictures sit in the middle, shrunk to fit.
+any size from a function a pixel, the pictures registered with Edit,
+Register Material, Image (the current layer cut to what it covers, kept as
+a PNG in the materials location's `materials/` so every project has it)
+and the brush tips made from pictures (`tips/`). The kinds are not a fixed
+list: each registers in `sue_paint::materials::MaterialKinds` with an id
+under `sue_paint.`, a name, a glyph, a placement (`Cover` or `Fit`) and a
+scan that finds its materials, and the palette's tabs and the start page's
+tree come from the registry. The materials location is
+`sue_paint.materials_dir`, or Sue Paint's folder when empty. Double-clicking
+one, or Paste to Canvas, puts it on a new layer above the current one:
+tones and patterns cover the canvas in the drawing color, pictures sit in
+the middle, shrunk to fit.
+
+The materials found are entities of a `materials::Library`, an arena of its
+own beside the project: class `sue_paint.material` with the properties
+`sue_paint.material.{kind, source, favorite, used, added}`. Favorites and
+use change through `SetProperty` on the library's own `UndoStack`, and the
+arena is kept in the materials location as `library.sue` (the `.sue`
+container), so ids and favorites survive a restart and a material that
+comes back keeps its entity.
+
+**Start page** (`start.rs`). On the desktop, while no canvas is open or
+after File, Start Page (`file.start_page`), the page is a start page built
+from `sue_wm::start`: the rail (Draw, Projects, Manage Materials), Data
+Transfers, Help and Settings at the top right, and the main area. Draw
+opens the newest picture or Sue Paint project in the `WorkList` (pictures
+through Sue Paint's own open, projects with `ShellRequest::OpenFile`), or
+the New dialog. Projects are the `WorkList`'s pictures, `.sue` files last
+worked on in Sue Paint and its kept work, filtered by shelf (All,
+Favorite, a label), type chips and search, sorted by date or name; their
+thumbnails are made on a `JobPool` thread (a picture decoded, or a
+project's first picture flattened), at most 256 pixels, and uploaded once.
+Manage Materials reads the `Library`. Help opens the Sue site and GitHub
+pages through `open-url:`; Settings writes `sue_paint.theme` (dark mode:
+Gray or Paper) and `sue_paint.materials_dir`, so Sue's Settings shows the
+same values. Popups and pages open by name for scripts and snapshots
+(`navigate("start/materials")`, `start/help` and so on). Phones and tablets
+keep the canvas.
 
 **Camera folders.** A camera folder (Animation, New Animation Layer, Camera
 Folder) is a layer folder flagged `folder.camera` whose camera keyframes are
@@ -2353,7 +2413,8 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: Polyline, Selection pen and Erase selection; expand, shrink and blur selections; Select Color Gamut; selection layers; Quick Mask; the Selection Launcher | **Implemented**; a unit test for growing, shrinking, blurring, painting and picking colors, and an end-to-end run that shrinks a full selection, keeps it as a layer and turns Quick Mask on and off | `sue-paint/src/select.rs`, `canvas.rs`, `studio.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: 3D layers (shapes and OBJ models), their camera and look, and lines and tones from them | **Implemented**; unit tests for the renderer's coverage, outlines and folds (a sphere smooth inside), each look, and a layer turned and undone; an end-to-end run makes a cube, turns it with the Object tool, undoes, converts it to lines and tones and imports an OBJ model | `sue-paint/src/three.rs`, `canvas.rs`, `panels.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: audio tracks on the animation timeline, played in step | **Implemented**; a unit test for a sound imported, mixed from its frame, moved, removed and undone; the animation end-to-end run imports a WAV and plays and stops it with the animation | `sue-paint/src/anim.rs`, `anim_ui.rs`, `bins/sue/src/runtime.rs` |
-| §3.7 Sue Paint: brush tip materials | Planned; the menu item is present and grayed out | n/a |
+| §3.7 Sue Paint: the start page (Draw, Projects with labels and thumbnails, Manage Materials, Data Transfers, Help, Settings) | **Implemented**; unit tests for projects read from the shared work list, sorted and filtered, thumbnails made in the background, pages and popups by name, labels kept, transfers run and cleared, the material library's ids and favorites kept and undone, and every start page widget drawn; the snapshot run shoots the start page and its popups | `sue-paint/src/start.rs`, `materials.rs`, `sue-wm/src/start.rs`, `work.rs`, `transfers.rs`, `bins/sue/src/runtime.rs` |
+| §3.7 Sue Paint: brush tip materials | Partly; brush tips made from pictures list as materials and can be added from PNG files; the Edit menu item is grayed out | `sue-paint/src/materials.rs` |
 | §3.6 Embedded web view | Planned (a Browser drawer of earlier builds was retired) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |
 | §4 Rice parser, GUI descriptors, write-back, profiles | **Implemented** | `sue-rice` |

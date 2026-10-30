@@ -327,13 +327,34 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     runtime.request(ShellRequest::Open(convert), &mut camera.painter, camera.now);
     shoot(&mut runtime, &mut camera, "07-converter")?;
 
-    // 08. Sue Paint with a sample illustration, 09. the Sue menu over it,
-    // 10. its Layer menu and 11. its dialogs.
+    // 08a. Sue Paint opens on its start page while no canvas is open: the
+    // projects, the materials and the three popups.
     runtime.request(
         ShellRequest::Open(paint.clone()),
         &mut camera.painter,
         camera.now,
     );
+    for (target, name) in [
+        ("start/projects", "08a-paint-start-projects"),
+        ("start/materials", "08b-paint-start-materials"),
+        ("start/transfers", "08c-paint-start-transfers"),
+        ("start/help", "08d-paint-start-help"),
+        ("start/settings", "08e-paint-start-settings"),
+        ("start/maintenance", "08f-paint-start-maintenance"),
+    ] {
+        if let Some(applet) = runtime.applets.get_mut(&paint) {
+            applet.navigate("start/close");
+            applet.navigate(target);
+        }
+        shoot(&mut runtime, &mut camera, name)?;
+    }
+    if let Some(applet) = runtime.applets.get_mut(&paint) {
+        applet.navigate("start/close");
+        applet.navigate("start/projects");
+    }
+
+    // 08. Sue Paint with a sample illustration, 09. the Sue menu over it,
+    // 10. its Layer menu and 11. its dialogs.
     runtime.with_context(&mut camera.painter, camera.now, |cx| {
         sue_paint::sample_picture(cx, 1600, 1200)
     });

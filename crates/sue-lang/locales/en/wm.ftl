@@ -114,3 +114,13 @@ ago-days = { $count ->
    *[other] { $count } days ago
 }
 untitled = Untitled
+
+## work.rs: labels
+
+label-work = Work
+
+## transfers.rs
+
+transfer-import = Import
+transfer-export = Export
+transfer-copy = Copy

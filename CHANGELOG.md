@@ -13,6 +13,13 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint opens on a start page on the desktop: **Draw** opens your last
+  picture or project (or a new canvas), **Projects** shows your pictures
+  and Sue Paint projects with thumbnails, sorted into Favorite, Work and
+  labels of your own, and **Manage Materials** browses tones, patterns,
+  pictures and brush tips. Data Transfers lists what Sue opened, saved and
+  copied; Help and Settings sit beside it. Everything stays on your
+  device. File, Start Page brings it back.
 - Footnotes in Sue Writer's PDFs print at the foot of their page, and
   endnotes (Insert, Endnote) gather at the end; Word and OpenDocument keep
   both.

@@ -1669,34 +1669,33 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        let folder = crate::colorsets::folder(cx);
-        let library = crate::materials::library(folder.as_deref());
+        let folder = crate::materials::location(cx);
+        let library = self.material_kinds.scan(folder.as_deref());
         let mut inner = child(ui, body, "materials");
         let small = |text: &str| {
             RichText::new(text)
                 .size(theme.small_size)
                 .color(theme.muted)
         };
-        let kinds = [tr!("all"), tr!("tones"), tr!("patterns"), tr!("images")];
-        inner.horizontal(|ui| {
-            for (index, name) in kinds.iter().enumerate() {
-                ui.selectable_value(&mut self.material_kind, index as u8, name.as_str());
+        // All, then every kind registered.
+        let kinds: Vec<(String, String)> = self
+            .material_kinds
+            .iter()
+            .map(|kind| (kind.id.clone(), crate::localize(&kind.name)))
+            .collect();
+        inner.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut self.material_kind, 0, tr!("all"));
+            for (index, (_, name)) in kinds.iter().enumerate() {
+                ui.selectable_value(&mut self.material_kind, index as u8 + 1, name.as_str());
             }
         });
+        let chosen = usize::from(self.material_kind)
+            .checked_sub(1)
+            .and_then(|index| kinds.get(index))
+            .map(|(id, _)| id.as_str());
         let shown: Vec<&crate::materials::Material> = library
             .iter()
-            .filter(|material| {
-                self.material_kind == 0
-                    || crate::materials::Kind::NAMES
-                        .get(usize::from(self.material_kind) - 1)
-                        .is_some_and(|name| {
-                            crate::materials::Kind::NAMES[match material.kind {
-                                crate::materials::Kind::Tone => 0,
-                                crate::materials::Kind::Pattern => 1,
-                                crate::materials::Kind::Image => 2,
-                            }] == *name
-                        })
-            })
+            .filter(|material| chosen.is_none_or(|id| material.kind == id))
             .collect();
         let mut paste = None;
         let mut delete = None;
@@ -1765,7 +1764,7 @@ impl SuePaint {
                                         paste = Some((*material).clone());
                                         ui.close();
                                     }
-                                    if material.kind == crate::materials::Kind::Image
+                                    if material.removable()
                                         && ui.button(tr!("delete-material")).clicked()
                                     {
                                         delete = Some((*material).clone());
@@ -1789,9 +1788,7 @@ impl SuePaint {
             {
                 paste = picked.clone();
             }
-            if let Some(material) = picked
-                .as_ref()
-                .filter(|material| material.kind == crate::materials::Kind::Image)
+            if let Some(material) = picked.as_ref().filter(|material| material.removable())
                 && ui.button(tr!("delete")).clicked()
             {
                 delete = Some(material.clone());
@@ -4103,10 +4100,12 @@ pub(crate) fn tool_icon(tool: Tool) -> Icon {
 }
 
 /// A material's thumbnail, `side` square, over white.
-fn material_thumb(material: &crate::materials::Material, side: u32) -> Vec<u8> {
-    let tile = match material.kind {
-        crate::materials::Kind::Image => crate::materials::layer(material, [side, side], [0; 3]),
-        _ => crate::materials::picture(material, [side, side], [0; 3]),
+pub(crate) fn material_thumb(material: &crate::materials::Material, side: u32) -> Vec<u8> {
+    let tile = match material.placement {
+        crate::materials::Placement::Fit => crate::materials::layer(material, [side, side], [0; 3]),
+        crate::materials::Placement::Cover => {
+            crate::materials::picture(material, [side, side], [0; 3])
+        }
     };
     let mut out = vec![255_u8; (side * side * 4) as usize];
     if let Some(bytes) = tile.as_ref().and_then(|tile| tile.bytes()) {

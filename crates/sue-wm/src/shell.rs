@@ -91,6 +91,8 @@ pub struct ShellIo<'a> {
     pub requests: &'a mut Vec<ShellRequest>,
     /// The files of late and the work Sue kept, for the Hub's lists.
     pub work: &'a WorkList,
+    /// The files brought in, written out and copied in this run.
+    pub transfers: &'a mut crate::Transfers,
     /// Frames per second while animating; `None` when idle.
     pub fps: Option<u32>,
 }
@@ -111,6 +113,7 @@ fn split<'b>(
         audio: io.audio.as_deref_mut(),
         transport: &mut *io.transport,
         work: io.work,
+        transfers: &mut *io.transfers,
         view,
     };
     (&mut *io.applets, cx)
@@ -1139,7 +1142,15 @@ impl Shell {
                     applet.take_entity(&purpose, entity, &mut cx);
                 }
             }
-            ShellRequest::Saved { path, note } => self.notify_saved(&path, &note),
+            ShellRequest::Saved { path, note } => {
+                let name = path.file_name().map_or_else(
+                    || path.display().to_string(),
+                    |name| name.to_string_lossy().into_owned(),
+                );
+                io.transfers
+                    .done(crate::TransferKind::Export, &name, Some(path.clone()));
+                self.notify_saved(&path, &note);
+            }
             ShellRequest::CloseWindow => self.close_window(),
             ShellRequest::OpenWindow(id) => self.open_window(id),
             ShellRequest::AppletCommand { applet, command } => {
@@ -2599,6 +2610,7 @@ mod tests {
         let mut transport = Transport::default();
         let mut requests = Vec::new();
         let work = WorkList::default();
+        let mut transfers = crate::Transfers::default();
         let theme = Theme::from_rice(&world.rice);
         let mut shell = Shell::new(
             WmConfig::from_rice(&world.rice).unwrap(),
@@ -2621,6 +2633,7 @@ mod tests {
                 transport: &mut transport,
                 requests: &mut requests,
                 work: &work,
+                transfers: &mut transfers,
                 fps: None,
             };
             ctx.run_ui(egui::RawInput::default(), |ui| {
