@@ -26,7 +26,7 @@ use egui::{
     Align, Align2, Id, LayerId, Layout, Order, Rect, RichText, ScrollArea, Sense, Stroke,
     StrokeKind, Ui, UiBuilder, Vec2, pos2, vec2,
 };
-use sue_core::UndoStack;
+use sue_core::{ReversibleTransaction, UndoStack};
 use sue_platform::{AudioSink, FormFactor, FramePacing, SafeAreaInsets, TextureUpload};
 use sue_rice::{HardwareProfile, RiceSchema, RiceValue, SetRiceValue};
 
@@ -95,8 +95,12 @@ pub fn pinned(rice: &RiceSchema, applets: &Applets) -> Option<AppletId> {
 pub struct ShellIo<'a> {
     /// The arena and the live rice.
     pub world: &'a mut World,
-    /// The global undo tree.
+    /// The undo tree of the studio or tool on the page and its document (or
+    /// Sue's own on the Hub).
     pub history: &'a mut UndoStack<World>,
+    /// Sue's own undo tree, for settings, pins and the language, when it
+    /// is not [`Self::history`].
+    pub sue_history: Option<&'a mut UndoStack<World>>,
     /// Typing waiting to become an undo step.
     pub typing: &'a mut Typing,
     /// The live applets.
@@ -119,6 +123,24 @@ pub struct ShellIo<'a> {
     pub fps: Option<u32>,
 }
 
+impl ShellIo<'_> {
+    /// Applies a change of Sue's own (a setting, a pin, the language) and
+    /// records it in Sue's history, not a document's.
+    ///
+    /// # Errors
+    /// The change's own error; nothing is recorded then.
+    pub fn apply_sue(
+        &mut self,
+        txn: impl ReversibleTransaction<World> + 'static,
+    ) -> Result<sue_core::NodeId, sue_core::TxnError> {
+        let stack = match self.sue_history.as_deref_mut() {
+            Some(sue) => sue,
+            None => &mut *self.history,
+        };
+        stack.apply(self.world, txn)
+    }
+}
+
 fn split<'b>(
     io: &'b mut ShellIo<'_>,
     theme: &'b Theme,
@@ -127,6 +149,7 @@ fn split<'b>(
     let cx = AppletContext {
         world: &mut *io.world,
         history: &mut *io.history,
+        sue_history: io.sue_history.as_deref_mut(),
         typing: &mut *io.typing,
         requests: &mut *io.requests,
         catalog: io.catalog,
@@ -774,7 +797,7 @@ impl Shell {
             .map(|manifest| manifest.title());
         let txn = SetRiceValue::new(PIN_KEY, RiceValue::Text(value));
         io.typing.flush(io.history);
-        match io.history.apply(io.world, RiceEdit(txn)) {
+        match io.apply_sue(RiceEdit(txn)) {
             Ok(_) => self.notify(
                 name.map_or_else(
                     || tr!("sue-opens-hub-launch"),
@@ -794,7 +817,7 @@ impl Shell {
         }
         let txn = SetRiceValue::new(crate::LANGUAGE_KEY, RiceValue::Text(setting.to_owned()));
         io.typing.flush(io.history);
-        match io.history.apply(io.world, RiceEdit(txn)) {
+        match io.apply_sue(RiceEdit(txn)) {
             Ok(_) => {
                 let _language = sue_lang::scope(&crate::sue_language(&io.world.rice));
                 self.notify(
@@ -825,7 +848,7 @@ impl Shell {
     fn edit_display(&mut self, key: &str, value: RiceValue, io: &mut ShellIo<'_>) {
         let txn = SetRiceValue::new(key, value);
         io.typing.flush(io.history);
-        match io.history.apply(io.world, RiceEdit(txn)) {
+        match io.apply_sue(RiceEdit(txn)) {
             Ok(_) => {
                 // The shell follows at once; the engine reads the rice again
                 // for everything else.
@@ -2904,6 +2927,7 @@ mod tests {
             let mut io = ShellIo {
                 world: &mut world,
                 history: &mut history,
+                sue_history: None,
                 typing: &mut typing,
                 applets: &mut applets,
                 catalog: &catalog,
@@ -2994,6 +3018,7 @@ mod tests {
             let mut io = ShellIo {
                 world: &mut self.world,
                 history: &mut self.history,
+                sue_history: None,
                 typing: &mut self.typing,
                 applets: &mut self.applets,
                 catalog: &self.catalog,

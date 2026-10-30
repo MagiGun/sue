@@ -269,8 +269,12 @@ stops. When nothing moves, Sue draws nothing at all.
 Every place you type (documents, search boxes, names) works the same: drag
 to select, double-click a word, `Ctrl+A` to select all, `Ctrl+C`, `Ctrl+X` and
 `Ctrl+V` to copy, cut and paste, and `Ctrl+Z` and `Ctrl+Y` to undo and redo.
-Undo is one history for everything: typing, a brush stroke, the Hub's pin or
-a Settings slider all go back in the order you did them.
+Each document keeps its own history, as in Clip Studio Paint: undo in one
+canvas of Sue Paint (or one story's pages) takes back only that canvas's
+steps, never another's, and each studio and tool keeps its own for each file
+it works on. Sue's own changes (Settings, the Hub's pin, the language) have
+their own history too, undone from the Hub. Sue Paint's Edit, Clear work
+history, History forgets the steps of the canvas in front.
 
 ### Settings
 

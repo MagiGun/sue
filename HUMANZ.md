@@ -387,12 +387,22 @@ changed, before and after: a brush stroke stores only the 64-pixel tiles it
 touched), `InsertBundle` (§1.10) and `Batch<T>`, which applies several
 transactions as one step and takes back the done ones if a later one fails.
 
-`UndoStack<T>` is generic. The shell keeps **one global history**,
+`UndoStack<T>` is generic. Sue keeps **one history per document**, each an
 `UndoStack<sue_wm::World>`, where `World { arena, rice }` holds everything
-undoable. `ArenaEdit(txn)` and `RiceEdit(txn)` lift arena and rice transactions
-onto the world, so a single `Ctrl+Z` (or `Ctrl+Shift+Z` / `Ctrl+Y` to redo) steps
-back through typing, brush strokes, the Hub's pin and theme edits in the order
-they happened.
+undoable; `ArenaEdit(txn)` and `RiceEdit(txn)` lift arena and rice
+transactions onto the world. The engine's history in use belongs to a
+`HistoryKey`: Sue's own (`Sue`: settings, the Hub's pin, the language) or a
+studio's or tool's for one document (`Applet(id, scope)`, the scope being
+`SueApplet::history_scope`: the entity in `focus` by default, a Sue Paint
+canvas or its story). Each frame the runtime puts in use the history of the
+studio or tool on the page and its document (`Runtime::follow_history`),
+parking the others; typing still open goes to the history it was typed in.
+`Ctrl+Z` steps back only through that history. Settings changed from inside
+a studio (`AppletContext::edit_rice`) and by the shell (`ShellIo::apply_sue`)
+go to Sue's own. A document new to its studio takes the steps made since
+the history in use was last looked at (`UndoStack::take_since`,
+`record_boxed`): they made it, so undo in the canvas that was open then
+cannot take it away.
 
 ### 1.9 The `.sue` project file
 
@@ -2625,7 +2635,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §1.7 Time, rates, drop-frame timecode | **Implemented** | `sue-core/src/time.rs` |
 | §1.8 Delta-tree undo, `checkout`, `record` | **Implemented** | `sue-core/src/undo.rs` |
 | §1.8 Generic edits by id and `Batch<T>` | **Implemented** | `sue-core/src/txn.rs`, `format.rs` |
-| §1.8 One global history for arena and rice edits | **Implemented** (`UndoStack<World>`) | `sue-wm/src/world.rs` |
+| §1.8 A history per document (and Sue's own) for arena and rice edits | **Implemented** (`UndoStack<World>` per `HistoryKey`) | `sue-wm/src/world.rs` |
 | §1.9 `.sue` container, `ARNA`, `META`, `PRST`; an old `SCNE` kept untouched | **Implemented**; save with `Ctrl+S`, open like any file; compressed chunks planned | `sue-core/src/file.rs`, `sue-wm/src/world.rs`, `bins/sue/src/runtime.rs` |
 | §1.10 Format registry, bundles, copy with fresh ids | **Implemented**; opened and dropped files still go through the ingest path (§2.2) and the `.sue` handler | `sue-core/src/format.rs`, `sue-io/src/formats.rs` |
 | §1.11 Operators and presets | **Implemented** in the kernel; the palette and applets do not route through operators yet | `sue-core/src/operator.rs` |

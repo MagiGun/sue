@@ -707,6 +707,26 @@ fn implemented(command: &str) -> bool {
         "file.new"
             | "file.open"
             | "file.start_page"
+            | "file.duplicate.clip"
+            | "file.export.webp"
+            | "edit.outline_selection"
+            | "edit.transform.scale_only"
+            | "edit.transform.rotate"
+            | "edit.transform.skew"
+            | "edit.clear_history"
+            | "layer.ungroup"
+            | "layer.delete_empty"
+            | "layer.delete_hidden"
+            | "layer.hide_drafts"
+            | "layer.rename"
+            | "layer.transfer_down"
+            | "layer.merge_visible_here"
+            | "view.reset_turn"
+            | "view.rotate_90"
+            | "view.rotate_180"
+            | "view.rotate_270"
+            | "view.reset_display"
+            | "view.paper"
             | "file.close"
             | "file.save"
             | "file.save_as"
@@ -3977,6 +3997,13 @@ impl SuePaint {
                     );
                 });
             }
+            "edit.clear_history" => {
+                // Edit, Clear work history: this canvas's steps only, as
+                // each canvas keeps its own.
+                cx.typing.flush(cx.history);
+                *cx.history = sue_core::UndoStack::new();
+                cx.notify(tr!("work-history-cleared"));
+            }
             "edit.outline_selection" => {
                 if self.doc().is_some_and(|doc| doc.selection.is_some()) {
                     self.dialog = Some(Dialog::SelectBy(3, 4.0));
@@ -6144,6 +6171,13 @@ impl SueApplet for SuePaint {
 
     fn focus(&self) -> Option<EntityId> {
         self.picture()
+    }
+
+    /// Each canvas has its own history; the pages of a story share the
+    /// story's, as a comic's pages share their Page Manager.
+    fn history_scope(&self, arena: &sue_core::Arena) -> Option<EntityId> {
+        let picture = self.picture()?;
+        Some(crate::story::story_of(arena, picture).unwrap_or(picture))
     }
 
     /// Clip Studio Paint files come to Sue Paint as they are, wherever

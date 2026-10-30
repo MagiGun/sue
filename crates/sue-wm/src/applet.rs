@@ -570,8 +570,13 @@ pub struct PaletteEntry {
 pub struct AppletContext<'a> {
     /// The arena and the live rice.
     pub world: &'a mut World,
-    /// The global undo tree.
+    /// The undo tree of the document in focus: each studio and tool keeps
+    /// one per document it works on (Sue Paint one per canvas), so undo
+    /// takes back only that document's changes.
     pub history: &'a mut UndoStack<World>,
+    /// Sue's own undo tree, for settings changed from inside a studio, when
+    /// it is not [`Self::history`] (the Hub and Settings use Sue's).
+    pub sue_history: Option<&'a mut UndoStack<World>>,
     /// Typing waiting to become one undo step.
     pub typing: &'a mut Typing,
     /// Requests for the shell and the engine.
@@ -651,7 +656,11 @@ impl AppletContext<'_> {
     /// # Errors
     /// The transaction's own error.
     pub fn edit_rice(&mut self, txn: SetRiceValue) -> Result<sue_core::NodeId, TxnError> {
-        self.apply(RiceEdit(txn))
+        // A setting is Sue's, not the document's: it goes to Sue's history.
+        match self.sue_history.as_deref_mut() {
+            Some(sue) => sue.apply(self.world, RiceEdit(txn)),
+            None => self.apply(RiceEdit(txn)),
+        }
     }
 
     /// Records text a text field already typed into `handle`.
@@ -748,6 +757,15 @@ pub trait SueApplet: Send {
     /// The entity this studio or tool works on, for the Sue menu's Send To.
     fn focus(&self) -> Option<sue_core::EntityId> {
         None
+    }
+
+    /// The document whose undo history is in use: each gets its own, so
+    /// undo in one canvas or file never takes back another's changes. The
+    /// entity in [`Self::focus`] by default; `None` shares one history for
+    /// the whole studio or tool.
+    fn history_scope(&self, arena: &sue_core::Arena) -> Option<sue_core::EntityId> {
+        let _ = arena;
+        self.focus()
     }
 
     /// Draws the applet's part of the top bar, right after the Sue button:

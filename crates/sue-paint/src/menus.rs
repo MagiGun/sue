@@ -300,6 +300,10 @@ pub fn menus() -> Vec<Menu> {
                     ],
                 ),
                 act(&tr!("canvas-properties-ellipsis"), "edit.canvas_properties"),
+                sub(
+                    &tr!("clear-work-history"),
+                    vec![act(&tr!("history"), "edit.clear_history")],
+                ),
                 SEP,
                 act(
                     &tr!("create-brush-tip-from-image-ellipsis"),

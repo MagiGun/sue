@@ -184,6 +184,39 @@ impl<T> UndoStack<T> {
         self.push(Box::new(txn))
     }
 
+    /// [`record`](Self::record) for an already-boxed transaction.
+    pub fn record_boxed(&mut self, txn: Box<dyn ReversibleTransaction<T>>) -> NodeId {
+        self.push(txn)
+    }
+
+    /// Takes the steps after `since` up to the cursor out of this tree, as
+    /// they are applied (oldest first), to keep in another tree: the cursor
+    /// goes back to `since` without reverting anything, and those steps are
+    /// no longer here to undo or redo. Nothing is taken unless `since` is on
+    /// the path to the cursor.
+    pub fn take_since(&mut self, since: NodeId) -> Vec<Box<dyn ReversibleTransaction<T>>> {
+        if !self.is_applied(since) {
+            return Vec::new();
+        }
+        let mut taken = Vec::new();
+        let mut node = self.cursor;
+        while node != since {
+            let parent = self.parent_of(node);
+            if let Some(txn) = self.nodes[node.0].txn.take() {
+                taken.push(txn);
+            }
+            let parent_node = &mut self.nodes[parent.0];
+            parent_node.children.retain(|child| *child != node);
+            if parent_node.preferred == Some(node) {
+                parent_node.preferred = parent_node.children.last().copied();
+            }
+            node = parent;
+        }
+        self.cursor = since;
+        taken.reverse();
+        taken
+    }
+
     fn push(&mut self, txn: Box<dyn ReversibleTransaction<T>>) -> NodeId {
         let id = NodeId(self.nodes.len());
         let parent = self.cursor;
@@ -400,6 +433,44 @@ impl<T> UndoStack<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn steps_move_to_another_tree_as_they_are() {
+        let mut value = 0_i64;
+        let mut first = UndoStack::new();
+        first.apply(&mut value, Add(1)).unwrap();
+        let mark = first.cursor();
+        first.apply(&mut value, Add(10)).unwrap();
+        first.apply(&mut value, Add(100)).unwrap();
+        assert_eq!(value, 111);
+        // The two newest go to a tree of their own, nothing reverted.
+        let taken = first.take_since(mark);
+        assert_eq!(taken.len(), 2);
+        assert_eq!(value, 111);
+        assert_eq!(first.cursor(), mark);
+        assert!(!first.can_redo(), "they are gone from the first tree");
+        let mut second = UndoStack::new();
+        for txn in taken {
+            second.record_boxed(txn);
+        }
+        assert_eq!(second.history(), ["add 10", "add 100"]);
+        // Each tree undoes only its own.
+        second.undo(&mut value).unwrap();
+        assert_eq!(value, 11);
+        first.undo(&mut value).unwrap();
+        assert_eq!(value, 10);
+        second.undo(&mut value).unwrap();
+        assert_eq!(value, 0);
+        second.redo(&mut value).unwrap();
+        assert_eq!(value, 10);
+        // A mark off the path takes nothing.
+        let mut other = UndoStack::new();
+        other.apply(&mut value, Add(1)).unwrap();
+        let off = other.cursor();
+        other.undo(&mut value).unwrap();
+        other.apply(&mut value, Add(2)).unwrap();
+        assert!(other.take_since(off).is_empty());
+    }
 
     /// Adds `delta` to an `i64`: an exactly invertible delta.
     struct Add(i64);

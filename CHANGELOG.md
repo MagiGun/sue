@@ -19,6 +19,18 @@ follow [Semantic Versioning](https://semver.org/).
   every step to go back or forward to with a click, and the layer
   buttons are Clip Studio's (with Transfer To Lower Layer).
 - Icons in Sue Paint are bigger and two-toned.
+- Each document keeps its own undo history, as in Clip Studio Paint:
+  undo in one Sue Paint canvas (or one story's pages) takes back only its
+  own steps, every studio and tool keeps a history per file, and Sue's own
+  changes (Settings, the Hub's pin, the language) have theirs. Edit, Clear
+  work history, History in Sue Paint forgets the canvas's steps.
+- Sue Paint's menus have more of Clip Studio Paint's items: more formats
+  under Save Duplicate and Export, Special Export, Outline Selection,
+  Scale, Rotate and Skew, Ungroup Layer Folder, Delete empty or hidden
+  layers, Hide all visible draft layers, Change Layer Name, Transfer To
+  Lower Layer, Merge visible layers in place (Ctrl+Shift+E), view
+  rotations of 90, 180 and 270 degrees, Reset Display, Paper, and Move
+  frame.
 - File, Preferences in Sue Paint opens its own Preferences, page by page
   as in Clip Studio Paint, instead of Sue's Settings. Options Sue Paint
   does not do yet are shown greyed out.

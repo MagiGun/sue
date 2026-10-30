@@ -1945,3 +1945,5 @@ go-to-previous-frame = Go to previous frame
 go-to-next-frame = Go to next frame
 pick-a-layer-folder-first = Pick a layer folder first
 no-such-layers = There are no such layers
+clear-work-history = Clear work history
+work-history-cleared = This canvas's history is cleared

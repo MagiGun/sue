@@ -209,8 +209,16 @@ pub struct Engine {
     pub paths: PlatformPaths,
     /// The arena and the live rice.
     pub world: World,
-    /// The global undo tree.
+    /// The undo tree in use: the one of the studio or tool on the page and
+    /// its document, or Sue's own (see [`HistoryKey`]).
     pub history: UndoStack<World>,
+    /// Whose [`Self::history`] is.
+    pub history_key: HistoryKey,
+    /// Every other undo tree, kept while another is in use.
+    pub parked: std::collections::HashMap<HistoryKey, UndoStack<World>>,
+    /// Where [`Self::history`] stood when last looked at, so the steps that
+    /// made a new document can go to that document's own history.
+    pub history_mark: sue_core::NodeId,
     /// Requests waiting for the runtime.
     pub requests: Vec<ShellRequest>,
     /// Where the rice came from.
@@ -230,7 +238,55 @@ pub struct Engine {
     options: BootOptions,
 }
 
+/// Whose undo history: Sue's own (settings, the Hub's pins, the
+/// language), or a studio's or tool's for one document (Sue Paint's for one
+/// canvas). Undo takes back only the history in use.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum HistoryKey {
+    /// Sue's own.
+    Sue,
+    /// A studio or tool, and the document it works on (`None`: the one
+    /// history it has without a document).
+    Applet(sue_wm::AppletId, Option<sue_core::EntityId>),
+}
+
 impl Engine {
+    /// Puts `key`'s history in use (keeping the one in use until now).
+    ///
+    /// A document new to the studio or tool (one without a history yet)
+    /// takes the steps made since the history in use was last looked at:
+    /// they made it, and undoing them belongs to it, not to the document
+    /// that was open when it was made.
+    pub fn use_history(&mut self, key: HistoryKey) {
+        if key != self.history_key {
+            let new_document =
+                matches!(key, HistoryKey::Applet(_, Some(_))) && !self.parked.contains_key(&key);
+            let made = if new_document {
+                self.history.take_since(self.history_mark)
+            } else {
+                Vec::new()
+            };
+            let next = self.parked.remove(&key).unwrap_or_default();
+            let old = std::mem::replace(&mut self.history, next);
+            let was = std::mem::replace(&mut self.history_key, key);
+            if !old.is_empty() {
+                self.parked.insert(was, old);
+            }
+            for step in made {
+                self.history.record_boxed(step);
+            }
+        }
+        self.history_mark = self.history.cursor();
+    }
+
+    /// Forgets every history (a project replaced the open one, so their
+    /// steps name entities that are gone).
+    pub fn forget_histories(&mut self) {
+        self.history = UndoStack::new();
+        self.parked.clear();
+        self.history_mark = sue_core::NodeId::ROOT;
+    }
+
     /// Boots against `host` with no audio devices or GPU to report.
     ///
     /// # Errors
@@ -270,6 +326,9 @@ impl Engine {
             paths,
             world,
             history: UndoStack::new(),
+            history_key: HistoryKey::Sue,
+            parked: std::collections::HashMap::new(),
+            history_mark: sue_core::NodeId::ROOT,
             requests: Vec::new(),
             rice_source,
             launchpad,

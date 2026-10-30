@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use egui::{Align2, Id, Order, RichText, Sense};
-use sue_core::{SueFile, UndoStack};
+use sue_core::SueFile;
 use sue_io::{IngestOptions, NativeJxlPipeline, ingest_bytes, meta};
 use sue_platform::time::Instant;
 use sue_platform::{
@@ -114,6 +114,17 @@ macro_rules! shell_io {
         ShellIo {
             world: &mut $runtime.engine.world,
             history: &mut $runtime.engine.history,
+            sue_history: if $runtime.engine.history_key == crate::engine::HistoryKey::Sue {
+                None
+            } else {
+                Some(
+                    $runtime
+                        .engine
+                        .parked
+                        .entry(crate::engine::HistoryKey::Sue)
+                        .or_default(),
+                )
+            },
             typing: &mut $runtime.typing,
             applets: &mut $runtime.applets,
             catalog: &$runtime.engine.catalog,
@@ -324,6 +335,25 @@ impl Runtime {
     }
 
     /// Builds one frame of the whole window into the root `ui`.
+    /// Puts in use the history of the studio or tool on the page and its
+    /// document, or Sue's own on the Hub; typing still open goes to the
+    /// history it was typed in first.
+    pub fn follow_history(&mut self) {
+        let key = match self.shell.page() {
+            Some(page) => crate::engine::HistoryKey::Applet(
+                page.clone(),
+                self.applets
+                    .get(page)
+                    .and_then(|applet| applet.history_scope(&self.engine.world.arena)),
+            ),
+            None => crate::engine::HistoryKey::Sue,
+        };
+        if key != self.engine.history_key {
+            self.typing.flush(&mut self.engine.history);
+        }
+        self.engine.use_history(key);
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui, textures: &mut dyn TextureUpload, now: Instant) {
         let _language = sue_lang::scope(&sue_wm::sue_language(&self.engine.world.rice));
         if !self.booted {
@@ -342,6 +372,7 @@ impl Runtime {
             }
         }
         self.poll_system_dialogs(textures, now);
+        self.follow_history();
         {
             let mut io = shell_io!(self, textures);
             self.shell.ui(ui, &mut io, now);
@@ -814,7 +845,7 @@ impl Runtime {
             );
             return;
         }
-        self.engine.history = UndoStack::new();
+        self.engine.forget_histories();
         self.typing = Typing::default();
         self.project.clone_from(&kept.project);
         self.project_file = file;
@@ -1233,7 +1264,7 @@ impl Runtime {
             .load_file(&file, &sue_model::registry())
             .map_err(|error| error.to_string())?;
         // Old steps name entities that are gone.
-        self.engine.history = UndoStack::new();
+        self.engine.forget_histories();
         self.typing = Typing::default();
         self.project = Some(path.to_path_buf());
         self.project_file = file;
@@ -1452,11 +1483,17 @@ impl Runtime {
         let count = changes.len();
         let txn = SetRiceValues::new(tr!("reload-default-suerice"), changes);
         self.typing.flush(&mut self.engine.history);
-        match self
-            .engine
-            .history
-            .apply(&mut self.engine.world, RiceEdit(txn))
-        {
+        // Settings are Sue's: they go to Sue's own history.
+        let world = &mut self.engine.world;
+        let sue = if self.engine.history_key == crate::engine::HistoryKey::Sue {
+            &mut self.engine.history
+        } else {
+            self.engine
+                .parked
+                .entry(crate::engine::HistoryKey::Sue)
+                .or_default()
+        };
+        match sue.apply(world, RiceEdit(txn)) {
             Ok(_) => self
                 .shell
                 .notify(tr!("reloaded-values-from-disk", count = count), false),
@@ -3752,6 +3789,87 @@ f 2 3 4
                 .iter()
                 .any(|info| info.name == "Wedge"
                     && sue_paint::three::is_3d(&runtime.engine.world.arena, info.id))
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn each_canvas_keeps_its_own_undo_history() {
+        let (mut runtime, root) = runtime("paint-histories");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        runtime.request(ShellRequest::Open(paint.clone()), &mut NoTextures, now);
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        let command = |runtime: &mut Runtime, name: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: name.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let focus =
+            |runtime: &Runtime| runtime.applets.get(&paint).and_then(|a| a.focus()).unwrap();
+        let count = |runtime: &Runtime, picture| {
+            sue_paint::doc::layers(&runtime.engine.world.arena, picture).len()
+        };
+        // Two canvases, a new layer in each.
+        let mut pictures = Vec::new();
+        for _ in 0..2 {
+            step(
+                &mut runtime,
+                vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+            );
+            step(
+                &mut runtime,
+                vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+            );
+            step(&mut runtime, Vec::new());
+            let picture = focus(&runtime);
+            let before = count(&runtime, picture);
+            command(&mut runtime, "layer.new");
+            step(&mut runtime, Vec::new());
+            assert_eq!(count(&runtime, picture), before + 1);
+            pictures.push((picture, before));
+        }
+        // Undo in the second takes back its layer only.
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        assert_eq!(count(&runtime, pictures[1].0), pictures[1].1);
+        assert_eq!(
+            count(&runtime, pictures[0].0),
+            pictures[0].1 + 1,
+            "the first keeps its"
+        );
+        // Back in the first, its own undo takes back its own layer.
+        command(&mut runtime, "window.prev_tab");
+        step(&mut runtime, Vec::new());
+        assert_eq!(focus(&runtime), pictures[0].0);
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        assert_eq!(count(&runtime, pictures[0].0), pictures[0].1);
+        assert_eq!(count(&runtime, pictures[1].0), pictures[1].1);
+        // A setting changed meanwhile is Sue's, not a canvas's.
+        assert!(
+            runtime
+                .engine
+                .history
+                .history()
+                .iter()
+                .all(|label| !label.starts_with("Set ")),
+            "no settings in a canvas's history"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
