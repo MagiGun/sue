@@ -3943,6 +3943,169 @@ f 2 3 4
     }
 
     #[test]
+    fn sue_paint_pinching_takes_back_the_touch_and_undoes_nothing() {
+        let (mut runtime, root) = runtime("paint-pinch");
+        let ctx = egui::Context::default();
+        let mut now = Instant::now();
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        step(&mut runtime, Vec::new());
+        let pictures = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .filter(|(_, entity)| sue_model::picture::is_picture(entity))
+                .count()
+        };
+        let touch = |id: u64, phase, pos| egui::Event::Touch {
+            device_id: egui::TouchDeviceId(1),
+            id: egui::TouchId(id),
+            phase,
+            pos,
+            force: None,
+        };
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let middle = paint_middle(&runtime);
+        // A real stroke with one finger first.
+        let a = middle - vec2(150.0, 80.0);
+        step(
+            &mut runtime,
+            vec![
+                touch(1, egui::TouchPhase::Start, a),
+                egui::Event::PointerMoved(a),
+                press(a, true),
+            ],
+        );
+        step(
+            &mut runtime,
+            vec![
+                touch(1, egui::TouchPhase::Move, a + vec2(60.0, 0.0)),
+                egui::Event::PointerMoved(a + vec2(60.0, 0.0)),
+            ],
+        );
+        step(
+            &mut runtime,
+            vec![
+                touch(1, egui::TouchPhase::End, a + vec2(60.0, 0.0)),
+                press(a + vec2(60.0, 0.0), false),
+            ],
+        );
+        let depth = runtime.engine.history.depth();
+        let open = pictures(&runtime);
+        let layer_bytes = |runtime: &Runtime| {
+            let arena = &runtime.engine.world.arena;
+            let picture = arena
+                .iter()
+                .find(|(_, entity)| sue_model::picture::is_picture(entity))
+                .map(|(_, entity)| entity.id())
+                .unwrap();
+            let layer = sue_paint::doc::layers(arena, picture).last().unwrap().id;
+            sue_paint::doc::raster(arena, layer)
+                .unwrap()
+                .bytes()
+                .unwrap()
+                .to_vec()
+        };
+        let before = layer_bytes(&runtime);
+        // Now a pinch: one finger lands (and starts to paint), a second
+        // follows, both spread apart and lift.
+        let (one, two) = (middle, middle + vec2(80.0, 40.0));
+        step(
+            &mut runtime,
+            vec![
+                touch(1, egui::TouchPhase::Start, one),
+                egui::Event::PointerMoved(one),
+                press(one, true),
+            ],
+        );
+        step(&mut runtime, vec![touch(2, egui::TouchPhase::Start, two)]);
+        for spread in 1..=6 {
+            let d = vec2(12.0, 6.0) * spread as f32;
+            step(
+                &mut runtime,
+                vec![
+                    touch(1, egui::TouchPhase::Move, one - d),
+                    touch(2, egui::TouchPhase::Move, two + d),
+                    egui::Event::PointerMoved(one - d),
+                ],
+            );
+        }
+        step(
+            &mut runtime,
+            vec![
+                touch(2, egui::TouchPhase::End, two + vec2(72.0, 36.0)),
+                touch(1, egui::TouchPhase::End, one - vec2(72.0, 36.0)),
+                press(one - vec2(72.0, 36.0), false),
+            ],
+        );
+        step(&mut runtime, Vec::new());
+        assert_eq!(
+            runtime.engine.history.depth(),
+            depth,
+            "nothing undone, nothing added"
+        );
+        assert_eq!(pictures(&runtime), open, "the picture stays open");
+        assert_eq!(
+            layer_bytes(&runtime),
+            before,
+            "the pinch left no paint, the stroke stays"
+        );
+        // Both fingers landing in one frame: no stroke starts either.
+        step(
+            &mut runtime,
+            vec![
+                touch(3, egui::TouchPhase::Start, one),
+                touch(4, egui::TouchPhase::Start, two),
+                egui::Event::PointerMoved(one),
+                press(one, true),
+            ],
+        );
+        step(
+            &mut runtime,
+            vec![
+                touch(3, egui::TouchPhase::Move, one - vec2(50.0, 0.0)),
+                touch(4, egui::TouchPhase::Move, two + vec2(50.0, 0.0)),
+                egui::Event::PointerMoved(one - vec2(50.0, 0.0)),
+            ],
+        );
+        step(
+            &mut runtime,
+            vec![
+                touch(3, egui::TouchPhase::End, one - vec2(50.0, 0.0)),
+                touch(4, egui::TouchPhase::End, two + vec2(50.0, 0.0)),
+                press(one - vec2(50.0, 0.0), false),
+            ],
+        );
+        step(&mut runtime, Vec::new());
+        assert_eq!(runtime.engine.history.depth(), depth);
+        assert_eq!(layer_bytes(&runtime), before, "no stroke during a pinch");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_saves_as_a_project_or_any_picture_type() {
         let (mut runtime, root) = runtime("paint-save-as");
         let ctx = egui::Context::default();
