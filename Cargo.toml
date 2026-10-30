@@ -112,6 +112,17 @@ lto = "fat"
 codegen-units = 1
 strip = "debuginfo"
 
+# But the pixel loops run for every pixel of every stroke, and the browser
+# runs them on one thread: they are built for speed even there.
+[profile.web.package.sue-paint]
+opt-level = 3
+
+[profile.web.package.sue-model]
+opt-level = 3
+
+[profile.web.package.sue-core]
+opt-level = 3
+
 # Codecs, the GPU stack and the audio backend are far too slow unoptimized;
 # Sue's own crates stay at the default debug level for fast rebuilds.
 [profile.dev.package."*"]
