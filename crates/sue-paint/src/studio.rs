@@ -3638,6 +3638,14 @@ impl SuePaint {
                 flag(self.interface == interface["window.interface.".len()..])
             }
             "view.snap_grid" => flag(self.snap_grid),
+            "view.paper" => match self.picture().and_then(|picture| {
+                doc::layers(arena, picture)
+                    .into_iter()
+                    .find(|info| info.kind == LayerKind::Paper)
+            }) {
+                Some(paper) => flag(paper.style.visible),
+                None => ItemState::off(),
+            },
             "view.crop_frame" => flag(self.crop_frame),
             "view.bleed" => flag(self.bleed),
             "view.page_image" => flag(self.page_image),
@@ -3825,6 +3833,15 @@ impl SuePaint {
                 ))
             }
             "file.export.bmp" => self.export(cx, "bmp"),
+            "file.export.webp" => self.export(cx, "webp"),
+            "file.duplicate.clip" => {
+                if let Some(picture) = self.picture() {
+                    match crate::clip_io::encode(&cx.world.arena, picture) {
+                        Ok(bytes) => self.export_bytes(cx, bytes, "clip"),
+                        Err(error) => cx.fail(tr!("export-failed", error = error)),
+                    }
+                }
+            }
             "file.export.tif" => self.export(cx, "tif"),
             "file.export.tga" => self.export(cx, "tga"),
             "file.export.psd" => self.export_psd(cx, false),
@@ -3878,8 +3895,13 @@ impl SuePaint {
                     cx.notify(tr!("mesh-transformation-drag-points-bend-layer"));
                 }
             }
-            "edit.transform.scale" => self.start_transform(cx, false),
-            "edit.transform.free" | "edit.transform.distort" | "edit.transform.perspective" => {
+            "edit.transform.scale" | "edit.transform.scale_only" | "edit.transform.rotate" => {
+                self.start_transform(cx, false);
+            }
+            "edit.transform.free"
+            | "edit.transform.distort"
+            | "edit.transform.skew"
+            | "edit.transform.perspective" => {
                 self.start_transform(cx, true);
             }
             "file.pressure" => {
@@ -3954,6 +3976,13 @@ impl SuePaint {
                         alpha_lock,
                     );
                 });
+            }
+            "edit.outline_selection" => {
+                if self.doc().is_some_and(|doc| doc.selection.is_some()) {
+                    self.dialog = Some(Dialog::SelectBy(3, 4.0));
+                } else {
+                    cx.fail(tr!("select-area-keep-first"));
+                }
             }
             "edit.recolor" => self.filter_now(
                 cx,
@@ -4692,6 +4721,159 @@ impl SuePaint {
                     }
                 }
             }
+            "layer.ungroup" => {
+                let (Some(picture), Some(folder)) = (self.picture(), self.layer()) else {
+                    return;
+                };
+                let arena = &cx.world.arena;
+                if !doc::is_folder(arena, folder) {
+                    cx.fail(tr!("pick-a-layer-folder-first"));
+                    return;
+                }
+                // Its layers go where it was; then it goes.
+                let outer = doc::folder_of(arena, folder);
+                let mut edit = doc::Edit::new(tr!("ungroup-layer-folder"));
+                for layer in doc::layers(arena, picture) {
+                    if doc::folder_of(arena, layer.id) == Some(folder)
+                        && let Some(moved) = doc::set_folder(arena, layer.id, outer)
+                    {
+                        edit = edit.then(moved);
+                    }
+                }
+                edit = edit.then(sue_core::txn::DespawnEntity::new(folder));
+                if Self::apply(cx, edit)
+                    && let Some(doc) = self.doc_mut()
+                {
+                    doc.layer = None;
+                }
+            }
+            "layer.delete_empty" | "layer.delete_hidden" => {
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                let arena = &cx.world.arena;
+                let stack = doc::layers(arena, picture);
+                let gone: Vec<EntityId> = stack
+                    .iter()
+                    .filter(|info| {
+                        info.kind == LayerKind::Raster && !doc::is_folder(arena, info.id)
+                    })
+                    .filter(|info| {
+                        if command == "layer.delete_hidden" {
+                            !info.style.visible
+                        } else {
+                            doc::raster(arena, info.id).is_some_and(|raster| {
+                                raster.bytes().is_some_and(|bytes| {
+                                    bytes.iter().skip(3).step_by(4).all(|a| *a == 0)
+                                })
+                            })
+                        }
+                    })
+                    .map(|info| info.id)
+                    .collect();
+                if gone.is_empty() {
+                    cx.notify(tr!("no-such-layers"));
+                    return;
+                }
+                if gone.len() >= stack.len() {
+                    cx.fail(tr!("picture-keeps-least-one-layer"));
+                    return;
+                }
+                let mut edit = doc::Edit::new(if command == "layer.delete_hidden" {
+                    tr!("hidden-layers")
+                } else {
+                    tr!("empty-layers")
+                });
+                for id in gone {
+                    edit = edit.then(sue_core::txn::DespawnEntity::new(id));
+                }
+                if Self::apply(cx, edit)
+                    && let Some(doc) = self.doc_mut()
+                {
+                    doc.layer = None;
+                }
+            }
+            "layer.hide_drafts" => {
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                let mut edit = doc::Edit::new(tr!("hide-all-visible-draft-layers"));
+                for info in doc::layers(&cx.world.arena, picture) {
+                    if info.style.draft && info.style.visible {
+                        edit = edit.then(SetProperty::new(info.id, picture::VISIBLE, false));
+                    }
+                }
+                if !edit.is_empty() {
+                    Self::apply(cx, edit);
+                }
+            }
+            "layer.rename" => {
+                if let Some(info) = self.layer_info(&cx.world.arena) {
+                    self.panels.layer = true;
+                    self.layer_tab = 0;
+                    self.renaming = Some((info.id, info.name));
+                }
+            }
+            "layer.merge_visible_here" => {
+                // Merge Visible Layers: the visible layers become one, the
+                // hidden ones stay.
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                let arena = &cx.world.arena;
+                match doc::merge_visible(arena, picture, false) {
+                    Ok((merged, id)) => {
+                        let mut edit = doc::Edit::new(tr!("merge-visible-layers")).then(merged);
+                        for info in doc::layers(arena, picture) {
+                            if info.style.visible && !doc::is_folder(arena, info.id) {
+                                edit = edit.then(sue_core::txn::DespawnEntity::new(info.id));
+                            }
+                        }
+                        if Self::apply(cx, edit)
+                            && let Some(doc) = self.doc_mut()
+                        {
+                            doc.layer = Some(id);
+                        }
+                    }
+                    Err(error) => cx.fail(error),
+                }
+            }
+            "view.rotate_90" | "view.rotate_180" | "view.rotate_270" => {
+                let angle = match command {
+                    "view.rotate_90" => 90.0,
+                    "view.rotate_180" => 180.0,
+                    _ => 270.0,
+                };
+                self.with_view(cx, |view, rect, size| view.set_rotation(rect, size, angle));
+            }
+            "view.reset_turn" | "view.reset_display" => {
+                let fit = command == "view.reset_display";
+                self.with_view(cx, |view, rect, size| {
+                    view.set_rotation(rect, size, 0.0);
+                    if view.flip_h {
+                        view.flip(rect, size, true);
+                    }
+                    if view.flip_v {
+                        view.flip(rect, size, false);
+                    }
+                    if fit {
+                        view.fit(rect, size);
+                    }
+                });
+            }
+            "view.paper" => {
+                let paper = self.picture().and_then(|picture| {
+                    doc::layers(&cx.world.arena, picture)
+                        .into_iter()
+                        .find(|info| info.kind == LayerKind::Paper)
+                });
+                if let Some(paper) = paper {
+                    Self::apply(
+                        cx,
+                        doc::set(paper.id, picture::VISIBLE, !paper.style.visible),
+                    );
+                }
+            }
             "layer.transfer_down" => {
                 if let (Some(picture), Some(layer)) = (self.picture(), self.layer()) {
                     match doc::transfer_down(&cx.world.arena, picture, layer) {
@@ -5231,6 +5413,35 @@ impl SuePaint {
         }
     }
 
+    /// Edit, Outline Selection: a line `width` pixels wide along the
+    /// selection's edge, half inside and half outside, in the drawing
+    /// color on the current layer.
+    pub(crate) fn outline_selection(&mut self, cx: &mut AppletContext<'_>, width: f32) {
+        let Some(selection) = self.doc().and_then(|doc| doc.selection.clone()) else {
+            return;
+        };
+        let half = (width / 2.0).max(0.5);
+        let outer = selection.expanded(half);
+        let inner = selection.shrunk(half);
+        let size = selection.size();
+        let mask: Vec<u8> = outer
+            .mask()
+            .iter()
+            .zip(inner.mask())
+            .map(|(out, inside)| out.saturating_sub(*inside))
+            .collect();
+        let rgb = color::unit(self.drawing_color());
+        let alpha_lock = self
+            .layer_info(&cx.world.arena)
+            .is_some_and(|info| info.alpha_locked);
+        let offset = self
+            .layer_info(&cx.world.arena)
+            .map_or([0, 0], |info| info.style.offset);
+        self.rewrite(cx, &tr!("outline-selection"), |pixels, w, h| {
+            crate::fill::paint_mask(pixels, [w, h], offset, &mask, size, rgb, 1.0, alpha_lock);
+        });
+    }
+
     /// Clears the selected pixels (or, `outside`, the unselected ones).
     fn run_clear(&mut self, cx: &mut AppletContext<'_>, outside: bool, label: &str) {
         let Some(mut selection) = self.selection_or_all(&cx.world.arena) else {
@@ -5609,7 +5820,8 @@ fn shortcuts() -> Vec<(Modifiers, Key, &'static str)> {
         // Layer.
         (command | alt, Key::G, "layer.toggle.clip"),
         (command, Key::G, "layer.folder_insert"),
-        (shifted, Key::E, "layer.merge_visible"),
+        (shifted, Key::E, "layer.merge_visible_here"),
+        (shifted, Key::G, "layer.ungroup"),
         (shift | alt, Key::E, "layer.merge_selected"),
         (command, Key::E, "layer.merge_down"),
         (alt, Key::CloseBracket, "layer.select_above"),

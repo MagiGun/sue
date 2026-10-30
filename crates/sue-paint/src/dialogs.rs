@@ -552,6 +552,7 @@ impl SuePaint {
                 match kind {
                     0 => tr!("expand-selected-area-2"),
                     1 => tr!("shrink-selected-area-2"),
+                    3 => tr!("outline-selection"),
                     _ => tr!("blur-border"),
                 },
                 vec2(320.0, 140.0),
@@ -1217,6 +1218,7 @@ impl SuePaint {
             (Dialog::Perspective(count), Outcome::Ok) => self.make_perspective(cx, count),
             (Dialog::Timelapse(export), Outcome::Ok) => self.ask_export_timelapse(cx, export),
             (Dialog::Material(name), Outcome::Ok) => self.register_material(cx, &name),
+            (Dialog::SelectBy(3, width), Outcome::Ok) => self.outline_selection(cx, width),
             (Dialog::SelectBy(kind, amount), Outcome::Ok) => {
                 if let Some(doc) = self.doc_mut()
                     && let Some(selection) = doc.selection.clone()
