@@ -58,6 +58,7 @@ mod lettering;
 pub mod manga;
 pub mod materials;
 mod menus;
+mod mobile;
 mod pages;
 mod panels;
 mod phone;
@@ -70,6 +71,7 @@ mod start;
 pub mod story;
 mod studio;
 mod subview;
+pub mod templates;
 pub mod three;
 pub mod timelapse;
 pub mod tools;
@@ -217,6 +219,16 @@ mod language_tests {
             crate::materials::MaterialKinds::builtin()
                 .iter()
                 .map(|kind| kind.name.clone()),
+        );
+        let templates = crate::templates::CanvasTemplates::builtin();
+        names.extend(templates.categories().iter().map(|(_, name)| name.clone()));
+        names.extend(
+            templates
+                .categories()
+                .iter()
+                .flat_map(|(id, _)| templates.of(id))
+                .map(|template| template.name.clone())
+                .filter(|name| !name.is_empty()),
         );
         let tables: [&[&str]; 7] = [
             &crate::anim::Onion::MODES,

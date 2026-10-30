@@ -95,6 +95,10 @@ pub enum Glyph {
     Mail,
     /// A grid of dots: everything.
     All,
+    /// An arrow to the left: back.
+    Back,
+    /// A strip of film: a movie.
+    Film,
 }
 
 fn line(painter: &Painter, points: &[Pos2], stroke: Stroke) {
@@ -571,6 +575,28 @@ pub fn glyph(painter: &Painter, rect: Rect, glyph: Glyph, color: Color32) {
                 &[at(-0.65, -0.45), at(0.0, 0.1), at(0.65, -0.45)],
                 stroke,
             );
+        }
+        Glyph::Back => {
+            line(painter, &[at(0.6, 0.0), at(-0.55, 0.0)], stroke);
+            line(
+                painter,
+                &[at(-0.1, -0.45), at(-0.55, 0.0), at(-0.1, 0.45)],
+                stroke,
+            );
+        }
+        Glyph::Film => {
+            painter.rect_stroke(
+                Rect::from_min_max(at(-0.55, -0.65), at(0.55, 0.65)),
+                0.0,
+                stroke,
+                StrokeKind::Middle,
+            );
+            line(painter, &[at(-0.3, -0.65), at(-0.3, 0.65)], stroke);
+            line(painter, &[at(0.3, -0.65), at(0.3, 0.65)], stroke);
+            for y in [-0.4, 0.0, 0.4] {
+                painter.circle_filled(at(-0.43, y), 0.05 * s, color);
+                painter.circle_filled(at(0.43, y), 0.05 * s, color);
+            }
         }
         Glyph::All => {
             for row in 0..3 {
@@ -1686,6 +1712,355 @@ pub fn popup(
     outcome
 }
 
+/// A sheet over the whole screen (phones and tablets), with `title` in the
+/// middle of its top, an X at the right, and `body`'s rows under them.
+/// Escape closes it too.
+pub fn sheet(
+    ctx: &egui::Context,
+    id: &str,
+    title: &str,
+    theme: &Theme,
+    body: impl FnOnce(&mut Ui),
+) -> PopupOutcome {
+    let rect = ctx.content_rect();
+    let mut outcome = PopupOutcome::Open;
+    egui::Area::new(Id::unique(("sue-start-sheet", id)))
+        .fade_in(false)
+        .order(Order::Foreground)
+        .fixed_pos(rect.min)
+        .show(ctx, |ui| {
+            ui.set_min_size(rect.size());
+            ui.set_max_size(rect.size());
+            // The sheet takes every touch, so nothing under it reacts.
+            let _ = ui.interact(rect, ui.scope_id().with("cover"), Sense::click_and_drag());
+            ui.painter().rect_filled(rect, 0.0, theme.panel);
+            ui.painter().text(
+                pos2(rect.center().x, rect.top() + 34.0),
+                Align2::CENTER_CENTER,
+                title,
+                theme.font(theme.heading_size),
+                theme.text,
+            );
+            let close = Rect::from_center_size(
+                pos2(rect.right() - 32.0, rect.top() + 34.0),
+                Vec2::splat(44.0),
+            );
+            if icon_button(ui, close, Glyph::Close, "", false, theme).clicked() {
+                outcome = PopupOutcome::Closed;
+            }
+            let side = ((rect.width() - 560.0) / 2.0).max(16.0);
+            let inner = Rect::from_min_max(
+                pos2(rect.left() + side, rect.top() + 68.0),
+                pos2(rect.right() - side, rect.bottom() - 12.0),
+            );
+            let mut child = ui.new_child(
+                UiBuilder::new()
+                    .max_rect(inner)
+                    .layout(egui::Layout::top_down(egui::Align::Min)),
+            );
+            child.set_clip_rect(inner);
+            egui::ScrollArea::vertical()
+                .id_salt(("sue-start-sheet-body", id))
+                .auto_shrink([false, false])
+                .show(&mut child, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    ui.set_width(inner.width());
+                    body(ui);
+                });
+        });
+    if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        outcome = PopupOutcome::Closed;
+    }
+    outcome
+}
+
+/// A bar of large buttons along the bottom of a phone's page, filling
+/// `rect`: each with its glyph over its label, a round one raised in the
+/// middle. Returns the button tapped.
+pub fn tab_bar(
+    ui: &mut Ui,
+    rect: Rect,
+    items: &[RailItem],
+    selected: Option<usize>,
+    theme: &Theme,
+) -> Option<usize> {
+    let painter = ui.painter().clone();
+    painter.rect_filled(rect, 0.0, theme.panel);
+    painter.line_segment([rect.left_top(), rect.right_top()], theme.hairline());
+    let width = rect.width() / items.len().max(1) as f32;
+    let mut tapped = None;
+    for (index, item) in items.iter().enumerate() {
+        let cell = Rect::from_min_size(
+            pos2(rect.left() + index as f32 * width, rect.top()),
+            vec2(width, rect.height()),
+        );
+        let on = selected == Some(index);
+        if item.round {
+            let center = pos2(cell.center().x, rect.top() + 6.0);
+            let hit = Rect::from_center_size(center + vec2(0.0, 8.0), Vec2::splat(72.0));
+            let response = ui.interact(
+                hit,
+                ui.scope_id().with(("sue-tab-bar", index)),
+                Sense::click(),
+            );
+            painter.circle_filled(center, 33.0, theme.panel);
+            painter.circle_filled(
+                center,
+                29.0,
+                if response.hovered() {
+                    theme.text
+                } else {
+                    theme.border_active
+                },
+            );
+            glyph(
+                &painter,
+                Rect::from_center_size(center, Vec2::splat(28.0)),
+                item.glyph,
+                theme.void,
+            );
+            painter.text(
+                pos2(cell.center().x, rect.bottom() - 10.0),
+                Align2::CENTER_BOTTOM,
+                &item.label,
+                theme.font(theme.small_size),
+                theme.text,
+            );
+            if response.clicked() {
+                tapped = Some(index);
+            }
+            continue;
+        }
+        let response = ui.interact(
+            cell,
+            ui.scope_id().with(("sue-tab-bar", index)),
+            Sense::click(),
+        );
+        let ink = if on { theme.text } else { theme.muted };
+        if on {
+            painter.rect_filled(
+                Rect::from_min_size(
+                    cell.left_top() + vec2(cell.width() * 0.3, 0.0),
+                    vec2(cell.width() * 0.4, 3.0),
+                ),
+                0.0,
+                theme.border_active,
+            );
+        }
+        glyph(
+            &painter,
+            Rect::from_center_size(pos2(cell.center().x, cell.top() + 22.0), Vec2::splat(24.0)),
+            item.glyph,
+            ink,
+        );
+        painter.text(
+            pos2(cell.center().x, rect.bottom() - 10.0),
+            Align2::CENTER_BOTTOM,
+            &item.label,
+            theme.font(theme.small_size),
+            ink,
+        );
+        if response.clicked() {
+            tapped = Some(index);
+        }
+    }
+    tapped
+}
+
+/// A large row `size` big: a glyph and a label, for the first things a
+/// page offers (Create new file).
+pub fn big_row(ui: &mut Ui, size: Vec2, picture: Glyph, label: &str, theme: &Theme) -> Response {
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        0.0,
+        if response.hovered() {
+            theme.hover
+        } else {
+            theme.pill
+        },
+        theme.hairline(),
+        StrokeKind::Inside,
+    );
+    let side = (rect.height() * 0.42).clamp(22.0, 44.0);
+    let at = pos2(rect.left() + 24.0 + side / 2.0, rect.center().y);
+    glyph(
+        painter,
+        Rect::from_center_size(at, Vec2::splat(side)),
+        picture,
+        theme.text,
+    );
+    painter.text(
+        pos2(at.x + side / 2.0 + 20.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        theme.font(theme.ui_size * 1.25),
+        theme.text,
+    );
+    response
+}
+
+/// A row of tabs `width` wide, the chosen one underlined. Returns the tab
+/// tapped.
+pub fn tabs(
+    ui: &mut Ui,
+    width: f32,
+    labels: &[String],
+    chosen: usize,
+    theme: &Theme,
+) -> Option<usize> {
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 40.0), Sense::hover());
+    let painter = ui.painter().clone();
+    painter.line_segment([rect.left_bottom(), rect.right_bottom()], theme.hairline());
+    let each = rect.width() / labels.len().max(1) as f32;
+    let mut tapped = None;
+    for (index, label) in labels.iter().enumerate() {
+        let cell = Rect::from_min_size(
+            pos2(rect.left() + index as f32 * each, rect.top()),
+            vec2(each, rect.height()),
+        );
+        let response = ui.interact(
+            cell,
+            ui.scope_id().with(("sue-tabs", index)),
+            Sense::click(),
+        );
+        let on = index == chosen;
+        painter.text(
+            cell.center(),
+            Align2::CENTER_CENTER,
+            label,
+            theme.font(theme.ui_size),
+            if on { theme.text } else { theme.muted },
+        );
+        if on {
+            painter.rect_filled(
+                Rect::from_min_max(
+                    pos2(cell.left() + 6.0, cell.bottom() - 2.0),
+                    pos2(cell.right() - 6.0, cell.bottom()),
+                ),
+                0.0,
+                theme.border_active,
+            );
+        }
+        if response.clicked() {
+            tapped = Some(index);
+        }
+    }
+    tapped
+}
+
+/// What a tile shows above its name.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Preview {
+    /// A glyph.
+    Glyph(Glyph),
+    /// A sheet of paper of this width to height.
+    Paper(f32),
+}
+
+/// A template tile `side` wide: its preview in a square, then its name and
+/// a small line under it.
+pub fn tile(
+    ui: &mut Ui,
+    side: f32,
+    preview: Preview,
+    name: &str,
+    detail: &str,
+    theme: &Theme,
+) -> Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(side, side + 44.0), Sense::click());
+    let square = Rect::from_min_size(rect.min, Vec2::splat(side));
+    let painter = ui.painter();
+    painter.rect(
+        square,
+        0.0,
+        if response.hovered() {
+            theme.hover
+        } else {
+            theme.pill
+        },
+        if response.hovered() {
+            theme.hairline_active()
+        } else {
+            theme.hairline()
+        },
+        StrokeKind::Inside,
+    );
+    match preview {
+        Preview::Glyph(picture) => glyph(
+            painter,
+            Rect::from_center_size(square.center(), Vec2::splat(side * 0.4)),
+            picture,
+            theme.text,
+        ),
+        Preview::Paper(aspect) => {
+            let room = side * 0.72;
+            let aspect = aspect.clamp(0.02, 50.0);
+            let size = if aspect >= 1.0 {
+                vec2(room, room / aspect)
+            } else {
+                vec2((room * aspect).max(6.0), room)
+            };
+            let paper = Rect::from_center_size(square.center(), size);
+            painter.rect_filled(
+                paper.translate(vec2(3.0, 3.0)),
+                0.0,
+                theme.shadow.gamma_multiply(0.5),
+            );
+            painter.rect_filled(paper, 0.0, Color32::WHITE);
+        }
+    }
+    painter.text(
+        pos2(rect.center().x, square.bottom() + 12.0),
+        Align2::CENTER_CENTER,
+        name,
+        theme.font(theme.ui_size),
+        theme.text,
+    );
+    painter.text(
+        pos2(rect.center().x, square.bottom() + 30.0),
+        Align2::CENTER_CENTER,
+        detail,
+        theme.font(theme.small_size),
+        theme.muted,
+    );
+    response
+}
+
+/// An outlined button with a label (and a glyph before it, if any),
+/// sized to its text.
+pub fn outline_button(ui: &mut Ui, picture: Option<Glyph>, label: &str, theme: &Theme) -> Response {
+    let galley =
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), theme.font(theme.ui_size), theme.text);
+    let lead = if picture.is_some() { 28.0 } else { 0.0 };
+    let size = vec2(galley.size().x + 28.0 + lead, 36.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let painter = ui.painter();
+    if response.hovered() {
+        painter.rect_filled(rect, 0.0, theme.hover);
+    }
+    painter.rect_stroke(rect, 0.0, Stroke::new(1.5, theme.text), StrokeKind::Inside);
+    if let Some(picture) = picture {
+        glyph(
+            painter,
+            Rect::from_center_size(pos2(rect.left() + 24.0, rect.center().y), Vec2::splat(16.0)),
+            picture,
+            theme.text,
+        );
+    }
+    painter.galley(
+        pos2(
+            rect.left() + 14.0 + lead,
+            rect.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        theme.text,
+    );
+    response
+}
+
 /// A gap between groups in a popup.
 pub fn gap(ui: &mut Ui) {
     ui.add_space(18.0);
@@ -1695,7 +2070,9 @@ pub fn gap(ui: &mut Ui) {
 mod tests {
     use super::*;
 
-    const EVERY: [Glyph; 37] = [
+    const EVERY: [Glyph; 39] = [
+        Glyph::Back,
+        Glyph::Film,
         Glyph::Draw,
         Glyph::Projects,
         Glyph::Materials,

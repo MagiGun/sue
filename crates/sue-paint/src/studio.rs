@@ -450,8 +450,10 @@ pub struct SuePaint {
     pub(crate) material_thumbs: HashMap<u64, Vec<u8>>,
     /// The kinds of material, registered at start.
     pub(crate) material_kinds: crate::materials::MaterialKinds,
-    /// The start page, shown on the desktop while no canvas is open.
+    /// The start page, shown while no canvas is open.
     pub(crate) start: crate::start::StartPage,
+    /// The New canvas page's templates, registered at start.
+    pub(crate) canvas_templates: crate::templates::CanvasTemplates,
     /// Each recording picture's compositor version at its last timelapse
     /// frame, the version it is waiting to settle on, and its next frame
     /// number.
@@ -579,6 +581,7 @@ impl Default for SuePaint {
             material_thumbs: HashMap::new(),
             material_kinds: crate::materials::MaterialKinds::builtin(),
             start: crate::start::StartPage::default(),
+            canvas_templates: crate::templates::CanvasTemplates::builtin(),
             timelapse: HashMap::new(),
             timelapse_export: crate::timelapse::Export::default(),
             transform: None,
@@ -2605,7 +2608,7 @@ impl SuePaint {
 
     /// Asks for a picture file and opens it as a new canvas, or as a new
     /// layer of the current one.
-    fn pick_image(&mut self, cx: &mut AppletContext<'_>, as_layer: bool) {
+    pub(crate) fn pick_image(&mut self, cx: &mut AppletContext<'_>, as_layer: bool) {
         let start = self
             .last_dir
             .clone()
@@ -2762,7 +2765,7 @@ impl SuePaint {
     /// File, Import, Vector, Movie or Pattern from Image: the file at
     /// `path` as a vector layer, as cels of a new animation folder, or
     /// tiled over a new layer.
-    fn import_file(&mut self, cx: &mut AppletContext<'_>, purpose: &str, path: &Path) {
+    pub(crate) fn import_file(&mut self, cx: &mut AppletContext<'_>, purpose: &str, path: &Path) {
         let Some(picture) = self.picture() else {
             return;
         };
@@ -5216,6 +5219,15 @@ impl SuePaint {
         if self.laid_for != Some(form) {
             self.lay_out_for(form);
         }
+        // Phones and tablets have their own start page.
+        if form != sue_platform::FormFactor::Desktop && self.start.shows(self.docs.is_empty()) {
+            self.mobile_start_ui(ui, full, cx, &theme);
+            if self.ready {
+                self.dialog_ui(&ctx, cx, &theme);
+            }
+            return;
+        }
+        self.start.full = false;
         if form == sue_platform::FormFactor::Mobile {
             self.phone_frame(ui, full, cx, &theme);
             if self.ready {
@@ -5613,6 +5625,11 @@ impl SueApplet for SuePaint {
         self.follow_language(cx);
         let theme = cx.theme.clone();
         let rect = ui.max_rect();
+        let no_canvas = self.docs.is_empty();
+        if cx.view.form_factor != sue_platform::FormFactor::Desktop && self.start.shows(no_canvas) {
+            self.mobile_header(ui, rect, &theme);
+            return;
+        }
         if cx.view.form_factor == sue_platform::FormFactor::Mobile {
             // A phone's row of large buttons: the menus as a sheet, undo,
             // redo and the palettes.

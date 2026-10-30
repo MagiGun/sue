@@ -23,7 +23,7 @@ use crate::composite::{RenderOptions, render};
 pub type Edit = Batch<Arena>;
 
 /// The largest side of a new picture, in pixels.
-pub const MAX_SIDE: u32 = 10_000;
+pub const MAX_SIDE: u32 = 20_000;
 
 /// What a new picture looks like.
 #[derive(Clone, Debug, PartialEq)]
