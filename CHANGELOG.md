@@ -11,8 +11,16 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Settings can go back to how Sue comes: a Reset beside any changed
+  setting, Reset This Page, and Reset All Settings.
+- The Image Viewer has Undo and Redo buttons.
+
 ### Changed
 
+- The Hub's pin is a real pushpin, and pointing at it lights up the pin,
+  not its whole box.
 - Slider handles are thin rectangles, a little shorter than the circles
   they were: `---[]---`.
 - Huge brushes and erasers in Sue Paint keep up: painting with a 2000
@@ -23,6 +31,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Pinching to zoom in Sue Paint no longer undoes your work or closes the
+  picture: the touch the pinch began with is taken back, nothing else.
+- Pen strokes on phones and tablets no longer end in a big blob: the
+  stroke's last point keeps the pen's last pressure.
 - Pen pressure works with drawing tablets whose driver has Windows Ink
   turned off (WinTab, common with Huion and XP-Pen), and with pens in the
   browser version. Sue Paint starts with a slightly soft pressure curve,
