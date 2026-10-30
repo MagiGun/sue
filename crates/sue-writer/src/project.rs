@@ -30,8 +30,15 @@ pub const HISTORY: &str = "sue_writer.history";
 /// `true` for a single document shown without its binder, as a word
 /// processor shows a file.
 pub const SIMPLE: &str = "sue_writer.simple";
-/// A running head on printed pages (`Text`).
+/// The running header on printed pages (`Text`: left, middle and right
+/// parts parted by tabs, with fields such as `{page}`; see
+/// [`sue_model::Running`]).
 pub const HEADER: &str = "sue_writer.header";
+/// The running footer, as the header (`Text`; the page number in the
+/// middle without it).
+pub const FOOTER: &str = "sue_writer.footer";
+/// `true`: no header or footer on the first page (`Bool`).
+pub const DIFFERENT_FIRST: &str = "sue_writer.different_first";
 /// The relation from a document to its snapshots.
 pub const SNAPSHOT: &str = "sue_writer.snapshot";
 /// When a snapshot was taken, as text (`Text`).
@@ -56,6 +63,71 @@ pub const LABELS: &[(&str, [u8; 3])] = &[
     ("Location", [0x40, 0xa8, 0xb0]),
     ("Research", [0x99, 0x99, 0x99]),
 ];
+
+/// What people read for status `name`: one of [`STATUSES`] in the
+/// language in use, any other as it is (statuses are kept in English).
+#[must_use]
+pub fn status_text(name: &str) -> String {
+    match name {
+        "To Do" => tr!("status-to-do"),
+        "First Draft" => tr!("status-first-draft"),
+        "Revised Draft" => tr!("status-revised-draft"),
+        "Final Draft" => tr!("status-final-draft"),
+        "Done" => tr!("status-done"),
+        other => other.to_owned(),
+    }
+}
+
+/// What people read for label `name`: one of [`LABELS`] in the language
+/// in use, any other as it is (labels are kept in English).
+#[must_use]
+pub fn label_text(name: &str) -> String {
+    match name {
+        "Concept" => tr!("label-concept"),
+        "Chapter" => tr!("label-chapter"),
+        "Scene" => tr!("label-scene"),
+        "Idea" => tr!("label-idea"),
+        "Character" => tr!("label-character"),
+        "Location" => tr!("label-location"),
+        "Research" => tr!("label-research"),
+        other => other.to_owned(),
+    }
+}
+
+/// The name of template `key` (one of [`TEMPLATES`]) in the language in
+/// use.
+#[must_use]
+pub fn template_name(key: &str) -> String {
+    match key {
+        "blank" => tr!("template-blank"),
+        "novel" => tr!("template-novel"),
+        "short-story" => tr!("template-short-story"),
+        "screenplay" => tr!("template-screenplay"),
+        "nonfiction" => tr!("template-nonfiction"),
+        "essay" => tr!("template-essay"),
+        "poetry" => tr!("template-poetry"),
+        "letter" => tr!("template-letter"),
+        "report" => tr!("template-report"),
+        other => other.to_owned(),
+    }
+}
+
+/// What template `key` is for, in the language in use.
+#[must_use]
+pub fn template_about(key: &str) -> String {
+    match key {
+        "blank" => tr!("template-blank-about"),
+        "novel" => tr!("template-novel-about"),
+        "short-story" => tr!("template-short-story-about"),
+        "screenplay" => tr!("template-screenplay-about"),
+        "nonfiction" => tr!("template-nonfiction-about"),
+        "essay" => tr!("template-essay-about"),
+        "poetry" => tr!("template-poetry-about"),
+        "letter" => tr!("template-letter-about"),
+        "report" => tr!("template-report-about"),
+        _ => String::new(),
+    }
+}
 
 /// The color of label `name`.
 #[must_use]
@@ -110,32 +182,33 @@ pub const TEMPLATES: &[(&str, &str, &str)] = &[
 /// A document to make: its name, its text, and the style of each of its
 /// paragraphs.
 struct Sheet {
-    name: &'static str,
+    name: String,
     paragraphs: Vec<(&'static str, String)>,
-    synopsis: &'static str,
+    synopsis: String,
 }
 
 impl Sheet {
-    fn new(name: &'static str, paragraphs: &[(&'static str, &str)]) -> Self {
+    fn new(name: &str, paragraphs: &[(&'static str, &str)]) -> Self {
         Self {
-            name,
+            name: name.to_owned(),
             paragraphs: paragraphs
                 .iter()
                 .map(|(style, text)| (*style, (*text).to_owned()))
                 .collect(),
-            synopsis: "",
+            synopsis: String::new(),
         }
     }
 
-    fn about(mut self, synopsis: &'static str) -> Self {
-        self.synopsis = synopsis;
+    fn about(mut self, synopsis: &str) -> Self {
+        synopsis.clone_into(&mut self.synopsis);
         self
     }
 }
 
-/// Something in a new binder.
+/// Something in a new binder: a folder (its name, synopsis and items) or
+/// a document. Their names are made in the language in use.
 enum Item {
-    Folder(&'static str, &'static str, Vec<Item>),
+    Folder(String, &'static str, Vec<Item>),
     Text(Sheet),
 }
 
@@ -178,37 +251,37 @@ fn structure(template: &str) -> (&'static str, Vec<Item>, Vec<Item>) {
     let character = || {
         Item::Text(
             Sheet::new(
-                "Character Sketch",
+                &tr!("character-sketch"),
                 &[
-                    ("heading2", "Name"),
+                    ("heading2", &tr!("name")),
                     body(""),
-                    ("heading3", "Role in the story"),
+                    ("heading3", &tr!("role-in-the-story")),
                     body(""),
-                    ("heading3", "What they want"),
+                    ("heading3", &tr!("what-they-want")),
                     body(""),
-                    ("heading3", "What stands in the way"),
+                    ("heading3", &tr!("what-stands-in-the-way")),
                     body(""),
-                    ("heading3", "How they change"),
+                    ("heading3", &tr!("how-they-change")),
                     body(""),
                 ],
             )
-            .about("Copy this sheet for each character."),
+            .about(&tr!("copy-sheet-each-character")),
         )
     };
     let place = || {
         Item::Text(
             Sheet::new(
-                "Setting Sketch",
+                &tr!("setting-sketch"),
                 &[
-                    ("heading2", "Place"),
+                    ("heading2", &tr!("place")),
                     body(""),
-                    ("heading3", "Sights, sounds and smells"),
+                    ("heading3", &tr!("sights-sounds-and-smells")),
                     body(""),
-                    ("heading3", "Why it matters"),
+                    ("heading3", &tr!("why-it-matters")),
                     body(""),
                 ],
             )
-            .about("Copy this sheet for each place."),
+            .about(&tr!("copy-sheet-each-place")),
         )
     };
     match template {
@@ -216,116 +289,117 @@ fn structure(template: &str) -> (&'static str, Vec<Item>, Vec<Item>) {
             "manuscript",
             vec![
                 Item::Folder(
-                    "Chapter 1",
+                    tr!("chapter-1"),
                     "",
                     vec![Item::Text(
-                        Sheet::new("Scene 1", &[body("")]).about("What happens, in a line or two."),
+                        Sheet::new(&tr!("scene-1"), &[body("")])
+                            .about(&tr!("what-happens-line-two")),
                     )],
                 ),
                 Item::Folder(
-                    "Chapter 2",
+                    tr!("chapter-2"),
                     "",
-                    vec![Item::Text(Sheet::new("Scene 1", &[body("")]))],
+                    vec![Item::Text(Sheet::new(&tr!("scene-1"), &[body("")]))],
                 ),
             ],
             vec![
-                Item::Folder("Characters", "", vec![character()]),
-                Item::Folder("Places", "", vec![place()]),
-                Item::Text(Sheet::new("Notes", &[body("")])),
+                Item::Folder(tr!("characters"), "", vec![character()]),
+                Item::Folder(tr!("places"), "", vec![place()]),
+                Item::Text(Sheet::new(&tr!("notes"), &[body("")])),
             ],
         ),
         "short-story" => (
             "manuscript",
-            vec![Item::Text(Sheet::new("Story", &[body("")]))],
+            vec![Item::Text(Sheet::new(&tr!("story"), &[body("")]))],
             vec![
-                Item::Folder("Characters", "", vec![character()]),
-                Item::Text(Sheet::new("Notes", &[body("")])),
+                Item::Folder(tr!("characters"), "", vec![character()]),
+                Item::Text(Sheet::new(&tr!("notes"), &[body("")])),
             ],
         ),
         "screenplay" => (
             "screenplay",
             vec![
                 Item::Folder(
-                    "Act One",
+                    tr!("act-one"),
                     "",
                     vec![Item::Text(Sheet::new(
-                        "Scene 1",
-                        &[("scene", "INT. LOCATION - DAY"), body("Action.")],
+                        &tr!("scene-1"),
+                        &[("scene", &tr!("int-location-day")), body(&tr!("action"))],
                     ))],
                 ),
-                Item::Folder("Act Two", "", vec![]),
-                Item::Folder("Act Three", "", vec![]),
+                Item::Folder(tr!("act-two"), "", vec![]),
+                Item::Folder(tr!("act-three"), "", vec![]),
             ],
             vec![
-                Item::Folder("Characters", "", vec![character()]),
-                Item::Text(Sheet::new("Notes", &[body("")])),
+                Item::Folder(tr!("characters"), "", vec![character()]),
+                Item::Text(Sheet::new(&tr!("notes"), &[body("")])),
             ],
         ),
         "nonfiction" => (
             "standard",
             vec![
                 Item::Text(Sheet::new(
-                    "Introduction",
-                    &[("heading1", "Introduction"), body("")],
+                    &tr!("introduction"),
+                    &[("heading1", &tr!("introduction")), body("")],
                 )),
                 Item::Folder(
-                    "Part One",
+                    tr!("part-one"),
                     "",
                     vec![Item::Text(Sheet::new(
-                        "Chapter 1",
-                        &[("heading1", "Chapter 1"), body("")],
+                        &tr!("chapter-1"),
+                        &[("heading1", &tr!("chapter-1")), body("")],
                     ))],
                 ),
                 Item::Text(Sheet::new(
-                    "Conclusion",
-                    &[("heading1", "Conclusion"), body("")],
+                    &tr!("conclusion"),
+                    &[("heading1", &tr!("conclusion")), body("")],
                 )),
             ],
             vec![
-                Item::Text(Sheet::new("Sources", &[body("")])),
-                Item::Text(Sheet::new("Notes", &[body("")])),
+                Item::Text(Sheet::new(&tr!("sources"), &[body("")])),
+                Item::Text(Sheet::new(&tr!("notes"), &[body("")])),
             ],
         ),
         "essay" => (
             "standard",
             vec![Item::Text(Sheet::new(
-                "Paper",
+                &tr!("paper"),
                 &[
-                    ("title", "Title"),
-                    ("subtitle", "Author"),
-                    ("heading1", "Introduction"),
+                    ("title", &tr!("title")),
+                    ("subtitle", &tr!("author")),
+                    ("heading1", &tr!("introduction")),
                     body(""),
-                    ("heading1", "Discussion"),
+                    ("heading1", &tr!("discussion")),
                     body(""),
-                    ("heading1", "Conclusion"),
+                    ("heading1", &tr!("conclusion")),
                     body(""),
                 ],
             ))],
-            vec![Item::Text(Sheet::new("Sources", &[body("")]))],
+            vec![Item::Text(Sheet::new(&tr!("sources"), &[body("")]))],
         ),
         "poetry" => (
             "standard",
             vec![Item::Text(Sheet::new(
-                "Untitled Poem",
-                &[("heading1", "Untitled"), body("")],
+                &tr!("untitled-poem"),
+                &[("heading1", &tr!("untitled")), body("")],
             ))],
-            vec![Item::Text(Sheet::new("Ideas", &[body("")]))],
+            vec![Item::Text(Sheet::new(&tr!("ideas"), &[body("")]))],
         ),
         "letter" => (
             "standard",
             vec![Item::Text(Sheet::new(
-                "Letter",
+                &tr!("letter"),
                 &[
-                    body("Your Name"),
-                    body("Your Address"),
+                    body(&tr!("your-name")),
+                    body(&tr!("your-address")),
                     body(""),
-                    body("Date"),
+                    body(&tr!("date")),
                     body(""),
-                    body("Dear ,"),
+                    body(&tr!("dear")),
                     body(""),
-                    body("Kind regards,"),
+                    body(&tr!("kind-regards")),
                     body(""),
-                    body("Your Name"),
+                    body(&tr!("your-name")),
                 ],
             ))],
             vec![],
@@ -333,16 +407,16 @@ fn structure(template: &str) -> (&'static str, Vec<Item>, Vec<Item>) {
         "report" => (
             "standard",
             vec![Item::Text(Sheet::new(
-                "Report",
+                &tr!("report"),
                 &[
-                    ("title", "Title"),
-                    ("heading1", "Summary"),
+                    ("title", &tr!("title")),
+                    ("heading1", &tr!("summary")),
                     body(""),
-                    ("heading1", "Background"),
+                    ("heading1", &tr!("background")),
                     body(""),
-                    ("heading1", "Findings"),
+                    ("heading1", &tr!("findings")),
                     body(""),
-                    ("heading1", "Next Steps"),
+                    ("heading1", &tr!("next-steps")),
                     body(""),
                 ],
             ))],
@@ -350,7 +424,7 @@ fn structure(template: &str) -> (&'static str, Vec<Item>, Vec<Item>) {
         ),
         _ => (
             "standard",
-            vec![Item::Text(Sheet::new("Document", &[body("")]))],
+            vec![Item::Text(Sheet::new(&tr!("document"), &[body("")]))],
             vec![],
         ),
     }
@@ -365,7 +439,7 @@ pub fn create(key: &str, title: &str, fonts: &sue_type::Fonts) -> (Batch<Arena>,
     let mut root = Entity::empty(title, class::MANUSCRIPT)
         .with_property(manuscript::TITLE, title)
         .with_property(SHEET, sheet)
-        .with_property(PAGE, "Letter")
+        .with_property(PAGE, tr!("letter"))
         .with_property(MARGIN, 72.0);
     // Only fonts that are really installed are written down; a project
     // made before the fonts are known takes the best ones once they are.
@@ -397,12 +471,12 @@ pub fn create(key: &str, title: &str, fonts: &sue_type::Fonts) -> (Batch<Arena>,
         _ => root,
     };
     let root_id = root.id();
-    let mut batch = Batch::new(format!("New {title}")).then(SpawnEntity::new(root));
+    let mut batch = Batch::new(tr!("new", title = title)).then(SpawnEntity::new(root));
     let mut orders = OrderKey::sequence(None, 3).into_iter();
-    let mut folders = vec![("Manuscript", role::DRAFT, draft)];
+    let mut folders = vec![(tr!("manuscript"), role::DRAFT, draft)];
     if !simple {
-        folders.push(("Research", role::RESEARCH, research));
-        folders.push(("Trash", role::TRASH, Vec::new()));
+        folders.push((tr!("research"), role::RESEARCH, research));
+        folders.push((tr!("trash"), role::TRASH, Vec::new()));
     }
     for (name, folder_role, items) in folders {
         let folder =
@@ -423,7 +497,7 @@ fn add_items(batch: &mut Batch<Arena>, parent: EntityId, items: Vec<Item>) {
     for (item, order) in items.into_iter().zip(orders) {
         match item {
             Item::Folder(name, synopsis, children) => {
-                let mut folder = Entity::empty(name, class::FOLDER);
+                let mut folder = Entity::empty(&name, class::FOLDER);
                 if !synopsis.is_empty() {
                     folder = folder.with_property(manuscript::SYNOPSIS, synopsis);
                 }
@@ -436,7 +510,7 @@ fn add_items(batch: &mut Batch<Arena>, parent: EntityId, items: Vec<Item>) {
             }
             Item::Text(sheet) => {
                 let (text, marks) = rich(&sheet.paragraphs);
-                let mut entity = document_entity(sheet.name, text, marks);
+                let mut entity = document_entity(&sheet.name, text, marks);
                 if !sheet.synopsis.is_empty() {
                     entity = entity.with_property(manuscript::SYNOPSIS, sheet.synopsis);
                 }
@@ -529,7 +603,7 @@ pub fn move_to(
     let old = manuscript::parent(arena, id)?;
     let order = order_at(arena, parent, index, Some(id));
     Some(
-        Batch::new("Move")
+        Batch::new(tr!("move"))
             .then(Unrelate::new(old, CHILD, id))
             .then(Relate::new(Relation::new(parent, CHILD, id).ordered(order))),
     )
@@ -545,7 +619,7 @@ pub fn trash(arena: &Arena, id: EntityId) -> Option<Batch<Arena>> {
     }
     let end = manuscript::children(arena, bin).len();
     move_to(arena, id, bin, end).map(|batch| {
-        let mut out = Batch::new("Move to Trash");
+        let mut out = Batch::new(tr!("move-to-trash"));
         out.push(Box::new(batch));
         out
     })
@@ -559,7 +633,7 @@ pub fn empty_trash(arena: &Arena, root: EntityId) -> Option<Batch<Arena>> {
     if items.is_empty() {
         return None;
     }
-    let mut batch = Batch::new("Empty Trash");
+    let mut batch = Batch::new(tr!("empty-trash"));
     // Children before their parents.
     for (id, _) in items.into_iter().rev() {
         for snapshot in snapshots(arena, id) {
@@ -570,7 +644,49 @@ pub fn empty_trash(arena: &Arena, root: EntityId) -> Option<Batch<Arena>> {
     Some(batch)
 }
 
-fn copy_of(entity: &Entity, name: &str) -> Entity {
+/// Copies of the tables (and tables of contents) `marks` shows, the marks
+/// pointing at the copies now: a copied document owns its tables, so
+/// editing one copy leaves the other alone.
+fn copy_tables(arena: &Arena, marks: &mut TextMarks) -> Vec<Entity> {
+    let shown: Vec<(std::ops::Range<usize>, EntityId)> = marks
+        .marks()
+        .iter()
+        .filter(|mark| mark.kind == kind::EMBED)
+        .filter_map(|mark| match mark.value {
+            Value::Entity(id) => Some((mark.range.clone(), id)),
+            _ => None,
+        })
+        .collect();
+    let mut copies = Vec::new();
+    for (range, id) in shown {
+        let Ok(table) = arena.get_by_id(id) else {
+            continue;
+        };
+        let mut copy = match (table.class(), table.ext::<sue_model::Table>()) {
+            (sue_model::TEXT_TABLE, Some(cells)) => {
+                Entity::empty(table.name(), table.class()).with_ext(cells.clone())
+            }
+            (sue_model::contents::CONTENTS, _) => Entity::empty(table.name(), table.class()),
+            _ => continue,
+        };
+        for (key, value) in table.properties().iter() {
+            copy = copy.with_property(key, value.clone());
+        }
+        marks.set(range, kind::EMBED, Some(Value::Entity(copy.id())));
+        copies.push(copy);
+    }
+    copies
+}
+
+/// Spawns each of `entities` in `batch`.
+fn spawn_all(batch: &mut Batch<Arena>, entities: Vec<Entity>) {
+    for entity in entities {
+        batch.push(Box::new(SpawnEntity::new(entity)));
+    }
+}
+
+/// A copy of `entity` named `name`, and copies of the tables it shows.
+fn copy_of(arena: &Arena, entity: &Entity, name: &str) -> (Entity, Vec<Entity>) {
     let mut copy = match entity.string_buffer() {
         Some(text) => Entity::new(name, StringBuffer::from(text.as_str().to_owned())),
         None => Entity::empty(name, entity.class()),
@@ -579,10 +695,13 @@ fn copy_of(entity: &Entity, name: &str) -> Entity {
     for (key, value) in entity.properties().iter() {
         copy = copy.with_property(key, value.clone());
     }
+    let mut tables = Vec::new();
     if let Some(marks) = entity.ext::<TextMarks>() {
-        copy = copy.with_ext(marks.clone());
+        let mut marks = marks.clone();
+        tables = copy_tables(arena, &mut marks);
+        copy = copy.with_ext(marks);
     }
-    copy
+    (copy, tables)
 }
 
 /// A copy of `id` (and everything under it) right after it.
@@ -594,9 +713,10 @@ pub fn duplicate(arena: &Arena, id: EntityId) -> Option<Batch<Arena>> {
         .iter()
         .position(|child| *child == id)?
         + 1;
-    let copy = copy_of(entity, &format!("{} (copy)", entity.name()));
+    let (copy, tables) = copy_of(arena, entity, &tr!("copy", entity = entity.name()));
     let copy_id = copy.id();
-    let mut batch = add(arena, parent, index, copy, "Duplicate");
+    let mut batch = add(arena, parent, index, copy, &tr!("duplicate"));
+    spawn_all(&mut batch, tables);
     fn under(arena: &Arena, from: EntityId, to: EntityId, batch: &mut Batch<Arena>) {
         let children = manuscript::children(arena, from);
         for (child, order) in children
@@ -606,11 +726,12 @@ pub fn duplicate(arena: &Arena, id: EntityId) -> Option<Batch<Arena>> {
             let Ok(entity) = arena.get_by_id(*child) else {
                 continue;
             };
-            let copy = copy_of(entity, entity.name());
+            let (copy, tables) = copy_of(arena, entity, entity.name());
             let id = copy.id();
             batch.push(Box::new(
                 SpawnEntity::new(copy).with_relation(Relation::new(to, CHILD, id).ordered(order)),
             ));
+            spawn_all(batch, tables);
             under(arena, *child, id, batch);
         }
     }
@@ -671,11 +792,15 @@ pub fn split(
         + 1;
     let new = document_entity(name, tail, tail_marks);
     let new_id = new.id();
-    let mut batch = Batch::new("Split");
+    let mut batch = Batch::new(tr!("split"));
     batch.push(Box::new(replace_all(
-        arena, id, &head, head_marks, "Split",
+        arena,
+        id,
+        &head,
+        head_marks,
+        &tr!("split"),
     )?));
-    batch.push(Box::new(add(arena, parent, index, new, "Split")));
+    batch.push(Box::new(add(arena, parent, index, new, &tr!("split"))));
     Some((batch, new_id))
 }
 
@@ -699,8 +824,14 @@ pub fn merge(arena: &Arena, ids: &[EntityId]) -> Option<Batch<Arena>> {
         marks.insert_text(&before, before.len(), &piece, Some(&own_marks));
         text.push_str(&piece);
     }
-    let mut batch = Batch::new("Merge");
-    batch.push(Box::new(replace_all(arena, first, &text, marks, "Merge")?));
+    let mut batch = Batch::new(tr!("merge"));
+    batch.push(Box::new(replace_all(
+        arena,
+        first,
+        &text,
+        marks,
+        &tr!("merge"),
+    )?));
     for id in rest {
         if let Some(step) = trash(arena, *id) {
             batch.push(Box::new(step));
@@ -725,12 +856,15 @@ pub fn take_snapshot(
     taken: &str,
 ) -> Option<Batch<Arena>> {
     let entity = arena.get_by_id(id).ok()?;
-    let copy = copy_of(entity, title).with_property(TAKEN, taken);
+    let (copy, tables) = copy_of(arena, entity, title);
+    let copy = copy.with_property(TAKEN, taken);
     let copy_id = copy.id();
     let order = arena.relations().next_order(id, SNAPSHOT);
-    Some(Batch::new("Take Snapshot").then(
+    let mut batch = Batch::new(tr!("take-snapshot")).then(
         SpawnEntity::new(copy).with_relation(Relation::new(id, SNAPSHOT, copy_id).ordered(order)),
-    ))
+    );
+    spawn_all(&mut batch, tables);
+    Some(batch)
 }
 
 /// Puts snapshot `snapshot`'s text back into document `id` (after taking
@@ -744,12 +878,14 @@ pub fn restore(
 ) -> Option<Batch<Arena>> {
     let saved = arena.get_by_id(snapshot).ok()?;
     let text = saved.string_buffer()?.as_str().to_owned();
-    let marks = saved.ext::<TextMarks>().cloned().unwrap_or_default();
-    let mut batch = Batch::new("Restore Snapshot");
+    let mut marks = saved.ext::<TextMarks>().cloned().unwrap_or_default();
+    let tables = copy_tables(arena, &mut marks);
+    let mut batch = Batch::new(tr!("restore-snapshot"));
+    spawn_all(&mut batch, tables);
     batch.push(Box::new(take_snapshot(
         arena,
         id,
-        "Before restoring",
+        &tr!("before-restoring"),
         taken,
     )?));
     batch.push(Box::new(replace_all(
@@ -757,7 +893,7 @@ pub fn restore(
         id,
         &text,
         marks,
-        "Restore Snapshot",
+        &tr!("restore-snapshot"),
     )?));
     Some(batch)
 }

@@ -82,6 +82,9 @@ fn run_props(look: &sue_model::CharFormat) -> String {
     if look.small_caps {
         props.push_str("<w:smallCaps/>");
     }
+    if look.caps {
+        props.push_str("<w:caps/>");
+    }
     if let Some(color) = look.color {
         let _ = write!(props, "<w:color w:val=\"{}\"/>", hex(color));
     } else if look.link.is_some() {
@@ -114,6 +117,18 @@ fn run_props(look: &sue_model::CharFormat) -> String {
 
 /// Text as Word runs' content: tabs as `w:tab`.
 fn run_text(text: &str) -> String {
+    let mut out = String::new();
+    for (line, part) in text.split(sue_model::LINE_BREAK).enumerate() {
+        if line > 0 {
+            out.push_str("<w:br/>");
+        }
+        out.push_str(&tab_text(part));
+    }
+    out
+}
+
+/// `text` as Word runs' text, its tabs as `w:tab`.
+fn tab_text(text: &str) -> String {
     let mut out = String::new();
     for (index, piece) in text.split('\t').enumerate() {
         if index > 0 {
@@ -238,7 +253,17 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
             false,
         ),
     ];
-    if book.page_numbers {
+    let has_header = !book.header.is_empty();
+    let has_footer = !book.footer.is_empty();
+    if has_header {
+        relations.push((
+            "rIdHeader".into(),
+            "header".into(),
+            "header1.xml".into(),
+            false,
+        ));
+    }
+    if has_footer {
         relations.push((
             "rIdFooter".into(),
             "footer".into(),
@@ -248,6 +273,12 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
     }
     let mut images: Vec<(String, Vec<u8>)> = Vec::new();
     let mut notes: Vec<String> = Vec::new();
+    let mut endnotes: Vec<String> = Vec::new();
+    // Comments: each opens once, before its first words, and closes at the
+    // end of them (or of their paragraph).
+    let mut comments: Vec<sue_core::EntityId> = Vec::new();
+    let mut open_comment: Option<usize> = None;
+    let mut revisions = 0;
     // Each numbered list starts again at 1: a numbering instance per list.
     let mut number_instances = 0_usize;
     let mut body = String::new();
@@ -323,6 +354,16 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
             if let Some(align) = &para.align {
                 let _ = write!(props, "<w:jc w:val=\"{}\"/>", jc(align));
             }
+            if let Some(table) = book.table(&para) {
+                let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+                body.push_str(&table_xml(table, width));
+                continue;
+            }
+            if let Some(contents) = book.contents_of(&para) {
+                let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+                body.push_str(&contents_xml(book, contents, width));
+                continue;
+            }
             let _ = write!(body, "<w:p><w:pPr>{props}</w:pPr>");
             if let Some(id) = para.embed
                 && let Some(figure) = book.figures.get(&id)
@@ -343,7 +384,40 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
                 );
             }
             for (text, look) in &para.runs {
-                let run = format!("<w:r>{}{}</w:r>", run_props(look), run_text(text));
+                let here = look.comment.filter(|id| book.comments.contains_key(id));
+                let current = open_comment.map(|index| comments[index]);
+                if here != current {
+                    if let Some(index) = open_comment.take() {
+                        body.push_str(&comment_end(index));
+                    }
+                    if let Some(id) = here
+                        && !comments.contains(&id)
+                    {
+                        comments.push(id);
+                        let index = comments.len() - 1;
+                        let _ = write!(body, "<w:commentRangeStart w:id=\"{index}\"/>");
+                        open_comment = Some(index);
+                    }
+                }
+                let mut run = format!("<w:r>{}{}</w:r>", run_props(look), run_text(text));
+                // Tracked changes, with who made them and when.
+                for (change, tag) in [(&look.deleted, "w:del"), (&look.inserted, "w:ins")] {
+                    if let Some(change) = change {
+                        revisions += 1;
+                        if tag == "w:del" {
+                            run = run
+                                .replace("<w:t xml:space=", "<w:delText xml:space=")
+                                .replace("</w:t>", "</w:delText>");
+                        }
+                        run = format!(
+                            "<{tag} w:id=\"{}\" w:author=\"{}\" w:date=\"{}\">{run}</{tag}>",
+                            1000 + revisions,
+                            escape(&change.author),
+                            escape(&word_date(&change.date))
+                        );
+                        break;
+                    }
+                }
                 match &look.link {
                     Some(link) => {
                         let rel = format!("rIdLink{}", relations.len());
@@ -360,19 +434,54 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
                         notes.len()
                     );
                 }
+                if let Some(note) = &look.endnote {
+                    endnotes.push(note.clone());
+                    let _ = write!(
+                        body,
+                        "<w:r><w:rPr><w:vertAlign w:val=\"superscript\"/></w:rPr><w:endnoteReference w:id=\"{}\"/></w:r>",
+                        endnotes.len()
+                    );
+                }
+            }
+            if let Some(index) = open_comment.take() {
+                body.push_str(&comment_end(index));
             }
             body.push_str("</w:p>");
         }
     }
+    if !endnotes.is_empty() {
+        relations.push((
+            "rIdEndnotes".into(),
+            "endnotes".into(),
+            "endnotes.xml".into(),
+            false,
+        ));
+    }
+    if !comments.is_empty() {
+        relations.push((
+            "rIdComments".into(),
+            "comments".into(),
+            "comments.xml".into(),
+            false,
+        ));
+    }
+    let comments_xml = comments_part(book, &comments);
     let [top, right, bottom, left] = book.margins;
-    let footer = if book.page_numbers {
-        "<w:footerReference w:type=\"default\" r:id=\"rIdFooter\"/>"
+    let mut references = String::new();
+    if has_header {
+        references.push_str("<w:headerReference w:type=\"default\" r:id=\"rIdHeader\"/>");
+    }
+    if has_footer {
+        references.push_str("<w:footerReference w:type=\"default\" r:id=\"rIdFooter\"/>");
+    }
+    let title_page = if book.different_first {
+        "<w:titlePg/>"
     } else {
         ""
     };
     let _ = write!(
         body,
-        "<w:sectPr>{footer}<w:pgSz w:w=\"{}\" w:h=\"{}\"/><w:pgMar w:top=\"{}\" w:right=\"{}\" w:bottom=\"{}\" w:left=\"{}\" w:header=\"720\" w:footer=\"720\" w:gutter=\"0\"/></w:sectPr>",
+        "<w:sectPr>{references}<w:pgSz w:w=\"{}\" w:h=\"{}\"/><w:pgMar w:top=\"{}\" w:right=\"{}\" w:bottom=\"{}\" w:left=\"{}\" w:header=\"720\" w:footer=\"720\" w:gutter=\"0\"/>{title_page}</w:sectPr>",
         twips(book.page[0]),
         twips(book.page[1]),
         twips(top),
@@ -446,13 +555,31 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
         );
     }
     footnotes.push_str("</w:footnotes>");
+    let mut endnotes_xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:endnotes xmlns:w=\"{W}\"><w:endnote w:type=\"separator\" w:id=\"-1\"><w:p><w:r><w:separator/></w:r></w:p></w:endnote><w:endnote w:type=\"continuationSeparator\" w:id=\"0\"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:endnote>"
+    );
+    for (index, note) in endnotes.iter().enumerate() {
+        let _ = write!(
+            endnotes_xml,
+            "<w:endnote w:id=\"{}\"><w:p><w:pPr><w:pStyle w:val=\"EndnoteText\"/></w:pPr><w:r><w:rPr><w:vertAlign w:val=\"superscript\"/></w:rPr><w:endnoteRef/></w:r><w:r>{}</w:r></w:p></w:endnote>",
+            index + 1,
+            run_text(&format!(" {note}"))
+        );
+    }
+    endnotes_xml.push_str("</w:endnotes>");
 
+    // Word fills in a table of contents' page numbers when it opens.
+    let update = if book.contents.is_empty() {
+        ""
+    } else {
+        "<w:updateFields w:val=\"true\"/>"
+    };
     let settings = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:settings xmlns:w=\"{W}\"><w:defaultTabStop w:val=\"720\"/><w:compat><w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"15\"/></w:compat></w:settings>"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:settings xmlns:w=\"{W}\">{update}<w:defaultTabStop w:val=\"720\"/><w:compat><w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"15\"/></w:compat></w:settings>"
     );
-    let footer = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:ftr xmlns:w=\"{W}\"><w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType=\"end\"/></w:r></w:p></w:ftr>"
-    );
+    let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+    let header = running_xml(book, &book.header, "w:hdr", width);
+    let footer = running_xml(book, &book.footer, "w:ftr", width);
 
     let mut rels = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
@@ -475,7 +602,25 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
     let mut types = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"png\" ContentType=\"image/png\"/><Override PartName=\"/word/document.xml\" ContentType=\"{main}.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"{main}.styles+xml\"/><Override PartName=\"/word/numbering.xml\" ContentType=\"{main}.numbering+xml\"/><Override PartName=\"/word/footnotes.xml\" ContentType=\"{main}.footnotes+xml\"/><Override PartName=\"/word/settings.xml\" ContentType=\"{main}.settings+xml\"/><Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/><Override PartName=\"/docProps/app.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.extended-properties+xml\"/>"
     );
-    if book.page_numbers {
+    if has_header {
+        let _ = write!(
+            types,
+            "<Override PartName=\"/word/header1.xml\" ContentType=\"{main}.header+xml\"/>"
+        );
+    }
+    if !endnotes.is_empty() {
+        let _ = write!(
+            types,
+            "<Override PartName=\"/word/endnotes.xml\" ContentType=\"{main}.endnotes+xml\"/>"
+        );
+    }
+    if !comments.is_empty() {
+        let _ = write!(
+            types,
+            "<Override PartName=\"/word/comments.xml\" ContentType=\"{main}.comments+xml\"/>"
+        );
+    }
+    if has_footer {
         let _ = write!(
             types,
             "<Override PartName=\"/word/footer1.xml\" ContentType=\"{main}.footer+xml\"/>"
@@ -501,7 +646,16 @@ pub fn to_docx(book: &Book) -> Vec<u8> {
     zip.add_text("word/numbering.xml", &numbering);
     zip.add_text("word/footnotes.xml", &footnotes);
     zip.add_text("word/settings.xml", &settings);
-    if book.page_numbers {
+    if has_header {
+        zip.add_text("word/header1.xml", &header);
+    }
+    if !comments.is_empty() {
+        zip.add_text("word/comments.xml", &comments_xml);
+    }
+    if !endnotes.is_empty() {
+        zip.add_text("word/endnotes.xml", &endnotes_xml);
+    }
+    if has_footer {
         zip.add_text("word/footer1.xml", &footer);
     }
     zip.add_text("word/_rels/document.xml.rels", &rels);
@@ -524,6 +678,44 @@ fn on(event: &XmlEvent) -> bool {
 /// # Errors
 /// If the file is not a Word document.
 pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
+    read_docx_into(bytes, false).map(|read| (read.text, read.marks))
+}
+
+/// A document read from a file, with the entities its text shows (its
+/// tables), for the caller to add to the arena with it.
+#[derive(Debug)]
+pub struct Imported {
+    /// The text.
+    pub text: String,
+    /// Its formatting; `embed` marks name the entities.
+    pub marks: TextMarks,
+    /// The tables (and other things) the text shows.
+    pub entities: Vec<sue_core::Entity>,
+}
+
+/// Reads a Word document as [`from_docx`] does, its tables as table
+/// entities set in the text (heading rows and column widths kept).
+///
+/// # Errors
+/// If it is not a Word document.
+pub fn read_docx(bytes: &[u8]) -> Result<Imported, String> {
+    read_docx_into(bytes, true)
+}
+
+/// A table being read: where its text began, its rows so far, the row and
+/// cell under way, its heading rows and its column widths.
+#[derive(Default)]
+struct TableRead {
+    start: usize,
+    rows: Vec<Vec<String>>,
+    row: Vec<String>,
+    cell: usize,
+    header_rows: u32,
+    heading: bool,
+    widths: Vec<f32>,
+}
+
+fn read_docx_into(bytes: &[u8], keep_tables: bool) -> Result<Imported, String> {
     let files: HashMap<String, Vec<u8>> = read_zip(bytes)?.into_iter().collect();
     let read = |name: &str| {
         files
@@ -539,6 +731,28 @@ pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
                 && event.attr("TargetMode") == Some("External")
             {
                 links.insert(id.to_owned(), target.to_owned());
+            }
+        }
+    }
+    let mut endnotes: HashMap<String, String> = HashMap::new();
+    if let Some(xml) = read("word/endnotes.xml") {
+        let mut current: Option<(String, String)> = None;
+        for event in parse(&xml) {
+            match &event {
+                XmlEvent::Open { name, .. } if name == "w:endnote" => {
+                    current = event.attr("w:id").map(|id| (id.to_owned(), String::new()));
+                }
+                XmlEvent::Text(text) => {
+                    if let Some((_, note)) = &mut current {
+                        note.push_str(text);
+                    }
+                }
+                XmlEvent::Close(name) if name == "w:endnote" => {
+                    if let Some((id, note)) = current.take() {
+                        endnotes.insert(id, note.trim().to_owned());
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -613,6 +827,8 @@ pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
         italic: bool,
         underline: bool,
         strike: bool,
+        caps: bool,
+        small_caps: bool,
         script: Option<&'static str>,
         color: Option<String>,
         size: Option<f32>,
@@ -626,7 +842,80 @@ pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
     let mut link: Option<(usize, String)> = None;
     let mut list_num: Option<String> = None;
     let mut list_level = 0;
+    let mut depth = 0_usize;
+    let mut table: Option<TableRead> = None;
+    let mut entities = Vec::new();
     for event in parse(&document) {
+        // Tables: the text of each cell, then the whole table in place of
+        // that text.
+        match &event {
+            XmlEvent::Open { name, empty, .. } if !*empty && name == "w:tbl" => {
+                depth += 1;
+                if depth == 1 && keep_tables {
+                    table = Some(TableRead {
+                        start: text.len(),
+                        ..TableRead::default()
+                    });
+                }
+            }
+            XmlEvent::Open { name, .. } if depth == 1 => {
+                if let Some(read) = &mut table {
+                    match name.as_str() {
+                        "w:gridCol" => read.widths.push(
+                            event
+                                .attr("w:w")
+                                .and_then(|width| width.parse().ok())
+                                .unwrap_or(0.0),
+                        ),
+                        "w:tr" => {
+                            read.row.clear();
+                            read.heading = false;
+                        }
+                        "w:tblHeader" => read.heading = on(&event),
+                        "w:tc" => read.cell = text.len(),
+                        _ => {}
+                    }
+                }
+            }
+            XmlEvent::Close(name) if depth == 1 && name == "w:tc" => {
+                if let Some(read) = &mut table {
+                    let cell = text[read.cell.min(text.len())..]
+                        .trim_end_matches('\n')
+                        .to_owned();
+                    read.row.push(cell);
+                }
+            }
+            XmlEvent::Close(name) if depth == 1 && name == "w:tr" => {
+                if let Some(read) = &mut table {
+                    let row = std::mem::take(&mut read.row);
+                    if read.heading && read.rows.len() == read.header_rows as usize {
+                        read.header_rows += 1;
+                    }
+                    read.rows.push(row);
+                }
+            }
+            XmlEvent::Close(name) if name == "w:tbl" => {
+                if depth == 1
+                    && let Some(read) = table.take()
+                {
+                    let start = read.start.min(text.len());
+                    marks.delete_text(&text, start..text.len());
+                    text.truncate(start);
+                    let entity = sue_model::text_table(&read.rows, read.header_rows, &read.widths);
+                    let at = text.len();
+                    text.push(sue_model::OBJECT);
+                    text.push('\n');
+                    marks.set(
+                        at..at + sue_model::OBJECT.len_utf8(),
+                        kind::EMBED,
+                        Some(Value::Entity(entity.id())),
+                    );
+                    entities.push(entity);
+                }
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
         match &event {
             XmlEvent::Open { name, empty, .. } => match name.as_str() {
                 "w:p" => {
@@ -676,6 +965,8 @@ pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
                 "w:i" if in_run_props => run.italic = on(&event),
                 "w:u" if in_run_props => run.underline = on(&event),
                 "w:strike" | "w:dstrike" if in_run_props => run.strike = on(&event),
+                "w:caps" if in_run_props => run.caps = on(&event),
+                "w:smallCaps" if in_run_props => run.small_caps = on(&event),
                 "w:vertAlign" if in_run_props => {
                     run.script = match event.attr("w:val") {
                         Some("superscript") => Some("super"),
@@ -704,7 +995,7 @@ pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
                             para.page_break = true;
                         }
                     } else {
-                        text.push(' ');
+                        text.push(sue_model::LINE_BREAK);
                     }
                 }
                 "w:hyperlink" => {
@@ -712,6 +1003,18 @@ pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
                         .attr("r:id")
                         .and_then(|id| links.get(id))
                         .map(|target| (text.len(), target.clone()));
+                }
+                "w:endnoteReference" => {
+                    if let Some(note) = event.attr("w:id").and_then(|id| endnotes.get(id))
+                        && text.len() > para.as_ref().map_or(0, |para| para.start)
+                    {
+                        let end = text.len();
+                        let start = text[..end]
+                            .char_indices()
+                            .next_back()
+                            .map_or(0, |(at, _)| at);
+                        marks.set(start..end, kind::ENDNOTE, Some(note.clone().into()));
+                    }
                 }
                 "w:footnoteReference" => {
                     if let Some(note) = event.attr("w:id").and_then(|id| notes.get(id))
@@ -744,6 +1047,12 @@ pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
                 }
                 if run.strike {
                     set(kind::STRIKE, Value::Bool(true));
+                }
+                if run.caps {
+                    set(kind::CAPS, Value::Bool(true));
+                }
+                if run.small_caps {
+                    set(kind::SMALL_CAPS, Value::Bool(true));
                 }
                 if let Some(script) = run.script {
                     set(kind::SCRIPT, Value::Text(script.to_owned()));
@@ -821,12 +1130,333 @@ pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
         text.push('\n');
     }
     marks.fit(&text);
-    Ok((text, marks))
+    Ok(Imported {
+        text,
+        marks,
+        entities,
+    })
+}
+
+/// A date as Word writes it (`2026-10-29T00:00:00Z`).
+fn word_date(date: &str) -> String {
+    if date.len() == 10 {
+        format!("{date}T00:00:00Z")
+    } else {
+        date.to_owned()
+    }
+}
+
+/// The end of comment `index`'s words, and its mark in the text.
+fn comment_end(index: usize) -> String {
+    format!(
+        "<w:commentRangeEnd w:id=\"{index}\"/><w:r><w:commentReference w:id=\"{index}\"/></w:r>"
+    )
+}
+
+/// The comments part: each comment by its author and date, its replies
+/// after it as paragraphs of their own, named.
+fn comments_part(book: &Book, comments: &[sue_core::EntityId]) -> String {
+    let mut out = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:comments xmlns:w=\"{W}\">"
+    );
+    for (index, id) in comments.iter().enumerate() {
+        let Some(thread) = book.comments.get(id) else {
+            continue;
+        };
+        let date = if thread.first.date.len() == 10 {
+            format!("{}T00:00:00Z", thread.first.date)
+        } else {
+            thread.first.date.clone()
+        };
+        let initials: String = thread
+            .first
+            .author
+            .split_whitespace()
+            .filter_map(|word| word.chars().next())
+            .collect();
+        let _ = write!(
+            out,
+            "<w:comment w:id=\"{index}\" w:author=\"{}\" w:date=\"{}\" w:initials=\"{}\">",
+            escape(&thread.first.author),
+            escape(&date),
+            escape(&initials)
+        );
+        let _ = write!(
+            out,
+            "<w:p><w:r>{}</w:r></w:p>",
+            run_text(&thread.first.text)
+        );
+        for reply in &thread.replies {
+            let _ = write!(
+                out,
+                "<w:p><w:r><w:rPr><w:b/></w:rPr>{}</w:r><w:r>{}</w:r></w:p>",
+                run_text(&format!("{}: ", reply.author)),
+                run_text(&reply.text)
+            );
+        }
+        out.push_str("</w:comment>");
+    }
+    out.push_str("</w:comments>");
+    out
+}
+
+/// A running header (`w:hdr`) or footer (`w:ftr`) part: one paragraph with
+/// a centered and a right tab stop across `width` points, its page fields
+/// Word's own `PAGE` and `NUMPAGES`.
+fn running_xml(book: &Book, running: &sue_model::Running, tag: &str, width: f32) -> String {
+    use crate::publish::Live;
+    let mut out = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<{tag} xmlns:w=\"{W}\"><w:p><w:pPr><w:tabs><w:tab w:val=\"center\" w:pos=\"{}\"/><w:tab w:val=\"right\" w:pos=\"{}\"/></w:tabs><w:rPr><w:sz w:val=\"18\"/></w:rPr></w:pPr>",
+        twips(width / 2.0),
+        twips(width)
+    );
+    for (index, part) in book.live(running).iter().enumerate() {
+        if index > 0 {
+            out.push_str("<w:r><w:tab/></w:r>");
+        }
+        for piece in part {
+            match piece {
+                Live::Text(text) if !text.is_empty() => {
+                    let _ = write!(
+                        out,
+                        "<w:r><w:rPr><w:sz w:val=\"18\"/></w:rPr>{}</w:r>",
+                        run_text(text)
+                    );
+                }
+                Live::Text(_) => {}
+                Live::Page | Live::Pages => {
+                    let code = if *piece == Live::Page {
+                        "PAGE"
+                    } else {
+                        "NUMPAGES"
+                    };
+                    let _ = write!(
+                        out,
+                        "<w:fldSimple w:instr=\" {code} \"><w:r><w:rPr><w:sz w:val=\"18\"/></w:rPr><w:t>1</w:t></w:r></w:fldSimple>"
+                    );
+                }
+            }
+        }
+    }
+    let _ = write!(out, "</w:p></{tag}>");
+    out
+}
+
+/// A table of contents as Word's own `TOC` field over the headings, its
+/// entries the book's headings (Word fills in the pages when it opens).
+fn contents_xml(book: &Book, contents: &sue_model::contents::Contents, width: f32) -> String {
+    let mut out = String::new();
+    if !contents.title.is_empty() {
+        let _ = write!(
+            out,
+            "<w:p><w:pPr><w:pStyle w:val=\"TOCHeading\"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val=\"32\"/></w:rPr>{}</w:r></w:p>",
+            run_text(&contents.title)
+        );
+    }
+    let headings = book.headings(contents);
+    let tabs = format!(
+        "<w:tabs><w:tab w:val=\"right\" w:leader=\"dot\" w:pos=\"{}\"/></w:tabs>",
+        twips(width)
+    );
+    let field = format!(
+        "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> TOC \\o \"1-{}\" \\h \\z \\u </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>",
+        contents.levels
+    );
+    let end = "<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>";
+    if headings.is_empty() {
+        let _ = write!(out, "<w:p>{field}{end}</w:p>");
+        return out;
+    }
+    for (index, (level, title)) in headings.iter().enumerate() {
+        let _ = write!(
+            out,
+            "<w:p><w:pPr><w:pStyle w:val=\"TOC{level}\"/>{tabs}<w:ind w:left=\"{}\"/></w:pPr>",
+            twips(f32::from(level.saturating_sub(1)) * 18.0)
+        );
+        if index == 0 {
+            out.push_str(&field);
+        }
+        let _ = write!(out, "<w:r>{}</w:r>", run_text(title));
+        if index + 1 == headings.len() {
+            out.push_str(end);
+        }
+        out.push_str("</w:p>");
+    }
+    out
+}
+
+/// A table as WordprocessingML, `width` points across: a grid of the
+/// column widths, single borders, the heading rows marked to repeat.
+fn table_xml(table: &crate::publish::PublishTable, width: f32) -> String {
+    let columns = table.columns().max(1);
+    let widths: Vec<i32> = (0..columns)
+        .map(|column| twips(width * table.share(column)))
+        .collect();
+    let mut out =
+        String::from("<w:tbl><w:tblPr><w:tblW w:w=\"5000\" w:type=\"pct\"/><w:tblBorders>");
+    for side in ["top", "left", "bottom", "right", "insideH", "insideV"] {
+        let _ = write!(
+            out,
+            "<w:{side} w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>"
+        );
+    }
+    out.push_str("</w:tblBorders><w:tblLayout w:type=\"fixed\"/></w:tblPr><w:tblGrid>");
+    for width in &widths {
+        let _ = write!(out, "<w:gridCol w:w=\"{width}\"/>");
+    }
+    out.push_str("</w:tblGrid>");
+    for (row, cells) in table.cells.iter().enumerate() {
+        let heading = row < table.header_rows;
+        out.push_str("<w:tr>");
+        if heading {
+            out.push_str("<w:trPr><w:tblHeader/></w:trPr>");
+        }
+        for (column, width) in widths.iter().enumerate() {
+            let _ = write!(
+                out,
+                "<w:tc><w:tcPr><w:tcW w:w=\"{width}\" w:type=\"dxa\"/></w:tcPr>"
+            );
+            let text = cells.get(column).map_or("", String::as_str);
+            for line in text.split('\n') {
+                out.push_str("<w:p>");
+                if !line.is_empty() {
+                    let bold = if heading { "<w:rPr><w:b/></w:rPr>" } else { "" };
+                    let _ = write!(out, "<w:r>{bold}{}</w:r>", run_text(line));
+                }
+                out.push_str("</w:p>");
+            }
+            out.push_str("</w:tc>");
+        }
+        out.push_str("</w:tr>");
+    }
+    out.push_str("</w:tbl>");
+    out
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn word_endnotes_go_out_and_come_back() {
+        let mut book = sample();
+        book.sections[0]
+            .marks
+            .set(12..15, kind::ENDNOTE, Some("The end of it.".into()));
+        let bytes = to_docx(&book);
+        let files: HashMap<String, Vec<u8>> = read_zip(&bytes).unwrap().into_iter().collect();
+        assert!(files.contains_key("word/endnotes.xml"));
+        let (_, marks) = from_docx(&bytes).unwrap();
+        assert!(
+            marks.marks().iter().any(|mark| mark.kind == kind::ENDNOTE
+                && mark.value == Value::Text("The end of it.".into()))
+        );
+        let (_, marks) = crate::publish::from_odt(&crate::publish::to_odt(&book)).unwrap();
+        assert!(marks.marks().iter().any(|mark| mark.kind == kind::ENDNOTE));
+    }
+
+    #[test]
+    fn word_tables_come_back_as_tables() {
+        let bytes = to_docx(&super::super::tests::with_table());
+        let read = read_docx(&bytes).unwrap();
+        assert_eq!(read.entities.len(), 1);
+        let entity = &read.entities[0];
+        let table = entity.ext::<sue_model::Table>().unwrap();
+        assert_eq!(
+            table.texts(),
+            vec![vec!["Item", "Count & size"], vec!["Bolt <M8>", "40"]]
+        );
+        assert_eq!(
+            entity.property(sue_model::HEADER_ROWS),
+            Some(&Value::Int(1))
+        );
+        let shares = sue_model::column_shares(entity.property(sue_model::WIDTHS), 2);
+        assert!((shares[0] - 0.7).abs() < 0.01, "{shares:?}");
+        assert_eq!(
+            read.text,
+            format!("Parts\n{}\nThe end.\n", sue_model::OBJECT)
+        );
+        assert!(
+            read.marks
+                .marks()
+                .iter()
+                .any(|mark| mark.kind == kind::EMBED && mark.value == Value::Entity(entity.id()))
+        );
+        // Read for its text alone, a table stays words.
+        let (text, _) = from_docx(&bytes).unwrap();
+        assert!(text.contains("Bolt <M8>"));
+    }
+
+    #[test]
+    fn word_keeps_tracked_changes_with_their_authors() {
+        use sue_model::changes::Change;
+        let mut book = sample();
+        let change = Change::new("Ann", "2026-10-30");
+        book.sections[0]
+            .marks
+            .set(18..22, kind::DELETED, Some(change.value()));
+        book.sections[0]
+            .marks
+            .set(23..26, kind::INSERTED, Some(change.value()));
+        let bytes = to_docx(&book);
+        let files: HashMap<String, Vec<u8>> = read_zip(&bytes).unwrap().into_iter().collect();
+        let xml = String::from_utf8(files["word/document.xml"].clone()).unwrap();
+        assert!(xml.contains("<w:del w:id="), "{xml}");
+        assert!(xml.contains("w:author=\"Ann\" w:date=\"2026-10-30T00:00:00Z\""));
+        assert!(xml.contains("<w:delText xml:space=\"preserve\">dark</w:delText>"));
+        assert!(xml.contains("<w:ins w:id="));
+    }
+
+    #[test]
+    fn word_comments_mark_their_words_and_keep_their_replies() {
+        let bytes = to_docx(&super::super::tests::with_comment());
+        let files: HashMap<String, Vec<u8>> = read_zip(&bytes).unwrap().into_iter().collect();
+        let xml = String::from_utf8(files["word/document.xml"].clone()).unwrap();
+        assert!(xml.contains("<w:commentRangeStart w:id=\"0\"/>"), "{xml}");
+        assert!(xml.contains("<w:commentReference w:id=\"0\"/>"));
+        let start = xml.find("commentRangeStart").unwrap();
+        let end = xml.find("commentRangeEnd").unwrap();
+        assert!(xml[start..end].contains("dark"));
+        let comments = String::from_utf8(files["word/comments.xml"].clone()).unwrap();
+        assert!(comments.contains("w:author=\"Ann\""), "{comments}");
+        assert!(comments.contains("Too much?") && comments.contains("Keep it."));
+        let types = String::from_utf8(files["[Content_Types].xml"].clone()).unwrap();
+        assert!(types.contains("comments+xml"));
+    }
+
+    #[test]
+    fn word_contents_are_a_toc_field_word_updates() {
+        let bytes = to_docx(&super::super::tests::with_contents());
+        let files: HashMap<String, Vec<u8>> = read_zip(&bytes).unwrap().into_iter().collect();
+        let xml = String::from_utf8(files["word/document.xml"].clone()).unwrap();
+        assert!(xml.contains("TOC \\o \"1-2\""), "{xml}");
+        assert_eq!(xml.matches("w:fldCharType=\"begin\"").count(), 1);
+        assert_eq!(xml.matches("w:fldCharType=\"end\"").count(), 1);
+        assert!(xml.contains("<w:pStyle w:val=\"TOC2\"/>"));
+        let settings = String::from_utf8(files["word/settings.xml"].clone()).unwrap();
+        assert!(settings.contains("<w:updateFields w:val=\"true\"/>"));
+    }
+
+    #[test]
+    fn word_headers_and_footers_carry_live_page_fields() {
+        let mut book = sample();
+        book.header = sue_model::Running::parse("{title}\t\tPage {page} of {pages}");
+        book.different_first = true;
+        let bytes = to_docx(&book);
+        let files: HashMap<String, Vec<u8>> = read_zip(&bytes).unwrap().into_iter().collect();
+        let header = String::from_utf8(files["word/header1.xml"].clone()).unwrap();
+        assert!(header.contains("My Story"), "{header}");
+        assert!(header.contains("w:instr=\" PAGE \""));
+        assert!(header.contains("w:instr=\" NUMPAGES \""));
+        assert_eq!(header.matches("<w:tab/>").count(), 2);
+        assert!(files.contains_key("word/footer1.xml"));
+        let document = String::from_utf8(files["word/document.xml"].clone()).unwrap();
+        assert!(document.contains("<w:headerReference w:type=\"default\" r:id=\"rIdHeader\"/>"));
+        assert!(document.contains("<w:titlePg/></w:sectPr>"));
+        let rels = String::from_utf8(files["word/_rels/document.xml.rels"].clone()).unwrap();
+        assert!(rels.contains("header1.xml"));
+    }
+
     use super::super::tests::sample;
+    use super::super::tests::with_table;
     use super::*;
 
     #[test]
@@ -884,5 +1514,22 @@ mod tests {
             .unwrap();
         assert_eq!(note.value.as_str(), Some("Or so they say."));
         assert!(from_docx(b"nope").is_err());
+    }
+
+    #[test]
+    fn word_tables_have_their_grid_borders_and_heading_row() {
+        let bytes = to_docx(&with_table());
+        let files: HashMap<String, Vec<u8>> = read_zip(&bytes).unwrap().into_iter().collect();
+        let xml = String::from_utf8(files["word/document.xml"].clone()).unwrap();
+        assert_eq!(
+            xml.matches("<w:tc>").count(),
+            xml.matches("</w:tc>").count()
+        );
+        assert!(xml.contains("<w:tbl>"), "{xml}");
+        assert_eq!(xml.matches("<w:gridCol ").count(), 2);
+        assert_eq!(xml.matches("<w:tr>").count(), 2);
+        assert_eq!(xml.matches("<w:tblHeader/>").count(), 1);
+        assert!(xml.contains("Count &amp; size"));
+        assert!(xml.contains("Bolt &lt;M8&gt;"));
     }
 }

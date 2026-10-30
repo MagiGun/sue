@@ -99,7 +99,7 @@ pub fn video_frames(dir: &Path, export: Export) -> Result<(Vec<RasterTile2D>, u3
     let paths = frames(dir);
     let last = paths
         .last()
-        .ok_or("This canvas has no timelapse yet: record it first")?;
+        .ok_or(tr!("canvas-has-no-timelapse-yet-record"))?;
     let read = |path: &Path| -> Result<RasterTile2D, String> {
         let bytes = sue_platform::fs::read(path).map_err(|error| error.to_string())?;
         Ok(sue_io::decode_jpeg(&bytes)?.tile)
@@ -166,7 +166,7 @@ fn letterbox(tile: &RasterTile2D, size: [u32; 2]) -> RasterTile2D {
 /// As [`video_frames`].
 pub fn export_avi(dir: &Path, export: Export) -> Result<(Vec<u8>, usize), String> {
     let (frames, fps) = video_frames(dir, export)?;
-    let first = frames.first().ok_or("no frames")?;
+    let first = frames.first().ok_or(tr!("no-frames"))?;
     let mut video = sue_io::MjpegAvi::new(first.width(), first.height(), fps);
     for frame in &frames {
         video.push_frame(frame, 85)?;

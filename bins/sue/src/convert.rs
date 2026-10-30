@@ -12,6 +12,11 @@
 //! convert on a background thread, next to each file or into a chosen
 //! folder, and the list says where each one went.
 
+/// Text from the language database's `convert` namespace (the Converter).
+macro_rules! tr {
+    ($($arg:tt)*) => { sue_lang::tr!("convert", $($arg)*) };
+}
+
 mod ops;
 
 use std::collections::HashMap;
@@ -150,6 +155,8 @@ pub struct Convert {
     results: Option<Receiver<Finished>>,
     menus: Vec<Menu>,
     menubar: MenuBar,
+    /// When to build the menus again, in another language.
+    language: sue_lang::Watch,
 }
 
 impl Default for Convert {
@@ -172,34 +179,55 @@ impl Default for Convert {
             results: None,
             menus: Self::menus(),
             menubar: MenuBar::new(),
+            language: sue_lang::Watch::default(),
         }
     }
 }
 
-const RESIZES: [&str; 6] = [
-    "Keep the size",
-    "Scale",
-    "Width",
-    "Height",
-    "Fit inside",
-    "Exact size",
+/// The ways to size a picture, in the order the Converter offers them.
+fn resizes() -> [String; 6] {
+    [
+        tr!("keep-the-size"),
+        tr!("scale"),
+        tr!("width"),
+        tr!("height"),
+        tr!("fit-inside"),
+        tr!("exact-size"),
+    ]
+}
+
+const RATES: [Option<u32>; 9] = [
+    None,
+    Some(8_000),
+    Some(16_000),
+    Some(22_050),
+    Some(32_000),
+    Some(44_100),
+    Some(48_000),
+    Some(88_200),
+    Some(96_000),
 ];
-const RATES: [(Option<u32>, &str); 9] = [
-    (None, "Keep the rate"),
-    (Some(8_000), "8,000 Hz"),
-    (Some(16_000), "16,000 Hz"),
-    (Some(22_050), "22,050 Hz"),
-    (Some(32_000), "32,000 Hz"),
-    (Some(44_100), "44,100 Hz (CD)"),
-    (Some(48_000), "48,000 Hz"),
-    (Some(88_200), "88,200 Hz"),
-    (Some(96_000), "96,000 Hz"),
-];
-const CHANNELS: [(Option<u16>, &str); 3] = [
-    (None, "Keep the channels"),
-    (Some(1), "Mono"),
-    (Some(2), "Stereo"),
-];
+
+/// A sample rate as people read it, e.g. `44,100 Hz (CD)`.
+fn rate_label(rate: Option<u32>) -> String {
+    match rate {
+        None => tr!("keep-the-rate"),
+        Some(44_100) => tr!("rate-cd", rate = sue_lang::number(44_100.0, 0)),
+        Some(rate) => tr!("rate-hz", rate = sue_lang::number(f64::from(rate), 0)),
+    }
+}
+
+const CHANNELS: [Option<u16>; 3] = [None, Some(1), Some(2)];
+
+/// A channel count as people read it.
+fn channels_label(channels: Option<u16>) -> String {
+    match channels {
+        None => tr!("keep-the-channels"),
+        Some(1) => tr!("mono"),
+        Some(2) => tr!("stereo"),
+        Some(count) => tr!("channel-count", count = count),
+    }
+}
 
 fn combo<T: Copy + PartialEq>(
     ui: &mut Ui,
@@ -377,14 +405,33 @@ impl Convert {
             5 => Resize::Exact(width, height),
             _ => Resize::Keep,
         };
-        options.sound.sample_rate = RATES[self.sample_rate].0;
-        options.sound.channels = CHANNELS[self.channels].0;
+        options.sound.sample_rate = RATES[self.sample_rate];
+        options.sound.channels = CHANNELS[self.channels];
         options
+    }
+
+    /// `true` when results put next to their files would stay in Sue's
+    /// cache, where nobody sees them: a phone's picker gives Sue a copy of
+    /// a file chosen on its own, and the place it came from takes no new
+    /// files. `stays` is [`sue_platform::stays_in_cache`] outside tests.
+    fn strands_next_to(&self, stays: impl Fn(&Path) -> bool) -> bool {
+        self.output.folder.is_none()
+            && self.inputs.iter().any(|input| {
+                input.status != Status::Working
+                    && matches!(&input.source, Source::File(path)
+                        if path.parent().is_some_and(&stays))
+            })
     }
 
     /// Converts every waiting file: those on disk on a background thread,
     /// the project's own at once.
     fn run(&mut self, cx: &mut AppletContext<'_>) {
+        // Results that would stay in the cache need a folder first; the
+        // run goes on once one is chosen.
+        if self.strands_next_to(sue_platform::stays_in_cache) {
+            Self::pick(cx, "run", &tr!("choose-where-converted-files-go"), true);
+            return;
+        }
         let options = self.settled_options();
         let fallback = crate::util::export_dir(cx);
         let mut jobs = Vec::new();
@@ -473,10 +520,14 @@ impl Convert {
                     None => entity
                         .component(ComponentKind::RasterTile2D)
                         .and_then(|data| data.as_raster())
-                        .ok_or("the picture is gone")?,
+                        .ok_or(tr!("the-picture-is-gone"))?,
                 };
                 let changed = ops::transform_picture(tile, &options.picture, target)?;
-                let note = format!("{} by {} pixels", changed.width(), changed.height());
+                let note = tr!(
+                    "by-pixels",
+                    width = changed.width(),
+                    height = changed.height()
+                );
                 (
                     ops::write_picture(&changed, target, &options.picture)?,
                     note,
@@ -486,7 +537,7 @@ impl Convert {
                 let pcm = entity
                     .component(ComponentKind::PCMFloat1D)
                     .and_then(|data| data.as_pcm())
-                    .ok_or("the sound is gone")?;
+                    .ok_or(tr!("the-sound-is-gone"))?;
                 let changed = ops::transform_sound(pcm, &options.sound)?;
                 let note = format!("{:.1} s", changed.duration_seconds());
                 (
@@ -494,7 +545,7 @@ impl Convert {
                     note,
                 )
             }
-            Kind::Text | Kind::Data => return Err("only files on disk convert as text".to_owned()),
+            Kind::Text | Kind::Data => return Err(tr!("only-files-disk-convert-as-text")),
         };
         if let Some(folder) = out.parent() {
             sue_platform::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
@@ -545,22 +596,24 @@ impl Convert {
             .filter(|input| matches!(input.status, Status::Failed(_)))
             .count();
         match done.as_slice() {
-            [] if failed > 0 => cx.fail(format!("Nothing converted: {failed} failed")),
+            [] if failed > 0 => cx.fail(tr!("nothing-converted-failed", failed = failed)),
             [] => {}
             [one] => cx.saved(one.to_path_buf(), "converted"),
             many => {
                 let folder = many[0].parent().map(Path::to_path_buf).unwrap_or_default();
                 cx.saved(
                     many[0].to_path_buf(),
-                    format!(
-                        "{} files converted, {failed} failed, into {}",
-                        many.len(),
-                        folder.display()
+                    tr!(
+                        "files-converted-failed-into-2",
+                        count = many.len(),
+                        value = sue_platform::shown_path(&folder),
+                        failed = failed
                     ),
                 );
             }
         }
         if self.reveal_after
+            && sue_platform::file_manager().is_some()
             && let Some(first) = done.first()
         {
             cx.request(ShellRequest::Command(format!(
@@ -585,24 +638,21 @@ impl Convert {
         let act = MenuItem::action;
         vec![
             Menu::new(
-                "File",
+                tr!("file"),
                 vec![
-                    act("Add Files...", "convert.add"),
-                    act("Add a Folder...", "convert.add_folder"),
-                    act(
-                        "Add the Project's Pictures and Sounds",
-                        "convert.add_project",
-                    ),
-                    act("Clear the List", "convert.clear"),
+                    act(tr!("add-files-ellipsis"), "convert.add"),
+                    act(tr!("add-a-folder-ellipsis"), "convert.add_folder"),
+                    act(tr!("add-projects-pictures-sounds"), "convert.add_project"),
+                    act(tr!("clear-the-list"), "convert.clear"),
                     MenuItem::Separator,
-                    act("Choose the Output Folder...", "convert.folder"),
+                    act(tr!("choose-the-output-folder-ellipsis"), "convert.folder"),
                     MenuItem::Separator,
-                    act("Back to the Hub", "convert.leave"),
+                    act(tr!("back-to-the-hub"), "convert.leave"),
                 ],
             ),
             Menu::new(
-                "Convert",
-                vec![act("Convert the List", "convert.run").key("Ctrl+Enter")],
+                tr!("convert"),
+                vec![act(tr!("convert-the-list"), "convert.run").key("Ctrl+Enter")],
             ),
         ]
     }
@@ -645,27 +695,27 @@ impl Convert {
         let theme = cx.theme.clone();
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-            if widgets::pill_button(ui, "Add Files", false, &theme)
-                .on_hover_text("Choose a file with the system's dialog")
+            if widgets::pill_button(ui, &tr!("add-files"), false, &theme)
+                .on_hover_text(tr!("choose-file-systems-dialog"))
                 .clicked()
             {
-                Self::pick(cx, "add", "Add Files to Convert", false);
+                Self::pick(cx, "add", &tr!("add-files-to-convert"), false);
             }
-            if widgets::pill_button(ui, "Add a Folder", false, &theme)
-                .on_hover_text("Every file in a folder")
+            if widgets::pill_button(ui, &tr!("add-a-folder"), false, &theme)
+                .on_hover_text(tr!("every-file-in-a-folder"))
                 .clicked()
             {
-                Self::pick(cx, "add", "Add a Folder to Convert", true);
+                Self::pick(cx, "add", &tr!("add-a-folder-to-convert"), true);
             }
-            if widgets::pill_button(ui, "Add from the Project", false, &theme)
-                .on_hover_text("The pictures and sounds open in Sue")
+            if widgets::pill_button(ui, &tr!("add-from-the-project"), false, &theme)
+                .on_hover_text(tr!("pictures-sounds-open-sue"))
                 .clicked()
             {
                 self.add_project(cx);
             }
             if !self.inputs.is_empty()
                 && !self.busy()
-                && widgets::pill_button(ui, "Clear", false, &theme).clicked()
+                && widgets::pill_button(ui, &tr!("clear"), false, &theme).clicked()
             {
                 self.inputs.clear();
             }
@@ -673,8 +723,7 @@ impl Convert {
         if self.inputs.is_empty() {
             ui.add(
                 egui::Label::new(
-                    RichText::new("Add any file: a picture, a song, a text file, a table, or anything at all. In any studio or tool, the Sue menu's Send To, Converter sends what it shows here.")
-                        .color(theme.muted),
+                    RichText::new(tr!("add-any-file-picture-song-text")).color(theme.muted),
                 )
                 .wrap(),
             );
@@ -706,14 +755,15 @@ impl Convert {
                     } else {
                         String::new()
                     };
-                    format!(
-                        "{}{size}, becomes {}",
-                        input.kind.plural().trim_end_matches('s'),
-                        self.target(input.kind).label()
+                    tr!(
+                        "becomes",
+                        value = input.kind.singular(),
+                        label = self.target(input.kind).label(),
+                        size = size
                     )
                 }
-                Status::Working => "Converting...".to_owned(),
-                Status::Done(path, note) => format!("Done: {} ({note})", file_name(path)),
+                Status::Working => tr!("converting-ellipsis"),
+                Status::Done(path, note) => tr!("done", value = file_name(path), note = note),
                 Status::Failed(error) => format!("! {error}"),
             };
             painter.text(
@@ -744,12 +794,15 @@ impl Convert {
                 },
             );
             if close_response
-                .on_hover_text("Take it off the list")
+                .on_hover_text(tr!("take-it-off-the-list"))
                 .clicked()
             {
                 remove = Some(index);
             } else if let Status::Done(path, _) = &input.status
-                && response.on_hover_text("Show it in Explorer").clicked()
+                && let Some(manager) = sue_platform::file_manager()
+                && response
+                    .on_hover_text(tr!("show-it-in", manager = manager))
+                    .clicked()
             {
                 reveal = Some(path.clone());
             }
@@ -772,7 +825,7 @@ impl Convert {
                 .into_iter()
                 .map(|target| (target, target.label()))
                 .collect();
-            row(ui, &format!("{} become", kind.plural()), theme, |ui| {
+            row(ui, &tr!("become", plural = kind.plural()), theme, |ui| {
                 if combo(
                     ui,
                     &format!("sue-convert-target-{kind:?}"),
@@ -795,17 +848,13 @@ impl Convert {
         ) {
             return;
         }
-        egui::CollapsingHeader::new(RichText::new("Picture options").color(theme.text))
+        egui::CollapsingHeader::new(RichText::new(tr!("picture-options")).color(theme.text))
             .id_salt("sue-convert-picture")
             .default_open(true)
             .show(ui, |ui| {
                 let picture = &mut self.options.picture;
-                row(ui, "Size", theme, |ui| {
-                    let options: Vec<(usize, String)> = RESIZES
-                        .iter()
-                        .enumerate()
-                        .map(|(index, label)| (index, (*label).to_owned()))
-                        .collect();
+                row(ui, &tr!("size"), theme, |ui| {
+                    let options: Vec<(usize, String)> = resizes().into_iter().enumerate().collect();
                     combo(
                         ui,
                         "sue-convert-resize",
@@ -816,31 +865,47 @@ impl Convert {
                 });
                 let (percent, width, height) = &mut self.resize_values;
                 match self.resize_mode {
-                    1 => row(ui, "Scale", theme, |ui| {
+                    1 => row(ui, &tr!("scale"), theme, |ui| {
                         ui.add(
                             egui::Slider::new(percent, 1.0..=400.0)
                                 .suffix(" %")
                                 .max_decimals(0),
                         );
                     }),
-                    2 => row(ui, "Width", theme, |ui| {
-                        ui.add(egui::DragValue::new(width).range(1..=32_768).suffix(" px"));
+                    2 => row(ui, &tr!("width"), theme, |ui| {
+                        ui.add(
+                            egui::DragValue::new(width)
+                                .range(1..=32_768)
+                                .suffix(tr!("px")),
+                        );
                     }),
-                    3 => row(ui, "Height", theme, |ui| {
-                        ui.add(egui::DragValue::new(height).range(1..=32_768).suffix(" px"));
+                    3 => row(ui, &tr!("height"), theme, |ui| {
+                        ui.add(
+                            egui::DragValue::new(height)
+                                .range(1..=32_768)
+                                .suffix(tr!("px")),
+                        );
                     }),
-                    4 | 5 => row(ui, "Box", theme, |ui| {
-                        ui.add(egui::DragValue::new(width).range(1..=32_768).suffix(" px"));
+                    4 | 5 => row(ui, &tr!("box"), theme, |ui| {
+                        ui.add(
+                            egui::DragValue::new(width)
+                                .range(1..=32_768)
+                                .suffix(tr!("px")),
+                        );
                         ui.label("by");
-                        ui.add(egui::DragValue::new(height).range(1..=32_768).suffix(" px"));
+                        ui.add(
+                            egui::DragValue::new(height)
+                                .range(1..=32_768)
+                                .suffix(tr!("px")),
+                        );
                     }),
                     _ => {}
                 }
                 if self.resize_mode != 0 {
-                    row(ui, "Resampling", theme, |ui| {
+                    row(ui, &tr!("resampling"), theme, |ui| {
                         let options: Vec<(Filter, String)> = Filter::ALL
                             .iter()
-                            .map(|(filter, label)| (*filter, (*label).to_owned()))
+                            .map(|filter| (*filter, filter.label()))
                             .collect();
                         combo(
                             ui,
@@ -851,9 +916,13 @@ impl Convert {
                         );
                     });
                 }
-                row(ui, "Turn", theme, |ui| {
-                    let options = ["None", "90\u{00B0} right", "180\u{00B0}", "90\u{00B0} left"]
-                        .map(str::to_owned);
+                row(ui, &tr!("turn"), theme, |ui| {
+                    let options = [
+                        tr!("none"),
+                        tr!("n-90-right"),
+                        "180\u{00B0}".to_owned(),
+                        tr!("n-90-left"),
+                    ];
                     if let Some(index) = widgets::segmented(
                         ui,
                         &options,
@@ -863,25 +932,25 @@ impl Convert {
                         picture.quarter_turns = index as u8;
                     }
                 });
-                row(ui, "Mirror", theme, |ui| {
-                    ui.checkbox(&mut picture.flip_h, "Left to right");
-                    ui.checkbox(&mut picture.flip_v, "Top to bottom");
+                row(ui, &tr!("mirror"), theme, |ui| {
+                    ui.checkbox(&mut picture.flip_h, tr!("left-to-right"));
+                    ui.checkbox(&mut picture.flip_v, tr!("top-to-bottom"));
                 });
-                row(ui, "Brightness", theme, |ui| {
+                row(ui, &tr!("brightness"), theme, |ui| {
                     ui.add(egui::Slider::new(&mut picture.brightness, -1.0..=1.0).max_decimals(2));
                 });
-                row(ui, "Contrast", theme, |ui| {
+                row(ui, &tr!("contrast"), theme, |ui| {
                     ui.add(egui::Slider::new(&mut picture.contrast, -1.0..=1.0).max_decimals(2));
                 });
-                row(ui, "Saturation", theme, |ui| {
+                row(ui, &tr!("saturation"), theme, |ui| {
                     ui.add(egui::Slider::new(&mut picture.saturation, -1.0..=1.0).max_decimals(2));
                 });
-                row(ui, "Colors", theme, |ui| {
-                    ui.checkbox(&mut picture.grayscale, "Grays only");
-                    ui.checkbox(&mut picture.flatten, "Fill transparency");
+                row(ui, &tr!("colors"), theme, |ui| {
+                    ui.checkbox(&mut picture.grayscale, tr!("grays-only"));
+                    ui.checkbox(&mut picture.flatten, tr!("fill-transparency"));
                 });
                 if picture.flatten || target.flattens() {
-                    row(ui, "Background", theme, |ui| {
+                    row(ui, &tr!("background"), theme, |ui| {
                         let [r, g, b] = picture.background;
                         let mut rgba = [r, g, b, 255];
                         if sue_wm::color_button(
@@ -898,14 +967,14 @@ impl Convert {
                     });
                 }
                 if target == Target::Jpeg {
-                    row(ui, "Quality", theme, |ui| {
+                    row(ui, &tr!("quality"), theme, |ui| {
                         ui.add(egui::Slider::new(&mut picture.jpeg_quality, 1..=100));
                     });
                 }
                 if target == Target::Jxl {
-                    row(ui, "Effort", theme, |ui| {
+                    row(ui, &tr!("effort"), theme, |ui| {
                         ui.add(egui::Slider::new(&mut picture.jxl_effort, 1..=9))
-                            .on_hover_text("Higher is smaller and slower");
+                            .on_hover_text(tr!("higher-is-smaller-and-slower"));
                     });
                 }
                 if let Target::Picture(format) = target
@@ -913,9 +982,10 @@ impl Convert {
                     && max <= 256
                 {
                     ui.label(
-                        RichText::new(format!(
-                            "{} pictures are at most {max} by {max}; bigger ones are fitted.",
-                            format.name()
+                        RichText::new(tr!(
+                            "pictures-are-most-bigger-ones-are",
+                            format = format.name(),
+                            max = max
                         ))
                         .size(theme.small_size)
                         .color(theme.muted),
@@ -929,15 +999,15 @@ impl Convert {
         if !matches!(target, Target::Wav | Target::Flac | Target::Aiff) {
             return;
         }
-        egui::CollapsingHeader::new(RichText::new("Sound options").color(theme.text))
+        egui::CollapsingHeader::new(RichText::new(tr!("sound-options")).color(theme.text))
             .id_salt("sue-convert-sound")
             .default_open(true)
             .show(ui, |ui| {
-                row(ui, "Sample rate", theme, |ui| {
+                row(ui, &tr!("sample-rate"), theme, |ui| {
                     let options: Vec<(usize, String)> = RATES
                         .iter()
                         .enumerate()
-                        .map(|(index, (_, label))| (index, (*label).to_owned()))
+                        .map(|(index, rate)| (index, rate_label(*rate)))
                         .collect();
                     combo(
                         ui,
@@ -947,11 +1017,11 @@ impl Convert {
                         &options,
                     );
                 });
-                row(ui, "Channels", theme, |ui| {
+                row(ui, &tr!("channels"), theme, |ui| {
                     let options: Vec<(usize, String)> = CHANNELS
                         .iter()
                         .enumerate()
-                        .map(|(index, (_, label))| (index, (*label).to_owned()))
+                        .map(|(index, channels)| (index, channels_label(*channels)))
                         .collect();
                     combo(
                         ui,
@@ -962,68 +1032,68 @@ impl Convert {
                     );
                 });
                 let sound = &mut self.options.sound;
-                row(ui, "Bits", theme, |ui| {
+                row(ui, &tr!("bits"), theme, |ui| {
                     let mut depths = vec![
-                        (SampleDepth::Int16, "16-bit (CD)".to_owned()),
-                        (SampleDepth::Int24, "24-bit (studio)".to_owned()),
+                        (SampleDepth::Int16, tr!("n-16-bit-cd")),
+                        (SampleDepth::Int24, tr!("n-24-bit-studio")),
                     ];
                     if target == Target::Wav {
-                        depths.push((SampleDepth::Float32, "32-bit float".to_owned()));
+                        depths.push((SampleDepth::Float32, tr!("n-32-bit-float")));
                     } else if sound.depth == SampleDepth::Float32 {
                         sound.depth = SampleDepth::Int24;
                     }
                     combo(ui, "sue-convert-depth", 150.0, &mut sound.depth, &depths);
                 });
-                row(ui, "Loudness", theme, |ui| {
-                    ui.checkbox(&mut sound.normalize, "Normalize to -1 dB");
+                row(ui, &tr!("loudness"), theme, |ui| {
+                    ui.checkbox(&mut sound.normalize, tr!("normalize-to-1-db"));
                 });
                 if !sound.normalize {
-                    row(ui, "Gain", theme, |ui| {
+                    row(ui, &tr!("gain"), theme, |ui| {
                         ui.add(
                             egui::Slider::new(&mut sound.gain_db, -24.0..=24.0)
-                                .suffix(" dB")
+                                .suffix(tr!("db"))
                                 .max_decimals(1),
                         );
                     });
                 }
-                row(ui, "Cut the start", theme, |ui| {
+                row(ui, &tr!("cut-the-start"), theme, |ui| {
                     ui.add(
                         egui::Slider::new(&mut sound.trim_start, 0.0..=60.0)
                             .suffix(" s")
                             .max_decimals(2),
                     );
                 });
-                row(ui, "Cut the end", theme, |ui| {
+                row(ui, &tr!("cut-the-end"), theme, |ui| {
                     ui.add(
                         egui::Slider::new(&mut sound.trim_end, 0.0..=60.0)
                             .suffix(" s")
                             .max_decimals(2),
                     );
                 });
-                row(ui, "Fade in", theme, |ui| {
+                row(ui, &tr!("fade-in"), theme, |ui| {
                     ui.add(
                         egui::Slider::new(&mut sound.fade_in, 0.0..=10.0)
                             .suffix(" s")
                             .max_decimals(2),
                     );
                 });
-                row(ui, "Fade out", theme, |ui| {
+                row(ui, &tr!("fade-out"), theme, |ui| {
                     ui.add(
                         egui::Slider::new(&mut sound.fade_out, 0.0..=10.0)
                             .suffix(" s")
                             .max_decimals(2),
                     );
                 });
-                row(ui, "Speed", theme, |ui| {
+                row(ui, &tr!("speed"), theme, |ui| {
                     ui.add(
                         egui::Slider::new(&mut sound.speed, 0.25..=4.0)
                             .suffix("x")
                             .max_decimals(2),
                     )
-                    .on_hover_text("Changes the pitch too");
+                    .on_hover_text(tr!("changes-the-pitch-too"));
                 });
-                row(ui, "Direction", theme, |ui| {
-                    ui.checkbox(&mut sound.reverse, "Backwards");
+                row(ui, &tr!("direction"), theme, |ui| {
+                    ui.checkbox(&mut sound.reverse, tr!("backwards"));
                 });
             });
     }
@@ -1039,15 +1109,15 @@ impl Convert {
                 Target::Text | Target::Html | Target::Json | Target::Csv | Target::Tsv
             )
         {
-            egui::CollapsingHeader::new(RichText::new("Text options").color(theme.text))
+            egui::CollapsingHeader::new(RichText::new(tr!("text-options")).color(theme.text))
                 .id_salt("sue-convert-text")
                 .default_open(true)
                 .show(ui, |ui| {
-                    row(ui, "Line endings", theme, |ui| {
+                    row(ui, &tr!("line-endings"), theme, |ui| {
                         let options = vec![
-                            (Endings::Keep, "Keep".to_owned()),
-                            (Endings::Lf, "LF (Linux, macOS)".to_owned()),
-                            (Endings::CrLf, "CRLF (Windows)".to_owned()),
+                            (Endings::Keep, tr!("keep")),
+                            (Endings::Lf, tr!("lf-linux-macos")),
+                            (Endings::CrLf, tr!("crlf-windows")),
                         ];
                         combo(
                             ui,
@@ -1058,32 +1128,34 @@ impl Convert {
                         );
                     });
                     if target == Target::Text {
-                        row(ui, "Tidy", theme, |ui| {
-                            ui.checkbox(&mut text.trim_trailing, "Drop trailing spaces");
+                        row(ui, &tr!("tidy"), theme, |ui| {
+                            ui.checkbox(&mut text.trim_trailing, tr!("drop-trailing-spaces"));
                         });
-                        row(ui, "Tabs", theme, |ui| {
+                        row(ui, &tr!("tabs"), theme, |ui| {
                             ui.add(
-                                egui::Slider::new(&mut text.tab_spaces, 0..=8).suffix(" spaces"),
+                                egui::Slider::new(&mut text.tab_spaces, 0..=8)
+                                    .suffix(tr!("spaces")),
                             )
-                            .on_hover_text("0 keeps the tabs");
+                            .on_hover_text(tr!("n-0-keeps-the-tabs"));
                         });
                     }
                     if target == Target::Json {
-                        row(ui, "Indent", theme, |ui| {
+                        row(ui, &tr!("indent"), theme, |ui| {
                             ui.add(
-                                egui::Slider::new(&mut text.json_indent, 0..=8).suffix(" spaces"),
+                                egui::Slider::new(&mut text.json_indent, 0..=8)
+                                    .suffix(tr!("spaces")),
                             )
-                            .on_hover_text("0 writes it on one line");
+                            .on_hover_text(tr!("n-0-writes-one-line"));
                         });
-                        row(ui, "Tables", theme, |ui| {
-                            ui.checkbox(&mut text.header_row, "The first row names the columns");
+                        row(ui, &tr!("tables"), theme, |ui| {
+                            ui.checkbox(&mut text.header_row, tr!("first-row-names-columns"));
                         });
                     }
                     if target == Target::Html {
-                        row(ui, "Page title", theme, |ui| {
+                        row(ui, &tr!("page-title"), theme, |ui| {
                             ui.add(
                                 egui::TextEdit::singleline(&mut text.html_title)
-                                    .hint_text("The file's name")
+                                    .hint_text(tr!("the-files-name"))
                                     .desired_width(180.0),
                             );
                         });
@@ -1091,55 +1163,67 @@ impl Convert {
                 });
         }
         if data_targets.contains(&Target::Hex) {
-            row(ui, "Hex bytes a line", theme, |ui| {
+            row(ui, &tr!("hex-bytes-a-line"), theme, |ui| {
                 ui.add(egui::Slider::new(&mut text.hex_width, 4..=64));
             });
         }
         if data_targets.contains(&Target::Base64) {
-            row(ui, "Base64", theme, |ui| {
-                ui.checkbox(&mut text.base64_wrap, "Wrap lines at 76");
+            row(ui, &tr!("base64"), theme, |ui| {
+                ui.checkbox(&mut text.base64_wrap, tr!("wrap-lines-at-76"));
             });
         }
         if data_targets.contains(&Target::ByteMap) {
-            row(ui, "Byte map width", theme, |ui| {
-                ui.add(egui::Slider::new(&mut text.map_width, 16..=2048).suffix(" px"));
+            row(ui, &tr!("byte-map-width"), theme, |ui| {
+                ui.add(egui::Slider::new(&mut text.map_width, 16..=2048).suffix(tr!("px")));
             });
         }
     }
 
     fn output_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
         let theme = cx.theme.clone();
-        widgets::heading(ui, "Save to", &theme);
+        widgets::heading(ui, &tr!("save-to"), &theme);
         let mut next_to = self.output.folder.is_none();
         ui.horizontal_wrapped(|ui| {
             if ui
-                .radio_value(&mut next_to, true, "Next to each file")
+                .radio_value(&mut next_to, true, tr!("next-to-each-file"))
                 .clicked()
             {
                 self.output.folder = None;
             }
             if ui
-                .radio_value(&mut next_to, false, "This folder:")
+                .radio_value(&mut next_to, false, tr!("this-folder"))
                 .clicked()
                 && self.output.folder.is_none()
             {
-                Self::pick(cx, "folder", "Choose Where Converted Files Go", true);
+                Self::pick(cx, "folder", &tr!("choose-where-converted-files-go"), true);
             }
         });
+        if self.strands_next_to(sue_platform::stays_in_cache) {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(tr!("picked-copies-ask-for-a-folder"))
+                        .size(theme.small_size)
+                        .color(theme.muted),
+                )
+                .wrap(),
+            );
+        }
         if let Some(folder) = self.output.folder.clone() {
             ui.horizontal_wrapped(|ui| {
                 ui.add(
                     egui::Label::new(
-                        RichText::new(folder.display().to_string())
+                        RichText::new(sue_platform::shown_path(&folder))
                             .size(theme.small_size)
                             .color(theme.text),
                     )
                     .wrap(),
                 );
-                if widgets::pill_button(ui, "Change", false, &theme).clicked() {
-                    Self::pick(cx, "folder", "Choose Where Converted Files Go", true);
+                if widgets::pill_button(ui, &tr!("change"), false, &theme).clicked() {
+                    Self::pick(cx, "folder", &tr!("choose-where-converted-files-go"), true);
                 }
-                if widgets::pill_button(ui, "Open", false, &theme).clicked() {
+                if sue_platform::file_manager().is_some()
+                    && widgets::pill_button(ui, &tr!("open"), false, &theme).clicked()
+                {
                     cx.request(ShellRequest::Command(format!(
                         "reveal:{}",
                         folder.display()
@@ -1147,19 +1231,16 @@ impl Convert {
                 }
             });
         }
-        row(ui, "File name", &theme, |ui| {
+        row(ui, &tr!("file-name"), &theme, |ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.output.pattern)
                     .desired_width(140.0)
                     .hint_text("{name}"),
             )
-            .on_hover_text("{name} is the original's name, e.g. {name}-small");
+            .on_hover_text(tr!("originals-name-e-g-small"));
         });
-        row(ui, "If it exists", &theme, |ui| {
-            let options = vec![
-                (false, "Keep both".to_owned()),
-                (true, "Replace it".to_owned()),
-            ];
+        row(ui, &tr!("if-it-exists"), &theme, |ui| {
+            let options = vec![(false, tr!("keep-both")), (true, tr!("replace-it"))];
             combo(
                 ui,
                 "sue-convert-replace",
@@ -1168,10 +1249,12 @@ impl Convert {
                 &options,
             );
         });
-        ui.checkbox(
-            &mut self.reveal_after,
-            "Show the result in Explorer when done",
-        );
+        if let Some(manager) = sue_platform::file_manager() {
+            ui.checkbox(
+                &mut self.reveal_after,
+                tr!("show-result-when-done", manager = manager),
+            );
+        }
     }
 
     fn body(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
@@ -1200,9 +1283,9 @@ impl Convert {
             .count();
         ui.horizontal(|ui| {
             let label = if waiting == 1 {
-                "Convert 1 file".to_owned()
+                tr!("convert-1-file")
             } else {
-                format!("Convert {waiting} files")
+                tr!("convert-files", waiting = waiting)
             };
             if ui
                 .add_enabled(
@@ -1236,7 +1319,8 @@ fn me() -> AppletId {
 
 impl SueApplet for Convert {
     fn manifest(&self) -> AppletManifest {
-        let mut manifest = AppletManifest::new(ID, "Converter", AppletRole::Tool, "\u{1F504}");
+        let mut manifest = AppletManifest::new(ID, "Converter", AppletRole::Tool, "\u{1F504}")
+            .localized("convert");
         manifest.summary =
             "Turn any file into another kind: pictures, sounds, text, tables or bytes.".to_owned();
         manifest.order = 30;
@@ -1275,7 +1359,7 @@ impl SueApplet for Convert {
             .auto_shrink([false, false])
             .show(&mut inner, |ui| {
                 ui.label(
-                    RichText::new("Converter")
+                    RichText::new(tr!("applet-name"))
                         .size(theme.heading_size)
                         .color(theme.text),
                 );
@@ -1286,6 +1370,9 @@ impl SueApplet for Convert {
     }
 
     fn bar_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        if self.language.changed() {
+            self.menus = Self::menus();
+        }
         let theme = cx.theme.clone();
         let rect = ui.max_rect();
         let mut menubar = std::mem::take(&mut self.menubar);
@@ -1301,9 +1388,9 @@ impl SueApplet for Convert {
 
     fn commands(&self) -> Vec<sue_wm::PaletteEntry> {
         [
-            ("Add Files", "convert.add"),
-            ("Add a Folder", "convert.add_folder"),
-            ("Convert the List", "convert.run"),
+            (tr!("add-files"), "convert.add"),
+            (tr!("add-a-folder"), "convert.add_folder"),
+            (tr!("convert-the-list"), "convert.run"),
         ]
         .into_iter()
         .map(|(label, command)| sue_wm::PaletteEntry {
@@ -1317,14 +1404,16 @@ impl SueApplet for Convert {
     fn command(&mut self, name: &str, cx: &mut AppletContext<'_>) -> bool {
         match name {
             "convert.add" | "file.open" => {
-                Self::pick(cx, "add", "Add Files to Convert", false);
+                Self::pick(cx, "add", &tr!("add-files-to-convert"), false);
             }
-            "convert.add_folder" => Self::pick(cx, "add", "Add a Folder to Convert", true),
+            "convert.add_folder" => Self::pick(cx, "add", &tr!("add-a-folder-to-convert"), true),
             "convert.add_project" => self.add_project(cx),
             "convert.clear" if !self.busy() => self.inputs.clear(),
-            "convert.folder" => Self::pick(cx, "folder", "Choose Where Converted Files Go", true),
+            "convert.folder" => {
+                Self::pick(cx, "folder", &tr!("choose-where-converted-files-go"), true)
+            }
             "convert.run" if !self.busy() => self.run(cx),
-            "convert.run" | "convert.clear" => cx.notify("Already converting"),
+            "convert.run" | "convert.clear" => cx.notify(tr!("already-converting")),
             "convert.leave" => cx.request(ShellRequest::Hub),
             _ => return false,
         }
@@ -1354,7 +1443,7 @@ impl SueApplet for Convert {
             Some(entity) if Self::kind_of_entity(entity).is_some() => {
                 vec![sue_wm::SueAction::new(
                     sue_wm::sue_menu::SEND_TO,
-                    "Converter",
+                    tr!("applet-name"),
                     ShellRequest::SendEntity {
                         to: me(),
                         purpose: "add".to_owned(),
@@ -1405,16 +1494,20 @@ impl SueApplet for Convert {
         cx.request(ShellRequest::Open(me()));
     }
 
-    fn picked(&mut self, pick: &FilePick, path: &Path, _cx: &mut AppletContext<'_>) {
+    fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
         match pick.purpose.as_str() {
             "add" => self.add_path(path),
-            "folder" => {
+            "folder" | "run" => {
                 let folder = if sue_platform::fs::is_dir(path) {
                     path.to_path_buf()
                 } else {
                     path.parent().map(Path::to_path_buf).unwrap_or_default()
                 };
                 self.output.folder = Some(folder);
+                // Convert asked for it: carry on converting.
+                if pick.purpose == "run" && !self.busy() {
+                    self.run(cx);
+                }
             }
             _ => {}
         }
@@ -1459,5 +1552,44 @@ mod tests {
             dir.join("out").join("photo-small.png")
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn copies_of_picked_files_ask_where_their_results_go() {
+        // A stand-in for a phone's cache: the copy of a file picked on its
+        // own is in `picked/1`, a chosen folder's files are in `picked/2`.
+        let stays = |path: &Path| path == Path::new("picked/1");
+        let input = |source| Input {
+            source,
+            name: "Picture.png".to_owned(),
+            kind: Kind::Picture,
+            size: 1,
+            status: Status::Waiting,
+        };
+        let mut convert = Convert::default();
+        convert
+            .inputs
+            .push(input(Source::File(PathBuf::from("picked/2/Song.wav"))));
+        convert
+            .inputs
+            .push(input(Source::Entity(AssetHandle::new(1, 1))));
+        assert!(!convert.strands_next_to(stays), "these land where they are");
+
+        convert
+            .inputs
+            .push(input(Source::File(PathBuf::from("picked/1/Picture.png"))));
+        assert!(convert.strands_next_to(stays));
+        assert!(
+            !convert.strands_next_to(sue_platform::stays_in_cache),
+            "a desktop writes next to every file"
+        );
+        // Already on its way, it asks nothing.
+        convert.inputs[2].status = Status::Working;
+        assert!(!convert.strands_next_to(stays));
+        convert.inputs[2].status = Status::Done(PathBuf::new(), String::new());
+        assert!(convert.strands_next_to(stays));
+        // With a folder chosen, every result goes there.
+        convert.output.folder = Some(PathBuf::from("picked/3"));
+        assert!(!convert.strands_next_to(stays));
     }
 }

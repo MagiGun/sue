@@ -16,7 +16,7 @@ use sue_core::{Arena, AssetHandle, CoreError, Entity, ReversibleTransaction, Txn
 use sue_platform::{AudioSink, FormFactor, TextureUpload};
 use sue_rice::{HardwareProfile, RiceDeclaration, RiceSchema, SetRiceValue};
 
-use crate::{Catalog, RiceEdit, Theme, Transport, Typing, WmError, World};
+use crate::{Catalog, RiceEdit, Theme, Transport, Typing, WmError, WorkList, World};
 
 /// An applet's unique id: `[a-z][a-z0-9-]*`, e.g. `paint`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -120,6 +120,12 @@ pub struct AppletManifest {
     pub icon: String,
     /// Sort key among applets of the same role (lower first).
     pub order: i32,
+    /// The namespace of the language database its text lives in, e.g.
+    /// `paint`. With one, its name and summary are read from the messages
+    /// `applet-name` and `applet-summary` there, in the language in use
+    /// ([`Self::title`], [`Self::blurb`]); `name` and `summary` are what
+    /// shows where no language has them.
+    pub namespace: Option<String>,
 }
 
 impl AppletManifest {
@@ -136,6 +142,33 @@ impl AppletManifest {
             role,
             icon: icon.to_owned(),
             order: 0,
+            namespace: None,
+        }
+    }
+
+    /// The same manifest, reading its name and summary from `namespace` in
+    /// the language database.
+    #[must_use]
+    pub fn localized(mut self, namespace: &str) -> Self {
+        self.namespace = Some(namespace.to_owned());
+        self
+    }
+
+    /// Its name in the language in use.
+    #[must_use]
+    pub fn title(&self) -> String {
+        match &self.namespace {
+            Some(namespace) => sue_lang::text_or(namespace, "applet-name", &self.name),
+            None => self.name.clone(),
+        }
+    }
+
+    /// What it does, in the language in use.
+    #[must_use]
+    pub fn blurb(&self) -> String {
+        match &self.namespace {
+            Some(namespace) => sue_lang::text_or(namespace, "applet-summary", &self.summary),
+            None => self.summary.clone(),
         }
     }
 }
@@ -243,6 +276,8 @@ pub enum ShellRequest {
     },
     /// Open the Sue menu.
     SueMenu,
+    /// Set Sue's language: a language tag, or `system` for the system's.
+    Language(String),
     /// Hand a file to an applet, as if it had picked it.
     SendFile {
         /// Who gets it.
@@ -261,6 +296,21 @@ pub enum ShellRequest {
         /// What it is, e.g. `JPEG XL, lossless, 1.2 MiB`.
         note: String,
     },
+    /// Put a file first in the work Sue remembers (the Hub's lists and
+    /// every Open Recent): it was opened, or `saved`.
+    Remember {
+        /// The file.
+        path: PathBuf,
+        /// `true` when it was saved, `false` when opened.
+        saved: bool,
+    },
+    /// Forget a file in the work Sue remembers.
+    Forget(PathBuf),
+    /// Bring back work Sue kept by itself (an autosave, by its id) and open
+    /// it in its studio.
+    Recover(String),
+    /// Throw away work Sue kept by itself (an autosave, by its id).
+    Discard(String),
 }
 
 /// A request for a file, answered by the system's own open or save dialog:
@@ -396,7 +446,7 @@ impl FilePick {
             Vec::new()
         } else {
             vec![sue_platform::FileFilter {
-                name: "Files".to_owned(),
+                name: tr!("files"),
                 extensions: self.extensions.clone(),
             }]
         }
@@ -526,6 +576,9 @@ pub struct AppletContext<'a> {
     pub audio: Option<&'a mut (dyn AudioSink + 'static)>,
     /// The shared audio transport.
     pub transport: &'a mut Transport,
+    /// The files of late and the work Sue kept; change it with
+    /// [`ShellRequest::Remember`] and [`ShellRequest::Forget`].
+    pub work: &'a WorkList,
     /// What the shell shows.
     pub view: ShellView,
 }
@@ -607,6 +660,17 @@ impl AppletContext<'_> {
         let now = self.view.now;
         self.typing
             .record_with(self.history, handle, id, ops, before, now);
+    }
+
+    /// Records typing already done in place that is not a text buffer's (a
+    /// table cell's): edits with the same `key` in a burst are one undo
+    /// step, and `undo` (built before this edit) is kept from the first.
+    pub fn record_held_typing<X>(&mut self, key: u64, undo: X)
+    where
+        X: ReversibleTransaction<World> + 'static,
+    {
+        let now = self.view.now;
+        self.typing.hold(self.history, key, Box::new(undo), now);
     }
 
     /// A message for the status bar.

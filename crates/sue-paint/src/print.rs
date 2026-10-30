@@ -103,7 +103,7 @@ pub fn pdf(
         ..PdfDocument::default()
     };
     for page in pages {
-        let bytes = page.bytes().ok_or("pages are 8-bit RGBA")?;
+        let bytes = page.bytes().ok_or(tr!("pages-are-8-bit-rgba"))?;
         let rgb = bytes
             .chunks(4)
             .flat_map(|pixel| {
@@ -128,7 +128,7 @@ pub fn pdf(
         });
     }
     if doc.pages.is_empty() {
-        return Err("There is nothing to print".to_owned());
+        return Err(tr!("there-is-nothing-to-print"));
     }
     write_pdf(&doc)
 }

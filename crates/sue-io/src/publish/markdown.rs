@@ -41,6 +41,22 @@ pub fn to_markdown(book: &Book) -> String {
                 out.push_str("```\n\n");
                 in_code = false;
             }
+            if let Some(contents) = book.contents_of(&para) {
+                if !contents.title.is_empty() {
+                    out.push_str(&format!("**{}**\n\n", escape(&contents.title)));
+                }
+                for (level, title) in book.headings(contents) {
+                    let indent = "  ".repeat(usize::from(level.saturating_sub(1)));
+                    out.push_str(&format!("{indent}- {}\n", escape(&title)));
+                }
+                out.push('\n');
+                continue;
+            }
+            if let Some(table) = book.table(&para) {
+                out.push_str(&table_markdown(table));
+                out.push('\n');
+                continue;
+            }
             if para.embed.is_some() {
                 out.push_str("![](picture)\n\n");
                 continue;
@@ -50,7 +66,9 @@ pub fn to_markdown(book: &Book) -> String {
                 let mut piece = if look.code {
                     format!("`{text}`")
                 } else {
-                    escape(text)
+                    // A line break inside a paragraph: two spaces, then a
+                    // new line.
+                    escape(text).replace(sue_model::LINE_BREAK, "  \n")
                 };
                 if !look.code && !text.trim().is_empty() {
                     let (lead, core, trail) = split_spaces(&piece);
@@ -70,7 +88,7 @@ pub fn to_markdown(book: &Book) -> String {
                     piece = format!("{lead}{core}{trail}");
                 }
                 line.push_str(&piece);
-                if let Some(note) = &look.footnote {
+                if let Some(note) = look.footnote.as_ref().or(look.endnote.as_ref()) {
                     notes.push(note.clone());
                     line.push_str(&format!("[^{}]", notes.len()));
                 }
@@ -269,9 +287,42 @@ fn inline(line: &str, text: &mut String, marks: &mut TextMarks) {
     }
 }
 
+/// A table as a pipe table: its first row the header (an empty one when
+/// it has no heading row).
+fn table_markdown(table: &crate::publish::PublishTable) -> String {
+    let columns = table.columns().max(1);
+    let row_of = |cells: &[String]| {
+        let mut line = String::from("|");
+        for column in 0..columns {
+            let text = cells.get(column).map_or("", String::as_str);
+            line.push(' ');
+            line.push_str(&escape(text).replace('|', "\\|").replace('\n', "<br>"));
+            line.push_str(" |");
+        }
+        line.push('\n');
+        line
+    };
+    let mut out = String::new();
+    let body = if table.header_rows > 0 && !table.cells.is_empty() {
+        out.push_str(&row_of(&table.cells[0]));
+        &table.cells[1..]
+    } else {
+        out.push_str(&row_of(&vec![String::new(); columns]));
+        &table.cells[..]
+    };
+    out.push('|');
+    out.push_str(&" --- |".repeat(columns));
+    out.push('\n');
+    for cells in body {
+        out.push_str(&row_of(cells));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::tests::sample;
+    use super::super::tests::with_table;
     use super::*;
 
     #[test]
@@ -302,6 +353,15 @@ mod tests {
         assert_eq!(
             marks.paragraph_value(&text, 3, kind::LEVEL),
             Some(&Value::Int(1))
+        );
+    }
+
+    #[test]
+    fn markdown_tables_are_pipe_tables() {
+        let markdown = to_markdown(&with_table());
+        assert!(
+            markdown.contains("| Item | Count & size |\n| --- | --- |\n| Bolt"),
+            "{markdown}"
         );
     }
 }

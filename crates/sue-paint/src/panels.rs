@@ -64,7 +64,7 @@ pub(crate) fn icon_button(
     let response = if enabled {
         response.on_hover_text(tip)
     } else {
-        response.on_hover_text(format!("{tip} (not available yet)"))
+        response.on_hover_text(tr!("not-available-yet", tip = tip))
     };
     enabled && response.clicked()
 }
@@ -79,7 +79,7 @@ pub(crate) fn icon_in(ui: &mut Ui, icon: Icon, active: bool, tip: &str, theme: &
 fn header(
     ui: &mut Ui,
     rect: Rect,
-    tabs: &[(&str, bool)],
+    tabs: &[(String, bool)],
     selected: u8,
     theme: &Theme,
 ) -> (Rect, Option<u8>) {
@@ -93,7 +93,7 @@ fn header(
     // Tabs pad less when there are many, so they fit the palette.
     let galleys: Vec<_> = tabs
         .iter()
-        .map(|(title, _)| painter.layout_no_wrap((*title).to_owned(), font.clone(), theme.text))
+        .map(|(title, _)| painter.layout_no_wrap(title.clone(), font.clone(), theme.text))
         .collect();
     let text: f32 = galleys.iter().map(|galley| galley.size().x + 2.0).sum();
     let pad = ((strip.width() - 8.0 - text) / tabs.len().max(1) as f32).clamp(6.0, 16.0);
@@ -227,7 +227,7 @@ fn dynamic_row(
             curve,
             Stroke::new(1.2, if on { theme.text } else { theme.muted }),
         ));
-        let button = button.on_hover_text(format!("{label} Dynamics: what the pen changes"));
+        let button = button.on_hover_text(tr!("dynamics-what-the-pen-changes", label = label));
         egui::Popup::from_toggle_button_response(&button)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .show(|ui| {
@@ -248,12 +248,15 @@ fn starting_and_ending_ui(ui: &mut Ui, tip: &mut crate::brush::Tip, theme: &Them
             .size(theme.small_size + 0.5)
             .color(theme.muted)
     };
-    egui::CollapsingHeader::new(small("Starting and ending"))
+    egui::CollapsingHeader::new(small(&tr!("starting-and-ending")))
         .id_salt("starting-and-ending")
         .default_open(true)
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.add_sized(vec2(78.0, 18.0), egui::Label::new(small("How to specify")));
+                ui.add_sized(
+                    vec2(78.0, 18.0),
+                    egui::Label::new(small(&tr!("how-to-specify"))),
+                );
                 egui::ComboBox::from_id_salt("taper-mode")
                     .selected_text(tip.taper_mode.label())
                     .show_ui(ui, |ui| {
@@ -263,41 +266,41 @@ fn starting_and_ending_ui(ui: &mut Ui, tip: &mut crate::brush::Tip, theme: &Them
                     });
             });
             let (unit, top) = match tip.taper_mode {
-                TaperMode::Percent => (" %", 100.0),
-                TaperMode::Length | TaperMode::Fade => (" px", 400.0),
+                TaperMode::Percent => (" %".to_owned(), 100.0),
+                TaperMode::Length | TaperMode::Fade => (tr!("px"), 400.0),
             };
             slider_row(
                 ui,
-                "Starting",
+                &tr!("starting-2"),
                 &mut tip.taper_start,
                 0.0..=top,
-                unit,
+                &unit,
                 false,
                 theme,
             );
             let ending = if tip.taper_mode == TaperMode::Fade {
-                "Fade by"
+                tr!("fade-by")
             } else {
-                "Ending"
+                tr!("ending")
             };
             slider_row(
                 ui,
-                ending,
+                &ending,
                 &mut tip.taper_end,
                 0.0..=top,
-                unit,
+                &unit,
                 false,
                 theme,
             );
             ui.horizontal(|ui| {
-                ui.checkbox(&mut tip.taper_size, small("Brush size"));
-                ui.checkbox(&mut tip.taper_opacity, small("Opacity"));
+                ui.checkbox(&mut tip.taper_size, small(&tr!("brush-size-2")));
+                ui.checkbox(&mut tip.taper_opacity, small(&tr!("opacity")));
             });
             ui.checkbox(
                 &mut tip.taper_by_speed,
-                small("Starting and ending by speed"),
+                small(&tr!("starting-and-ending-by-speed")),
             )
-            .on_hover_text("Quicker strokes get longer starts and ends");
+            .on_hover_text(tr!("quicker-strokes-get-longer-starts-ends"));
         });
 }
 
@@ -317,30 +320,51 @@ fn color_jitter_ui(ui: &mut Ui, jitter: &mut Jitter, stamps: bool, theme: &Theme
             }
         });
     };
-    egui::CollapsingHeader::new(small("Color jitter"))
+    egui::CollapsingHeader::new(small(&tr!("color-jitter")))
         .id_salt("color-jitter")
         .show(ui, |ui| {
             ui.add_enabled_ui(stamps, |ui| {
-                ui.checkbox(&mut jitter.tip, small("Change brush tip color"))
-                    .on_disabled_hover_text("For brushes that stamp (build up, color mixing)");
+                ui.checkbox(&mut jitter.tip, small(&tr!("change-brush-tip-color")))
+                    .on_disabled_hover_text(tr!("brushes-stamp-build-up-color-mixing"));
             });
             let on = jitter.tip && stamps;
-            amount(ui, "Hue", &mut jitter.hue, 180.0, " deg", on);
-            amount(ui, "Saturation", &mut jitter.saturation, 100.0, " %", on);
-            amount(ui, "Luminosity", &mut jitter.value, 100.0, " %", on);
-            amount(ui, "Blend sub", &mut jitter.sub, 100.0, " %", on);
-            ui.checkbox(&mut jitter.stroke, small("Randomize per stroke"));
-            let on = jitter.stroke;
-            amount(ui, "Hue", &mut jitter.stroke_hue, 180.0, " deg", on);
+            amount(ui, &tr!("hue"), &mut jitter.hue, 180.0, &tr!("deg"), on);
             amount(
                 ui,
-                "Saturation",
+                &tr!("saturation"),
+                &mut jitter.saturation,
+                100.0,
+                " %",
+                on,
+            );
+            amount(ui, &tr!("luminosity"), &mut jitter.value, 100.0, " %", on);
+            amount(ui, &tr!("blend-sub"), &mut jitter.sub, 100.0, " %", on);
+            ui.checkbox(&mut jitter.stroke, small(&tr!("randomize-per-stroke")));
+            let on = jitter.stroke;
+            amount(
+                ui,
+                &tr!("hue"),
+                &mut jitter.stroke_hue,
+                180.0,
+                &tr!("deg"),
+                on,
+            );
+            amount(
+                ui,
+                &tr!("saturation"),
                 &mut jitter.stroke_saturation,
                 100.0,
                 " %",
                 on,
             );
-            amount(ui, "Luminosity", &mut jitter.stroke_value, 100.0, " %", on);
+            amount(
+                ui,
+                &tr!("luminosity"),
+                &mut jitter.stroke_value,
+                100.0,
+                " %",
+                on,
+            );
         });
 }
 
@@ -353,11 +377,11 @@ fn dynamics_ui(ui: &mut Ui, label: &str, dynamics: &mut Dynamics, theme: &Theme)
             .color(theme.muted)
     };
     ui.label(
-        RichText::new(format!("{label} Dynamics"))
+        RichText::new(tr!("dynamics", label = label))
             .size(theme.ui_size)
             .color(theme.text),
     );
-    ui.label(small(&format!("Input affecting {label}")));
+    ui.label(small(&tr!("input-affecting", label = label)));
     let input = |ui: &mut Ui, name: &str, on: &mut bool, min: &mut f32| {
         ui.horizontal(|ui| {
             ui.add_sized(vec2(96.0, 18.0), egui::Checkbox::new(on, small(name)));
@@ -368,7 +392,7 @@ fn dynamics_ui(ui: &mut Ui, label: &str, dynamics: &mut Dynamics, theme: &Theme)
                 .suffix(" %");
             if ui
                 .add_enabled(*on, slider)
-                .on_hover_text("Minimum value: how much is left at the least")
+                .on_hover_text(tr!("minimum-value-how-much-left-least"))
                 .changed()
             {
                 *min = percent / 100.0;
@@ -377,34 +401,39 @@ fn dynamics_ui(ui: &mut Ui, label: &str, dynamics: &mut Dynamics, theme: &Theme)
     };
     input(
         ui,
-        "Pen pressure",
+        &tr!("pen-pressure"),
         &mut dynamics.pressure,
         &mut dynamics.pressure_min,
     );
     input(
         ui,
-        "Velocity",
+        &tr!("velocity"),
         &mut dynamics.velocity,
         &mut dynamics.velocity_min,
     );
-    input(ui, "Random", &mut dynamics.random, &mut dynamics.random_min);
+    input(
+        ui,
+        &tr!("random"),
+        &mut dynamics.random,
+        &mut dynamics.random_min,
+    );
     ui.add_space(4.0);
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
-            ui.label(small("Pen pressure settings"));
+            ui.label(small(&tr!("pen-pressure-settings")));
             ui.add_enabled_ui(dynamics.pressure, |ui| {
                 sue_wm::widgets::response_curve(
                     ui,
                     (label, "pressure"),
                     &mut dynamics.pressure_curve,
                     92.0,
-                    sue_wm::widgets::CurveLabels::PRESSURE,
+                    sue_wm::widgets::CurveLabels::pressure(),
                     theme,
                 );
             });
         });
         ui.vertical(|ui| {
-            ui.label(small("Velocity settings"));
+            ui.label(small(&tr!("velocity-settings")));
             ui.add_enabled_ui(dynamics.velocity, |ui| {
                 sue_wm::widgets::response_curve(
                     ui,
@@ -412,10 +441,10 @@ fn dynamics_ui(ui: &mut Ui, label: &str, dynamics: &mut Dynamics, theme: &Theme)
                     &mut dynamics.velocity_curve,
                     92.0,
                     sue_wm::widgets::CurveLabels {
-                        input: "Velocity",
-                        low: "Still",
-                        high: "Fast",
-                        output: "Output",
+                        input: tr!("velocity"),
+                        low: tr!("still"),
+                        high: tr!("fast"),
+                        output: tr!("output"),
                     },
                     theme,
                 );
@@ -507,7 +536,7 @@ impl SuePaint {
                     *icon,
                     state.enabled,
                     state.checked == Some(true),
-                    tip,
+                    &crate::localize(tip),
                     theme,
                 ) {
                     clicked = Some((*command).to_owned());
@@ -575,14 +604,14 @@ impl SuePaint {
             },
             Stroke::NONE,
         ));
-        let response = response.on_hover_text("Save or export");
+        let response = response.on_hover_text(tr!("save-or-export"));
         egui::Popup::menu(&response).show(|ui| {
             for (label, command) in [
-                ("Save Project (Ctrl+S)", "file.save"),
-                ("Save Project As (Ctrl+Shift+S)", "file.save_as"),
-                ("Export as PNG", "file.export.png"),
-                ("Export as JPEG", "file.export.jpg"),
-                ("Export as JPEG XL", "file.export.jxl"),
+                (tr!("save-project-ctrl-s"), "file.save"),
+                (tr!("save-project-as-ctrl-shift-s"), "file.save_as"),
+                (tr!("export-as-png"), "file.export.png"),
+                (tr!("export-as-jpeg"), "file.export.jpg"),
+                (tr!("export-as-jpeg-xl"), "file.export.jxl"),
             ] {
                 if ui.button(label).clicked() {
                     clicked = Some(command.to_owned());
@@ -645,7 +674,7 @@ impl SuePaint {
             Icon::Swap,
             true,
             false,
-            "Swap main and sub color (X)",
+            &tr!("swap-main-sub-color-x"),
             theme,
         ) {
             std::mem::swap(&mut self.main, &mut self.sub);
@@ -684,7 +713,7 @@ impl SuePaint {
             sub,
             self.sub,
             self.sub_active && !self.transparent,
-            "Sub color",
+            &tr!("sub-color"),
         ) {
             self.sub_active = true;
             self.transparent = false;
@@ -695,7 +724,7 @@ impl SuePaint {
             main,
             self.main,
             !self.sub_active && !self.transparent,
-            "Main color",
+            &tr!("main-color"),
         ) {
             self.sub_active = false;
             self.transparent = false;
@@ -733,7 +762,7 @@ impl SuePaint {
             StrokeKind::Outside,
         );
         if response
-            .on_hover_text("Transparent color: brushes erase (C)")
+            .on_hover_text(tr!("transparent-color-brushes-erase-c"))
             .clicked()
         {
             self.transparent = !self.transparent;
@@ -751,8 +780,8 @@ impl SuePaint {
     ) {
         let tool = self.toolbox.tool();
         let tabs = [
-            ("Sub Tool", self.panels.sub_tool),
-            ("Tool Property", self.panels.tool_property),
+            (tr!("sub-tool"), self.panels.sub_tool),
+            (tr!("tool-property"), self.panels.tool_property),
         ];
         let (body, clicked) = header(ui, rect, &tabs, self.tool_tab, theme);
         if let Some(tab) = clicked {
@@ -775,7 +804,7 @@ impl SuePaint {
                 .toolbox
                 .subs(tool)
                 .iter()
-                .map(|sub| sub.name.clone())
+                .map(|sub| crate::localize(&sub.name))
                 .collect();
             egui::ScrollArea::vertical()
                 .id_salt("sue-paint-subs")
@@ -794,9 +823,9 @@ impl SuePaint {
                         // Clip Studio Paint's sub tool menu.
                         response.context_menu(|ui| {
                             for (what, label) in [
-                                (0, "Duplicate Sub Tool"),
-                                (1, "Delete Sub Tool"),
-                                (2, "Reset to Initial Settings"),
+                                (0, tr!("duplicate-sub-tool")),
+                                (1, tr!("delete-sub-tool")),
+                                (2, tr!("reset-to-initial-settings")),
                             ] {
                                 if ui
                                     .add_enabled(
@@ -825,7 +854,7 @@ impl SuePaint {
             return;
         }
         // Tool Property.
-        let sub_name = self.toolbox.current().name.clone();
+        let sub_name = crate::localize(&self.toolbox.current().name);
         inner.horizontal(|ui| {
             ui.label(
                 RichText::new(&sub_name)
@@ -843,7 +872,7 @@ impl SuePaint {
                             .toolbox
                             .subs(tool)
                             .iter()
-                            .map(|sub| sub.name.clone())
+                            .map(|sub| crate::localize(&sub.name))
                             .collect();
                         for (index, name) in names.iter().enumerate() {
                             if ui.selectable_label(index == picked, name).clicked() {
@@ -992,14 +1021,18 @@ impl SuePaint {
                 if tool == Tool::Eraser {
                     // How it erases lines on vector layers.
                     ui.horizontal(|ui| {
-                        ui.label(small("Vector"));
+                        ui.label(small(&tr!("vector")));
                         egui::ComboBox::from_id_salt("sue-paint-vector-eraser")
-                            .selected_text(
+                            .selected_text(crate::localize(
                                 crate::vector::Erase::NAMES[usize::from(sub.kind.min(2))],
-                            )
+                            ))
                             .show_ui(ui, |ui| {
                                 for (kind, name) in crate::vector::Erase::NAMES.iter().enumerate() {
-                                    ui.selectable_value(&mut sub.kind, kind as u8, *name);
+                                    ui.selectable_value(
+                                        &mut sub.kind,
+                                        kind as u8,
+                                        crate::localize(name),
+                                    );
                                 }
                             });
                     });
@@ -1008,18 +1041,18 @@ impl SuePaint {
                 let (mut screen_size, mut at_least_one) = (tip.screen_size, tip.at_least_one);
                 dynamic_row(
                     ui,
-                    "Brush Size",
+                    &tr!("brush-size"),
                     &mut tip.size,
                     0.5..=1000.0,
-                    " px",
+                    &tr!("px"),
                     true,
                     &mut tip.size_by,
                     |ui| {
                         ui.separator();
-                        ui.checkbox(&mut screen_size, small("Specify by size on screen"))
-                            .on_hover_text("The brush looks the same size at any zoom");
-                        ui.checkbox(&mut at_least_one, small("At least 1 pixel"))
-                            .on_hover_text("Light pressure never thins the line below a pixel");
+                        ui.checkbox(&mut screen_size, small(&tr!("specify-by-size-on-screen")))
+                            .on_hover_text(tr!("brush-looks-same-size-any-zoom"));
+                        ui.checkbox(&mut at_least_one, small(&tr!("at-least-1-pixel")))
+                            .on_hover_text(tr!("light-pressure-never-thins-line-below"));
                     },
                     theme,
                 );
@@ -1028,7 +1061,7 @@ impl SuePaint {
                 let mut opacity = tip.opacity * 100.0;
                 if dynamic_row(
                     ui,
-                    "Opacity",
+                    &tr!("opacity"),
                     &mut opacity,
                     0.0..=100.0,
                     " %",
@@ -1042,7 +1075,7 @@ impl SuePaint {
                 let mut hardness = tip.hardness * 100.0;
                 if slider_row(
                     ui,
-                    "Hardness",
+                    &tr!("hardness"),
                     &mut hardness,
                     0.0..=100.0,
                     " %",
@@ -1052,7 +1085,10 @@ impl SuePaint {
                     tip.hardness = hardness / 100.0;
                 }
                 ui.horizontal(|ui| {
-                    ui.add_sized(vec2(78.0, 18.0), egui::Label::new(small("Anti-aliasing")));
+                    ui.add_sized(
+                        vec2(78.0, 18.0),
+                        egui::Label::new(small(&tr!("anti-aliasing"))),
+                    );
                     for level in AntiAlias::ALL {
                         let (rect, response) =
                             ui.allocate_exact_size(vec2(26.0, 20.0), Sense::click());
@@ -1080,7 +1116,7 @@ impl SuePaint {
                 let mut stabilization = sub.stabilization as f32;
                 if slider_row(
                     ui,
-                    "Stabilization",
+                    &tr!("stabilization"),
                     &mut stabilization,
                     0.0..=100.0,
                     "",
@@ -1089,14 +1125,12 @@ impl SuePaint {
                 ) {
                     sub.stabilization = stabilization.round() as u32;
                 }
-                ui.checkbox(&mut sub.adjust_by_speed, small("Adjust by speed"))
-                    .on_hover_text(
-                        "Less smoothing as the pen moves faster, so quick lines stay snappy",
-                    );
+                ui.checkbox(&mut sub.adjust_by_speed, small(&tr!("adjust-by-speed")))
+                    .on_hover_text(tr!("less-smoothing-as-pen-moves-faster"));
                 let mut correction = sub.correction as f32;
                 if slider_row(
                     ui,
-                    "Correction",
+                    &tr!("correction"),
                     &mut correction,
                     0.0..=10.0,
                     "",
@@ -1105,24 +1139,21 @@ impl SuePaint {
                 ) {
                     sub.correction = correction.round() as u32;
                 }
-                ui.checkbox(&mut sub.flick, small("Flick into a point"))
-                    .on_hover_text(
-                        "A quick stroke carries on along the pen's momentum into a fine point",
-                    );
+                ui.checkbox(&mut sub.flick, small(&tr!("flick-into-a-point")))
+                    .on_hover_text(tr!("quick-stroke-carries-along-pens-momentum"));
                 let tip = &mut sub.tip;
                 let shapes = crate::brush::shapes();
                 if !shapes.is_empty() || tip.shape != 0 {
                     ui.horizontal(|ui| {
-                        ui.label(small("Brush tip"));
+                        ui.label(small(&tr!("brush-tip")));
                         let now = shapes
                             .iter()
                             .find(|(id, _)| *id == tip.shape)
-                            .map_or("Round", |(_, name)| name.as_str())
-                            .to_owned();
+                            .map_or_else(|| tr!("round"), |(_, name)| name.clone());
                         egui::ComboBox::from_id_salt("sue-paint-tip-shape")
                             .selected_text(now)
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut tip.shape, 0, "Round");
+                                ui.selectable_value(&mut tip.shape, 0, tr!("round"));
                                 for (id, name) in &shapes {
                                     ui.selectable_value(&mut tip.shape, *id, name);
                                 }
@@ -1134,14 +1165,22 @@ impl SuePaint {
                 color_jitter_ui(ui, &mut tip.jitter, stamps, theme);
                 if tip.dabbed() {
                     let mut spacing = tip.spacing * 100.0;
-                    if slider_row(ui, "Spacing", &mut spacing, 1.0..=200.0, " %", true, theme) {
+                    if slider_row(
+                        ui,
+                        &tr!("spacing"),
+                        &mut spacing,
+                        1.0..=200.0,
+                        " %",
+                        true,
+                        theme,
+                    ) {
                         tip.spacing = spacing / 100.0;
                     }
                 }
-                ui.checkbox(&mut tip.build_up, small("Build up (airbrush)"));
+                ui.checkbox(&mut tip.build_up, small(&tr!("build-up-airbrush")));
                 if tip.build_up {
                     let mut flow = tip.flow * 100.0;
-                    if slider_row(ui, "Flow", &mut flow, 1.0..=100.0, " %", false, theme) {
+                    if slider_row(ui, &tr!("flow"), &mut flow, 1.0..=100.0, " %", false, theme) {
                         tip.flow = flow / 100.0;
                     }
                 }
@@ -1149,7 +1188,7 @@ impl SuePaint {
                     let mut mix = tip.mix * 100.0;
                     if slider_row(
                         ui,
-                        "Color mixing",
+                        &tr!("color-mixing"),
                         &mut mix,
                         0.0..=100.0,
                         " %",
@@ -1162,7 +1201,7 @@ impl SuePaint {
                 let mut grain = tip.grain * 100.0;
                 if slider_row(
                     ui,
-                    "Paper grain",
+                    &tr!("paper-grain"),
                     &mut grain,
                     0.0..=100.0,
                     " %",
@@ -1173,17 +1212,17 @@ impl SuePaint {
                 }
                 ui.add_enabled(
                     false,
-                    egui::Checkbox::new(&mut false, small("Vector magnet")),
+                    egui::Checkbox::new(&mut false, small(&tr!("vector-magnet"))),
                 );
                 if tool == Tool::Figure {
-                    ui.label(small("Drag on the canvas to draw the shape"));
+                    ui.label(small(&tr!("drag-canvas-draw-shape")));
                 }
             }
             Tool::Fill | Tool::AutoSelect => {
                 let mut tolerance = sub.tolerance * 100.0;
                 if slider_row(
                     ui,
-                    "Tolerance",
+                    &tr!("tolerance"),
                     &mut tolerance,
                     0.0..=100.0,
                     " %",
@@ -1193,30 +1232,36 @@ impl SuePaint {
                     sub.tolerance = tolerance / 100.0;
                 }
                 ui.horizontal(|ui| {
-                    ui.label(small("Refer"));
-                    ui.selectable_value(&mut sub.mode, 0, "Editing layer");
-                    ui.selectable_value(&mut sub.mode, 1, "All layers");
-                    ui.selectable_value(&mut sub.mode, 2, "Reference layer");
+                    ui.label(small(&tr!("refer")));
+                    ui.selectable_value(&mut sub.mode, 0, tr!("editing-layer"));
+                    ui.selectable_value(&mut sub.mode, 1, tr!("all-layers"));
+                    ui.selectable_value(&mut sub.mode, 2, tr!("reference-layer"));
                 });
                 if tool == Tool::Fill {
                     ui.horizontal(|ui| {
-                        ui.label(small("Close gap"));
-                        for (level, name) in ["None", "Weak", "Medium", "Strong", "Max"]
-                            .iter()
-                            .enumerate()
+                        ui.label(small(&tr!("close-gap")));
+                        for (level, name) in [
+                            tr!("none"),
+                            tr!("weak"),
+                            tr!("medium"),
+                            tr!("strong"),
+                            tr!("max"),
+                        ]
+                        .iter()
+                        .enumerate()
                         {
-                            ui.selectable_value(&mut sub.gap, level as u32, *name);
+                            ui.selectable_value(&mut sub.gap, level as u32, name.as_str());
                         }
                     })
                     .response
-                    .on_hover_text("Fills hold inside lines with small breaks");
+                    .on_hover_text(tr!("fills-hold-inside-lines-small-breaks"));
                     let mut spread = sub.spread as f32;
                     if slider_row(
                         ui,
-                        "Area scaling",
+                        &tr!("area-scaling"),
                         &mut spread,
                         0.0..=20.0,
-                        " px",
+                        &tr!("px"),
                         false,
                         theme,
                     ) {
@@ -1225,20 +1270,31 @@ impl SuePaint {
                 }
                 if tool == Tool::Fill {
                     let mut opacity = sub.tip.opacity * 100.0;
-                    if slider_row(ui, "Opacity", &mut opacity, 0.0..=100.0, " %", false, theme) {
+                    if slider_row(
+                        ui,
+                        &tr!("opacity"),
+                        &mut opacity,
+                        0.0..=100.0,
+                        " %",
+                        false,
+                        theme,
+                    ) {
                         sub.tip.opacity = opacity / 100.0;
                     }
-                    ui.add_enabled(false, egui::Checkbox::new(&mut false, small("Close gap")));
+                    ui.add_enabled(
+                        false,
+                        egui::Checkbox::new(&mut false, small(&tr!("close-gap"))),
+                    );
                 } else {
                     self.select_ops(ui, theme);
                 }
             }
             Tool::Gradient => {
                 ui.horizontal(|ui| {
-                    ui.label(small("Shape"));
+                    ui.label(small(&tr!("shape-2")));
                     let mut radial = sub.mode == 2;
-                    ui.selectable_value(&mut radial, false, "Linear");
-                    ui.selectable_value(&mut radial, true, "Radial");
+                    ui.selectable_value(&mut radial, false, tr!("linear"));
+                    ui.selectable_value(&mut radial, true, tr!("radial"));
                     if radial {
                         sub.mode = 2;
                     } else if sub.mode == 2 {
@@ -1247,146 +1303,157 @@ impl SuePaint {
                 });
                 if sub.mode != 2 {
                     ui.horizontal(|ui| {
-                        ui.label(small("Colors"));
-                        ui.selectable_value(&mut sub.mode, 0, "To transparent");
-                        ui.selectable_value(&mut sub.mode, 1, "Main to sub");
+                        ui.label(small(&tr!("colors-2")));
+                        ui.selectable_value(&mut sub.mode, 0, tr!("to-transparent"));
+                        ui.selectable_value(&mut sub.mode, 1, tr!("main-to-sub"));
                     });
                 }
                 let mut opacity = sub.tip.opacity * 100.0;
-                if slider_row(ui, "Opacity", &mut opacity, 0.0..=100.0, " %", false, theme) {
+                if slider_row(
+                    ui,
+                    &tr!("opacity"),
+                    &mut opacity,
+                    0.0..=100.0,
+                    " %",
+                    false,
+                    theme,
+                ) {
                     sub.tip.opacity = opacity / 100.0;
                 }
             }
             Tool::Select if matches!(sub.mode, 4 | 5) => {
                 slider_row(
                     ui,
-                    "Brush Size",
+                    &tr!("brush-size"),
                     &mut sub.tip.size,
                     1.0..=500.0,
-                    " px",
+                    &tr!("px"),
                     true,
                     theme,
                 );
-                ui.label(small(if sub.mode == 4 {
-                    "Paint what to select"
+                ui.label(small(&if sub.mode == 4 {
+                    tr!("paint-what-to-select")
                 } else {
-                    "Paint what to leave out"
+                    tr!("paint-what-to-leave-out")
                 }));
             }
             Tool::Select if sub.mode == 3 => {
-                ui.label(small(
-                    "Click the corners; click the first again or press Enter to close",
-                ));
+                ui.label(small(&tr!("click-corners-click-first-again-press")));
             }
             Tool::Select => {
                 ui.horizontal(|ui| {
-                    ui.label(small("Shape"));
-                    ui.selectable_value(&mut sub.mode, 0, "Rectangle");
-                    ui.selectable_value(&mut sub.mode, 1, "Ellipse");
-                    ui.selectable_value(&mut sub.mode, 2, "Lasso");
+                    ui.label(small(&tr!("shape-2")));
+                    ui.selectable_value(&mut sub.mode, 0, tr!("rectangle"));
+                    ui.selectable_value(&mut sub.mode, 1, tr!("ellipse"));
+                    ui.selectable_value(&mut sub.mode, 2, tr!("lasso"));
                 });
                 self.select_ops(ui, theme);
             }
             Tool::Eyedropper => {
-                ui.selectable_value(&mut sub.mode, 0, "Obtain display color");
-                ui.selectable_value(&mut sub.mode, 1, "Obtain layer color");
+                ui.selectable_value(&mut sub.mode, 0, tr!("obtain-display-color"));
+                ui.selectable_value(&mut sub.mode, 1, tr!("obtain-layer-color"));
             }
             Tool::Zoom => {
-                ui.selectable_value(&mut sub.mode, 0, "Zoom in on click");
-                ui.selectable_value(&mut sub.mode, 1, "Zoom out on click");
-                ui.label(small("Alt+click does the opposite"));
+                ui.selectable_value(&mut sub.mode, 0, tr!("zoom-in-on-click"));
+                ui.selectable_value(&mut sub.mode, 1, tr!("zoom-out-on-click"));
+                ui.label(small(&tr!("alt-click-does-the-opposite")));
             }
             Tool::Hand => {
-                ui.selectable_value(&mut sub.mode, 0, "Scroll");
-                ui.selectable_value(&mut sub.mode, 1, "Rotate");
+                ui.selectable_value(&mut sub.mode, 0, tr!("scroll"));
+                ui.selectable_value(&mut sub.mode, 1, tr!("rotate"));
             }
             Tool::MoveLayer => {
-                ui.label(small("Drag to move the current layer"));
+                ui.label(small(&tr!("drag-move-current-layer")));
             }
             Tool::Ruler => {
                 match sub.mode {
                     6 => {
-                        ui.label(small(
-                            "Click to place points; click the last one again or press Enter to lay the curve. Esc drops it",
-                        ));
-                        ui.label(small("Ctrl+1 (Snap to Ruler) turns rulers on and off"));
+                        ui.label(small(&tr!("click-place-points-click-last-one")));
+                        ui.label(small(&tr!("ctrl-1-snap-ruler-turns-rulers")));
                     }
                     7 => {
                         ui.horizontal(|ui| {
-                            ui.label(small("Figure"));
-                            ui.selectable_value(&mut sub.kind, 0, "Rectangle");
-                            ui.selectable_value(&mut sub.kind, 1, "Ellipse");
+                            ui.label(small(&tr!("figure")));
+                            ui.selectable_value(&mut sub.kind, 0, tr!("rectangle"));
+                            ui.selectable_value(&mut sub.kind, 1, tr!("ellipse"));
                         });
-                        ui.label(small(
-                            "Drag to lay the ruler; strokes that start on it follow it",
-                        ));
+                        ui.label(small(&tr!("drag-lay-ruler-strokes-start-follow")));
                     }
                     8 => {
-                        ui.label(small(
-                            "Draw a ruler freehand; strokes that start on it follow it",
-                        ));
+                        ui.label(small(&tr!("draw-ruler-freehand-strokes-start-follow")));
                     }
                     5 => {
-                        ui.label(small(
-                            "Drag to lay a straight ruler. Strokes that start near it follow it; Shift keeps it to 45 degrees",
-                        ));
-                        ui.label(small("Ctrl+1 (Snap to Ruler) turns it on and off"));
+                        ui.label(small(&tr!("drag-lay-straight-ruler-strokes-start")));
+                        ui.label(small(&tr!("ctrl-1-snap-ruler-turns-off")));
                     }
                     2 => {
                         ui.horizontal(|ui| {
-                            ui.label(small("Special ruler"));
+                            ui.label(small(&tr!("special-ruler")));
                             egui::ComboBox::from_id_salt("sue-paint-special-ruler")
-                                .selected_text(
+                                .selected_text(crate::localize(
                                     crate::rulers::Special::NAMES[usize::from(sub.kind.min(2))],
-                                )
+                                ))
                                 .show_ui(ui, |ui| {
                                     for (kind, name) in
                                         crate::rulers::Special::NAMES.iter().enumerate()
                                     {
-                                        ui.selectable_value(&mut sub.kind, kind as u8, *name);
+                                        ui.selectable_value(
+                                            &mut sub.kind,
+                                            kind as u8,
+                                            crate::localize(name),
+                                        );
                                     }
                                 });
                         });
-                        ui.label(small(match sub.kind {
-                            0 => "Drag to set the lines' direction: every stroke runs that way",
-                            1 => "Click the middle: every stroke runs toward it",
-                            _ => "Click the middle: every stroke goes round it",
+                        ui.label(small(&match sub.kind {
+                            0 => tr!("drag-set-lines-direction-every-stroke"),
+                            1 => tr!("click-middle-every-stroke-runs-toward"),
+                            _ => tr!("click-middle-every-stroke-goes-round"),
                         }));
-                        ui.label(small("Ctrl+2 (Snap to Special Ruler) turns it on and off"));
+                        ui.label(small(&tr!("ctrl-2-snap-special-ruler-turns")));
                     }
                     1 => {
                         ui.horizontal(|ui| {
-                            ui.label(small("Process"));
+                            ui.label(small(&tr!("process")));
                             egui::ComboBox::from_id_salt("sue-paint-perspective-process")
                                 .selected_text(if sub.kind == 1 {
-                                    "Delete vanishing point"
+                                    tr!("delete-vanishing-point-2")
                                 } else {
-                                    "Add vanishing point"
+                                    tr!("add-vanishing-point-2")
                                 })
                                 .show_ui(ui, |ui| {
-                                    ui.selectable_value(&mut sub.kind, 0, "Add vanishing point");
-                                    ui.selectable_value(&mut sub.kind, 1, "Delete vanishing point");
+                                    ui.selectable_value(
+                                        &mut sub.kind,
+                                        0,
+                                        tr!("add-vanishing-point-2"),
+                                    );
+                                    ui.selectable_value(
+                                        &mut sub.kind,
+                                        1,
+                                        tr!("delete-vanishing-point-2"),
+                                    );
                                 });
                         });
-                        ui.checkbox(&mut sub.fix_eye_level, small("Fix eye level"))
-                            .on_hover_text("Vanishing points slide along the eye level");
-                        ui.label(small(if sub.kind == 1 {
-                            "Click a vanishing point to take it away"
+                        ui.checkbox(&mut sub.fix_eye_level, small(&tr!("fix-eye-level")))
+                            .on_hover_text(tr!("vanishing-points-slide-along-eye-level"));
+                        ui.label(small(&if sub.kind == 1 {
+                            tr!("click-vanishing-point-take-away")
                         } else {
-                            "Drag along two edges that meet in the distance: where they cross becomes a vanishing point. Drag a point or the eye level to move it"
+                            tr!("drag-along-two-edges-meet-distance")
                         }));
-                        if ui.button("Create Perspective Ruler...").clicked() {
+                        if ui
+                            .button(tr!("create-perspective-ruler-ellipsis"))
+                            .clicked()
+                        {
                             command = Some("layer.ruler.perspective");
                         }
                     }
                     _ => {
-                        ui.label(small(
-                            "Drag on the canvas to lay the ruler: strokes draw on both sides",
-                        ));
+                        ui.label(small(&tr!("drag-canvas-lay-ruler-strokes-draw")));
                         let mut lines = sub.lines as f32;
                         if slider_row(
                             ui,
-                            "Number of lines",
+                            &tr!("number-of-lines"),
                             &mut lines,
                             2.0..=32.0,
                             "",
@@ -1395,12 +1462,12 @@ impl SuePaint {
                         ) {
                             sub.lines = lines.round() as u32;
                         }
-                        ui.checkbox(&mut sub.mirror, small("Line symmetry"))
-                            .on_hover_text("Every other line is mirrored, as in Clip Studio Paint");
-                        ui.label(small("Ctrl+2 (Snap to Special Ruler) turns it on and off"));
+                        ui.checkbox(&mut sub.mirror, small(&tr!("line-symmetry")))
+                            .on_hover_text(tr!("every-other-line-mirrored-as-clip"));
+                        ui.label(small(&tr!("ctrl-2-snap-special-ruler-turns")));
                     }
                 }
-                if ui.button("Delete Ruler").clicked() {
+                if ui.button(tr!("delete-ruler")).clicked() {
                     command = Some("layer.ruler.delete");
                 }
             }
@@ -1408,10 +1475,10 @@ impl SuePaint {
                 let size = |ui: &mut Ui, sub: &mut crate::tools::SubTool| {
                     slider_row(
                         ui,
-                        "Brush Size",
+                        &tr!("brush-size"),
                         &mut sub.tip.size,
                         1.0..=500.0,
-                        " px",
+                        &tr!("px"),
                         true,
                         theme,
                     );
@@ -1427,79 +1494,79 @@ impl SuePaint {
                 match sub.mode {
                     0 => {
                         for (kind, name) in [
-                            "Move control points",
-                            "Add control point",
-                            "Delete control point",
-                            "Switch corner",
-                            "Adjust line width",
-                            "Adjust opacity",
-                            "Split line",
+                            tr!("move-control-points"),
+                            tr!("add-control-point"),
+                            tr!("delete-control-point"),
+                            tr!("switch-corner"),
+                            tr!("adjust-line-width"),
+                            tr!("adjust-opacity"),
+                            tr!("split-line"),
                         ]
                         .iter()
                         .enumerate()
                         {
-                            ui.radio_value(&mut sub.kind, kind as u8, *name);
+                            ui.radio_value(&mut sub.kind, kind as u8, name.as_str());
                         }
-                        ui.label(small(match sub.kind {
-                            1 => "Click a line to add a control point",
-                            2 => "Click a control point to delete it",
-                            3 => "Click a control point to make it a corner, or smooth again",
-                            4 => "Drag a control point up to widen the line, down to narrow it",
-                            5 => "Drag a control point up for more opacity, down for less",
-                            6 => "Click a line to split it in two there",
-                            _ => "Drag a control point to move it",
+                        ui.label(small(&match sub.kind {
+                            1 => tr!("click-line-add-control-point"),
+                            2 => tr!("click-control-point-delete"),
+                            3 => tr!("click-control-point-make-corner-smooth"),
+                            4 => tr!("drag-control-point-up-widen-line"),
+                            5 => tr!("drag-control-point-up-more-opacity"),
+                            6 => tr!("click-line-split-two-there"),
+                            _ => tr!("drag-control-point-move"),
                         }));
                     }
                     1 => {
                         ui.horizontal(|ui| {
-                            ui.label(small("Fix end"));
-                            ui.selectable_value(&mut sub.kind, 0, "Both ends");
-                            ui.selectable_value(&mut sub.kind, 1, "Free");
+                            ui.label(small(&tr!("fix-end")));
+                            ui.selectable_value(&mut sub.kind, 0, tr!("both-ends"));
+                            ui.selectable_value(&mut sub.kind, 1, tr!("free"));
                         });
-                        levels(ui, "Pinch level", &mut sub.level);
+                        levels(ui, &tr!("pinch-level"), &mut sub.level);
                         slider_row(
                             ui,
-                            "Effect range",
+                            &tr!("effect-range"),
                             &mut sub.amount,
                             1.0..=500.0,
-                            " px",
+                            &tr!("px"),
                             true,
                             theme,
                         );
-                        ui.label(small("Drag a line to pull it into shape"));
+                        ui.label(small(&tr!("drag-line-pull-into-shape")));
                     }
                     2 => {
-                        levels(ui, "Simplify", &mut sub.level);
-                        ui.checkbox(&mut sub.whole, small("Delete short lines"));
+                        levels(ui, &tr!("simplify"), &mut sub.level);
+                        ui.checkbox(&mut sub.whole, small(&tr!("delete-short-lines")));
                         size(ui, sub);
                     }
                     3 => {
-                        ui.label(small("Brush over the ends of two lines to join them"));
+                        ui.label(small(&tr!("brush-over-ends-two-lines-join")));
                         size(ui, sub);
                     }
                     4 => {
                         for (kind, name) in crate::correct::Widen::NAMES.iter().enumerate() {
-                            ui.radio_value(&mut sub.kind, kind as u8, *name);
+                            ui.radio_value(&mut sub.kind, kind as u8, crate::localize(name));
                         }
                         if matches!(sub.kind, 0 | 1 | 4) {
                             slider_row(
                                 ui,
-                                "Width",
+                                &tr!("width-2"),
                                 &mut sub.amount,
                                 0.1..=100.0,
-                                " px",
+                                &tr!("px"),
                                 true,
                                 theme,
                             );
                         }
-                        ui.checkbox(&mut sub.whole, small("Process whole line"));
+                        ui.checkbox(&mut sub.whole, small(&tr!("process-whole-line")));
                         size(ui, sub);
                     }
                     5 => {
                         let mut level = sub.stabilization as f32;
                         if slider_row(
                             ui,
-                            "Stabilization",
+                            &tr!("stabilization"),
                             &mut level,
                             0.0..=100.0,
                             "",
@@ -1508,47 +1575,41 @@ impl SuePaint {
                         ) {
                             sub.stabilization = level.round() as u32;
                         }
-                        ui.label(small("Trace over part of a line to draw it again that way"));
+                        ui.label(small(&tr!("trace-over-part-line-draw-again")));
                     }
                     6 => {
                         size(ui, sub);
-                        ui.label(small(
-                            "Trace over a line: its width follows your pen pressure",
-                        ));
+                        ui.label(small(&tr!("trace-over-line-width-follows-your")));
                     }
                     _ => {
                         slider_row(
                             ui,
-                            "Dust size",
+                            &tr!("dust-size"),
                             &mut sub.amount,
                             1.0..=100.0,
-                            " px",
+                            &tr!("px"),
                             false,
                             theme,
                         );
-                        ui.label(small(
-                            "Drag a box to remove specks in it, or click for the whole layer",
-                        ));
+                        ui.label(small(&tr!("drag-box-remove-specks-click-whole")));
                     }
                 }
-                ui.label(small(
-                    "Correct Line works on vector layers; Remove dust on raster layers",
-                ));
+                ui.label(small(&tr!("correct-line-works-vector-layers-remove")));
             }
             Tool::Blend => {
                 slider_row(
                     ui,
-                    "Brush Size",
+                    &tr!("brush-size"),
                     &mut sub.tip.size,
                     2.0..=600.0,
-                    " px",
+                    &tr!("px"),
                     true,
                     theme,
                 );
                 let mut strength = sub.tip.opacity * 100.0;
                 if slider_row(
                     ui,
-                    "Strength",
+                    &tr!("strength"),
                     &mut strength,
                     1.0..=100.0,
                     " %",
@@ -1557,35 +1618,43 @@ impl SuePaint {
                 ) {
                     sub.tip.opacity = strength / 100.0;
                 }
-                ui.label(small(match sub.mode {
-                    0 => "Softens what is under the brush",
-                    1 => "Drags color along the stroke",
-                    2 => "Moves the picture along the stroke",
-                    3 => "Swells the picture from the brush's middle",
-                    4 => "Draws the picture into the brush's middle",
-                    _ => "Turns the picture around the brush's middle",
+                ui.label(small(&match sub.mode {
+                    0 => tr!("softens-what-under-brush"),
+                    1 => tr!("drags-color-along-the-stroke"),
+                    2 => tr!("moves-picture-along-stroke"),
+                    3 => tr!("swells-picture-brushs-middle"),
+                    4 => tr!("draws-picture-into-brushs-middle"),
+                    _ => tr!("turns-picture-around-brushs-middle"),
                 }));
             }
             Tool::Frame => {
-                ui.label(small(if sub.mode == 1 {
-                    "Drag a line across a panel to divide it"
+                ui.label(small(&if sub.mode == 1 {
+                    tr!("drag-line-across-panel-divide")
                 } else {
-                    "Drag to draw a rectangle panel"
+                    tr!("drag-draw-rectangle-panel")
                 }));
             }
             Tool::Balloon => {
                 let mut line = sub.tip.size;
-                if slider_row(ui, "Line width", &mut line, 1.0..=20.0, " px", false, theme) {
+                if slider_row(
+                    ui,
+                    &tr!("line-width-2"),
+                    &mut line,
+                    1.0..=20.0,
+                    &tr!("px"),
+                    false,
+                    theme,
+                ) {
                     sub.tip.size = line;
                 }
-                ui.label(small(if sub.mode == 1 {
-                    "Drag from inside a balloon to where its tail points"
+                ui.label(small(&if sub.mode == 1 {
+                    tr!("drag-inside-balloon-where-tail-points")
                 } else {
-                    "Drag to draw a balloon"
+                    tr!("drag-to-draw-a-balloon")
                 }));
             }
             _ => {
-                ui.label(small("This tool arrives in a later Sue Paint"));
+                ui.label(small(&tr!("tool-arrives-later-sue-paint")));
             }
         }
         command
@@ -1608,10 +1677,10 @@ impl SuePaint {
                 .size(theme.small_size)
                 .color(theme.muted)
         };
-        let kinds = ["All", "Tones", "Patterns", "Images"];
+        let kinds = [tr!("all"), tr!("tones"), tr!("patterns"), tr!("images")];
         inner.horizontal(|ui| {
             for (index, name) in kinds.iter().enumerate() {
-                ui.selectable_value(&mut self.material_kind, index as u8, *name);
+                ui.selectable_value(&mut self.material_kind, index as u8, name.as_str());
             }
         });
         let shown: Vec<&crate::materials::Material> = library
@@ -1692,18 +1761,18 @@ impl SuePaint {
                                     paste = Some((*material).clone());
                                 }
                                 response.context_menu(|ui| {
-                                    if ui.button("Paste to Canvas").clicked() {
+                                    if ui.button(tr!("paste-to-canvas")).clicked() {
                                         paste = Some((*material).clone());
                                         ui.close();
                                     }
                                     if material.kind == crate::materials::Kind::Image
-                                        && ui.button("Delete Material").clicked()
+                                        && ui.button(tr!("delete-material")).clicked()
                                     {
                                         delete = Some((*material).clone());
                                         ui.close();
                                     }
                                 });
-                                ui.label(small(&material.name));
+                                ui.label(small(&crate::localize(&material.name)));
                             });
                         }
                     });
@@ -1715,7 +1784,7 @@ impl SuePaint {
             .map(|material| (*material).clone());
         inner.horizontal(|ui| {
             if ui
-                .add_enabled(picked.is_some(), egui::Button::new("Paste to Canvas"))
+                .add_enabled(picked.is_some(), egui::Button::new(tr!("paste-to-canvas")))
                 .clicked()
             {
                 paste = picked.clone();
@@ -1723,14 +1792,12 @@ impl SuePaint {
             if let Some(material) = picked
                 .as_ref()
                 .filter(|material| material.kind == crate::materials::Kind::Image)
-                && ui.button("Delete").clicked()
+                && ui.button(tr!("delete")).clicked()
             {
                 delete = Some(material.clone());
             }
         });
-        inner.label(small(
-            "Double-click to paste. Edit, Register Material, Image adds the current layer",
-        ));
+        inner.label(small(&tr!("double-click-paste-edit-register-material")));
         if let Some(material) = paste {
             self.paste_material(cx, &material);
         }
@@ -1738,8 +1805,8 @@ impl SuePaint {
             && let crate::materials::Source::File(path) = &material.source
         {
             match sue_platform::fs::remove_file(path) {
-                Ok(()) => cx.notify(format!("{} is no longer a material", material.name)),
-                Err(error) => cx.fail(format!("Cannot delete the material: {error}")),
+                Ok(()) => cx.notify(tr!("is-no-longer-a-material", name = material.name)),
+                Err(error) => cx.fail(tr!("cannot-delete-the-material", error = error)),
             }
             self.material_pick = None;
         }
@@ -1772,19 +1839,45 @@ impl SuePaint {
             })
             .inner
         };
-        released |= slider(ui, "Camera angle", &mut view.yaw, -180.0..=180.0, " deg");
-        released |= slider(ui, "Height", &mut view.pitch, -89.0..=89.0, " deg");
-        released |= slider(ui, "Distance", &mut view.distance, 0.6..=30.0, "");
-        released |= slider(ui, "Perspective", &mut view.fov, 5.0..=120.0, " deg");
-        released |= slider(ui, "Light", &mut view.light, -180.0..=180.0, " deg");
+        released |= slider(
+            ui,
+            &tr!("camera-angle"),
+            &mut view.yaw,
+            -180.0..=180.0,
+            &tr!("deg"),
+        );
+        released |= slider(
+            ui,
+            &tr!("height-2"),
+            &mut view.pitch,
+            -89.0..=89.0,
+            &tr!("deg"),
+        );
+        released |= slider(ui, &tr!("distance"), &mut view.distance, 0.6..=30.0, "");
+        released |= slider(
+            ui,
+            &tr!("perspective"),
+            &mut view.fov,
+            5.0..=120.0,
+            &tr!("deg"),
+        );
+        released |= slider(
+            ui,
+            &tr!("light"),
+            &mut view.light,
+            -180.0..=180.0,
+            &tr!("deg"),
+        );
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Draw as").color(theme.muted));
+            ui.label(RichText::new(tr!("draw-as")).color(theme.muted));
             egui::ComboBox::from_id_salt(("sue-paint-3d-style", layer))
-                .selected_text(crate::three::STYLES[usize::from(view.style.min(2))])
+                .selected_text(crate::localize(
+                    crate::three::STYLES[usize::from(view.style.min(2))],
+                ))
                 .show_ui(ui, |ui| {
                     for (index, name) in crate::three::STYLES.iter().enumerate() {
                         if ui
-                            .selectable_value(&mut view.style, index as u8, *name)
+                            .selectable_value(&mut view.style, index as u8, crate::localize(name))
                             .clicked()
                         {
                             released = true;
@@ -1793,11 +1886,23 @@ impl SuePaint {
                 });
         });
         if view.style > 0 {
-            released |= slider(ui, "Line width", &mut view.line_width, 0.5..=20.0, " px");
-            released |= slider(ui, "Fold lines at", &mut view.crease, 5.0..=170.0, " deg");
+            released |= slider(
+                ui,
+                &tr!("line-width-2"),
+                &mut view.line_width,
+                0.5..=20.0,
+                &tr!("px"),
+            );
+            released |= slider(
+                ui,
+                &tr!("fold-lines-at"),
+                &mut view.crease,
+                5.0..=170.0,
+                &tr!("deg"),
+            );
         }
         ui.label(
-            RichText::new("Drag on the canvas to turn the camera; Shift moves it, Ctrl comes nearer. Layer, Convert to Lines and Tones makes line art from it.")
+            RichText::new(tr!("drag-canvas-turn-camera-shift-moves"))
                 .size(theme.small_size)
                 .color(theme.muted),
         );
@@ -1837,18 +1942,18 @@ impl SuePaint {
         let (frame, time) = self.frame_time(arena);
         let mut camera = self.camera_now(arena, folder);
         let before = camera;
-        ui.label(small(&format!("Camera at frame {}", frame + 1)));
+        ui.label(small(&tr!("camera-at-frame", value = frame + 1)));
         egui::Grid::new("sue-paint-camera")
             .num_columns(2)
             .spacing(vec2(10.0, 6.0))
             .show(ui, |ui| {
-                ui.label(small("Position X"));
-                ui.add(egui::DragValue::new(&mut camera.center[0]).suffix(" px"));
+                ui.label(small(&tr!("position-x")));
+                ui.add(egui::DragValue::new(&mut camera.center[0]).suffix(tr!("px")));
                 ui.end_row();
-                ui.label(small("Position Y"));
-                ui.add(egui::DragValue::new(&mut camera.center[1]).suffix(" px"));
+                ui.label(small(&tr!("position-y")));
+                ui.add(egui::DragValue::new(&mut camera.center[1]).suffix(tr!("px")));
                 ui.end_row();
-                ui.label(small("Scale"));
+                ui.label(small(&tr!("scale")));
                 let mut percent = camera.scale * 100.0;
                 if ui
                     .add(
@@ -1861,10 +1966,10 @@ impl SuePaint {
                     camera.scale = percent / 100.0;
                 }
                 ui.end_row();
-                ui.label(small("Rotation"));
+                ui.label(small(&tr!("rotation")));
                 let mut degrees = camera.angle.to_degrees();
                 if ui
-                    .add(egui::DragValue::new(&mut degrees).suffix(" deg"))
+                    .add(egui::DragValue::new(&mut degrees).suffix(tr!("deg")))
                     .changed()
                 {
                     camera.angle = degrees.to_radians();
@@ -1880,15 +1985,15 @@ impl SuePaint {
         ui.horizontal(|ui| {
             if ui
                 .button(if keyed {
-                    "Update Keyframe"
+                    tr!("update-keyframe")
                 } else {
-                    "Add Keyframe"
+                    tr!("add-keyframe")
                 })
                 .clicked()
             {
                 command = Some("anim.camera.key");
             }
-            if keyed && ui.button("Delete Keyframe").clicked() {
+            if keyed && ui.button(tr!("delete-keyframe")).clicked() {
                 command = Some("anim.camera.unkey");
             }
         });
@@ -1901,20 +2006,18 @@ impl SuePaint {
             .map(|time| (time.frame(rate) + 1).to_string())
             .collect();
         ui.label(small(&if frames.is_empty() {
-            "No keyframes yet: the camera shows the canvas as it is".to_owned()
+            tr!("no-keyframes-yet-camera-shows-canvas")
         } else {
-            format!("Keyframes at frames {}", frames.join(", "))
+            tr!("keyframes-at-frames", value = frames.join(", "))
         }));
-        ui.label(small(
-            "Drag inside the frame to move the camera, a corner to zoom, outside to turn it",
-        ));
+        ui.label(small(&tr!("drag-inside-frame-move-camera-corner")));
         command
     }
 
     fn select_ops(&mut self, ui: &mut Ui, theme: &Theme) {
         ui.horizontal_wrapped(|ui| {
             ui.label(
-                RichText::new("Mode")
+                RichText::new(tr!("mode"))
                     .size(theme.small_size + 0.5)
                     .color(theme.muted),
             );
@@ -1923,7 +2026,7 @@ impl SuePaint {
             }
         });
         ui.label(
-            RichText::new("Shift adds, Alt subtracts, both intersect")
+            RichText::new(tr!("shift-adds-alt-subtracts-both-intersect"))
                 .size(theme.small_size)
                 .color(theme.muted),
         );
@@ -1933,10 +2036,10 @@ impl SuePaint {
 
     pub(crate) fn color_panel(&mut self, ui: &mut Ui, rect: Rect, theme: &Theme) {
         let tabs = [
-            ("Color Wheel", true),
-            ("Color Slider", true),
-            ("Intermediate Color", true),
-            ("Approximate Color", true),
+            (tr!("color-wheel"), true),
+            (tr!("color-slider"), true),
+            (tr!("intermediate-color"), true),
+            (tr!("approximate-color"), true),
         ];
         let (body, clicked) = header(ui, rect, &tabs, self.color_tab, theme);
         if let Some(tab) = clicked {
@@ -2045,7 +2148,10 @@ impl SuePaint {
                 Id::unique(("sue-paint-intermediate-corner", index)),
                 Sense::click(),
             );
-            if response.on_hover_text("Set to the drawing color").clicked() {
+            if response
+                .on_hover_text(tr!("set-to-the-drawing-color"))
+                .clicked()
+            {
                 self.intermediate.0[index] = drawing;
             }
         }
@@ -2057,7 +2163,7 @@ impl SuePaint {
         );
         if slider_row(
             &mut inner,
-            "Steps",
+            &tr!("steps-2"),
             &mut steps,
             2.0..=24.0,
             "",
@@ -2104,37 +2210,37 @@ impl SuePaint {
             Rect::from_min_max(pos2(body.left(), area.bottom() + 6.0), body.max),
             "approximate-axes",
         );
-        let names = ["Hue", "Saturation", "Brightness"];
+        let names = [tr!("hue"), tr!("saturation"), tr!("brightness")];
         inner.horizontal(|ui| {
             ui.label(
-                RichText::new("Across")
+                RichText::new(tr!("across"))
                     .size(theme.small_size)
                     .color(theme.muted),
             );
             egui::ComboBox::from_id_salt("sue-paint-approximate-across")
-                .selected_text(names[usize::from(across.min(2))])
+                .selected_text(names[usize::from(across.min(2))].clone())
                 .show_ui(ui, |ui| {
                     for (index, name) in names.iter().enumerate() {
-                        ui.selectable_value(&mut self.approximate.0, index as u8, *name);
+                        ui.selectable_value(&mut self.approximate.0, index as u8, name.as_str());
                     }
                 });
             ui.label(
-                RichText::new("Down")
+                RichText::new(tr!("down"))
                     .size(theme.small_size)
                     .color(theme.muted),
             );
             egui::ComboBox::from_id_salt("sue-paint-approximate-down")
-                .selected_text(names[usize::from(down.min(2))])
+                .selected_text(names[usize::from(down.min(2))].clone())
                 .show_ui(ui, |ui| {
                     for (index, name) in names.iter().enumerate() {
-                        ui.selectable_value(&mut self.approximate.1, index as u8, *name);
+                        ui.selectable_value(&mut self.approximate.1, index as u8, name.as_str());
                     }
                 });
         });
         let mut spread = reach * 100.0;
         if slider_row(
             &mut inner,
-            "Range",
+            &tr!("range"),
             &mut spread,
             5.0..=100.0,
             " %",
@@ -2299,7 +2405,7 @@ impl SuePaint {
         }
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new("Hex")
+                RichText::new(tr!("hex"))
                     .size(theme.small_size + 0.5)
                     .color(theme.muted),
             );
@@ -2321,9 +2427,9 @@ impl SuePaint {
         theme: &Theme,
     ) {
         let tabs = [
-            ("Color Set", true),
-            ("Color History", true),
-            ("Material", true),
+            (tr!("color-set"), true),
+            (tr!("color-history"), true),
+            (tr!("material"), true),
         ];
         let (body, clicked) = header(ui, rect, &tabs, self.set_tab, theme);
         if let Some(tab) = clicked {
@@ -2380,7 +2486,7 @@ impl SuePaint {
                 Icon::Wrench,
                 true,
                 self.set_menu,
-                "Color set settings",
+                &tr!("color-set-settings"),
                 theme,
             ) {
                 self.set_menu = !self.set_menu;
@@ -2392,12 +2498,16 @@ impl SuePaint {
                 Icon::Import,
                 true,
                 false,
-                "Import a color set (GIMP .gpl or hex list)",
+                &tr!("import-color-set-gimp-gpl-hex"),
                 theme,
             ) {
                 cx.request(ShellRequest::PickFile(
-                    sue_wm::FilePick::open(Some(me()), "colorset-import", "Import a Color Set")
-                        .extensions(&["gpl", "txt", "hex"]),
+                    sue_wm::FilePick::open(
+                        Some(me()),
+                        "colorset-import",
+                        &tr!("import-a-color-set"),
+                    )
+                    .extensions(&["gpl", "txt", "hex"]),
                 ));
             }
             if icon_button(
@@ -2406,7 +2516,7 @@ impl SuePaint {
                 Icon::Export,
                 true,
                 false,
-                "Export this color set (GIMP .gpl)",
+                &tr!("export-color-set-gimp-gpl"),
                 theme,
             ) {
                 let name = names
@@ -2417,7 +2527,7 @@ impl SuePaint {
                     sue_wm::FilePick::save(
                         Some(me()),
                         "colorset-export",
-                        "Export the Color Set",
+                        &tr!("export-the-color-set"),
                         &format!("{name}.gpl"),
                     )
                     .extensions(&["gpl"]),
@@ -2439,9 +2549,9 @@ impl SuePaint {
                 pos2(body.left() + 2.0, top + 10.0),
                 Align2::LEFT_CENTER,
                 if editing {
-                    "Empty: add the drawing color with +"
+                    tr!("empty-add-drawing-color")
                 } else {
-                    "Colors you paint with show here"
+                    tr!("colors-you-paint-show-here")
                 },
                 theme.font(theme.small_size + 0.5),
                 theme.muted,
@@ -2491,9 +2601,11 @@ impl SuePaint {
             }
             if editing {
                 response.context_menu(|ui| {
-                    for (what, label) in
-                        [(0, "Add Color"), (1, "Replace Color"), (2, "Delete Color")]
-                    {
+                    for (what, label) in [
+                        (0, tr!("add-color")),
+                        (1, tr!("replace-color")),
+                        (2, tr!("delete-color")),
+                    ] {
                         if ui.button(label).clicked() {
                             swatch_menu = Some((what, index));
                             ui.close();
@@ -2566,7 +2678,7 @@ impl SuePaint {
             Icon::Add,
             true,
             false,
-            "Add the drawing color",
+            &tr!("add-the-drawing-color"),
             theme,
         ) && let Some(colors) = self.color_sets.colors_mut()
         {
@@ -2580,7 +2692,7 @@ impl SuePaint {
             Icon::Replace,
             has.is_some(),
             false,
-            "Replace the picked swatch with the drawing color",
+            &tr!("replace-picked-swatch-drawing-color"),
             theme,
         ) && let (Some(index), Some(colors)) = (has, self.color_sets.colors_mut())
         {
@@ -2593,7 +2705,7 @@ impl SuePaint {
             Icon::Delete,
             has.is_some(),
             false,
-            "Delete the picked swatch",
+            &tr!("delete-the-picked-swatch"),
             theme,
         ) && let (Some(index), Some(colors)) = (has, self.color_sets.colors_mut())
         {
@@ -2625,13 +2737,13 @@ impl SuePaint {
                     .show(ui, |ui| {
                         ui.set_min_width(178.0);
                         for (label, key) in [
-                            ("New Color Set", "new"),
-                            ("Duplicate This Set", "duplicate"),
-                            ("Delete This Set", "delete"),
-                            ("Small Swatches", "small"),
-                            ("Medium Swatches", "medium"),
-                            ("Large Swatches", "large"),
-                            ("Restore the Built-in Sets", "restore"),
+                            (tr!("new-color-set"), "new"),
+                            (tr!("duplicate-this-set"), "duplicate"),
+                            (tr!("delete-this-set"), "delete"),
+                            (tr!("small-swatches"), "small"),
+                            (tr!("medium-swatches"), "medium"),
+                            (tr!("large-swatches"), "large"),
+                            (tr!("restore-the-built-in-sets"), "restore"),
                         ] {
                             if ui.add(egui::Button::new(label).frame(false)).clicked() {
                                 chosen = Some(key);
@@ -2649,7 +2761,7 @@ impl SuePaint {
         });
         let sets = &mut self.color_sets;
         match chosen {
-            Some("new") => sets.add_set("My Colors", Vec::new()),
+            Some("new") => sets.add_set(&tr!("my-colors"), Vec::new()),
             Some("duplicate") => {
                 let (name, colors) = sets.sets.get(sets.current).cloned().unwrap_or_default();
                 sets.add_set(&name, colors);
@@ -2685,7 +2797,7 @@ impl SuePaint {
         ui.painter().rect_filled(rect, 0.0, theme.panel);
         ui.painter()
             .vline(rect.right(), rect.y_range(), theme.hairline());
-        let (body, _) = header(ui, rect, &[("Size", true)], 0, theme);
+        let (body, _) = header(ui, rect, &[(tr!("size-2"), true)], 0, theme);
         let tool = self.toolbox.tool();
         if !tool.paints() && !matches!(tool, Tool::Fill | Tool::Gradient) {
             return;
@@ -2739,11 +2851,11 @@ impl SuePaint {
             ui,
             rect,
             &[
-                ("Navigator", true),
-                ("Sub View", true),
-                ("Info", true),
-                ("Auto Actions", true),
-                ("Item Bank", true),
+                (tr!("navigator"), true),
+                (tr!("sub-view"), true),
+                (tr!("info"), true),
+                (tr!("auto-actions"), true),
+                (tr!("item-bank"), true),
             ],
             self.nav_tab,
             theme,
@@ -2843,16 +2955,16 @@ impl SuePaint {
                 doc.view
                     .set_zoom_at(viewport, size, viewport.center(), percent / 100.0);
             }
-            if icon_in(ui, Icon::ZoomOut, false, "Zoom out", theme) {
+            if icon_in(ui, Icon::ZoomOut, false, &tr!("zoom-out"), theme) {
                 doc.view.zoom_at(viewport, size, viewport.center(), 0.8);
             }
-            if icon_in(ui, Icon::ZoomIn, false, "Zoom in", theme) {
+            if icon_in(ui, Icon::ZoomIn, false, &tr!("zoom-in"), theme) {
                 doc.view.zoom_at(viewport, size, viewport.center(), 1.25);
             }
             if icon_in(ui, Icon::Actual, false, "100%", theme) {
                 doc.view.set_zoom_at(viewport, size, viewport.center(), 1.0);
             }
-            if icon_in(ui, Icon::Fit, false, "Fit to screen", theme) {
+            if icon_in(ui, Icon::Fit, false, &tr!("fit-to-screen-2"), theme) {
                 doc.view.fit(viewport, size);
             }
         });
@@ -2868,19 +2980,31 @@ impl SuePaint {
             {
                 doc.view.set_rotation(viewport, size, rotation);
             }
-            if icon_in(ui, Icon::RotateLeft, false, "Rotate left", theme) {
+            if icon_in(ui, Icon::RotateLeft, false, &tr!("rotate-left"), theme) {
                 doc.view.rotate_by(viewport, size, -15.0);
             }
-            if icon_in(ui, Icon::RotateRight, false, "Rotate right", theme) {
+            if icon_in(ui, Icon::RotateRight, false, &tr!("rotate-right"), theme) {
                 doc.view.rotate_by(viewport, size, 15.0);
             }
-            if icon_in(ui, Icon::Reset, false, "Reset rotation", theme) {
+            if icon_in(ui, Icon::Reset, false, &tr!("reset-rotation"), theme) {
                 doc.view.set_rotation(viewport, size, 0.0);
             }
-            if icon_in(ui, Icon::FlipH, doc.view.flip_h, "Flip horizontally", theme) {
+            if icon_in(
+                ui,
+                Icon::FlipH,
+                doc.view.flip_h,
+                &tr!("flip-horizontally"),
+                theme,
+            ) {
                 doc.view.flip(viewport, size, true);
             }
-            if icon_in(ui, Icon::FlipV, doc.view.flip_v, "Flip vertically", theme) {
+            if icon_in(
+                ui,
+                Icon::FlipV,
+                doc.view.flip_v,
+                &tr!("flip-vertically"),
+                theme,
+            ) {
                 doc.view.flip(viewport, size, false);
             }
         });
@@ -2895,10 +3019,10 @@ impl SuePaint {
         theme: &Theme,
     ) {
         let tabs = [
-            ("Layer", true),
-            ("Layer Property", true),
-            ("History", true),
-            ("Animation Cels", true),
+            (tr!("layer-2"), true),
+            (tr!("layer-property"), true),
+            (tr!("history"), true),
+            (tr!("animation-cels"), true),
         ];
         let (body, clicked) = header(ui, rect, &tabs, self.layer_tab, theme);
         if let Some(tab) = clicked {
@@ -2930,13 +3054,13 @@ impl SuePaint {
                 let mut inner = child(ui, body.shrink(8.0), "layer-history");
                 inner.horizontal(|ui| {
                     if ui
-                        .add_enabled(cx.history.can_undo(), egui::Button::new("Undo"))
+                        .add_enabled(cx.history.can_undo(), egui::Button::new(tr!("undo")))
                         .clicked()
                     {
                         self.run("edit.undo", cx);
                     }
                     if ui
-                        .add_enabled(cx.history.can_redo(), egui::Button::new("Redo"))
+                        .add_enabled(cx.history.can_redo(), egui::Button::new(tr!("redo")))
                         .clicked()
                     {
                         self.run("edit.redo", cx);
@@ -2953,7 +3077,7 @@ impl SuePaint {
                     .stick_to_bottom(true)
                     .show(&mut inner, |ui| {
                         if labels.is_empty() {
-                            ui.label(RichText::new("Nothing to undo yet").color(theme.muted));
+                            ui.label(RichText::new(tr!("nothing-to-undo-yet")).color(theme.muted));
                         }
                         for (index, label) in labels.iter().enumerate() {
                             let last = index + 1 == labels.len();
@@ -2979,7 +3103,7 @@ impl SuePaint {
                 .map_or(BlendMode::Normal, |info| info.style.blend);
             ui.add_enabled_ui(raster, |ui| {
                 egui::ComboBox::from_id_salt("sue-paint-blend")
-                    .selected_text(blend.label())
+                    .selected_text(sue_lang::translate("model", blend.label()))
                     .width(108.0)
                     .height(420.0)
                     .show_ui(ui, |ui| {
@@ -2989,7 +3113,12 @@ impl SuePaint {
                                 ui.separator();
                                 group = mode.group();
                             }
-                            if ui.selectable_label(mode == blend, mode.label()).clicked()
+                            if ui
+                                .selectable_label(
+                                    mode == blend,
+                                    sue_lang::translate("model", mode.label()),
+                                )
+                                .clicked()
                                 && let Some(info) = &current
                             {
                                 Self::apply(cx, doc::set(info.id, picture::BLEND, mode.name()));
@@ -3021,20 +3150,24 @@ impl SuePaint {
         // Layer switches and actions.
         let row_top = inner.min_rect().bottom() + 4.0;
         let flags: [(Icon, &str, &str); 6] = [
-            (Icon::Clip, "layer.toggle.clip", "Clip to Layer Below"),
+            (Icon::Clip, "layer.toggle.clip", &tr!("clip-to-layer-below")),
             (
                 Icon::Reference,
                 "layer.toggle.reference",
-                "Set as Reference Layer",
+                &tr!("set-as-reference-layer"),
             ),
-            (Icon::Draft, "layer.toggle.draft", "Set as Draft Layer"),
-            (Icon::Lock, "layer.toggle.lock", "Lock Layer"),
+            (
+                Icon::Draft,
+                "layer.toggle.draft",
+                &tr!("set-as-draft-layer"),
+            ),
+            (Icon::Lock, "layer.toggle.lock", &tr!("lock-layer")),
             (
                 Icon::LockAlpha,
                 "layer.toggle.lock_alpha",
-                "Lock Transparent Pixels",
+                &tr!("lock-transparent-pixels"),
             ),
-            (Icon::Mask, "layer.mask.outside", "Enable Mask"),
+            (Icon::Mask, "layer.mask.outside", &tr!("enable-mask")),
         ];
         let mut run = None;
         for (index, (icon, command, tip)) in flags.iter().enumerate() {
@@ -3055,19 +3188,27 @@ impl SuePaint {
             (
                 Icon::NewLayer,
                 "layer.new",
-                "New Raster Layer (Ctrl+Shift+N)",
+                &tr!("new-raster-layer-ctrl-shift-n"),
             ),
-            (Icon::NewVector, "layer.new.vector", "New Vector Layer"),
-            (Icon::NewFolder, "layer.new.folder", "New Layer Folder"),
-            (Icon::Duplicate, "layer.duplicate", "Duplicate Layer"),
+            (
+                Icon::NewVector,
+                "layer.new.vector",
+                &tr!("new-vector-layer"),
+            ),
+            (
+                Icon::NewFolder,
+                "layer.new.folder",
+                &tr!("new-layer-folder"),
+            ),
+            (Icon::Duplicate, "layer.duplicate", &tr!("duplicate-layer")),
             (
                 Icon::MergeDown,
                 "layer.merge_down",
-                "Merge with Layer Below (Ctrl+E)",
+                &tr!("merge-layer-below-ctrl-e"),
             ),
-            (Icon::Up, "layer.order.up", "Move Layer Up (Ctrl+])"),
-            (Icon::Down, "layer.order.down", "Move Layer Down (Ctrl+[)"),
-            (Icon::Delete, "layer.delete", "Delete Layer"),
+            (Icon::Up, "layer.order.up", &tr!("move-layer-up-ctrl")),
+            (Icon::Down, "layer.order.down", &tr!("move-layer-down-ctrl")),
+            (Icon::Delete, "layer.delete", &tr!("delete-layer")),
         ];
         let action_top = row_top + 28.0;
         for (index, (icon, command, tip)) in actions.iter().enumerate() {
@@ -3094,7 +3235,7 @@ impl SuePaint {
         // Right-click on a layer: Clip Studio Paint's layer menu.
         let layer_menu: Vec<sue_wm::MenuItem> = crate::menus::menus()
             .into_iter()
-            .find(|menu| menu.title == "Layer")
+            .find(|menu| menu.title == tr!("layer-2"))
             .map(|menu| menu.items)
             .unwrap_or_default();
         let mut from_menu = None;
@@ -3153,7 +3294,7 @@ impl SuePaint {
                             theme.muted.gamma_multiply(0.35)
                         },
                     );
-                    if eye_response.on_hover_text("Show or hide").clicked() {
+                    if eye_response.on_hover_text(tr!("show-or-hide")).clicked() {
                         toggle = Some((info.id, !info.style.visible));
                     }
                     // State marks: the pen on the current layer, locks.
@@ -3203,9 +3344,9 @@ impl SuePaint {
                         ));
                         if arrow_response
                             .on_hover_text(if open {
-                                "Close the folder"
+                                tr!("close-the-folder")
                             } else {
-                                "Open the folder"
+                                tr!("open-the-folder")
                             })
                             .clicked()
                         {
@@ -3254,7 +3395,7 @@ impl SuePaint {
                             Sense::click(),
                         );
                         if mask_response
-                            .on_hover_text("Draw on the mask: the pen shows, the eraser hides")
+                            .on_hover_text(tr!("draw-mask-pen-shows-eraser-hides"))
                             .clicked()
                         {
                             mask_click = Some(info.id);
@@ -3263,11 +3404,11 @@ impl SuePaint {
                     }
                     // Text.
                     let top_line = match info.kind {
-                        LayerKind::Paper => "Paper".to_owned(),
+                        LayerKind::Paper => tr!("paper-2"),
                         _ => format!(
-                            "{:.0} % {}",
-                            info.style.opacity * 100.0,
-                            info.style.blend.label()
+                            "{} % {}",
+                            sue_lang::number(f64::from(info.style.opacity) * 100.0, 0),
+                            sue_lang::translate("model", info.style.blend.label())
                         ),
                     };
                     ui.painter().text(
@@ -3305,8 +3446,8 @@ impl SuePaint {
                             info.style.draft,
                             doc::is_reference(&cx.world.arena, info.id),
                         ) {
-                            (true, _) => format!("{} (draft)", info.name),
-                            (false, true) => format!("{} (reference)", info.name),
+                            (true, _) => tr!("draft", name = info.name),
+                            (false, true) => tr!("reference", name = info.name),
                             _ if crate::three::is_3d(&cx.world.arena, info.id) => {
                                 format!("{} (3D)", info.name)
                             }
@@ -3421,7 +3562,7 @@ impl SuePaint {
         theme: &Theme,
     ) {
         let Some(info) = current else {
-            ui.label(RichText::new("No layer").color(theme.muted));
+            ui.label(RichText::new(tr!("no-layer")).color(theme.muted));
             return;
         };
         ui.label(
@@ -3431,9 +3572,9 @@ impl SuePaint {
         );
         ui.label(
             RichText::new(match info.kind {
-                LayerKind::Raster => "Raster layer",
-                LayerKind::Paper => "Paper",
-                LayerKind::Other => "A layer kind this Sue cannot edit yet",
+                LayerKind::Raster => tr!("raster-layer"),
+                LayerKind::Paper => tr!("paper-2"),
+                LayerKind::Other => tr!("layer-kind-sue-cannot-edit-yet"),
             })
             .color(theme.muted),
         );
@@ -3449,7 +3590,7 @@ impl SuePaint {
                 let [r, g, b] = color::bytes(paper.rgb);
                 let mut rgba = [r, g, b, 255];
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Color").color(theme.muted));
+                    ui.label(RichText::new(tr!("color-2")).color(theme.muted));
                     let pick = sue_wm::color_button(
                         ui,
                         ("sue-paint-paper", info.id),
@@ -3473,7 +3614,7 @@ impl SuePaint {
             LayerKind::Raster => {
                 let mut opacity = info.style.opacity * 100.0;
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Opacity").color(theme.muted));
+                    ui.label(RichText::new(tr!("opacity")).color(theme.muted));
                     let response = ui.add(
                         egui::Slider::new(&mut opacity, 0.0..=100.0)
                             .max_decimals(0)
@@ -3489,19 +3630,19 @@ impl SuePaint {
                 });
                 let mut offset = info.style.offset;
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Offset").color(theme.muted));
-                    let x = ui.add(egui::DragValue::new(&mut offset[0]).suffix(" px"));
+                    ui.label(RichText::new(tr!("offset")).color(theme.muted));
+                    let x = ui.add(egui::DragValue::new(&mut offset[0]).suffix(tr!("px")));
                     self.live_property(cx, &x, info.id, picture::X, Value::Int(offset[0]));
-                    let y = ui.add(egui::DragValue::new(&mut offset[1]).suffix(" px"));
+                    let y = ui.add(egui::DragValue::new(&mut offset[1]).suffix(tr!("px")));
                     self.live_property(cx, &y, info.id, picture::Y, Value::Int(offset[1]));
                 });
                 if let Some(raster) = doc::raster(&cx.world.arena, info.id) {
                     ui.label(
-                        RichText::new(format!(
-                            "{} x {} px, {:?}",
-                            raster.width(),
-                            raster.height(),
-                            raster.format()
+                        RichText::new(tr!(
+                            "x-px",
+                            width = raster.width(),
+                            height = raster.height(),
+                            format = format!("{:?}", raster.format())
                         ))
                         .size(theme.small_size)
                         .color(theme.muted),
@@ -3547,13 +3688,21 @@ impl SuePaint {
             color_of(effects::BORDER_COLOR),
             color_of(effects::COLOR_VALUE),
         );
-        ui.label(small("Effect"));
+        ui.label(small(&tr!("effect")));
         let mut toggle = None;
         ui.horizontal(|ui| {
             for (key, name, on) in [
-                (effects::BORDER, "Border effect", effects.border.is_some()),
-                (effects::TONE, "Tone", effects.tone.is_some()),
-                (effects::COLOR, "Layer color", effects.color.is_some()),
+                (
+                    effects::BORDER,
+                    tr!("border-effect-2"),
+                    effects.border.is_some(),
+                ),
+                (effects::TONE, tr!("tone"), effects.tone.is_some()),
+                (
+                    effects::COLOR,
+                    tr!("layer-color-2"),
+                    effects.color.is_some(),
+                ),
             ] {
                 if ui.selectable_label(on, name).clicked() {
                     toggle = Some((key, !on));
@@ -3572,10 +3721,10 @@ impl SuePaint {
             let [r, g, b] = color::bytes(color.to_space(sue_core::ColorSpace::Srgb).rgb);
             let mut rgba = [r, g, b, 255];
             ui.horizontal(|ui| {
-                ui.label(small(if salt == "sue-paint-border" {
-                    "Edge color"
+                ui.label(small(&if salt == "sue-paint-border" {
+                    tr!("edge-color")
                 } else {
-                    "Layer color"
+                    tr!("layer-color-2")
                 }));
                 let pick = sue_wm::color_button(ui, (salt, info.id), &mut rgba, false, theme);
                 let [r, g, b, _] = rgba;
@@ -3594,8 +3743,8 @@ impl SuePaint {
         if effects.border.is_some() {
             let mut width = border_width as f32;
             ui.horizontal(|ui| {
-                ui.label(small("Thickness of edge"));
-                let response = ui.add(egui::Slider::new(&mut width, 1.0..=50.0).suffix(" px"));
+                ui.label(small(&tr!("thickness-of-edge")));
+                let response = ui.add(egui::Slider::new(&mut width, 1.0..=50.0).suffix(tr!("px")));
                 self.live_property(
                     cx,
                     &response,
@@ -3616,8 +3765,9 @@ impl SuePaint {
         if effects.tone.is_some() {
             let (mut lines, mut angle) = (lines as f32, angle as f32);
             ui.horizontal(|ui| {
-                ui.label(small("Frequency"));
-                let response = ui.add(egui::Slider::new(&mut lines, 5.0..=300.0).suffix(" lpi"));
+                ui.label(small(&tr!("frequency")));
+                let response =
+                    ui.add(egui::Slider::new(&mut lines, 5.0..=300.0).suffix(tr!("lpi")));
                 self.live_property(
                     cx,
                     &response,
@@ -3627,8 +3777,9 @@ impl SuePaint {
                 );
             });
             ui.horizontal(|ui| {
-                ui.label(small("Angle"));
-                let response = ui.add(egui::Slider::new(&mut angle, 0.0..=180.0).suffix(" deg"));
+                ui.label(small(&tr!("angle")));
+                let response =
+                    ui.add(egui::Slider::new(&mut angle, 0.0..=180.0).suffix(tr!("deg")));
                 self.live_property(
                     cx,
                     &response,
@@ -3651,7 +3802,7 @@ impl SuePaint {
         ui.add_space(4.0);
         let mut expression = effects.expression;
         ui.horizontal(|ui| {
-            ui.label(small("Expression color"));
+            ui.label(small(&tr!("expression-color-2")));
             egui::ComboBox::from_id_salt(("sue-paint-expression", info.id))
                 .selected_text(effects::EXPRESSIONS[usize::from(expression.min(2))])
                 .show_ui(ui, |ui| {
@@ -3669,7 +3820,7 @@ impl SuePaint {
         if effects.expression == 2 {
             let mut threshold = threshold as f32 * 100.0;
             ui.horizontal(|ui| {
-                ui.label(small("Threshold"));
+                ui.label(small(&tr!("threshold")));
                 let response = ui.add(egui::Slider::new(&mut threshold, 1.0..=99.0).suffix(" %"));
                 self.live_property(
                     cx,
@@ -3792,19 +3943,37 @@ impl SuePaint {
         let cel = self.editing_cel(&cx.world.arena);
         let has = cel.is_some();
         let buttons: [(Icon, &str, &str, bool, bool); 5] = [
-            (Icon::Cel, "New animation cel", "anim.cel.new", true, false),
-            (Icon::Edit, "Specify cels", "anim.cel.assign", has, false),
-            (Icon::Onion, "Onion skin", "anim.onion", true, self.onion),
+            (
+                Icon::Cel,
+                &tr!("new-animation-cel-2"),
+                "anim.cel.new",
+                true,
+                false,
+            ),
+            (
+                Icon::Edit,
+                &tr!("specify-cels"),
+                "anim.cel.assign",
+                has,
+                false,
+            ),
+            (
+                Icon::Onion,
+                &tr!("onion-skin"),
+                "anim.onion",
+                true,
+                self.onion,
+            ),
             (
                 Icon::Layers,
-                "Enable light table",
+                &tr!("enable-light-table-2"),
                 "anim.light_table",
                 true,
                 self.light_table,
             ),
             (
                 Icon::Reference,
-                "Register selected layer to the light table",
+                &tr!("register-selected-layer-light-table"),
                 "anim.light_table.register",
                 has,
                 false,
@@ -3835,20 +4004,20 @@ impl SuePaint {
         };
         match cel {
             None => {
-                inner.label(small("Go to a frame with a cel to see its light table"));
+                inner.label(small(&tr!("go-frame-cel-see-light-table")));
             }
             Some(cel) => {
                 let name = |id: sue_core::EntityId| {
                     cx.world
                         .arena
                         .get_by_id(id)
-                        .map_or_else(|_| "Layer".to_owned(), |entity| entity.name().to_owned())
+                        .map_or_else(|_| tr!("layer-2"), |entity| entity.name().to_owned())
                 };
-                inner.label(small(&format!("Light table of cel {}", name(cel))));
+                inner.label(small(&tr!("light-table-of-cel", value = name(cel))));
                 let mut opacity = self.light_opacity * 100.0;
                 if slider_row(
                     &mut inner,
-                    "Opacity",
+                    &tr!("opacity"),
                     &mut opacity,
                     0.0..=100.0,
                     " %",
@@ -3859,16 +4028,14 @@ impl SuePaint {
                 }
                 let layers = crate::anim::light_table(&cx.world.arena, cel);
                 if layers.is_empty() {
-                    inner.label(small(
-                        "Pick a layer to trace from, then register it with the last button",
-                    ));
+                    inner.label(small(&tr!("pick-layer-trace-then-register-last")));
                 }
                 let mut off = None;
                 for layer in layers {
                     inner.horizontal(|ui| {
                         if ui
                             .small_button("x")
-                            .on_hover_text("Deregister from the light table")
+                            .on_hover_text(tr!("deregister-from-the-light-table"))
                             .clicked()
                         {
                             off = Some(layer);
@@ -3896,7 +4063,7 @@ impl SuePaint {
         ui.painter().rect_filled(rect, 0.0, theme.panel);
         ui.painter()
             .hline(rect.x_range(), rect.top(), theme.hairline());
-        let (body, _) = header(ui, rect, &[("Timeline", true)], 0, theme);
+        let (body, _) = header(ui, rect, &[(tr!("timeline"), true)], 0, theme);
         let bar = Rect::from_min_size(body.min, vec2(body.width(), 28.0));
         ui.painter()
             .hline(body.x_range(), bar.bottom(), theme.hairline());

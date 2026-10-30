@@ -70,6 +70,21 @@ pub(crate) fn para_html(
     notes: &mut Vec<String>,
     figure: &dyn Fn(sue_core::EntityId) -> Option<String>,
 ) -> String {
+    if let Some(table) = book.table(para) {
+        return table_html(table);
+    }
+    if let Some(contents) = book.contents_of(para) {
+        let mut out = String::from("<nav class=\"contents\">");
+        if !contents.title.is_empty() {
+            let _ = write!(out, "<h2>{}</h2>", escape(&contents.title));
+        }
+        out.push_str("<ul>");
+        for (level, title) in book.headings(contents) {
+            let _ = write!(out, "<li class=\"level-{level}\">{}</li>", escape(&title));
+        }
+        out.push_str("</ul></nav>");
+        return out;
+    }
     let mut inner = String::new();
     if let Some(id) = para.embed
         && let Some(src) = figure(id)
@@ -77,7 +92,7 @@ pub(crate) fn para_html(
         let _ = write!(inner, "<img src=\"{}\" alt=\"\"/>", escape(&src));
     }
     for (text, look) in &para.runs {
-        let mut piece = escape(text);
+        let mut piece = escape(text).replace(sue_model::LINE_BREAK, "<br/>");
         if look.code {
             piece = format!("<code>{piece}</code>");
         }
@@ -92,6 +107,19 @@ pub(crate) fn para_html(
         }
         if look.strike {
             piece = format!("<s>{piece}</s>");
+        }
+        if let Some(change) = &look.deleted {
+            piece = format!(
+                "<del title=\"{}, {}\">{piece}</del>",
+                escape(&change.author),
+                escape(&change.date)
+            );
+        } else if let Some(change) = &look.inserted {
+            piece = format!(
+                "<ins title=\"{}, {}\">{piece}</ins>",
+                escape(&change.author),
+                escape(&change.date)
+            );
         }
         match look.script {
             1 => piece = format!("<sup>{piece}</sup>"),
@@ -114,14 +142,27 @@ pub(crate) fn para_html(
         if look.small_caps {
             css.push_str("font-variant: small-caps;");
         }
+        if look.caps {
+            css.push_str("text-transform: uppercase;");
+        }
         if !css.is_empty() {
             piece = format!("<span style=\"{css}\">{piece}</span>");
         }
         if let Some(link) = &look.link {
             piece = format!("<a href=\"{}\">{piece}</a>", escape(link));
         }
+        if let Some(thread) = look.comment.and_then(|id| book.comments.get(&id)) {
+            let said: Vec<String> = std::iter::once(&thread.first)
+                .chain(&thread.replies)
+                .map(|note| format!("{}: {}", note.author, note.text))
+                .collect();
+            piece = format!(
+                "<mark class=\"comment\" title=\"{}\">{piece}</mark>",
+                escape(&said.join("\n"))
+            );
+        }
         inner.push_str(&piece);
-        if let Some(note) = &look.footnote {
+        if let Some(note) = look.footnote.as_ref().or(look.endnote.as_ref()) {
             notes.push(note.clone());
             let n = notes.len();
             let _ = write!(
@@ -158,6 +199,43 @@ pub(crate) fn para_html(
         }
         None => format!("<p{attrs}>{inner}</p>"),
     }
+}
+
+/// A table as HTML: column widths, heading rows in `thead`.
+pub(crate) fn table_html(table: &crate::publish::PublishTable) -> String {
+    let columns = table.columns().max(1);
+    let mut out = String::from("<table class=\"sue-table\"><colgroup>");
+    for column in 0..columns {
+        let _ = write!(
+            out,
+            "<col style=\"width: {:.2}%\"/>",
+            table.share(column) * 100.0
+        );
+    }
+    out.push_str("</colgroup>");
+    let cell = |row: usize, column: usize| escape(table.cell(row, column)).replace('\n', "<br/>");
+    let heading = table.header_rows.min(table.cells.len());
+    if heading > 0 {
+        out.push_str("<thead>");
+        for row in 0..heading {
+            out.push_str("<tr>");
+            for column in 0..columns {
+                let _ = write!(out, "<th>{}</th>", cell(row, column));
+            }
+            out.push_str("</tr>");
+        }
+        out.push_str("</thead>");
+    }
+    out.push_str("<tbody>");
+    for row in heading..table.cells.len() {
+        out.push_str("<tr>");
+        for column in 0..columns {
+            let _ = write!(out, "<td>{}</td>", cell(row, column));
+        }
+        out.push_str("</tr>");
+    }
+    out.push_str("</tbody></table>");
+    out
 }
 
 /// The body of a run of paragraphs: lists become `ul` and `ol`.
@@ -491,7 +569,23 @@ pub fn from_html(html: &str) -> (String, TextMarks) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn html_comments_mark_their_words() {
+        let html = to_html(&super::super::tests::with_comment());
+        assert!(
+            html.contains("<mark class=\"comment\" title=\"Ann: Too much?\nBo: Keep it.\">"),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn html_contents_are_a_list_of_the_headings() {
+        let html = to_html(&super::super::tests::with_contents());
+        assert!(html.contains("<nav class=\"contents\"><h2>Contents</h2><ul><li class=\"level-1\">One</li><li class=\"level-2\">Two</li></ul></nav>"), "{html}");
+    }
+
     use super::super::tests::sample;
+    use super::super::tests::with_table;
     use super::*;
 
     #[test]
@@ -526,5 +620,16 @@ mod tests {
             .unwrap();
         assert_eq!(note.value.as_str(), Some("Or so they say."));
         assert_eq!(base64(b"Sue!"), "U3VlIQ==");
+    }
+
+    #[test]
+    fn html_tables_have_a_head_and_a_body() {
+        let html = to_html(&with_table());
+        assert!(
+            html.contains("<thead><tr><th>Item</th><th>Count &amp; size</th></tr></thead>"),
+            "{html}"
+        );
+        assert!(html.contains("<tbody><tr><td>Bolt &lt;M8&gt;</td><td>40</td></tr></tbody>"));
+        assert!(html.contains("width: 70.00%"));
     }
 }

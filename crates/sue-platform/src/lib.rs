@@ -14,7 +14,8 @@
 //! its safe API, so this crate keeps `unsafe` forbidden like every other one.
 //!
 //! The rest of the OS surface lives here too: [`AudioOutput`] (a `cpal`
-//! stream fed by a lock-free ring), [`list_dir`] and [`write_atomic`], and
+//! stream fed by a lock-free ring), [`list_dir`] and [`write_atomic`], the
+//! system's languages ([`system_languages`]), and
 //! hand-offs to the system browser, file manager and the system's own file
 //! dialogs (on phones and tablets they answer later, see [`poll_picks`]).
 //!
@@ -31,6 +32,7 @@ mod host;
 mod input;
 #[cfg(target_os = "ios")]
 mod ios;
+mod locale;
 mod os;
 mod paint;
 mod paths;
@@ -74,10 +76,11 @@ pub use input::{
     FileDrop, InputEvent, Key, KeyEvent, Modifiers, MouseButton, MouseEvent, NamedKey, Point,
     ScreenEdge, StylusSample, SwipeDirection, TouchGesture, WindowEvent,
 };
+pub use locale::{normalize_language, system_languages};
 pub use os::{
-    FileFilter, PickNews, Picking, copy_text, deliver_picked_files, open_document, open_url,
-    pick_folder, pick_open_file, pick_save_file, picks_busy, poll_picks, reveal_file,
-    reveal_folder, web_url,
+    FileFilter, PickNews, Picking, ShownPlace, copy_text, deliver_picked_files, file_manager,
+    open_document, open_url, pick_folder, pick_open_file, pick_save_file, picks_busy, poll_picks,
+    reveal_file, reveal_folder, shown_path, shown_place, stays_in_cache, web_url,
 };
 pub use paint::{EguiPainter, NoTextures, TextureUpload};
 pub use paths::{PlatformPaths, font_dirs, system_font_dirs};

@@ -58,6 +58,20 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
         )
         .labeled("Open At Launch"),
         declare(
+            "launchpad.recent_count",
+            int(8, 0, 50),
+            "How many recent files and projects the Hub lists (0 hides the list)",
+        )
+        .labeled("Recent Files on the Hub"),
+        declare(
+            crate::LANGUAGE_KEY,
+            RiceParameter::Text {
+                value: sue_lang::SYSTEM.to_owned(),
+            },
+            "Sue's language, which every studio and tool follows unless set apart (system follows the system's language)",
+        )
+        .labeled("Language"),
+        declare(
             "profile.hardware",
             choice("auto", &profiles),
             "Frame pacing and effect budget",
@@ -333,8 +347,12 @@ pub struct WmConfig {
     /// `launchpad.pinned`: the studio or tool Sue opens into, empty for
     /// the Hub.
     pub pinned: String,
+    /// `launchpad.recent_count`: how many recent files the Hub lists.
+    pub recent_count: usize,
     /// Points per wheel line in lists.
     pub wheel_line_px: f32,
+    /// `general.language`: a language tag, or `system`.
+    pub language: String,
 }
 
 impl WmConfig {
@@ -408,7 +426,16 @@ impl WmConfig {
                 .ok_or(WmError::MissingRice("launchpad.pinned"))?
                 .trim()
                 .to_owned(),
+            recent_count: schema
+                .get_i64("launchpad.recent_count")
+                .and_then(|count| usize::try_from(count).ok())
+                .ok_or(WmError::MissingRice("launchpad.recent_count"))?,
             wheel_line_px: number("input.wheel_line_px")?,
+            language: schema
+                .get_str(crate::LANGUAGE_KEY)
+                .unwrap_or(sue_lang::SYSTEM)
+                .trim()
+                .to_owned(),
         })
     }
 }
@@ -429,6 +456,7 @@ mod tests {
         assert_eq!(config.metrics.bar_height, 28.0);
         assert_eq!(config.metrics.status_bar_height, 22.0);
         assert_eq!(config.pinned, "", "nothing pinned: Sue opens on the Hub");
+        assert_eq!(config.recent_count, 8);
         assert_eq!(config.keymap.command_palette.to_string(), "Tab");
     }
 

@@ -102,6 +102,9 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
         if look.small_caps {
             props.push_str(" fo:font-variant=\"small-caps\"");
         }
+        if look.caps {
+            props.push_str(" fo:text-transform=\"uppercase\"");
+        }
         match look.script {
             1 => props.push_str(" style:text-position=\"super 58%\""),
             -1 => props.push_str(" style:text-position=\"sub 58%\""),
@@ -141,6 +144,10 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
     let mut notes = 0;
     let mut images: Vec<(String, Vec<u8>)> = Vec::new();
     let mut page_breaks = false;
+    let mut tables = 0;
+    let mut table_styles = String::new();
+    let mut commented: Vec<sue_core::EntityId> = Vec::new();
+    let mut open_comment: Option<sue_core::EntityId> = None;
     for (index, section) in book.sections.iter().enumerate() {
         let mut open_list: Option<&str> = None;
         for (para_index, para) in paragraphs(&section.text, &section.marks)
@@ -160,6 +167,25 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
                 }
                 open_list = list;
             }
+            if let Some(contents) = book.contents_of(&para) {
+                if open_list.take().is_some() {
+                    body.push_str("</text:list>");
+                }
+                tables += 1;
+                body.push_str(&contents_xml(book, contents, tables));
+                continue;
+            }
+            if let Some(table) = book.table(&para) {
+                if open_list.take().is_some() {
+                    body.push_str("</text:list>");
+                }
+                tables += 1;
+                let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+                let (styles, xml) = table_xml(table, tables, width);
+                table_styles.push_str(&styles);
+                body.push_str(&xml);
+                continue;
+            }
             let mut inner = String::new();
             if let Some(id) = para.embed
                 && let Some(figure) = book.figures.get(&id)
@@ -176,12 +202,29 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
                 images.push((name, figure.png.clone()));
             }
             for (text, look) in &para.runs {
+                let here = look.comment.filter(|id| book.comments.contains_key(id));
+                if here != open_comment {
+                    if let Some(open) = open_comment.take() {
+                        let index = commented.iter().position(|id| *id == open).unwrap_or(0);
+                        let _ = write!(inner, "<office:annotation-end office:name=\"c{index}\"/>");
+                    }
+                    if let Some(id) = here
+                        && !commented.contains(&id)
+                        && let Some(thread) = book.comments.get(&id)
+                    {
+                        commented.push(id);
+                        inner.push_str(&annotation(thread, commented.len() - 1));
+                        open_comment = Some(id);
+                    }
+                }
                 let mut piece = String::new();
                 for (index, part) in text.split('\t').enumerate() {
                     if index > 0 {
                         piece.push_str("<text:tab/>");
                     }
-                    piece.push_str(&escape(part));
+                    piece.push_str(
+                        &escape(part).replace(sue_model::LINE_BREAK, "<text:line-break/>"),
+                    );
                 }
                 if let Some(name) = span_style(look) {
                     piece = format!("<text:span text:style-name=\"{name}\">{piece}</text:span>");
@@ -193,14 +236,20 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
                     );
                 }
                 inner.push_str(&piece);
-                if let Some(note) = &look.footnote {
-                    notes += 1;
-                    let _ = write!(
-                        inner,
-                        "<text:note text:id=\"note{notes}\" text:note-class=\"footnote\"><text:note-citation>{notes}</text:note-citation><text:note-body><text:p text:style-name=\"Footnote\">{}</text:p></text:note-body></text:note>",
-                        escape(note)
-                    );
+                for (note, class) in [(&look.footnote, "footnote"), (&look.endnote, "endnote")] {
+                    if let Some(note) = note {
+                        notes += 1;
+                        let _ = write!(
+                            inner,
+                            "<text:note text:id=\"note{notes}\" text:note-class=\"{class}\"><text:note-citation>{notes}</text:note-citation><text:note-body><text:p text:style-name=\"Footnote\">{}</text:p></text:note-body></text:note>",
+                            escape(note)
+                        );
+                    }
                 }
+            }
+            if let Some(open) = open_comment.take() {
+                let index = commented.iter().position(|id| *id == open).unwrap_or(0);
+                let _ = write!(inner, "<office:annotation-end office:name=\"c{index}\"/>");
             }
             let new_page = para.page_break || (section.new_page && index > 0 && para_index == 0);
             page_breaks |= new_page;
@@ -225,7 +274,7 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
             body.push_str("</text:list>");
         }
     }
-    let mut auto = String::new();
+    let mut auto = table_styles;
     for (index, props) in automatic.iter().enumerate() {
         let _ = write!(
             auto,
@@ -272,15 +321,30 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
         styles.push_str(&paragraph_style(style));
     }
     styles.push_str("<style:style style:name=\"Footnote\" style:family=\"paragraph\"><style:text-properties fo:font-size=\"10pt\"/></style:style>");
+    styles.push_str("<style:style style:name=\"Table_20_Heading\" style:display-name=\"Table Heading\" style:family=\"paragraph\"><style:text-properties fo:font-weight=\"bold\"/></style:style>");
     let [top, right, bottom, left] = book.margins;
-    let footer = if book.page_numbers {
-        "<style:footer><text:p text:style-name=\"Sue_20_Footer\"><text:page-number text:select-page=\"current\">1</text:page-number></text:p></style:footer>"
-    } else {
-        ""
-    };
+    let width = (book.page[0] - book.margins[1] - book.margins[3]).max(72.0);
+    let mut furniture = String::new();
+    for (running, tag) in [(&book.header, "header"), (&book.footer, "footer")] {
+        if running.is_empty() {
+            continue;
+        }
+        let paragraph = running_xml(book, running);
+        let _ = write!(furniture, "<style:{tag}>{paragraph}</style:{tag}>");
+        if book.different_first {
+            let _ = write!(
+                furniture,
+                "<style:{tag}-first><text:p text:style-name=\"Sue_20_Footer\"/></style:{tag}-first>"
+            );
+        }
+    }
+    let footer = furniture;
     let styles_xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<office:document-styles {NS}><office:styles>{styles}<style:style style:name=\"Sue_20_Footer\" style:family=\"paragraph\"><style:paragraph-properties fo:text-align=\"center\"/></style:style></office:styles><office:automatic-styles><style:page-layout style:name=\"Page\"><style:page-layout-properties fo:page-width=\"{}pt\" fo:page-height=\"{}pt\" fo:margin-top=\"{top}pt\" fo:margin-right=\"{right}pt\" fo:margin-bottom=\"{bottom}pt\" fo:margin-left=\"{left}pt\"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name=\"Standard\" style:page-layout-name=\"Page\">{footer}</style:master-page></office:master-styles></office:document-styles>",
-        book.page[0], book.page[1]
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<office:document-styles {NS}><office:styles>{styles}<style:style style:name=\"Sue_20_Footer\" style:family=\"paragraph\"><style:paragraph-properties><style:tab-stops><style:tab-stop style:position=\"{}pt\" style:type=\"center\"/><style:tab-stop style:position=\"{}pt\" style:type=\"right\"/></style:tab-stops></style:paragraph-properties><style:text-properties fo:font-size=\"9pt\"/></style:style></office:styles><office:automatic-styles><style:page-layout style:name=\"Page\"><style:page-layout-properties fo:page-width=\"{}pt\" fo:page-height=\"{}pt\" fo:margin-top=\"{top}pt\" fo:margin-right=\"{right}pt\" fo:margin-bottom=\"{bottom}pt\" fo:margin-left=\"{left}pt\"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name=\"Standard\" style:page-layout-name=\"Page\">{footer}</style:master-page></office:master-styles></office:document-styles>",
+        width / 2.0,
+        width,
+        book.page[0],
+        book.page[1]
     );
     let meta = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<office:document-meta {NS}><office:meta><dc:title>{}</dc:title><dc:creator>{}</dc:creator><dc:language>{}</dc:language><meta:generator>Sue</meta:generator></office:meta></office:document-meta>",
@@ -310,9 +374,192 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
     zip.finish()
 }
 
+/// Comment number `index` as an OpenDocument annotation: its author,
+/// date and text, then its replies, named.
+fn annotation(thread: &sue_model::comments::Thread, index: usize) -> String {
+    let mut out = format!(
+        "<office:annotation office:name=\"c{index}\"><dc:creator>{}</dc:creator><dc:date>{}</dc:date><text:p>{}</text:p>",
+        escape(&thread.first.author),
+        escape(&if thread.first.date.len() == 10 {
+            format!("{}T00:00:00", thread.first.date)
+        } else {
+            thread.first.date.clone()
+        }),
+        escape(&thread.first.text)
+    );
+    for reply in &thread.replies {
+        let _ = write!(
+            out,
+            "<text:p>{}: {}</text:p>",
+            escape(&reply.author),
+            escape(&reply.text)
+        );
+    }
+    out.push_str("</office:annotation>");
+    out
+}
+
+/// A running header or footer's paragraph: its parts parted by tabs (the
+/// paragraph style's centered and right tab stops), its page fields
+/// OpenDocument's own.
+fn running_xml(book: &Book, running: &sue_model::Running) -> String {
+    use crate::publish::Live;
+    let mut out = String::from("<text:p text:style-name=\"Sue_20_Footer\">");
+    for (index, part) in book.live(running).iter().enumerate() {
+        if index > 0 {
+            out.push_str("<text:tab/>");
+        }
+        for piece in part {
+            match piece {
+                Live::Text(text) => out.push_str(&escape(text)),
+                Live::Page => {
+                    out.push_str(
+                        "<text:page-number text:select-page=\"current\">1</text:page-number>",
+                    );
+                }
+                Live::Pages => out.push_str("<text:page-count>1</text:page-count>"),
+            }
+        }
+    }
+    out.push_str("</text:p>");
+    out
+}
+
+/// A table of contents as OpenDocument's own, over the outline levels it
+/// lists, its body the book's headings.
+fn contents_xml(book: &Book, contents: &sue_model::contents::Contents, number: usize) -> String {
+    let name = format!("Contents{number}");
+    let title = escape(&contents.title);
+    let mut out = format!(
+        "<text:table-of-content text:protected=\"true\" text:name=\"{name}\"><text:table-of-content-source text:outline-level=\"{}\"><text:index-title-template text:style-name=\"Contents_20_Heading\">{title}</text:index-title-template></text:table-of-content-source><text:index-body>",
+        contents.levels
+    );
+    if !contents.title.is_empty() {
+        let _ = write!(
+            out,
+            "<text:index-title text:name=\"{name}_Head\"><text:p text:style-name=\"Contents_20_Heading\">{title}</text:p></text:index-title>"
+        );
+    }
+    for (level, heading) in book.headings(contents) {
+        let _ = write!(
+            out,
+            "<text:p text:style-name=\"Contents_20_{level}\">{}</text:p>",
+            escape(&heading)
+        );
+    }
+    out.push_str("</text:index-body></text:table-of-content>");
+    out
+}
+
+/// Table number `number` as OpenDocument, `width` points across: its
+/// automatic styles (the width of the table and each column, cell borders)
+/// and the table, heading rows repeated.
+fn table_xml(table: &crate::publish::PublishTable, number: usize, width: f32) -> (String, String) {
+    let name = format!("Table{number}");
+    let columns = table.columns().max(1);
+    let mut styles = format!(
+        "<style:style style:name=\"{name}\" style:family=\"table\"><style:table-properties style:width=\"{width}pt\" table:align=\"margins\"/></style:style><style:style style:name=\"{name}.Cell\" style:family=\"table-cell\"><style:table-cell-properties fo:padding=\"3pt\" fo:border=\"0.5pt solid #000000\"/></style:style>"
+    );
+    for column in 0..columns {
+        let _ = write!(
+            styles,
+            "<style:style style:name=\"{name}.C{column}\" style:family=\"table-column\"><style:table-column-properties style:column-width=\"{}pt\"/></style:style>",
+            width * table.share(column)
+        );
+    }
+    let mut xml = format!("<table:table table:name=\"{name}\" table:style-name=\"{name}\">");
+    for column in 0..columns {
+        let _ = write!(
+            xml,
+            "<table:table-column table:style-name=\"{name}.C{column}\"/>"
+        );
+    }
+    for (row, cells) in table.cells.iter().enumerate() {
+        if row == 0 && table.header_rows > 0 {
+            xml.push_str("<table:table-header-rows>");
+        }
+        xml.push_str("<table:table-row>");
+        for column in 0..columns {
+            let _ = write!(
+                xml,
+                "<table:table-cell table:style-name=\"{name}.Cell\" office:value-type=\"string\">"
+            );
+            let text = cells.get(column).map_or("", String::as_str);
+            for line in text.split('\n') {
+                if row < table.header_rows {
+                    let _ = write!(
+                        xml,
+                        "<text:p text:style-name=\"Table_20_Heading\">{}</text:p>",
+                        escape(line)
+                    );
+                } else {
+                    let _ = write!(xml, "<text:p>{}</text:p>", escape(line));
+                }
+            }
+            xml.push_str("</table:table-cell>");
+        }
+        xml.push_str("</table:table-row>");
+        if row + 1 == table.header_rows.min(table.cells.len()) {
+            xml.push_str("</table:table-header-rows>");
+        }
+    }
+    xml.push_str("</table:table>");
+    (styles, xml)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn opendocument_comments_are_annotations_over_their_words() {
+        let files = read_zip(&to_odt(&super::super::tests::with_comment())).unwrap();
+        let content = files
+            .iter()
+            .find(|(name, _)| name == "content.xml")
+            .unwrap();
+        let xml = String::from_utf8(content.1.clone()).unwrap();
+        let start = xml
+            .find("<office:annotation office:name=\"c0\">")
+            .expect("an annotation");
+        let end = xml
+            .find("<office:annotation-end office:name=\"c0\"/>")
+            .unwrap();
+        assert!(xml[start..end].contains("dark"), "{xml}");
+        assert!(xml.contains("<dc:creator>Ann</dc:creator>"));
+        assert!(xml.contains("<text:p>Bo: Keep it.</text:p>"));
+    }
+
+    #[test]
+    fn opendocument_contents_are_an_index_of_the_outline() {
+        let files = read_zip(&to_odt(&super::super::tests::with_contents())).unwrap();
+        let content = files
+            .iter()
+            .find(|(name, _)| name == "content.xml")
+            .unwrap();
+        let xml = String::from_utf8(content.1.clone()).unwrap();
+        assert!(
+            xml.contains("<text:table-of-content-source text:outline-level=\"2\">"),
+            "{xml}"
+        );
+        assert!(xml.contains("<text:p text:style-name=\"Contents_20_2\">Two</text:p>"));
+        assert!(!xml.contains("Contents_20_3"));
+    }
+
+    #[test]
+    fn opendocument_headers_and_footers_carry_live_page_fields() {
+        let mut book = sample();
+        book.header = sue_model::Running::parse("{author}\t\t{page}/{pages}");
+        book.different_first = true;
+        let files = read_zip(&to_odt(&book)).unwrap();
+        let styles = files.iter().find(|(name, _)| name == "styles.xml").unwrap();
+        let xml = String::from_utf8(styles.1.clone()).unwrap();
+        assert!(xml.contains("<style:header><text:p text:style-name=\"Sue_20_Footer\">A. Writer<text:tab/><text:tab/><text:page-number"), "{xml}");
+        assert!(xml.contains("<text:page-count>1</text:page-count>"));
+        assert!(xml.contains("<style:header-first>"));
+        assert!(xml.contains("<style:footer>"));
+    }
+
     use super::super::tests::sample;
+    use super::super::tests::with_table;
     use super::super::xml::{XmlEvent, parse};
     use super::*;
     use crate::zip::read_zip;
@@ -343,5 +590,25 @@ mod tests {
             .filter(|e| matches!(e, XmlEvent::Close(_)))
             .count();
         assert_eq!(opens, closes);
+    }
+
+    #[test]
+    fn opendocument_tables_have_columns_and_heading_rows() {
+        let bytes = to_odt(&with_table());
+        let files = read_zip(&bytes).unwrap();
+        let content = files
+            .iter()
+            .find(|(name, _)| name == "content.xml")
+            .unwrap();
+        let xml = String::from_utf8(content.1.clone()).unwrap();
+        assert_eq!(
+            xml.matches("<table:table-cell ").count(),
+            xml.matches("</table:table-cell>").count()
+        );
+        assert!(xml.contains("<table:table table:name=\"Table1\""), "{xml}");
+        assert_eq!(xml.matches("<table:table-column ").count(), 2);
+        assert_eq!(xml.matches("<table:table-header-rows>").count(), 1);
+        assert_eq!(xml.matches("<table:table-row>").count(), 2);
+        assert!(xml.contains("Bolt &lt;M8&gt;"));
     }
 }

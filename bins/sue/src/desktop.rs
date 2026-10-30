@@ -32,7 +32,10 @@ impl DesktopApp for DesktopShell {
             gpu_kind: Some(host.gpu().adapter_kind().to_owned()),
             gpus: host.gpu().available().to_vec(),
         };
+        // Sue starts in the system's language when it has it.
+        sue_lang::set_system(&sue_platform::system_languages());
         let engine = Engine::boot_with(&*host, options)?;
+        sue_lang::set_language(&engine.config.language);
         let runtime = Runtime::new(engine)?.interactive(true);
         host.set_clear_color(runtime.theme().void);
         self.runtime = Some(runtime);

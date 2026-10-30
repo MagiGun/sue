@@ -8,6 +8,9 @@
 //! | --- | --- |
 //! | [`TextMarks`] | word processing, notes, markdown, novels, LaTeX, layout |
 //! | [`manuscript`] | novels, scripts, theses, manuals, e-books, outlines |
+//! | [`changes`] | tracked changes in any text: who inserted and deleted what |
+//! | [`comments`] | comments and replies on any text |
+//! | [`contents`] | tables of contents in any text, made from its headings |
 //! | [`Table`] | spreadsheets, databases, CSV, schedules, bills of materials |
 //! | [`Animation`] / [`Curve`] | motion graphics, 2D and 3D animation, automation, grading |
 //! | [`Sequence`] / [`Notes`] | video editing, DAWs, slideshows, subtitles, singing synthesis |
@@ -21,6 +24,9 @@
 //! way (see `HUMANZ.md` §8), and register it with [`register`].
 
 mod blend;
+pub mod changes;
+pub mod comments;
+pub mod contents;
 mod curve;
 mod encoded;
 mod geometry;
@@ -37,13 +43,19 @@ pub use curve::{Animation, Curve, Interpolation, Key, Response};
 pub use encoded::Encoded;
 pub use geometry::{AttributeData, Domain, Geometry, Prim, PrimKind, Transform};
 pub use graph::{GraphEdit, GraphOp, Link, Node, NodeGraph, NodeKey, NodeRegistry, NodeType, Port};
-pub use layout::{Frame, PAGE_SIZES, Page, PageLayout, Rect, page_size, points};
+pub use layout::{
+    FIELDS, Frame, PAGE_SIZES, Page, PageFields, PageLayout, Rect, Running, RunningPiece,
+    page_size, points, running_pieces,
+};
 pub use sequence::{Clip, Note, Notes, Sequence, Track};
-pub use table::{Cell, Column, SetCell, Table, column_name, parse_a1};
+pub use table::{
+    Axis, Cell, Column, HEADER_ROWS, Reshape, SetCell, TEXT_TABLE, Table, WIDTHS, column_name,
+    column_shares, parse_a1, text_table,
+};
 pub use text::{
-    CharFormat, Mark, OBJECT, PARAGRAPH_KINDS, TextMarks, char_format, ensure_final_newline,
-    is_paragraph_kind, kind as mark_kind, marks_by_paragraph, paragraph_at, paragraphs, points_of,
-    rgb_of, runs, word_count,
+    CharFormat, LINE_BREAK, Mark, OBJECT, PARAGRAPH_KINDS, TextMarks, char_format,
+    ensure_final_newline, is_paragraph_kind, kind as mark_kind, marks_by_paragraph, paragraph_at,
+    paragraphs, points_of, rgb_of, runs, word_count,
 };
 
 use sue_core::{ComponentRegistry, PropertyDef, PropertySchema, Quantity, ValueType};

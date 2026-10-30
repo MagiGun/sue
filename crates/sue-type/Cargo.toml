@@ -10,7 +10,10 @@ license-file.workspace = true
 
 [dependencies]
 egui.workspace = true
+miniz_oxide.workspace = true
+regex.workspace = true
 sue-core.workspace = true
+sue-lang.workspace = true
 sue-io.workspace = true
 sue-model.workspace = true
 sue-wm.workspace = true

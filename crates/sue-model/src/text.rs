@@ -73,11 +73,23 @@ pub mod kind {
     pub const SCRIPT: &str = "script";
     /// Small capitals (value `true`).
     pub const SMALL_CAPS: &str = "small_caps";
-    /// A footnote after the marked text: the note itself, as text.
+    /// All capitals (value `true`): shown and printed in capitals, typed
+    /// and kept as written.
+    pub const CAPS: &str = "caps";
+    /// A footnote after the marked text: the note itself, as text. It
+    /// prints at the foot of the page.
     pub const FOOTNOTE: &str = "footnote";
+    /// An endnote after the marked text: the note itself, as text. It
+    /// prints with the others at the end.
+    pub const ENDNOTE: &str = "endnote";
     /// An entity shown in the text (a picture), on an [`super::OBJECT`]
     /// character.
     pub const EMBED: &str = "embed";
+    /// Text a tracked change inserted: who and when
+    /// ([`crate::changes::Change::value`]).
+    pub const INSERTED: &str = "inserted";
+    /// Text a tracked change deleted, kept until the change is accepted.
+    pub const DELETED: &str = "deleted";
 }
 
 /// The kinds that belong to whole paragraphs and travel with them.
@@ -102,6 +114,10 @@ pub const PARAGRAPH_KINDS: &[&str] = &[
 pub fn is_paragraph_kind(kind: &str) -> bool {
     PARAGRAPH_KINDS.contains(&kind)
 }
+
+/// A line break inside a paragraph (Shift+Enter): the line ends, the
+/// paragraph goes on.
+pub const LINE_BREAK: char = '\u{2028}';
 
 /// The character an embedded entity stands on ([`kind::EMBED`]).
 pub const OBJECT: char = '\u{FFFC}';
@@ -194,7 +210,10 @@ impl Mark {
     /// A mark over `range`. Formatting kinds extend when typing at their end.
     pub fn new(range: Range<usize>, kind: impl Into<String>, value: impl Into<Value>) -> Self {
         let kind = kind.into();
-        let inclusive = !matches!(kind.as_str(), kind::LINK | kind::COMMENT | kind::MATH);
+        let inclusive = !matches!(
+            kind.as_str(),
+            kind::LINK | kind::COMMENT | kind::MATH | kind::DELETED
+        );
         Self {
             range,
             kind,
@@ -610,6 +629,8 @@ pub struct CharFormat {
     pub code: bool,
     /// Small capitals.
     pub small_caps: bool,
+    /// All capitals.
+    pub caps: bool,
     /// Another font family.
     pub font: Option<String>,
     /// Another size, in points.
@@ -622,10 +643,16 @@ pub struct CharFormat {
     pub script: i8,
     /// A link's target.
     pub link: Option<String>,
-    /// `true` inside a comment.
-    pub comment: bool,
+    /// The comment this run is under ([`crate::comments`]).
+    pub comment: Option<EntityId>,
     /// A footnote that follows this run.
     pub footnote: Option<String>,
+    /// An endnote that follows this run.
+    pub endnote: Option<String>,
+    /// A tracked change inserted this run.
+    pub inserted: Option<crate::changes::Change>,
+    /// A tracked change deleted this run.
+    pub deleted: Option<crate::changes::Change>,
 }
 
 /// The sRGB bytes of a color value.
@@ -676,6 +703,7 @@ pub fn char_format(marks: &[&Mark], range: &Range<usize>) -> CharFormat {
             kind::STRIKE => look.strike = on,
             kind::CODE => look.code = on,
             kind::SMALL_CAPS => look.small_caps = on,
+            kind::CAPS => look.caps = on,
             kind::FONT => look.font = mark.value.as_str().map(str::to_owned),
             kind::SIZE => look.size = points_of(&mark.value),
             kind::COLOR => look.color = rgb_of(&mark.value),
@@ -688,9 +716,19 @@ pub fn char_format(marks: &[&Mark], range: &Range<usize>) -> CharFormat {
                 };
             }
             kind::LINK => look.link = mark.value.as_str().map(str::to_owned),
-            kind::COMMENT => look.comment = true,
+            kind::INSERTED => look.inserted = Some(crate::changes::Change::of(&mark.value)),
+            kind::DELETED => look.deleted = Some(crate::changes::Change::of(&mark.value)),
+            kind::COMMENT => {
+                look.comment = match mark.value {
+                    Value::Entity(id) => Some(id),
+                    _ => None,
+                };
+            }
             kind::FOOTNOTE if mark.range.end == range.end => {
                 look.footnote = mark.value.as_str().map(str::to_owned);
+            }
+            kind::ENDNOTE if mark.range.end == range.end => {
+                look.endnote = mark.value.as_str().map(str::to_owned);
             }
             _ => {}
         }

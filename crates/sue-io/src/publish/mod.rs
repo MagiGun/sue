@@ -1,7 +1,7 @@
 //! Publishing rich text: a [`Book`] (sections of rich text with the
 //! paragraph styles they use) written as Word, OpenDocument, EPUB, HTML,
-//! RTF, Markdown or plain text, and Word, HTML and Markdown read back into
-//! rich text. Any studio that publishes (a writing studio, notes, a page
+//! RTF, Markdown or plain text, and Word, OpenDocument, HTML and Markdown
+//! read back into rich text. Any studio that publishes (a writing studio, notes, a page
 //! layout studio) fills a [`Book`]; the formats never know who made it.
 //!
 //! Lengths are in points.
@@ -11,6 +11,7 @@ mod epub;
 mod html;
 mod markdown;
 mod odt;
+mod odt_read;
 mod pictures;
 mod rtf;
 pub mod xml;
@@ -19,13 +20,16 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use sue_core::{EntityId, Value};
-use sue_model::{CharFormat, TextMarks, mark_kind as kind};
+use sue_model::comments::Thread;
+use sue_model::contents::Contents;
+use sue_model::{CharFormat, Running, RunningPiece, TextMarks, mark_kind as kind, running_pieces};
 
-pub use docx::{from_docx, to_docx};
+pub use docx::{Imported, from_docx, read_docx, to_docx};
 pub use epub::to_epub;
 pub use html::{from_html, to_html};
 pub use markdown::{from_markdown, to_markdown};
 pub use odt::to_odt;
+pub use odt_read::{from_odt, read_odt};
 pub use pictures::{PictureBook, picture_epub, picture_pdf};
 pub use rtf::to_rtf;
 
@@ -166,6 +170,45 @@ pub struct Figure {
     pub height: u32,
 }
 
+/// A table a book shows (its `embed` marks name the entity).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PublishTable {
+    /// Each cell's text, row by row (a cell's lines part at newlines).
+    pub cells: Vec<Vec<String>>,
+    /// Rows at the top that are headings.
+    pub header_rows: usize,
+    /// Each column's share of the width, adding up to one.
+    pub shares: Vec<f32>,
+}
+
+impl PublishTable {
+    /// The number of columns.
+    #[must_use]
+    pub fn columns(&self) -> usize {
+        self.shares
+            .len()
+            .max(self.cells.iter().map(Vec::len).max().unwrap_or(0))
+    }
+
+    /// Column `column`'s share of the width.
+    #[must_use]
+    pub fn share(&self, column: usize) -> f32 {
+        self.shares
+            .get(column)
+            .copied()
+            .unwrap_or(1.0 / self.columns().max(1) as f32)
+    }
+
+    /// Cell `(row, column)`'s text (empty where a row is short).
+    #[must_use]
+    pub fn cell(&self, row: usize, column: usize) -> &str {
+        self.cells
+            .get(row)
+            .and_then(|cells| cells.get(column))
+            .map_or("", String::as_str)
+    }
+}
+
 /// What a publishing format writes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Book {
@@ -183,12 +226,57 @@ pub struct Book {
     pub styles: Vec<PublishStyle>,
     /// The pictures.
     pub figures: HashMap<EntityId, Figure>,
+    /// The tables.
+    pub tables: HashMap<EntityId, PublishTable>,
+    /// The tables of contents (their entries are the book's headings).
+    pub contents: HashMap<EntityId, Contents>,
+    /// The comments its `comment` marks name, with their replies.
+    pub comments: HashMap<EntityId, Thread>,
     /// The page size.
     pub page: [f32; 2],
     /// Top, right, bottom and left margins.
     pub margins: [f32; 4],
-    /// Page numbers in the footer.
-    pub page_numbers: bool,
+    /// The running header, in the top margin.
+    pub header: Running,
+    /// The running footer (the page number in the middle by default).
+    pub footer: Running,
+    /// No header or footer on the first page.
+    pub different_first: bool,
+    /// The date a `{date}` field shows.
+    pub date: String,
+}
+
+/// A piece of a running header or footer as a format writes it: text, or
+/// a field the reader's program fills in on each page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Live {
+    /// Text.
+    Text(String),
+    /// The page's number.
+    Page,
+    /// The number of pages.
+    Pages,
+}
+
+impl Book {
+    /// The left, middle and right parts of `running`, with the book's own
+    /// title, author and date filled in and the page fields left live.
+    pub(crate) fn live(&self, running: &Running) -> [Vec<Live>; 3] {
+        [&running.left, &running.center, &running.right].map(|part| {
+            running_pieces(part)
+                .into_iter()
+                .map(|piece| match piece {
+                    RunningPiece::Text(text) => Live::Text(text.to_owned()),
+                    RunningPiece::Field("page") => Live::Page,
+                    RunningPiece::Field("pages") => Live::Pages,
+                    RunningPiece::Field("title") => Live::Text(self.title.clone()),
+                    RunningPiece::Field("author") => Live::Text(self.author.clone()),
+                    RunningPiece::Field("date") => Live::Text(self.date.clone()),
+                    RunningPiece::Field(other) => Live::Text(format!("{{{other}}}")),
+                })
+                .collect()
+        })
+    }
 }
 
 impl Book {
@@ -209,10 +297,42 @@ impl Book {
             }],
             styles: PublishStyle::defaults(),
             figures: HashMap::new(),
+            tables: HashMap::new(),
+            contents: HashMap::new(),
+            comments: HashMap::new(),
             page: [612.0, 792.0],
             margins: [72.0; 4],
-            page_numbers: true,
+            header: Running::default(),
+            footer: Running::parse("{page}"),
+            different_first: false,
+            date: String::new(),
         }
+    }
+
+    /// The table of contents paragraph `para` shows, if it shows one.
+    #[must_use]
+    pub fn contents_of(&self, para: &Para) -> Option<&Contents> {
+        para.embed.and_then(|id| self.contents.get(&id))
+    }
+
+    /// The headings `contents` lists: their level and text, in order.
+    #[must_use]
+    pub fn headings(&self, contents: &Contents) -> Vec<(u8, String)> {
+        self.sections
+            .iter()
+            .flat_map(|section| paragraphs(&section.text, &section.marks))
+            .filter_map(|para| {
+                let level = para.outline(self)?;
+                let text = para.text().trim().to_owned();
+                (contents.lists(level) && !text.is_empty()).then_some((level, text))
+            })
+            .collect()
+    }
+
+    /// The table paragraph `para` shows, if it shows one.
+    #[must_use]
+    pub fn table(&self, para: &Para) -> Option<&PublishTable> {
+        para.embed.and_then(|id| self.tables.get(&id))
     }
 
     /// The style `key`, else body text.
@@ -350,7 +470,11 @@ pub fn footnotes(book: &Book) -> Vec<String> {
     book.sections
         .iter()
         .flat_map(|section| paragraphs(&section.text, &section.marks))
-        .flat_map(|para| para.runs.into_iter().filter_map(|(_, look)| look.footnote))
+        .flat_map(|para| {
+            para.runs
+                .into_iter()
+                .filter_map(|(_, look)| look.footnote.or(look.endnote))
+        })
         .collect()
 }
 
@@ -365,6 +489,25 @@ pub fn to_text(book: &Book) -> String {
             out.push('\n');
         }
         for para in paragraphs(&section.text, &section.marks) {
+            if let Some(contents) = book.contents_of(&para) {
+                if !contents.title.is_empty() {
+                    out.push_str(&contents.title);
+                    out.push('\n');
+                }
+                for (level, title) in book.headings(contents) {
+                    out.push_str(&"  ".repeat(usize::from(level.saturating_sub(1))));
+                    out.push_str(&title);
+                    out.push('\n');
+                }
+                continue;
+            }
+            if let Some(table) = book.table(&para) {
+                for row in &table.cells {
+                    out.push_str(&row.join("\t").replace('\n', " "));
+                    out.push('\n');
+                }
+                continue;
+            }
             if para.embed.is_some() {
                 continue;
             }
@@ -373,8 +516,8 @@ pub fn to_text(book: &Book) -> String {
                 out.push_str("- ");
             }
             for (text, look) in &para.runs {
-                out.push_str(text);
-                if let Some(note) = &look.footnote {
+                out.push_str(&text.replace(sue_model::LINE_BREAK, "\n"));
+                if let Some(note) = look.footnote.as_ref().or(look.endnote.as_ref()) {
                     notes.push(note.clone());
                     out.push_str(&format!("[{}]", notes.len()));
                 }
@@ -413,6 +556,122 @@ mod tests {
         let mut book = Book::single("My Story", text, &marks);
         book.author = "A. Writer".to_owned();
         book
+    }
+
+    /// A book holding a table between two paragraphs.
+    pub(crate) fn with_table() -> Book {
+        let text = format!("Parts\n{}\nThe end.\n", sue_model::OBJECT);
+        let mut marks = TextMarks::new();
+        let at = text.find(sue_model::OBJECT).unwrap_or(0);
+        let id = EntityId::new();
+        marks.set(
+            at..at + sue_model::OBJECT.len_utf8(),
+            kind::EMBED,
+            Some(Value::Entity(id)),
+        );
+        let mut book = Book::single("Parts", &text, &marks);
+        book.tables.insert(
+            id,
+            PublishTable {
+                cells: vec![
+                    vec!["Item".to_owned(), "Count & size".to_owned()],
+                    vec!["Bolt <M8>".to_owned(), "40".to_owned()],
+                ],
+                header_rows: 1,
+                shares: vec![0.7, 0.3],
+            },
+        );
+        book
+    }
+
+    /// A book with a comment and its reply on the words "dark and stormy".
+    pub(crate) fn with_comment() -> Book {
+        use sue_model::comments::Note;
+        let mut book = sample();
+        let id = EntityId::new();
+        let text = book.sections[0].text.clone();
+        let at = text.find("dark and stormy").unwrap_or(0);
+        book.sections[0]
+            .marks
+            .set(at..at + 15, kind::COMMENT, Some(Value::Entity(id)));
+        let note = |author: &str, text: &str| Note {
+            id: EntityId::new(),
+            author: author.to_owned(),
+            date: "2026-10-29".to_owned(),
+            text: text.to_owned(),
+        };
+        book.comments.insert(
+            id,
+            Thread {
+                first: note("Ann", "Too much?"),
+                replies: vec![note("Bo", "Keep it.")],
+                resolved: false,
+            },
+        );
+        book
+    }
+
+    /// A book with a table of contents before two headings.
+    pub(crate) fn with_contents() -> Book {
+        let text = format!("{}\nOne\nBody text.\nTwo\nThree\n", sue_model::OBJECT);
+        let mut marks = TextMarks::new();
+        let id = EntityId::new();
+        marks.set(
+            0..sue_model::OBJECT.len_utf8(),
+            kind::EMBED,
+            Some(Value::Entity(id)),
+        );
+        for (heading, style) in [
+            ("One", "heading1"),
+            ("Two", "heading2"),
+            ("Three", "heading3"),
+        ] {
+            let at = text.find(heading).unwrap_or(0);
+            marks.set_paragraphs(&text, at..at, kind::STYLE, Some(style.into()));
+        }
+        let mut book = Book::single("Guide", &text, &marks);
+        book.contents.insert(
+            id,
+            Contents {
+                title: "Contents".to_owned(),
+                levels: 2,
+            },
+        );
+        book
+    }
+
+    #[test]
+    fn line_breaks_go_out_and_come_back_in_every_format() {
+        let text = format!("Roses are red,{}violets are blue.\n", sue_model::LINE_BREAK);
+        let book = Book::single("Poem", &text, &TextMarks::new());
+        let word = to_docx(&book);
+        assert_eq!(from_docx(&word).unwrap().0, text);
+        assert_eq!(from_odt(&to_odt(&book)).unwrap().0, text);
+        assert!(to_html(&book).contains("red,<br/>violets"));
+        assert!(to_rtf(&book).contains("red,\\line violets"));
+        assert!(to_markdown(&book).contains("red,  \nviolets"));
+        assert!(to_text(&book).contains("red,\nviolets"));
+    }
+
+    #[test]
+    fn contents_list_the_books_headings() {
+        let book = with_contents();
+        let contents = book.contents.values().next().unwrap();
+        assert_eq!(
+            book.headings(contents),
+            vec![(1, "One".to_owned()), (2, "Two".to_owned())]
+        );
+        let plain = to_text(&book);
+        assert!(plain.starts_with("Contents\nOne\n  Two\nOne\n"), "{plain}");
+    }
+
+    #[test]
+    fn tables_go_into_plain_text_by_rows() {
+        let plain = to_text(&with_table());
+        assert!(
+            plain.contains("Item\tCount & size\nBolt <M8>\t40\n"),
+            "{plain}"
+        );
     }
 
     #[test]

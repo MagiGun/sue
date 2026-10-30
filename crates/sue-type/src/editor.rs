@@ -17,7 +17,7 @@ use egui::text::{CCursor, CharIndex, LayoutJob, TextFormat};
 use egui::{Color32, Event, Id, Key, Modifiers, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use sue_core::{EntityId, Value};
 use sue_model::{TextMarks, mark_kind as kind};
-use sue_wm::AppletContext;
+use sue_wm::{AppletContext, ArenaEdit};
 
 use crate::caret::{self, CaretGlide, CaretMotion};
 use crate::edit;
@@ -26,6 +26,8 @@ use crate::layout::{
     lay_document, paginate,
 };
 use crate::style::{CharFormat, ParagraphLook, StyleSheet, char_format, paragraph_look};
+pub use crate::tables::TableEdit;
+use crate::tables::{CellCaret, TableSource, paint_table};
 
 /// A place in the shown documents: which one, and a byte offset in it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -62,6 +64,9 @@ pub struct EditorView<'a> {
     /// The names of the documents, shown between them when there are
     /// several.
     pub titles: &'a [String],
+    /// Spelling as you type, while set: the words it also takes as right
+    /// (lower case; a project's own dictionary).
+    pub spelling: Option<&'a dyn Fn(&str) -> bool>,
     /// The room around the pages or the column, in screen points; `None`
     /// for the usual (24 around pages, 32 around a column). A phone wants
     /// less, so that the lines get the width.
@@ -83,6 +88,9 @@ pub struct EditorOutput {
     pub link: Option<String>,
     /// Ctrl and the wheel asked to zoom by this factor.
     pub zoom: Option<f32>,
+    /// A word to add to the dictionary (lower case), from the spelling
+    /// menu.
+    pub learn: Option<String>,
 }
 
 /// A heading of the shown documents.
@@ -104,6 +112,8 @@ struct DocKey {
     scale: u32,
     fonts: usize,
     ink: [u8; 4],
+    /// The revisions of the tables it shows.
+    embeds: u64,
 }
 
 struct Cached {
@@ -156,6 +166,20 @@ pub struct Editor {
     /// How the caret glides and blinks, from the rice and the hardware.
     motion: CaretMotion,
     glide: CaretGlide,
+    /// The caret in a table cell, while it is in one.
+    cell: Option<CellCaret>,
+    /// The spelling menu of the word last pressed with the secondary
+    /// button: its document, its range and what it may have meant.
+    spell_menu: Option<(usize, Range<usize>, Vec<String>)>,
+    /// Words this sitting takes as right (Ignore All).
+    ignored: std::collections::HashSet<String>,
+    /// Changes are recorded as made by this author on this date (track
+    /// changes), while set.
+    tracking: Option<sue_model::changes::Change>,
+    /// The deletion under way goes forward (the Delete key).
+    delete_forward: bool,
+    /// A cell the caret left this frame, its typing still to record.
+    left_cell: Option<CellCaret>,
 }
 
 impl std::fmt::Debug for Editor {
@@ -197,6 +221,12 @@ impl Editor {
             scroll_target: None,
             motion: CaretMotion::STILL,
             glide: CaretGlide::default(),
+            cell: None,
+            left_cell: None,
+            tracking: None,
+            delete_forward: false,
+            spell_menu: None,
+            ignored: std::collections::HashSet::new(),
         }
     }
 
@@ -432,7 +462,7 @@ impl Editor {
         if range.is_empty() {
             return;
         }
-        edit::reformat(cx, doc, "Clear Formatting", |_, marks| {
+        edit::reformat(cx, doc, &tr!("clear-formatting"), |_, marks| {
             let kinds: Vec<String> = marks
                 .marks()
                 .iter()
@@ -472,16 +502,417 @@ impl Editor {
         self.replace_selection(cx, text, None);
     }
 
+    /// Changes the case of the selection (or of the word at the caret),
+    /// keeping its formatting and selecting what it changed. Returns
+    /// `false` if nothing changed.
+    pub fn change_case(&mut self, cx: &mut AppletContext<'_>, case: crate::case::Case) -> bool {
+        let Some(doc) = self.current() else {
+            return false;
+        };
+        let mut range = self.selection();
+        if range.is_empty() {
+            let (start, end) = word_around(self.text(), range.start);
+            range = start..end;
+        }
+        let text = self.text();
+        let before = &text[range.clone()];
+        let sentence_start = text[..range.start]
+            .trim_end_matches([' ', '"', '\'', '\u{201C}', '\u{2018}', '('])
+            .chars()
+            .next_back()
+            .is_none_or(|ch| matches!(ch, '.' | '!' | '?' | '\n'));
+        let after = crate::case::change(before, case, sentence_start);
+        if after == before {
+            return false;
+        }
+        let marks = self.marks[self.caret.doc].slice(range.clone());
+        self.commit(cx);
+        cx.typing.flush(cx.history);
+        let Some(end) = edit::replace(cx, doc, range.clone(), &after, Some(&marks), &[]) else {
+            return false;
+        };
+        cx.typing.flush(cx.history);
+        self.sync_text(cx);
+        self.anchor = Caret {
+            doc: self.caret.doc,
+            offset: range.start,
+        };
+        self.caret = Caret {
+            doc: self.caret.doc,
+            offset: end,
+        };
+        self.follow = true;
+        true
+    }
+
     /// Puts an embedded entity (a picture) in a paragraph of its own at the
     /// caret.
     pub fn insert_embed(&mut self, cx: &mut AppletContext<'_>, entity: EntityId) {
+        self.embed(cx, entity, &tr!("insert-picture"));
+    }
+
+    /// Puts a new table of `rows` by `columns` in a paragraph of its own at
+    /// the caret, its first `header_rows` rows headings, and the caret in
+    /// its first cell. Returns the table's entity.
+    pub fn insert_table(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        rows: u32,
+        columns: u32,
+        header_rows: u32,
+    ) -> Option<EntityId> {
+        let entity = crate::tables::new_table(rows.max(1), columns.max(1), header_rows);
+        self.place_table(cx, entity, self.selection())
+    }
+
+    /// Every comment in the shown documents, in order: the document (an
+    /// index into the shown documents), the words it is about and its
+    /// entity.
+    #[must_use]
+    pub fn comments(&self) -> Vec<(usize, Range<usize>, EntityId)> {
+        let mut out = Vec::new();
+        for (doc, marks) in self.marks.iter().enumerate() {
+            let mut found: Vec<(Range<usize>, EntityId)> = marks
+                .marks()
+                .iter()
+                .filter(|mark| mark.kind == kind::COMMENT)
+                .filter_map(|mark| match mark.value {
+                    Value::Entity(id) => Some((mark.range.clone(), id)),
+                    _ => None,
+                })
+                .collect();
+            found.sort_by_key(|(range, _)| range.start);
+            out.extend(found.into_iter().map(|(range, id)| (doc, range, id)));
+        }
+        out
+    }
+
+    /// The comment under the caret, if any.
+    #[must_use]
+    pub fn comment_here(&self) -> Option<EntityId> {
+        let at = self.caret.offset;
+        self.comments()
+            .into_iter()
+            .find(|(doc, range, _)| *doc == self.caret.doc && range.start <= at && at <= range.end)
+            .map(|(_, _, id)| id)
+    }
+
+    /// Puts comment `entity` on the selection (or the word at the caret),
+    /// spawning it, as one undo step. Returns `false` when there are no
+    /// words to comment on.
+    pub fn add_comment(&mut self, cx: &mut AppletContext<'_>, entity: sue_core::Entity) -> bool {
+        let Some(doc) = self.current() else {
+            return false;
+        };
+        let mut range = self.selection();
+        if range.is_empty() {
+            let (start, end) = word_around(self.text(), range.start);
+            range = start..end;
+        }
+        if range.is_empty() {
+            return false;
+        }
+        self.commit(cx);
+        let id = entity.id();
+        let mut marks = self.marks[self.caret.doc].clone();
+        marks.set(range.clone(), kind::COMMENT, Some(Value::Entity(id)));
+        let batch = sue_core::txn::Batch::new(tr!("new-comment"))
+            .then(sue_core::txn::SpawnEntity::new(entity))
+            .then(sue_core::txn::SetExtension::set(doc, marks));
+        if cx.apply(ArenaEdit(batch)).is_err() {
+            return false;
+        }
+        self.sync_text(cx);
+        self.select(doc, range);
+        true
+    }
+
+    /// Takes comment `id` and its replies out of the shown documents, as
+    /// one undo step.
+    pub fn remove_comment(&mut self, cx: &mut AppletContext<'_>, id: EntityId) -> bool {
+        self.commit(cx);
+        let mut batch = sue_core::txn::Batch::new(tr!("delete-comment"));
+        let mut found = false;
+        for (index, doc) in self.docs.iter().enumerate() {
+            let mut marks = self.marks[index].clone();
+            let ranges: Vec<Range<usize>> = marks
+                .marks()
+                .iter()
+                .filter(|mark| mark.kind == kind::COMMENT && mark.value == Value::Entity(id))
+                .map(|mark| mark.range.clone())
+                .collect();
+            if ranges.is_empty() {
+                continue;
+            }
+            for range in ranges {
+                marks.set(range, kind::COMMENT, None);
+            }
+            batch.push(Box::new(sue_core::txn::SetExtension::set(*doc, marks)));
+            found = true;
+        }
+        if !found {
+            return false;
+        }
+        let replies = cx
+            .arena()
+            .relations()
+            .targets(id, sue_model::comments::REPLY);
+        for reply in replies.into_iter().rev() {
+            batch.push(Box::new(sue_core::txn::DespawnEntity::new(reply)));
+        }
+        batch.push(Box::new(sue_core::txn::DespawnEntity::new(id)));
+        let done = cx.apply(ArenaEdit(batch)).is_ok();
+        let docs = self.docs.clone();
+        for (index, doc) in docs.iter().enumerate() {
+            self.marks[index] = edit::marks_of(cx.arena(), *doc);
+        }
+        done
+    }
+
+    /// Puts a table of contents with `contents`' settings in a paragraph of
+    /// its own at the caret. Returns its entity.
+    pub fn insert_contents(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        contents: &sue_model::contents::Contents,
+    ) -> Option<EntityId> {
+        self.commit(cx);
+        self.current()?;
+        let entity = contents.entity();
+        let id = entity.id();
+        cx.apply(ArenaEdit(sue_core::txn::SpawnEntity::new(entity)))
+            .ok()?;
+        self.embed(cx, id, &tr!("insert-table-of-contents"));
+        Some(id)
+    }
+
+    /// Spawns table `entity` and sets it over `range` of the current
+    /// document, with the caret in its first cell.
+    fn place_table(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        entity: sue_core::Entity,
+        range: Range<usize>,
+    ) -> Option<EntityId> {
+        self.commit(cx);
+        self.current()?;
+        let id = entity.id();
+        cx.apply(ArenaEdit(sue_core::txn::SpawnEntity::new(entity)))
+            .ok()?;
+        self.anchor = Caret {
+            doc: self.caret.doc,
+            offset: range.start,
+        };
+        self.caret = Caret {
+            doc: self.caret.doc,
+            offset: range.end,
+        };
+        self.embed(cx, id, &tr!("insert-table"));
+        self.enter_cell(id, 0, 0);
+        Some(id)
+    }
+
+    /// Changes the table the caret is in. Returns `false` if the caret is
+    /// in none, or nothing changed.
+    pub fn edit_table(&mut self, cx: &mut AppletContext<'_>, edit: TableEdit) -> bool {
+        use sue_core::ReversibleTransaction;
+        use sue_model::Reshape;
+        self.commit(cx);
+        let Some(cell) = self.cell.clone() else {
+            return false;
+        };
+        let (rows, columns) = crate::tables::size_of(cx.arena(), cell.table);
+        let (row, column) = (cell.row as u32, cell.column as u32);
+        let fill = Some(Value::Text(String::new()));
+        let id = cell.table;
+        let widths = cx
+            .arena()
+            .get_by_id(id)
+            .ok()
+            .and_then(|entity| entity.property(sue_model::WIDTHS))
+            .is_some();
+        let reshape = |reshape: Reshape| {
+            let batch = sue_core::txn::Batch::new(reshape.label()).then(reshape);
+            if widths {
+                // New columns make every column even again.
+                batch.then(sue_core::txn::SetProperty::remove(id, sue_model::WIDTHS))
+            } else {
+                batch
+            }
+        };
+        let (step, moved) = match edit {
+            TableEdit::RowAbove => (
+                reshape(Reshape::insert_rows(id, row, 1, fill)),
+                (row, column),
+            ),
+            TableEdit::RowBelow => (
+                reshape(Reshape::insert_rows(id, row + 1, 1, fill)),
+                (row + 1, column),
+            ),
+            TableEdit::ColumnLeft => (
+                reshape(Reshape::insert_columns(id, column, 1, fill)),
+                (row, column),
+            ),
+            TableEdit::ColumnRight => (
+                reshape(Reshape::insert_columns(id, column + 1, 1, fill)),
+                (row, column + 1),
+            ),
+            TableEdit::DeleteRow if rows > 1 => (
+                reshape(Reshape::remove_rows(id, row, 1)),
+                (row.min(rows as u32 - 2), column),
+            ),
+            TableEdit::DeleteColumn if columns > 1 => (
+                reshape(Reshape::remove_columns(id, column, 1)),
+                (row, column.min(columns as u32 - 2)),
+            ),
+            TableEdit::HeaderRow => {
+                let now = cx
+                    .arena()
+                    .get_by_id(id)
+                    .ok()
+                    .and_then(|entity| entity.property(sue_model::HEADER_ROWS))
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                let step = sue_core::txn::Batch::new(tr!("heading-row")).then(
+                    sue_core::txn::SetProperty::new(
+                        id,
+                        sue_model::HEADER_ROWS,
+                        Value::Int(i64::from(now == 0)),
+                    ),
+                );
+                (step, (row, column))
+            }
+            TableEdit::DeleteRow | TableEdit::DeleteColumn | TableEdit::DeleteTable => {
+                return self.delete_table(cx);
+            }
+        };
+        if cx.apply(ArenaEdit(step)).is_err() {
+            return false;
+        }
+        if let Some(cell) = self.cell.as_mut() {
+            cell.row = moved.0 as usize;
+            cell.column = moved.1 as usize;
+            cell.offset = 0;
+        }
+        true
+    }
+
+    /// Takes the table the caret is in out of the text.
+    fn delete_table(&mut self, cx: &mut AppletContext<'_>) -> bool {
+        let Some(cell) = self.cell.take() else {
+            return false;
+        };
+        let Some(index) = self.table_block(cell.doc, cell.table) else {
+            return false;
+        };
+        let Some(doc) = self.docs.get(cell.doc).copied() else {
+            return false;
+        };
+        let range = self.laid.blocks[index].range.clone();
+        let text = self.doc_text(cell.doc);
+        let end = range.end + usize::from(text.as_bytes().get(range.end) == Some(&b'\n'));
+        cx.typing.flush(cx.history);
+        if edit::replace(cx, doc, range.start..end, "", None, &[]).is_none() {
+            return false;
+        }
+        cx.typing.flush(cx.history);
+        self.set_caret(
+            Caret {
+                doc: cell.doc,
+                offset: range.start,
+            },
+            false,
+        );
+        self.sync_text(cx);
+        true
+    }
+
+    /// Turns the table the caret is in into text: a paragraph for each
+    /// row, its cells parted by tabs.
+    pub fn table_to_text(&mut self, cx: &mut AppletContext<'_>) -> bool {
+        self.commit(cx);
+        let Some(cell) = self.cell.clone() else {
+            return false;
+        };
+        let Some(source) = TableSource::read(cx.arena(), cell.table) else {
+            return false;
+        };
+        let lines: Vec<String> = source
+            .cells
+            .iter()
+            .map(|row| row.join("\t").replace('\n', " "))
+            .collect();
+        let Some(index) = self.table_block(cell.doc, cell.table) else {
+            return false;
+        };
+        let Some(doc) = self.docs.get(cell.doc).copied() else {
+            return false;
+        };
+        let range = self.laid.blocks[index].range.clone();
+        self.cell = None;
+        cx.typing.flush(cx.history);
+        let Some(end) = edit::replace(cx, doc, range, &lines.join("\n"), None, &[]) else {
+            return false;
+        };
+        cx.typing.flush(cx.history);
+        self.set_caret(
+            Caret {
+                doc: cell.doc,
+                offset: end,
+            },
+            false,
+        );
+        self.sync_text(cx);
+        true
+    }
+
+    /// Turns the selected paragraphs into a table: a row for each, cut
+    /// into cells at its tabs (or, without tabs, at its commas).
+    pub fn text_to_table(&mut self, cx: &mut AppletContext<'_>) -> Option<EntityId> {
+        let range = self.paragraph_span();
+        let text = self.doc_text(self.caret.doc)[range.clone()].to_owned();
+        let tabs = text.contains('\t');
+        let cells: Vec<Vec<String>> = text
+            .lines()
+            .map(|line| {
+                if tabs {
+                    line.split('\t').map(str::to_owned).collect()
+                } else {
+                    line.split(',').map(|cell| cell.trim().to_owned()).collect()
+                }
+            })
+            .collect();
+        if cells.is_empty() {
+            return None;
+        }
+        let entity = crate::tables::table_of(&cells, 0);
+        self.place_table(cx, entity, range)
+    }
+
+    /// The selected paragraphs, without the last one's newline.
+    fn paragraph_span(&self) -> Range<usize> {
+        let text = self.doc_text(self.caret.doc);
+        let selection = self.selection();
+        let paragraphs = sue_model::paragraphs(text);
+        let first = sue_model::paragraph_at(text, selection.start);
+        let last = sue_model::paragraph_at(text, selection.end);
+        let start = paragraphs.get(first).map_or(0, |range| range.start);
+        let end = paragraphs.get(last).map_or(text.len(), |range| {
+            range.end - usize::from(text[range.clone()].ends_with('\n'))
+        });
+        start..end.max(start)
+    }
+
+    /// Puts `entity` in a paragraph of its own over the selection, as one
+    /// edit labeled `label`.
+    fn embed(&mut self, cx: &mut AppletContext<'_>, entity: EntityId, label: &str) {
         let Some(doc) = self.current() else {
             return;
         };
         let at = self.selection().start;
         let text = self.text().to_owned();
         let starts_line = at == 0 || text.as_bytes().get(at - 1) == Some(&b'\n');
-        let ends_line = text.as_bytes().get(at) == Some(&b'\n');
+        let ends_line = text.as_bytes().get(self.selection().end) == Some(&b'\n');
         let mut insert = String::new();
         if !starts_line {
             insert.push('\n');
@@ -495,7 +926,7 @@ impl Editor {
             return;
         };
         let object = object_at..object_at + sue_model::OBJECT.len_utf8();
-        edit::reformat(cx, doc, "Insert Picture", |_, marks| {
+        edit::reformat(cx, doc, label, |_, marks| {
             marks.set(object, kind::EMBED, Some(Value::Entity(entity)));
         });
         self.set_caret(
@@ -596,11 +1027,28 @@ impl Editor {
         let mut blocks = Vec::new();
         let mut starts = Vec::with_capacity(docs.len());
         let figure_size = |id: EntityId| (view.figures)(id).map(|(_, size)| size);
+        let arena = cx.arena();
+        let tables = |id: EntityId| TableSource::read(arena, id);
+        let contents = |id: EntityId| {
+            arena
+                .get_by_id(id)
+                .ok()
+                .and_then(sue_model::contents::Contents::read)
+        };
         for (index, id) in docs.iter().enumerate() {
-            let revision = cx
-                .arena()
-                .get_by_id(*id)
-                .map_or(0, sue_core::Entity::revision);
+            let revision = arena.get_by_id(*id).map_or(0, sue_core::Entity::revision);
+            let embeds = self.marks[index]
+                .marks()
+                .iter()
+                .filter(|mark| mark.kind == kind::EMBED)
+                .filter_map(|mark| match mark.value {
+                    Value::Entity(embedded) => arena.get_by_id(embedded).ok(),
+                    _ => None,
+                })
+                .filter(|entity| entity.class() == sue_model::TEXT_TABLE)
+                .fold(0_u64, |hash, entity| {
+                    hash.rotate_left(7) ^ entity.revision()
+                });
             let key = DocKey {
                 revision,
                 sheet,
@@ -608,6 +1056,7 @@ impl Editor {
                 scale: scale.to_bits(),
                 fonts,
                 ink,
+                embeds,
             };
             let fresh = self.cache.get(id).is_some_and(|cached| cached.key == key);
             if !fresh {
@@ -621,6 +1070,8 @@ impl Editor {
                     text: &self.texts[index],
                     marks: &self.marks[index],
                     figure_size: &figure_size,
+                    tables: &tables,
+                    contents: &contents,
                 };
                 let laid = lay_document(ctx, index, &source, &setting);
                 self.cache.insert(*id, Cached { key, blocks: laid });
@@ -642,6 +1093,38 @@ impl Editor {
             0.0
         };
         paginate(&mut self.laid, view.mode, view.page, scale, gap);
+        if self
+            .laid
+            .blocks
+            .iter()
+            .any(|block| block.contents.is_some())
+        {
+            // Tables of contents list the headings with their pages: laid
+            // out once to find the pages, then again with them.
+            let setting = Setting {
+                sheet: view.sheet,
+                scale,
+                width,
+                ink: view.ink,
+            };
+            for pass in 0..2 {
+                let pages = (pass > 0).then(|| {
+                    let mut pages = vec![0; self.laid.blocks.len()];
+                    for piece in self.laid.pieces.iter().rev() {
+                        pages[piece.block] = piece.page;
+                    }
+                    pages
+                });
+                crate::contents::fill(
+                    ctx,
+                    &mut self.laid.blocks,
+                    &self.texts,
+                    &setting,
+                    pages.as_deref(),
+                );
+                paginate(&mut self.laid, view.mode, view.page, scale, gap);
+            }
+        }
         self.pieces_of = vec![0..0; self.laid.blocks.len()];
         for (index, piece) in self.laid.pieces.iter().enumerate() {
             let range = &mut self.pieces_of[piece.block];
@@ -653,6 +1136,428 @@ impl Editor {
         }
         self.caret = self.clamp(self.caret);
         self.anchor = self.clamp(self.anchor);
+        self.keep_cell(cx);
+    }
+
+    /// Keeps the cell caret in a cell of a table still shown, or lets it go.
+    fn keep_cell(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(cell) = &mut self.cell else {
+            return;
+        };
+        let table = self
+            .laid
+            .blocks
+            .iter()
+            .filter(|block| block.doc == cell.doc)
+            .find_map(|block| {
+                block
+                    .table
+                    .as_ref()
+                    .filter(|table| table.entity == cell.table)
+            });
+        match table {
+            Some(table) if !table.rows.is_empty() && table.columns() > 0 => {
+                cell.row = cell.row.min(table.rows.len() - 1);
+                cell.column = cell.column.min(table.columns() - 1);
+                let text = &table.texts[cell.row][cell.column];
+                cell.offset = cell.offset.min(text.len());
+                while !text.is_char_boundary(cell.offset) {
+                    cell.offset -= 1;
+                }
+            }
+            _ => {
+                if let Some(mut gone) = self.cell.take() {
+                    gone.commit(cx);
+                }
+            }
+        }
+    }
+
+    /// The table block holding `table` in shown document `doc`.
+    fn table_block(&self, doc: usize, table: EntityId) -> Option<usize> {
+        self.laid.blocks.iter().position(|block| {
+            block.doc == doc
+                && block
+                    .table
+                    .as_ref()
+                    .is_some_and(|laid| laid.entity == table)
+        })
+    }
+
+    /// Where row `row` of table block `index` is drawn: the top left of the
+    /// table for the piece showing that row.
+    fn table_origin(&self, index: usize, row: usize) -> Option<Pos2> {
+        let block = &self.laid.blocks[index];
+        let pieces = self.pieces_of.get(index)?.clone();
+        let piece = pieces
+            .clone()
+            .find(|piece| self.laid.pieces[*piece].rows.contains(&row))
+            .or(pieces.clone().next())?;
+        let (galley, _) = self.piece_place(piece);
+        let left = self.text_origin(self.laid.pieces[piece].page).x + block.indent;
+        Some(pos2(left, galley.y))
+    }
+
+    /// The caret's rectangle on screen, in a cell or in the text.
+    fn shown_caret(&self) -> Option<Rect> {
+        match &self.cell {
+            Some(cell) => {
+                let index = self.table_block(cell.doc, cell.table)?;
+                let table = self.laid.blocks[index].table.as_ref()?;
+                let origin = self.table_origin(index, cell.row)?;
+                let rect = table.caret(cell.row, cell.column, cell.offset)?;
+                Some(rect.translate(origin.to_vec2()))
+            }
+            None => self.caret_rect(self.caret),
+        }
+    }
+
+    /// `true` if `word` is spelled right for `view` (its dictionary and the
+    /// words ignored this sitting).
+    fn spelled_right(&self, view: &EditorView<'_>, word: &str) -> bool {
+        let Some(also) = view.spelling else {
+            return true;
+        };
+        crate::spell::is_correct(word, &|lower| also(lower) || self.ignored.contains(lower))
+    }
+
+    /// The menu a secondary press on a misspelled word opens: what it may
+    /// have meant, Ignore All and Add to Dictionary. Returns `true` if it
+    /// changed the text.
+    fn spelling_menu(
+        &mut self,
+        ui: &Ui,
+        cx: &mut AppletContext<'_>,
+        response: &egui::Response,
+        view: &EditorView<'_>,
+        output: &mut EditorOutput,
+    ) -> bool {
+        if view.spelling.is_none() {
+            return false;
+        }
+        if response.secondary_clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            let caret = self.hit(pos);
+            let text = self.doc_text(caret.doc).to_owned();
+            self.spell_menu = crate::spell::words(&text)
+                .into_iter()
+                .find(|range| range.start <= caret.offset && caret.offset <= range.end)
+                .filter(|range| !self.spelled_right(view, &text[range.clone()]))
+                .map(|range| {
+                    let suggestions = crate::spell::suggest(&text[range.clone()], 6);
+                    (caret.doc, range, suggestions)
+                });
+        }
+        let Some((doc, range, suggestions)) = self.spell_menu.clone() else {
+            return false;
+        };
+        let word = self
+            .doc_text(doc)
+            .get(range.clone())
+            .unwrap_or("")
+            .to_owned();
+        let mut pick: Option<String> = None;
+        let mut learn = false;
+        let mut ignore = false;
+        response.context_menu(|ui| {
+            if suggestions.is_empty() {
+                ui.label(tr!("no-suggestions"));
+            }
+            for suggestion in &suggestions {
+                if ui.button(suggestion).clicked() {
+                    pick = Some(suggestion.clone());
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui.button(tr!("ignore-all")).clicked() {
+                ignore = true;
+                ui.close();
+            }
+            if ui.button(tr!("add-to-dictionary")).clicked() {
+                learn = true;
+                ui.close();
+            }
+        });
+        let lower = word.to_lowercase().replace('\u{2019}', "'");
+        if ignore {
+            self.ignored.insert(lower.clone());
+            self.spell_menu = None;
+        }
+        if learn {
+            output.learn = Some(lower);
+            self.spell_menu = None;
+        }
+        let Some(pick) = pick else {
+            let _ = ui;
+            return false;
+        };
+        self.spell_menu = None;
+        self.anchor = Caret {
+            doc,
+            offset: range.start,
+        };
+        self.caret = Caret {
+            doc,
+            offset: range.end,
+        };
+        self.replace_selection(cx, &pick, None)
+    }
+
+    /// The heading a table of contents' entry under a point on screen
+    /// leads to, if there is one.
+    fn hit_entry(&self, pos: Pos2) -> Option<Caret> {
+        for (index, piece) in self.laid.pieces.iter().enumerate() {
+            let block = &self.laid.blocks[piece.block];
+            let Some(listing) = block
+                .table
+                .as_ref()
+                .and_then(|table| table.listing.as_ref().map(|listing| (table, listing)))
+            else {
+                continue;
+            };
+            let (table, listing) = listing;
+            let (galley, clip) = self.piece_place(index);
+            if !clip.contains(pos) {
+                continue;
+            }
+            let y = pos.y - galley.y;
+            let row = table
+                .rows
+                .iter()
+                .position(|(top, bottom)| y >= *top && y < *bottom)?;
+            let target = (*listing.targets.get(row)?)?;
+            let heading = self.laid.blocks.get(target)?;
+            return Some(Caret {
+                doc: heading.doc,
+                offset: heading.range.start,
+            });
+        }
+        None
+    }
+
+    /// The table cell under a point on screen, if any.
+    fn hit_cell(&self, pos: Pos2) -> Option<CellCaret> {
+        for (index, piece) in self.laid.pieces.iter().enumerate() {
+            let block = &self.laid.blocks[piece.block];
+            let Some(table) = block.table.as_ref().filter(|table| table.listing.is_none()) else {
+                continue;
+            };
+            let (galley, clip) = self.piece_place(index);
+            let repeat = if piece.rows.start >= table.header_rows.max(1) {
+                table.repeat_height()
+            } else {
+                0.0
+            };
+            if pos.y < clip.top() - repeat || pos.y > clip.bottom() {
+                continue;
+            }
+            let left = self.text_origin(piece.page).x + block.indent;
+            let origin = pos2(left, galley.y);
+            let mut local = pos - origin;
+            if pos.y < clip.top() {
+                // In the heading rows repeated above this page's rows.
+                local.y = pos.y - (clip.top() - repeat) + table.rows[0].0;
+            }
+            if let Some((row, column, offset)) = table.hit(local) {
+                return Some(CellCaret::new(block.doc, table.entity, row, column, offset));
+            }
+        }
+        None
+    }
+
+    /// Records the typing in the cell the caret is in as one undo step; a
+    /// studio calls it before undo, redo and its own edits of the table.
+    pub fn commit(&mut self, cx: &mut AppletContext<'_>) {
+        if let Some(mut left) = self.left_cell.take() {
+            left.commit(cx);
+        }
+        if let Some(cell) = &mut self.cell {
+            cell.commit(cx);
+        }
+    }
+
+    /// The table and the cell (row, column) the caret is in.
+    #[must_use]
+    pub fn cell(&self) -> Option<(EntityId, usize, usize)> {
+        self.cell
+            .as_ref()
+            .map(|cell| (cell.table, cell.row, cell.column))
+    }
+
+    /// Puts the caret in cell `(row, column)` of table `table` in the
+    /// current document.
+    pub fn enter_cell(&mut self, table: EntityId, row: usize, column: usize) {
+        if self.left_cell.is_none() {
+            self.left_cell = self.cell.take();
+        }
+        self.cell = Some(CellCaret::new(self.caret.doc, table, row, column, 0));
+        self.follow = true;
+    }
+
+    /// Leaves the table the caret is in, for the paragraph after it (or
+    /// before it, with `up`).
+    pub fn leave_table(&mut self, up: bool) {
+        let Some(cell) = self.cell.take() else {
+            return;
+        };
+        let doc = cell.doc;
+        if let Some(index) = self.table_block(doc, cell.table) {
+            let range = self.laid.blocks[index].range.clone();
+            let text = self.doc_text(doc);
+            let offset = if up {
+                range.start.saturating_sub(1)
+            } else if range.end < self.last_offset(doc) {
+                range.end + usize::from(text.as_bytes().get(range.end) == Some(&b'\n'))
+            } else {
+                range.end
+            };
+            self.set_caret(Caret { doc, offset }, false);
+        }
+        if self.left_cell.is_none() {
+            self.left_cell = Some(cell);
+        }
+    }
+
+    /// Keys and text while the caret is in a cell. Returns `true` if the
+    /// table changed.
+    fn cell_keyboard(&mut self, ui: &Ui, cx: &mut AppletContext<'_>) -> bool {
+        let events = ui.input(|input| input.events.clone());
+        let mut changed = false;
+        for event in events {
+            let Some(cell) = self.cell.as_mut() else {
+                break;
+            };
+            let at = cell.offset;
+            match event {
+                Event::Text(text) if !text.chars().all(char::is_control) => {
+                    changed |= cell.replace(cx, at..at, &text);
+                }
+                Event::Ime(egui::ImeEvent::Preedit { text, .. }) => {
+                    self.preedit = (!text.is_empty()).then_some(text);
+                }
+                Event::Ime(egui::ImeEvent::Commit(text)) => {
+                    self.preedit = None;
+                    changed |= cell.replace(cx, at..at, &text);
+                }
+                Event::Paste(text) => {
+                    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+                    changed |= cell.replace(cx, at..at, text.trim_end_matches('\n'));
+                }
+                Event::Copy | Event::Cut => {
+                    ui.ctx().copy_text(cell.text(cx.arena()));
+                }
+                Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } => changed |= self.cell_key(cx, key, modifiers),
+                _ => {}
+            }
+        }
+        if changed {
+            self.follow = true;
+        }
+        changed
+    }
+
+    /// One key in a cell. Returns `true` if the table changed.
+    fn cell_key(&mut self, cx: &mut AppletContext<'_>, key: Key, modifiers: Modifiers) -> bool {
+        let Some(cell) = self.cell.as_mut() else {
+            return false;
+        };
+        let text = cell.text(cx.arena());
+        let (rows, columns) = crate::tables::size_of(cx.arena(), cell.table);
+        let columns = columns.max(1);
+        let at = cell.offset.min(text.len());
+        let place = cell.row * columns + cell.column;
+        match key {
+            Key::Backspace if at > 0 => {
+                let from = prev_boundary(&text, at);
+                cell.replace(cx, from..at, "")
+            }
+            Key::Delete if at < text.len() => {
+                let to = next_boundary(&text, at);
+                cell.replace(cx, at..to, "")
+            }
+            Key::Enter => cell.replace(cx, at..at, "\n"),
+            Key::ArrowLeft if at > 0 => {
+                cell.offset = prev_boundary(&text, at);
+                false
+            }
+            Key::ArrowRight if at < text.len() => {
+                cell.offset = next_boundary(&text, at);
+                false
+            }
+            Key::ArrowLeft | Key::ArrowRight => {
+                let forward = key == Key::ArrowRight;
+                if forward && place + 1 < rows * columns {
+                    cell.move_to(cx, (place + 1) / columns, (place + 1) % columns, false);
+                } else if !forward && place > 0 {
+                    cell.move_to(cx, (place - 1) / columns, (place - 1) % columns, true);
+                } else {
+                    self.leave_table(!forward);
+                }
+                false
+            }
+            Key::Home => {
+                cell.offset = 0;
+                false
+            }
+            Key::End => {
+                cell.offset = text.len();
+                false
+            }
+            Key::Tab if modifiers.shift => {
+                if place > 0 {
+                    cell.move_to(cx, (place - 1) / columns, (place - 1) % columns, true);
+                }
+                false
+            }
+            Key::Tab if place + 1 < rows * columns => {
+                cell.move_to(cx, (place + 1) / columns, (place + 1) % columns, true);
+                false
+            }
+            Key::Tab => {
+                // Tab in the last cell adds a row, as in every word processor.
+                cell.commit(cx);
+                let table = cell.table;
+                let grown = cx
+                    .apply(ArenaEdit(sue_model::Reshape::insert_rows(
+                        table,
+                        rows as u32,
+                        1,
+                        Some(Value::Text(String::new())),
+                    )))
+                    .is_ok();
+                if grown && let Some(cell) = self.cell.as_mut() {
+                    cell.row = rows;
+                    cell.column = 0;
+                    cell.offset = 0;
+                }
+                grown
+            }
+            Key::ArrowUp | Key::ArrowDown => {
+                let down = key == Key::ArrowDown;
+                if down && cell.row + 1 < rows {
+                    let (row, column) = (cell.row + 1, cell.column);
+                    cell.move_to(cx, row, column, false);
+                } else if !down && cell.row > 0 {
+                    let (row, column) = (cell.row - 1, cell.column);
+                    cell.move_to(cx, row, column, false);
+                } else {
+                    self.leave_table(!down);
+                }
+                false
+            }
+            Key::Escape => {
+                self.leave_table(false);
+                false
+            }
+            _ => false,
+        }
     }
 
     /// Keeps a place inside the shown documents, before their last newline.
@@ -706,6 +1611,14 @@ impl Editor {
             }
         }
         self.pointer(ui, &response, output);
+        if let Some(mut left) = self.left_cell.take() {
+            left.commit(cx);
+        }
+        if !view.read_only && self.spelling_menu(ui, cx, &response, view, output) {
+            output.changed = true;
+            let docs = self.docs.clone();
+            self.prepare(&ctx, cx, &docs, view);
+        }
         let focused = ctx.memory(|memory| memory.has_focus(self.id));
         if focused && resized && self.had_focus {
             self.follow = true;
@@ -725,7 +1638,16 @@ impl Editor {
             });
             // The shell and the studios treat Sue's text fields as typing.
             egui::text_edit::TextEditState::default().store(&ctx, self.id);
-            if !view.read_only && self.keyboard(ui, cx, view) {
+            let typed = !view.read_only
+                && if self.cell.is_some() {
+                    self.cell_keyboard(ui, cx)
+                } else {
+                    self.keyboard(ui, cx, view)
+                };
+            if let Some(mut left) = self.left_cell.take() {
+                left.commit(cx);
+            }
+            if typed {
                 output.changed = true;
                 let docs = self.docs.clone();
                 self.prepare(&ctx, cx, &docs, view);
@@ -738,13 +1660,13 @@ impl Editor {
             self.follow = true;
         }
         if self.follow
-            && let Some(caret) = self.caret_rect(self.caret)
+            && let Some(caret) = self.shown_caret()
         {
             let align = view.typewriter.then_some(egui::Align::Center);
             ui.scroll_to_rect(caret.expand2(vec2(48.0, 36.0)), align);
             self.follow = false;
         }
-        if focused && let Some(caret) = self.caret_rect(self.caret) {
+        if focused && let Some(caret) = self.shown_caret() {
             let to_global = ctx
                 .layer_transform_to_global(ui.layer_id())
                 .unwrap_or_default();
@@ -1073,6 +1995,36 @@ impl Editor {
                 1
             };
             self.clicks = (time, pos, count);
+            if let Some(hit) = self.hit_cell(pos) {
+                // A press in a table puts the caret in that cell.
+                let same = self.cell.as_ref().is_some_and(|old| {
+                    (old.table, old.row, old.column) == (hit.table, hit.row, hit.column)
+                });
+                if same {
+                    if let Some(cell) = self.cell.as_mut() {
+                        cell.offset = hit.offset;
+                    }
+                } else {
+                    if self.left_cell.is_none() {
+                        self.left_cell = self.cell.take();
+                    }
+                    self.cell = Some(hit);
+                }
+                self.h_pos = None;
+                self.follow = true;
+                self.pending.clear();
+                return;
+            }
+            if self.cell.is_some() && self.left_cell.is_none() {
+                self.left_cell = self.cell.take();
+            }
+            self.cell = None;
+            if let Some(heading) = self.hit_entry(pos) {
+                // A press on a table of contents' entry goes to its heading.
+                self.set_caret(heading, false);
+                self.pending.clear();
+                return;
+            }
             let caret = self.hit(pos);
             self.h_pos = None;
             match count {
@@ -1112,7 +2064,7 @@ impl Editor {
                 }
             }
             self.pending.clear();
-        } else if response.dragged() && self.clicks.2 == 1 {
+        } else if response.dragged() && self.clicks.2 == 1 && self.cell.is_none() {
             let mut caret = self.hit(pos);
             // Selections stay in one document.
             if caret.doc != self.anchor.doc {
@@ -1240,8 +2192,14 @@ impl Editor {
         if range.is_empty() && text.is_empty() {
             return false;
         }
+        if let Some(change) = self.tracking.clone() {
+            return self.replace_tracked(cx, doc, range, text, source, &change);
+        }
         let format = std::mem::take(&mut self.pending);
-        let Some(end) = edit::replace(cx, doc, range, text, source, &format) else {
+        // Text typed while changes are not recorded is no one's insertion.
+        let mut applied = format.clone();
+        applied.push((kind::INSERTED.to_owned(), None));
+        let Some(end) = edit::replace(cx, doc, range, text, source, &applied) else {
             return false;
         };
         if text.is_empty() {
@@ -1250,6 +2208,110 @@ impl Editor {
         let caret = Caret {
             doc: self.caret.doc,
             offset: end,
+        };
+        self.caret = caret;
+        self.anchor = caret;
+        self.h_pos = None;
+        self.follow = true;
+        self.sync_text(cx);
+        true
+    }
+
+    /// Records changes as `change` (who and when) while it is set: typing
+    /// marks what it puts in as inserted, deleting strikes text through
+    /// instead of taking it out (text a change inserted goes for good).
+    pub fn set_tracking(&mut self, change: Option<sue_model::changes::Change>) {
+        self.tracking = change;
+    }
+
+    /// `true` while changes are recorded.
+    #[must_use]
+    pub fn tracking(&self) -> bool {
+        self.tracking.is_some()
+    }
+
+    /// Every tracked change in the shown documents, in order, with the
+    /// document it is in (an index into the shown documents).
+    #[must_use]
+    pub fn changes(&self) -> Vec<(usize, sue_model::changes::Tracked)> {
+        self.marks
+            .iter()
+            .enumerate()
+            .flat_map(|(doc, marks)| {
+                sue_model::changes::changes(marks)
+                    .into_iter()
+                    .map(move |tracked| (doc, tracked))
+            })
+            .collect()
+    }
+
+    /// [`Self::replace_selection`] while changes are recorded.
+    fn replace_tracked(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        doc: EntityId,
+        range: Range<usize>,
+        text: &str,
+        source: Option<&TextMarks>,
+        change: &sue_model::changes::Change,
+    ) -> bool {
+        let forward = std::mem::take(&mut self.delete_forward);
+        let format = std::mem::take(&mut self.pending);
+        let mut at = range.start;
+        let mut caret = range.start;
+        if !range.is_empty() {
+            let marks = self.marks[self.caret.doc].clone();
+            // What a change inserted goes; the rest is struck through.
+            let mut inserted: Vec<Range<usize>> = marks
+                .marks()
+                .iter()
+                .filter(|mark| mark.kind == kind::INSERTED)
+                .map(|mark| mark.range.start.max(range.start)..mark.range.end.min(range.end))
+                .filter(|part| !part.is_empty())
+                .collect();
+            inserted.sort_by_key(|part| part.start);
+            let mut kept = Vec::new();
+            let mut from = range.start;
+            for part in &inserted {
+                if part.start > from {
+                    kept.push(from..part.start);
+                }
+                from = from.max(part.end);
+            }
+            if from < range.end {
+                kept.push(from..range.end);
+            }
+            if !kept.is_empty() {
+                let value = change.value();
+                edit::reformat(cx, doc, &tr!("delete"), |_, marks| {
+                    for part in kept {
+                        marks.set(part, kind::DELETED, Some(value.clone()));
+                    }
+                });
+            }
+            let mut removed = 0;
+            for part in inserted.iter().rev() {
+                if edit::replace(cx, doc, part.clone(), "", None, &[]).is_some() {
+                    removed += part.len();
+                }
+            }
+            at = range.end - removed;
+            caret = if forward { at } else { range.start };
+        }
+        if text.is_empty() {
+            self.pending = format;
+        } else {
+            let mut applied = format;
+            applied.push((kind::INSERTED.to_owned(), Some(change.value())));
+            applied.push((kind::DELETED.to_owned(), None));
+            match edit::replace(cx, doc, at..at, text, source, &applied) {
+                Some(end) => caret = end,
+                None => return false,
+            }
+        }
+        let caret = Caret {
+            doc: self.caret.doc,
+            offset: caret,
         };
         self.caret = caret;
         self.anchor = caret;
@@ -1388,12 +2450,13 @@ impl Editor {
                     return self.replace_selection(cx, "", None);
                 }
                 let forward = key == Key::Delete;
+                self.delete_forward = forward;
                 let text = self.doc_text(self.caret.doc).to_owned();
                 let at = self.caret.offset;
                 // Backspace at the start of a list item ends the list first.
                 if !forward && self.at_paragraph_start() && self.in_list() {
-                    self.set_paragraph(cx, kind::LIST, None, "End List");
-                    self.set_paragraph(cx, kind::LEVEL, None, "End List");
+                    self.set_paragraph(cx, kind::LIST, None, &tr!("end-list"));
+                    self.set_paragraph(cx, kind::LEVEL, None, &tr!("end-list"));
                     return true;
                 }
                 let range = if forward {
@@ -1425,11 +2488,14 @@ impl Editor {
                 };
                 self.replace_selection(cx, "", None)
             }
+            Key::Enter if shift => {
+                self.replace_selection(cx, &sue_model::LINE_BREAK.to_string(), None)
+            }
             Key::Enter => {
                 // Enter on an empty list item ends the list.
                 if selection.is_empty() && self.in_list() && self.paragraph_empty() {
-                    self.set_paragraph(cx, kind::LIST, None, "End List");
-                    self.set_paragraph(cx, kind::LEVEL, None, "End List");
+                    self.set_paragraph(cx, kind::LIST, None, &tr!("end-list"));
+                    self.set_paragraph(cx, kind::LEVEL, None, &tr!("end-list"));
                     return true;
                 }
                 let (look, _) = self.look_here(view.sheet);
@@ -1440,7 +2506,7 @@ impl Editor {
                     && at_end
                     && let Some(next) = view.sheet.get(&look.style).next.clone()
                 {
-                    self.set_style(cx, &next, "Next Style");
+                    self.set_style(cx, &next, &tr!("next-style"));
                 }
                 changed
             }
@@ -1456,14 +2522,14 @@ impl Editor {
                         cx,
                         kind::LEVEL,
                         Some(Value::Int(level as i64)),
-                        "List Level",
+                        &tr!("list-level"),
                     );
                     return true;
                 }
                 if let Some(tab) = view.sheet.get(&look.style).tab.clone()
                     && self.paragraph_empty()
                 {
-                    self.set_style(cx, &tab, "Change Element");
+                    self.set_style(cx, &tab, &tr!("change-element"));
                     return true;
                 }
                 if shift {
@@ -1529,29 +2595,27 @@ impl Editor {
                 painter.rect_filled(rect, 0.0, view.ink.paper);
                 let small =
                     egui::FontId::new((9.0 * scale).max(6.0), egui::FontFamily::Proportional);
-                if view.page.numbers {
-                    painter.text(
-                        pos2(
-                            rect.center().x,
-                            rect.bottom() - view.page.margins[2] * scale * 0.5,
-                        ),
-                        egui::Align2::CENTER_CENTER,
-                        (page + 1).to_string(),
-                        small.clone(),
-                        view.ink.soft,
-                    );
-                }
-                if page > 0 && !view.page.header.is_empty() {
-                    painter.text(
-                        pos2(
-                            rect.center().x,
-                            rect.top() + view.page.margins[0] * scale * 0.5,
-                        ),
-                        egui::Align2::CENTER_CENTER,
-                        &view.page.header,
-                        small,
-                        view.ink.soft,
-                    );
+                let [margin_top, margin_right, margin_bottom, margin_left] =
+                    view.page.margins.map(|margin| margin * scale);
+                let furniture = view.page.furniture(page, self.laid.pages);
+                let rows = [
+                    rect.top() + margin_top * 0.5,
+                    rect.bottom() - margin_bottom * 0.5,
+                ];
+                for (parts, y) in furniture.into_iter().zip(rows) {
+                    let Some(parts) = parts else {
+                        continue;
+                    };
+                    let places = [
+                        (rect.left() + margin_left, egui::Align2::LEFT_CENTER),
+                        (rect.center().x, egui::Align2::CENTER_CENTER),
+                        (rect.right() - margin_right, egui::Align2::RIGHT_CENTER),
+                    ];
+                    for (text, (x, align)) in parts.iter().zip(places) {
+                        if !text.is_empty() {
+                            painter.text(pos2(x, y), align, text, small.clone(), view.ink.soft);
+                        }
+                    }
                 }
             }
         } else {
@@ -1624,6 +2688,29 @@ impl Editor {
             if selecting && self.caret.doc == block.doc {
                 self.paint_selection(painter, block, piece, galley_at, &selection, select_color);
             }
+            if let Some(table) = block.table.as_ref().filter(|table| table.listing.is_some()) {
+                let origin = pos2(text_left + block.indent, galley_at.y);
+                crate::contents::paint_contents(
+                    painter,
+                    table,
+                    piece.rows.clone(),
+                    origin,
+                    view.ink.text,
+                );
+                continue;
+            }
+            if let Some(table) = &block.table {
+                let origin = pos2(text_left + block.indent, galley_at.y);
+                paint_table(
+                    painter,
+                    table,
+                    piece.rows.clone(),
+                    origin,
+                    view.ink.text,
+                    view.ink.shade,
+                );
+                continue;
+            }
             if let Some((entity, size)) = block.figure {
                 let rect = Rect::from_min_size(
                     pos2(
@@ -1655,6 +2742,15 @@ impl Editor {
             painter
                 .with_clip_rect(clip.intersect(self.viewport))
                 .galley(galley_at, block.galley.clone(), view.ink.text);
+            if view.spelling.is_some() {
+                self.paint_spelling(
+                    &painter.with_clip_rect(clip.intersect(self.viewport)),
+                    view,
+                    block,
+                    galley_at,
+                    focused,
+                );
+            }
             if piece.rows.start == 0
                 && let Some(label) = &block.label
             {
@@ -1695,6 +2791,55 @@ impl Editor {
         }
     }
 
+    /// Red waves under the misspelled words of `block`, but not under the
+    /// word being typed.
+    fn paint_spelling(
+        &self,
+        painter: &egui::Painter,
+        view: &EditorView<'_>,
+        block: &Block,
+        galley_at: Pos2,
+        focused: bool,
+    ) {
+        let Some(text) = self.texts.get(block.doc) else {
+            return;
+        };
+        let body = &text[block.range.clone()];
+        let typing = (focused && self.caret.doc == block.doc).then_some(self.caret.offset);
+        let wave = Stroke::new(1.0, Color32::from_rgb(0xd0, 0x30, 0x30));
+        for range in crate::spell::words(body) {
+            let word = &body[range.clone()];
+            let at = block.range.start + range.start..block.range.start + range.end;
+            if typing.is_some_and(|caret| caret == at.end) || self.spelled_right(view, word) {
+                continue;
+            }
+            let cursor = |chars: usize| CCursor {
+                index: CharIndex(chars),
+                prefer_next_row: false,
+            };
+            let start = body[..range.start].chars().count();
+            let end = start + word.chars().count();
+            let from = block.galley.pos_from_cursor(cursor(start));
+            let to = block.galley.pos_from_cursor(cursor(end));
+            if (from.min.y - to.min.y).abs() > 0.5 {
+                continue;
+            }
+            let y = galley_at.y + from.max.y - 1.0;
+            let mut points = Vec::new();
+            let mut x = galley_at.x + from.min.x;
+            let right = galley_at.x + to.min.x;
+            let mut up = false;
+            while x < right {
+                points.push(pos2(x, if up { y - 1.5 } else { y }));
+                x += 2.0;
+                up = !up;
+            }
+            if points.len() > 1 {
+                painter.add(egui::Shape::line(points, wave));
+            }
+        }
+    }
+
     /// Where to draw the caret this frame, on screen: gliding to its place
     /// and blinking at rest ([`crate::caret`]). `None` while the blink has
     /// it dark, or when it is not drawn (no keyboard, or an input method
@@ -1707,7 +2852,7 @@ impl Editor {
         focused: bool,
         dragging: bool,
     ) -> Option<Rect> {
-        let target = self.caret_rect(self.caret);
+        let target = self.shown_caret();
         let shown = focused && self.preedit.is_none() && target.is_some();
         let offset = self.origin.to_vec2();
         let frame = caret::Frame {

@@ -156,10 +156,10 @@ pub fn new_camera(arena: &Arena, picture: EntityId, layer: Option<EntityId>) -> 
         .filter(|info| is_camera(arena, info.id))
         .count();
     let (edit, id) = doc::new_folder(arena, picture, layer, layer.is_some());
-    let mut edit = Edit::new("New Camera Folder").then(edit);
+    let mut edit = Edit::new(tr!("new-camera-folder")).then(edit);
     edit = edit
         .then(SetProperty::new(id, CAMERA, true))
-        .then(Rename::new(id, format!("Camera {}", count + 1)));
+        .then(Rename::new(id, tr!("camera", value = count + 1)));
     (edit, id)
 }
 
@@ -203,7 +203,7 @@ pub fn key(arena: &Arena, folder: EntityId, time: Time, camera: Camera) -> Edit 
             interpolation: Interpolation::Linear,
         });
     }
-    Edit::new("Camera Keyframe").then(SetExtension::set(folder, animation))
+    Edit::new(tr!("camera-keyframe")).then(SetExtension::set(folder, animation))
 }
 
 /// The edit that takes `folder`'s camera keyframe at `time` away, if it has
@@ -215,7 +215,7 @@ pub fn delete_key(arena: &Arena, folder: EntityId, time: Time) -> Option<Edit> {
     for channel in [X, Y, SCALE, ANGLE] {
         any |= animation.channel_mut(channel).remove(time).is_some();
     }
-    any.then(|| Edit::new("Delete Camera Keyframe").then(SetExtension::set(folder, animation)))
+    any.then(|| Edit::new(tr!("delete-camera-keyframe")).then(SetExtension::set(folder, animation)))
 }
 
 #[cfg(test)]

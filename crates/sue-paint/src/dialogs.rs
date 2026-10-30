@@ -46,7 +46,7 @@ impl Unit {
 }
 
 /// Paper sizes of the size list: name, pixels and resolution.
-const SIZES: [(&str, u32, u32, f64); 11] = [
+pub(crate) const SIZES: [(&str, u32, u32, f64); 11] = [
     ("Custom", 0, 0, 0.0),
     ("A4", 2894, 4093, 350.0),
     ("A5", 2039, 2894, 350.0),
@@ -68,12 +68,12 @@ pub(crate) const NEW_PRESET_TARGET: &str = "paint.new";
 pub(crate) fn new_presets() -> PresetLibrary {
     let mut library = PresetLibrary::new();
     for (name, width, height, dpi, paper) in [
-        ("Illustration", 1600_i64, 1200_i64, 72.0, true),
-        ("Print (A4, 350 dpi)", 2894, 4093, 350.0, true),
-        ("Screen (Full HD)", 1920, 1080, 72.0, true),
-        ("Square Post", 2048, 2048, 72.0, true),
-        ("Transparent Sprite", 512, 512, 72.0, false),
-        ("Webtoon (800 x 12800)", 800, 12800, 72.0, true),
+        (tr!("illustration"), 1600_i64, 1200_i64, 72.0, true),
+        (tr!("print-a4-350-dpi"), 2894, 4093, 350.0, true),
+        (tr!("screen-full-hd"), 1920, 1080, 72.0, true),
+        (tr!("square-post"), 2048, 2048, 72.0, true),
+        (tr!("transparent-sprite"), 512, 512, 72.0, false),
+        (tr!("webtoon-800-x-12800"), 800, 12800, 72.0, true),
     ] {
         library.add(Preset::new(
             name,
@@ -151,7 +151,7 @@ impl NewDialog {
     pub(crate) fn spec(&self) -> NewPicture {
         NewPicture {
             name: if self.name.trim().is_empty() {
-                "Illustration".to_owned()
+                tr!("illustration")
             } else {
                 self.name.trim().to_owned()
             },
@@ -476,7 +476,7 @@ pub(crate) enum Outcome {
 
 /// What the pen and mouse do, for the Keyboard Shortcuts dialog under
 /// the keys Settings has: Clip Studio Paint's gestures.
-const GESTURES: [(&str, &str); 11] = [
+pub(crate) const GESTURES: [(&str, &str); 11] = [
     ("Scroll", "Space+drag, middle drag"),
     ("Rotate the view", "Shift+Space+drag, Shift+wheel"),
     (
@@ -518,7 +518,7 @@ impl SuePaint {
                     .rect_filled(screen, 0.0, theme.shadow.gamma_multiply(0.45));
             });
         let (title, size) = match &dialog {
-            Dialog::New(_) => ("New", vec2(560.0, 560.0)),
+            Dialog::New(_) => (tr!("new-2"), vec2(560.0, 560.0)),
             Dialog::Filter(filter) => (
                 filter.filter.label(),
                 vec2(
@@ -530,41 +530,41 @@ impl SuePaint {
                     },
                 ),
             ),
-            Dialog::Shortcuts => ("Keyboard Shortcuts", vec2(470.0, 560.0)),
-            Dialog::Pages(_) => ("Page Manager", vec2(820.0, 620.0)),
-            Dialog::Frame(_) => ("New Frame Border Folder", vec2(420.0, 330.0)),
-            Dialog::Canvas(_) => ("Change Canvas Size", vec2(380.0, 300.0)),
-            Dialog::Resolution(_) => ("Change Image Resolution", vec2(380.0, 250.0)),
-            Dialog::Text(..) => ("Text", vec2(440.0, 380.0)),
-            Dialog::Perspective(_) => ("Create Perspective Ruler", vec2(320.0, 190.0)),
-            Dialog::Onion(_) => ("Onion Skin Settings", vec2(360.0, 330.0)),
-            Dialog::Timelapse(_) => ("Export Timelapse", vec2(360.0, 230.0)),
-            Dialog::Material(_) => ("Register Material", vec2(360.0, 160.0)),
+            Dialog::Shortcuts => (tr!("keyboard-shortcuts"), vec2(470.0, 560.0)),
+            Dialog::Pages(_) => (tr!("page-manager"), vec2(820.0, 620.0)),
+            Dialog::Frame(_) => (tr!("new-frame-border-folder"), vec2(420.0, 330.0)),
+            Dialog::Canvas(_) => (tr!("change-canvas-size"), vec2(380.0, 300.0)),
+            Dialog::Resolution(_) => (tr!("change-image-resolution"), vec2(380.0, 250.0)),
+            Dialog::Text(..) => (tr!("text"), vec2(440.0, 380.0)),
+            Dialog::Perspective(_) => (tr!("create-perspective-ruler"), vec2(320.0, 190.0)),
+            Dialog::Onion(_) => (tr!("onion-skin-settings"), vec2(360.0, 330.0)),
+            Dialog::Timelapse(_) => (tr!("export-timelapse"), vec2(360.0, 230.0)),
+            Dialog::Material(_) => (tr!("register-material"), vec2(360.0, 160.0)),
             Dialog::SelectBy(kind, _) => (
                 match kind {
-                    0 => "Expand Selected Area",
-                    1 => "Shrink Selected Area",
-                    _ => "Blur Border",
+                    0 => tr!("expand-selected-area-2"),
+                    1 => tr!("shrink-selected-area-2"),
+                    _ => tr!("blur-border"),
                 },
                 vec2(320.0, 140.0),
             ),
-            Dialog::Gamut(..) => ("Select Color Gamut", vec2(340.0, 170.0)),
-            Dialog::Webtoon(..) => ("Export Webtoon", vec2(340.0, 170.0)),
-            Dialog::Timeline(..) => ("Edit Timeline", vec2(320.0, 150.0)),
-            Dialog::Shape3D(_) => ("New 3D Layer", vec2(300.0, 230.0)),
-            Dialog::Workspace(_) => ("Register Workspace", vec2(340.0, 140.0)),
-            Dialog::Workspaces => ("Manage Workspaces", vec2(380.0, 320.0)),
-            Dialog::Message(title, _) => (title.as_str(), vec2(520.0, 460.0)),
-            Dialog::Print(_, true) => ("Print", vec2(380.0, 330.0)),
-            Dialog::Print(_, false) => ("Print Settings", vec2(380.0, 330.0)),
-            Dialog::Modifiers(_) => ("Modifier Key Settings", vec2(400.0, 230.0)),
-            Dialog::CommandBar(_) => ("Command Bar Settings", vec2(420.0, 460.0)),
-            Dialog::CanvasProperties(_) => ("Canvas Properties", vec2(380.0, 230.0)),
-            Dialog::Proof(_) => ("Color Profile Preview Settings", vec2(400.0, 230.0)),
-            Dialog::PageSettings(_) => ("Change Page Settings", vec2(380.0, 270.0)),
-            Dialog::StoryInfo(_) => ("Change Story Information", vec2(380.0, 240.0)),
-            Dialog::StoryEditor(_) => ("Story Editor", vec2(520.0, 520.0)),
-            Dialog::Convert(..) => ("Convert Layer", vec2(360.0, 190.0)),
+            Dialog::Gamut(..) => (tr!("select-color-gamut"), vec2(340.0, 170.0)),
+            Dialog::Webtoon(..) => (tr!("export-webtoon"), vec2(340.0, 170.0)),
+            Dialog::Timeline(..) => (tr!("edit-timeline"), vec2(320.0, 150.0)),
+            Dialog::Shape3D(_) => (tr!("new-3d-layer"), vec2(300.0, 230.0)),
+            Dialog::Workspace(_) => (tr!("register-workspace"), vec2(340.0, 140.0)),
+            Dialog::Workspaces => (tr!("manage-workspaces"), vec2(380.0, 320.0)),
+            Dialog::Message(title, _) => (title.clone(), vec2(520.0, 460.0)),
+            Dialog::Print(_, true) => (tr!("print"), vec2(380.0, 330.0)),
+            Dialog::Print(_, false) => (tr!("print-settings"), vec2(380.0, 330.0)),
+            Dialog::Modifiers(_) => (tr!("modifier-key-settings"), vec2(400.0, 230.0)),
+            Dialog::CommandBar(_) => (tr!("command-bar-settings"), vec2(420.0, 460.0)),
+            Dialog::CanvasProperties(_) => (tr!("canvas-properties"), vec2(380.0, 230.0)),
+            Dialog::Proof(_) => (tr!("color-profile-preview-settings"), vec2(400.0, 230.0)),
+            Dialog::PageSettings(_) => (tr!("change-page-settings"), vec2(380.0, 270.0)),
+            Dialog::StoryInfo(_) => (tr!("change-story-information"), vec2(380.0, 240.0)),
+            Dialog::StoryEditor(_) => (tr!("story-editor"), vec2(520.0, 520.0)),
+            Dialog::Convert(..) => (tr!("convert-layer"), vec2(360.0, 190.0)),
             Dialog::Correction(_, filter, ..) => (
                 filter.label(),
                 vec2(
@@ -577,7 +577,7 @@ impl SuePaint {
                 ),
             ),
             Dialog::Pressure(pressure) => (
-                "Adjust pen pressure",
+                tr!("adjust-pen-pressure"),
                 vec2(560.0, if pressure.show_graph { 520.0 } else { 330.0 }),
             ),
         };
@@ -630,14 +630,14 @@ impl SuePaint {
                             Dialog::Onion(onion) => outcome = onion_ui(ui, onion, theme),
                             Dialog::SelectBy(kind, amount) => {
                                 ui.horizontal(|ui| {
-                                    label(ui, if *kind == 2 { "Blur width:" } else { "Width:" }, theme);
-                                    ui.add(egui::Slider::new(amount, 1.0..=100.0).suffix(" px"));
+                                    label(ui, &if *kind == 2 { tr!("blur-width") } else { tr!("width") }, theme);
+                                    ui.add(egui::Slider::new(amount, 1.0..=100.0).suffix(tr!("px")));
                                 });
                                 ok_cancel(ui, &mut outcome);
                             }
                             Dialog::Workspace(name) => {
                                 ui.horizontal(|ui| {
-                                    label(ui, "Name:", theme);
+                                    label(ui, &tr!("name"), theme);
                                     ui.text_edit_singleline(name);
                                 });
                                 ok_cancel(ui, &mut outcome);
@@ -649,17 +649,17 @@ impl SuePaint {
                                     for (index, space) in self.workspaces.iter_mut().enumerate() {
                                         ui.horizontal(|ui| {
                                             ui.text_edit_singleline(&mut space.name);
-                                            if ui.button("Use").clicked() {
+                                            if ui.button(tr!("use")).clicked() {
                                                 chosen = Some(index);
                                             }
-                                            if ui.button("Delete").clicked() {
+                                            if ui.button(tr!("delete")).clicked() {
                                                 gone = Some(index);
                                             }
                                         });
                                     }
                                     if self.workspaces.is_empty() {
                                         ui.label(
-                                            RichText::new("No workspaces yet: Window, Workspace, Register Workspace keeps the palettes as they are")
+                                            RichText::new(tr!("no-workspaces-yet-window-workspace-register"))
                                                 .size(theme.small_size)
                                                 .color(theme.muted),
                                         );
@@ -672,44 +672,44 @@ impl SuePaint {
                                     self.workspaces.remove(index);
                                 }
                                 ui.add_space(8.0);
-                                if ui.button("Close").clicked() {
+                                if ui.button(tr!("close")).clicked() {
                                     outcome = Outcome::Ok;
                                 }
                             }
                             Dialog::Print(settings, printing) => {
                                 ui.horizontal(|ui| {
-                                    label(ui, "Paper:", theme);
+                                    label(ui, &tr!("paper"), theme);
                                     egui::ComboBox::from_id_salt("sue-paint-paper")
-                                        .selected_text(crate::print::PAPERS[settings.paper].0)
+                                        .selected_text(crate::localize(crate::print::PAPERS[settings.paper].0))
                                         .show_ui(ui, |ui| {
                                             for (index, (name, ..)) in crate::print::PAPERS.iter().enumerate() {
-                                                ui.selectable_value(&mut settings.paper, index, *name);
+                                                ui.selectable_value(&mut settings.paper, index, crate::localize(name));
                                             }
                                         });
                                 });
                                 ui.horizontal(|ui| {
-                                    label(ui, "Orientation:", theme);
-                                    ui.radio_value(&mut settings.orientation, 0, "Auto");
-                                    ui.radio_value(&mut settings.orientation, 1, "Portrait");
-                                    ui.radio_value(&mut settings.orientation, 2, "Landscape");
+                                    label(ui, &tr!("orientation"), theme);
+                                    ui.radio_value(&mut settings.orientation, 0, tr!("auto"));
+                                    ui.radio_value(&mut settings.orientation, 1, tr!("portrait"));
+                                    ui.radio_value(&mut settings.orientation, 2, tr!("landscape"));
                                 });
                                 ui.horizontal(|ui| {
-                                    label(ui, "Size:", theme);
-                                    ui.radio_value(&mut settings.size, 0, "Fit to page");
-                                    ui.radio_value(&mut settings.size, 1, "Print size");
-                                    ui.radio_value(&mut settings.size, 2, "Scale");
+                                    label(ui, &tr!("size"), theme);
+                                    ui.radio_value(&mut settings.size, 0, tr!("fit-to-page"));
+                                    ui.radio_value(&mut settings.size, 1, tr!("print-size"));
+                                    ui.radio_value(&mut settings.size, 2, tr!("scale"));
                                 });
                                 if settings.size == 2 {
                                     ui.add(egui::Slider::new(&mut settings.percent, 1.0..=400.0).suffix(" %"));
                                 }
                                 ui.horizontal(|ui| {
-                                    label(ui, "Margin:", theme);
-                                    ui.add(egui::Slider::new(&mut settings.margin, 0.0..=50.0).suffix(" mm"));
+                                    label(ui, &tr!("margin"), theme);
+                                    ui.add(egui::Slider::new(&mut settings.margin, 0.0..=50.0).suffix(tr!("mm")));
                                 });
-                                ui.checkbox(&mut settings.all_pages, "Every page of the story");
+                                ui.checkbox(&mut settings.all_pages, tr!("every-page-of-the-story"));
                                 if *printing {
                                     ui.label(
-                                        RichText::new("The pages open as a PDF in your viewer, ready to print")
+                                        RichText::new(tr!("pages-open-as-pdf-your-viewer"))
                                             .size(theme.small_size)
                                             .color(theme.muted),
                                     );
@@ -717,20 +717,28 @@ impl SuePaint {
                                 ok_cancel(ui, &mut outcome);
                             }
                             Dialog::Modifiers(chosen) => {
-                                for ((_, name, choices), pick) in MODIFIERS.iter().zip(chosen.iter_mut()) {
+                                for ((key, name, choices), pick) in MODIFIERS.iter().zip(chosen.iter_mut()) {
+                                    // Each choice reads as Settings names it.
+                                    let choice_text = |choice: &str| {
+                                        sue_lang::text_or(
+                                            "rice",
+                                            &format!("{}.{choice}", key.replace('.', "-")),
+                                            &choice.replace('_', " "),
+                                        )
+                                    };
                                     ui.horizontal(|ui| {
-                                        label(ui, name, theme);
+                                        label(ui, &crate::localize(name), theme);
                                         egui::ComboBox::from_id_salt(("sue-paint-modifier", *name))
-                                            .selected_text(choices[(*pick).min(choices.len() - 1)].replace('_', " "))
+                                            .selected_text(choice_text(choices[(*pick).min(choices.len() - 1)]))
                                             .show_ui(ui, |ui| {
                                                 for (index, choice) in choices.iter().enumerate() {
-                                                    ui.selectable_value(pick, index, choice.replace('_', " "));
+                                                    ui.selectable_value(pick, index, choice_text(choice));
                                                 }
                                             });
                                     });
                                 }
                                 ui.label(
-                                    RichText::new("Space with Shift turns the view, with Ctrl or Alt zooms; Ctrl+Alt drags the brush size")
+                                    RichText::new(tr!("space-shift-turns-view-ctrl-alt"))
                                         .size(theme.small_size)
                                         .color(theme.muted),
                                 );
@@ -741,7 +749,7 @@ impl SuePaint {
                                     for group in crate::panels::BAR_GROUPS {
                                         for (_, command, tip) in group.iter() {
                                             let mut shown = !self.bar_hidden.contains(*command);
-                                            if ui.checkbox(&mut shown, *tip).changed() {
+                                            if ui.checkbox(&mut shown, crate::localize(tip)).changed() {
                                                 if shown {
                                                     self.bar_hidden.remove(*command);
                                                 } else {
@@ -755,7 +763,7 @@ impl SuePaint {
                                     for (index, command) in self.bar_extra.iter().enumerate() {
                                         ui.horizontal(|ui| {
                                             ui.label(crate::menus::label_of(&self.menus, command).unwrap_or(command));
-                                            if ui.small_button("Remove").clicked() {
+                                            if ui.small_button(tr!("remove")).clicked() {
                                                 gone = Some(index);
                                             }
                                         });
@@ -765,8 +773,8 @@ impl SuePaint {
                                     }
                                 });
                                 ui.horizontal(|ui| {
-                                    label(ui, "Add:", theme);
-                                    let picked = crate::menus::label_of(&self.menus, adding).unwrap_or("A menu command").to_owned();
+                                    label(ui, &tr!("add"), theme);
+                                    let picked = crate::menus::label_of(&self.menus, adding).unwrap_or(&tr!("a-menu-command")).to_owned();
                                     egui::ComboBox::from_id_salt("sue-paint-bar-add")
                                         .selected_text(picked)
                                         .height(320.0)
@@ -775,36 +783,36 @@ impl SuePaint {
                                                 ui.selectable_value(adding, command, label);
                                             }
                                         });
-                                    if ui.button("Add").clicked() && !adding.is_empty() && !self.bar_extra.contains(adding) {
+                                    if ui.button(tr!("add-2")).clicked() && !adding.is_empty() && !self.bar_extra.contains(adding) {
                                         self.bar_extra.push(adding.clone());
                                     }
                                 });
                                 ui.add_space(6.0);
-                                if ui.button("Close").clicked() {
+                                if ui.button(tr!("close")).clicked() {
                                     outcome = Outcome::Ok;
                                 }
                             }
                             Dialog::PageSettings(settings) => {
                                 ui.horizontal(|ui| {
-                                    label(ui, "Size:", theme);
-                                    ui.add(egui::DragValue::new(&mut settings.width).range(1..=10_000).suffix(" px"));
+                                    label(ui, &tr!("size"), theme);
+                                    ui.add(egui::DragValue::new(&mut settings.width).range(1..=10_000).suffix(tr!("px")));
                                     ui.label("by");
-                                    ui.add(egui::DragValue::new(&mut settings.height).range(1..=10_000).suffix(" px"));
+                                    ui.add(egui::DragValue::new(&mut settings.height).range(1..=10_000).suffix(tr!("px")));
                                 });
                                 ui.horizontal(|ui| {
-                                    label(ui, "Resolution:", theme);
-                                    ui.add(egui::DragValue::new(&mut settings.dpi).range(1.0..=2400.0).suffix(" dpi"));
+                                    label(ui, &tr!("resolution"), theme);
+                                    ui.add(egui::DragValue::new(&mut settings.dpi).range(1.0..=2400.0).suffix(tr!("dpi")));
                                 });
                                 ui.horizontal(|ui| {
-                                    label(ui, "Bleed:", theme);
-                                    ui.add(egui::DragValue::new(&mut settings.bleed).range(0.0..=50.0).suffix(" mm"));
+                                    label(ui, &tr!("bleed"), theme);
+                                    ui.add(egui::DragValue::new(&mut settings.bleed).range(0.0..=50.0).suffix(tr!("mm")));
                                 });
                                 ui.horizontal(|ui| {
-                                    label(ui, "Inner border:", theme);
-                                    ui.add(egui::DragValue::new(&mut settings.inner).range(0.0..=100.0).suffix(" mm"));
+                                    label(ui, &tr!("inner-border"), theme);
+                                    ui.add(egui::DragValue::new(&mut settings.inner).range(0.0..=100.0).suffix(tr!("mm")));
                                 });
                                 ui.label(
-                                    RichText::new("Every page of the story changes; each keeps its drawing in the middle")
+                                    RichText::new(tr!("every-page-story-changes-each-keeps"))
                                         .size(theme.small_size)
                                         .color(theme.muted),
                                 );
@@ -812,21 +820,21 @@ impl SuePaint {
                             }
                             Dialog::StoryInfo(info) => {
                                 ui.horizontal(|ui| {
-                                    label(ui, "Title:", theme);
+                                    label(ui, &tr!("title"), theme);
                                     ui.text_edit_singleline(&mut info.title);
                                 });
                                 ui.horizontal(|ui| {
-                                    label(ui, "Author:", theme);
+                                    label(ui, &tr!("author"), theme);
                                     ui.text_edit_singleline(&mut info.author);
                                 });
                                 ui.horizontal(|ui| {
-                                    label(ui, "First page number:", theme);
+                                    label(ui, &tr!("first-page-number"), theme);
                                     ui.add(egui::DragValue::new(&mut info.first).range(0..=9_999));
                                 });
                                 ui.horizontal(|ui| {
-                                    label(ui, "Binding:", theme);
-                                    ui.radio_value(&mut info.right_bound, false, "Left (left to right)");
-                                    ui.radio_value(&mut info.right_bound, true, "Right (manga)");
+                                    label(ui, &tr!("binding"), theme);
+                                    ui.radio_value(&mut info.right_bound, false, tr!("left-left-to-right"));
+                                    ui.radio_value(&mut info.right_bound, true, tr!("right-manga"));
                                 });
                                 ok_cancel(ui, &mut outcome);
                             }
@@ -837,7 +845,7 @@ impl SuePaint {
                                         if *number != last_page {
                                             last_page = *number;
                                             ui.add_space(4.0);
-                                            ui.label(RichText::new(format!("Page {number}")).color(theme.text).strong());
+                                            ui.label(RichText::new(tr!("page", number = number)).color(theme.text).strong());
                                         }
                                         ui.add(egui::TextEdit::multiline(words).desired_rows(2).desired_width(f32::INFINITY));
                                     }
@@ -846,27 +854,27 @@ impl SuePaint {
                             }
                             Dialog::Proof(profile) => {
                                 ui.label(
-                                    RichText::new("How the picture would print: shown while View, Color Profile, Preview is on")
+                                    RichText::new(tr!("how-picture-would-print-shown-while"))
                                         .size(theme.small_size)
                                         .color(theme.muted),
                                 );
                                 for (index, (name, ..)) in crate::proof::PROFILES.iter().enumerate() {
-                                    ui.radio_value(profile, index, *name);
+                                    ui.radio_value(profile, index, crate::localize(name));
                                 }
                                 ok_cancel(ui, &mut outcome);
                             }
                             Dialog::CanvasProperties(props) => {
                                 ui.horizontal(|ui| {
-                                    label(ui, "Name:", theme);
+                                    label(ui, &tr!("name"), theme);
                                     ui.text_edit_singleline(&mut props.name);
                                 });
                                 ui.horizontal(|ui| {
-                                    label(ui, "Resolution:", theme);
-                                    ui.add(egui::DragValue::new(&mut props.dpi).range(1.0..=2400.0).suffix(" dpi"));
+                                    label(ui, &tr!("resolution"), theme);
+                                    ui.add(egui::DragValue::new(&mut props.dpi).range(1.0..=2400.0).suffix(tr!("dpi")));
                                 });
                                 if props.paper.is_some() {
                                     ui.horizontal(|ui| {
-                                        ui.checkbox(&mut props.paper_shown, "Paper");
+                                        ui.checkbox(&mut props.paper_shown, tr!("paper-2"));
                                         ui.color_edit_button_srgb(&mut props.paper_color);
                                     });
                                 }
@@ -874,16 +882,16 @@ impl SuePaint {
                             }
                             Dialog::Convert(_, kind, name) => {
                                 ui.horizontal(|ui| {
-                                    label(ui, "Name:", theme);
+                                    label(ui, &tr!("name"), theme);
                                     ui.text_edit_singleline(name);
                                 });
                                 ui.horizontal(|ui| {
-                                    label(ui, "Type:", theme);
-                                    ui.radio_value(kind, 0, "Raster layer");
-                                    ui.radio_value(kind, 1, "Vector layer");
+                                    label(ui, &tr!("type"), theme);
+                                    ui.radio_value(kind, 0, tr!("raster-layer"));
+                                    ui.radio_value(kind, 1, tr!("vector-layer"));
                                 });
                                 ui.label(
-                                    RichText::new("To vector, the pixels are traced to lines down the middle of each stroke")
+                                    RichText::new(tr!("vector-pixels-are-traced-lines-down"))
                                         .size(theme.small_size)
                                         .color(theme.muted),
                                 );
@@ -903,37 +911,37 @@ impl SuePaint {
                                     }
                                 });
                                 ui.add_space(8.0);
-                                if ui.button("Close").clicked() {
+                                if ui.button(tr!("close")).clicked() {
                                     outcome = Outcome::Ok;
                                 }
                             }
                             Dialog::Gamut(tolerance, all) => {
                                 ui.label(
-                                    RichText::new("Selects the colors near the drawing color")
+                                    RichText::new(tr!("selects-colors-near-drawing-color"))
                                         .size(theme.small_size)
                                         .color(theme.muted),
                                 );
                                 ui.horizontal(|ui| {
-                                    label(ui, "Color margin:", theme);
+                                    label(ui, &tr!("color-margin"), theme);
                                     let mut percent = *tolerance * 100.0;
                                     if ui.add(egui::Slider::new(&mut percent, 0.0..=100.0).suffix(" %")).changed() {
                                         *tolerance = percent / 100.0;
                                     }
                                 });
-                                ui.checkbox(all, "Refer to all layers");
+                                ui.checkbox(all, tr!("refer-to-all-layers"));
                                 ok_cancel(ui, &mut outcome);
                             }
                             Dialog::Webtoon(height, width) => {
                                 egui::Grid::new("sue-paint-webtoon").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
-                                    label(ui, "Split every:", theme);
-                                    ui.add(egui::DragValue::new(height).range(200..=20000).suffix(" px"));
+                                    label(ui, &tr!("split-every"), theme);
+                                    ui.add(egui::DragValue::new(height).range(200..=20000).suffix(tr!("px")));
                                     ui.end_row();
-                                    label(ui, "Output width:", theme);
-                                    ui.add(egui::DragValue::new(width).range(100..=4000).suffix(" px"));
+                                    label(ui, &tr!("output-width"), theme);
+                                    ui.add(egui::DragValue::new(width).range(100..=4000).suffix(tr!("px")));
                                     ui.end_row();
                                 });
                                 ui.label(
-                                    RichText::new("The tall canvas is cut into numbered pictures, top to bottom")
+                                    RichText::new(tr!("tall-canvas-cut-into-numbered-pictures"))
                                         .size(theme.small_size)
                                         .color(theme.muted),
                                 );
@@ -941,22 +949,22 @@ impl SuePaint {
                             }
                             Dialog::Timeline(fps, length) => {
                                 egui::Grid::new("sue-paint-timeline-edit").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
-                                    label(ui, "Frame rate:", theme);
-                                    ui.add(egui::DragValue::new(fps).range(1..=120).suffix(" fps"));
+                                    label(ui, &tr!("frame-rate-2"), theme);
+                                    ui.add(egui::DragValue::new(fps).range(1..=120).suffix(tr!("fps")));
                                     ui.end_row();
-                                    label(ui, "Playback time:", theme);
-                                    ui.add(egui::DragValue::new(length).range(1..=100_000).suffix(" frames"));
+                                    label(ui, &tr!("playback-time"), theme);
+                                    ui.add(egui::DragValue::new(length).range(1..=100_000).suffix(tr!("frames")));
                                     ui.end_row();
                                 });
                                 ok_cancel(ui, &mut outcome);
                             }
                             Dialog::Shape3D(kind) => {
-                                label(ui, "Shape:", theme);
+                                label(ui, &tr!("shape"), theme);
                                 for (index, name) in crate::three::SHAPES.iter().enumerate() {
-                                    ui.radio_value(kind, index, *name);
+                                    ui.radio_value(kind, index, crate::localize(name));
                                 }
                                 ui.label(
-                                    RichText::new("File, Import, 3D Data brings in models of your own")
+                                    RichText::new(tr!("file-import-3d-data-brings-models"))
                                         .size(theme.small_size)
                                         .color(theme.muted),
                                 );
@@ -964,11 +972,11 @@ impl SuePaint {
                             }
                             Dialog::Material(name) => {
                                 ui.horizontal(|ui| {
-                                    label(ui, "Material name:", theme);
+                                    label(ui, &tr!("material-name"), theme);
                                     ui.add(egui::TextEdit::singleline(name).desired_width(200.0));
                                 });
                                 ui.label(
-                                    RichText::new("The current layer goes into the Material palette, for every project")
+                                    RichText::new(tr!("current-layer-goes-into-material-palette"))
                                         .size(theme.small_size)
                                         .color(theme.muted),
                                 );
@@ -979,20 +987,20 @@ impl SuePaint {
                                     .num_columns(2)
                                     .spacing(vec2(12.0, 8.0))
                                     .show(ui, |ui| {
-                                        label(ui, "Long side:", theme);
+                                        label(ui, &tr!("long-side"), theme);
                                         egui::ComboBox::from_id_salt("sue-paint-timelapse-side")
-                                            .selected_text(format!("{} px", export.side))
+                                            .selected_text(tr!("px-2", side = export.side))
                                             .show_ui(ui, |ui| {
                                                 for side in [480, 720, 1080, 1280, 1920] {
-                                                    ui.selectable_value(&mut export.side, side, format!("{side} px"));
+                                                    ui.selectable_value(&mut export.side, side, tr!("px-2", side = side));
                                                 }
                                             });
                                         ui.end_row();
-                                        label(ui, "Length:", theme);
+                                        label(ui, &tr!("length"), theme);
                                         let mut fit = export.seconds.is_some();
                                         ui.vertical(|ui| {
-                                            if ui.radio_value(&mut fit, true, "Fit to specified length").changed()
-                                                || ui.radio_value(&mut fit, false, "Export all frames").changed()
+                                            if ui.radio_value(&mut fit, true, tr!("fit-to-specified-length")).changed()
+                                                || ui.radio_value(&mut fit, false, tr!("export-all-frames")).changed()
                                             {
                                                 export.seconds = fit.then_some(30.0);
                                             }
@@ -1003,7 +1011,7 @@ impl SuePaint {
                                         ui.end_row();
                                     });
                                 ui.label(
-                                    RichText::new("A Motion JPEG AVI video, or an animated GIF")
+                                    RichText::new(tr!("motion-jpeg-avi-video-animated-gif"))
                                         .size(theme.small_size)
                                         .color(theme.muted),
                                 );
@@ -1011,19 +1019,19 @@ impl SuePaint {
                             }
                             Dialog::Perspective(count) => {
                                 ui.horizontal(|ui| {
-                                    label(ui, "Type:", theme);
+                                    label(ui, &tr!("type"), theme);
                                     ui.vertical(|ui| {
                                         for (points, name) in [
-                                            (1, "1-point perspective"),
-                                            (2, "2-point perspective"),
-                                            (3, "3-point perspective"),
+                                            (1, tr!("n-1-point-perspective")),
+                                            (2, tr!("n-2-point-perspective")),
+                                            (3, tr!("n-3-point-perspective")),
                                         ] {
                                             ui.radio_value(count, points, name);
                                         }
                                     });
                                 });
                                 ui.label(
-                                    RichText::new("Strokes run toward the vanishing points while Snap to Special Ruler is on")
+                                    RichText::new(tr!("strokes-run-toward-vanishing-points-while"))
                                         .size(theme.small_size)
                                         .color(theme.muted),
                                 );
@@ -1032,7 +1040,7 @@ impl SuePaint {
                             Dialog::Correction(_, filter, ..) => {
                                 filter_params(ui, filter, theme);
                                 ui.label(
-                                    RichText::new("Changes every layer under this one")
+                                    RichText::new(tr!("changes-every-layer-under-one"))
                                         .size(theme.small_size)
                                         .color(theme.muted),
                                 );
@@ -1055,14 +1063,14 @@ impl SuePaint {
                                         );
                                         ui.add_space(12.0);
                                         ui.label(
-                                            RichText::new("With the pen and mouse")
+                                            RichText::new(tr!("with-the-pen-and-mouse"))
                                                 .color(theme.text)
                                                 .strong(),
                                         );
                                         let gestures: Vec<(String, String)> = GESTURES
                                             .iter()
                                             .map(|(what, how)| {
-                                                ((*what).to_owned(), (*how).to_owned())
+                                                (crate::localize(what), crate::localize(how))
                                             })
                                             .collect();
                                         sue_wm::shortcuts::grid_ui(
@@ -1074,13 +1082,13 @@ impl SuePaint {
                                     },
                                 );
                                 ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
-                                    if ui.button("Close").clicked() {
+                                    if ui.button(tr!("close")).clicked() {
                                         outcome = Outcome::Cancel;
                                     }
                                     if ui
-                                        .button("Change Shortcuts...")
+                                        .button(tr!("change-shortcuts-ellipsis"))
                                         .on_hover_text(
-                                            "Settings, Keymaps: any number of keys for each",
+                                            tr!("settings-keymaps-any-number-keys-each"),
                                         )
                                         .clicked()
                                     {
@@ -1210,7 +1218,7 @@ impl SuePaint {
             (Dialog::Gamut(tolerance, all), Outcome::Ok) => self.select_gamut(cx, tolerance, all),
             (Dialog::Workspace(name), Outcome::Ok) => {
                 let name = if name.trim().is_empty() {
-                    "Workspace".to_owned()
+                    tr!("workspace")
                 } else {
                     name.trim().to_owned()
                 };
@@ -1236,7 +1244,7 @@ impl SuePaint {
                     if let Err(error) =
                         cx.edit_rice(SetRiceValue::new(*key, RiceValue::Text(value)))
                     {
-                        cx.fail(format!("Cannot keep the modifier keys: {error}"));
+                        cx.fail(tr!("cannot-keep-the-modifier-keys", error = error));
                     }
                 }
             }
@@ -1269,7 +1277,7 @@ impl SuePaint {
                 }
             }
             (Dialog::StoryInfo(info), _) => {
-                let mut edit = crate::doc::Edit::new("Change Story Information")
+                let mut edit = crate::doc::Edit::new(tr!("change-story-information"))
                     .then(sue_core::txn::SetProperty::new(
                         info.story,
                         crate::story::AUTHOR,
@@ -1291,7 +1299,7 @@ impl SuePaint {
                 Self::apply(cx, edit);
             }
             (Dialog::StoryEditor(texts), _) => {
-                let mut edit = crate::doc::Edit::new("Story Editor");
+                let mut edit = crate::doc::Edit::new(tr!("story-editor"));
                 let mut changed = false;
                 for (_, page, layer, words) in texts {
                     let arena = &cx.world.arena;
@@ -1326,7 +1334,7 @@ impl SuePaint {
                 self.proof_on = true;
             }
             (Dialog::CanvasProperties(props), _) => {
-                let mut edit = crate::doc::Edit::new("Canvas Properties").then(
+                let mut edit = crate::doc::Edit::new(tr!("canvas-properties")).then(
                     sue_core::txn::SetProperty::new(
                         props.picture,
                         sue_model::picture::DPI,
@@ -1379,7 +1387,7 @@ impl SuePaint {
                         if !name.trim().is_empty() {
                             Self::apply(
                                 cx,
-                                crate::doc::Edit::new("Rename Layer")
+                                crate::doc::Edit::new(tr!("rename-layer"))
                                     .then(sue_core::txn::Rename::new(layer, name.trim())),
                             );
                         }
@@ -1392,7 +1400,7 @@ impl SuePaint {
             }
             (Dialog::Shape3D(kind), Outcome::Ok) => {
                 let name = crate::three::SHAPES[kind.min(crate::three::SHAPES.len() - 1)];
-                let model = sue_core::Entity::empty(name, sue_model::class::MODEL)
+                let model = sue_core::Entity::empty(crate::localize(name), sue_model::class::MODEL)
                     .with_ext(crate::three::shape(kind));
                 self.add_3d_layer(cx, name, model);
             }
@@ -1406,7 +1414,7 @@ impl SuePaint {
             }
             (Dialog::Onion(onion), Outcome::Ok) => {
                 if let Some(picture) = self.picture() {
-                    let edit = doc::Edit::new("Onion Skin Settings").then(
+                    let edit = doc::Edit::new(tr!("onion-skin-settings")).then(
                         sue_core::txn::SetProperty::new(
                             picture,
                             crate::anim::ONION,
@@ -1486,8 +1494,8 @@ impl SuePaint {
             (Dialog::Pressure(pressure), Outcome::Ok) => {
                 let text = pressure.curve.to_string();
                 match cx.edit_rice(SetRiceValue::new(PEN_PRESSURE, RiceValue::Text(text))) {
-                    Ok(_) => cx.notify("Pen pressure adjusted for every tool"),
-                    Err(error) => cx.fail(format!("Cannot keep the pen pressure: {error}")),
+                    Ok(_) => cx.notify(tr!("pen-pressure-adjusted-every-tool")),
+                    Err(error) => cx.fail(tr!("cannot-keep-the-pen-pressure", error = error)),
                 }
             }
             (
@@ -1523,7 +1531,7 @@ impl SuePaint {
 fn onion_ui(ui: &mut Ui, onion: &mut crate::anim::Onion, theme: &Theme) -> Outcome {
     let mut outcome = Outcome::Open;
     ui.label(
-        RichText::new("Number of skins")
+        RichText::new(tr!("number-of-skins"))
             .size(theme.small_size)
             .color(theme.muted),
     );
@@ -1531,24 +1539,24 @@ fn onion_ui(ui: &mut Ui, onion: &mut crate::anim::Onion, theme: &Theme) -> Outco
         .num_columns(2)
         .spacing(vec2(12.0, 8.0))
         .show(ui, |ui| {
-            label(ui, "Previous frame:", theme);
+            label(ui, &tr!("previous-frame-2"), theme);
             ui.add(
                 egui::DragValue::new(&mut onion.before)
                     .range(0..=10)
-                    .suffix(" cels"),
+                    .suffix(tr!("cels")),
             );
             ui.end_row();
-            label(ui, "Next frame:", theme);
+            label(ui, &tr!("next-frame-2"), theme);
             ui.add(
                 egui::DragValue::new(&mut onion.after)
                     .range(0..=10)
-                    .suffix(" cels"),
+                    .suffix(tr!("cels")),
             );
             ui.end_row();
         });
     ui.add_space(4.0);
     ui.label(
-        RichText::new("View Settings")
+        RichText::new(tr!("view-settings"))
             .size(theme.small_size)
             .color(theme.muted),
     );
@@ -1556,20 +1564,22 @@ fn onion_ui(ui: &mut Ui, onion: &mut crate::anim::Onion, theme: &Theme) -> Outco
         .num_columns(2)
         .spacing(vec2(12.0, 8.0))
         .show(ui, |ui| {
-            label(ui, "Color mode:", theme);
+            label(ui, &tr!("color-mode"), theme);
             egui::ComboBox::from_id_salt("sue-paint-onion-mode")
-                .selected_text(crate::anim::Onion::MODES[usize::from(onion.mode.min(2))])
+                .selected_text(crate::localize(
+                    crate::anim::Onion::MODES[usize::from(onion.mode.min(2))],
+                ))
                 .show_ui(ui, |ui| {
                     for (mode, name) in crate::anim::Onion::MODES.iter().enumerate() {
-                        ui.selectable_value(&mut onion.mode, mode as u8, *name);
+                        ui.selectable_value(&mut onion.mode, mode as u8, crate::localize(name));
                     }
                 });
             ui.end_row();
             for (name, color) in [
-                ("Previous frame:", &mut onion.before_color),
-                ("Next frame:", &mut onion.after_color),
+                (tr!("previous-frame-2"), &mut onion.before_color),
+                (tr!("next-frame-2"), &mut onion.after_color),
             ] {
-                label(ui, name, theme);
+                label(ui, &name, theme);
                 let mut rgba = [color[0], color[1], color[2], 255];
                 if sue_wm::color_button(ui, name, &mut rgba, false, theme).changed {
                     *color = [rgba[0], rgba[1], rgba[2]];
@@ -1578,7 +1588,10 @@ fn onion_ui(ui: &mut Ui, onion: &mut crate::anim::Onion, theme: &Theme) -> Outco
             }
         });
     let mut specify = onion.opacity.is_some();
-    if ui.checkbox(&mut specify, "Specify opacity level").changed() {
+    if ui
+        .checkbox(&mut specify, tr!("specify-opacity-level"))
+        .changed()
+    {
         onion.opacity = specify.then_some((0.8, 0.1));
     }
     if let Some((start, step)) = onion.opacity.as_mut() {
@@ -1601,8 +1614,8 @@ fn onion_ui(ui: &mut Ui, onion: &mut crate::anim::Onion, theme: &Theme) -> Outco
                     }
                     ui.end_row();
                 };
-                percent(ui, "Start:", start);
-                percent(ui, "Step opacity:", step);
+                percent(ui, &tr!("start"), start);
+                percent(ui, &tr!("step-opacity"), step);
             });
     }
     ok_cancel(ui, &mut outcome);
@@ -1616,21 +1629,21 @@ fn canvas_ui(ui: &mut Ui, canvas: &mut CanvasDialog, theme: &Theme) -> Outcome {
         .num_columns(2)
         .spacing(vec2(12.0, 8.0))
         .show(ui, |ui| {
-            label(ui, "Width:", theme);
+            label(ui, &tr!("width"), theme);
             ui.add(
                 egui::DragValue::new(&mut canvas.size[0])
                     .range(1..=doc::MAX_SIDE)
-                    .suffix(" px"),
+                    .suffix(tr!("px")),
             );
             ui.end_row();
-            label(ui, "Height:", theme);
+            label(ui, &tr!("height"), theme);
             ui.add(
                 egui::DragValue::new(&mut canvas.size[1])
                     .range(1..=doc::MAX_SIDE)
-                    .suffix(" px"),
+                    .suffix(tr!("px")),
             );
             ui.end_row();
-            label(ui, "Reference point:", theme);
+            label(ui, &tr!("reference-point"), theme);
             egui::Grid::new("sue-paint-anchor")
                 .spacing(vec2(2.0, 2.0))
                 .show(ui, |ui| {
@@ -1651,9 +1664,13 @@ fn canvas_ui(ui: &mut Ui, canvas: &mut CanvasDialog, theme: &Theme) -> Outcome {
             ui.end_row();
         });
     ui.label(
-        RichText::new(format!("Now {} by {} px", canvas.old[0], canvas.old[1]))
-            .size(theme.small_size)
-            .color(theme.muted),
+        RichText::new(tr!(
+            "now-by-px",
+            value = canvas.old[0],
+            value2 = canvas.old[1]
+        ))
+        .size(theme.small_size)
+        .color(theme.muted),
     );
     ok_cancel(ui, &mut outcome);
     outcome
@@ -1668,12 +1685,12 @@ fn resolution_ui(ui: &mut Ui, resolution: &mut ResolutionDialog, theme: &Theme) 
         .num_columns(2)
         .spacing(vec2(12.0, 8.0))
         .show(ui, |ui| {
-            label(ui, "Width:", theme);
+            label(ui, &tr!("width"), theme);
             if ui
                 .add(
                     egui::DragValue::new(&mut resolution.size[0])
                         .range(1..=doc::MAX_SIDE)
-                        .suffix(" px"),
+                        .suffix(tr!("px")),
                 )
                 .changed()
                 && resolution.keep
@@ -1682,12 +1699,12 @@ fn resolution_ui(ui: &mut Ui, resolution: &mut ResolutionDialog, theme: &Theme) 
                     ((f64::from(resolution.size[0]) * ratio).round() as u32).max(1);
             }
             ui.end_row();
-            label(ui, "Height:", theme);
+            label(ui, &tr!("height"), theme);
             if ui
                 .add(
                     egui::DragValue::new(&mut resolution.size[1])
                         .range(1..=doc::MAX_SIDE)
-                        .suffix(" px"),
+                        .suffix(tr!("px")),
                 )
                 .changed()
                 && resolution.keep
@@ -1696,15 +1713,15 @@ fn resolution_ui(ui: &mut Ui, resolution: &mut ResolutionDialog, theme: &Theme) 
                     ((f64::from(resolution.size[1]) / ratio.max(1e-6)).round() as u32).max(1);
             }
             ui.end_row();
-            label(ui, "Resolution:", theme);
+            label(ui, &tr!("resolution"), theme);
             ui.add(
                 egui::DragValue::new(&mut resolution.dpi)
                     .range(1.0..=2400.0)
-                    .suffix(" dpi"),
+                    .suffix(tr!("dpi")),
             );
             ui.end_row();
         });
-    ui.checkbox(&mut resolution.keep, "Keep the shape");
+    ui.checkbox(&mut resolution.keep, tr!("keep-the-shape"));
     ok_cancel(ui, &mut outcome);
     outcome
 }
@@ -1716,7 +1733,7 @@ fn text_ui(ui: &mut Ui, lettering: &mut crate::lettering::Lettering, theme: &The
         egui::TextEdit::multiline(&mut lettering.content)
             .desired_rows(5)
             .desired_width(f32::INFINITY)
-            .hint_text("Type here"),
+            .hint_text(tr!("type-here")),
     );
     // The words take the keys while nothing else does.
     if ui.ctx().memory(|memory| memory.focused().is_none()) {
@@ -1726,9 +1743,9 @@ fn text_ui(ui: &mut Ui, lettering: &mut crate::lettering::Lettering, theme: &The
         .num_columns(2)
         .spacing(vec2(12.0, 8.0))
         .show(ui, |ui| {
-            label(ui, "Font:", theme);
+            label(ui, &tr!("font"), theme);
             let shown = if lettering.font.is_empty() {
-                "Sue (Ubuntu Light)".to_owned()
+                tr!("sue-ubuntu-light")
             } else {
                 lettering.font.clone()
             };
@@ -1737,29 +1754,36 @@ fn text_ui(ui: &mut Ui, lettering: &mut crate::lettering::Lettering, theme: &The
                 .width(240.0)
                 .height(320.0)
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut lettering.font, String::new(), "Sue (Ubuntu Light)");
+                    ui.selectable_value(
+                        &mut lettering.font,
+                        String::new(),
+                        tr!("sue-ubuntu-light"),
+                    );
                     for family in sue_wm::fonts::families() {
                         ui.selectable_value(&mut lettering.font, family.clone(), family);
                     }
                 });
             ui.end_row();
-            label(ui, "Size:", theme);
+            label(ui, &tr!("size"), theme);
             ui.add(
                 egui::Slider::new(&mut lettering.size, 6.0..=400.0)
                     .logarithmic(true)
-                    .suffix(" px"),
+                    .suffix(tr!("px")),
             );
             ui.end_row();
-            label(ui, "Color:", theme);
+            label(ui, &tr!("color"), theme);
             ui.color_edit_button_srgb(&mut lettering.rgb);
             ui.end_row();
         });
     ui.horizontal(|ui| {
-        ui.checkbox(&mut lettering.center, "Centered");
-        ui.checkbox(&mut lettering.vertical, "Vertical (columns, right to left)");
+        ui.checkbox(&mut lettering.center, tr!("centered"));
+        ui.checkbox(
+            &mut lettering.vertical,
+            tr!("vertical-columns-right-to-left"),
+        );
     });
     ui.label(
-        RichText::new("Enter starts a new line; Ctrl+Enter is OK")
+        RichText::new(tr!("enter-starts-new-line-ctrl-enter"))
             .size(theme.small_size)
             .color(theme.muted),
     );
@@ -1789,7 +1813,7 @@ fn ok_cancel(ui: &mut Ui, outcome: &mut Outcome) {
         if ui.button("OK").clicked() {
             *outcome = Outcome::Ok;
         }
-        if ui.button("Cancel").clicked() {
+        if ui.button(tr!("cancel")).clicked() {
             *outcome = Outcome::Cancel;
         }
     });
@@ -1802,31 +1826,31 @@ fn frame_ui(ui: &mut Ui, frame: &mut crate::comic::FrameSpec, theme: &Theme) -> 
         .num_columns(2)
         .spacing(vec2(12.0, 8.0))
         .show(ui, |ui| {
-            label(ui, "Layout:", theme);
+            label(ui, &tr!("layout"), theme);
             egui::ComboBox::from_id_salt("sue-paint-frame-layout")
-                .selected_text(crate::manga::LAYOUTS[frame.layout].0)
+                .selected_text(crate::localize(crate::manga::LAYOUTS[frame.layout].0))
                 .width(220.0)
                 .show_ui(ui, |ui| {
                     for (index, (name, _)) in crate::manga::LAYOUTS.iter().enumerate() {
-                        ui.selectable_value(&mut frame.layout, index, *name);
+                        ui.selectable_value(&mut frame.layout, index, crate::localize(name));
                     }
                 });
             ui.end_row();
-            label(ui, "Border width:", theme);
-            ui.add(egui::Slider::new(&mut frame.border, 0.0..=40.0).suffix(" px"));
+            label(ui, &tr!("border-width"), theme);
+            ui.add(egui::Slider::new(&mut frame.border, 0.0..=40.0).suffix(tr!("px")));
             ui.end_row();
-            label(ui, "Margin:", theme);
-            ui.add(egui::Slider::new(&mut frame.margin, 0.0..=400.0).suffix(" px"));
+            label(ui, &tr!("margin"), theme);
+            ui.add(egui::Slider::new(&mut frame.margin, 0.0..=400.0).suffix(tr!("px")));
             ui.end_row();
-            label(ui, "Gap across:", theme);
-            ui.add(egui::Slider::new(&mut frame.gap, 0.0..=200.0).suffix(" px"));
+            label(ui, &tr!("gap-across"), theme);
+            ui.add(egui::Slider::new(&mut frame.gap, 0.0..=200.0).suffix(tr!("px")));
             ui.end_row();
-            label(ui, "Gap down:", theme);
-            ui.add(egui::Slider::new(&mut frame.gap_y, 0.0..=200.0).suffix(" px"));
+            label(ui, &tr!("gap-down"), theme);
+            ui.add(egui::Slider::new(&mut frame.gap_y, 0.0..=200.0).suffix(tr!("px")));
             ui.end_row();
         });
     ui.label(
-        RichText::new("Layers under the frame show only inside the panels. The Frame Border tool draws more panels and divides them.")
+        RichText::new(tr!("layers-under-frame-show-only-inside"))
             .size(theme.small_size)
             .color(theme.muted),
     );
@@ -1834,7 +1858,7 @@ fn frame_ui(ui: &mut Ui, frame: &mut crate::comic::FrameSpec, theme: &Theme) -> 
         if ui.button("OK").clicked() {
             outcome = Outcome::Ok;
         }
-        if ui.button("Cancel").clicked() {
+        if ui.button(tr!("cancel")).clicked() {
             outcome = Outcome::Cancel;
         }
     });
@@ -1845,9 +1869,9 @@ fn frame_ui(ui: &mut Ui, frame: &mut crate::comic::FrameSpec, theme: &Theme) -> 
 fn pressure_ui(ui: &mut Ui, pressure: &mut PressureDialog, theme: &Theme) -> Outcome {
     let mut outcome = Outcome::Open;
     let words = if pressure.checked {
-        "Draw again to try the adjusted pressure.\nStronger reaches a full line with a lighter touch, Lighter needs a firmer one.\nDone keeps it for every tool."
+        tr!("draw-again-try-adjusted-pressure-stronger")
     } else {
-        "Draw freely on the pad with the pen.\nWhile drawing, vary your pressure as you normally would.\nWhen you have finished, choose Check adjusted settings."
+        tr!("draw-freely-pad-pen-while-drawing")
     };
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
@@ -1860,24 +1884,30 @@ fn pressure_ui(ui: &mut Ui, pressure: &mut PressureDialog, theme: &Theme) -> Out
             if pressure.checked {
                 ui.horizontal(|ui| {
                     let half = vec2(wide.x / 2.0 - 4.0, wide.y);
-                    if ui.add_sized(half, egui::Button::new("Stronger")).clicked() {
+                    if ui
+                        .add_sized(half, egui::Button::new(tr!("stronger")))
+                        .clicked()
+                    {
                         pressure.curve = pressure.curve.map_outputs(|y| y.powf(0.8));
                     }
-                    if ui.add_sized(half, egui::Button::new("Lighter")).clicked() {
+                    if ui
+                        .add_sized(half, egui::Button::new(tr!("lighter")))
+                        .clicked()
+                    {
                         pressure.curve = pressure.curve.map_outputs(|y| y.powf(1.25));
                     }
                 });
-                if ui.add_sized(wide, egui::Button::new("Done")).clicked() {
+                if ui.add_sized(wide, egui::Button::new(tr!("done"))).clicked() {
                     outcome = Outcome::Ok;
                 }
             } else {
                 let enough = pressure.raw.len() >= PressureDialog::ENOUGH;
                 let check = ui
                     .add_enabled_ui(enough, |ui| {
-                        ui.add_sized(wide, egui::Button::new("Check adjusted settings"))
+                        ui.add_sized(wide, egui::Button::new(tr!("check-adjusted-settings")))
                     })
                     .inner
-                    .on_disabled_hover_text("Draw a few lines with the pen first");
+                    .on_disabled_hover_text(tr!("draw-few-lines-pen-first"));
                 if check.clicked()
                     && let Some(curve) = PressureDialog::fit(&pressure.raw)
                 {
@@ -1886,11 +1916,14 @@ fn pressure_ui(ui: &mut Ui, pressure: &mut PressureDialog, theme: &Theme) -> Out
                     pressure.lines.clear();
                 }
             }
-            if ui.add_sized(wide, egui::Button::new("Cancel")).clicked() {
+            if ui
+                .add_sized(wide, egui::Button::new(tr!("cancel")))
+                .clicked()
+            {
                 outcome = Outcome::Cancel;
             }
             if ui
-                .add_sized(wide, egui::Button::new("Reset to default"))
+                .add_sized(wide, egui::Button::new(tr!("reset-to-default")))
                 .clicked()
             {
                 pressure.curve = Response::LINEAR;
@@ -1957,7 +1990,7 @@ fn pressure_ui(ui: &mut Ui, pressure: &mut PressureDialog, theme: &Theme) -> Out
     ui.add_space(6.0);
     ui.checkbox(
         &mut pressure.show_graph,
-        RichText::new("Show pen pressure graph").color(theme.text),
+        RichText::new(tr!("show-pen-pressure-graph")).color(theme.text),
     );
     if pressure.show_graph {
         widgets::response_curve(
@@ -1965,7 +1998,7 @@ fn pressure_ui(ui: &mut Ui, pressure: &mut PressureDialog, theme: &Theme) -> Out
             "pen-pressure",
             &mut pressure.curve,
             150.0,
-            widgets::CurveLabels::PRESSURE,
+            widgets::CurveLabels::pressure(),
             theme,
         );
     }
@@ -1979,7 +2012,7 @@ fn length_field(ui: &mut Ui, pixels: &mut u32, unit: Unit, dpi: f64) -> bool {
             .add(
                 egui::DragValue::new(pixels)
                     .range(1..=doc::MAX_SIDE)
-                    .suffix(" px"),
+                    .suffix(tr!("px")),
             )
             .changed();
     }
@@ -2007,14 +2040,18 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
     let presets = new_presets();
     ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
     ui.horizontal(|ui| {
-        label(ui, "Project:", theme);
+        label(ui, &tr!("project"), theme);
         let kinds = [
-            (Icon::Paper, "Illustration", Some(Project::Illustration)),
-            (Icon::Frame, "Webtoon", None),
-            (Icon::Duplicate, "Comic", Some(Project::Comic)),
-            (Icon::Open, "Fanzine print", None),
-            (Icon::NewFolder, "Show all comic settings", None),
-            (Icon::Play, "Animation", Some(Project::Animation)),
+            (
+                Icon::Paper,
+                tr!("illustration"),
+                Some(Project::Illustration),
+            ),
+            (Icon::Frame, tr!("webtoon"), None),
+            (Icon::Duplicate, tr!("comic"), Some(Project::Comic)),
+            (Icon::Open, tr!("fanzine-print"), None),
+            (Icon::NewFolder, tr!("show-all-comic-settings"), None),
+            (Icon::Play, tr!("animation"), Some(Project::Animation)),
         ];
         for (icon, tip, project) in kinds {
             let enabled = project.is_some();
@@ -2046,7 +2083,7 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
             response.on_hover_text(if enabled {
                 tip.to_owned()
             } else {
-                format!("{tip} (not available yet)")
+                tr!("not-available-yet", tip = tip)
             });
         }
     });
@@ -2054,35 +2091,39 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
         .num_columns(2)
         .spacing(vec2(12.0, 8.0))
         .show(ui, |ui| {
-            label(ui, "File name:", theme);
+            label(ui, &tr!("file-name"), theme);
             ui.add(egui::TextEdit::singleline(&mut new.name).desired_width(260.0));
             ui.end_row();
 
             if new.project == Project::Animation {
-                label(ui, "Frames:", theme);
+                label(ui, &tr!("frames-2"), theme);
                 ui.add(egui::DragValue::new(&mut new.frames).range(1..=10_000));
                 ui.end_row();
-                label(ui, "Frame rate:", theme);
+                label(ui, &tr!("frame-rate-2"), theme);
                 ui.add(
                     egui::DragValue::new(&mut new.fps)
                         .range(1..=120)
-                        .suffix(" fps"),
+                        .suffix(tr!("fps")),
                 );
                 ui.end_row();
             }
             if new.project == Project::Comic {
-                label(ui, "Pages:", theme);
+                label(ui, &tr!("pages"), theme);
                 ui.add(egui::DragValue::new(&mut new.pages).range(1..=500));
                 ui.end_row();
-                label(ui, "Binding:", theme);
+                label(ui, &tr!("binding"), theme);
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut new.right_bound, true, "Right (manga, right to left)");
-                    ui.selectable_value(&mut new.right_bound, false, "Left (left to right)");
+                    ui.selectable_value(
+                        &mut new.right_bound,
+                        true,
+                        tr!("right-manga-right-to-left"),
+                    );
+                    ui.selectable_value(&mut new.right_bound, false, tr!("left-left-to-right"));
                 });
                 ui.end_row();
             }
 
-            label(ui, "Preset:", theme);
+            label(ui, &tr!("preset"), theme);
             ui.horizontal(|ui| {
                 let shown = new.preset.clone().unwrap_or_else(|| "Custom".to_owned());
                 let mut picked = None;
@@ -2100,9 +2141,9 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
                 if let Some(preset) = picked {
                     new.apply_preset(&preset);
                 }
-                ui.add_enabled(false, egui::Button::new("Register"))
-                    .on_disabled_hover_text("Saving your own presets arrives later");
-                label(ui, "Unit:", theme);
+                ui.add_enabled(false, egui::Button::new(tr!("register")))
+                    .on_disabled_hover_text(tr!("saving-your-own-presets-arrives-later"));
+                label(ui, &tr!("unit"), theme);
                 egui::ComboBox::from_id_salt("sue-paint-unit")
                     .selected_text(new.unit.label())
                     .width(56.0)
@@ -2115,51 +2156,54 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
             ui.end_row();
         });
     ui.separator();
-    label(ui, "Canvas", theme);
+    label(ui, &tr!("canvas"), theme);
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             egui::Grid::new("sue-paint-canvas")
                 .num_columns(3)
                 .spacing(vec2(10.0, 8.0))
                 .show(ui, |ui| {
-                    label(ui, "Width:", theme);
+                    label(ui, &tr!("width"), theme);
                     if length_field(ui, &mut new.width, new.unit, new.dpi) {
                         new.size = 0;
                     }
-                    let size_name = SIZES[new.size].0;
+                    let size_name = crate::localize(SIZES[new.size].0);
                     let mut picked = None;
                     egui::ComboBox::from_id_salt("sue-paint-size")
                         .selected_text(size_name)
                         .width(170.0)
                         .show_ui(ui, |ui| {
                             for (index, (name, ..)) in SIZES.iter().enumerate().skip(1) {
-                                if ui.selectable_label(new.size == index, *name).clicked() {
+                                if ui
+                                    .selectable_label(new.size == index, crate::localize(name))
+                                    .clicked()
+                                {
                                     picked = Some(index);
                                 }
                             }
                         });
                     ui.end_row();
-                    label(ui, "Height:", theme);
+                    label(ui, &tr!("height"), theme);
                     if length_field(ui, &mut new.height, new.unit, new.dpi) {
                         new.size = 0;
                     }
                     if ui
-                        .button("Swap")
-                        .on_hover_text("Swap width and height")
+                        .button(tr!("swap"))
+                        .on_hover_text(tr!("swap-width-and-height"))
                         .clicked()
                     {
                         std::mem::swap(&mut new.width, &mut new.height);
                     }
                     ui.end_row();
-                    label(ui, "Resolution:", theme);
+                    label(ui, &tr!("resolution"), theme);
                     ui.add(
                         egui::DragValue::new(&mut new.dpi)
                             .range(1.0..=2400.0)
                             .max_decimals(0)
-                            .suffix(" dpi"),
+                            .suffix(tr!("dpi")),
                     );
                     egui::ComboBox::from_id_salt("sue-paint-dpi")
-                        .selected_text("Common")
+                        .selected_text(tr!("common"))
                         .width(90.0)
                         .show_ui(ui, |ui| {
                             for dpi in [72.0, 150.0, 300.0, 350.0, 600.0] {
@@ -2172,14 +2216,17 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
                             }
                         });
                     ui.end_row();
-                    label(ui, "Basic expression color:", theme);
+                    label(ui, &tr!("basic-expression-color"), theme);
                     egui::ComboBox::from_id_salt("sue-paint-color-mode")
-                        .selected_text("Color")
+                        .selected_text(tr!("color-2"))
                         .width(110.0)
                         .show_ui(ui, |ui| {
-                            let _ = ui.selectable_label(true, "Color");
-                            ui.add_enabled(false, egui::Button::selectable(false, "Gray"));
-                            ui.add_enabled(false, egui::Button::selectable(false, "Monochrome"));
+                            let _ = ui.selectable_label(true, tr!("color-2"));
+                            ui.add_enabled(false, egui::Button::selectable(false, tr!("gray")));
+                            ui.add_enabled(
+                                false,
+                                egui::Button::selectable(false, tr!("monochrome")),
+                            );
                         });
                     ui.end_row();
                     if let Some(index) = picked {
@@ -2212,7 +2259,7 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
             .rect_stroke(page, 0.0, theme.hairline(), egui::StrokeKind::Outside);
     });
     ui.horizontal(|ui| {
-        ui.checkbox(&mut new.paper, "Paper color");
+        ui.checkbox(&mut new.paper, tr!("paper-color"));
         ui.add_enabled_ui(new.paper, |ui| {
             let [r, g, b] = new.paper_color;
             let mut rgba = [r, g, b, 255];
@@ -2222,34 +2269,37 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
         });
     });
     ui.add_enabled_ui(false, |ui| {
-        ui.checkbox(&mut false, "Template");
+        ui.checkbox(&mut false, tr!("template"));
         ui.horizontal(|ui| {
-            ui.checkbox(&mut false, "Color profile");
-            label(ui, "Working profile: sRGB", theme);
+            ui.checkbox(&mut false, tr!("color-profile"));
+            label(ui, &tr!("working-profile-srgb"), theme);
         });
-        ui.checkbox(&mut false, "Create animated illustration");
+        ui.checkbox(&mut false, tr!("create-animated-illustration"));
     });
     ui.horizontal(|ui| {
-        label(ui, "Record timelapse:", theme);
+        label(ui, &tr!("record-timelapse"), theme);
         egui::ComboBox::from_id_salt("sue-paint-timelapse")
-            .selected_text(if new.timelapse { "On" } else { "Off" })
+            .selected_text(if new.timelapse { tr!("on") } else { tr!("off") })
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut new.timelapse, false, "Off");
-                ui.selectable_value(&mut new.timelapse, true, "On");
+                ui.selectable_value(&mut new.timelapse, false, tr!("off"));
+                ui.selectable_value(&mut new.timelapse, true, tr!("on"));
             });
     });
     ui.label(
-        RichText::new(format!(
-            "{} x {} px, {:.1} MB per layer",
-            new.width,
-            new.height,
-            f64::from(new.width) * f64::from(new.height) * 4.0 / 1_048_576.0
+        RichText::new(tr!(
+            "x-px-mb-per-layer",
+            width = new.width,
+            height = new.height,
+            value = sue_lang::number(
+                f64::from(new.width) * f64::from(new.height) * 4.0 / 1_048_576.0,
+                1
+            )
         ))
         .size(theme.small_size)
         .color(theme.muted),
     );
     ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
-        if ui.button("Cancel").clicked() {
+        if ui.button(tr!("cancel")).clicked() {
             outcome = Outcome::Cancel;
         }
         if ui
@@ -2334,8 +2384,8 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
             ui.add(egui::Slider::new(wavelength, 2.0..=400.0).text("Wavelength"));
         }
         Filter::Polar { inverse } => {
-            ui.radio_value(inverse, false, "Rectangular to polar");
-            ui.radio_value(inverse, true, "Polar to rectangular");
+            ui.radio_value(inverse, false, tr!("rectangular-to-polar"));
+            ui.radio_value(inverse, true, tr!("polar-to-rectangular"));
         }
         Filter::Aberration { shift } => {
             ui.add(egui::Slider::new(shift, 0.0..=40.0).text("Shift"));
@@ -2376,7 +2426,10 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
             channel,
         } => {
             ui.horizontal(|ui| {
-                for (index, name) in ["RGB", "Red", "Green", "Blue"].iter().enumerate() {
+                for (index, name) in ["RGB", &tr!("red"), &tr!("green"), &tr!("blue")]
+                    .iter()
+                    .enumerate()
+                {
                     ui.selectable_value(channel, index as u8, *name);
                 }
             });
@@ -2392,10 +2445,10 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
                 curve,
                 180.0,
                 widgets::CurveLabels {
-                    input: "Input",
-                    low: "0",
-                    high: "255",
-                    output: "Output",
+                    input: tr!("input"),
+                    low: "0".to_owned(),
+                    high: "255".to_owned(),
+                    output: tr!("output"),
                 },
                 theme,
             );
@@ -2407,7 +2460,7 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
             out_black,
             out_white,
         } => {
-            ui.label(RichText::new("Input").color(theme.muted));
+            ui.label(RichText::new(tr!("input")).color(theme.muted));
             ui.add(egui::Slider::new(black, 0.0..=0.99).text("Shadow"));
             ui.add(
                 egui::Slider::new(gamma, 0.1..=10.0)
@@ -2415,14 +2468,17 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
                     .text("Gamma"),
             );
             ui.add(egui::Slider::new(white, 0.01..=1.0).text("Highlight"));
-            ui.label(RichText::new("Output").color(theme.muted));
+            ui.label(RichText::new(tr!("output")).color(theme.muted));
             ui.add(egui::Slider::new(out_black, 0.0..=1.0).text("Shadow"));
             ui.add(egui::Slider::new(out_white, 0.0..=1.0).text("Highlight"));
         }
         Filter::ColorBalance { shifts, range } => {
             ui.horizontal(|ui| {
-                for (index, name) in ["Shadow", "Midtone", "Highlight"].iter().enumerate() {
-                    ui.selectable_value(range, index as u8, *name);
+                for (index, name) in [tr!("shadow"), tr!("midtone"), tr!("highlight")]
+                    .iter()
+                    .enumerate()
+                {
+                    ui.selectable_value(range, index as u8, name.as_str());
                 }
             });
             let shift = &mut shifts[usize::from((*range).min(2))];
@@ -2432,9 +2488,9 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
         }
         Filter::GradientMap { from, to } => {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Black becomes").color(theme.muted));
+                ui.label(RichText::new(tr!("black-becomes")).color(theme.muted));
                 ui.color_edit_button_srgb(from);
-                ui.label(RichText::new("white becomes").color(theme.muted));
+                ui.label(RichText::new(tr!("white-becomes")).color(theme.muted));
                 ui.color_edit_button_srgb(to);
             });
         }
@@ -2509,18 +2565,18 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
 fn filter_ui(ui: &mut Ui, dialog: &mut FilterDialog, theme: &Theme) -> Outcome {
     let mut outcome = Outcome::Open;
     filter_params(ui, &mut dialog.filter, theme);
-    ui.checkbox(&mut dialog.preview, "Preview");
+    ui.checkbox(&mut dialog.preview, tr!("preview"));
     ui.label(
         RichText::new(if dialog.selection.is_some() {
-            "Changes the selected area of the layer"
+            tr!("changes-selected-area-layer")
         } else {
-            "Changes the whole layer"
+            tr!("changes-the-whole-layer")
         })
         .size(theme.small_size)
         .color(theme.muted),
     );
     ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
-        if ui.button("Cancel").clicked() {
+        if ui.button(tr!("cancel")).clicked() {
             outcome = Outcome::Cancel;
         }
         if ui

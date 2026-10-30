@@ -25,12 +25,12 @@ impl Op {
 
     /// What people read.
     #[must_use]
-    pub const fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Replace => "New",
-            Self::Add => "Add",
-            Self::Subtract => "Subtract",
-            Self::Intersect => "Intersect",
+            Self::Replace => tr!("new-2"),
+            Self::Add => tr!("add-2"),
+            Self::Subtract => tr!("subtract"),
+            Self::Intersect => tr!("intersect"),
         }
     }
 }

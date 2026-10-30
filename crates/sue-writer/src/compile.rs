@@ -7,10 +7,12 @@
 use std::collections::HashMap;
 
 use sue_core::{Arena, ComponentKind, EntityId, Value};
-use sue_io::publish::{Book, Figure, PublishStyle, Section};
+use sue_io::publish::{Book, Figure, PublishStyle, PublishTable, Section};
+use sue_model::contents::Contents;
 use sue_model::manuscript;
 use sue_model::{TextMarks, mark_kind as kind, picture};
-use sue_type::typeset::{PrintDoc, typeset};
+use sue_type::tables::TableSource;
+use sue_type::typeset::{Embeds, PrintDoc, typeset};
 use sue_type::{PageSetup, StyleSheet};
 
 /// A format a project compiles to: key, name, file extension.
@@ -24,6 +26,24 @@ pub const FORMATS: &[(&str, &str, &str)] = &[
     ("md", "Markdown", "md"),
     ("txt", "Plain text", "txt"),
 ];
+
+/// The name of format `key` (one of [`FORMATS`]) in the language in use.
+#[must_use]
+pub fn format_name(key: &str) -> String {
+    match key {
+        "docx" => tr!("word-document"),
+        "odt" => tr!("opendocument-text"),
+        "epub" => tr!("epub-e-book"),
+        "html" => tr!("web-page"),
+        "rtf" => tr!("rich-text-format"),
+        "md" => tr!("markdown"),
+        "txt" => tr!("plain-text"),
+        other => FORMATS
+            .iter()
+            .find(|(format, ..)| *format == other)
+            .map_or_else(|| other.to_owned(), |(_, name, _)| (*name).to_owned()),
+    }
+}
 
 /// Which titles go into the text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -276,14 +296,80 @@ fn figures(arena: &Arena, sections: &[Section]) -> HashMap<EntityId, Figure> {
     out
 }
 
+/// The tables the sections show, for the publishing formats.
+fn tables(arena: &Arena, sections: &[Section]) -> HashMap<EntityId, PublishTable> {
+    let mut out = HashMap::new();
+    for section in sections {
+        for mark in section.marks.marks() {
+            if mark.kind == kind::EMBED
+                && let Value::Entity(id) = mark.value
+                && !out.contains_key(&id)
+                && let Some(table) = TableSource::read(arena, id)
+            {
+                out.insert(
+                    id,
+                    PublishTable {
+                        cells: table.cells,
+                        header_rows: table.header_rows,
+                        shares: table.shares,
+                    },
+                );
+            }
+        }
+    }
+    out
+}
+
+/// The tables of contents the sections show, for the publishing formats.
+fn contents(arena: &Arena, sections: &[Section]) -> HashMap<EntityId, Contents> {
+    let mut out = HashMap::new();
+    for section in sections {
+        for mark in section.marks.marks() {
+            if mark.kind == kind::EMBED
+                && let Value::Entity(id) = mark.value
+                && let Some(contents) = arena.get_by_id(id).ok().and_then(Contents::read)
+            {
+                out.insert(id, contents);
+            }
+        }
+    }
+    out
+}
+
+/// The comment threads the sections' words carry, for the formats that
+/// keep comments.
+fn comments(arena: &Arena, sections: &[Section]) -> HashMap<EntityId, sue_model::comments::Thread> {
+    let mut out = HashMap::new();
+    for section in sections {
+        for mark in section.marks.marks() {
+            if mark.kind == kind::COMMENT
+                && let Value::Entity(id) = mark.value
+                && let Some(thread) = sue_model::comments::thread(arena, id)
+            {
+                out.insert(id, thread);
+            }
+        }
+    }
+    out
+}
+
 /// Compiles with `options` into the bytes of a file.
 ///
 /// # Errors
 /// If the format is unknown or a PDF font cannot be read.
 pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>, String> {
-    let sections = sections(arena, options, look);
+    let mut sections = sections(arena, options, look);
     if sections.is_empty() {
-        return Err("there is nothing to compile: every document is left out".to_owned());
+        return Err(tr!("there-nothing-compile-every-document-left"));
+    }
+    // Word and web pages show tracked changes; the rest print the text as
+    // it is with every change accepted.
+    if !matches!(options.format.as_str(), "docx" | "html") {
+        for section in &mut sections {
+            let (text, marks) = sue_model::changes::accepted(&section.text, &section.marks);
+            section.text = text;
+            section.marks = marks;
+        }
     }
     if options.format == "pdf" {
         let docs: Vec<PrintDoc<'_>> = sections
@@ -309,11 +395,17 @@ pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>,
                 .collect();
             Some(sue_io::pdf::PdfImage { width, height, rgb })
         };
+        let contents = |id: EntityId| arena.get_by_id(id).ok().and_then(Contents::read);
+        let embeds = Embeds {
+            figures: &pictures,
+            tables: &|id| TableSource::read(arena, id),
+            contents: &contents,
+        };
         let pdf = typeset(
             &docs,
             &look.sheet,
             &look.page,
-            &pictures,
+            &embeds,
             &look.title,
             &look.author,
         );
@@ -325,11 +417,17 @@ pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>,
         language: "en".to_owned(),
         identifier: format!("urn:sue:{}", options.from),
         figures: figures(arena, &sections),
+        tables: tables(arena, &sections),
+        contents: contents(arena, &sections),
+        comments: comments(arena, &sections),
         sections,
         styles: publish_styles(&look.sheet),
         page: look.page.size,
         margins: look.page.margins,
-        page_numbers: look.page.numbers,
+        header: look.page.header.clone(),
+        footer: look.page.footer.clone(),
+        different_first: look.page.different_first,
+        date: look.page.date.clone(),
     };
     use sue_io::publish as p;
     Ok(match options.format.as_str() {
@@ -340,16 +438,17 @@ pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>,
         "rtf" => p::to_rtf(&book).into_bytes(),
         "md" => p::to_markdown(&book).into_bytes(),
         "txt" => p::to_text(&book).into_bytes(),
-        other => return Err(format!("Sue Writer cannot write {other} files")),
+        other => return Err(tr!("sue-writer-cannot-write-files", other = other)),
     })
 }
 
-/// A document file read into rich text, by its extension: Word, HTML,
-/// Markdown or plain text.
+/// A document file read into rich text, by its extension: Word or
+/// OpenDocument (their tables as table entities), HTML, Markdown or plain
+/// text.
 ///
 /// # Errors
 /// If the file cannot be read as that kind.
-pub fn import(name: &str, bytes: &[u8]) -> Result<(String, TextMarks), String> {
+pub fn import(name: &str, bytes: &[u8]) -> Result<sue_io::publish::Imported, String> {
     let ext = std::path::Path::new(name)
         .extension()
         .map(|ext| ext.to_string_lossy().to_ascii_lowercase())
@@ -359,16 +458,22 @@ pub fn import(name: &str, bytes: &[u8]) -> Result<(String, TextMarks), String> {
             .trim_start_matches('\u{FEFF}')
             .replace("\r\n", "\n")
     };
+    let plain = |(text, marks): (String, TextMarks)| sue_io::publish::Imported {
+        text,
+        marks,
+        entities: Vec::new(),
+    };
     match ext.as_str() {
-        "docx" => sue_io::publish::from_docx(bytes),
-        "html" | "htm" | "xhtml" => Ok(sue_io::publish::from_html(&text())),
-        "md" | "markdown" => Ok(sue_io::publish::from_markdown(&text())),
+        "docx" => sue_io::publish::read_docx(bytes),
+        "odt" => sue_io::publish::read_odt(bytes),
+        "html" | "htm" | "xhtml" => Ok(plain(sue_io::publish::from_html(&text()))),
+        "md" | "markdown" => Ok(plain(sue_io::publish::from_markdown(&text()))),
         "txt" | "text" | "" | "fountain" => {
             let mut text = text();
             sue_model::ensure_final_newline(&mut text);
-            Ok((text, TextMarks::new()))
+            Ok(plain((text, TextMarks::new())))
         }
-        other => Err(format!("Sue Writer cannot read .{other} files yet")),
+        other => Err(tr!("sue-writer-cannot-read-files-yet", other = other)),
     }
 }
 
@@ -439,7 +544,8 @@ mod tests {
         }
         options.title_page = false;
         assert!(compile(&arena, &options, &look).is_err());
-        let (text, marks) = import("a.md", b"# Hi\n\nthere").unwrap();
+        let sue_io::publish::Imported { text, marks, .. } =
+            import("a.md", b"# Hi\n\nthere").unwrap();
         assert_eq!(text, "Hi\nthere\n");
         assert!(marks.paragraph_value(&text, 0, kind::STYLE).is_some());
     }

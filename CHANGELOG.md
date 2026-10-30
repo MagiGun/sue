@@ -13,6 +13,47 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Footnotes in Sue Writer's PDFs print at the foot of their page, and
+  endnotes (Insert, Endnote) gather at the end; Word and OpenDocument keep
+  both.
+- `Shift+Enter` in Sue Writer starts a new line inside a paragraph.
+- Sue Writer opens OpenDocument (`.odt`) files from LibreOffice, with their
+  styles, lists, links, footnotes, tables and table of contents.
+- All Capitals, Grow Font and Shrink Font in Sue Writer's Format, Text,
+  and Insert, Formatting Mark for non-breaking spaces and hyphens.
+- Word files opened in Sue Writer bring their tables as tables.
+- Spelling as you type in Sue Writer: misspelled words are underlined;
+  right-click for suggestions, Ignore All or Add to Dictionary, and `F7`
+  goes to the next one. English ships with Sue.
+- Track changes in Sue Writer (Review, Track Changes): typed text is
+  underlined, deleted text struck through, until each change is accepted
+  or rejected. Word files keep the changes with their authors.
+- Sue speaks your language. It starts in your system's language when Sue
+  has it; the Sue menu's Language changes it for every studio and tool at
+  once, and Settings, Language lets any studio or tool keep a language of
+  its own. Spanish and Japanese ship as drafts waiting for a native
+  speaker's review; anything not yet translated shows in English.
+- Comments in Sue Writer (Review, New Comment, `Ctrl+Alt+C`): shown beside
+  the text with their replies, to reply to, resolve or delete. They go into
+  Word and OpenDocument files as comments.
+- A table of contents in Sue Writer (Insert, Table of Contents): the
+  headings with their pages, kept up as you write; click an entry to go
+  there. It prints in PDFs and goes into Word, OpenDocument, web pages,
+  e-books, RTF, Markdown and plain text.
+- Find and Replace in Sue Writer takes regular expressions, and the
+  replacement can put back what a group caught (`$1`).
+- Change Case in Sue Writer (Format, Text): Sentence case, lowercase,
+  UPPERCASE, Capitalize Every Word and tOGGLE cASE.
+- Headers and footers in Sue Writer (Insert, Header and Footer): left,
+  middle and right parts with the page number, page count, title, author
+  and date, and a different first page. They print in PDFs and go into
+  Word, OpenDocument and RTF as live page numbers.
+- Tables in Sue Writer: Table, Insert Table (`Ctrl+F12`), then type in the
+  cells; `Tab` moves on and adds a row at the end. Insert and delete rows
+  and columns, a heading row that repeats on every page, and text to table
+  and back. Tables print in PDFs and go into Word, OpenDocument, EPUB, web
+  pages, RTF, Markdown and plain text.
+
 - The Hub is Sue's home page: a box for every studio (Sue Paint, Sue
   Writer) and every tool (the Image Viewer, the Converter). The pin at a
   box's bottom right makes Sue open straight into it; one pin at a time,
@@ -25,6 +66,14 @@ follow [Semantic Versioning](https://semver.org/).
   Files browser on iPhone and iPad. On Android, saving a file you opened
   writes back to the original, and a folder you choose is read and
   written (the Converter's Add a Folder and its output folder).
+- The Hub lists your work under its boxes: **Recent** files and projects,
+  **Saved Projects**, and **Unsaved Work**. Click one to open it in its
+  studio. The Sue menu's File, Open Recent shows the same recent files.
+- Sue keeps work you have not saved by itself (a minute after a change, and
+  when you quit), so nothing is lost to a crash or a quick Quit. The Hub's
+  Unsaved Work brings it back (Recover) or throws it away (Discard, which
+  asks once more). Opening another project keeps the unsaved work it
+  replaces there too. Settings, General sets how often, or turns it off.
 - Typing in Sue Writer feels smooth: the caret glides to its new place
   instead of jumping, as you type, delete, move with the keys or click, and
   as lines and pages wrap. It blinks only while it rests. Settings, Display
@@ -32,6 +81,9 @@ follow [Semantic Versioning](https://semver.org/).
   for its speed.
 
 ### Changed
+
+- Sue Paint's File, Open Recent now shows the pictures from Sue's one list
+  of recent files, the same one the Hub shows.
 
 - Sue Writer on a phone: the text flows to the screen's width at a size you
   can read, the formatting is a row of big buttons right above the keyboard,
@@ -64,6 +116,21 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Sue Writer no longer crashes on a page narrower than about 543 points,
   such as a phone's.
+- Studios and tools wear their own colors again: with a light Sue theme
+  (Paper), Sue Paint in Gray showed white fields and buttons with dark text
+  on its gray panels.
+- On iPhone and iPad the on-screen keyboard no longer covers the bottom of
+  Sue: Sue fits itself above the keyboard, as on Android, so the line you
+  are writing in Sue Writer stays in sight.
+- On Android, a file you chose in the system's picker is named as you know
+  it, such as "Picture.png in Download", in the status bar, the Image
+  Viewer, the Converter and the Hub, instead of a path inside Sue's
+  cache. There the Image Viewer and the Converter no longer offer to
+  show files in Explorer, which a phone does not have.
+- On Android, the Converter no longer loses what it makes from a file you
+  picked on its own: "Next to each file" asks which folder the results go
+  to first, and the status bar names them there, such as "Picture.jxl in
+  Download". On iPhone and iPad it asks too.
 
 ## [0.0.3] - 2026-10-29
 

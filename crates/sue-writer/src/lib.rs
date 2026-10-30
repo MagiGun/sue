@@ -19,6 +19,11 @@
 //! - Pictures from Sue Paint go straight into the text (the Sue menu's
 //!   Send To), drawn with Sue Paint's own compositing.
 
+/// Text from the language database's `writer` namespace (Sue Writer).
+macro_rules! tr {
+    ($($arg:tt)*) => { sue_lang::tr!("writer", $($arg)*) };
+}
+
 mod compile;
 mod menus;
 mod project;
@@ -47,12 +52,36 @@ pub fn sample_project(cx: &mut AppletContext<'_>) -> Option<EntityId> {
         Some(Value::Text("A. Writer".into())),
     )))
     .ok()?;
+    // A manuscript's running head: author, title and page at the right.
+    cx.apply(ArenaEdit(project::set(
+        root,
+        project::HEADER,
+        Some(Value::Text("\t\tWriter / {title} / {page}".into())),
+    )))
+    .ok()?;
     let draft = manuscript::folder(cx.arena(), root, role::DRAFT)?;
     let chapters = manuscript::children(cx.arena(), draft);
     let scenes: Vec<EntityId> = chapters
         .iter()
         .filter_map(|chapter| manuscript::children(cx.arena(), *chapter).first().copied())
         .collect();
+    // The last lines of the logbook, in a table of their own.
+    let log = sue_type::tables::table_of(
+        &[
+            vec!["Night".to_owned(), "Weather".to_owned(), "Oil".to_owned()],
+            vec!["Monday".to_owned(), "Fog".to_owned(), "One pint".to_owned()],
+            vec![
+                "Tuesday".to_owned(),
+                "Gale from the west".to_owned(),
+                "Two pints".to_owned(),
+            ],
+        ],
+        1,
+    );
+    let log_id = log.id();
+    cx.apply(ArenaEdit(sue_core::txn::SpawnEntity::new(log)))
+        .ok()?;
+    let object = sue_model::OBJECT.to_string();
     let first = [
         "The storm came in off the water a little after six, the way storms always did on that coast: first the gulls went quiet, then the light turned the color of old pewter, and then the rain arrived all at once, as if someone had opened a door.",
         "Mara had kept the light for eleven years. She knew every sound the tower made. Tonight it made a new one.",
@@ -60,6 +89,8 @@ pub fn sample_project(cx: &mut AppletContext<'_>) -> Option<EntityId> {
         "A lamp with oil for three nights",
         "Her father's logbook",
         "One letter she had never opened",
+        "The logbook's last page read:",
+        object.as_str(),
         "Somewhere below, a bell rang once, though there was no bell on the island.",
     ];
     let second = [
@@ -100,8 +131,36 @@ pub fn sample_project(cx: &mut AppletContext<'_>) -> Option<EntityId> {
                 Some(Value::Text("Since the winter her father died.".into())),
             );
         }
+        if let Some(at) = text.find(sue_model::OBJECT) {
+            marks.set(
+                at..at + sue_model::OBJECT.len_utf8(),
+                kind::EMBED,
+                Some(Value::Entity(log_id)),
+            );
+        }
         if let Some(at) = text.find("breathing") {
             marks.set(at..at + 9, kind::BOLD, Some(Value::Bool(true)));
+        }
+        // A comment and its reply on the bell that should not be there.
+        if let Some(at) = text.find("a bell rang once") {
+            let comment = sue_model::comments::comment(
+                "A. Writer",
+                "2026-10-29",
+                "Plant the bell earlier, in chapter one?",
+            );
+            let id = comment.id();
+            let reply = sue_model::comments::comment("Editor", "2026-10-30", "Yes, in the storm.");
+            let reply_id = reply.id();
+            let batch = sue_core::txn::Batch::new("Comment")
+                .then(sue_core::txn::SpawnEntity::new(comment))
+                .then(
+                    sue_core::txn::SpawnEntity::new(reply).with_relation(
+                        sue_core::Relation::new(id, sue_model::comments::REPLY, reply_id)
+                            .ordered(sue_core::OrderKey::sequence(None, 1)[0].clone()),
+                    ),
+                );
+            cx.apply(ArenaEdit(batch)).ok()?;
+            marks.set(at..at + 16, kind::COMMENT, Some(Value::Entity(id)));
         }
         for item in ["A lamp", "Her father's", "One letter"] {
             if let Some(at) = text.find(item) {

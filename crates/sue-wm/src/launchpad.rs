@@ -76,13 +76,21 @@ impl Launchpad {
             .map(|registration| &registration.manifest)
     }
 
-    /// Every riceable the installed applets declare.
+    /// Every riceable the installed applets declare, and each studio's and
+    /// tool's language (`<section>.language`).
     #[must_use]
     pub fn rice_declarations(&self) -> Vec<RiceDeclaration> {
-        self.registrations
+        let mut declarations: Vec<RiceDeclaration> = self
+            .registrations
             .iter()
             .flat_map(|registration| (registration.factory)().rice_declarations())
-            .collect()
+            .collect();
+        declarations.extend(
+            self.manifests()
+                .filter(|manifest| manifest.role.is_page())
+                .map(|manifest| crate::language_declaration(&manifest.id)),
+        );
+        declarations
     }
 
     /// One live instance of every applet.

@@ -233,7 +233,8 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         gpu_kind: Some(gpu.adapter_kind().to_owned()),
         gpus: gpu.available().to_vec(),
     };
-    let mut runtime = Runtime::new(Engine::boot_with(&host, options)?)?;
+    // It remembers work in the throwaway profile, for the Hub's lists.
+    let mut runtime = Runtime::new(Engine::boot_with(&host, options)?)?.remembering(true);
     let start = Instant::now();
     let mut camera = Camera2 {
         ctx: egui::Context::default(),
@@ -453,6 +454,96 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     if let Some(applet) = runtime.applets.get_mut(&writer) {
         applet.navigate("dialog/close");
         applet.navigate("view/document");
+    }
+    // 19a. The comments beside the text (Review, Comments), shown and put
+    // away again.
+    for shown in [true, false] {
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: writer.clone(),
+                command: "review.comments".to_owned(),
+            },
+            &mut camera.painter,
+            camera.now,
+        );
+        if shown {
+            shoot(&mut runtime, &mut camera, "19a-sue-writer-comments")?;
+        }
+    }
+
+    // 19b and 19c. The Hub's lists: the novel saved as a project, the
+    // picture opened earlier, and a picture another run kept unsaved; then
+    // the same Hub in Paper.
+    let project = home.join("Novel.sue");
+    runtime.save_project_to(&project)?;
+    let bytes = std::fs::read(&project).map_err(|error| error.to_string())?;
+    let mut other = sue_wm::WorkList::open(runtime.engine.paths.data_dir.join("work"));
+    other
+        .keep(
+            &bytes,
+            None,
+            "Illustration",
+            Some(paint.clone()),
+            sue_wm::unix_now().saturating_sub(300),
+        )
+        .map_err(|error| error.to_string())?;
+    runtime.request(ShellRequest::Hub, &mut camera.painter, camera.now);
+    shoot(&mut runtime, &mut camera, "19b-hub-lists")?;
+    let paper = sue_rice::builtin_presets()
+        .into_iter()
+        .find(|preset| preset.id == "paper")
+        .ok_or("no Paper preset")?;
+    let txn = paper.transaction(&runtime.engine.world.rice);
+    runtime
+        .engine
+        .history
+        .apply(&mut runtime.engine.world, sue_wm::RiceEdit(txn))
+        .map_err(|error| error.to_string())?;
+    shoot(&mut runtime, &mut camera, "19c-hub-lists-paper")?;
+    runtime
+        .engine
+        .history
+        .undo(&mut runtime.engine.world)
+        .map_err(|error| error.to_string())?;
+
+    // 19d. Sue in Japanese, chosen from the Sue menu's Language submenu;
+    // 19e. Sue Paint set apart in Spanish while Sue stays Japanese.
+    runtime.request(ShellRequest::Hub, &mut camera.painter, camera.now);
+    camera.click(runtime.shell.sue_button().center());
+    let now = camera.now;
+    let japanese = sue_lang::name("ja");
+    runtime.with_shell(&mut camera.painter, now, |shell, io, now| {
+        shell.sue_menu_pick(&["Language", &japanese], io, now)
+    });
+    camera.settle(&mut runtime);
+    camera.click(runtime.shell.sue_button().center());
+    shoot(&mut runtime, &mut camera, "19d-sue-menu-japanese")?;
+    runtime.shell.dismiss_overlays();
+    let _ = runtime.engine.world.rice.set(
+        "sue_paint.language",
+        sue_rice::RiceValue::Text("es".to_owned()),
+    );
+    runtime.request(
+        ShellRequest::Open(paint.clone()),
+        &mut camera.painter,
+        camera.now,
+    );
+    camera.click(runtime.shell.sue_button().center());
+    shoot(
+        &mut runtime,
+        &mut camera,
+        "19e-sue-paint-spanish-in-japanese-sue",
+    )?;
+    runtime.shell.dismiss_overlays();
+    for (key, value) in [
+        (sue_wm::LANGUAGE_KEY, sue_lang::SYSTEM),
+        ("sue_paint.language", sue_lang::FOLLOW),
+    ] {
+        let _ = runtime
+            .engine
+            .world
+            .rice
+            .set(key, sue_rice::RiceValue::Text(value.to_owned()));
     }
 
     // 20 to 23. The touch layouts: the Hub, Sue Paint and Sue Writer on a

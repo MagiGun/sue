@@ -6,9 +6,16 @@
 //! egui for them with `request_repaint`) and for a short riced grace period
 //! after any change. Then the window sleeps at 0 FPS, waking only for timed
 //! work: the audio queue while something plays, a status message to clear,
-//! a typing burst to close into one undo step.
+//! a typing burst to close into one undo step, unsaved work to keep.
+//!
+//! The work Sue remembers ([`WorkList`]): every file opened or saved goes
+//! first in the recent list, and work nobody saved is kept by itself
+//! (`general.autosave_seconds` after a change, and at quit) for the Hub to
+//! recover or discard. Opening another project keeps the unsaved work it
+//! replaces the same way.
 
 use std::collections::VecDeque;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -22,7 +29,8 @@ use sue_platform::{
 };
 use sue_rice::{RiceSchema, SetRiceValues};
 use sue_wm::{
-    Applets, FilePick, RiceEdit, Shell, ShellIo, ShellRequest, Theme, Transport, Typing, widgets,
+    AppletId, AppletRole, Applets, FilePick, RiceEdit, Shell, ShellIo, ShellRequest, Theme,
+    Transport, Typing, WorkList, unix_now, widgets,
 };
 
 use crate::engine::Engine;
@@ -85,6 +93,14 @@ fn catalog_fingerprint(rice: &RiceSchema) -> String {
         rice.get(path)
             .map_or_else(String::new, |value| value.to_string())
     })
+    // The pages read in Sue's language and name each studio's own.
+    .chain(
+        rice.entries()
+            .iter()
+            .filter(|entry| entry.key() == "language")
+            .map(|entry| entry.parameter().value().to_string()),
+    )
+    .chain(std::iter::once(sue_lang::generation().to_string()))
     .collect::<Vec<_>>()
     .join("\u{1F}")
 }
@@ -102,6 +118,7 @@ macro_rules! shell_io {
             audio: $runtime.engine.audio.as_deref_mut(),
             transport: &mut $runtime.transport,
             requests: &mut $runtime.engine.requests,
+            work: &$runtime.work,
             fps: ($runtime.telemetry.fps() > 0).then(|| $runtime.telemetry.fps()),
         }
     };
@@ -145,6 +162,30 @@ pub struct Runtime {
     project: Option<PathBuf>,
     /// The open project file, so chunks this build does not know survive.
     project_file: SueFile,
+    /// The files of late and the work Sue kept (the Hub's lists).
+    work: WorkList,
+    /// The arena's revision when the work was last looked at for keeping.
+    autosave_seen: u64,
+    /// When to keep the work next, while a change waits for it.
+    next_autosave: Option<Instant>,
+    /// What the project was when saved or opened (`None`: unknown, as
+    /// after a recovery), so unchanged work is not kept.
+    saved_digest: Option<u64>,
+    /// What the work kept by this run holds.
+    kept_digest: Option<u64>,
+    /// The Hub was open in the last frame; its lists are read again each
+    /// time it opens.
+    hub_was_open: bool,
+}
+
+/// Said after opening something over unsaved work, which was kept.
+const REPLACED: &str = "; the unsaved work before it is on the Hub, under Unsaved Work";
+
+/// A digest of a project's bytes, to tell whether two are the same.
+fn digest(bytes: &[u8]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
 }
 
 impl Runtime {
@@ -188,6 +229,12 @@ impl Runtime {
             next_pick_poll: None,
             project: None,
             project_file: SueFile::new(),
+            work: WorkList::default(),
+            autosave_seen: 0,
+            next_autosave: None,
+            saved_digest: None,
+            kept_digest: None,
+            hub_was_open: false,
         })
     }
 
@@ -196,7 +243,49 @@ impl Runtime {
     pub fn interactive(mut self, interactive: bool) -> Self {
         self.interactive = interactive;
         self.shell.set_interactive(interactive);
+        self.remembering(interactive)
+    }
+
+    /// Lets the runtime remember work in Sue's data folder: the files of
+    /// late and the work it keeps. Off, nothing is written there (tests and
+    /// the self-check run beside people's own lists).
+    #[must_use]
+    pub fn remembering(mut self, on: bool) -> Self {
+        if !on {
+            self.work = WorkList::default();
+            return self;
+        }
+        let dir = self.engine.paths.data_dir.join("work");
+        let first = !dir.join("recent.txt").exists();
+        self.work = WorkList::open(dir);
+        // Sue Paint kept its own recent files before Sue did.
+        if first
+            && let Ok(text) =
+                std::fs::read_to_string(self.engine.paths.data_dir.join("paint").join("recent.txt"))
+        {
+            let paint = AppletId::new(sue_paint::ID).ok();
+            let now = unix_now();
+            let paths: Vec<&str> = text
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .collect();
+            for (age, path) in paths.iter().enumerate().rev() {
+                let when = now.saturating_sub(age as u64);
+                let _ = self
+                    .work
+                    .remember(Path::new(path), false, paint.clone(), when);
+            }
+        }
+        self.work.refresh();
+        self.autosave_seen = self.engine.world.arena.revision();
         self
+    }
+
+    /// The files of late and the work Sue kept (tests).
+    #[cfg(test)]
+    #[must_use]
+    pub fn work(&self) -> &WorkList {
+        &self.work
     }
 
     /// The current theme.
@@ -218,6 +307,7 @@ impl Runtime {
 
     /// Builds one frame of the whole window into the root `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui, textures: &mut dyn TextureUpload, now: Instant) {
+        let _language = sue_lang::scope(&sue_wm::sue_language(&self.engine.world.rice));
         if !self.booted {
             self.booted = true;
             let mut io = shell_io!(self, textures);
@@ -233,6 +323,13 @@ impl Runtime {
         }
         self.serve_requests(textures, now);
         self.refresh_rice();
+        // The Hub's lists are read again each time it opens.
+        let hub = self.shell.hub_open();
+        if hub && !self.hub_was_open {
+            self.work.refresh();
+        }
+        self.hub_was_open = hub;
+        self.schedule_autosave(now);
         if self.shell.is_animating() {
             self.telemetry.record(now);
         } else {
@@ -242,7 +339,7 @@ impl Runtime {
             && let Some(Err(error)) = self.persist()
         {
             self.shell
-                .notify(format!("Could not save the rice: {error}"), true);
+                .notify(tr!("could-not-save-the-rice", error = error), true);
         }
     }
 
@@ -268,19 +365,21 @@ impl Runtime {
                         .inner_margin(egui::Margin::same(16))
                         .show(ui, |ui| {
                             ui.label(
-                                RichText::new("Quit Sue?")
+                                RichText::new(tr!("quit-sue"))
                                     .size(theme.heading_size)
                                     .color(theme.text),
                             );
                             ui.label(
-                                RichText::new("Your settings are saved first.").color(theme.muted),
+                                RichText::new(tr!("your-settings-are-saved-first"))
+                                    .color(theme.muted),
                             );
                             ui.add_space(theme.padding);
                             ui.horizontal(|ui| {
-                                if widgets::pill_button(ui, "Quit", true, &theme).clicked() {
+                                if widgets::pill_button(ui, &tr!("quit"), true, &theme).clicked() {
                                     answer = Some(true);
                                 }
-                                if widgets::pill_button(ui, "Cancel", false, &theme).clicked() {
+                                if widgets::pill_button(ui, &tr!("cancel"), false, &theme).clicked()
+                                {
                                     answer = Some(false);
                                 }
                             });
@@ -318,8 +417,14 @@ impl Runtime {
         }
         self.applied_revision = revision;
         if let Err(error) = self.engine.refresh_config() {
-            self.shell.notify(format!("Settings: {error}"), true);
+            self.shell
+                .notify(tr!("settings-error", error = error), true);
             return;
+        }
+        if self.interactive {
+            // Threads outside the frame (background jobs) read the global
+            // language; frames open a scope of their own.
+            sue_lang::set_language(&self.engine.config.language);
         }
         let theme = Theme::from_rice(&self.engine.world.rice);
         self.shell
@@ -358,6 +463,7 @@ impl Runtime {
             self.typing.deadline(),
             self.next_tick,
             self.next_pick_poll,
+            self.next_autosave,
         ]
         .into_iter()
         .flatten()
@@ -368,6 +474,7 @@ impl Runtime {
     /// Runs timed work that is due. Returns `true` if the window must be
     /// redrawn.
     pub fn timer(&mut self, textures: &mut dyn TextureUpload, now: Instant) -> bool {
+        let _language = sue_lang::scope(&sue_wm::sue_language(&self.engine.world.rice));
         let mut redraw = self.shell.expire(now);
         redraw |= self.poll_system_dialogs(textures, now);
         if self.typing.flush_if_paused(&mut self.engine.history, now) {
@@ -406,6 +513,12 @@ impl Runtime {
             redraw |= tick.repaint || tick.animating;
             self.serve_requests(textures, now);
         }
+        if self.next_autosave.is_some_and(|due| due <= now) {
+            self.next_autosave = None;
+            self.autosave();
+            redraw = true;
+        }
+        self.schedule_autosave(now);
         redraw
     }
 
@@ -429,11 +542,250 @@ impl Runtime {
         true
     }
 
-    /// Saves what must survive: the open typing group and the rice.
+    /// Saves what must survive: the open typing group, the rice, and the
+    /// work nobody saved (kept for the Hub to offer next time).
     pub fn shutdown(&mut self) {
         self.typing.flush(&mut self.engine.history);
         if let Some(Err(error)) = self.persist() {
             eprintln!("sue: could not save the rice: {error}");
+        }
+        self.autosave();
+    }
+
+    /// How often unsaved work is kept, or `None` when it is not (no folder
+    /// to keep it in, or `general.autosave_seconds` is 0).
+    fn autosave_interval(&self) -> Option<Duration> {
+        self.work.dir()?;
+        let seconds = self
+            .engine
+            .world
+            .rice
+            .get_i64("general.autosave_seconds")
+            .unwrap_or(60);
+        u64::try_from(seconds)
+            .ok()
+            .filter(|seconds| *seconds > 0)
+            .map(Duration::from_secs)
+    }
+
+    /// After a change, keeps the work once the riced interval has passed.
+    fn schedule_autosave(&mut self, now: Instant) {
+        if self.next_autosave.is_none()
+            && self.engine.world.arena.revision() != self.autosave_seen
+            && let Some(interval) = self.autosave_interval()
+        {
+            self.next_autosave = Some(now + interval);
+        }
+    }
+
+    /// The project as it would be saved now.
+    fn project_bytes(&mut self) -> Vec<u8> {
+        self.engine.world.write_into(&mut self.project_file);
+        self.project_file.to_bytes()
+    }
+
+    /// Keeps the work if it changed and nobody saved it, for the Hub to
+    /// offer under Unsaved Work; lets the kept copy go once the work is
+    /// saved (or empty) again.
+    fn autosave(&mut self) {
+        if self.autosave_interval().is_none() {
+            return;
+        }
+        let revision = self.engine.world.arena.revision();
+        if revision == self.autosave_seen {
+            return;
+        }
+        self.autosave_seen = revision;
+        if self.engine.world.arena.is_empty() && self.project.is_none() {
+            self.kept_digest = None;
+            let _ = self.work.release();
+            return;
+        }
+        let bytes = self.project_bytes();
+        let kept = digest(&bytes);
+        if Some(kept) == self.saved_digest {
+            self.kept_digest = None;
+            let _ = self.work.release();
+            return;
+        }
+        if Some(kept) == self.kept_digest {
+            return;
+        }
+        let (name, page) = self.what_is_open();
+        match self
+            .work
+            .keep(&bytes, self.project.as_deref(), &name, page, unix_now())
+        {
+            Ok(()) => self.kept_digest = Some(kept),
+            Err(error) => self
+                .shell
+                .notify(tr!("could-not-keep-unsaved-work", error = error), true),
+        }
+    }
+
+    /// Keeps the work about to be replaced if nobody saved it, so the Hub
+    /// offers it; what comes next is kept apart from it. Returns `true`
+    /// when something was kept.
+    fn set_aside(&mut self) -> bool {
+        if self.autosave_interval().is_none() {
+            return false;
+        }
+        // Look again, whether or not the timer came.
+        self.autosave_seen = self.engine.world.arena.revision().wrapping_add(1);
+        self.autosave();
+        let kept = self.kept_digest.is_some();
+        self.work.start_over();
+        self.kept_digest = None;
+        self.next_autosave = None;
+        kept
+    }
+
+    /// What the page shows, by name, and the page: for the kept work's
+    /// note.
+    fn what_is_open(&self) -> (String, Option<AppletId>) {
+        let page = self.shell.page().cloned();
+        let focus = page
+            .as_ref()
+            .and_then(|id| self.applets.get(id))
+            .and_then(|applet| applet.focus())
+            .and_then(|id| self.engine.world.arena.get_by_id(id).ok())
+            .map(|entity| entity.name().to_owned());
+        match focus {
+            Some(name) => (name, page),
+            None => self.first_page(page.as_ref()).map_or_else(
+                || (String::new(), page.clone()),
+                |(entity, applet)| {
+                    let name = self
+                        .engine
+                        .world
+                        .arena
+                        .get_by_id(entity)
+                        .map(|entity| entity.name().to_owned())
+                        .unwrap_or_default();
+                    (name, Some(applet))
+                },
+            ),
+        }
+    }
+
+    /// The first thing in the project a studio works on (or else a tool),
+    /// and where: `prefer` first, when it takes something.
+    fn first_page(&self, prefer: Option<&AppletId>) -> Option<(sue_core::EntityId, AppletId)> {
+        let mut studio = None;
+        let mut tool = None;
+        for (_, entity) in self.engine.world.arena.iter() {
+            if let Some(prefer) = prefer
+                && self
+                    .applets
+                    .get(prefer)
+                    .is_some_and(|applet| applet.accepts(entity))
+            {
+                return Some((entity.id(), prefer.clone()));
+            }
+            let Some(applet) = self.applets.page_for(entity) else {
+                continue;
+            };
+            let role = self.applets.manifest(&applet).map(|manifest| manifest.role);
+            if role == Some(AppletRole::Studio) {
+                studio.get_or_insert((entity.id(), applet));
+            } else {
+                tool.get_or_insert((entity.id(), applet));
+            }
+        }
+        studio.or(tool)
+    }
+
+    /// Opens what the project holds in its studio (`prefer` first). Returns
+    /// the studio or tool, if anything opened.
+    fn open_first_page(
+        &mut self,
+        prefer: Option<&AppletId>,
+        textures: &mut dyn TextureUpload,
+        now: Instant,
+    ) -> Option<AppletId> {
+        let (entity, applet) = self.first_page(prefer)?;
+        self.request(
+            ShellRequest::OpenIn {
+                entity,
+                applet: applet.clone(),
+            },
+            textures,
+            now,
+        );
+        Some(applet)
+    }
+
+    /// Brings back the work kept as `id` and opens it in its studio. The
+    /// work it replaces is kept first if nobody saved it.
+    fn recover(&mut self, id: &str, textures: &mut dyn TextureUpload, now: Instant) {
+        let Some(kept) = self.work.autosave(id).cloned() else {
+            self.shell.notify(tr!("that-unsaved-work-is-gone"), true);
+            return;
+        };
+        let file = std::fs::read(&kept.file)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| SueFile::from_bytes(&bytes).map_err(|error| error.to_string()));
+        let file = match file {
+            Ok(file) => file,
+            Err(error) => {
+                self.shell.notify(
+                    tr!("cannot-recover", title = kept.title(), error = error),
+                    true,
+                );
+                return;
+            }
+        };
+        let replaced = self.set_aside();
+        self.typing.flush(&mut self.engine.history);
+        self.transport
+            .set_playing(false, self.engine.audio.as_deref_mut());
+        if let Err(error) = self.engine.world.load_file(&file, &sue_model::registry()) {
+            self.shell.notify(
+                tr!("cannot-recover", title = kept.title(), error = error),
+                true,
+            );
+            return;
+        }
+        self.engine.history = UndoStack::new();
+        self.typing = Typing::default();
+        self.project.clone_from(&kept.project);
+        self.project_file = file;
+        // This run keeps it from now on, until it is saved.
+        self.work.adopt(&kept.id);
+        self.saved_digest = None;
+        let bytes = self.project_bytes();
+        self.kept_digest = Some(digest(&bytes));
+        self.autosave_seen = self.engine.world.arena.revision();
+        self.shell.notify(
+            tr!(
+                "recovered-save-keep",
+                title = kept.title(),
+                value = if replaced { REPLACED } else { "" }
+            ),
+            false,
+        );
+        self.open_first_page(kept.page.as_ref(), textures, now);
+    }
+
+    /// Throws away the work kept as `id`.
+    fn discard(&mut self, id: &str) {
+        let title = self
+            .work
+            .autosave(id)
+            .map_or_else(String::new, sue_wm::Autosave::title);
+        match self.work.discard(id) {
+            Ok(()) => self.shell.notify(tr!("discarded", title = title), false),
+            Err(error) => self
+                .shell
+                .notify(tr!("cannot-discard", title = title, error = error), true),
+        }
+    }
+
+    /// Puts `path` first in the files of late.
+    fn remember(&mut self, path: &Path, saved: bool, page: Option<AppletId>) {
+        if let Err(error) = self.work.remember(path, saved, page, unix_now()) {
+            self.shell
+                .notify(tr!("cannot-remember-the-recent-files", error = error), true);
         }
     }
 
@@ -470,6 +822,15 @@ impl Runtime {
                         self.picked(&pick, &path, textures, now);
                     }
                     Some(ShellRequest::PickFile(pick)) => self.pick_with_system_dialog(pick),
+                    Some(ShellRequest::Remember { path, saved }) => {
+                        let page = self.shell.page().cloned();
+                        self.remember(&path, saved, page);
+                    }
+                    Some(ShellRequest::Forget(path)) => {
+                        let _ = self.work.forget(&path);
+                    }
+                    Some(ShellRequest::Recover(id)) => self.recover(&id, textures, now),
+                    Some(ShellRequest::Discard(id)) => self.discard(&id),
                     Some(_) | None => {}
                 }
             }
@@ -517,7 +878,8 @@ impl Runtime {
                 } else if let Some(path) = other.strip_prefix("reveal-file:") {
                     self.reveal_file(Path::new(path));
                 } else {
-                    self.shell.notify(format!("Unknown command {other}"), true);
+                    self.shell
+                        .notify(tr!("unknown-command", other = other), true);
                 }
             }
         }
@@ -525,26 +887,24 @@ impl Runtime {
 
     fn reveal(&mut self, dir: &Path) {
         if !self.interactive {
-            self.shell
-                .notify(format!("Folder: {}", dir.display()), false);
+            self.shell.notify(tr!("folder", dir = dir.display()), false);
             return;
         }
         if let Err(error) = sue_platform::reveal_folder(dir) {
             self.shell
-                .notify(format!("Cannot open the folder: {error}"), true);
+                .notify(tr!("cannot-open-the-folder", error = error), true);
         }
     }
 
     /// Shows a file selected in the system file manager.
     fn reveal_file(&mut self, path: &Path) {
         if !self.interactive {
-            self.shell
-                .notify(format!("File: {}", path.display()), false);
+            self.shell.notify(tr!("file", path = path.display()), false);
             return;
         }
         if let Err(error) = sue_platform::reveal_file(path) {
             self.shell
-                .notify(format!("Cannot show the file: {error}"), true);
+                .notify(tr!("cannot-show-the-file", error = error), true);
         }
     }
 
@@ -555,7 +915,7 @@ impl Runtime {
             .push(ShellRequest::PickFile(FilePick::open(
                 None,
                 "open",
-                "Open File",
+                &tr!("open-file"),
             )));
     }
 
@@ -572,20 +932,22 @@ impl Runtime {
             "open" => self.open_path(path, textures, now),
             "save-project" => {
                 if let Err(error) = self.save_project_to(path) {
-                    self.shell
-                        .notify(format!("Cannot save {}: {error}", file_name(path)), true);
+                    self.shell.notify(
+                        tr!("cannot-save", value = file_name(path), error = error),
+                        true,
+                    );
                 }
             }
             "export-rice" => {
                 let text = self.engine.world.rice.to_suerice();
                 match write_atomic(path, text.as_bytes()) {
                     Ok(()) => self.shell.notify_saved(path, "rice"),
-                    Err(error) => self.shell.notify(format!("Export failed: {error}"), true),
+                    Err(error) => self.shell.notify(tr!("export-failed", error = error), true),
                 }
             }
             other => self
                 .shell
-                .notify(format!("Nothing asked for a file to {other}"), true),
+                .notify(tr!("nothing-asked-file", other = other), true),
         }
     }
 
@@ -596,7 +958,7 @@ impl Runtime {
     fn pick_with_system_dialog(&mut self, pick: FilePick) {
         if !self.interactive {
             self.shell
-                .notify("Choosing files needs the desktop window", false);
+                .notify(tr!("choosing-files-needs-desktop-window"), false);
             self.pending_pick = Some(pick);
             return;
         }
@@ -624,7 +986,7 @@ impl Runtime {
             Picking::Waiting => self.waiting_pick = Some(pick),
             Picking::Failed(why) => self
                 .shell
-                .notify(format!("Cannot choose a file: {why}"), true),
+                .notify(tr!("cannot-choose-a-file", why = why), true),
         }
     }
 
@@ -702,16 +1064,23 @@ impl Runtime {
                     .and_then(|path| path.parent().map(Path::to_path_buf))
                     .unwrap_or_else(|| self.engine.paths.home_dir.clone());
                 self.engine.requests.push(ShellRequest::PickFile(
-                    FilePick::save(None, "save-project", "Save Project", "Untitled.sue")
-                        .types(vec![sue_wm::FileType::new("Sue project", &["sue"])])
-                        .starting_in(Some(start)),
+                    FilePick::save(
+                        None,
+                        "save-project",
+                        &tr!("save-project"),
+                        &tr!("untitled-sue"),
+                    )
+                    .types(vec![sue_wm::FileType::new(&tr!("sue-project"), &["sue"])])
+                    .starting_in(Some(start)),
                 ));
                 return;
             }
         };
         if let Err(error) = self.save_project_to(&path) {
-            self.shell
-                .notify(format!("Cannot save {}: {error}", file_name(&path)), true);
+            self.shell.notify(
+                tr!("cannot-save", value = file_name(&path), error = error),
+                true,
+            );
         }
     }
 
@@ -721,9 +1090,17 @@ impl Runtime {
     /// The file system's message.
     pub fn save_project_to(&mut self, path: &Path) -> Result<(), String> {
         self.typing.flush(&mut self.engine.history);
-        self.engine.world.write_into(&mut self.project_file);
-        write_atomic(path, &self.project_file.to_bytes()).map_err(|error| error.to_string())?;
+        let bytes = self.project_bytes();
+        write_atomic(path, &bytes).map_err(|error| error.to_string())?;
         self.project = Some(path.to_path_buf());
+        // Saved: nothing is kept for it any more.
+        self.saved_digest = Some(digest(&bytes));
+        self.kept_digest = None;
+        self.autosave_seen = self.engine.world.arena.revision();
+        self.next_autosave = None;
+        let _ = self.work.release();
+        let page = self.shell.page().cloned();
+        self.remember(path, true, page);
         self.shell.notify_saved(path, "project");
         Ok(())
     }
@@ -734,6 +1111,7 @@ impl Runtime {
     /// Why the project could not be read; nothing changes then.
     pub fn open_project(&mut self, path: &Path, bytes: &[u8]) -> Result<(), String> {
         let file = SueFile::from_bytes(bytes).map_err(|error| error.to_string())?;
+        let replaced = self.set_aside();
         self.typing.flush(&mut self.engine.history);
         self.transport
             .set_playing(false, self.engine.audio.as_deref_mut());
@@ -746,8 +1124,20 @@ impl Runtime {
         self.typing = Typing::default();
         self.project = Some(path.to_path_buf());
         self.project_file = file;
-        self.shell
-            .notify(format!("Opened {}", file_name(path)), false);
+        if self.work.dir().is_some() {
+            let bytes = self.project_bytes();
+            self.saved_digest = Some(digest(&bytes));
+        }
+        self.kept_digest = None;
+        self.autosave_seen = self.engine.world.arena.revision();
+        self.shell.notify(
+            tr!(
+                "opened-2",
+                value = file_name(path),
+                value2 = if replaced { REPLACED } else { "" }
+            ),
+            false,
+        );
         Ok(())
     }
 
@@ -762,6 +1152,7 @@ impl Runtime {
             .find(|(_, applet)| applet.opens_file(path))
             .map(|(manifest, _)| manifest.id.clone());
         if let Some(to) = taker {
+            self.remember(path, false, Some(to.clone()));
             self.request(
                 ShellRequest::SendFile {
                     to,
@@ -785,10 +1176,11 @@ impl Runtime {
             .unwrap_or(u64::MAX)
             .saturating_mul(1024 * 1024);
         let bytes = match sue_platform::fs::metadata(path) {
-            Ok(metadata) if metadata.is_dir() => Err("it is a folder".to_owned()),
-            Ok(metadata) if metadata.len() > limit => Err(format!(
-                "it is {}, over the {limit_mib} MiB limit (io.max_ingest_mib)",
-                human_bytes(metadata.len())
+            Ok(metadata) if metadata.is_dir() => Err(tr!("it-is-a-folder")),
+            Ok(metadata) if metadata.len() > limit => Err(tr!(
+                "over-mib-limit-io-max-ingest",
+                value = human_bytes(metadata.len()),
+                limit_mib = limit_mib
             )),
             Ok(_) => sue_platform::fs::read(path).map_err(|error| error.to_string()),
             Err(error) => Err(error.to_string()),
@@ -797,14 +1189,26 @@ impl Runtime {
             Ok(bytes) => bytes,
             Err(reason) => {
                 self.shell
-                    .notify(format!("Cannot open {name}: {reason}"), true);
+                    .notify(tr!("cannot-open", name = name, reason = reason), true);
                 return;
             }
         };
         if SueFile::sniff(&bytes) {
-            if let Err(reason) = self.open_project(path, &bytes) {
-                self.shell
-                    .notify(format!("Cannot open {name}: {reason}"), true);
+            match self.open_project(path, &bytes) {
+                Ok(()) => {
+                    // Back in the studio it was saved from, if it takes
+                    // what the project holds.
+                    let prefer = self
+                        .work
+                        .recent()
+                        .find(|file| file.path == path)
+                        .and_then(|file| file.page.clone());
+                    let page = self.open_first_page(prefer.as_ref(), textures, now);
+                    self.remember(path, false, page);
+                }
+                Err(reason) => self
+                    .shell
+                    .notify(tr!("cannot-open", name = name, reason = reason), true),
             }
             self.serve_requests(textures, now);
             return;
@@ -829,7 +1233,7 @@ impl Runtime {
             Ok(ingested) => ingested,
             Err(error) => {
                 self.shell
-                    .notify(format!("Cannot open {name}: {error}"), true);
+                    .notify(tr!("cannot-open", name = name, reason = error), true);
                 return;
             }
         };
@@ -849,19 +1253,20 @@ impl Runtime {
             // Nothing shows it: it does not stay in the project unseen.
             let _ = self.engine.world.arena.despawn(ingested.handle);
             self.shell
-                .notify(format!("No studio or tool opens {name} yet"), true);
+                .notify(tr!("no-studio-tool-opens-yet", name = name), true);
             return;
         };
         if let Some(note) = ingested.note {
             self.shell.notify(format!("{name}: {note}"), false);
         }
+        self.remember(path, false, Some(applet.clone()));
         self.request(ShellRequest::OpenIn { entity: id, applet }, textures, now);
     }
 
     /// Opens (or reopens) the audio output with the riced device and format.
     fn open_audio(&mut self) {
         if !self.interactive {
-            self.engine.audio_error = Some("there is no audio device in this mode".to_owned());
+            self.engine.audio_error = Some(tr!("there-no-audio-device-mode"));
             self.engine.rebuild_catalog();
             return;
         }
@@ -888,7 +1293,7 @@ impl Runtime {
                     .set_playing(playing, self.engine.audio.as_deref_mut());
             }
             Err(error) => {
-                self.shell.notify(format!("Audio: {error}"), true);
+                self.shell.notify(tr!("audio", error = error), true);
                 self.engine.audio_error = Some(error.to_string());
             }
         }
@@ -902,8 +1307,10 @@ impl Runtime {
         let text = match sue_platform::fs::read_to_string(&path) {
             Ok(text) => text,
             Err(error) => {
-                self.shell
-                    .notify(format!("Cannot read {}: {error}", path.display()), true);
+                self.shell.notify(
+                    tr!("cannot-read", path = path.display(), error = error),
+                    true,
+                );
                 return;
             }
         };
@@ -911,7 +1318,7 @@ impl Runtime {
             Ok(disk) => disk,
             Err(error) => {
                 self.shell
-                    .notify(format!("The rice file has an error: {error}"), true);
+                    .notify(tr!("rice-file-has-error", error = error), true);
                 return;
             }
         };
@@ -926,11 +1333,11 @@ impl Runtime {
             .collect();
         if changes.is_empty() {
             self.shell
-                .notify("The rice file matches what Sue shows", false);
+                .notify(tr!("rice-file-matches-what-sue-shows"), false);
             return;
         }
         let count = changes.len();
-        let txn = SetRiceValues::new("Reload default.suerice", changes);
+        let txn = SetRiceValues::new(tr!("reload-default-suerice"), changes);
         self.typing.flush(&mut self.engine.history);
         match self
             .engine
@@ -939,8 +1346,8 @@ impl Runtime {
         {
             Ok(_) => self
                 .shell
-                .notify(format!("Reloaded {count} values from disk"), false),
-            Err(error) => self.shell.notify(format!("Reload failed: {error}"), true),
+                .notify(tr!("reloaded-values-from-disk", count = count), false),
+            Err(error) => self.shell.notify(tr!("reload-failed", error = error), true),
         }
         self.refresh_rice();
     }
@@ -949,7 +1356,7 @@ impl Runtime {
         // The system's dialog asks where; `picked` writes it.
         let start = self.engine.paths.home_dir.clone();
         self.engine.requests.push(ShellRequest::PickFile(
-            FilePick::save(None, "export-rice", "Export Rice", "my.suerice")
+            FilePick::save(None, "export-rice", &tr!("export-rice"), "my.suerice")
                 .extensions(&["suerice"])
                 .starting_in(Some(start)),
         ));
@@ -3935,6 +4342,205 @@ f 2 3 4
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A click at `at` over three frames, for [`frames`].
+    fn click_at(at: egui::Pos2) -> impl FnMut(usize) -> Vec<egui::Event> {
+        move |frame: usize| match frame {
+            0 => vec![egui::Event::PointerMoved(at)],
+            1 => vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            2 => vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Where the Hub drew the row (or button) that does `row`.
+    fn hub_row(runtime: &Runtime, row: &sue_wm::HubRow) -> Option<egui::Rect> {
+        runtime
+            .shell
+            .hub_rows()
+            .iter()
+            .filter(|(what, _)| what == row)
+            .map(|(_, rect)| *rect)
+            .max_by(|a, b| a.width().total_cmp(&b.width()))
+    }
+
+    #[test]
+    fn the_hub_lists_recent_files_saved_projects_and_unsaved_work() {
+        use sue_wm::HubRow;
+        let (host, root) = temp_host("hub-lists");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        let boot = || {
+            Runtime::new(Engine::boot(&host).unwrap())
+                .unwrap()
+                .remembering(true)
+        };
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let pictures = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .filter(|(_, entity)| sue_model::picture::is_picture(entity))
+                .count()
+        };
+        let mut runtime = boot();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        assert!(runtime.shell.hub_rows().is_empty(), "nothing yet");
+
+        // A picture opened from a file goes first among the recent files.
+        std::fs::create_dir_all(&root).unwrap();
+        let photo = root.join("photo.png");
+        let pixels = vec![200_u8; 4 * 4 * 4];
+        std::fs::write(&photo, sue_io::encode_png_rgba(4, 4, &pixels).unwrap()).unwrap();
+        runtime.request(
+            ShellRequest::OpenFile(photo.clone()),
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(
+            runtime.work().recent().next().map(|file| &file.path),
+            Some(&photo)
+        );
+
+        // A picture made in Sue Paint and saved as a project is a saved
+        // project too.
+        runtime.request(
+            ShellRequest::Create {
+                applet: paint.clone(),
+                key: "Square Post".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        let album = root.join("album.sue");
+        runtime.save_project_to(&album).unwrap();
+        let first: Vec<&Path> = runtime
+            .work()
+            .recent()
+            .map(|file| file.path.as_path())
+            .collect();
+        assert_eq!(first, [album.as_path(), photo.as_path()]);
+        assert_eq!(runtime.work().projects().len(), 1);
+        assert_eq!(runtime.work().projects()[0].page.as_ref(), Some(&paint));
+        // The Sue menu opens them too.
+        runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
+        assert_eq!(
+            runtime.shell.sue_menu_labels(&["File", "Open Recent"]),
+            ["album.sue", "photo.png"]
+        );
+        runtime.shell.dismiss_overlays();
+
+        // A second picture, never saved, is kept at quit.
+        runtime.request(
+            ShellRequest::Create {
+                applet: paint.clone(),
+                key: "Square Post".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(pictures(&runtime), 2);
+        runtime.shutdown();
+
+        // The next start lists all three on the Hub.
+        let mut runtime = boot();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let kept = runtime.work().unsaved().next().cloned().unwrap();
+        assert_eq!(kept.project.as_deref(), Some(album.as_path()));
+        assert_eq!(kept.title(), "album");
+        for row in [
+            HubRow::Open(photo.clone()),
+            HubRow::Open(album.clone()),
+            HubRow::Recover(kept.id.clone()),
+            HubRow::Discard(kept.id.clone()),
+        ] {
+            assert!(hub_row(&runtime, &row).is_some(), "{row:?} is on the Hub");
+        }
+
+        // A click on it brings it back in Sue Paint, both pictures, and the
+        // project it belongs to.
+        let at = hub_row(&runtime, &HubRow::Recover(kept.id.clone()))
+            .unwrap()
+            .left_center()
+            + vec2(40.0, 0.0);
+        frames(&mut runtime, &ctx, size, start, click_at(at));
+        assert_eq!(runtime.shell.page(), Some(&paint));
+        assert_eq!(pictures(&runtime), 2);
+        assert_eq!(runtime.project(), Some(album.as_path()));
+        assert_eq!(runtime.work().unsaved().count(), 0, "it is this run's now");
+        assert!(kept.file.exists(), "kept until it is saved");
+        runtime.save_project_to(&album).unwrap();
+        assert!(!kept.file.exists(), "saved, it is let go");
+
+        // Opening another project keeps the unsaved work it replaces.
+        runtime.request(
+            ShellRequest::Create {
+                applet: paint.clone(),
+                key: "Square Post".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(pictures(&runtime), 3);
+        runtime.request(
+            ShellRequest::OpenFile(album.clone()),
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(pictures(&runtime), 2, "the saved project");
+        assert_eq!(
+            runtime.shell.page(),
+            Some(&paint),
+            "in the studio it was saved from"
+        );
+        let replaced = runtime.work().unsaved().next().cloned().unwrap();
+
+        // Discard asks once more, then throws it away.
+        runtime.request(ShellRequest::Hub, &mut NoTextures, start);
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let discard = HubRow::Discard(replaced.id.clone());
+        let button = hub_row(&runtime, &discard).unwrap().center();
+        frames(&mut runtime, &ctx, size, start, click_at(button));
+        assert!(replaced.file.exists(), "a first click only asks");
+        let button = hub_row(&runtime, &discard).unwrap().center();
+        frames(&mut runtime, &ctx, size, start, click_at(button));
+        assert!(!replaced.file.exists());
+        assert_eq!(runtime.work().unsaved().count(), 0);
+        assert!(hub_row(&runtime, &discard).is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn runs_that_do_not_remember_leave_no_trace() {
+        let (mut runtime, root) = runtime("no-trace");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("story.sue");
+        runtime.request(
+            ShellRequest::Create {
+                applet: AppletId::new(sue_paint::ID).unwrap(),
+                key: "Square Post".to_owned(),
+            },
+            &mut NoTextures,
+            Instant::now(),
+        );
+        runtime.save_project_to(&path).unwrap();
+        runtime.shutdown();
+        assert!(!runtime.engine.paths.data_dir.join("work").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn a_pinned_studio_opens_at_launch_and_the_pin_undoes() {
         let (host, root) = temp_host("pin");
@@ -4327,6 +4933,504 @@ f 2 3 4
             "with its text"
         );
         assert_eq!(runtime.shell.page(), Some(&writer));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+    #[test]
+    fn sue_writer_changes_case_keeping_formatting_and_undoes_it() {
+        let (mut runtime, root) = runtime("sue-writer-case");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let writer = AppletId::new(sue_writer::ID).unwrap();
+        runtime.request(
+            ShellRequest::Create {
+                applet: writer.clone(),
+                key: "blank".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![egui::Event::Text("the storm came".to_owned())]
+            } else {
+                Vec::new()
+            }
+        });
+        runtime.typing.flush(&mut runtime.engine.history);
+        let text = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .find_map(|(_, entity)| {
+                    entity
+                        .string_buffer()
+                        .map(|text| text.as_str().to_owned())
+                        .filter(|text| text.contains("storm"))
+                })
+                .unwrap_or_default()
+        };
+        assert_eq!(text(&runtime), "the storm came\n");
+        // Nothing selected: the word at the caret changes.
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: writer.clone(),
+                command: "format.case.upper".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        assert_eq!(text(&runtime), "the storm CAME\n");
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![egui::Event::Key {
+                    key: egui::Key::Z,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::COMMAND,
+                }]
+            } else {
+                Vec::new()
+            }
+        });
+        assert_eq!(text(&runtime), "the storm came\n");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn sue_writer_records_changes_and_accepts_them() {
+        let (mut runtime, root) = runtime("sue-writer-changes");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let writer = AppletId::new(sue_writer::ID).unwrap();
+        runtime.request(
+            ShellRequest::Create {
+                applet: writer.clone(),
+                key: "blank".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![egui::Event::Text("The cat".to_owned())]
+            } else {
+                Vec::new()
+            }
+        });
+        runtime.typing.flush(&mut runtime.engine.history);
+        let command = |runtime: &mut Runtime, command: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: writer.clone(),
+                    command: command.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let key = |key: egui::Key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let doc = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .find_map(|(_, entity)| {
+                    let text = entity.string_buffer()?.as_str().to_owned();
+                    text.starts_with("The")
+                        .then(|| (text, entity.ext::<sue_model::TextMarks>().cloned()))
+                })
+                .unwrap()
+        };
+        command(&mut runtime, "review.track");
+        // Typed while recording: inserted. Backspace takes an insertion out
+        // for good, then strikes "t" of the old text through.
+        frames(&mut runtime, &ctx, size, start, |frame| match frame {
+            1 => vec![egui::Event::Text("s sat".to_owned())],
+            2 => vec![key(egui::Key::Backspace), key(egui::Key::Backspace)],
+            3 => vec![key(egui::Key::Home)],
+            4 => vec![key(egui::Key::Delete)],
+            _ => Vec::new(),
+        });
+        let (text, marks) = doc(&runtime);
+        let marks = marks.unwrap();
+        assert_eq!(text, "The cats s\n", "{marks:?}");
+        let changes = sue_model::changes::changes(&marks);
+        assert!(
+            changes
+                .iter()
+                .any(|tracked| tracked.inserted && tracked.range == (7..10))
+        );
+        assert!(
+            changes
+                .iter()
+                .any(|tracked| !tracked.inserted && tracked.range == (0..1))
+        );
+        assert_eq!(changes[0].change.author, "Author");
+        // Accept All keeps the insertion and drops the struck "T".
+        command(&mut runtime, "review.accept_all");
+        let (text, marks) = doc_any(&runtime);
+        assert_eq!(text, "he cats s\n");
+        assert!(sue_model::changes::changes(&marks).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The first document's text and marks.
+    fn doc_any(runtime: &Runtime) -> (String, sue_model::TextMarks) {
+        runtime
+            .engine
+            .world
+            .arena
+            .iter()
+            .find_map(|(_, entity)| {
+                let text = entity.string_buffer()?.as_str().to_owned();
+                text.contains("cat").then(|| {
+                    (
+                        text,
+                        entity
+                            .ext::<sue_model::TextMarks>()
+                            .cloned()
+                            .unwrap_or_default(),
+                    )
+                })
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn sue_writer_comments_go_on_words_and_come_off_with_undo() {
+        let (mut runtime, root) = runtime("sue-writer-comments");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let writer = AppletId::new(sue_writer::ID).unwrap();
+        runtime.request(
+            ShellRequest::Create {
+                applet: writer.clone(),
+                key: "blank".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![egui::Event::Text("A dark and stormy night".to_owned())]
+            } else {
+                Vec::new()
+            }
+        });
+        runtime.typing.flush(&mut runtime.engine.history);
+        let command = |runtime: &mut Runtime, command: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: writer.clone(),
+                    command: command.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let key = |key: egui::Key, modifiers: egui::Modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        // New Comment on the word at the caret, typed and sent with
+        // Ctrl+Enter.
+        command(&mut runtime, "review.comment");
+        frames(&mut runtime, &ctx, size, start, |frame| match frame {
+            1 => vec![egui::Event::Text("Too much?".to_owned())],
+            2 => vec![key(egui::Key::Enter, egui::Modifiers::COMMAND)],
+            _ => Vec::new(),
+        });
+        let comments = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .filter(|(_, entity)| entity.class() == sue_model::comments::COMMENT)
+                .map(|(_, entity)| entity.id())
+                .collect::<Vec<_>>()
+        };
+        let found = comments(&runtime);
+        assert_eq!(found.len(), 1, "a comment was made");
+        let thread = sue_model::comments::thread(&runtime.engine.world.arena, found[0]).unwrap();
+        assert_eq!(thread.first.text, "Too much?");
+        let marked = runtime.engine.world.arena.iter().any(|(_, entity)| {
+            entity.ext::<sue_model::TextMarks>().is_some_and(|marks| {
+                marks.marks().iter().any(|mark| {
+                    mark.kind == sue_model::mark_kind::COMMENT
+                        && mark.value == sue_core::Value::Entity(found[0])
+                })
+            })
+        });
+        assert!(marked, "its words carry it");
+        // Delete it from the Review menu; undo brings it back.
+        command(&mut runtime, "review.delete_comment");
+        assert!(comments(&runtime).is_empty());
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]
+            } else {
+                Vec::new()
+            }
+        });
+        assert_eq!(comments(&runtime), found);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn sue_writer_tables_take_typing_grow_with_tab_undo_and_export() {
+        let (mut runtime, root) = runtime("sue-writer-tables");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let writer = AppletId::new(sue_writer::ID).unwrap();
+        runtime.request(
+            ShellRequest::Create {
+                applet: writer.clone(),
+                key: "novel".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let command = |runtime: &mut Runtime, command: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: writer.clone(),
+                    command: command.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        command(&mut runtime, "table.insert.2x2");
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let table_of = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .find(|(_, entity)| entity.class() == sue_model::TEXT_TABLE)
+                .and_then(|(_, entity)| entity.ext::<sue_model::Table>().cloned())
+                .expect("a table in the arena")
+        };
+        assert_eq!(table_of(&runtime).size(), (2, 2));
+        let key = |key: egui::Key, modifiers: egui::Modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        // Typing goes into the first cell; Tab moves on, and Tab in the last
+        // cell adds a row.
+        frames(&mut runtime, &ctx, size, start, |frame| match frame {
+            1 => vec![egui::Event::Text("Name".to_owned())],
+            2 => vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
+            3 => vec![egui::Event::Text("Qty".to_owned())],
+            4 => vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
+            5 => vec![egui::Event::Text("Bolt".to_owned())],
+            6 => vec![
+                key(egui::Key::Tab, egui::Modifiers::NONE),
+                key(egui::Key::Tab, egui::Modifiers::NONE),
+            ],
+            _ => Vec::new(),
+        });
+        let table = table_of(&runtime);
+        assert_eq!(table.text(0, 0), "Name");
+        assert_eq!(table.text(0, 1), "Qty");
+        assert_eq!(table.text(1, 0), "Bolt");
+        assert_eq!(table.size(), (3, 2), "Tab in the last cell adds a row");
+        // Undo takes the new row back, then the typing in the cell before.
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]
+            } else {
+                Vec::new()
+            }
+        });
+        assert_eq!(table_of(&runtime).size(), (2, 2));
+        frames(&mut runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]
+            } else {
+                Vec::new()
+            }
+        });
+        assert_eq!(
+            table_of(&runtime).text(1, 0),
+            "",
+            "{:?}",
+            table_of(&runtime)
+        );
+        assert_eq!(table_of(&runtime).text(0, 1), "Qty");
+        // A column after the caret's, from the Table menu.
+        command(&mut runtime, "table.column_right");
+        assert_eq!(table_of(&runtime).size(), (2, 3));
+        // The table goes out in a web page and a Word file.
+        for (format, needle) in [("html", "<td>"), ("docx", ""), ("odt", "")] {
+            let home = runtime.engine.catalog.folders["home"].clone();
+            std::fs::create_dir_all(&home).unwrap();
+            let path = home.join(format!("tables.{format}"));
+            runtime.request(
+                ShellRequest::Picked {
+                    pick: FilePick::save(
+                        Some(writer.clone()),
+                        &format!("compile.{format}"),
+                        "Export",
+                        "tables",
+                    ),
+                    path: path.clone(),
+                },
+                &mut NoTextures,
+                start,
+            );
+            let bytes = std::fs::read(&path).unwrap();
+            if format == "html" {
+                let html = String::from_utf8(bytes).unwrap();
+                assert!(html.contains(needle) && html.contains("Qty"), "{html}");
+            } else {
+                assert!(bytes.starts_with(b"PK"));
+            }
+        }
+        // The Word file opens with its table a table again.
+        let tables = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .filter(|(_, entity)| entity.class() == sue_model::TEXT_TABLE)
+                .count()
+        };
+        let before = tables(&runtime);
+        let word = runtime.engine.catalog.folders["home"].join("tables.docx");
+        runtime.open_path(&word, &mut NoTextures, start);
+        assert_eq!(
+            tables(&runtime),
+            before + 1,
+            "the Word file's table came back"
+        );
+        // So does an OpenDocument file's.
+        let odt = runtime.engine.catalog.folders["home"].join("tables.odt");
+        runtime.open_path(&odt, &mut NoTextures, start);
+        assert_eq!(
+            tables(&runtime),
+            before + 2,
+            "the OpenDocument table came back"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_sue_menu_changes_the_language_and_a_tool_can_keep_its_own() {
+        let (mut runtime, root) = runtime("language");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+
+        // Headless runs start in English; the Sue menu offers every language.
+        runtime.with_shell(&mut NoTextures, start, |shell, io, _| {
+            shell.open_sue_menu(io)
+        });
+        let languages = runtime.shell.sue_menu_labels(&["Language"]);
+        let japanese = sue_lang::name("ja");
+        assert!(languages.contains(&japanese), "{languages:?}");
+        assert!(languages.contains(&sue_lang::name("es")), "{languages:?}");
+
+        // Picking Japanese is an undoable rice edit, and the menu speaks it.
+        let picked = runtime.with_shell(&mut NoTextures, start, |shell, io, now| {
+            shell.sue_menu_pick(&["Language", &japanese], io, now)
+        });
+        assert!(picked);
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        assert_eq!(
+            runtime.engine.world.rice.get_str(sue_wm::LANGUAGE_KEY),
+            Some("ja")
+        );
+        runtime.with_shell(&mut NoTextures, start, |shell, io, _| {
+            shell.open_sue_menu(io)
+        });
+        let labels = runtime.shell.sue_menu_labels(&[]);
+        let settings = {
+            let _ja = sue_lang::scope("ja");
+            sue_lang::text("wm", "settings")
+        };
+        assert_ne!(settings, "Settings");
+        assert!(labels.contains(&settings), "{labels:?}");
+        runtime.shell.dismiss_overlays();
+
+        // The Image Viewer set apart in Spanish: what it says is Spanish,
+        // while Sue's own menu stays Japanese.
+        let viewer = AppletId::new(crate::viewer::ID).unwrap();
+        runtime
+            .engine
+            .world
+            .rice
+            .set(
+                &sue_wm::language_key(&viewer),
+                sue_rice::RiceValue::Text("es".to_owned()),
+            )
+            .unwrap();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: viewer,
+                command: "no.such.command".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        let spanish = {
+            let _es = sue_lang::scope("es");
+            sue_lang::tr!("wm", "is-not-available", command = "no.such.command")
+        };
+        assert_eq!(
+            runtime.shell.message().map(|(text, _)| text),
+            Some(spanish.as_str())
+        );
+        runtime.with_shell(&mut NoTextures, start, |shell, io, _| {
+            shell.open_sue_menu(io)
+        });
+        assert!(runtime.shell.sue_menu_labels(&[]).contains(&settings));
+
+        // English again: the menu reads English.
+        let _ = runtime.engine.world.rice.set(
+            sue_wm::LANGUAGE_KEY,
+            sue_rice::RiceValue::Text(sue_lang::ENGLISH.to_owned()),
+        );
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        runtime.with_shell(&mut NoTextures, start, |shell, io, _| {
+            shell.open_sue_menu(io)
+        });
+        assert!(
+            runtime
+                .shell
+                .sue_menu_labels(&[])
+                .contains(&"Settings".to_owned())
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }
