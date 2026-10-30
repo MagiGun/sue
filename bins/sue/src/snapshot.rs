@@ -360,6 +360,22 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         sue_paint::sample_picture(cx, 1600, 1200)
     });
     shoot(&mut runtime, &mut camera, "08-sue-paint")?;
+    // 08g. The Sub Tool list and the Brush Size grid, as tabs of the tool
+    // palette; the layer's History.
+    for (target, name) in [
+        ("tab/tool/0", "08g-sue-paint-sub-tools"),
+        ("tab/tool/2", "08h-sue-paint-brush-size"),
+        ("tab/layer/2", "08i-sue-paint-history"),
+    ] {
+        if let Some(applet) = runtime.applets.get_mut(&paint) {
+            applet.navigate(target);
+        }
+        shoot(&mut runtime, &mut camera, name)?;
+    }
+    if let Some(applet) = runtime.applets.get_mut(&paint) {
+        applet.navigate("tab/tool/1");
+        applet.navigate("tab/layer/0");
+    }
     runtime.request(ShellRequest::SueMenu, &mut camera.painter, camera.now);
     shoot(&mut runtime, &mut camera, "09-sue-menu-in-paint")?;
     runtime.shell.dismiss_overlays();

@@ -62,7 +62,7 @@ impl Palette {
     /// The width of a palette that is always as wide, like the tool strip.
     pub fn fixed_width(self) -> Option<f32> {
         match self {
-            Self::Tools => Some(40.0),
+            Self::Tools => Some(46.0),
             Self::BrushSize => Some(58.0),
             _ => None,
         }
@@ -169,7 +169,7 @@ impl Default for Dock {
         };
         Self {
             left: vec![
-                column(&[(Palette::Tools, 1.0)], 40.0),
+                column(&[(Palette::Tools, 1.0)], 46.0),
                 column(
                     &[
                         (Palette::SubTool, 0.44),

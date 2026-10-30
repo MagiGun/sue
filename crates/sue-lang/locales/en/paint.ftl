@@ -1630,3 +1630,6 @@ studio-key-space = Space
 studio-return-home = Return to Home
 studio-to-simple = Switch to Simple Mode
 studio-app-settings = App Settings
+no-brush-size-for-this-tool = This tool has no brush size
+transfer-to-lower-layer = Transfer To Lower Layer
+create-layer-mask = Create layer mask

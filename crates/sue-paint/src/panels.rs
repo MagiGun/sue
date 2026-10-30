@@ -60,7 +60,7 @@ pub(crate) fn icon_button(
     } else {
         theme.text.gamma_multiply(0.85)
     };
-    icons::paint(painter, rect.shrink(rect.width() * 0.2), icon, color);
+    icons::paint(painter, rect.shrink(rect.width() * 0.13), icon, color);
     let response = if enabled {
         response.on_hover_text(tip)
     } else {
@@ -75,45 +75,54 @@ pub(crate) fn icon_in(ui: &mut Ui, icon: Icon, active: bool, tip: &str, theme: &
     icon_button(ui, rect, icon, true, active, tip, theme)
 }
 
-/// A palette's tab strip. Returns the body below it and a clicked tab.
+/// A palette's tab strip, as Clip Studio Paint draws it: each tab an icon
+/// and its name, the chosen one lit. When the names do not all fit, only
+/// the chosen tab keeps its name and the others show their icon (with the
+/// name on hover). Returns the body below it and a clicked tab.
 fn header(
     ui: &mut Ui,
     rect: Rect,
-    tabs: &[(String, bool)],
+    tabs: &[(String, Icon, bool)],
     selected: u8,
     theme: &Theme,
 ) -> (Rect, Option<u8>) {
-    let strip = Rect::from_min_size(rect.min, vec2(rect.width(), 24.0));
+    let strip = Rect::from_min_size(rect.min, vec2(rect.width(), 28.0));
     let painter = ui.painter().clone();
     painter.rect_filled(strip, 0.0, theme.pill);
     painter.hline(strip.x_range(), strip.bottom(), theme.hairline());
     let font = theme.font(theme.small_size + 0.5);
-    let mut x = strip.left() + 4.0;
-    let mut clicked = None;
-    // Tabs pad less when there are many, so they fit the palette.
+    let icon_side = 18.0;
     let galleys: Vec<_> = tabs
         .iter()
-        .map(|(title, _)| painter.layout_no_wrap(title.clone(), font.clone(), theme.text))
+        .map(|(title, _, _)| painter.layout_no_wrap(title.clone(), font.clone(), theme.text))
         .collect();
-    let text: f32 = galleys.iter().map(|galley| galley.size().x + 2.0).sum();
-    let pad = ((strip.width() - 8.0 - text) / tabs.len().max(1) as f32).clamp(6.0, 16.0);
+    let labelled = |galley: &std::sync::Arc<egui::Galley>| icon_side + 6.0 + galley.size().x + 14.0;
+    let bare = icon_side + 14.0;
+    let all: f32 = galleys.iter().map(labelled).sum::<f32>() + 2.0 * tabs.len() as f32;
+    let names = all <= strip.width() - 8.0;
+    let mut x = strip.left() + 4.0;
+    let mut clicked = None;
     let painter = painter.with_clip_rect(strip);
-    for ((index, (title, enabled)), galley) in tabs.iter().enumerate().zip(galleys) {
-        let tab = Rect::from_min_size(
-            pos2(x, strip.top() + 2.0),
-            vec2(galley.size().x + pad, 22.0),
-        );
-        x = tab.right() + 2.0;
+    for ((index, (title, icon, enabled)), galley) in tabs.iter().enumerate().zip(galleys) {
         let chosen = index as u8 == selected;
+        let named = names || chosen;
+        let width = if named { labelled(&galley) } else { bare };
+        let tab = Rect::from_min_size(pos2(x, strip.top() + 2.0), vec2(width, 26.0));
+        x = tab.right() + 2.0;
         let response = ui.interact(
             tab,
             Id::unique(("sue-paint-tab", title, rect.min.x as i32, rect.min.y as i32)),
             Sense::click(),
         );
         if chosen {
-            painter.rect_filled(tab, 0.0, theme.panel);
+            painter.rect_filled(tab, theme.control_radius, theme.panel);
+            painter.hline(
+                tab.shrink2(vec2(6.0, 0.0)).x_range(),
+                tab.bottom() - 1.0,
+                Stroke::new(2.0, theme.border_active),
+            );
         } else if *enabled && response.hovered() {
-            painter.rect_filled(tab, 0.0, theme.hover);
+            painter.rect_filled(tab, theme.control_radius, theme.hover);
         }
         let color = if !enabled {
             theme.muted.gamma_multiply(0.5)
@@ -122,7 +131,26 @@ fn header(
         } else {
             theme.muted
         };
-        painter.galley(tab.center() - galley.size() / 2.0, galley, color);
+        let icon_rect = Rect::from_center_size(
+            pos2(tab.left() + 7.0 + icon_side / 2.0, tab.center().y),
+            vec2(icon_side, icon_side),
+        );
+        icons::paint(&painter, icon_rect, *icon, color);
+        if named {
+            painter.galley(
+                pos2(
+                    icon_rect.right() + 6.0,
+                    tab.center().y - galley.size().y / 2.0,
+                ),
+                galley,
+                color,
+            );
+        }
+        let response = if named {
+            response
+        } else {
+            response.on_hover_text(title)
+        };
         if *enabled && response.clicked() {
             clicked = Some(index as u8);
         }
@@ -524,8 +552,8 @@ impl SuePaint {
                 if self.bar_hidden.contains(*command) {
                     continue;
                 }
-                let rect = Rect::from_min_size(pos2(x, strip.top() + 3.0), vec2(28.0, 28.0));
-                x += 30.0;
+                let rect = Rect::from_min_size(pos2(x, strip.top() + 3.0), vec2(32.0, 32.0));
+                x += 34.0;
                 if *command == "file.save" {
                     save_at = Some(rect);
                 }
@@ -640,9 +668,12 @@ impl SuePaint {
             .vline(strip.right(), strip.y_range(), theme.hairline());
         let mut y = strip.top() + 6.0;
         let current = self.toolbox.tool();
+        // As roomy as the strip allows, every tool always in it.
+        let room = strip.height() - 6.0 - 70.0;
+        let step = (room / Tool::ALL.len() as f32).clamp(24.0, 36.0);
         for tool in Tool::ALL {
-            let rect = Rect::from_min_size(pos2(strip.left() + 5.0, y), vec2(30.0, 28.0));
-            y += 30.0;
+            let rect = Rect::from_min_size(pos2(strip.left() + 4.0, y), vec2(38.0, step - 2.0));
+            y += step;
             if y > strip.bottom() - 70.0 {
                 break;
             }
@@ -780,17 +811,26 @@ impl SuePaint {
     ) {
         let tool = self.toolbox.tool();
         let tabs = [
-            (tr!("sub-tool"), self.panels.sub_tool),
-            (tr!("tool-property"), self.panels.tool_property),
+            (tr!("sub-tool"), Icon::SubTool, self.panels.sub_tool),
+            (
+                tr!("tool-property"),
+                Icon::Sliders,
+                self.panels.tool_property,
+            ),
+            (tr!("brush-size"), Icon::BrushSize, true),
         ];
         let (body, clicked) = header(ui, rect, &tabs, self.tool_tab, theme);
         if let Some(tab) = clicked {
             self.tool_tab = tab;
         }
-        if !self.panels.sub_tool {
+        if !self.panels.sub_tool && self.tool_tab == 0 {
             self.tool_tab = 1;
-        } else if !self.panels.tool_property {
+        } else if !self.panels.tool_property && self.tool_tab == 1 {
             self.tool_tab = 0;
+        }
+        if self.tool_tab == 2 {
+            self.brush_size_grid(ui, body.shrink2(vec2(6.0, 6.0)), theme);
+            return;
         }
         let mut inner = child(ui, body.shrink2(vec2(8.0, 6.0)), "tool-panel");
         if self.tool_tab == 0 {
@@ -806,16 +846,74 @@ impl SuePaint {
                 .iter()
                 .map(|sub| crate::localize(&sub.name))
                 .collect();
+            let tips: Vec<Option<crate::brush::Tip>> = self
+                .toolbox
+                .subs(tool)
+                .iter()
+                .map(|sub| tool.paints().then_some(sub.tip))
+                .collect();
             egui::ScrollArea::vertical()
                 .id_salt("sue-paint-subs")
                 .show(&mut inner, |ui| {
                     let mut action = None;
                     for (index, name) in names.iter().enumerate() {
                         let chosen = index == picked;
-                        let response = ui.add_sized(
-                            vec2(ui.available_width(), 24.0),
-                            egui::Button::selectable(chosen, name.as_str()),
+                        // A painting sub tool is a row with its own sample
+                        // stroke and its name, as in Clip Studio Paint.
+                        let tall = if tips[index].is_some() { 44.0 } else { 26.0 };
+                        let (row, response) = ui
+                            .allocate_exact_size(vec2(ui.available_width(), tall), Sense::click());
+                        let painter = ui.painter();
+                        let fill = if chosen {
+                            theme.active
+                        } else if response.hovered() {
+                            theme.hover
+                        } else {
+                            theme.pill
+                        };
+                        painter.rect_filled(
+                            row.shrink2(vec2(0.0, 1.0)),
+                            theme.control_radius,
+                            fill,
                         );
+                        if let Some(tip) = tips[index] {
+                            let size = [
+                                (row.width().round() as u32).clamp(40, 600),
+                                (tall as u32) - 8,
+                            ];
+                            if let Some(texture) =
+                                Self::sub_preview(&mut self.sub_previews, cx, tip, size)
+                            {
+                                ui.painter().image(
+                                    texture,
+                                    Rect::from_min_size(
+                                        row.min + vec2(0.0, 2.0),
+                                        vec2(size[0] as f32, size[1] as f32),
+                                    ),
+                                    Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
+                                    if chosen {
+                                        theme.text
+                                    } else {
+                                        theme.text.gamma_multiply(0.85)
+                                    },
+                                );
+                            }
+                            ui.painter().text(
+                                row.right_bottom() + vec2(-6.0, -4.0),
+                                Align2::RIGHT_BOTTOM,
+                                name,
+                                theme.font(theme.small_size + 0.5),
+                                theme.text,
+                            );
+                        } else {
+                            ui.painter().text(
+                                row.left_center() + vec2(8.0, 0.0),
+                                Align2::LEFT_CENTER,
+                                name,
+                                theme.font(theme.small_size + 0.5),
+                                theme.text,
+                            );
+                        }
                         if response.clicked() {
                             self.toolbox.pick_sub(tool, index);
                             self.tool_tab = 1;
@@ -902,6 +1000,205 @@ impl SuePaint {
             && let Some((layer, base, before)) = self.view3d_before.take()
         {
             self.finish_view3d(cx, layer, base, &before);
+        }
+    }
+
+    /// History, as Clip Studio Paint lists it: the start, then every step
+    /// to the current one (lit) and the steps undone after it (dimmed); a
+    /// click on any of them goes back or forward to it.
+    fn history_tab(&mut self, ui: &mut Ui, body: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
+        use sue_core::NodeId;
+        let history = &*cx.history;
+        let cursor = history.cursor();
+        let mut done = Vec::new();
+        let mut node = cursor;
+        while node != NodeId::ROOT {
+            done.push(node);
+            node = history.parent(node).unwrap_or(NodeId::ROOT);
+        }
+        done.reverse();
+        let mut undone = Vec::new();
+        let mut next = history.preferred_child(cursor);
+        while let Some(node) = next {
+            undone.push(node);
+            next = history.preferred_child(node);
+        }
+        let start = self
+            .picture()
+            .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
+            .map_or_else(|| tr!("picture"), |entity| entity.name().to_owned());
+        let rows: Vec<(NodeId, String, bool)> = std::iter::once((NodeId::ROOT, start, true))
+            .chain(done.iter().map(|node| {
+                (
+                    *node,
+                    history.label(*node).unwrap_or_default().to_owned(),
+                    true,
+                )
+            }))
+            .chain(undone.iter().map(|node| {
+                (
+                    *node,
+                    history.label(*node).unwrap_or_default().to_owned(),
+                    false,
+                )
+            }))
+            .collect();
+        let mut go = None;
+        let mut inner = child(ui, body, "layer-history");
+        egui::ScrollArea::vertical()
+            .id_salt("sue-paint-history")
+            .stick_to_bottom(true)
+            .show(&mut inner, |ui| {
+                for (node, label, applied) in &rows {
+                    let (row, response) =
+                        ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
+                    let painter = ui.painter();
+                    if *node == cursor {
+                        painter.rect_filled(row, 0.0, theme.active);
+                    } else if response.hovered() {
+                        painter.rect_filled(row, 0.0, theme.hover);
+                    }
+                    painter.hline(row.x_range(), row.bottom(), theme.hairline());
+                    painter.text(
+                        row.left_center() + vec2(8.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        label,
+                        theme.font(theme.small_size + 0.5),
+                        if *applied {
+                            theme.text
+                        } else {
+                            theme.muted.gamma_multiply(0.6)
+                        },
+                    );
+                    if response.clicked() && *node != cursor {
+                        go = Some(*node);
+                    }
+                }
+            });
+        if let Some(node) = go {
+            cx.typing.flush(cx.history);
+            if let Err(error) = cx.history.checkout(cx.world, node) {
+                cx.fail(tr!("undo-failed", error = error));
+            }
+        }
+    }
+
+    /// The texture of `tip`'s sample stroke for the Sub Tool list, `size`
+    /// pixels: white ink on clear, tinted when drawn.
+    fn sub_preview(
+        cache: &mut std::collections::HashMap<u64, Vec<u8>>,
+        cx: &mut AppletContext<'_>,
+        mut tip: crate::brush::Tip,
+        size: [u32; 2],
+    ) -> Option<egui::TextureId> {
+        use std::hash::{Hash, Hasher};
+        // Thin pens stay thin and big brushes fit the row.
+        tip.size = (tip.size * 0.7).clamp(1.0, size[1] as f32 * 0.4);
+        let key = {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            format!("{tip:?}{size:?}").hash(&mut hasher);
+            hasher.finish()
+        };
+        if !cache.contains_key(&key) {
+            if cache.len() > 256 {
+                cache.clear();
+            }
+            cache.insert(key, Self::render_stroke(tip, size)?);
+        }
+        let pixels = cache.get(&key)?;
+        cx.textures
+            .texture(0x5355_4253_5452_4b45, key, size, 4, pixels, false)
+    }
+
+    /// A sample stroke with `tip` in white over nothing, `size` pixels.
+    fn render_stroke(tip: crate::brush::Tip, [width, height]: [u32; 2]) -> Option<Vec<u8>> {
+        let mut raster =
+            sue_core::RasterTile2D::new(width, height, sue_core::PixelFormat::Rgba8).ok()?;
+        let mut tip = tip;
+        // An eraser's sample is drawn as ink, so it shows.
+        tip.eraser = false;
+        let mut stroke = BrushStroke::new(sue_core::EntityId::NIL, tip, [1.0, 1.0, 1.0], false);
+        for step in 0..=48 {
+            let t = step as f32 / 48.0;
+            let x = 10.0 + t * (width as f32 * 0.62);
+            let y = height as f32 * (0.42 - 0.2 * (t * std::f32::consts::TAU * 0.8).sin());
+            let pressure = (t * std::f32::consts::PI).sin().max(0.05);
+            stroke.to(&mut raster, [x, y], pressure, None);
+        }
+        stroke.end(&mut raster, crate::brush::Finish::default(), None);
+        raster.bytes().map(<[u8]>::to_vec)
+    }
+
+    /// Brush Size: Clip Studio Paint's grid of sizes, each a dot of its
+    /// size (up to the cell) over its number; a click takes it.
+    fn brush_size_grid(&mut self, ui: &mut Ui, body: Rect, theme: &Theme) {
+        const SIZES: [f32; 40] = [
+            0.7, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0, 12.0, 15.0, 17.0, 20.0,
+            25.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 100.0, 120.0, 150.0, 170.0, 200.0, 250.0,
+            300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 1000.0, 1200.0, 1500.0, 1700.0, 2000.0,
+        ];
+        let tool = self.toolbox.tool();
+        if !tool.paints() && !matches!(tool, Tool::Fill | Tool::Gradient) {
+            ui.painter().text(
+                body.center_top() + vec2(0.0, 16.0),
+                Align2::CENTER_CENTER,
+                tr!("no-brush-size-for-this-tool"),
+                theme.font(theme.small_size + 0.5),
+                theme.muted,
+            );
+            return;
+        }
+        let columns = ((body.width() / 34.0).floor() as usize).clamp(3, 8);
+        let cell = body.width() / columns as f32;
+        let now = self.toolbox.current().tip.size;
+        let mut take = None;
+        let painter = ui.painter().with_clip_rect(body);
+        for (index, size) in SIZES.iter().enumerate() {
+            let (row, column) = (index / columns, index % columns);
+            let rect = Rect::from_min_size(
+                pos2(
+                    body.left() + column as f32 * cell,
+                    body.top() + row as f32 * (cell + 4.0),
+                ),
+                vec2(cell, cell + 4.0),
+            )
+            .shrink(1.0);
+            if rect.top() > body.bottom() {
+                break;
+            }
+            let response = ui.interact(
+                rect,
+                Id::unique(("sue-paint-size-cell", index)),
+                Sense::click(),
+            );
+            let chosen = (now - size).abs() < 0.01;
+            if chosen {
+                painter.rect_filled(rect, theme.control_radius, theme.active);
+            } else if response.hovered() {
+                painter.rect_filled(rect, theme.control_radius, theme.hover);
+            }
+            let dot = rect.shrink2(vec2(0.0, 7.0)).translate(vec2(0.0, -5.0));
+            // Sizes up to 30 grow; larger ones fill the cell.
+            let radius =
+                (size / 30.0).clamp(0.0, 1.0).sqrt() * dot.height().min(dot.width()) * 0.48;
+            painter.circle_filled(dot.center(), radius.max(0.8), theme.text);
+            painter.text(
+                rect.center_bottom() - vec2(0.0, 1.0),
+                Align2::CENTER_BOTTOM,
+                if size.fract() == 0.0 {
+                    format!("{size:.0}")
+                } else {
+                    format!("{size}")
+                },
+                theme.font(theme.small_size - 1.0),
+                theme.muted,
+            );
+            if response.clicked() {
+                take = Some(*size);
+            }
+        }
+        if let Some(size) = take {
+            self.toolbox.current_mut().tip.size = size;
         }
     }
 
@@ -2033,10 +2330,10 @@ impl SuePaint {
 
     pub(crate) fn color_panel(&mut self, ui: &mut Ui, rect: Rect, theme: &Theme) {
         let tabs = [
-            (tr!("color-wheel"), true),
-            (tr!("color-slider"), true),
-            (tr!("intermediate-color"), true),
-            (tr!("approximate-color"), true),
+            (tr!("color-wheel"), Icon::Wheel, true),
+            (tr!("color-slider"), Icon::ColorSlider, true),
+            (tr!("intermediate-color"), Icon::Intermediate, true),
+            (tr!("approximate-color"), Icon::Approximate, true),
         ];
         let (body, clicked) = header(ui, rect, &tabs, self.color_tab, theme);
         if let Some(tab) = clicked {
@@ -2424,9 +2721,9 @@ impl SuePaint {
         theme: &Theme,
     ) {
         let tabs = [
-            (tr!("color-set"), true),
-            (tr!("color-history"), true),
-            (tr!("material"), true),
+            (tr!("color-set"), Icon::Swatches, true),
+            (tr!("color-history"), Icon::History, true),
+            (tr!("material"), Icon::Material, true),
         ];
         let (body, clicked) = header(ui, rect, &tabs, self.set_tab, theme);
         if let Some(tab) = clicked {
@@ -2794,7 +3091,13 @@ impl SuePaint {
         ui.painter().rect_filled(rect, 0.0, theme.panel);
         ui.painter()
             .vline(rect.right(), rect.y_range(), theme.hairline());
-        let (body, _) = header(ui, rect, &[(tr!("size-2"), true)], 0, theme);
+        let (body, _) = header(
+            ui,
+            rect,
+            &[(tr!("size-2"), Icon::BrushSize, true)],
+            0,
+            theme,
+        );
         let tool = self.toolbox.tool();
         if !tool.paints() && !matches!(tool, Tool::Fill | Tool::Gradient) {
             return;
@@ -2848,11 +3151,11 @@ impl SuePaint {
             ui,
             rect,
             &[
-                (tr!("navigator"), true),
-                (tr!("sub-view"), true),
-                (tr!("info"), true),
-                (tr!("auto-actions"), true),
-                (tr!("item-bank"), true),
+                (tr!("navigator"), Icon::Navigator, true),
+                (tr!("sub-view"), Icon::SubView, true),
+                (tr!("info"), Icon::Info, true),
+                (tr!("auto-actions"), Icon::AutoAction, true),
+                (tr!("item-bank"), Icon::ItemBank, true),
             ],
             self.nav_tab,
             theme,
@@ -3019,10 +3322,10 @@ impl SuePaint {
         theme: &Theme,
     ) {
         let tabs = [
-            (tr!("layer-2"), true),
-            (tr!("layer-property"), true),
-            (tr!("history"), true),
-            (tr!("animation-cels"), true),
+            (tr!("layer-2"), Icon::Layers, true),
+            (tr!("layer-property"), Icon::LayerProperty, true),
+            (tr!("history"), Icon::History, true),
+            (tr!("animation-cels"), Icon::Cel, true),
         ];
         let (body, clicked) = header(ui, rect, &tabs, self.layer_tab, theme);
         if let Some(tab) = clicked {
@@ -3051,43 +3354,7 @@ impl SuePaint {
                 return;
             }
             2 => {
-                let mut inner = child(ui, body.shrink(8.0), "layer-history");
-                inner.horizontal(|ui| {
-                    if ui
-                        .add_enabled(cx.history.can_undo(), egui::Button::new(tr!("undo")))
-                        .clicked()
-                    {
-                        self.run("edit.undo", cx);
-                    }
-                    if ui
-                        .add_enabled(cx.history.can_redo(), egui::Button::new(tr!("redo")))
-                        .clicked()
-                    {
-                        self.run("edit.redo", cx);
-                    }
-                });
-                let labels: Vec<String> = cx
-                    .history
-                    .history()
-                    .iter()
-                    .map(|label| (*label).to_owned())
-                    .collect();
-                egui::ScrollArea::vertical()
-                    .id_salt("sue-paint-history")
-                    .stick_to_bottom(true)
-                    .show(&mut inner, |ui| {
-                        if labels.is_empty() {
-                            ui.label(RichText::new(tr!("nothing-to-undo-yet")).color(theme.muted));
-                        }
-                        for (index, label) in labels.iter().enumerate() {
-                            let last = index + 1 == labels.len();
-                            ui.label(RichText::new(label).color(if last {
-                                theme.text
-                            } else {
-                                theme.muted
-                            }));
-                        }
-                    });
+                self.history_tab(ui, body, cx, theme);
                 return;
             }
             _ => {}
@@ -3167,7 +3434,7 @@ impl SuePaint {
                 "layer.toggle.lock_alpha",
                 &tr!("lock-transparent-pixels"),
             ),
-            (Icon::Mask, "layer.mask.outside", &tr!("enable-mask")),
+            (Icon::Mask, "layer.mask.toggle", &tr!("enable-mask")),
         ];
         let mut run = None;
         for (index, (icon, command, tip)) in flags.iter().enumerate() {
@@ -3200,14 +3467,26 @@ impl SuePaint {
                 "layer.new.folder",
                 &tr!("new-layer-folder"),
             ),
-            (Icon::Duplicate, "layer.duplicate", &tr!("duplicate-layer")),
+            (
+                Icon::TransferDown,
+                "layer.transfer_down",
+                &tr!("transfer-to-lower-layer"),
+            ),
             (
                 Icon::MergeDown,
                 "layer.merge_down",
                 &tr!("merge-layer-below-ctrl-e"),
             ),
-            (Icon::Up, "layer.order.up", &tr!("move-layer-up-ctrl")),
-            (Icon::Down, "layer.order.down", &tr!("move-layer-down-ctrl")),
+            (
+                Icon::NewMask,
+                "layer.mask.outside",
+                &tr!("create-layer-mask"),
+            ),
+            (
+                Icon::ApplyMask,
+                "layer.mask.apply",
+                &tr!("apply-mask-to-layer"),
+            ),
             (Icon::Delete, "layer.delete", &tr!("delete-layer")),
         ];
         let action_top = row_top + 28.0;
@@ -4063,7 +4342,13 @@ impl SuePaint {
         ui.painter().rect_filled(rect, 0.0, theme.panel);
         ui.painter()
             .hline(rect.x_range(), rect.top(), theme.hairline());
-        let (body, _) = header(ui, rect, &[(tr!("timeline"), true)], 0, theme);
+        let (body, _) = header(
+            ui,
+            rect,
+            &[(tr!("timeline"), Icon::Timeline, true)],
+            0,
+            theme,
+        );
         let bar = Rect::from_min_size(body.min, vec2(body.width(), 28.0));
         ui.painter()
             .hline(body.x_range(), bar.bottom(), theme.hairline());

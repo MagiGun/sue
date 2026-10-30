@@ -1,5 +1,6 @@
-//! Line icons drawn with the painter, so they stay crisp at any interface
-//! scale and take the theme's color.
+//! Icons drawn with the painter, so they stay crisp at any interface scale
+//! and take the theme's color: two-tone, each shape outlined over a soft
+//! fill of its own color, so they read as objects and not wire.
 
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
 
@@ -69,7 +70,6 @@ pub enum Icon {
     Next,
     Loop,
     Up,
-    Down,
     /// Three lines: a palette's menu.
     Menu,
     /// A ring of hues: the color wheel.
@@ -106,6 +106,97 @@ pub enum Icon {
     Edit,
     /// A minus: take away or collapse.
     Minus,
+    /// Brush strokes in a stack: the sub tools.
+    SubTool,
+    /// Sliders: a tool's settings.
+    Sliders,
+    /// Bars with knobs: the color sliders.
+    ColorSlider,
+    /// A square shaded from its corners: the intermediate colors.
+    Intermediate,
+    /// A grid shading off: the approximate colors.
+    Approximate,
+    /// A clock: the history.
+    History,
+    /// A cube: the materials.
+    Material,
+    /// A picture with a mountain: the sub view.
+    SubView,
+    /// An i in a ring: information.
+    Info,
+    /// A play button over lines: the auto actions.
+    AutoAction,
+    /// An open box: the item bank.
+    ItemBank,
+    /// A sheet with a spark: the layer's properties.
+    LayerProperty,
+    /// A strip of film: the timeline.
+    Timeline,
+    /// An arrow down onto a sheet: transfer to the lower layer.
+    TransferDown,
+    /// A sheet with a mask: create a layer mask.
+    NewMask,
+    /// A mask pressed onto a sheet: apply the mask.
+    ApplyMask,
+}
+
+/// Triangles filling the simple polygon `points` (ear clipping), for the
+/// soft fill of a shape that need not be convex.
+fn fill_polygon(points: &[Pos2]) -> Vec<[usize; 3]> {
+    let n = points.len();
+    if n < 3 {
+        return Vec::new();
+    }
+    let area: f32 = (0..n)
+        .map(|i| {
+            let (a, b) = (points[i], points[(i + 1) % n]);
+            a.x * b.y - b.x * a.y
+        })
+        .sum();
+    let ccw = area > 0.0;
+    let mut left: Vec<usize> = (0..n).collect();
+    let mut out = Vec::new();
+    let cross = |a: Pos2, b: Pos2, c: Pos2| (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    let mut guard = 0;
+    while left.len() > 3 && guard < n * n {
+        guard += 1;
+        let m = left.len();
+        let mut clipped = false;
+        for i in 0..m {
+            let (ia, ib, ic) = (left[(i + m - 1) % m], left[i], left[(i + 1) % m]);
+            let (a, b, c) = (points[ia], points[ib], points[ic]);
+            let turn = cross(a, b, c);
+            if (turn > 0.0) != ccw || turn.abs() < 1e-6 {
+                continue;
+            }
+            let inside = left.iter().any(|&j| {
+                if j == ia || j == ib || j == ic {
+                    return false;
+                }
+                let q = points[j];
+                let (d1, d2, d3) = (cross(a, b, q), cross(b, c, q), cross(c, a, q));
+                if ccw {
+                    d1 > 0.0 && d2 > 0.0 && d3 > 0.0
+                } else {
+                    d1 < 0.0 && d2 < 0.0 && d3 < 0.0
+                }
+            });
+            if inside {
+                continue;
+            }
+            out.push([ia, ib, ic]);
+            left.remove(i);
+            clipped = true;
+            break;
+        }
+        if !clipped {
+            break;
+        }
+    }
+    if left.len() == 3 {
+        out.push([left[0], left[1], left[2]]);
+    }
+    out
 }
 
 fn arc(center: Pos2, radius: f32, from: f32, to: f32) -> Vec<Pos2> {
@@ -124,8 +215,24 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
     let side = rect.width().min(rect.height());
     let area = Rect::from_center_size(rect.center(), vec2(side, side));
     let p = |x: f32, y: f32| pos2(area.left() + x * side, area.top() + y * side);
-    let width = (side / 13.0).clamp(1.0, 2.0);
+    let width = (side / 11.0).clamp(1.3, 2.6);
     let stroke = Stroke::new(width, color);
+    // The soft fill under every outline.
+    let soft = color.gamma_multiply(0.26);
+    let fill = |points: Vec<Pos2>| {
+        let mut mesh = egui::Mesh::default();
+        for point in &points {
+            mesh.colored_vertex(*point, soft);
+        }
+        for [a, b, c] in fill_polygon(&points) {
+            mesh.add_triangle(a as u32, b as u32, c as u32);
+        }
+        painter.add(Shape::mesh(mesh));
+    };
+    let boxed = |rect: Rect, rounding: f32| {
+        painter.rect_filled(rect, rounding, soft);
+        painter.rect_stroke(rect, rounding, stroke, egui::StrokeKind::Middle);
+    };
     let line = |points: &[(f32, f32)]| {
         painter.add(Shape::line(
             points.iter().map(|(x, y)| p(*x, *y)).collect(),
@@ -133,10 +240,9 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         ));
     };
     let closed = |points: &[(f32, f32)]| {
-        painter.add(Shape::closed_line(
-            points.iter().map(|(x, y)| p(*x, *y)).collect(),
-            stroke,
-        ));
+        let points: Vec<Pos2> = points.iter().map(|(x, y)| p(*x, *y)).collect();
+        fill(points.clone());
+        painter.add(Shape::closed_line(points, stroke));
     };
     let filled = |points: &[(f32, f32)]| {
         painter.add(Shape::convex_polygon(
@@ -145,7 +251,10 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             Stroke::NONE,
         ));
     };
-    let circle = |x: f32, y: f32, r: f32| painter.circle_stroke(p(x, y), r * side, stroke);
+    let circle = |x: f32, y: f32, r: f32| {
+        painter.circle_filled(p(x, y), r * side, soft);
+        painter.circle_stroke(p(x, y), r * side, stroke);
+    };
     let dot = |x: f32, y: f32, r: f32| painter.circle_filled(p(x, y), r * side, color);
     let curve = |x: f32, y: f32, r: f32, from: f32, to: f32| {
         painter.add(Shape::line(arc(p(x, y), r * side, from, to), stroke));
@@ -209,11 +318,9 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         }
     };
     let lock = || {
-        painter.rect_stroke(
+        boxed(
             Rect::from_min_max(p(0.24, 0.45), p(0.76, 0.86)),
             side * 0.05,
-            stroke,
-            egui::StrokeKind::Middle,
         );
         curve(0.5, 0.45, 0.17, 180.0, 360.0);
     };
@@ -291,12 +398,7 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             ]);
         }
         Icon::Airbrush => {
-            painter.rect_stroke(
-                Rect::from_min_max(p(0.3, 0.4), p(0.58, 0.88)),
-                side * 0.05,
-                stroke,
-                egui::StrokeKind::Middle,
-            );
+            boxed(Rect::from_min_max(p(0.3, 0.4), p(0.58, 0.88)), side * 0.05);
             line(&[(0.38, 0.4), (0.38, 0.28), (0.5, 0.28), (0.5, 0.4)]);
             for (x, y) in [
                 (0.68, 0.18),
@@ -355,20 +457,10 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::Figure => {
             line(&[(0.14, 0.86), (0.5, 0.5)]);
             circle(0.68, 0.32, 0.18);
-            painter.rect_stroke(
-                Rect::from_min_max(p(0.12, 0.14), p(0.4, 0.42)),
-                0.0,
-                stroke,
-                egui::StrokeKind::Middle,
-            );
+            boxed(Rect::from_min_max(p(0.12, 0.14), p(0.4, 0.42)), 0.0);
         }
         Icon::Frame => {
-            painter.rect_stroke(
-                Rect::from_min_max(p(0.14, 0.14), p(0.86, 0.86)),
-                0.0,
-                stroke,
-                egui::StrokeKind::Middle,
-            );
+            boxed(Rect::from_min_max(p(0.14, 0.14), p(0.86, 0.86)), 0.0);
             line(&[(0.14, 0.46), (0.86, 0.4)]);
             line(&[(0.5, 0.43), (0.46, 0.86)]);
         }
@@ -438,18 +530,8 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 (0.84, 0.84),
                 (0.16, 0.84),
             ]);
-            painter.rect_stroke(
-                Rect::from_min_max(p(0.3, 0.16), p(0.64, 0.38)),
-                0.0,
-                stroke,
-                egui::StrokeKind::Middle,
-            );
-            painter.rect_stroke(
-                Rect::from_min_max(p(0.28, 0.56), p(0.72, 0.84)),
-                0.0,
-                stroke,
-                egui::StrokeKind::Middle,
-            );
+            boxed(Rect::from_min_max(p(0.3, 0.16), p(0.64, 0.38)), 0.0);
+            boxed(Rect::from_min_max(p(0.28, 0.56), p(0.72, 0.84)), 0.0);
         }
         Icon::Undo => {
             curve(0.52, 0.56, 0.26, -90.0, 90.0);
@@ -464,12 +546,7 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             filled(&[(0.86, 0.3), (0.7, 0.18), (0.7, 0.42)]);
         }
         Icon::Clear => {
-            painter.rect_stroke(
-                Rect::from_min_max(p(0.18, 0.18), p(0.82, 0.82)),
-                0.0,
-                stroke,
-                egui::StrokeKind::Middle,
-            );
+            boxed(Rect::from_min_max(p(0.18, 0.18), p(0.82, 0.82)), 0.0);
             line(&[(0.34, 0.34), (0.66, 0.66)]);
             line(&[(0.66, 0.34), (0.34, 0.66)]);
         }
@@ -567,27 +644,12 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             dot(0.5, 0.5, 0.1);
         }
         Icon::Mask => {
-            painter.rect_stroke(
-                Rect::from_min_max(p(0.16, 0.16), p(0.84, 0.84)),
-                0.0,
-                stroke,
-                egui::StrokeKind::Middle,
-            );
+            boxed(Rect::from_min_max(p(0.16, 0.16), p(0.84, 0.84)), 0.0);
             dot(0.5, 0.5, 0.2);
         }
         Icon::Duplicate => {
-            painter.rect_stroke(
-                Rect::from_min_max(p(0.14, 0.14), p(0.62, 0.62)),
-                0.0,
-                stroke,
-                egui::StrokeKind::Middle,
-            );
-            painter.rect_stroke(
-                Rect::from_min_max(p(0.38, 0.38), p(0.86, 0.86)),
-                0.0,
-                stroke,
-                egui::StrokeKind::Middle,
-            );
+            boxed(Rect::from_min_max(p(0.14, 0.14), p(0.62, 0.62)), 0.0);
+            boxed(Rect::from_min_max(p(0.38, 0.38), p(0.86, 0.86)), 0.0);
         }
         Icon::MergeDown => {
             line(&[(0.5, 0.12), (0.5, 0.6)]);
@@ -633,7 +695,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             filled(&[(0.8, 0.64), (0.88, 0.44), (0.68, 0.46)]);
         }
         Icon::Up => line(&[(0.22, 0.64), (0.5, 0.34), (0.78, 0.64)]),
-        Icon::Down => line(&[(0.22, 0.36), (0.5, 0.66), (0.78, 0.36)]),
         Icon::Menu => {
             for y in [0.3, 0.5, 0.7] {
                 line(&[(0.22, y), (0.78, y)]);
@@ -733,5 +794,148 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line(&[(0.16, 0.88), (0.84, 0.88)]);
         }
         Icon::Minus => line(&[(0.22, 0.5), (0.78, 0.5)]),
+        Icon::SubTool => {
+            for (y, w) in [(0.28, 0.5), (0.5, 0.62), (0.72, 0.44)] {
+                painter.add(Shape::line(
+                    (0..=10)
+                        .map(|step| {
+                            let t = step as f32 / 10.0;
+                            p(
+                                0.16 + w * t * 1.1,
+                                y - 0.06 * (t * std::f32::consts::PI).sin(),
+                            )
+                        })
+                        .collect(),
+                    Stroke::new(width * (1.0 + y), color),
+                ));
+            }
+        }
+        Icon::Sliders => {
+            for (y, knob) in [(0.28, 0.66), (0.5, 0.34), (0.72, 0.56)] {
+                line(&[(0.14, y), (0.86, y)]);
+                boxed(
+                    Rect::from_center_size(p(knob, y), vec2(side * 0.12, side * 0.2)),
+                    side * 0.02,
+                );
+            }
+        }
+        Icon::ColorSlider => {
+            for (x, knob) in [(0.28, 0.36), (0.5, 0.64), (0.72, 0.46)] {
+                line(&[(x, 0.14), (x, 0.86)]);
+                dot(x, knob, 0.08);
+            }
+        }
+        Icon::Intermediate => {
+            let r = Rect::from_min_max(p(0.16, 0.16), p(0.84, 0.84));
+            let mut mesh = egui::Mesh::default();
+            mesh.colored_vertex(r.left_top(), color);
+            mesh.colored_vertex(r.right_top(), color.gamma_multiply(0.45));
+            mesh.colored_vertex(r.right_bottom(), color.gamma_multiply(0.1));
+            mesh.colored_vertex(r.left_bottom(), color.gamma_multiply(0.6));
+            mesh.add_triangle(0, 1, 2);
+            mesh.add_triangle(0, 2, 3);
+            painter.add(Shape::mesh(mesh));
+            painter.rect_stroke(r, 0.0, stroke, egui::StrokeKind::Middle);
+        }
+        Icon::Approximate => {
+            for row in 0..3 {
+                for column in 0..3 {
+                    let (x, y) = (0.16 + column as f32 * 0.24, 0.16 + row as f32 * 0.24);
+                    painter.rect_filled(
+                        Rect::from_min_max(p(x, y), p(x + 0.2, y + 0.2)),
+                        side * 0.02,
+                        color.gamma_multiply(1.0 - (row + column) as f32 * 0.18),
+                    );
+                }
+            }
+        }
+        Icon::History => {
+            circle(0.5, 0.52, 0.34);
+            line(&[(0.5, 0.3), (0.5, 0.52), (0.66, 0.62)]);
+        }
+        Icon::Material => {
+            closed(&[(0.5, 0.14), (0.84, 0.32), (0.5, 0.5), (0.16, 0.32)]);
+            closed(&[(0.16, 0.32), (0.5, 0.5), (0.5, 0.88), (0.16, 0.7)]);
+            closed(&[(0.84, 0.32), (0.84, 0.7), (0.5, 0.88), (0.5, 0.5)]);
+        }
+        Icon::SubView => {
+            boxed(Rect::from_min_max(p(0.12, 0.2), p(0.88, 0.8)), side * 0.04);
+            filled(&[
+                (0.2, 0.72),
+                (0.42, 0.42),
+                (0.58, 0.62),
+                (0.66, 0.52),
+                (0.8, 0.72),
+            ]);
+            dot(0.7, 0.36, 0.06);
+        }
+        Icon::Info => {
+            circle(0.5, 0.5, 0.36);
+            line(&[(0.5, 0.46), (0.5, 0.7)]);
+            dot(0.5, 0.33, 0.045);
+        }
+        Icon::AutoAction => {
+            for y in [0.3, 0.5, 0.7] {
+                line(&[(0.14, y), (0.5, y)]);
+            }
+            filled(&[(0.6, 0.32), (0.88, 0.5), (0.6, 0.68)]);
+        }
+        Icon::ItemBank => {
+            closed(&[(0.14, 0.42), (0.86, 0.42), (0.8, 0.86), (0.2, 0.86)]);
+            line(&[(0.14, 0.42), (0.28, 0.18), (0.72, 0.18), (0.86, 0.42)]);
+            line(&[(0.38, 0.58), (0.62, 0.58)]);
+        }
+        Icon::LayerProperty => {
+            closed(&[(0.14, 0.22), (0.62, 0.22), (0.62, 0.86), (0.14, 0.86)]);
+            filled(&[
+                (0.76, 0.12),
+                (0.8, 0.3),
+                (0.94, 0.34),
+                (0.8, 0.38),
+                (0.76, 0.56),
+                (0.72, 0.38),
+                (0.58, 0.34),
+                (0.72, 0.3),
+            ]);
+        }
+        Icon::Timeline => {
+            boxed(Rect::from_min_max(p(0.1, 0.26), p(0.9, 0.74)), 0.0);
+            for x in [0.2, 0.36, 0.52, 0.68, 0.84] {
+                painter.rect_filled(
+                    Rect::from_center_size(p(x - 0.02, 0.33), vec2(side * 0.07, side * 0.05)),
+                    0.0,
+                    color,
+                );
+                painter.rect_filled(
+                    Rect::from_center_size(p(x - 0.02, 0.67), vec2(side * 0.07, side * 0.05)),
+                    0.0,
+                    color,
+                );
+            }
+        }
+        Icon::TransferDown => {
+            boxed(
+                Rect::from_min_max(p(0.14, 0.62), p(0.86, 0.86)),
+                side * 0.03,
+            );
+            line(&[(0.5, 0.12), (0.5, 0.46)]);
+            filled(&[(0.34, 0.4), (0.66, 0.4), (0.5, 0.58)]);
+            dashed_box(0.26, 0.12, 0.74, 0.3);
+        }
+        Icon::NewMask => {
+            boxed(
+                Rect::from_min_max(p(0.14, 0.18), p(0.74, 0.78)),
+                side * 0.03,
+            );
+            dot(0.44, 0.48, 0.16);
+            line(&[(0.66, 0.84), (0.9, 0.84)]);
+            line(&[(0.78, 0.72), (0.78, 0.96)]);
+        }
+        Icon::ApplyMask => {
+            boxed(Rect::from_min_max(p(0.14, 0.4), p(0.86, 0.86)), side * 0.03);
+            dot(0.5, 0.63, 0.12);
+            line(&[(0.5, 0.1), (0.5, 0.3)]);
+            filled(&[(0.38, 0.24), (0.62, 0.24), (0.5, 0.36)]);
+        }
     }
 }

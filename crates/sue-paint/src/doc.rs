@@ -1277,6 +1277,58 @@ pub fn merge_down(
     Ok((edit.then(DespawnEntity::new(layer)), below.id))
 }
 
+/// Transfer To Lower Layer: `layer`'s pixels are laid onto the raster
+/// layer below it, as Merge Down does, and `layer` stays, emptied. Answers
+/// the edit and the layer below.
+///
+/// # Errors
+/// As [`merge_down`].
+pub fn transfer_down(
+    arena: &Arena,
+    picture: EntityId,
+    layer: EntityId,
+) -> Result<(Edit, EntityId), String> {
+    let stack = layers(arena, picture);
+    let index = stack
+        .iter()
+        .position(|info| info.id == layer)
+        .ok_or(tr!("layer-not-picture"))?;
+    let below = index
+        .checked_sub(1)
+        .and_then(|at| stack.get(at))
+        .filter(|info| info.kind == LayerKind::Raster)
+        .ok_or(tr!("there-no-raster-layer-below-merge"))?;
+    if below.locked || stack[index].locked {
+        return Err(tr!("is-locked", name = below.name));
+    }
+    let upper = raster(arena, layer).ok_or(tr!("only-raster-layers-merge"))?;
+    let lower = raster(arena, below.id).ok_or(tr!("only-raster-layers-merge"))?;
+    if upper.format() != PixelFormat::Rgba8 || lower.format() != PixelFormat::Rgba8 {
+        return Err(tr!("only-rgba-layers-merge"));
+    }
+    let style = stack[index].style;
+    let mut edit = Edit::new(tr!("transfer-to-lower-layer"));
+    if let Some(patch) = merged_patch(upper, style, lower, below.style.offset) {
+        edit = edit.then(RasterEdit::new(below.id, tr!("merge-2"), vec![patch]));
+    }
+    // The upper layer, emptied.
+    let (width, height) = (upper.width(), upper.height());
+    if let Some(before) = RasterPatch::read(upper, 0, 0, width, height)
+        && before.iter().skip(3).step_by(4).any(|alpha| *alpha != 0)
+    {
+        let patch = RasterPatch {
+            x: 0,
+            y: 0,
+            width,
+            height,
+            after: vec![0; before.len()],
+            before,
+        };
+        edit = edit.then(RasterEdit::new(layer, tr!("clear"), vec![patch]));
+    }
+    Ok((edit, below.id))
+}
+
 /// The lower layer's pixels with the upper one laid over them, as a patch
 /// covering the upper layer's pixels.
 fn merged_patch(

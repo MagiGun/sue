@@ -531,6 +531,8 @@ pub struct SuePaint {
     /// Page thumbnails for the Page Manager, by page.
     pub(crate) page_thumbs: HashMap<EntityId, (u64, Vec<u8>, [u32; 2])>,
     pub(crate) preview: Option<(u64, Vec<u8>)>,
+    /// Each sub tool's sample stroke for the Sub Tool list, by its tip.
+    pub(crate) sub_previews: std::collections::HashMap<u64, Vec<u8>>,
     pub(crate) last_dir: Option<PathBuf>,
     /// An encoded export waiting for the save dialog to say where it goes.
     pub(crate) pending_export: Option<Vec<u8>>,
@@ -659,6 +661,7 @@ impl Default for SuePaint {
             thumbs: HashMap::new(),
             page_thumbs: HashMap::new(),
             preview: None,
+            sub_previews: std::collections::HashMap::new(),
             last_dir: None,
             transparent: false,
             menus_hidden: false,
@@ -4687,6 +4690,16 @@ impl SuePaint {
                     }
                 }
             }
+            "layer.transfer_down" => {
+                if let (Some(picture), Some(layer)) = (self.picture(), self.layer()) {
+                    match doc::transfer_down(&cx.world.arena, picture, layer) {
+                        Ok((edit, _)) => {
+                            Self::apply(cx, edit);
+                        }
+                        Err(error) => cx.fail(error),
+                    }
+                }
+            }
             "layer.merge_visible" | "layer.flatten" => {
                 if let Some(picture) = self.picture() {
                     match doc::merge_visible(&cx.world.arena, picture, command == "layer.flatten") {
@@ -5418,12 +5431,12 @@ impl SuePaint {
         let top_height = if self.menus_hidden || !self.panels.command_bar {
             0.0
         } else {
-            34.0
+            38.0
         };
         let lift = self.hide * top_height;
         if top_height > 0.0 {
             let top = full.top() - lift;
-            let strip = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), top + 34.0));
+            let strip = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), top + 38.0));
             self.command_bar(ui, strip, cx, &theme);
         }
         let body = Rect::from_min_max(pos2(full.left(), full.top() + top_height - lift), full.max);
@@ -6122,6 +6135,23 @@ impl SueApplet for SuePaint {
                 true
             }
             start if start.starts_with("start/") => self.start.navigate(start),
+            // A palette's tab: `tab/<palette>/<index>`.
+            tab if tab.starts_with("tab/") => {
+                let mut parts = tab["tab/".len()..].split('/');
+                let (Some(palette), Some(Ok(index))) =
+                    (parts.next(), parts.next().map(str::parse::<u8>))
+                else {
+                    return false;
+                };
+                match palette {
+                    "tool" => self.tool_tab = index,
+                    "layer" => self.layer_tab = index,
+                    "navigator" => self.nav_tab = index,
+                    "color" => self.color_tab = index,
+                    _ => return false,
+                }
+                true
+            }
             "sheet/more" => {
                 self.sheet = Some(crate::phone::Sheet::More);
                 true
