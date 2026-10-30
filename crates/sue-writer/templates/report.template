@@ -1,0 +1,26 @@
+# A report with a title, a summary and sections.
+name: tr:template-report
+about: tr:template-report-about
+group: template
+order: 40
+sheet: standard
+page: auto
+margin: 72
+header: ||{title}
+footer: |{page}|
+different-first: true
+binder: false
+
+draft:
+  document tr:report
+    title tr:title
+    subtitle tr:author
+    body {date}
+    heading1.break tr:summary
+    body
+    heading1 tr:background
+    body
+    heading1 tr:findings
+    body
+    heading1 tr:next-steps
+    body.bullet

@@ -1,0 +1,46 @@
+# Chapters of scenes in manuscript format, with research beside them.
+name: tr:template-novel
+about: tr:template-novel-about
+group: preset
+order: 10
+sheet: manuscript
+page: auto
+margin: 72
+font: body
+target: 80000
+session-target: 500
+binder: true
+
+draft:
+  folder tr:chapter-1
+    document tr:scene-1
+      synopsis tr:what-happens-line-two
+      body
+  folder tr:chapter-2
+    document tr:scene-1
+      body
+research:
+  folder tr:characters
+    document tr:character-sketch
+      synopsis tr:copy-sheet-each-character
+      heading2 tr:name
+      body
+      heading3 tr:role-in-the-story
+      body
+      heading3 tr:what-they-want
+      body
+      heading3 tr:what-stands-in-the-way
+      body
+      heading3 tr:how-they-change
+      body
+  folder tr:places
+    document tr:setting-sketch
+      synopsis tr:copy-sheet-each-place
+      heading2 tr:place
+      body
+      heading3 tr:sights-sounds-and-smells
+      body
+      heading3 tr:why-it-matters
+      body
+  document tr:notes
+    body

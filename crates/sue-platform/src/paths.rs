@@ -163,6 +163,13 @@ impl PlatformPaths {
         self.data_dir.join("models")
     }
 
+    /// Templates people keep for new work, a folder for each studio
+    /// (`writer`, ...).
+    #[must_use]
+    pub fn templates_dir(&self) -> PathBuf {
+        self.data_dir.join("templates")
+    }
+
     /// Fonts Sue keeps itself (installed from a studio), searched with the
     /// system's.
     #[must_use]
@@ -363,6 +370,7 @@ mod tests {
         let root = Path::new("/data/user/0/app.sue/files");
         let paths = PlatformPaths::resolve(OsFamily::Ios, env_of(&[]), Some(root)).unwrap();
         assert_eq!(paths.models_dir(), root.join("data").join("models"));
+        assert_eq!(paths.templates_dir(), root.join("data").join("templates"));
     }
 
     #[test]

@@ -19,6 +19,7 @@ use sue_wm::{
 
 use crate::compile::{self, FORMATS, Separator, Titles};
 use crate::project;
+use crate::templates::{Group, Template, Templates};
 
 /// The applet id.
 pub const ID: &str = "sue-writer";
@@ -107,7 +108,7 @@ pub(crate) struct Furniture {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Dialog {
     /// Choose a template for a new project.
-    NewProject { template: usize, title: String },
+    NewProject { template: String, title: String },
     /// Compile the project.
     Compile(CompileChoices),
     /// The project's settings.
@@ -212,8 +213,9 @@ pub struct SueWriter {
     pub(crate) toolbar_height: f32,
     /// Laid out for a phone this frame.
     pub(crate) phone: bool,
-    /// Pages on a phone, which reflows the text to the screen unless
-    /// asked for them (View, Page View).
+    /// Pages on a phone: the whole page fits the screen's width, as a
+    /// word processor's print layout. View, Draft View reflows the text to
+    /// the screen instead.
     pub(crate) phone_pages: bool,
     /// The binder over a phone's page (it starts closed: the text first).
     pub(crate) phone_binder: bool,
@@ -222,6 +224,8 @@ pub struct SueWriter {
     pub(crate) bars: Vec<Rect>,
     /// The Writer's row in Sue's top bar on a phone.
     pub(crate) top_bar: Option<Rect>,
+    /// The templates new documents start from (Sue's and people's own).
+    pub(crate) templates: Templates,
 }
 
 impl Default for SueWriter {
@@ -266,10 +270,11 @@ impl Default for SueWriter {
             shown_zoom: 1.0,
             toolbar_height: 36.0,
             phone: false,
-            phone_pages: false,
+            phone_pages: true,
             phone_binder: false,
             bars: Vec::new(),
             top_bar: None,
+            templates: Templates::load(),
         }
     }
 }
@@ -283,9 +288,6 @@ impl std::fmt::Debug for SueWriter {
             .finish_non_exhaustive()
     }
 }
-
-/// The page sizes the settings offer.
-pub(crate) const PAGES: &[&str] = &["Letter", "A4", "A5", "B5", "Legal", "Trade paperback"];
 
 impl SueWriter {
     // ----- What is open -----------------------------------------------------
@@ -529,12 +531,76 @@ impl SueWriter {
     /// Makes a project from template `key` and opens it.
     pub(crate) fn new_project(&mut self, cx: &mut AppletContext<'_>, key: &str, title: &str) {
         let fonts = Fonts::installed(12.0);
-        let (batch, root) = project::create(key, title, &fonts);
+        let Some(template) = self
+            .templates
+            .get(key)
+            .or_else(|| self.templates.get("blank"))
+        else {
+            return;
+        };
+        let (batch, root) = match project::create(template, title, &fonts) {
+            Ok(made) => made,
+            Err(error) => {
+                cx.notify(tr!(
+                    "could-not-read",
+                    path = template.key.clone(),
+                    error = error
+                ));
+                return;
+            }
+        };
         if !self.apply(cx, batch) {
             return;
         }
         self.open_project(cx, root, None);
         cx.notify(tr!("made", title = title));
+    }
+
+    /// Saves the open project as a template in the templates folder, so
+    /// it is offered for new documents from now on.
+    pub(crate) fn save_as_template(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(root) = self.project else {
+            cx.notify(tr!("open-a-project-first"));
+            return;
+        };
+        let name = self.title(cx);
+        let key: String = name
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() {
+                    c.to_ascii_lowercase()
+                } else {
+                    '-'
+                }
+            })
+            .collect::<String>()
+            .trim_matches('-')
+            .to_owned();
+        let key = if key.is_empty() {
+            "template".to_owned()
+        } else {
+            key
+        };
+        let (Some(template), Some(dir)) = (
+            Template::from_project(cx.arena(), root, &key, &name),
+            crate::templates::folder(),
+        ) else {
+            return;
+        };
+        let path = dir.join(format!("{key}.{}", crate::templates::EXTENSION));
+        let written =
+            std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, template.to_text()));
+        match written {
+            Ok(()) => {
+                self.templates = Templates::load();
+                cx.notify(tr!("saved-as-template", name = name));
+            }
+            Err(error) => cx.notify(tr!(
+                "could-not-write",
+                path = path.display().to_string(),
+                error = error.to_string()
+            )),
+        }
     }
 
     /// Adds a new document (or folder) after the selection.
@@ -1053,9 +1119,17 @@ impl SueWriter {
         match command {
             "file.new" => {
                 self.dialog = Some(Dialog::NewProject {
-                    template: 1,
+                    template: "blank".to_owned(),
                     title: tr!("untitled"),
                 });
+            }
+            "file.save_template" => self.save_as_template(cx),
+            "file.templates_folder" => {
+                if let Some(dir) = crate::templates::folder() {
+                    let _ = std::fs::create_dir_all(&dir);
+                    self.templates = Templates::load();
+                    cx.request(ShellRequest::Command(format!("reveal:{}", dir.display())));
+                }
             }
             "binder.new_doc" => self.add_item(cx, false),
             "binder.new_folder" => self.add_item(cx, true),
@@ -2004,22 +2078,25 @@ impl SueApplet for SueWriter {
     }
 
     fn templates(&self) -> Vec<sue_wm::FileTemplate> {
-        project::TEMPLATES
-            .iter()
-            .map(|(key, ..)| {
-                sue_wm::FileTemplate::new(tr!("writing"), project::template_name(key), *key)
+        // Documents first, then the presets for long work.
+        [Group::Template, Group::Preset]
+            .into_iter()
+            .flat_map(|group| self.templates.group(group))
+            .map(|template| {
+                let category = match template.group {
+                    Group::Template => tr!("document"),
+                    Group::Preset => tr!("presets"),
+                };
+                sue_wm::FileTemplate::new(category, template.name(), template.key.clone())
             })
             .collect()
     }
 
     fn create(&mut self, key: &str, cx: &mut AppletContext<'_>) {
-        let label = project::TEMPLATES
-            .iter()
-            .find(|(known, ..)| *known == key)
-            .map_or_else(
-                || tr!("untitled"),
-                |(known, ..)| project::template_name(known),
-            );
+        let label = self
+            .templates
+            .get(key)
+            .map_or_else(|| tr!("untitled"), Template::name);
         self.new_project(cx, key, &label);
         cx.request(ShellRequest::Open(me()));
     }
@@ -2107,6 +2184,13 @@ impl SueApplet for SueWriter {
             }
             "view/composition" => {
                 self.composition = true;
+                true
+            }
+            // The start page: templates, presets and what is in the project.
+            "start" => {
+                self.project = None;
+                self.open = None;
+                self.selected = None;
                 true
             }
             // The caret at the end of the open text, with the keyboard.

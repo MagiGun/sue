@@ -1,0 +1,31 @@
+# One story in manuscript format.
+name: tr:template-short-story
+about: tr:template-short-story-about
+group: preset
+order: 20
+sheet: manuscript
+page: auto
+margin: 72
+target: 5000
+session-target: 500
+binder: true
+
+draft:
+  document tr:story
+    body
+research:
+  folder tr:characters
+    document tr:character-sketch
+      synopsis tr:copy-sheet-each-character
+      heading2 tr:name
+      body
+      heading3 tr:role-in-the-story
+      body
+      heading3 tr:what-they-want
+      body
+      heading3 tr:what-stands-in-the-way
+      body
+      heading3 tr:how-they-change
+      body
+  document tr:notes
+    body

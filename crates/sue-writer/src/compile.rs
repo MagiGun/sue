@@ -487,7 +487,8 @@ mod tests {
     fn a_novel_compiles_to_every_format() {
         let mut arena = Arena::new();
         let mut history = UndoStack::new();
-        let (batch, root) = crate::project::create("novel", "Book", &sue_type::Fonts::default());
+        let (batch, root) =
+            crate::project::create_built_in("novel", "Book", &sue_type::Fonts::default()).unwrap();
         history.apply(&mut arena, batch).unwrap();
         let draft = manuscript::folder(&arena, root, role::DRAFT).unwrap();
         // Write a little in each scene.

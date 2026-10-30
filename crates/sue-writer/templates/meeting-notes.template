@@ -1,0 +1,22 @@
+# Notes from a meeting: who came, what was said and what happens next.
+name: tr:template-meeting-notes
+about: tr:template-meeting-notes-about
+group: template
+order: 80
+sheet: standard
+page: auto
+margin: 72
+binder: false
+
+draft:
+  document tr:meeting-notes
+    title tr:meeting-notes
+    body {date}
+    heading2 tr:attendees
+    body.bullet
+    heading2 tr:agenda
+    body.number
+    heading2 tr:discussion
+    body
+    heading2 tr:action-items
+    body.bullet

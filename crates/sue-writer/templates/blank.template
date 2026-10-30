@@ -1,0 +1,13 @@
+# One empty document on pages, as a word processor opens.
+name: tr:template-blank
+about: tr:template-blank-about
+group: template
+order: 0
+sheet: standard
+page: auto
+margin: 72
+binder: false
+
+draft:
+  document tr:document
+    body

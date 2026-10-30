@@ -2619,11 +2619,14 @@ impl Editor {
                 }
             }
         } else {
+            // The paper runs at least to the bottom of the view, so a short
+            // text reads as a sheet rather than a strip cut from one.
             let column = Rect::from_min_size(
                 pos2(self.origin.x + self.page_x - 24.0, self.origin.y),
                 vec2(
                     self.laid.page.x + 48.0,
-                    self.laid.text_height + self.gap * 2.0,
+                    (self.laid.text_height + self.gap * 2.0)
+                        .max(self.viewport.bottom() - self.origin.y),
                 ),
             );
             painter.rect_filled(column.intersect(self.viewport), 0.0, view.ink.paper);

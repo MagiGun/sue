@@ -472,10 +472,21 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         }
         shoot(&mut runtime, &mut camera, name)?;
     }
+    // 19-start. The start page: templates as pages, and the Presets list.
     if let Some(applet) = runtime.applets.get_mut(&writer) {
         applet.navigate("dialog/close");
         applet.navigate("view/document");
+        applet.navigate("start");
     }
+    shoot(&mut runtime, &mut camera, "19-sue-writer-start")?;
+    runtime.request(
+        ShellRequest::OpenIn {
+            entity: novel,
+            applet: writer.clone(),
+        },
+        &mut camera.painter,
+        camera.now,
+    );
     // 19a. The comments beside the text (Review, Comments), shown and put
     // away again.
     for shown in [true, false] {
@@ -696,6 +707,31 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
             camera.now,
         );
         shoot(&mut runtime, &mut camera, &format!("{prefix}-sue-writer"))?;
+        // The start page, and the page upright and on its side.
+        if let Some(applet) = runtime.applets.get_mut(&writer) {
+            applet.navigate("start");
+        }
+        shoot(
+            &mut runtime,
+            &mut camera,
+            &format!("{prefix}-sue-writer-start"),
+        )?;
+        runtime.request(
+            ShellRequest::OpenIn {
+                entity: novel,
+                applet: writer.clone(),
+            },
+            &mut camera.painter,
+            camera.now,
+        );
+        let upright = camera.size;
+        camera.size = [upright[1], upright[0]];
+        shoot(
+            &mut runtime,
+            &mut camera,
+            &format!("{prefix}-sue-writer-turned"),
+        )?;
+        camera.size = upright;
         if interface == "phone" {
             // Writing with the on-screen keyboard up: the window above it
             // keeps the caret's line and the formatting in sight.

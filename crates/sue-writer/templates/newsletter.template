@@ -1,0 +1,23 @@
+# A newsletter: a masthead, a lead story and short items.
+name: tr:template-newsletter
+about: tr:template-newsletter-about
+group: template
+order: 60
+sheet: standard
+page: auto
+margin: 54
+footer: {title}||{page}
+binder: false
+
+draft:
+  document tr:newsletter
+    title.center tr:newsletter-name
+    subtitle.center tr:newsletter-issue
+    heading1 tr:lead-story
+    body tr:lead-story-text
+    quote tr:pull-quote
+    heading2 tr:news-in-brief
+    body.bullet tr:news-item
+    body.bullet tr:news-item
+    heading2 tr:coming-up
+    body tr:coming-up-text

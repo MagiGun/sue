@@ -11,6 +11,8 @@ use sue_core::{Arena, CHILD, Entity, EntityId, OrderKey, Relation, StringBuffer,
 use sue_model::manuscript::{self, role};
 use sue_model::{TextMarks, class, mark_kind as kind};
 
+use crate::templates::{Body, Item, Paragraph, Template, Templates, words};
+
 /// The style sheet a project uses (`Text`, a key of `sue_type::SHEETS`).
 pub const SHEET: &str = "sue_writer.sheet";
 /// The page size, by name (`Text`, e.g. `Letter`).
@@ -39,6 +41,8 @@ pub const HEADER: &str = "sue_writer.header";
 pub const FOOTER: &str = "sue_writer.footer";
 /// `true`: no header or footer on the first page (`Bool`).
 pub const DIFFERENT_FIRST: &str = "sue_writer.different_first";
+/// The template a project was made from, by key (`Text`).
+pub const TEMPLATE: &str = "sue_writer.template";
 /// The relation from a document to its snapshots.
 pub const SNAPSHOT: &str = "sue_writer.snapshot";
 /// When a snapshot was taken, as text (`Text`).
@@ -94,41 +98,6 @@ pub fn label_text(name: &str) -> String {
     }
 }
 
-/// The name of template `key` (one of [`TEMPLATES`]) in the language in
-/// use.
-#[must_use]
-pub fn template_name(key: &str) -> String {
-    match key {
-        "blank" => tr!("template-blank"),
-        "novel" => tr!("template-novel"),
-        "short-story" => tr!("template-short-story"),
-        "screenplay" => tr!("template-screenplay"),
-        "nonfiction" => tr!("template-nonfiction"),
-        "essay" => tr!("template-essay"),
-        "poetry" => tr!("template-poetry"),
-        "letter" => tr!("template-letter"),
-        "report" => tr!("template-report"),
-        other => other.to_owned(),
-    }
-}
-
-/// What template `key` is for, in the language in use.
-#[must_use]
-pub fn template_about(key: &str) -> String {
-    match key {
-        "blank" => tr!("template-blank-about"),
-        "novel" => tr!("template-novel-about"),
-        "short-story" => tr!("template-short-story-about"),
-        "screenplay" => tr!("template-screenplay-about"),
-        "nonfiction" => tr!("template-nonfiction-about"),
-        "essay" => tr!("template-essay-about"),
-        "poetry" => tr!("template-poetry-about"),
-        "letter" => tr!("template-letter-about"),
-        "report" => tr!("template-report-about"),
-        _ => String::new(),
-    }
-}
-
 /// The color of label `name`.
 #[must_use]
 pub fn label_color(name: &str) -> Option<[u8; 3]> {
@@ -136,80 +105,6 @@ pub fn label_color(name: &str) -> Option<[u8; 3]> {
         .iter()
         .find(|(label, _)| label.eq_ignore_ascii_case(name))
         .map(|(_, color)| *color)
-}
-
-/// The kinds of new projects: key, label, and what it is for.
-pub const TEMPLATES: &[(&str, &str, &str)] = &[
-    (
-        "blank",
-        "Blank Document",
-        "One document on pages, as a word processor opens.",
-    ),
-    (
-        "novel",
-        "Novel",
-        "Chapters of scenes, with research for characters and places.",
-    ),
-    (
-        "short-story",
-        "Short Story",
-        "One story in manuscript format.",
-    ),
-    (
-        "screenplay",
-        "Screenplay",
-        "Scenes in screenplay format, Enter and Tab moving between elements.",
-    ),
-    (
-        "nonfiction",
-        "Non-fiction Book",
-        "Parts and chapters with notes and sources.",
-    ),
-    (
-        "essay",
-        "Essay or Paper",
-        "A titled paper with headings and notes.",
-    ),
-    ("poetry", "Poetry Collection", "A poem to a document."),
-    ("letter", "Letter", "A letter on one page."),
-    (
-        "report",
-        "Report",
-        "A report with a title, a summary and sections.",
-    ),
-];
-
-/// A document to make: its name, its text, and the style of each of its
-/// paragraphs.
-struct Sheet {
-    name: String,
-    paragraphs: Vec<(&'static str, String)>,
-    synopsis: String,
-}
-
-impl Sheet {
-    fn new(name: &str, paragraphs: &[(&'static str, &str)]) -> Self {
-        Self {
-            name: name.to_owned(),
-            paragraphs: paragraphs
-                .iter()
-                .map(|(style, text)| (*style, (*text).to_owned()))
-                .collect(),
-            synopsis: String::new(),
-        }
-    }
-
-    fn about(mut self, synopsis: &str) -> Self {
-        synopsis.clone_into(&mut self.synopsis);
-        self
-    }
-}
-
-/// Something in a new binder: a folder (its name, synopsis and items) or
-/// a document. Their names are made in the language in use.
-enum Item {
-    Folder(String, &'static str, Vec<Item>),
-    Text(Sheet),
 }
 
 /// Text and marks for `paragraphs` (style key, text).
@@ -244,231 +139,121 @@ pub fn document_entity(name: &str, text: String, marks: TextMarks) -> Entity {
         .with_ext(marks)
 }
 
-fn structure(template: &str) -> (&'static str, Vec<Item>, Vec<Item>) {
-    fn body(text: &str) -> (&'static str, &str) {
-        (sue_type::BODY, text)
+/// What a template's paragraph modifier `name` sets, as a paragraph
+/// mark: kind and value.
+fn paragraph_mark(name: &str) -> Option<(&'static str, Value)> {
+    Some(match name {
+        "bullet" | "number" => (kind::LIST, Value::Text(name.to_owned())),
+        "center" | "right" | "justify" | "left" => (kind::ALIGN, Value::Text(name.to_owned())),
+        "break" => (kind::PAGE_BREAK, Value::Bool(true)),
+        _ => return None,
+    })
+}
+
+/// Text and marks for a template document's `paragraphs`.
+fn template_text(paragraphs: &[Paragraph]) -> (String, TextMarks) {
+    let lines: Vec<(&str, String)> = paragraphs
+        .iter()
+        .map(|paragraph| (paragraph.style.as_str(), words(&paragraph.text)))
+        .collect();
+    let (text, mut marks) = rich(&lines);
+    let mut start = 0;
+    for (paragraph, (_, line)) in paragraphs.iter().zip(&lines) {
+        for name in &paragraph.mods {
+            if let Some((mark, value)) = paragraph_mark(name) {
+                marks.set_paragraphs(&text, start..start, mark, Some(value));
+            } else if let Some(mark) = match name.as_str() {
+                "bold" => Some(kind::BOLD),
+                "italic" => Some(kind::ITALIC),
+                _ => None,
+            } && !line.is_empty()
+            {
+                marks.set(start..start + line.len(), mark, Some(Value::Bool(true)));
+            }
+        }
+        start += line.len() + 1;
     }
-    let character = || {
-        Item::Text(
-            Sheet::new(
-                &tr!("character-sketch"),
-                &[
-                    ("heading2", &tr!("name")),
-                    body(""),
-                    ("heading3", &tr!("role-in-the-story")),
-                    body(""),
-                    ("heading3", &tr!("what-they-want")),
-                    body(""),
-                    ("heading3", &tr!("what-stands-in-the-way")),
-                    body(""),
-                    ("heading3", &tr!("how-they-change")),
-                    body(""),
-                ],
-            )
-            .about(&tr!("copy-sheet-each-character")),
-        )
-    };
-    let place = || {
-        Item::Text(
-            Sheet::new(
-                &tr!("setting-sketch"),
-                &[
-                    ("heading2", &tr!("place")),
-                    body(""),
-                    ("heading3", &tr!("sights-sounds-and-smells")),
-                    body(""),
-                    ("heading3", &tr!("why-it-matters")),
-                    body(""),
-                ],
-            )
-            .about(&tr!("copy-sheet-each-place")),
-        )
-    };
-    match template {
-        "novel" => (
-            "manuscript",
-            vec![
-                Item::Folder(
-                    tr!("chapter-1"),
-                    "",
-                    vec![Item::Text(
-                        Sheet::new(&tr!("scene-1"), &[body("")])
-                            .about(&tr!("what-happens-line-two")),
-                    )],
-                ),
-                Item::Folder(
-                    tr!("chapter-2"),
-                    "",
-                    vec![Item::Text(Sheet::new(&tr!("scene-1"), &[body("")]))],
-                ),
-            ],
-            vec![
-                Item::Folder(tr!("characters"), "", vec![character()]),
-                Item::Folder(tr!("places"), "", vec![place()]),
-                Item::Text(Sheet::new(&tr!("notes"), &[body("")])),
-            ],
-        ),
-        "short-story" => (
-            "manuscript",
-            vec![Item::Text(Sheet::new(&tr!("story"), &[body("")]))],
-            vec![
-                Item::Folder(tr!("characters"), "", vec![character()]),
-                Item::Text(Sheet::new(&tr!("notes"), &[body("")])),
-            ],
-        ),
-        "screenplay" => (
-            "screenplay",
-            vec![
-                Item::Folder(
-                    tr!("act-one"),
-                    "",
-                    vec![Item::Text(Sheet::new(
-                        &tr!("scene-1"),
-                        &[("scene", &tr!("int-location-day")), body(&tr!("action"))],
-                    ))],
-                ),
-                Item::Folder(tr!("act-two"), "", vec![]),
-                Item::Folder(tr!("act-three"), "", vec![]),
-            ],
-            vec![
-                Item::Folder(tr!("characters"), "", vec![character()]),
-                Item::Text(Sheet::new(&tr!("notes"), &[body("")])),
-            ],
-        ),
-        "nonfiction" => (
-            "standard",
-            vec![
-                Item::Text(Sheet::new(
-                    &tr!("introduction"),
-                    &[("heading1", &tr!("introduction")), body("")],
-                )),
-                Item::Folder(
-                    tr!("part-one"),
-                    "",
-                    vec![Item::Text(Sheet::new(
-                        &tr!("chapter-1"),
-                        &[("heading1", &tr!("chapter-1")), body("")],
-                    ))],
-                ),
-                Item::Text(Sheet::new(
-                    &tr!("conclusion"),
-                    &[("heading1", &tr!("conclusion")), body("")],
-                )),
-            ],
-            vec![
-                Item::Text(Sheet::new(&tr!("sources"), &[body("")])),
-                Item::Text(Sheet::new(&tr!("notes"), &[body("")])),
-            ],
-        ),
-        "essay" => (
-            "standard",
-            vec![Item::Text(Sheet::new(
-                &tr!("paper"),
-                &[
-                    ("title", &tr!("title")),
-                    ("subtitle", &tr!("author")),
-                    ("heading1", &tr!("introduction")),
-                    body(""),
-                    ("heading1", &tr!("discussion")),
-                    body(""),
-                    ("heading1", &tr!("conclusion")),
-                    body(""),
-                ],
-            ))],
-            vec![Item::Text(Sheet::new(&tr!("sources"), &[body("")]))],
-        ),
-        "poetry" => (
-            "standard",
-            vec![Item::Text(Sheet::new(
-                &tr!("untitled-poem"),
-                &[("heading1", &tr!("untitled")), body("")],
-            ))],
-            vec![Item::Text(Sheet::new(&tr!("ideas"), &[body("")]))],
-        ),
-        "letter" => (
-            "standard",
-            vec![Item::Text(Sheet::new(
-                &tr!("letter"),
-                &[
-                    body(&tr!("your-name")),
-                    body(&tr!("your-address")),
-                    body(""),
-                    body(&tr!("date")),
-                    body(""),
-                    body(&tr!("dear")),
-                    body(""),
-                    body(&tr!("kind-regards")),
-                    body(""),
-                    body(&tr!("your-name")),
-                ],
-            ))],
-            vec![],
-        ),
-        "report" => (
-            "standard",
-            vec![Item::Text(Sheet::new(
-                &tr!("report"),
-                &[
-                    ("title", &tr!("title")),
-                    ("heading1", &tr!("summary")),
-                    body(""),
-                    ("heading1", &tr!("background")),
-                    body(""),
-                    ("heading1", &tr!("findings")),
-                    body(""),
-                    ("heading1", &tr!("next-steps")),
-                    body(""),
-                ],
-            ))],
-            vec![],
-        ),
-        _ => (
-            "standard",
-            vec![Item::Text(Sheet::new(&tr!("document"), &[body("")]))],
-            vec![],
-        ),
+    (text, marks)
+}
+
+/// The page size a template asks for by name; `auto` (or nothing) is the
+/// size people use where they live: Letter in the Americas that use it
+/// and the Philippines, A4 elsewhere (as word processors choose by
+/// locale).
+#[must_use]
+pub fn page_for(setting: Option<&str>) -> String {
+    match setting {
+        Some(name) if !name.is_empty() && !name.eq_ignore_ascii_case("auto") => name.to_owned(),
+        _ => {
+            let tag = sue_lang::current();
+            let region = tag
+                .split(['-', '_'])
+                .skip(1)
+                .find(|part| part.len() == 2)
+                .unwrap_or_default()
+                .to_ascii_uppercase();
+            let letter = ["US", "CA", "MX", "PH", "CL", "CO", "VE"].contains(&region.as_str())
+                || (region.is_empty() && tag == "en");
+            if letter { "Letter" } else { "A4" }.to_owned()
+        }
     }
 }
 
-/// Makes a project from template `key` named `title`: the spawns as one
-/// undo step, and the project's id.
-#[must_use]
-pub fn create(key: &str, title: &str, fonts: &sue_type::Fonts) -> (Batch<Arena>, EntityId) {
-    let (sheet, draft, research) = structure(key);
-    let simple = matches!(key, "blank" | "letter" | "report" | "essay");
+/// Makes a project named `title` from `template`: the spawns as one undo
+/// step, and the project's id.
+///
+/// # Errors
+/// When a template kept as a document file cannot be read.
+pub fn create(
+    template: &Template,
+    title: &str,
+    fonts: &sue_type::Fonts,
+) -> Result<(Batch<Arena>, EntityId), String> {
+    let setting = |key: &str| template.setting(key);
+    let number = |key: &str| setting(key).and_then(|value| value.trim().parse::<f64>().ok());
+    let sheet = setting("sheet").unwrap_or("standard");
+    let simple = !template.binder();
     let mut root = Entity::empty(title, class::MANUSCRIPT)
         .with_property(manuscript::TITLE, title)
+        .with_property(TEMPLATE, template.key.as_str())
         .with_property(SHEET, sheet)
-        .with_property(PAGE, tr!("letter"))
-        .with_property(MARGIN, 72.0);
+        .with_property(PAGE, page_for(setting("page")))
+        .with_property(MARGIN, number("margin").unwrap_or(72.0));
     // Only fonts that are really installed are written down; a project
     // made before the fonts are known takes the best ones once they are.
-    let body = if sheet == "screenplay" {
-        &fonts.mono
-    } else {
-        &fonts.body
+    let body = match setting("font") {
+        Some("mono") => fonts.mono.clone(),
+        Some("body") | None => fonts.body.clone(),
+        Some(family) => family.to_owned(),
     };
     if body != sue_wm::fonts::SANS && body != sue_wm::fonts::MONO {
-        root = root.with_property(FONT, body.clone());
+        root = root.with_property(FONT, body);
     }
-    if fonts.heading != sue_wm::fonts::SANS {
-        root = root.with_property(HEADING_FONT, fonts.heading.clone());
+    let heading = setting("heading-font").map_or_else(|| fonts.heading.clone(), str::to_owned);
+    if heading != sue_wm::fonts::SANS {
+        root = root.with_property(HEADING_FONT, heading);
     }
-    let root = root
-        .with_property(
-            SIZE,
-            if sheet == "screenplay" {
-                12.0
-            } else {
-                f64::from(fonts.size)
-            },
-        )
+    root = root
+        .with_property(SIZE, number("size").unwrap_or(f64::from(fonts.size)))
         .with_property(SIMPLE, simple)
-        .with_property(SESSION_TARGET, 500_i64);
-    let root = match key {
-        "novel" => root.with_property(manuscript::TARGET, 80_000_i64),
-        "short-story" => root.with_property(manuscript::TARGET, 5_000_i64),
-        _ => root,
+        .with_property(
+            SESSION_TARGET,
+            number("session-target").map_or(500, |n| n as i64),
+        );
+    for (key, property) in [("header", HEADER), ("footer", FOOTER)] {
+        if let Some(value) = setting(key) {
+            root = root.with_property(property, value.replace('|', "\t"));
+        }
+    }
+    if setting("different-first") == Some("true") {
+        root = root.with_property(DIFFERENT_FIRST, true);
+    }
+    if let Some(target) = number("target") {
+        root = root.with_property(manuscript::TARGET, target as i64);
+    }
+    let (draft, research) = match &template.body {
+        Body::Outline { draft, research } => (draft.as_slice(), research.as_slice()),
+        Body::File(_) => (&[][..], &[][..]),
     };
     let root_id = root.id();
     let mut batch = Batch::new(tr!("new", title = title)).then(SpawnEntity::new(root));
@@ -476,12 +261,14 @@ pub fn create(key: &str, title: &str, fonts: &sue_type::Fonts) -> (Batch<Arena>,
     let mut folders = vec![(tr!("manuscript"), role::DRAFT, draft)];
     if !simple {
         folders.push((tr!("research"), role::RESEARCH, research));
-        folders.push((tr!("trash"), role::TRASH, Vec::new()));
+        folders.push((tr!("trash"), role::TRASH, &[][..]));
     }
+    let mut draft_id = None;
     for (name, folder_role, items) in folders {
         let folder =
             Entity::empty(name, class::FOLDER).with_property(manuscript::ROLE, folder_role);
         let id = folder.id();
+        draft_id.get_or_insert(id);
         let order = orders.next().unwrap_or_default();
         batch
             .push(Box::new(SpawnEntity::new(folder).with_relation(
@@ -489,30 +276,69 @@ pub fn create(key: &str, title: &str, fonts: &sue_type::Fonts) -> (Batch<Arena>,
             )));
         add_items(&mut batch, id, items);
     }
-    (batch, root_id)
+    // A Word or OpenDocument file kept as a template: its text is the
+    // one document.
+    if let (Body::File(path), Some(draft)) = (&template.body, draft_id) {
+        let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+        let imported = crate::compile::import(&path.to_string_lossy(), &bytes)?;
+        for entity in imported.entities {
+            batch.push(Box::new(SpawnEntity::new(entity)));
+        }
+        let doc = document_entity(title, imported.text, imported.marks);
+        let id = doc.id();
+        let order = OrderKey::sequence(None, 1)
+            .into_iter()
+            .next()
+            .unwrap_or_default();
+        batch.push(Box::new(
+            SpawnEntity::new(doc).with_relation(Relation::new(draft, CHILD, id).ordered(order)),
+        ));
+    }
+    Ok((batch, root_id))
 }
 
-fn add_items(batch: &mut Batch<Arena>, parent: EntityId, items: Vec<Item>) {
+/// Makes a project from Sue's own template `key` (a blank document when
+/// there is none), as [`create`].
+#[must_use]
+pub fn create_built_in(
+    key: &str,
+    title: &str,
+    fonts: &sue_type::Fonts,
+) -> Option<(Batch<Arena>, EntityId)> {
+    let templates = Templates::built_in();
+    let template = templates.get(key).or_else(|| templates.get("blank"))?;
+    create(template, title, fonts).ok()
+}
+
+fn add_items(batch: &mut Batch<Arena>, parent: EntityId, items: &[Item]) {
     let orders = OrderKey::sequence(None, items.len());
-    for (item, order) in items.into_iter().zip(orders) {
+    for (item, order) in items.iter().zip(orders) {
         match item {
-            Item::Folder(name, synopsis, children) => {
-                let mut folder = Entity::empty(&name, class::FOLDER);
+            Item::Folder {
+                name,
+                synopsis,
+                items,
+            } => {
+                let mut folder = Entity::empty(words(name), class::FOLDER);
                 if !synopsis.is_empty() {
-                    folder = folder.with_property(manuscript::SYNOPSIS, synopsis);
+                    folder = folder.with_property(manuscript::SYNOPSIS, words(synopsis));
                 }
                 let id = folder.id();
                 batch
                     .push(Box::new(SpawnEntity::new(folder).with_relation(
                         Relation::new(parent, CHILD, id).ordered(order),
                     )));
-                add_items(batch, id, children);
+                add_items(batch, id, items);
             }
-            Item::Text(sheet) => {
-                let (text, marks) = rich(&sheet.paragraphs);
-                let mut entity = document_entity(&sheet.name, text, marks);
-                if !sheet.synopsis.is_empty() {
-                    entity = entity.with_property(manuscript::SYNOPSIS, sheet.synopsis);
+            Item::Document {
+                name,
+                synopsis,
+                paragraphs,
+            } => {
+                let (text, marks) = template_text(paragraphs);
+                let mut entity = document_entity(&words(name), text, marks);
+                if !synopsis.is_empty() {
+                    entity = entity.with_property(manuscript::SYNOPSIS, words(synopsis));
                 }
                 let id = entity.id();
                 batch
@@ -964,9 +790,105 @@ mod tests {
     fn project(key: &str) -> (Arena, UndoStack<Arena>, EntityId) {
         let mut arena = Arena::new();
         let mut history = UndoStack::new();
-        let (batch, root) = create(key, "Book", &sue_type::Fonts::default());
+        let (batch, root) = create_built_in(key, "Book", &sue_type::Fonts::default()).unwrap();
         history.apply(&mut arena, batch).unwrap();
         (arena, history, root)
+    }
+
+    #[test]
+    fn every_template_makes_a_project_that_undoes_away() {
+        let templates = Templates::built_in();
+        for template in templates.all() {
+            let mut arena = Arena::new();
+            let mut history = UndoStack::new();
+            let (batch, root) = create(template, "Made", &sue_type::Fonts::default()).unwrap();
+            history.apply(&mut arena, batch).unwrap();
+            let project = arena.get_by_id(root).unwrap();
+            assert_eq!(
+                project.property(TEMPLATE).and_then(Value::as_str),
+                Some(template.key.as_str())
+            );
+            let page = project.property(PAGE).and_then(Value::as_str).unwrap();
+            assert!(
+                sue_model::page_size(page).is_some(),
+                "{}: {page}",
+                template.key
+            );
+            assert_eq!(
+                project.property(SIMPLE).and_then(Value::as_bool),
+                Some(!template.binder())
+            );
+            let draft = manuscript::folder(&arena, root, role::DRAFT).unwrap();
+            assert!(
+                manuscript::walk(&arena, draft)
+                    .iter()
+                    .any(|(id, _)| manuscript::is_document(arena.get_by_id(*id).unwrap())),
+                "{} has a document",
+                template.key
+            );
+            history.undo(&mut arena).unwrap();
+            assert_eq!(arena.len(), 0, "{}", template.key);
+        }
+    }
+
+    #[test]
+    fn a_template_sets_lists_alignment_and_running_heads() {
+        let (arena, _, root) = project("resume");
+        let draft = manuscript::folder(&arena, root, role::DRAFT).unwrap();
+        let doc = arena
+            .get_by_id(manuscript::children(&arena, draft)[0])
+            .unwrap();
+        let text = doc.string_buffer().unwrap().as_str().to_owned();
+        let marks = doc.ext::<TextMarks>().unwrap();
+        assert_eq!(
+            marks.paragraph_value(&text, 0, kind::STYLE),
+            Some(&Value::Text("title".into()))
+        );
+        assert_eq!(
+            marks.paragraph_value(&text, 0, kind::ALIGN),
+            Some(&Value::Text("center".into()))
+        );
+        let bullets = (0..sue_model::paragraphs(&text).len())
+            .filter(|index| {
+                marks.paragraph_value(&text, *index, kind::LIST)
+                    == Some(&Value::Text("bullet".into()))
+            })
+            .count();
+        assert!(bullets >= 3);
+        let (arena, _, root) = project("report");
+        let report = arena.get_by_id(root).unwrap();
+        assert_eq!(
+            report.property(HEADER).and_then(Value::as_str),
+            Some("		{title}")
+        );
+        assert_eq!(
+            report.property(DIFFERENT_FIRST).and_then(Value::as_bool),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn a_project_saved_as_a_template_makes_the_same_project() {
+        for key in ["novel", "resume", "screenplay"] {
+            let (arena, _, root) = project(key);
+            let saved = Template::from_project(&arena, root, "mine", "Mine").unwrap();
+            let read = Template::parse("mine", &saved.to_text()).unwrap();
+            assert_eq!(read.body, saved.body, "{key}");
+            let mut again = Arena::new();
+            let (batch, made) = create(&read, "Again", &sue_type::Fonts::default()).unwrap();
+            let mut history = UndoStack::new();
+            history.apply(&mut again, batch).unwrap();
+            let twice = Template::from_project(&again, made, "mine", "Mine").unwrap();
+            assert_eq!(twice.body, saved.body, "{key}");
+            assert_eq!(twice.settings, saved.settings, "{key}");
+        }
+    }
+
+    #[test]
+    fn the_page_follows_where_people_live() {
+        assert_eq!(page_for(Some("A5")), "A5");
+        let auto = page_for(Some("auto"));
+        assert!(auto == "Letter" || auto == "A4");
     }
 
     #[test]

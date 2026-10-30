@@ -1,0 +1,28 @@
+# A letter that goes with a job application.
+name: tr:template-cover-letter
+about: tr:template-cover-letter-about
+group: template
+order: 20
+sheet: standard
+page: auto
+margin: 72
+footer:
+binder: false
+
+draft:
+  document tr:cover-letter
+    title tr:your-name
+    body tr:contact-line
+    body
+    body {date}
+    body
+    body tr:hiring-manager
+    body tr:company-address
+    body
+    body tr:dear-hiring-manager
+    body tr:cover-letter-opening
+    body tr:cover-letter-middle
+    body tr:cover-letter-closing
+    body
+    body tr:sincerely
+    body tr:your-name

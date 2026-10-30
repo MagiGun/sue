@@ -1,0 +1,32 @@
+# A resume: a name, how to reach you, then experience, education and skills.
+name: tr:template-resume
+about: tr:template-resume-about
+group: template
+order: 30
+sheet: standard
+page: auto
+margin: 54
+footer:
+binder: false
+
+draft:
+  document tr:resume
+    title.center tr:your-name
+    body.center tr:contact-line
+    heading1 tr:profile
+    body tr:profile-text
+    heading1 tr:experience
+    heading3 tr:job-title-company
+    body.italic tr:job-dates
+    body.bullet tr:job-achievement
+    body.bullet tr:job-achievement
+    heading3 tr:job-title-company
+    body.italic tr:job-dates
+    body.bullet tr:job-achievement
+    heading1 tr:education
+    heading3 tr:degree-school
+    body.italic tr:job-dates
+    heading1 tr:skills
+    body.bullet tr:skill
+    body.bullet tr:skill
+    body.bullet tr:skill

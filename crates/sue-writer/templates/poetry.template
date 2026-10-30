@@ -1,0 +1,18 @@
+# A collection with a poem to a document.
+name: tr:template-poetry
+about: tr:template-poetry-about
+group: preset
+order: 50
+sheet: standard
+page: auto
+margin: 72
+session-target: 100
+binder: true
+
+draft:
+  document tr:untitled-poem
+    heading1 tr:untitled
+    body
+research:
+  document tr:ideas
+    body

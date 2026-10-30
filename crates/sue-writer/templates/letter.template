@@ -1,0 +1,27 @@
+# A letter on one page: sender, date, greeting and closing.
+name: tr:template-letter
+about: tr:template-letter-about
+group: template
+order: 10
+sheet: standard
+page: auto
+margin: 72
+footer:
+binder: false
+
+draft:
+  document tr:letter
+    body tr:your-name
+    body tr:your-address
+    body
+    body {date}
+    body
+    body tr:recipient-name
+    body tr:recipient-address
+    body
+    body tr:dear
+    body tr:letter-body
+    body
+    body tr:kind-regards
+    body
+    body tr:your-name

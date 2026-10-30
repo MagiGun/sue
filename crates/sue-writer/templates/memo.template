@@ -1,0 +1,20 @@
+# A memo: to, from, date and subject, then the message.
+name: tr:template-memo
+about: tr:template-memo-about
+group: template
+order: 70
+sheet: standard
+page: auto
+margin: 72
+footer:
+binder: false
+
+draft:
+  document tr:memo
+    title tr:memo
+    body tr:memo-to
+    body tr:memo-from
+    body tr:memo-date {date}
+    body tr:memo-subject
+    body
+    body tr:memo-body

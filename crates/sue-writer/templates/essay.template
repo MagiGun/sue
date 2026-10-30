@@ -1,0 +1,23 @@
+# A titled paper with headings and sources.
+name: tr:template-essay
+about: tr:template-essay-about
+group: template
+order: 50
+sheet: standard
+page: auto
+margin: 72
+header: ||{author} {page}
+binder: false
+
+draft:
+  document tr:paper
+    title.center tr:title
+    subtitle.center tr:author
+    heading1 tr:introduction
+    body
+    heading1 tr:discussion
+    body
+    heading1 tr:conclusion
+    body
+    heading1.break tr:sources
+    body

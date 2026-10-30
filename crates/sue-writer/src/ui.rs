@@ -15,8 +15,9 @@ use sue_type::{EditorView, Ink, ViewMode};
 use sue_wm::{AppletContext, AppletId, ArenaEdit, ItemState, ShellRequest, Theme, widgets};
 
 use crate::compile::{FORMATS, Separator, Titles};
-use crate::project::{self, LABELS, STATUSES, TEMPLATES};
-use crate::studio::{Dialog, Figure, Furniture, ID, PAGES, Settings, SueWriter, View};
+use crate::project::{self, LABELS, STATUSES};
+use crate::studio::{Dialog, Figure, Furniture, ID, Settings, SueWriter, View};
+use crate::templates::{Group, Template};
 
 const TOOLBAR_HEIGHT: f32 = 36.0;
 const STATUS_HEIGHT: f32 = 24.0;
@@ -147,7 +148,9 @@ impl SueWriter {
             places.toolbar.translate(vec2(0.0, -lift))
         };
         if self.phone {
-            self.phone_toolbar(ui, toolbar, cx, &theme);
+            if toolbar.height() > 0.0 {
+                self.phone_toolbar(ui, toolbar, cx, &theme);
+            }
         } else {
             self.toolbar(ui, toolbar, cx, &theme);
         }
@@ -339,8 +342,10 @@ impl SueWriter {
             // The formatting sits at the bottom, above the status bar and so
             // right above the on-screen keyboard; the binder or the
             // inspector, when asked for, takes the whole page in turn.
+            // The start page (no project yet) has nothing to format.
+            let bar = if has_project { PHONE_BAR } else { 0.0 };
             let toolbar = Rect::from_min_max(
-                pos2(full.left(), status.top() - PHONE_BAR),
+                pos2(full.left(), status.top() - bar),
                 pos2(full.right(), status.top()),
             );
             let body = Rect::from_min_max(
@@ -1391,8 +1396,9 @@ impl SueWriter {
             Ink::paper()
         };
         // The page fits the space, until people zoom themselves. A phone
-        // reflows the text to its screen at a size that reads (as Word's
-        // mobile view does), unless asked for pages.
+        // shows its whole page width too; asked for Draft View it reflows
+        // the text to its screen at a size that reads (as Word's mobile
+        // view does).
         let pages = self.pages_shown() && !composing;
         let reflow = self.phone && !pages;
         let phone_zoom = if self.fit { 1.0 } else { self.zoom };
@@ -1413,8 +1419,13 @@ impl SueWriter {
             )
         };
         // Never smaller than can be read, past which the page scrolls
-        // across; a phone's page may shrink further to be seen whole.
-        let least = if self.phone { 0.3 } else { 0.6 };
+        // across; a phone's or a tablet's page shrinks further to be seen
+        // whole, upright or on its side.
+        let least = if cx.view.form_factor == sue_platform::FormFactor::Desktop {
+            0.6
+        } else {
+            0.2
+        };
         let fit = ((rect.width() - 56.0) / (across * sue_type::PX_PER_PT)).clamp(least, 3.0);
         let zoom = if reflow {
             phone_zoom
@@ -1460,7 +1471,7 @@ impl SueWriter {
         let output = self.editor.show(&mut area, cx, &docs, &view);
         if let Some(factor) = output.zoom {
             self.fit = false;
-            self.zoom = (zoom * factor).clamp(0.25, 4.0);
+            self.zoom = (zoom * factor).clamp(0.2, 4.0);
         }
         if let Some(word) = output.learn.clone() {
             self.learn(cx, &word);
@@ -1546,113 +1557,139 @@ impl SueWriter {
 
     fn start_ui(&mut self, ui: &mut Ui, rect: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
         ui.painter().rect_filled(rect, 0.0, theme.void);
-        let width = rect.width().min(860.0);
-        let area = Rect::from_min_size(
-            pos2(rect.center().x - width / 2.0, rect.top() + 36.0),
-            vec2(width, rect.height() - 48.0),
+        // A phone's start page keeps a thumb's gutter; a desk's centers a
+        // column, as a word processor's start screen does.
+        let gutter = if rect.width() < 600.0 { 16.0 } else { 36.0 };
+        let width = (rect.width() - 2.0 * gutter).min(900.0);
+        let area = Rect::from_min_max(
+            pos2(rect.center().x - width / 2.0, rect.top() + gutter),
+            pos2(rect.center().x + width / 2.0, rect.bottom()),
         );
         let mut child = ui.new_child(
             UiBuilder::new()
                 .max_rect(area)
                 .layout(egui::Layout::top_down(egui::Align::Min)),
         );
-        let ui = &mut child;
-        ui.label(
-            RichText::new("Sue Writer")
-                .size(theme.heading_size * 1.4)
-                .color(theme.text),
-        );
-        ui.label(
-            RichText::new(tr!("start-something-new-open-project-sue"))
-                .size(theme.small_size + 1.0)
-                .color(theme.muted),
-        );
-        ui.add_space(18.0);
-        widgets::heading(ui, &tr!("new-2"), theme);
-        let card = vec2(196.0, 86.0);
-        let columns = ((width + 10.0) / (card.x + 10.0)).floor().max(1.0) as usize;
-        let mut chosen = None;
-        for row in TEMPLATES.chunks(columns) {
-            ui.horizontal(|ui| {
-                for (key, ..) in row {
-                    let (label, about) =
-                        (project::template_name(key), project::template_about(key));
-                    let (rect, response) = ui.allocate_exact_size(card, Sense::click());
-                    let fill = if response.hovered() {
-                        theme.hover
-                    } else {
-                        theme.pill
-                    };
-                    ui.painter()
-                        .rect_filled(rect, theme.control_radius * 2.0, fill);
-                    ui.painter().rect_stroke(
-                        rect,
-                        theme.control_radius * 2.0,
-                        theme.hairline(),
-                        StrokeKind::Inside,
-                    );
-                    ui.painter().text(
-                        rect.left_top() + vec2(12.0, 10.0),
-                        Align2::LEFT_TOP,
-                        &label,
-                        theme.font(theme.ui_size + 1.5),
-                        theme.text,
-                    );
-                    let galley = ui.painter().layout(
-                        about.to_string(),
-                        theme.font(theme.small_size),
-                        theme.muted,
-                        card.x - 24.0,
-                    );
-                    ui.painter()
-                        .galley(rect.left_top() + vec2(12.0, 34.0), galley, theme.muted);
-                    if response.clicked() {
-                        chosen = Some(*key);
+        let mut chosen: Option<String> = None;
+        egui::ScrollArea::vertical()
+            .id_salt("writer-start")
+            .auto_shrink([false, false])
+            .show(&mut child, |ui| {
+                ui.set_width(width);
+                ui.label(
+                    RichText::new("Sue Writer")
+                        .size(theme.heading_size * 1.4)
+                        .color(theme.text),
+                );
+                ui.label(
+                    RichText::new(tr!("start-something-new-open-project-sue"))
+                        .size(theme.small_size + 1.0)
+                        .color(theme.muted),
+                );
+                ui.add_space(14.0);
+                // New, with the presets for long work in a list at its side.
+                ui.horizontal(|ui| {
+                    widgets::heading(ui, &tr!("new-2"), theme);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        egui::ComboBox::from_id_salt("writer-presets")
+                            .selected_text(tr!("presets"))
+                            .width(170.0)
+                            .show_ui(ui, |ui| {
+                                ui.set_min_width(240.0);
+                                for template in self.templates.group(Group::Preset) {
+                                    if ui
+                                        .selectable_label(false, template.name())
+                                        .on_hover_text(template.about())
+                                        .clicked()
+                                    {
+                                        chosen = Some(template.key.clone());
+                                    }
+                                }
+                            })
+                            .response
+                            .on_hover_text(tr!("presets-about"));
+                    });
+                });
+                ui.add_space(6.0);
+                // Each template as a picture of its first page.
+                let gap = 12.0;
+                let least = if width < 420.0 { 100.0 } else { 132.0 };
+                let columns = ((width + gap) / (least + gap)).floor().max(2.0) as usize;
+                let card_width = (width - gap * (columns as f32 - 1.0)) / columns as f32;
+                let paper = vec2(card_width, card_width * 1.25);
+                let templates: Vec<&Template> = self.templates.group(Group::Template).collect();
+                for row in templates.chunks(columns) {
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = gap;
+                        for template in row {
+                            let (card, response) = ui.allocate_exact_size(
+                                vec2(card_width, paper.y + 44.0),
+                                Sense::click(),
+                            );
+                            let page = Rect::from_min_size(card.min, paper);
+                            template_thumb(ui.painter(), page, template, response.hovered(), theme);
+                            ui.painter().text(
+                                pos2(page.left() + 2.0, page.bottom() + 8.0),
+                                Align2::LEFT_TOP,
+                                template.name(),
+                                theme.font(theme.ui_size),
+                                theme.text,
+                            );
+                            let response = response.on_hover_text(template.about());
+                            if response.clicked() {
+                                chosen = Some(template.key.clone());
+                            }
+                        }
+                    });
+                    ui.add_space(gap * 0.5);
+                }
+                let projects: Vec<(EntityId, String, usize)> = cx
+                    .arena()
+                    .with_class(class::MANUSCRIPT)
+                    .filter_map(|handle| cx.arena().get(handle).ok())
+                    .map(|entity| {
+                        (
+                            entity.id(),
+                            entity.name().to_owned(),
+                            manuscript::total_words(cx.arena(), entity.id()),
+                        )
+                    })
+                    .collect();
+                if !projects.is_empty() {
+                    ui.add_space(14.0);
+                    widgets::heading(ui, &tr!("in-this-project"), theme);
+                    for (id, name, words) in projects {
+                        if ui
+                            .button(tr!("words", name = name, words = words))
+                            .clicked()
+                        {
+                            self.open_project(cx, id, None);
+                        }
                     }
                 }
+                ui.add_space(14.0);
+                ui.horizontal_wrapped(|ui| {
+                    if widgets::pill_button(ui, &tr!("import-a-document-ellipsis"), false, theme)
+                        .on_hover_text(tr!("word-markdown-html-plain-text"))
+                        .clicked()
+                    {
+                        self.run("file.import", cx);
+                    }
+                    if widgets::pill_button(ui, &tr!("templates-folder"), false, theme)
+                        .on_hover_text(tr!("templates-folder-about"))
+                        .clicked()
+                    {
+                        self.run("file.templates_folder", cx);
+                    }
+                });
+                ui.add_space(gutter);
             });
-            ui.add_space(6.0);
-        }
         if let Some(key) = chosen {
-            let label = TEMPLATES
-                .iter()
-                .find(|(known, ..)| *known == key)
-                .map_or_else(
-                    || tr!("untitled"),
-                    |(known, ..)| project::template_name(known),
-                );
-            self.new_project(cx, key, &label);
-        }
-        let projects: Vec<(EntityId, String, usize)> = cx
-            .arena()
-            .with_class(class::MANUSCRIPT)
-            .filter_map(|handle| cx.arena().get(handle).ok())
-            .map(|entity| {
-                (
-                    entity.id(),
-                    entity.name().to_owned(),
-                    manuscript::total_words(cx.arena(), entity.id()),
-                )
-            })
-            .collect();
-        if !projects.is_empty() {
-            ui.add_space(14.0);
-            widgets::heading(ui, &tr!("in-this-project"), theme);
-            for (id, name, words) in projects {
-                if ui
-                    .button(tr!("words", name = name, words = words))
-                    .clicked()
-                {
-                    self.open_project(cx, id, None);
-                }
-            }
-        }
-        ui.add_space(14.0);
-        if widgets::pill_button(ui, &tr!("import-a-document-ellipsis"), false, theme)
-            .on_hover_text(tr!("word-markdown-html-plain-text"))
-            .clicked()
-        {
-            self.run("file.import", cx);
+            let label = self
+                .templates
+                .get(&key)
+                .map_or_else(|| tr!("untitled"), Template::name);
+            self.new_project(cx, &key, &label);
         }
     }
 
@@ -2673,10 +2710,30 @@ impl SueWriter {
                 ui.add_space(8.0);
                 match &mut dialog {
                     Dialog::NewProject { template, title } => {
-                        for (index, (_, label, about)) in TEMPLATES.iter().enumerate() {
-                            ui.radio_value(template, index, RichText::new(*label).strong());
+                        let templates = &self.templates;
+                        for one in templates.group(Group::Template) {
+                            ui.radio_value(template, one.key.clone(), RichText::new(one.name()))
+                                .on_hover_text(one.about());
+                        }
+                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            ui.label(tr!("presets"));
+                            let shown = templates
+                                .get(template)
+                                .filter(|one| one.group == Group::Preset)
+                                .map_or_else(|| tr!("none"), Template::name);
+                            egui::ComboBox::from_id_salt("writer-new-preset")
+                                .selected_text(shown)
+                                .show_ui(ui, |ui| {
+                                    for one in templates.group(Group::Preset) {
+                                        ui.selectable_value(template, one.key.clone(), one.name())
+                                            .on_hover_text(one.about());
+                                    }
+                                });
+                        });
+                        if let Some(one) = templates.get(template) {
                             ui.label(
-                                RichText::new(*about)
+                                RichText::new(one.about())
                                     .size(theme.small_size)
                                     .color(theme.muted),
                             );
@@ -2689,14 +2746,14 @@ impl SueWriter {
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
                             if ui.button(tr!("create")).clicked() {
-                                let key = TEMPLATES[(*template).min(TEMPLATES.len() - 1)].0;
+                                let key = template.clone();
                                 let title = if title.trim().is_empty() {
                                     tr!("untitled")
                                 } else {
                                     title.trim().to_owned()
                                 };
                                 after = Some(Box::new(move |me: &mut Self, cx| {
-                                    me.new_project(cx, key, &title)
+                                    me.new_project(cx, &key, &title)
                                 }));
                                 keep = false;
                             }
@@ -3052,7 +3109,11 @@ impl SueWriter {
                 egui::ComboBox::from_id_salt("writer-page")
                     .selected_text(settings.page.clone())
                     .show_ui(ui, |ui| {
-                        for page in PAGES {
+                        // Paper sizes (the shared list, less the slides').
+                        for (page, _) in sue_model::PAGE_SIZES
+                            .iter()
+                            .filter(|(name, _)| !name.starts_with("Slide"))
+                        {
                             ui.selectable_value(&mut settings.page, (*page).to_owned(), *page);
                         }
                     });
@@ -3308,6 +3369,102 @@ pub(crate) struct Places {
 type After = Box<dyn FnOnce(&mut SueWriter, &mut AppletContext<'_>)>;
 
 /// The color around pages: the theme's darkest, a little lighter.
+/// A template's first page in small: its paragraphs as bars, sized and
+/// placed by their styles, as a word processor's template gallery shows.
+fn template_thumb(
+    painter: &Painter,
+    page: Rect,
+    template: &Template,
+    hovered: bool,
+    theme: &Theme,
+) {
+    painter.rect_filled(page, 3.0, Color32::from_gray(0xfa));
+    painter.rect_stroke(
+        page,
+        3.0,
+        if hovered {
+            Stroke::new(2.0, theme.text)
+        } else {
+            theme.hairline()
+        },
+        StrokeKind::Outside,
+    );
+    let margin = page.width() * 0.12;
+    let inner = page.shrink(margin);
+    let unit = page.width() / 100.0;
+    let mut y = inner.top();
+    let preview = template.preview();
+    if preview.iter().all(|paragraph| paragraph.text.is_empty()) {
+        // A blank page: just the caret's line.
+        painter.line_segment(
+            [pos2(inner.left(), y), pos2(inner.left(), y + 6.0 * unit)],
+            Stroke::new(unit.max(1.0), Color32::from_gray(0x50)),
+        );
+        return;
+    }
+    for paragraph in preview {
+        let (height, ink, before) = match paragraph.style.as_str() {
+            "title" => (5.0, 0x30, 0.0),
+            "subtitle" => (3.2, 0x70, 1.0),
+            "heading1" | "chapter" => (3.4, 0x40, 4.0),
+            "heading2" => (3.0, 0x48, 3.0),
+            "heading3" | "scene" => (2.6, 0x55, 2.5),
+            "quote" => (2.0, 0x90, 2.0),
+            _ => (1.6, 0xa8, 1.0),
+        };
+        let height = height * unit;
+        y += before * unit;
+        if paragraph.mods.iter().any(|one| one == "break") {
+            y += 4.0 * unit;
+        }
+        if y + height > inner.bottom() {
+            break;
+        }
+        // The bar is as long as the text, at most the line; an empty body
+        // paragraph is a few lines of room to write in.
+        let chars = paragraph.text.chars().count() as f32;
+        let lines = if paragraph.text.is_empty() && paragraph.style == sue_type::BODY {
+            2
+        } else {
+            1
+        };
+        for line in 0..lines {
+            let full = if paragraph.text.is_empty() {
+                if line + 1 == lines { 0.6 } else { 1.0 }
+            } else {
+                (chars * height * 0.55 / inner.width()).clamp(0.15, 1.0)
+            };
+            let mut left = inner.left();
+            if paragraph
+                .mods
+                .iter()
+                .any(|one| one == "bullet" || one == "number")
+            {
+                painter.circle_filled(
+                    pos2(left + unit, y + height / 2.0),
+                    unit * 0.8,
+                    Color32::from_gray(ink),
+                );
+                left += unit * 4.0;
+            }
+            let length = (inner.right() - left) * full;
+            let x = if paragraph.mods.iter().any(|one| one == "center") {
+                inner.center().x - length / 2.0
+            } else if paragraph.mods.iter().any(|one| one == "right") {
+                inner.right() - length
+            } else {
+                left
+            };
+            painter.rect_filled(
+                Rect::from_min_size(pos2(x, y), vec2(length, height * 0.7)),
+                height * 0.2,
+                Color32::from_gray(ink),
+            );
+            y += height + unit;
+        }
+    }
+}
+
 fn desk(theme: &Theme) -> Color32 {
     let [r, g, b, _] = theme.void.to_array();
     let lift = |value: u8| value.saturating_add(0x18);
@@ -3785,10 +3942,10 @@ mod tests {
         let places = writer.places(above, false, true, true);
         assert_eq!(places.binder, Some(places.body));
         assert!(!places.center.is_positive());
-        // A phone reflows the text unless asked for pages.
-        assert!(!writer.pages_shown());
-        writer.phone_pages = true;
+        // A phone shows whole pages until asked to reflow the text.
         assert!(writer.pages_shown());
+        writer.phone_pages = false;
+        assert!(!writer.pages_shown());
     }
 
     #[test]

@@ -1,0 +1,35 @@
+# Scenes in screenplay format; Enter and Tab move between elements.
+name: tr:template-screenplay
+about: tr:template-screenplay-about
+group: preset
+order: 30
+sheet: screenplay
+page: Letter
+margin: 72
+font: mono
+size: 12
+header: ||{page}.
+footer:
+different-first: true
+session-target: 500
+binder: true
+
+draft:
+  folder tr:act-one
+    document tr:scene-1
+      scene tr:int-location-day
+      body tr:action
+  folder tr:act-two
+  folder tr:act-three
+research:
+  folder tr:characters
+    document tr:character-sketch
+      synopsis tr:copy-sheet-each-character
+      heading2 tr:name
+      body
+      heading3 tr:role-in-the-story
+      body
+      heading3 tr:what-they-want
+      body
+  document tr:notes
+    body

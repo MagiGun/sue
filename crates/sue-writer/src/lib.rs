@@ -10,6 +10,9 @@
 //!
 //! It owns little of its own; it puts Sue's shared features together:
 //!
+//! - New documents start from templates that are files, not code
+//!   ([`templates`]): Word-style ones (a letter, a resume, a report) and
+//!   presets for long work (a novel, a screenplay).
 //! - A project is the shared manuscript of [`sue_model::manuscript`], its
 //!   documents rich text ([`sue_model::TextMarks`]), so every other studio
 //!   reads them, and they save in the `.sue` project.
@@ -28,10 +31,11 @@ mod compile;
 mod menus;
 mod project;
 mod studio;
+pub mod templates;
 mod ui;
 
 pub use compile::{FORMATS, Look, Options, Separator, Titles, compile, import, sections};
-pub use project::{TEMPLATES, create};
+pub use project::{create, create_built_in};
 pub use studio::{ID, SueWriter};
 
 use sue_core::{EntityId, Value};
@@ -44,7 +48,7 @@ use sue_wm::{AppletContext, ArenaEdit};
 /// the snapshots and the self-check. Returns the project.
 pub fn sample_project(cx: &mut AppletContext<'_>) -> Option<EntityId> {
     let fonts = sue_type::Fonts::installed(12.0);
-    let (batch, root) = project::create("novel", "The Lighthouse Keeper", &fonts);
+    let (batch, root) = project::create_built_in("novel", "The Lighthouse Keeper", &fonts)?;
     cx.apply(ArenaEdit(batch)).ok()?;
     cx.apply(ArenaEdit(project::set(
         root,
