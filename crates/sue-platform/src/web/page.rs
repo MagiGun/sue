@@ -445,6 +445,22 @@ pub(crate) fn touch_screen() -> bool {
     window.navigator().max_touch_points() > 0 && !fine_pointer
 }
 
+/// The browser's user agent, empty when it gives none.
+pub(crate) fn user_agent() -> String {
+    web_sys::window()
+        .and_then(|window| window.navigator().user_agent().ok())
+        .unwrap_or_default()
+}
+
+/// The shorter side of the device's screen in CSS pixels, when the
+/// browser tells.
+pub(crate) fn screen_side() -> Option<f32> {
+    let screen = web_sys::window()?.screen().ok()?;
+    let (width, height) = (screen.width().ok()?, screen.height().ok()?);
+    let side = width.min(height);
+    (side > 0).then_some(side as f32)
+}
+
 /// A file dropped on the page, staged in memory, as egui hands it on.
 #[derive(Debug)]
 pub(crate) struct Staged(PathBuf);

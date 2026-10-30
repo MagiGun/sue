@@ -39,6 +39,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- In the browser, a phone with Request Desktop Site turned on gets the
+  desktop layout. Tablets keep the tablet layout.
 - The status bar along the bottom is off at first; Settings turns it on.
   Its messages show as a small notice at the bottom meanwhile.
 - The Hub's pin is a real pushpin, and pointing at it lights up the pin,

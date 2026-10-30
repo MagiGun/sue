@@ -904,8 +904,12 @@ host:
   thread; seeds entity ids from the page (`random_seed`); runs background
   work where it is asked for (`THREADS` is `false`), and the font scan
   finds nothing, so text uses the bundled Ubuntu Light and Hack;
-- counts as a tablet or phone (by the shorter side) when touch is how the
-  page is used (touch points and no fine pointer), else as a desktop;
+- counts as a tablet or phone (by the shorter side of the screen) when
+  touch is how the page is used (touch points and no fine pointer), else
+  as a desktop (`FormFactor::for_browser`); a phone whose user agent no
+  longer says it is mobile (Request Desktop Site) is a desktop, while a
+  tablet stays a tablet whatever its user agent says, since tablets ask
+  for desktop sites by default;
   `OsFamily::Web`, and `GraphicsApi::WebGpu` or `Gles` (WebGL2).
 
 `packaging/web/build.sh` builds the `web` profile (`opt-level = "s"`, fat

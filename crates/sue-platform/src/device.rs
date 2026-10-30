@@ -97,6 +97,38 @@ impl FormFactor {
         }
     }
 
+    /// The layout for a page in a browser.
+    ///
+    /// A browser without touch as its main input is a desktop. A touch
+    /// screen is a tablet from [`Self::TABLET_MIN_SMALLEST_SIDE_DP`] up,
+    /// whatever its browser says it is: tablets ask for desktop sites by
+    /// default (an iPad's Safari says it is a Mac). A smaller touch screen
+    /// is a phone, unless its browser was told to show the desktop site
+    /// (Request Desktop Site), which shows in a user agent `mobile_agent`
+    /// is `false` for.
+    #[must_use]
+    pub fn for_browser(touch: bool, mobile_agent: bool, smallest_side_dp: f32) -> Self {
+        if !touch {
+            Self::Desktop
+        } else if smallest_side_dp >= Self::TABLET_MIN_SMALLEST_SIDE_DP {
+            Self::Tablet
+        } else if mobile_agent {
+            Self::Mobile
+        } else {
+            Self::Desktop
+        }
+    }
+
+    /// `true` when a browser's user agent says it is on a phone or tablet
+    /// (Android, iPhone, iPad, or a "Mobile" browser). A phone's browser
+    /// asked for the desktop site says it is a computer instead.
+    #[must_use]
+    pub fn mobile_agent(user_agent: &str) -> bool {
+        ["Mobi", "Android", "iPhone", "iPad", "iPod"]
+            .iter()
+            .any(|token| user_agent.contains(token))
+    }
+
     /// The layout people chose in Settings (`display.interface`):
     /// `desktop`, `tablet` or `phone`, or this device's own for `auto`
     /// and anything else.
@@ -277,6 +309,32 @@ mod tests {
         assert_eq!(FormFactor::Tablet.chosen("auto"), FormFactor::Tablet);
         assert_eq!(FormFactor::Mobile.chosen("nonsense"), FormFactor::Mobile);
         assert!(FormFactor::Tablet.is_touch() && !FormFactor::Desktop.is_touch());
+    }
+
+    #[test]
+    fn a_browser_shows_the_desktop_site_when_asked() {
+        let phone = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36                      (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36";
+        let iphone = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)                       AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0                       Mobile/15E148 Safari/604.1";
+        // Request Desktop Site: Chrome on Android says Linux, Safari on
+        // an iPhone or iPad says Mac.
+        let android_desktop = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36                                (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
+        let mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)                    AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+        assert!(FormFactor::mobile_agent(phone) && FormFactor::mobile_agent(iphone));
+        assert!(!FormFactor::mobile_agent(android_desktop) && !FormFactor::mobile_agent(mac));
+
+        let layout = |agent: &str, touch: bool, side: f32| {
+            FormFactor::for_browser(touch, FormFactor::mobile_agent(agent), side)
+        };
+        assert_eq!(layout(phone, true, 412.0), FormFactor::Mobile);
+        assert_eq!(layout(iphone, true, 390.0), FormFactor::Mobile);
+        assert_eq!(layout(android_desktop, true, 412.0), FormFactor::Desktop);
+        assert_eq!(layout(mac, true, 390.0), FormFactor::Desktop);
+        // A tablet stays a tablet: an iPad's Safari always says Mac.
+        assert_eq!(layout(mac, true, 820.0), FormFactor::Tablet);
+        assert_eq!(layout(android_desktop, true, 800.0), FormFactor::Tablet);
+        // A computer, touch screen or not, with a mouse.
+        assert_eq!(layout(mac, false, 900.0), FormFactor::Desktop);
+        assert_eq!(layout(phone, false, 412.0), FormFactor::Desktop);
     }
 
     #[test]
