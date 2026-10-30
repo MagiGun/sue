@@ -12,7 +12,10 @@ law. `AGENTS.md` and `CLAUDE.md` are identical copies. Change both or neither.
 
 Architecture: [`HUMANZ.md`](HUMANZ.md) (the backbone in §1, every feature area
 mapped onto it in §8). What people should experience:
-[`HUMANS.md`](HUMANS.md).
+[`HUMANS.md`](HUMANS.md). Parity with the programs the studios model is
+tracked per studio: [`docs/paint-parity.md`](docs/paint-parity.md) for
+Sue Paint, [`docs/writer-parity.md`](docs/writer-parity.md) for Sue
+Writer.
 
 ## What the backbone is
 
