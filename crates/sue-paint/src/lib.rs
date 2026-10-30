@@ -114,6 +114,7 @@ fn paint_path(
                 None,
             );
         }
+        stroke.flush(raster, None);
     }
     if let Some(raster) = doc::raster(&cx.world.arena, layer) {
         let edit = stroke.finish(raster, label);

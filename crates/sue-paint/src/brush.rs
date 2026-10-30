@@ -772,6 +772,10 @@ pub struct Finish {
     pub flick: Option<[f32; 2]>,
 }
 
+/// A band of tile rows being painted: its first pixel row, its rows of
+/// pixels and its tiles.
+type Band<'a> = (u32, &'a mut [u8], Vec<&'a mut TileState>);
+
 /// A tile's pixels before the stroke and how much the stroke covers them.
 #[derive(Clone, Debug)]
 struct TileState {
@@ -799,6 +803,7 @@ pub struct Stroke {
     tip: Tip,
     color: [f32; 3],
     alpha_lock: bool,
+    /// The tiles touched, by (row, column) so a row of them is together.
     tiles: BTreeMap<(u32, u32), TileState>,
     samples: Vec<Sample>,
     travelled: f32,
@@ -818,6 +823,12 @@ pub struct Stroke {
     sub: [f32; 3],
     end_speeds: Option<(f32, f32)>,
     copies: Vec<Copy2D>,
+    /// A point too close to the last one painted to be worth painting yet
+    /// (a big brush moving a little); painted when the pen moves on or
+    /// lifts.
+    pending: Option<Sample>,
+    /// Painting the waiting point now, however close.
+    flushing: bool,
 }
 
 impl Stroke {
@@ -847,6 +858,8 @@ impl Stroke {
             sub: [1.0; 3],
             end_speeds: None,
             copies: vec![SAME],
+            pending: None,
+            flushing: false,
         }
     }
 
@@ -995,6 +1008,20 @@ impl Stroke {
                 if length < 1e-3 {
                     return;
                 }
+                // A continuous line redraws the brush's whole width for
+                // each point, so a big brush waits until it has moved a
+                // twenty-fifth of its width: a 1500 pixel brush paints
+                // every 30 pixels, not every 3, and looks the same.
+                let radius = self.tip.size * 0.5 * self.width;
+                if !self.tip.dabbed()
+                    && !self.flushing
+                    && self.total.is_none()
+                    && length < radius * 0.04
+                {
+                    self.pending = Some(sample);
+                    return;
+                }
+                self.pending = None;
                 let start = self.travelled;
                 // Every copy starts from the same dab spacing.
                 let since = self.since_dab;
@@ -1027,6 +1054,7 @@ impl Stroke {
         finish: Finish,
         selection: Option<&Selection>,
     ) {
+        self.flush(raster, selection);
         let finishing = finish.correction > 0
             || finish.flick.is_some()
             || self.tip.taper_end > 0.0
@@ -1068,6 +1096,19 @@ impl Stroke {
         self.total = None;
         self.flicked = 0.0;
         self.end_speeds = None;
+    }
+
+    /// Paints the point that was waiting for the pen to move further, so
+    /// the line reaches where the pen is.
+    pub fn flush(&mut self, raster: &mut RasterTile2D, selection: Option<&Selection>) {
+        if let Some(sample) = self.pending.take() {
+            let keep = (self.width, self.alpha, self.speed);
+            (self.width, self.alpha, self.speed) = (sample.width, sample.alpha, sample.speed);
+            self.flushing = true;
+            self.to(raster, sample.at, sample.pressure, selection);
+            self.flushing = false;
+            (self.width, self.alpha, self.speed) = keep;
+        }
     }
 
     /// Puts back the pixels from before the stroke, to paint it again.
@@ -1183,7 +1224,11 @@ impl Stroke {
         let (ax, ay) = (a.at[0], a.at[1]);
         let (dx, dy) = (b.at[0] - ax, b.at[1] - ay);
         let length_sq = dx * dx + dy * dy;
-        self.apply(raster, rect, selection, Mode::Max, |px, py| {
+        // The most any pixel gets: thin lines keep their weight as lighter
+        // ink, so their strength never passes the larger end's.
+        let peak = sa.max(sb).min(1.0);
+        let span = |py: f32| capsule_span(a.at, b.at, reach, py);
+        self.apply(raster, rect, selection, Mode::Max, peak, span, |px, py| {
             let t = if length_sq > 0.0 {
                 (((px - ax) * dx + (py - ay) * dy) / length_sq).clamp(0.0, 1.0)
             } else {
@@ -1295,11 +1340,23 @@ impl Stroke {
         let reach = radius + self.tip.aa.edge() + 1.0;
         let tip = self.tip;
         let shaped = shape(tip.shape);
+        // A picture tip fills its square; a round one, its disc.
+        let round = shaped.is_none();
+        let span = move |py: f32| {
+            if !round {
+                return Some((x - reach, x + reach));
+            }
+            let dy = py - y;
+            let half = (reach * reach - dy * dy).max(0.0).sqrt();
+            (half > 0.0).then_some((x - half, x + half))
+        };
         self.apply(
             raster,
             [x - reach, y - reach, x + reach, y + reach],
             selection,
             mode,
+            strength.min(1.0),
+            span,
             |px, py| {
                 if let Some(shaped) = &shaped {
                     return shaped.at((px - x) / radius.max(0.5), (py - y) / radius.max(0.5))
@@ -1331,13 +1388,24 @@ impl Stroke {
     /// Lays coverage from `amount` (per pixel center, already including
     /// strength) over the pixels of `rect`, keeping every touched tile's
     /// old pixels first.
+    ///
+    /// `span` narrows each row (by its center's y) to the x range the shape
+    /// can reach, so the corners of a round dab's square cost nothing.
+    /// `peak` is the most any pixel can get: in [`Mode::Max`] a pixel the
+    /// stroke already covers that much is left alone without working out
+    /// its coverage, so a big hard brush moving a little repaints only its
+    /// edge. Big areas are painted on every core, one band of tile rows
+    /// each.
+    #[allow(clippy::too_many_arguments)]
     fn apply(
         &mut self,
         raster: &mut RasterTile2D,
         rect: [f32; 4],
         selection: Option<&Selection>,
         mode: Mode,
-        amount: impl Fn(f32, f32) -> f32,
+        peak: f32,
+        span: impl Fn(f32) -> Option<(f32, f32)> + Sync,
+        amount: impl Fn(f32, f32) -> f32 + Sync,
     ) {
         let (width, height) = (raster.width(), raster.height());
         let x0 = rect[0].floor().max(0.0) as u32;
@@ -1352,9 +1420,12 @@ impl Stroke {
         let Some(bytes) = raster.bytes_mut() else {
             return;
         };
-        for ty in (y0 / TILE)..=((y1 - 1) / TILE) {
-            for tx in (x0 / TILE)..=((x1 - 1) / TILE) {
-                let state = self.tiles.entry((tx, ty)).or_insert_with(|| {
+        let (tx0, tx1) = (x0 / TILE, (x1 - 1) / TILE);
+        let (ty0, ty1) = (y0 / TILE, (y1 - 1) / TILE);
+        // Every tile keeps its pixels from before the stroke first.
+        for ty in ty0..=ty1 {
+            for tx in tx0..=tx1 {
+                self.tiles.entry((ty, tx)).or_insert_with(|| {
                     let rect = [
                         tx * TILE,
                         ty * TILE,
@@ -1372,10 +1443,51 @@ impl Stroke {
                         mask: vec![0.0; rect[2] as usize * rect[3] as usize],
                     }
                 });
-                let [rx, ry, rw, rh] = state.rect;
-                for y in y0.max(ry)..y1.min(ry + rh) {
-                    for x in x0.max(rx)..x1.min(rx + rw) {
-                        let mut cover = amount(x as f32 + 0.5, y as f32 + 0.5);
+            }
+        }
+        // One band per row of tiles: its rows of pixels and its tiles.
+        let mut bands: Vec<Band<'_>> = Vec::new();
+        let band_start = (ty0 * TILE) as usize * stride;
+        let band_end = (((ty1 + 1) * TILE).min(height)) as usize * stride;
+        let mut rest = &mut bytes[band_start..band_end];
+        for ty in ty0..=ty1 {
+            let rows = (TILE.min(height - ty * TILE)) as usize;
+            let (band, after) = std::mem::take(&mut rest).split_at_mut(rows * stride);
+            rest = after;
+            bands.push((ty * TILE, band, Vec::new()));
+        }
+        for ((ty, tx), state) in self.tiles.range_mut((ty0, tx0)..=(ty1, tx1)) {
+            if (tx0..=tx1).contains(tx) {
+                bands[(ty - ty0) as usize].2.push(state);
+            }
+        }
+        let work = |band_y: u32, band: &mut [u8], tiles: &mut [&mut TileState]| {
+            for y in y0.max(band_y)..y1.min(band_y + TILE) {
+                let fy = y as f32 + 0.5;
+                let Some((from, to)) = span(fy) else {
+                    continue;
+                };
+                // Pixel centers inside [from, to].
+                let row_x0 = x0.max((from - 0.5).ceil().max(0.0) as u32);
+                let row_x1 = x1.min(((to - 0.5).floor() + 1.0).max(0.0) as u32);
+                if row_x0 >= row_x1 {
+                    continue;
+                }
+                let line = (y - band_y) as usize * stride;
+                for state in tiles.iter_mut() {
+                    let [rx, ry, rw, _] = state.rect;
+                    let (sx0, sx1) = (row_x0.max(rx), row_x1.min(rx + rw));
+                    if sx0 >= sx1 {
+                        continue;
+                    }
+                    let local_row = ((y - ry) * rw) as usize;
+                    for x in sx0..sx1 {
+                        let local = local_row + (x - rx) as usize;
+                        let old = state.mask[local];
+                        if matches!(mode, Mode::Max) && old >= peak {
+                            continue;
+                        }
+                        let mut cover = amount(x as f32 + 0.5, fy);
                         if cover <= 0.0 {
                             continue;
                         }
@@ -1385,10 +1497,8 @@ impl Stroke {
                         if let Some(selection) = selection {
                             cover *= selection.at(x, y);
                         }
-                        let local = ((y - ry) * rw + (x - rx)) as usize;
-                        let at = y as usize * stride + x as usize * 4;
+                        let at = line + x as usize * 4;
                         let mask = &mut state.mask[local];
-                        let old = *mask;
                         let pixel = match mode {
                             Mode::Max | Mode::Accumulate => {
                                 *mask = match mode {
@@ -1403,14 +1513,43 @@ impl Stroke {
                             }
                             Mode::Direct(rgb) => {
                                 *mask = old + (1.0 - old) * cover;
-                                let now = [bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]];
+                                let now = [band[at], band[at + 1], band[at + 2], band[at + 3]];
                                 paint_pixel(&now, cover, rgb, tip.eraser, alpha_lock)
                             }
                         };
-                        bytes[at..at + 4].copy_from_slice(&pixel);
+                        band[at..at + 4].copy_from_slice(&pixel);
                     }
                 }
             }
+        };
+        let area = (x1 - x0) as usize * (y1 - y0) as usize;
+        let threads = if area < 1 << 17 || bands.len() < 2 {
+            1
+        } else {
+            std::thread::available_parallelism()
+                .map_or(1, std::num::NonZero::get)
+                .min(bands.len())
+        };
+        if threads <= 1 {
+            for (band_y, band, mut tiles) in bands {
+                work(band_y, band, &mut tiles);
+            }
+        } else {
+            // Bands dealt round, so each core gets some of every part.
+            let mut shares: Vec<Vec<Band<'_>>> = (0..threads).map(|_| Vec::new()).collect();
+            for (index, band) in bands.into_iter().enumerate() {
+                shares[index % threads].push(band);
+            }
+            let work = &work;
+            std::thread::scope(|scope| {
+                for share in shares {
+                    scope.spawn(move || {
+                        for (band_y, band, mut tiles) in share {
+                            work(band_y, band, &mut tiles);
+                        }
+                    });
+                }
+            });
         }
         self.dirty = Some(union(self.dirty, [x0, y0, x1, y1]));
     }
@@ -1432,6 +1571,57 @@ impl Stroke {
             .collect();
         RasterEdit::new(self.layer, label, patches)
     }
+}
+
+/// Where the row at `y` crosses the capsule of radius `reach` around the
+/// segment from `a` to `b`: the x range, or `None` when it misses. The
+/// capsule is convex, so this is the span of its two end discs and the band
+/// between them.
+fn capsule_span(a: [f32; 2], b: [f32; 2], reach: f32, y: f32) -> Option<(f32, f32)> {
+    let mut low = f32::INFINITY;
+    let mut high = f32::NEG_INFINITY;
+    for [cx, cy] in [a, b] {
+        let dy = y - cy;
+        let half_sq = reach * reach - dy * dy;
+        if half_sq >= 0.0 {
+            let half = half_sq.sqrt();
+            low = low.min(cx - half);
+            high = high.max(cx + half);
+        }
+    }
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let length = dx.hypot(dy);
+    if length > 1e-6 && dy.abs() > 1e-6 {
+        // The band: |cross(p - a, d)| <= reach * length and
+        // 0 <= dot(p - a, d) <= length^2, each linear in x on this row.
+        let ry = y - a[1];
+        let mut from = f32::NEG_INFINITY;
+        let mut to = f32::INFINITY;
+        // cross = (px - ax) * dy - ry * dx, within +-reach * length.
+        let c = [
+            (-reach * length + ry * dx) / dy,
+            (reach * length + ry * dx) / dy,
+        ];
+        from = from.max(c[0].min(c[1]));
+        to = to.min(c[0].max(c[1]));
+        if dx.abs() > 1e-6 {
+            // dot = (px - ax) * dx + ry * dy, within 0..length^2.
+            let d = [(-ry * dy) / dx, (length * length - ry * dy) / dx];
+            from = from.max(d[0].min(d[1]));
+            to = to.min(d[0].max(d[1]));
+        } else if !(0.0..=length * length).contains(&(ry * dy)) {
+            to = f32::NEG_INFINITY;
+        }
+        if from <= to {
+            low = low.min(from + a[0]);
+            high = high.max(to + a[0]);
+        }
+    } else if length > 1e-6 && (y - a[1]).abs() <= reach {
+        // A level segment: the whole stretch between the ends.
+        low = low.min(a[0].min(b[0]));
+        high = high.max(a[0].max(b[0]));
+    }
+    (low <= high).then_some((low, high))
 }
 
 fn union(rect: Option<[u32; 4]>, [x0, y0, x1, y1]: [u32; 4]) -> [u32; 4] {
@@ -2056,6 +2246,66 @@ mod tests {
     }
 
     #[test]
+    fn capsule_rows_reach_every_pixel_the_capsule_does() {
+        let mut seed = 7_u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            (seed >> 8) as f32 / 16_777_216.0
+        };
+        for _ in 0..400 {
+            let a = [next() * 200.0, next() * 200.0];
+            let b = if next() < 0.2 {
+                [a[0] + next() * 0.01, a[1]]
+            } else {
+                [next() * 200.0, next() * 200.0]
+            };
+            let reach = 0.5 + next() * 60.0;
+            for row in 0..220 {
+                let y = row as f32 + 0.5;
+                for column in 0..220 {
+                    let x = column as f32 + 0.5;
+                    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                    let len = dx * dx + dy * dy;
+                    let t = if len > 0.0 {
+                        (((x - a[0]) * dx + (y - a[1]) * dy) / len).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let d = (x - a[0] - dx * t).hypot(y - a[1] - dy * t);
+                    if d <= reach - 0.01 {
+                        let (from, to) = capsule_span(a, b, reach, y)
+                            .unwrap_or_else(|| panic!("row {y} missed {a:?} {b:?} {reach}"));
+                        assert!(
+                            from <= x + 0.01 && x - 0.01 <= to,
+                            "{x},{y} outside {from}..{to} for {a:?} {b:?} {reach}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_big_brush_moving_a_little_still_ends_where_the_pen_lifts() {
+        let mut raster = layer(400, 300);
+        // A 200 pixel brush waits for 4 pixels of movement; these steps
+        // are one pixel.
+        let mut stroke = Stroke::new(EntityId::new(), flat_pen(200.0), [0.0; 3], false);
+        for x in 40..=60 {
+            stroke.to(&mut raster, [x as f32, 150.0], 1.0, None);
+        }
+        stroke.to(&mut raster, [61.5, 150.0], 1.0, None);
+        assert_eq!(
+            alpha(&raster, 160, 150),
+            0,
+            "the last point is still waiting"
+        );
+        stroke.end(&mut raster, Finish::default(), None);
+        assert_eq!(alpha(&raster, 160, 150), 255, "the pen lifted at 61.5");
+        assert_eq!(alpha(&raster, 163, 150), 0);
+    }
+
+    #[test]
     fn post_correction_takes_strokes_of_any_length() {
         // Short strokes once panicked: the reach's floor (3) passed a
         // third of the points.
@@ -2071,7 +2321,10 @@ mod tests {
                 .collect();
             for size in [1.0, 6.0, 80.0, 900.0] {
                 let out = correct(&path, 10, size);
-                assert!(path.is_empty() || !out.is_empty(), "{points} points, size {size}");
+                assert!(
+                    path.is_empty() || !out.is_empty(),
+                    "{points} points, size {size}"
+                );
             }
         }
     }
@@ -2887,5 +3140,76 @@ mod sheet {
             std::path::PathBuf::from,
         );
         std::fs::write(path, png).unwrap();
+    }
+}
+
+/// Timings of big strokes, for tuning (`cargo test --release -p sue-paint
+/// brush_speed -- --ignored --nocapture`).
+#[cfg(test)]
+mod speed {
+    use super::*;
+    use std::time::Instant;
+
+    fn run(name: &str, tip: Tip, samples: usize, step: f32) {
+        let mut raster = RasterTile2D::new(4000, 3000, sue_core::PixelFormat::Rgba8).unwrap();
+        if let Some(bytes) = raster.bytes_mut() {
+            for pixel in bytes.as_chunks_mut::<4>().0 {
+                pixel.copy_from_slice(&[200, 120, 40, 255]);
+            }
+        }
+        let mut stroke = Stroke::new(EntityId::new(), tip, [0.1, 0.2, 0.9], false);
+        let start = Instant::now();
+        let mut worst = 0.0_f64;
+        for i in 0..samples {
+            let at = [
+                800.0 + i as f32 * step,
+                1500.0 + (i as f32 * 0.05).sin() * 200.0,
+            ];
+            let one = Instant::now();
+            stroke.to(&mut raster, at, 0.8, None);
+            worst = worst.max(one.elapsed().as_secs_f64());
+        }
+        let painting = start.elapsed().as_secs_f64();
+        let ending = Instant::now();
+        stroke.end(&mut raster, Finish::default(), None);
+        let edit = stroke.finish(&raster, "Stroke");
+        println!(
+            "{name:<28} {:>7.2} ms per sample, worst {:>7.2} ms, finish {:>7.2} ms, {} patches",
+            painting * 1000.0 / samples as f64,
+            worst * 1000.0,
+            ending.elapsed().as_secs_f64() * 1000.0,
+            edit.patches().len(),
+        );
+    }
+
+    #[test]
+    #[ignore = "a benchmark"]
+    fn brush_speed() {
+        for size in [50.0, 300.0, 1000.0, 1500.0] {
+            let pen = Tip {
+                size,
+                size_by: Dynamics::NONE,
+                ..Tip::default()
+            };
+            run(&format!("hard pen {size}"), pen, 200, 3.0);
+            let eraser = Tip {
+                size,
+                hardness: 0.3,
+                eraser: true,
+                size_by: Dynamics::NONE,
+                ..Tip::default()
+            };
+            run(&format!("soft eraser {size}"), eraser, 200, 3.0);
+            let air = Tip {
+                size,
+                hardness: 0.0,
+                build_up: true,
+                flow: 0.2,
+                spacing: 0.1,
+                size_by: Dynamics::NONE,
+                ..Tip::default()
+            };
+            run(&format!("airbrush {size}"), air, 200, 3.0);
+        }
     }
 }

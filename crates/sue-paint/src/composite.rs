@@ -870,3 +870,62 @@ mod tests {
         assert_ne!(signature(&arena, picture), before);
     }
 }
+
+/// Timings of compositing big areas, for tuning (`cargo test --release -p
+/// sue-paint composite_speed -- --ignored --nocapture`).
+#[cfg(test)]
+mod speed {
+    use super::*;
+    use crate::doc::{self, NewPicture};
+    use std::time::Instant;
+    use sue_core::{Color, ReversibleTransaction};
+
+    #[test]
+    #[ignore = "a benchmark"]
+    fn composite_speed() {
+        let mut arena = Arena::new();
+        let (mut edit, picture) = doc::create(&NewPicture {
+            name: "Big".to_owned(),
+            width: 4000,
+            height: 3000,
+            dpi: 72.0,
+            paper: Some(Color::srgb8(255, 255, 255)),
+            timelapse: false,
+        })
+        .unwrap();
+        edit.apply(&mut arena).unwrap();
+        let mut below = doc::layers(&arena, picture).last().map(|info| info.id);
+        for i in 0..6 {
+            let (mut spawn, layer) =
+                doc::add_raster_layer(&arena, picture, below, format!("L{i}"), None).unwrap();
+            spawn.apply(&mut arena).unwrap();
+            if let Some(bytes) = doc::raster_mut(&mut arena, layer).and_then(|r| r.bytes_mut()) {
+                for (n, pixel) in bytes.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                    if (n / 4000 + n % 4000 + i * 300) % 900 < 400 {
+                        pixel.copy_from_slice(&[(i * 40) as u8, 90, 200, 180]);
+                    }
+                }
+            }
+            below = Some(layer);
+        }
+        let mut compositor = Compositor::new(picture);
+        let start = Instant::now();
+        compositor.sync(&arena);
+        println!(
+            "full composite 4000x3000, 8 layers: {:.1} ms",
+            start.elapsed().as_secs_f64() * 1000.0
+        );
+        for side in [100_u32, 500, 1500] {
+            let start = Instant::now();
+            let runs = 10;
+            for run in 0..runs {
+                let x = 500 + run * 7;
+                compositor.refresh(&arena, [x, 500, x + side, 500 + side]);
+            }
+            println!(
+                "refresh {side}x{side}: {:.2} ms",
+                start.elapsed().as_secs_f64() * 1000.0 / f64::from(runs)
+            );
+        }
+    }
+}

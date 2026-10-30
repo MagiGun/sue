@@ -3127,6 +3127,7 @@ impl SuePaint {
                     shifted.as_ref(),
                 );
             }
+            stroke.flush(raster, shifted.as_ref());
         }
         if let Some(raster) = doc::raster(&cx.world.arena, info.id) {
             let edit = stroke.finish(raster, &sub.name);
