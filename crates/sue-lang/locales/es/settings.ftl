@@ -107,3 +107,11 @@ applet-name = Ajustes
 applet-summary = Todos los ajustes y todos los parámetros de estilo.
 sue-keeps-work-you-have-not = Sue guarda por sí mismo el trabajo que no has guardado. El Hub lo muestra en Trabajo sin guardar, para recuperarlo o descartarlo.
 unsaved-work = Trabajo sin guardar
+
+check-for-updates = Buscar actualizaciones
+settings-reset = Restablecer
+settings-reset-all = Restablecer todos los ajustes
+settings-reset-all-confirm = Haz clic de nuevo para restablecer todos los ajustes
+settings-reset-hint = Volver a los valores iniciales de Sue
+settings-reset-page = Restablecer esta página
+sue-updates = Actualizaciones de Sue

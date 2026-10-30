@@ -84,3 +84,8 @@ image-viewer-re-encode-as-jpeg-ellipsis = Visor de imágenes: Recodificar como J
 image-viewer-rotate-right = Visor de imágenes: Girar a la derecha
 image-viewer-crop = Visor de imágenes: Recortar
 cannot-write-2 = No se puede escribir { $value }: { $error }
+
+redo = Rehacer
+redo-ctrl-y = Rehacer (Ctrl+Y)
+undo = Deshacer
+undo-ctrl-z = Deshacer el último cambio (Ctrl+Z)

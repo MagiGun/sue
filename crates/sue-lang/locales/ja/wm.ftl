@@ -104,3 +104,9 @@ saved-projects = 保存したプロジェクト
 unsaved-work = 未保存の作業
 untitled = 無題
 work-sue-keeps-you-before-saved = 保存前に Sue が保管している作業がここに表示されます。復元するか破棄できます。
+
+check-for-updates = アップデートを確認
+label-work = 作業
+transfer-copy = コピー
+transfer-export = エクスポート
+transfer-import = インポート

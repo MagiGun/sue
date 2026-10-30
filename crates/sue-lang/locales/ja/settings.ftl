@@ -107,3 +107,11 @@ applet-name = 設定
 applet-summary = すべての設定とすべてのカスタマイズ項目。
 sue-keeps-work-you-have-not = Sue は保存していない作業を自動で保管します。ハブの「未保存の作業」から復元または破棄できます。
 unsaved-work = 未保存の作業
+
+check-for-updates = アップデートを確認
+settings-reset = リセット
+settings-reset-all = すべての設定をリセット
+settings-reset-all-confirm = もう一度クリックしてすべての設定をリセット
+settings-reset-hint = Sue の初期設定に戻す
+settings-reset-page = このページをリセット
+sue-updates = Sue のアップデート

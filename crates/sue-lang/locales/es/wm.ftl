@@ -116,3 +116,9 @@ saved-projects = Proyectos guardados
 unsaved-work = Trabajo sin guardar
 untitled = Sin título
 work-sue-keeps-you-before-saved = Aquí aparece el trabajo que Sue guarda por ti antes de que lo guardes, para recuperarlo o descartarlo.
+
+check-for-updates = Buscar actualizaciones
+label-work = Trabajo
+transfer-copy = Copiar
+transfer-export = Exportar
+transfer-import = Importar
