@@ -2099,11 +2099,7 @@ impl SueApplet for SueWriter {
             .into_iter()
             .flat_map(|group| self.templates.group(group))
             .map(|template| {
-                let category = match template.group {
-                    Group::Template => tr!("document"),
-                    Group::Preset => tr!("presets"),
-                };
-                sue_wm::FileTemplate::new(category, template.name(), template.key.clone())
+                sue_wm::FileTemplate::new(tr!("writing"), template.name(), template.key.clone())
             })
             .collect()
     }
