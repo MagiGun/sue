@@ -1,14 +1,12 @@
-//! Sue Paint on a phone (and on any device set to the phone interface):
-//! the canvas fills the screen between Sue's top bar, where Sue Paint's row
-//! of large buttons follows the Sue button, and a bottom bar of large
-//! buttons, and the palettes come up as sheets from the bottom, one at a
-//! time. The tools, layers and colors are the same ones the desktop
-//! layout shows; only where they sit changes.
+//! The sheets Sue Paint's touch layouts (Simple Mode and Studio Mode)
+//! bring up from the bottom of the canvas, one at a time: the tools, the
+//! sub tools, the layers, the color, the timeline, the reference pictures,
+//! the navigator, the materials and the menus. They are the same palettes
+//! the desktop layout docks; only where they sit changes.
 
 use egui::{Align2, Color32, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
 use sue_wm::{AppletContext, Theme};
 
-use crate::icons::Icon;
 use crate::panels::{icon_button, tool_icon};
 use crate::studio::SuePaint;
 use crate::tools::Tool;
@@ -16,7 +14,7 @@ use crate::tools::Tool;
 /// What a sheet shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Sheet {
-    /// The menus, as a list.
+    /// Studio Mode's Menu: home, Simple Mode, Settings, then the menus.
     Menu,
     /// Every tool, as a grid.
     Tools,
@@ -28,6 +26,12 @@ pub(crate) enum Sheet {
     Color,
     /// The animation timeline.
     Timeline,
+    /// The navigator.
+    Navigator,
+    /// The current layer's settings.
+    LayerProperty,
+    /// The materials.
+    Materials,
     /// The reference pictures (Sub View).
     Reference,
     /// Simple Mode's "..." menu.
@@ -36,119 +40,10 @@ pub(crate) enum Sheet {
     Pens,
 }
 
-/// The tools the bottom bar shows first, the way people reach for them.
-const BAR_TOOLS: [Tool; 9] = [
-    Tool::Pen,
-    Tool::Pencil,
-    Tool::Brush,
-    Tool::Eraser,
-    Tool::Fill,
-    Tool::Select,
-    Tool::MoveLayer,
-    Tool::Eyedropper,
-    Tool::Hand,
-];
-
 /// A thumb-sized button.
 const BUTTON: f32 = 44.0;
 
 impl SuePaint {
-    /// The whole studio laid out for a phone: the canvas over a bottom bar
-    /// of large buttons. The top row is in Sue's bar ([`Self::phone_bar`]).
-    pub(crate) fn phone_frame(
-        &mut self,
-        ui: &mut Ui,
-        full: Rect,
-        cx: &mut AppletContext<'_>,
-        theme: &Theme,
-    ) {
-        let bottom = Rect::from_min_max(pos2(full.left(), full.bottom() - BUTTON - 16.0), full.max);
-        let middle = Rect::from_min_max(full.min, pos2(full.right(), bottom.top()));
-        self.canvas_area(ui, middle, cx, theme);
-        let mut run: Option<String> = None;
-
-        // The bottom bar: the main tools, then More, the color and the size.
-        ui.painter().rect_filled(bottom, 0.0, theme.panel);
-        ui.painter()
-            .hline(bottom.x_range(), bottom.top(), theme.hairline());
-        let chip = Rect::from_min_size(
-            pos2(bottom.right() - BUTTON - 8.0, bottom.top() + 8.0),
-            vec2(BUTTON, BUTTON),
-        );
-        let room = ((chip.left() - bottom.left() - 8.0) / (BUTTON + 2.0))
-            .floor()
-            .max(2.0) as usize;
-        let shown = room.saturating_sub(1).min(BAR_TOOLS.len());
-        let current = self.toolbox.tool();
-        for (index, tool) in BAR_TOOLS.iter().take(shown).enumerate() {
-            let rect = Rect::from_min_size(
-                pos2(
-                    bottom.left() + 8.0 + index as f32 * (BUTTON + 2.0),
-                    bottom.top() + 8.0,
-                ),
-                vec2(BUTTON, BUTTON),
-            );
-            if icon_button(
-                ui,
-                rect,
-                tool_icon(*tool),
-                tool.available(),
-                *tool == current,
-                &tool.label(),
-                theme,
-            ) {
-                if *tool == current {
-                    self.toggle_sheet(Sheet::ToolSettings);
-                } else {
-                    self.toolbox.pick(*tool);
-                }
-            }
-        }
-        let more = Rect::from_min_size(
-            pos2(
-                bottom.left() + 8.0 + shown as f32 * (BUTTON + 2.0),
-                bottom.top() + 8.0,
-            ),
-            vec2(BUTTON, BUTTON),
-        );
-        let others = !BAR_TOOLS[..shown].contains(&current);
-        if icon_button(
-            ui,
-            more,
-            Icon::List,
-            true,
-            others || self.sheet == Some(Sheet::Tools),
-            &tr!("every-tool"),
-            theme,
-        ) {
-            self.toggle_sheet(Sheet::Tools);
-        }
-        // The main color, which opens the color sheet.
-        let [r, g, b] = self.main;
-        ui.painter()
-            .rect_filled(chip.shrink(4.0), 6.0, Color32::from_rgb(r, g, b));
-        ui.painter().rect_stroke(
-            chip.shrink(4.0),
-            6.0,
-            Stroke::new(1.0, theme.border),
-            egui::StrokeKind::Outside,
-        );
-        if ui
-            .interact(chip, Id::unique("sue-paint-phone-color"), Sense::click())
-            .on_hover_text(tr!("color-2"))
-            .clicked()
-        {
-            self.toggle_sheet(Sheet::Color);
-        }
-
-        if let Some(sheet) = self.sheet {
-            self.phone_sheet(ui, middle, sheet, cx, theme, &mut run);
-        }
-        if let Some(command) = run {
-            self.run(&command, cx);
-        }
-    }
-
     pub(crate) fn toggle_sheet(&mut self, sheet: Sheet) {
         self.sheet = if self.sheet == Some(sheet) {
             None
@@ -171,6 +66,8 @@ impl SuePaint {
             Sheet::Menu | Sheet::Layers | Sheet::ToolSettings => area.height() * 0.75,
             Sheet::Tools | Sheet::Pens => (area.height() * 0.5).min(320.0),
             Sheet::More => (area.height() * 0.8).min(520.0),
+            Sheet::Navigator | Sheet::LayerProperty => (area.height() * 0.55).min(420.0),
+            Sheet::Materials => area.height() * 0.7,
             Sheet::Reference => area.height() * 0.6,
             Sheet::Color | Sheet::Timeline => (area.height() * 0.55).min(420.0),
         };
@@ -221,6 +118,16 @@ impl SuePaint {
             Sheet::ToolSettings => self.tool_panel(&mut inner, body, cx, theme),
             Sheet::Timeline => self.timeline_panel(&mut inner, body, cx, theme),
             Sheet::Reference => self.sub_view(&mut inner, body, cx, theme),
+            Sheet::Navigator => self.navigator(&mut inner, body, cx, theme),
+            Sheet::Materials => self.material_panel(&mut inner, body, cx, theme),
+            Sheet::LayerProperty => {
+                let info = self.layer_info(&cx.world.arena);
+                egui::ScrollArea::vertical()
+                    .id_salt("sue-paint-touch-layer-property")
+                    .show(&mut inner, |ui| {
+                        self.layer_property(ui, info.as_ref(), cx, theme);
+                    });
+            }
             Sheet::More => {
                 egui::ScrollArea::vertical()
                     .id_salt("sue-paint-simple-more")
@@ -268,49 +175,44 @@ impl SuePaint {
                 }
             }
             Sheet::Menu => {
-                let arena = &cx.world.arena;
-                let history = &*cx.history;
-                let menus = self.menus.clone();
-                // The layout first, so switching to the desktop one is a tap away.
-                inner.horizontal(|ui| {
-                    ui.label(egui::RichText::new(tr!("interface")).color(theme.muted));
-                    for (label, choice) in [
-                        (tr!("phone"), "phone"),
-                        (tr!("tablet"), "tablet"),
-                        (tr!("desktop"), "desktop"),
-                        (tr!("automatic"), "auto"),
-                    ] {
-                        if ui
-                            .selectable_label(self.interface == choice, label)
-                            .clicked()
-                        {
-                            *run = Some(format!("window.interface.{choice}"));
-                        }
-                    }
-                });
-                inner.separator();
                 egui::ScrollArea::vertical()
-                    .id_salt("sue-paint-phone-menus")
+                    .id_salt("sue-paint-touch-menu")
                     .show(&mut inner, |ui| {
-                        for menu in &menus {
-                            egui::CollapsingHeader::new(
-                                egui::RichText::new(&menu.title).size(theme.ui_size + 1.0),
-                            )
-                            .id_salt(("sue-paint-phone-menu", menu.title.as_str()))
-                            .show(ui, |ui| {
-                                menu_items(
-                                    ui,
-                                    &menu.items,
-                                    &|command| self.state(command, arena, history),
-                                    run,
-                                );
-                            });
-                        }
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        self.studio_menu(ui, cx, theme, run);
                     });
                 if run.is_some() {
                     self.sheet = None;
                 }
             }
+        }
+    }
+}
+
+impl SuePaint {
+    /// Sue Paint's menus as a list, each folded under its title.
+    pub(crate) fn menu_list(
+        &mut self,
+        ui: &mut Ui,
+        cx: &AppletContext<'_>,
+        theme: &Theme,
+        run: &mut Option<String>,
+    ) {
+        let arena = &cx.world.arena;
+        let history = &*cx.history;
+        let menus = self.menus.clone();
+        ui.spacing_mut().item_spacing.y = 4.0;
+        for menu in &menus {
+            egui::CollapsingHeader::new(egui::RichText::new(&menu.title).size(theme.ui_size + 1.0))
+                .id_salt(("sue-paint-touch-menu", menu.title.as_str()))
+                .show(ui, |ui| {
+                    menu_items(
+                        ui,
+                        &menu.items,
+                        &|command| self.state(command, arena, history),
+                        run,
+                    );
+                });
         }
     }
 }
@@ -351,78 +253,5 @@ fn menu_items(
                 ui.separator();
             }
         }
-    }
-}
-
-impl SuePaint {
-    /// The top row on a phone, in Sue's bar after the Sue button: the
-    /// menus as a sheet, undo and redo at the left, the palettes at the
-    /// right. Returns the command a button runs.
-    pub(crate) fn phone_bar(
-        &mut self,
-        ui: &mut Ui,
-        bar: Rect,
-        cx: &AppletContext<'_>,
-        theme: &Theme,
-    ) -> Option<String> {
-        let mut run = None;
-        let slot = |index: usize, from_right: bool| {
-            let x = if from_right {
-                bar.right() - 4.0 - (index as f32 + 1.0) * (BUTTON + 2.0)
-            } else {
-                bar.left() + 4.0 + index as f32 * (BUTTON + 2.0)
-            };
-            Rect::from_min_size(pos2(x, bar.center().y - BUTTON / 2.0), vec2(BUTTON, BUTTON))
-        };
-        let history = (cx.history.can_undo(), cx.history.can_redo());
-        if icon_button(
-            ui,
-            slot(0, false),
-            Icon::Menu,
-            true,
-            self.sheet == Some(Sheet::Menu),
-            &tr!("menus-2"),
-            theme,
-        ) {
-            self.toggle_sheet(Sheet::Menu);
-        }
-        if icon_button(
-            ui,
-            slot(1, false),
-            Icon::Undo,
-            history.0,
-            false,
-            &tr!("undo-two-finger-tap"),
-            theme,
-        ) {
-            run = Some("edit.undo".to_owned());
-        }
-        if icon_button(
-            ui,
-            slot(2, false),
-            Icon::Redo,
-            history.1,
-            false,
-            &tr!("redo-three-finger-tap"),
-            theme,
-        ) {
-            run = Some("edit.redo".to_owned());
-        }
-        let right = [
-            (Icon::Layers, Sheet::Layers, tr!("layers-3")),
-            (Icon::Wheel, Sheet::Color, tr!("color-2")),
-            (Icon::Wrench, Sheet::ToolSettings, tr!("tool-settings")),
-            (Icon::Play, Sheet::Timeline, tr!("timeline")),
-        ];
-        let fits = ((bar.width() - 3.0 * (BUTTON + 2.0) - 8.0) / (BUTTON + 2.0))
-            .floor()
-            .max(0.0) as usize;
-        for (index, (icon, sheet, tip)) in right.iter().enumerate().take(fits) {
-            let active = self.sheet == Some(*sheet);
-            if icon_button(ui, slot(index, true), *icon, true, active, tip, theme) {
-                self.toggle_sheet(*sheet);
-            }
-        }
-        run
     }
 }

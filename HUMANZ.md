@@ -1651,7 +1651,23 @@ or status strip), the size and opacity sliders of the current sub tool,
 and a bottom bar (swap with the eraser, the pens as `phone::Sheet::Pens`,
 the sub tools, the color, the layers). Its sheets are the phone's
 (`phone_sheet`), plus `Reference` (the Sub View) and `More`, whose rows run
-Sue Paint's own commands. Pictures may be up to 20000 pixels a side
+Sue Paint's own commands.
+
+**Studio Mode** (`studio_mode.rs`, `touch_mode` = `studio`). `studio_bar`
+shows the picture's name and the fullscreen toggle in Sue's top bar;
+`studio_frame` lays out a tool column (Menu, swap, the pen, Select,
+Operation, size and opacity on vertical sliders, the main color), the
+canvas, a row of palettes opening `phone::Sheet`s (Navigator, Layers,
+LayerProperty, ToolSettings, Color, Materials, Timeline, Reference) and a
+command bar running `file.save`, `edit.undo`, `edit.redo`,
+`edit.transform.scale`, `select.all`, `edit.copy`, `edit.cut` and
+`edit.paste`. `Touch` keeps fullscreen and the modifier key bar: Ctrl,
+Shift, Alt and Space latch and are ORed into the canvas's modifiers and
+Space (`canvas_input`), Esc lets go of them and deselects, and T1 to T7
+run `touch.custom.<n>`, the command in `sue_paint.custom_key_<n>`. The
+Menu sheet (`studio_menu`) has Return to Home, Switch to Simple Mode, App
+Settings and Sue Paint's menus (`menu_list`). Studio Mode replaces the
+earlier phone layout and the tablet's docked palettes. Pictures may be up to 20000 pixels a side
 (`doc::MAX_SIDE`), for webtoons.
 
 **Camera folders.** A camera folder (Animation, New Animation Layer, Camera

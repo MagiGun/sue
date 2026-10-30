@@ -34,6 +34,11 @@ follow [Semantic Versioning](https://semver.org/).
 - Simple Mode for Sue Paint on phones and tablets: just the canvas, brush
   size and opacity sliders, and a bar to swap brush and eraser, pick pens
   and brushes, the color and the layers; "..." holds the rest.
+- Studio Mode for Sue Paint on phones and tablets: a tool column with size
+  and opacity sliders, a row of palettes, a command bar, fullscreen, a
+  slide-out bar of modifier keys (Esc, Ctrl, Shift, Alt, Space and seven
+  keys of your own) and a Menu with every menu. It replaces the earlier
+  phone and tablet layouts.
 - Try Sue in your browser at https://magigun.github.io/sue/try/, with
   nothing to install: the Hub, Sue Paint, Sue Writer and the tools, opening
   files from your computer (or dropped on the page), saving them as

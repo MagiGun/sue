@@ -766,8 +766,10 @@ impl SuePaint {
                 input.modifiers,
             )
         });
+        // Studio Mode's modifier keys count as held.
+        let held = held | self.touch.modifiers();
         self.modifiers = held;
-        let space = space && !ctx.text_edit_focused();
+        let space = (space || self.touch.space) && !ctx.text_edit_focused();
         // Spread this frame's pointer samples evenly over the frame's time,
         // so the stabilizer and flicks see the pen's real speed.
         let moves = events

@@ -343,6 +343,20 @@ color and the layers. **...** has Export image, Export timelapse, Flip
 horizontal view, See reference images, Create animation, Canvas setting,
 Preferences, Switch to Studio Mode and Help.
 
+**Studio Mode** is closer to the desktop. A column at the left holds the
+menu, the brush and eraser swap, your pen (tap it again for every tool),
+the lasso and the object tool, then the brush size and opacity on
+vertical sliders and your color. Along the bottom a row of palettes
+(navigator, layers, layer property, tool settings, color, materials,
+timeline, reference pictures) sits over a command bar: back, save, undo,
+redo, transform, select all, copy, cut and paste. The button at the top
+right goes fullscreen. The tab at the right edge slides out the modifier
+keys: Esc, Ctrl, Shift, Alt and Space stay down until you tap them again,
+and T1 to T7 run commands you choose in Settings (Sue Paint, Key T1 and
+on). The menu button opens Return to Home, Switch to Simple Mode, App
+Settings and every menu. Settings, Sue Paint, Touch mode switches between
+the two modes too.
+
 Once a canvas is open:
 
 - **Menus along the top,** right after the Sue button: File, Edit, Story,
@@ -794,13 +808,9 @@ up, Sue fits itself into the space above it, and takes the whole screen back
 when it goes away. On an iPad, a floating or split keyboard leaves Sue as it
 is.
 
-**Sue Paint on a tablet** keeps the menus, the tool strip and the Layer
-palette, and folds the other palettes into icons at the right edge: tap one to
-pop it over the canvas. **On a phone** the canvas fills the screen. The top
-bar has the Sue button, then Sue Paint's menus, Undo and Redo, the layers,
-the color, the tool settings and the timeline; the bottom bar has the tools
-you reach for most, **More** for every tool, and your color. Palettes come up
-from the bottom as sheets, one at a time; tap above a sheet to put it away.
+**Sue Paint on a phone or tablet** draws in Simple Mode or Studio Mode
+(see Sue Paint, above). Palettes come up from the bottom as sheets, one at
+a time; tap above a sheet to put it away.
 
 Everywhere, **two fingers** move, zoom and turn the canvas, a quick
 **two-finger tap undoes** and a **three-finger tap redoes**, as in Clip Studio

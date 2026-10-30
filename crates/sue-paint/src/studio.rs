@@ -457,6 +457,8 @@ pub struct SuePaint {
     pub(crate) drawing_tool: crate::tools::Tool,
     /// The canvas shows without its tabs and status strip (Simple Mode).
     pub(crate) bare: bool,
+    /// Studio Mode's fullscreen and modifier keys.
+    pub(crate) touch: crate::studio_mode::Touch,
     /// The New canvas page's templates, registered at start.
     pub(crate) canvas_templates: crate::templates::CanvasTemplates,
     /// Each recording picture's compositor version at its last timelapse
@@ -589,6 +591,7 @@ impl Default for SuePaint {
             canvas_templates: crate::templates::CanvasTemplates::builtin(),
             drawing_tool: crate::tools::Tool::Pen,
             bare: false,
+            touch: crate::studio_mode::Touch::default(),
             timelapse: HashMap::new(),
             timelapse_export: crate::timelapse::Export::default(),
             transform: None,
@@ -3537,6 +3540,17 @@ impl SuePaint {
     /// Runs a command of the menus, the command bar or a shortcut.
     #[allow(clippy::too_many_lines, reason = "one arm per command")]
     pub(crate) fn run(&mut self, command: &str, cx: &mut AppletContext<'_>) {
+        // Studio Mode's keys T1 to T7 run the commands the rice names.
+        if let Some(index) = command
+            .strip_prefix("touch.custom.")
+            .and_then(|index| index.parse::<usize>().ok())
+        {
+            let custom = self.custom_command(index, cx);
+            if !custom.starts_with("touch.") && !custom.is_empty() {
+                self.run(&custom, cx);
+            }
+            return;
+        }
         self.record_auto(command);
         if command.starts_with("story.") && self.story_command(command, cx) {
             return;
@@ -5244,8 +5258,9 @@ impl SuePaint {
             }
             return;
         }
-        if form == sue_platform::FormFactor::Mobile {
-            self.phone_frame(ui, full, cx, &theme);
+        // Studio Mode on phones and tablets.
+        if form != sue_platform::FormFactor::Desktop {
+            self.studio_frame(ui, full, cx, &theme);
             if self.ready {
                 self.dialog_ui(&ctx, cx, &theme);
             }
@@ -5631,6 +5646,17 @@ impl SueApplet for SuePaint {
                 tr!("what-does-canvas-file-modifier-key", name = name),
             ));
         }
+        declarations.extend(crate::studio_mode::CUSTOM_DEFAULTS.iter().enumerate().map(
+            |(index, command)| {
+                RiceDeclaration::new(
+                    crate::studio_mode::custom_key(index),
+                    RiceParameter::Text {
+                        value: (*command).to_owned(),
+                    },
+                    format!("The command Studio Mode's key T{} runs", index + 1),
+                )
+            },
+        ));
         declarations.extend(Self::custom_colors());
         declarations.extend(sue_wm::shortcuts::declarations(
             KEYS_SECTION,
@@ -5662,12 +5688,8 @@ impl SueApplet for SuePaint {
             }
             return;
         }
-        if cx.view.form_factor == sue_platform::FormFactor::Mobile {
-            // A phone's row of large buttons: the menus as a sheet, undo,
-            // redo and the palettes.
-            if let Some(command) = self.phone_bar(ui, rect, cx, &theme) {
-                self.run(&command, cx);
-            }
+        if cx.view.form_factor != sue_platform::FormFactor::Desktop {
+            self.studio_bar(ui, rect, cx, &theme);
             return;
         }
         // The start page has no menus; everything is on its buttons.
@@ -5960,6 +5982,15 @@ impl SueApplet for SuePaint {
             }
             "sheet/close" => {
                 self.sheet = None;
+                self.touch.keys = false;
+                true
+            }
+            "sheet/menu" => {
+                self.sheet = Some(crate::phone::Sheet::Menu);
+                true
+            }
+            "keys/open" => {
+                self.touch.keys = true;
                 true
             }
             "dialog/close" => {

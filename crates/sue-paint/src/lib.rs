@@ -71,6 +71,7 @@ pub mod simple;
 mod start;
 pub mod story;
 mod studio;
+pub mod studio_mode;
 mod subview;
 pub mod templates;
 pub mod three;

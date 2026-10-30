@@ -1610,3 +1610,20 @@ simple-see-references = See reference images
 simple-create-animation = Create animation
 simple-canvas-setting = Canvas setting
 simple-to-studio = Switch to Studio Mode
+
+## studio_mode.rs: Studio Mode
+
+studio-fullscreen = Fullscreen
+studio-leave-fullscreen = Leave fullscreen
+studio-layer-property = Layer Property
+studio-lasso = Lasso
+studio-object = Object
+studio-modifier-keys = Modifier keys
+studio-key-esc = Esc
+studio-key-ctrl = Ctrl
+studio-key-shift = Shift
+studio-key-alt = Alt
+studio-key-space = Space
+studio-return-home = Return to Home
+studio-to-simple = Switch to Simple Mode
+studio-app-settings = App Settings

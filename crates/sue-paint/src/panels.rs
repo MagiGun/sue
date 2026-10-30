@@ -1662,7 +1662,7 @@ impl SuePaint {
 
     /// The Material palette: Sue Paint's tones and patterns and the
     /// pictures registered, to double-click onto the canvas.
-    fn material_panel(
+    pub(crate) fn material_panel(
         &mut self,
         ui: &mut Ui,
         body: Rect,
@@ -3551,7 +3551,7 @@ impl SuePaint {
     }
 
     /// The Layer Property tab: the current layer's settings.
-    fn layer_property(
+    pub(crate) fn layer_property(
         &mut self,
         ui: &mut Ui,
         current: Option<&doc::LayerInfo>,
