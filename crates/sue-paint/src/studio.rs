@@ -5860,6 +5860,14 @@ impl SueApplet for SuePaint {
         self.picture()
     }
 
+    /// Clip Studio Paint files come to Sue Paint as they are, wherever
+    /// they are opened (the Sue menu, the start page, a drop, the Hub),
+    /// since only Sue Paint reads their layers.
+    fn opens_file(&self, path: &Path) -> bool {
+        path.extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("clip"))
+    }
+
     fn reserved_keys(&self) -> Vec<sue_rice::Keybind> {
         // Every chord of the studio's shortcuts wins while it is open (Tab
         // hides the palettes, / is the Zoom tool, Ctrl+0 fits the picture).
@@ -5930,7 +5938,7 @@ impl SueApplet for SuePaint {
     }
 
     fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
-        if matches!(pick.purpose.as_str(), "open" | "layer")
+        if matches!(pick.purpose.as_str(), "open" | "import" | "layer")
             && cx.view.page.as_ref().map(AppletId::as_str) != Some(ID)
         {
             cx.request(ShellRequest::Open(me_id()));
@@ -5939,7 +5947,9 @@ impl SueApplet for SuePaint {
             return;
         }
         match pick.purpose.as_str() {
-            "open" => self.open_picked(cx, path, false),
+            // "import" is a file opened anywhere in Sue that Sue Paint
+            // takes itself (see `opens_file`).
+            "open" | "import" => self.open_picked(cx, path, false),
             "layer" => self.open_picked(cx, path, true),
             "import-layers" => self.open_picked(cx, path, true),
             "story-text" => self.import_text(cx, path),

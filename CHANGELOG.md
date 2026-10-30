@@ -43,6 +43,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Clip Studio Paint files (`.clip`) open in Sue Paint with their layers
+  however you open them: the Sue menu's Open File, the start page's
+  Open, dropping one on the window, or the Hub. On phones and tablets
+  the browser's file picker no longer greys them out.
 - Nothing paints or reacts under an open menu, popup, dialog or sheet,
   most of all on phones and tablets, where taps went through Sue Paint's
   sheets to the canvas.

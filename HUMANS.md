@@ -368,7 +368,9 @@ clipping, and Sue opens it again with everything, vector lines and tones
 included, because the file also carries Sue's own copy of the picture.
 File, Save As can make a Sue project, a Photoshop document or a flat
 picture instead, and Settings (Sue Paint, Save format) makes a Sue project
-what Save writes. Sue Paint also opens `.clip` files from Clip Studio:
+what Save writes. Sue Paint also opens `.clip` files from Clip Studio,
+however they are opened (its own Open, the Sue menu's Open File, a drop on
+the window, the Hub's recent files):
 pixel, text and vector layers come in as the pixels Clip Studio last drew
 for them, and correction, gradient and fill layers as empty layers in their
 places, since Sue cannot redo those effects yet.

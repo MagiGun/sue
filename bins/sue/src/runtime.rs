@@ -3999,6 +3999,73 @@ f 2 3 4
     }
 
     #[test]
+    fn a_clip_file_opens_in_sue_paint_from_anywhere() {
+        let (mut runtime, root) = runtime("clip-open");
+        let ctx = egui::Context::default();
+        let now = Instant::now();
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        std::fs::create_dir_all(&root).unwrap();
+        let psd = sue_io::psd::Psd {
+            width: 64,
+            height: 48,
+            layers: vec![sue_io::psd::PsdLayer::pixels(
+                "Ink",
+                4,
+                4,
+                8,
+                8,
+                [9_u8, 9, 9, 255].repeat(64),
+            )],
+            merged: Vec::new(),
+        };
+        let pictures = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .filter(|(_, entity)| sue_model::picture::is_picture(entity))
+                .count()
+        };
+        // The Sue menu's Open File (and the start page's Open), Sue
+        // Paint's own Open, and a file dropped on the window.
+        for (index, how) in ["open-file", "paint-open", "dropped"].iter().enumerate() {
+            let path = root.join(format!("Made in Clip Studio {index}.clip"));
+            std::fs::write(&path, sue_io::clip::encode_clip(&psd, 300.0, None).unwrap()).unwrap();
+            let before = pictures(&runtime);
+            match *how {
+                "open-file" => runtime.open_path(&path, &mut NoTextures, now),
+                "paint-open" => runtime.request(
+                    ShellRequest::Picked {
+                        pick: FilePick::open(
+                            Some(AppletId::new(sue_paint::ID).unwrap()),
+                            "open",
+                            "Open",
+                        ),
+                        path: path.clone(),
+                    },
+                    &mut NoTextures,
+                    now,
+                ),
+                // A dropped file reaches the runtime as this request.
+                _ => runtime.request(ShellRequest::OpenFile(path.clone()), &mut NoTextures, now),
+            }
+            frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+            assert_eq!(
+                pictures(&runtime),
+                before + 1,
+                "{how}: the .clip opened as a canvas"
+            );
+            assert_eq!(
+                runtime.shell.page().map(AppletId::as_str),
+                Some(sue_paint::ID),
+                "{how}: in Sue Paint"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_paints_nothing_under_a_menu_or_sheet() {
         let (mut runtime, root) = runtime("paint-covered");
         let ctx = egui::Context::default();
