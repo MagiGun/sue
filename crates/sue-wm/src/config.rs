@@ -182,6 +182,12 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
             "Height of the top bar with the Sue button and the menus (px; touch layouts make it taller)",
         ),
         declare(
+            "layout.status_bar",
+            toggle(false),
+            "Show the thin status bar along the bottom of the window (messages show as a notice without it)",
+        )
+        .labeled("Status bar"),
+        declare(
             "layout.status_bar_height",
             int(22, 16, 48),
             "Height of the status bar (px)",
@@ -387,7 +393,12 @@ impl WmConfig {
         Ok(Self {
             metrics: LayoutMetrics {
                 bar_height: number("layout.bar_height")?,
-                status_bar_height: number("layout.status_bar_height")?,
+                // Off unless asked for: the layout then gives it no room.
+                status_bar_height: if schema.get_bool("layout.status_bar").unwrap_or(false) {
+                    number("layout.status_bar_height")?
+                } else {
+                    0.0
+                },
             },
             spring: SpringParams {
                 stiffness: number("motion.spring_stiffness")?,
@@ -464,7 +475,10 @@ mod tests {
     fn the_config_reads_every_declaration() {
         let config = WmConfig::from_rice(&schema()).unwrap();
         assert_eq!(config.metrics.bar_height, 28.0);
-        assert_eq!(config.metrics.status_bar_height, 22.0);
+        assert_eq!(
+            config.metrics.status_bar_height, 0.0,
+            "off unless asked for"
+        );
         assert_eq!(config.pinned, "", "nothing pinned: Sue opens on the Hub");
         assert_eq!(config.recent_count, 8);
         assert_eq!(config.keymap.command_palette.to_string(), "Tab");

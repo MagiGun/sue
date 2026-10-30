@@ -400,6 +400,11 @@ impl Viewer {
                     )]);
                 cx.request(ShellRequest::PickFile(pick));
             }
+            "viewer.undo" | "viewer.redo" => {
+                if let Err(error) = cx.undo(command == "viewer.redo") {
+                    cx.fail(error.to_string());
+                }
+            }
             "viewer.fit" => self.fit = true,
             "viewer.actual" => {
                 self.fit = false;
@@ -969,6 +974,32 @@ impl Viewer {
         let ui = &mut row;
         ui.spacing_mut().item_spacing.x = 4.0;
         let has = self.current.is_some();
+        // Undo and Redo, as Ctrl+Z and Ctrl+Y do.
+        for (label, command, hint, can) in [
+            (
+                tr!("undo"),
+                "viewer.undo",
+                tr!("undo-ctrl-z"),
+                cx.history.can_undo(),
+            ),
+            (
+                tr!("redo"),
+                "viewer.redo",
+                tr!("redo-ctrl-y"),
+                cx.history.can_redo(),
+            ),
+        ] {
+            if ui
+                .add_enabled_ui(can, |ui| {
+                    widgets::pill_button(ui, &label, false, theme).on_hover_text(hint)
+                })
+                .inner
+                .clicked()
+            {
+                run = Some(command);
+            }
+        }
+        widgets::pill_divider(ui, theme);
         let mut button = |ui: &mut Ui, label: &str, command: &'static str, hint: &str, on: bool| {
             if ui
                 .add_enabled_ui(has, |ui| {

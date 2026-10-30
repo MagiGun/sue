@@ -183,6 +183,33 @@ pub struct Settings {
     stacked: bool,
     /// How wide choices and text fields are this frame.
     field: f32,
+    /// Reset All Settings was clicked once; a second click resets.
+    confirm_reset: bool,
+}
+
+/// The value `path` starts with: the one in the settings Sue ships.
+fn default_of(path: &str) -> Option<RiceValue> {
+    static SHIPPED: std::sync::OnceLock<Option<RiceSchema>> = std::sync::OnceLock::new();
+    SHIPPED
+        .get_or_init(|| RiceSchema::parse(sue_rice::DEFAULT_RICE).ok())
+        .as_ref()?
+        .get(path)
+}
+
+/// The settings among `entries` that differ from how Sue ships, with the
+/// value each goes back to.
+fn changed<'e>(
+    entries: impl IntoIterator<Item = &'e RiceEntry>,
+    rice: &RiceSchema,
+) -> Vec<(String, RiceValue)> {
+    entries
+        .into_iter()
+        .filter_map(|entry| {
+            let shipped = default_of(entry.path())?;
+            (rice.get(entry.path()).as_ref() != Some(&shipped))
+                .then(|| (entry.path().to_owned(), shipped))
+        })
+        .collect()
 }
 
 impl Settings {
@@ -194,6 +221,33 @@ impl Settings {
             Ok(_) => self.error = None,
             Err(error) => self.error = Some(error.to_string()),
         }
+    }
+
+    /// Puts `settings` back to how Sue ships them, each an undoable step.
+    fn reset(&mut self, cx: &mut AppletContext<'_>, settings: Vec<(String, RiceValue)>) {
+        for (path, value) in settings {
+            self.commit(cx, &path, value);
+        }
+    }
+
+    /// The small Reset button of a row that differs from how Sue ships it.
+    fn reset_button(ui: &mut Ui, entry: &RiceEntry, cx: &AppletContext<'_>) -> Option<Edit> {
+        let shipped = default_of(entry.path())?;
+        if cx.rice().get(entry.path()).as_ref() == Some(&shipped) {
+            return None;
+        }
+        let theme = &cx.theme;
+        ui.add(
+            egui::Button::new(
+                RichText::new(tr!("settings-reset"))
+                    .size(theme.small_size)
+                    .color(theme.muted),
+            )
+            .frame(false),
+        )
+        .on_hover_text(tr!("settings-reset-hint"))
+        .clicked()
+        .then(|| Edit::Set(entry.path().to_owned(), shipped))
     }
 
     fn apply(&mut self, cx: &mut AppletContext<'_>, edit: Edit) {
@@ -516,6 +570,9 @@ impl Settings {
                 ui.set_max_width(width);
                 ui.spacing_mut().slider_width = (width - 72.0).max(80.0);
                 edit = self.control(ui, entry, cx);
+                if let Some(reset) = Self::reset_button(ui, entry, cx) {
+                    edit = Some(reset);
+                }
             });
         } else {
             self.field = if self.stacked { width } else { 200.0 };
@@ -572,6 +629,9 @@ impl Settings {
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 *edit = self.control(ui, entry, cx);
+                if let Some(reset) = Self::reset_button(ui, entry, cx) {
+                    *edit = Some(reset);
+                }
             });
         });
     }
@@ -917,6 +977,51 @@ impl Settings {
         if let Some(error) = &self.error {
             ui.add(egui::Label::new(RichText::new(format!("! {error}")).color(theme.text)).wrap());
         }
+        // Back to how Sue ships: this page, or everything (asked twice).
+        if needle.is_empty()
+            && let Some(page) = pages.get(self.page)
+        {
+            let on_page: Vec<RiceEntry> = page
+                .groups
+                .iter()
+                .flat_map(|group| &group.items)
+                .flat_map(|item| entries_of(cx.rice(), item))
+                .cloned()
+                .collect();
+            let page_changes = changed(&on_page, cx.rice());
+            let all_changes = changed(cx.rice().entries(), cx.rice());
+            let mut reset = None;
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add_enabled(
+                        !page_changes.is_empty(),
+                        egui::Button::new(tr!("settings-reset-page")),
+                    )
+                    .clicked()
+                {
+                    reset = Some(page_changes.clone());
+                }
+                let label = if self.confirm_reset {
+                    tr!("settings-reset-all-confirm")
+                } else {
+                    tr!("settings-reset-all")
+                };
+                if ui
+                    .add_enabled(!all_changes.is_empty(), egui::Button::new(label))
+                    .clicked()
+                {
+                    if self.confirm_reset {
+                        reset = Some(all_changes.clone());
+                        self.confirm_reset = false;
+                    } else {
+                        self.confirm_reset = true;
+                    }
+                }
+            });
+            if let Some(reset) = reset {
+                self.reset(cx, reset);
+            }
+        }
         ui.add_space(theme.padding * 0.5);
         let shown: Vec<&SettingsPage> = if needle.is_empty() {
             pages.get(self.page).into_iter().collect()
@@ -963,6 +1068,29 @@ mod tests {
                 codec.abilities
             );
         }
+    }
+
+    #[test]
+    fn every_setting_has_a_default_to_go_back_to() {
+        let rice = every_setting();
+        let missing: Vec<&str> = rice
+            .entries()
+            .iter()
+            .map(RiceEntry::path)
+            .filter(|path| default_of(path).is_none())
+            .collect();
+        assert!(missing.is_empty(), "no shipped value for {missing:?}");
+        let mut changed_rice = every_setting();
+        let path = "general.confirm_on_exit";
+        let shipped = default_of(path).unwrap();
+        let other = match shipped {
+            RiceValue::Bool(on) => RiceValue::Bool(!on),
+            _ => panic!("a switch"),
+        };
+        changed_rice.set(path, other).unwrap();
+        let back = changed(changed_rice.entries(), &changed_rice);
+        assert_eq!(back, vec![(path.to_owned(), shipped)]);
+        assert!(changed(rice.entries(), &rice).is_empty(), "as shipped");
     }
 
     #[test]

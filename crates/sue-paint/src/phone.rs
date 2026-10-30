@@ -72,6 +72,8 @@ impl SuePaint {
             Sheet::Color | Sheet::Timeline => (area.height() * 0.55).min(420.0),
         };
         let rect = Rect::from_min_max(pos2(area.left(), area.bottom() - height), area.max);
+        // The sheet and its dimmed scrim lie over the canvas.
+        sue_wm::cover::cover(ui.ctx(), ui.layer_id(), area);
         // Above the canvas: a tap outside closes the sheet.
         let scrim = Rect::from_min_max(area.min, pos2(area.right(), rect.top()));
         let outside = ui.interact(scrim, Id::unique("sue-paint-sheet-scrim"), Sense::click());

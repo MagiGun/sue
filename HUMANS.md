@@ -47,8 +47,11 @@ Nothing is exported, imported or converted between them.
 
 ## How the screen works
 
-Sue's window has three parts: a **bar along the top**, the **page** under it,
-and a thin **status bar** along the bottom. Out of the box Sue is black,
+Sue's window has a **bar along the top** and the **page** under it. A thin
+**status bar** along the bottom is off at first: Settings, Appearance &
+Rice, **Status bar** turns it on. Without it, what the status bar would say
+(a file saved, something that went wrong) shows for a moment as a small
+notice at the bottom of the window. Out of the box Sue is black,
 white and grays only, so your own pictures and words are the only color you
 see (you can color it yourself in Settings).
 
@@ -176,7 +179,7 @@ fit it or see it at 100%, drag to pan, and step to the project's other
 pictures with the arrow keys. Its menus (File, Image, View, Send) and the
 toolbar under them do the quick fixes (turn, mirror, crop, resize,
 brightness and contrast, saturation and hue, grayscale, invert), each one
-`Ctrl+Z` step; save the picture as any picture type; re-encode it as a
+`Ctrl+Z` step, with **Undo** and **Redo** first on the toolbar; save the picture as any picture type; re-encode it as a
 lossless JPEG XL; show it in its folder; and send it to the Converter, Sue
 Paint or Sue Writer. File, Open Picture opens one with your system's own
 Open window.
@@ -275,7 +278,10 @@ The Sue menu's **Settings** (or `Ctrl+,`) opens Settings as a floating
 window. A list of categories runs down the left (General, Language,
 Appearance & Rice, Display & Graphics, Audio & DSP, Files & Codecs, Studios, Packages & Updates,
 Keymaps, MCP), and the right side shows only that category. Type in "Filter
-settings..." to search all of them.
+settings..." to search all of them. A setting you changed shows **Reset**
+beside it to go back to how Sue comes; **Reset This Page** and **Reset All
+Settings** (click it twice) do the same for a page or for everything, and
+each reset undoes with `Ctrl+Z`.
 
 Settings fits the screen it is on. On a phone it fills the screen: held
 upright, the categories are a list, a tap opens one, and **All settings** at
@@ -870,7 +876,9 @@ a time; tap above a sheet to put it away.
 
 Everywhere, **two fingers** move, zoom and turn the canvas, a quick
 **two-finger tap undoes** and a **three-finger tap redoes**, as in Clip Studio
-Paint.
+Paint. A pinch never paints and never undoes: if one finger began a line
+before the second came down, that line is taken back, and a tap counts only
+when the fingers stay still and the view does not move.
 
 **Switching layouts.** The Sue menu's **Layout** (or Settings, Display,
 **Interface**) chooses Automatic (the device decides), Desktop, Tablet or

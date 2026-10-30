@@ -31,6 +31,7 @@ pub mod brand;
 mod catalog;
 mod color_pick;
 mod config;
+pub mod cover;
 mod error;
 pub mod fonts;
 pub mod keys;

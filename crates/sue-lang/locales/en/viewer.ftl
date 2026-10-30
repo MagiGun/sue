@@ -89,3 +89,7 @@ image-viewer-crop = Image Viewer: Crop
 ## viewer.rs
 
 cannot-write-2 = Cannot write { $value }: { $error }
+undo = Undo
+redo = Redo
+undo-ctrl-z = Undo the last change (Ctrl+Z)
+redo-ctrl-y = Redo it (Ctrl+Y)

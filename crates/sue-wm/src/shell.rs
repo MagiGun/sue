@@ -296,31 +296,46 @@ fn templates(applets: &Applets, rice: &RiceSchema) -> Vec<(AppletId, crate::File
         .collect()
 }
 
-/// A pushpin in `rect`: filled when `pinned`.
+/// A pushpin in `rect`, leaning as one pressed into a board: its cap,
+/// body and base plate filled when `pinned`, outlined when not, and its
+/// needle.
 fn pin_glyph(painter: &egui::Painter, rect: Rect, pinned: bool, color: egui::Color32) {
-    let size = rect.width().min(rect.height()) * 0.3;
-    let center = rect.center() - vec2(0.0, size * 0.25);
-    let head = center - vec2(0.0, size * 0.55);
-    let stroke = Stroke::new(1.5, color);
-    if pinned {
-        painter.circle_filled(head, size * 0.55, color);
-    } else {
-        painter.circle_stroke(head, size * 0.55, stroke);
-    }
-    painter.line_segment(
-        [
-            center + vec2(-size * 0.85, size * 0.1),
-            center + vec2(size * 0.85, size * 0.1),
-        ],
-        stroke,
-    );
-    painter.line_segment(
-        [
-            center + vec2(0.0, size * 0.1),
-            center + vec2(0.0, size * 1.45),
-        ],
-        stroke,
-    );
+    let unit = rect.width().min(rect.height()) * 0.36;
+    let center = rect.center();
+    // Leaning 45 degrees to the right, needle down and to the left.
+    let (sin, cos) = std::f32::consts::FRAC_PI_4.sin_cos();
+    let at = |x: f32, y: f32| {
+        let (x, y) = (x * unit, y * unit);
+        center + vec2(x * cos - y * sin, x * sin + y * cos)
+    };
+    let stroke = Stroke::new(1.4, color);
+    let part = |points: Vec<egui::Pos2>| {
+        if pinned {
+            painter.add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
+        } else {
+            painter.add(egui::Shape::closed_line(points, stroke));
+        }
+    };
+    // The cap, the body narrowing to the base plate, the plate.
+    part(vec![
+        at(-0.42, -0.95),
+        at(0.42, -0.95),
+        at(0.42, -0.72),
+        at(-0.42, -0.72),
+    ]);
+    part(vec![
+        at(-0.22, -0.72),
+        at(0.22, -0.72),
+        at(0.3, -0.05),
+        at(-0.3, -0.05),
+    ]);
+    part(vec![
+        at(-0.55, -0.05),
+        at(0.55, -0.05),
+        at(0.55, 0.1),
+        at(-0.55, 0.1),
+    ]);
+    painter.line_segment([at(0.0, 0.1), at(0.0, 0.95)], Stroke::new(1.6, color));
 }
 
 impl Shell {
@@ -1374,6 +1389,7 @@ impl Shell {
     pub fn ui(&mut self, root: &mut Ui, io: &mut ShellIo<'_>, now: Instant) {
         let _language = sue_lang::scope(&crate::sue_language(&io.world.rice));
         let ctx = root.ctx().clone();
+        crate::cover::begin_frame(&ctx);
         self.cover_scripts(&ctx, io);
         // Real wall-clock time, clamped; after a sleep, one nominal frame.
         let nominal = 1.0 / self.scheduler.target_hz().max(1) as f32;
@@ -1482,7 +1498,11 @@ impl Shell {
                 dt,
             );
         });
-        self.status_ui(root, layout.status, io, &theme);
+        if layout.status.height() >= 1.0 {
+            self.status_ui(root, layout.status, io, &theme);
+        } else {
+            self.notice_ui(&ctx, root.max_rect(), io, &theme);
+        }
         self.palette_ui(&ctx, io, &theme, now);
         self.window_ui(&ctx, frame, io, &theme, now, dt);
 
@@ -2145,7 +2165,9 @@ impl Shell {
             } else {
                 tr!("pin-sue-opens-here-launch")
             });
-        let hovered = live && (response.hovered() || pin_response.hovered());
+        // The box lights up for itself, not while the pointer is on its
+        // pin: the pin lights up alone.
+        let hovered = live && response.hovered() && !pin_response.hovered();
         let painter = ui.painter();
         painter.rect(
             rect,
@@ -2311,6 +2333,67 @@ impl Shell {
         if escape {
             self.close_window();
         }
+    }
+
+    /// Without the status bar, its message shows as a small notice at the
+    /// bottom of the window while it lasts; a saved file's shows the file
+    /// when clicked.
+    fn notice_ui(
+        &mut self,
+        ctx: &egui::Context,
+        screen: Rect,
+        io: &mut ShellIo<'_>,
+        theme: &Theme,
+    ) {
+        let Some((text, error)) = self.message() else {
+            return;
+        };
+        let text = if error {
+            format!("! {text}")
+        } else {
+            text.to_owned()
+        };
+        let path = self.message_path.clone();
+        let font = theme.font(theme.small_size);
+        let galley = ctx.fonts_mut(|fonts| {
+            fonts.layout(text, font, theme.text, (screen.width() - 48.0).max(80.0))
+        });
+        let size = galley.size() + vec2(theme.padding * 2.0, theme.padding);
+        let rect = Rect::from_center_size(
+            pos2(screen.center().x, screen.bottom() - 16.0 - size.y / 2.0),
+            size,
+        );
+        egui::Area::new(Id::unique("sue-notice"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(rect.min)
+            .interactable(path.is_some())
+            .show(ctx, |ui| {
+                let (shown, response) = ui.allocate_exact_size(size, Sense::click());
+                let painter = ui.painter();
+                painter.rect(
+                    shown,
+                    0.0,
+                    theme.panel,
+                    theme.hairline(),
+                    StrokeKind::Inside,
+                );
+                painter.galley(
+                    shown.min + vec2(theme.padding, theme.padding / 2.0),
+                    galley,
+                    theme.text,
+                );
+                if let Some(path) = &path {
+                    let response = response
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text(path.display().to_string());
+                    if response.clicked() {
+                        io.requests.push(ShellRequest::Command(format!(
+                            "reveal-file:{}",
+                            path.display()
+                        )));
+                    }
+                }
+            });
     }
 
     fn status_ui(&mut self, root: &mut Ui, rect: Rect, io: &mut ShellIo<'_>, theme: &Theme) {

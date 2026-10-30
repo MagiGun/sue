@@ -1125,6 +1125,15 @@ impl Stroke {
         }
     }
 
+    /// Takes the stroke back as if it was never drawn (a second finger came
+    /// down: it was a pinch, not a line): the pixels from before it go back
+    /// and nothing is left to undo. Answers the rectangles that changed.
+    pub fn abandon(mut self, raster: &mut RasterTile2D) -> Vec<[u32; 4]> {
+        self.pending = None;
+        self.restart(raster);
+        self.take_dirty_tiles()
+    }
+
     /// Puts back the pixels from before the stroke, to paint it again.
     fn restart(&mut self, raster: &mut RasterTile2D) {
         let stride = raster.width() as usize * 4;
@@ -2373,6 +2382,20 @@ mod tests {
                 assert_eq!(erased, [before[0], before[1], before[2], 0]);
             }
         }
+    }
+
+    #[test]
+    fn an_abandoned_stroke_leaves_the_layer_as_it_was() {
+        let mut raster = layer(200, 100);
+        raster.bytes_mut().unwrap()[(50 * 200 + 20) * 4 + 3] = 77;
+        let before = raster.bytes().unwrap().to_vec();
+        let mut stroke = Stroke::new(EntityId::new(), flat_pen(30.0), [0.0; 3], false);
+        stroke.to(&mut raster, [20.0, 50.0], 1.0, None);
+        stroke.to(&mut raster, [120.0, 50.0], 1.0, None);
+        assert_ne!(raster.bytes().unwrap(), before.as_slice());
+        let rects = stroke.abandon(&mut raster);
+        assert_eq!(raster.bytes().unwrap(), before.as_slice());
+        assert!(!rects.is_empty(), "the screen redraws what it painted");
     }
 
     #[test]

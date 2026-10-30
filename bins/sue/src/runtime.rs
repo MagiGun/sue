@@ -3999,6 +3999,358 @@ f 2 3 4
     }
 
     #[test]
+    fn sue_paint_paints_nothing_under_a_menu_or_sheet() {
+        let (mut runtime, root) = runtime("paint-covered");
+        let ctx = egui::Context::default();
+        let mut now = Instant::now();
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        step(&mut runtime, Vec::new());
+        let bytes = |runtime: &Runtime| {
+            let arena = &runtime.engine.world.arena;
+            let picture = arena
+                .iter()
+                .find(|(_, entity)| sue_model::picture::is_picture(entity))
+                .map(|(_, entity)| entity.id())
+                .unwrap();
+            let layer = sue_paint::doc::layers(arena, picture).last().unwrap().id;
+            sue_paint::doc::raster(arena, layer)
+                .unwrap()
+                .bytes()
+                .unwrap()
+                .to_vec()
+        };
+        let middle = paint_middle(&runtime);
+        // A sheet painted over the left of the canvas, as a phone's are: on
+        // the page's layer, over the stroke's path.
+        let sheet =
+            egui::Rect::from_min_max(middle - vec2(300.0, 200.0), middle + vec2(0.0, 200.0));
+        let stroke = |runtime: &mut Runtime,
+                      step: &mut dyn FnMut(&mut Runtime, Vec<egui::Event>),
+                      from: egui::Pos2| {
+            let press = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            step(
+                runtime,
+                vec![egui::Event::PointerMoved(from), press(from, true)],
+            );
+            for i in 1..=6 {
+                let at = from + vec2(20.0 * i as f32, 0.0);
+                step(runtime, vec![egui::Event::PointerMoved(at)]);
+            }
+            step(runtime, vec![press(from + vec2(120.0, 0.0), false)]);
+        };
+        let before = bytes(&runtime);
+        let depth = runtime.engine.history.depth();
+        let covered_frames = |ctx: &egui::Context| {
+            sue_wm::cover::cover(ctx, egui::LayerId::background(), sheet);
+        };
+        covered_frames(&ctx);
+        let mut covered_step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            covered_frames(&ctx);
+            step(runtime, events);
+        };
+        stroke(&mut runtime, &mut covered_step, middle - vec2(250.0, 0.0));
+        assert_eq!(bytes(&runtime), before, "nothing painted under the sheet");
+        assert_eq!(runtime.engine.history.depth(), depth);
+        // Beside the sheet the canvas paints as ever.
+        stroke(&mut runtime, &mut covered_step, middle + vec2(40.0, 0.0));
+        assert_ne!(bytes(&runtime), before, "painted beside it");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn sue_paint_a_light_pen_stroke_ends_light() {
+        let (mut runtime, root) = runtime("paint-light-end");
+        let ctx = egui::Context::default();
+        let mut now = Instant::now();
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        // A bigger G-pen, so a full-pressure blob would show.
+        for _ in 0..8 {
+            step(
+                &mut runtime,
+                vec![key(egui::Key::CloseBracket, egui::Modifiers::NONE)],
+            );
+        }
+        let touch = |phase, pos| egui::Event::Touch {
+            device_id: egui::TouchDeviceId(1),
+            id: egui::TouchId(1),
+            phase,
+            pos,
+            force: Some(0.15),
+        };
+        let start = paint_middle(&runtime) - vec2(120.0, 0.0);
+        step(
+            &mut runtime,
+            vec![
+                touch(egui::TouchPhase::Start, start),
+                egui::Event::PointerMoved(start),
+                egui::Event::PointerButton {
+                    pos: start,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        let mut at = start;
+        for _ in 0..30 {
+            at += vec2(8.0, 0.0);
+            step(
+                &mut runtime,
+                vec![
+                    touch(egui::TouchPhase::Move, at),
+                    egui::Event::PointerMoved(at),
+                ],
+            );
+        }
+        // A real pen lifts a little away from its last move.
+        let lift = at + vec2(3.0, 0.0);
+        step(
+            &mut runtime,
+            vec![
+                touch(egui::TouchPhase::End, lift),
+                egui::Event::PointerButton {
+                    pos: lift,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        step(&mut runtime, Vec::new());
+        let arena = &runtime.engine.world.arena;
+        let picture = arena
+            .iter()
+            .find(|(_, entity)| sue_model::picture::is_picture(entity))
+            .map(|(_, entity)| entity.id())
+            .unwrap();
+        let layer = sue_paint::doc::layers(arena, picture).last().unwrap().id;
+        let raster = sue_paint::doc::raster(arena, layer).unwrap();
+        let bytes = raster.bytes().unwrap();
+        let width = raster.width() as usize;
+        // The painted columns, and each one's thickness.
+        let thick = |x: usize| {
+            (0..raster.height() as usize)
+                .filter(|y| bytes[(y * width + x) * 4 + 3] > 128)
+                .count()
+        };
+        let columns: Vec<usize> = (0..width).filter(|x| thick(*x) > 0).collect();
+        assert!(columns.len() > 20, "the stroke was painted");
+        let middle = thick(columns[columns.len() / 2]);
+        let end = columns[columns.len().saturating_sub(12)..]
+            .iter()
+            .map(|x| thick(*x))
+            .max()
+            .unwrap();
+        assert!(
+            end <= middle + 1,
+            "the end ({end} px) is no blob over the middle ({middle} px)"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn sue_paint_pinching_takes_back_the_touch_and_undoes_nothing() {
+        let (mut runtime, root) = runtime("paint-pinch");
+        let ctx = egui::Context::default();
+        let mut now = Instant::now();
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        step(&mut runtime, Vec::new());
+        let pictures = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .filter(|(_, entity)| sue_model::picture::is_picture(entity))
+                .count()
+        };
+        let touch = |id: u64, phase, pos| egui::Event::Touch {
+            device_id: egui::TouchDeviceId(1),
+            id: egui::TouchId(id),
+            phase,
+            pos,
+            force: None,
+        };
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let middle = paint_middle(&runtime);
+        // A real stroke with one finger first.
+        let a = middle - vec2(150.0, 80.0);
+        step(
+            &mut runtime,
+            vec![
+                touch(1, egui::TouchPhase::Start, a),
+                egui::Event::PointerMoved(a),
+                press(a, true),
+            ],
+        );
+        step(
+            &mut runtime,
+            vec![
+                touch(1, egui::TouchPhase::Move, a + vec2(60.0, 0.0)),
+                egui::Event::PointerMoved(a + vec2(60.0, 0.0)),
+            ],
+        );
+        step(
+            &mut runtime,
+            vec![
+                touch(1, egui::TouchPhase::End, a + vec2(60.0, 0.0)),
+                press(a + vec2(60.0, 0.0), false),
+            ],
+        );
+        let depth = runtime.engine.history.depth();
+        let open = pictures(&runtime);
+        let layer_bytes = |runtime: &Runtime| {
+            let arena = &runtime.engine.world.arena;
+            let picture = arena
+                .iter()
+                .find(|(_, entity)| sue_model::picture::is_picture(entity))
+                .map(|(_, entity)| entity.id())
+                .unwrap();
+            let layer = sue_paint::doc::layers(arena, picture).last().unwrap().id;
+            sue_paint::doc::raster(arena, layer)
+                .unwrap()
+                .bytes()
+                .unwrap()
+                .to_vec()
+        };
+        let before = layer_bytes(&runtime);
+        // Now a pinch: one finger lands (and starts to paint), a second
+        // follows, both spread apart and lift.
+        let (one, two) = (middle, middle + vec2(80.0, 40.0));
+        step(
+            &mut runtime,
+            vec![
+                touch(1, egui::TouchPhase::Start, one),
+                egui::Event::PointerMoved(one),
+                press(one, true),
+            ],
+        );
+        step(&mut runtime, vec![touch(2, egui::TouchPhase::Start, two)]);
+        for spread in 1..=6 {
+            let d = vec2(12.0, 6.0) * spread as f32;
+            step(
+                &mut runtime,
+                vec![
+                    touch(1, egui::TouchPhase::Move, one - d),
+                    touch(2, egui::TouchPhase::Move, two + d),
+                    egui::Event::PointerMoved(one - d),
+                ],
+            );
+        }
+        step(
+            &mut runtime,
+            vec![
+                touch(2, egui::TouchPhase::End, two + vec2(72.0, 36.0)),
+                touch(1, egui::TouchPhase::End, one - vec2(72.0, 36.0)),
+                press(one - vec2(72.0, 36.0), false),
+            ],
+        );
+        step(&mut runtime, Vec::new());
+        assert_eq!(
+            runtime.engine.history.depth(),
+            depth,
+            "nothing undone, nothing added"
+        );
+        assert_eq!(pictures(&runtime), open, "the picture stays open");
+        assert_eq!(
+            layer_bytes(&runtime),
+            before,
+            "the pinch left no paint, the stroke stays"
+        );
+        // Both fingers landing in one frame: no stroke starts either.
+        step(
+            &mut runtime,
+            vec![
+                touch(3, egui::TouchPhase::Start, one),
+                touch(4, egui::TouchPhase::Start, two),
+                egui::Event::PointerMoved(one),
+                press(one, true),
+            ],
+        );
+        step(
+            &mut runtime,
+            vec![
+                touch(3, egui::TouchPhase::Move, one - vec2(50.0, 0.0)),
+                touch(4, egui::TouchPhase::Move, two + vec2(50.0, 0.0)),
+                egui::Event::PointerMoved(one - vec2(50.0, 0.0)),
+            ],
+        );
+        step(
+            &mut runtime,
+            vec![
+                touch(3, egui::TouchPhase::End, one - vec2(50.0, 0.0)),
+                touch(4, egui::TouchPhase::End, two + vec2(50.0, 0.0)),
+                press(one - vec2(50.0, 0.0), false),
+            ],
+        );
+        step(&mut runtime, Vec::new());
+        assert_eq!(runtime.engine.history.depth(), depth);
+        assert_eq!(layer_bytes(&runtime), before, "no stroke during a pinch");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_saves_as_a_project_or_any_picture_type() {
         let (mut runtime, root) = runtime("paint-save-as");
         let ctx = egui::Context::default();
