@@ -365,6 +365,9 @@ impl Template {
                 settings.push((setting.to_owned(), value));
             }
         }
+        if let Some(true) = project.property(p::LANDSCAPE).and_then(Value::as_bool) {
+            settings.push(("orientation".to_owned(), "landscape".to_owned()));
+        }
         if let Some(margin) = number(p::MARGIN) {
             settings.push(("margin".to_owned(), format!("{margin}")));
         }

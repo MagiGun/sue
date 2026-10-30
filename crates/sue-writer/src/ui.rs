@@ -3118,6 +3118,12 @@ impl SueWriter {
                         }
                     });
                 ui.end_row();
+                ui.label(tr!("orientation"));
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut settings.landscape, false, tr!("portrait"));
+                    ui.radio_value(&mut settings.landscape, true, tr!("landscape"));
+                });
+                ui.end_row();
                 ui.label(tr!("margins-inches"));
                 let mut inches = settings.margin / 72.0;
                 if ui
@@ -3229,6 +3235,11 @@ impl SueWriter {
             root,
             project::PAGE,
             text(&settings.page),
+        )));
+        batch.push(Box::new(project::set(
+            root,
+            project::LANDSCAPE,
+            settings.landscape.then_some(Value::Bool(true)),
         )));
         batch.push(Box::new(project::set(
             root,

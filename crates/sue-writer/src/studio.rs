@@ -87,6 +87,7 @@ pub(crate) struct Settings {
     pub author: String,
     pub sheet: String,
     pub page: String,
+    pub landscape: bool,
     pub margin: f32,
     pub font: String,
     pub heading_font: String,
@@ -335,7 +336,16 @@ impl SueWriter {
     /// The project's page.
     pub(crate) fn page(&self, cx: &AppletContext<'_>) -> PageSetup {
         let name = self.project_text(cx, project::PAGE, "Letter");
-        let size = sue_model::page_size(&name).unwrap_or([612.0, 792.0]);
+        let mut size = sue_model::page_size(&name).unwrap_or([612.0, 792.0]);
+        // On its side: the long edge across.
+        let landscape = self
+            .project_entity(cx)
+            .and_then(|entity| entity.property(project::LANDSCAPE))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if landscape == (size[1] > size[0]) {
+            size.swap(0, 1);
+        }
         let margin = self.project_number(cx, project::MARGIN, 72.0) as f32;
         PageSetup {
             size: [size[0] as f32, size[1] as f32],
@@ -1185,6 +1195,11 @@ impl SueWriter {
                     author: self.project_text(cx, manuscript::AUTHOR, ""),
                     sheet: sheet.key.clone(),
                     page: self.project_text(cx, project::PAGE, "Letter"),
+                    landscape: self
+                        .project_entity(cx)
+                        .and_then(|entity| entity.property(project::LANDSCAPE))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
                     margin: self.project_number(cx, project::MARGIN, 72.0) as f32,
                     font: fonts.body,
                     heading_font: fonts.heading,

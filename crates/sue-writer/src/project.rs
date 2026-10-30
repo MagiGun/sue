@@ -17,6 +17,8 @@ use crate::templates::{Body, Item, Paragraph, Template, Templates, words};
 pub const SHEET: &str = "sue_writer.sheet";
 /// The page size, by name (`Text`, e.g. `Letter`).
 pub const PAGE: &str = "sue_writer.page";
+/// `true` for pages on their side, the long edge across (`Bool`).
+pub const LANDSCAPE: &str = "sue_writer.landscape";
 /// The page margins in points (`Float`).
 pub const MARGIN: &str = "sue_writer.margin";
 /// The body font (`Text`).
@@ -244,6 +246,9 @@ pub fn create(
         if let Some(value) = setting(key) {
             root = root.with_property(property, value.replace('|', "\t"));
         }
+    }
+    if setting("orientation") == Some("landscape") {
+        root = root.with_property(LANDSCAPE, true);
     }
     if setting("different-first") == Some("true") {
         root = root.with_property(DIFFERENT_FIRST, true);
@@ -882,6 +887,31 @@ mod tests {
             assert_eq!(twice.body, saved.body, "{key}");
             assert_eq!(twice.settings, saved.settings, "{key}");
         }
+    }
+
+    #[test]
+    fn a_template_can_turn_its_pages_on_their_side() {
+        let template = Template::parse(
+            "wide",
+            "orientation: landscape
+page: A4
+
+draft:
+  document Wide
+    body
+",
+        )
+        .unwrap();
+        let mut arena = Arena::new();
+        let (batch, root) = create(&template, "Wide", &sue_type::Fonts::default()).unwrap();
+        UndoStack::new().apply(&mut arena, batch).unwrap();
+        let project = arena.get_by_id(root).unwrap();
+        assert_eq!(
+            project.property(LANDSCAPE).and_then(Value::as_bool),
+            Some(true)
+        );
+        let saved = Template::from_project(&arena, root, "wide", "Wide").unwrap();
+        assert_eq!(saved.setting("orientation"), Some("landscape"));
     }
 
     #[test]

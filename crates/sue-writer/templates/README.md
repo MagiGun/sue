@@ -34,6 +34,7 @@ The header, one `key: value` a line:
 | `order` | Where it sorts in its group, smallest first. |
 | `sheet` | The style sheet: `standard`, `manuscript` or `screenplay`. |
 | `page` | A page size by name (`Letter`, `A4`, `A5`, ...), or `auto` for the size people use where they live. |
+| `orientation` | `portrait` (the default) or `landscape`, the long edge across. |
 | `margin` | The page margins in points. |
 | `font` | `body`, `mono` or a font family: the body font. |
 | `size` | The body size in points. |

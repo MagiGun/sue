@@ -557,3 +557,6 @@ meeting-notes = Meeting Notes
 attendees = Attendees
 agenda = Agenda
 action-items = Action Items
+orientation = Orientation
+portrait = Portrait
+landscape = Landscape
