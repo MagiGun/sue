@@ -30,7 +30,7 @@ pub fn copy_text(text: &str) -> Result<(), String> {
 
 /// The system opener for files, folders and web addresses, where there is
 /// one (desktops).
-fn open_detached(target: &std::ffi::OsStr) -> io::Result<()> {
+pub(crate) fn open_detached(target: &std::ffi::OsStr) -> io::Result<()> {
     #[cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))]
     {
         open::that_detached(target)
@@ -92,7 +92,9 @@ pub fn open_url(text: &str) -> io::Result<String> {
     let url = web_url(text)?;
     #[cfg(target_arch = "wasm32")]
     crate::web::page::open_url(&url)?;
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(target_os = "android")]
+    crate::android::open_url(&url).map_err(io::Error::other)?;
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
     open_detached(url.as_ref())?;
     Ok(url)
 }

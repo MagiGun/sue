@@ -93,6 +93,9 @@ volume = 0.8                   # [0.0..1.0] Volume of everything Sue plays
 [packages]
 require_signatures = true      # Only accept packages with a valid Ed25519 signature
 
+[updates]
+check_automatically = true     # Look for a newer Sue when it starts, at most once a day
+
 [sue_paint]
 width = 1600                   # [1..10000] Width of new illustrations (px)
 height = 1200                  # [1..10000] Height of new illustrations (px)

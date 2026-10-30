@@ -34,6 +34,7 @@ use sue_wm::{
 };
 
 use crate::engine::Engine;
+use crate::update::{self, Updater};
 use crate::util::{file_name, human_bytes};
 
 /// How often the audio queue is topped up while something plays.
@@ -183,6 +184,10 @@ pub struct Runtime {
     /// The Hub was open in the last frame; its lists are read again each
     /// time it opens.
     hub_was_open: bool,
+    /// Sue's own updates.
+    updater: Updater,
+    /// When to read a running update check or download next.
+    next_update_poll: Option<Instant>,
 }
 
 /// Said after opening something over unsaved work, which was kept.
@@ -212,6 +217,7 @@ impl Runtime {
         let applets = engine.launchpad.instantiate();
         let revision = engine.world.rice.revision();
         let fingerprint = catalog_fingerprint(&engine.world.rice);
+        let updater = Updater::new(&engine.paths);
         Ok(Self {
             engine,
             shell,
@@ -244,6 +250,8 @@ impl Runtime {
             saved_digest: None,
             kept_digest: None,
             hub_was_open: false,
+            updater,
+            next_update_poll: None,
         })
     }
 
@@ -322,6 +330,16 @@ impl Runtime {
             self.booted = true;
             let mut io = shell_io!(self, textures);
             self.shell.boot(&mut io);
+            if self.interactive
+                && self
+                    .engine
+                    .world
+                    .rice
+                    .get_bool("updates.check_automatically")
+                    .unwrap_or(true)
+            {
+                self.updater.check_if_due(unix_now());
+            }
         }
         self.poll_system_dialogs(textures, now);
         {
@@ -331,6 +349,7 @@ impl Runtime {
         if self.confirm_quit {
             self.quit_dialog(ui.ctx());
         }
+        self.updates(ui.ctx(), now);
         self.serve_requests(textures, now);
         self.refresh_rice();
         // The Hub's lists are read again each time it opens.
@@ -351,6 +370,28 @@ impl Runtime {
             self.shell
                 .notify(tr!("could-not-save-the-rice", error = error), true);
         }
+    }
+
+    /// Reads a running update check or download and draws the update
+    /// window when it shows.
+    fn updates(&mut self, ctx: &egui::Context, now: Instant) {
+        let polled = self.updater.poll();
+        let theme = self.shell.theme().clone();
+        let clicked = self.updater.ui(ctx, &theme);
+        for action in [polled, clicked].into_iter().flatten() {
+            match action {
+                update::Action::OpenUrl(link) => self.open_url(&link),
+                update::Action::Copy(text) => match sue_platform::copy_text(&text) {
+                    Ok(()) => self.shell.notify(tr!("update-command-copied"), false),
+                    Err(error) => self.shell.notify(error, true),
+                },
+                update::Action::Quit => {
+                    self.shutdown();
+                    self.quit = true;
+                }
+            }
+        }
+        self.next_update_poll = self.updater.busy().then(|| now + update::POLL);
     }
 
     fn quit_dialog(&mut self, ctx: &egui::Context) {
@@ -475,6 +516,7 @@ impl Runtime {
             self.next_pick_poll,
             self.next_autosave,
             self.next_transfer_poll,
+            self.next_update_poll,
         ]
         .into_iter()
         .flatten()
@@ -537,6 +579,12 @@ impl Runtime {
                 self.shell.touch();
                 redraw = true;
             }
+        }
+        // A running update check or download is read, and its window
+        // drawn, in the frame.
+        if self.next_update_poll.is_some_and(|due| due <= now) {
+            self.next_update_poll = None;
+            redraw = true;
         }
         self.schedule_autosave(now);
         redraw
@@ -895,6 +943,14 @@ impl Runtime {
                 }
             }
             "rice.reload" => self.reload_rice(),
+            "app.check_updates" => {
+                if self.interactive {
+                    self.updater.check(false);
+                    self.shell.touch();
+                } else {
+                    self.shell.notify(tr!("checking-for-updates"), false);
+                }
+            }
             "rice.export" => self.export_rice(),
             "rice.reveal" => {
                 let dir = self.engine.paths.rice_dir();

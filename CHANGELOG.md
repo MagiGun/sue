@@ -11,6 +11,19 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Sue keeps itself up to date. When it starts it looks for a newer
+  release, at most once a day, and a small window in the corner shows
+  what is new; **Check for Updates** is in the Sue menu and in Settings,
+  and **Check automatically** in Settings turns the daily look off.
+  Updating follows how you installed Sue: on Windows it downloads the new
+  setup program and restarts into it, macOS opens the new disk image, an
+  AppImage replaces itself, Android hands the new APK to its installer,
+  and Linux packages are downloaded with the command that installs them.
+  Downloads run in the background and are checked against the release's
+  checksums.
+
 ### Changed
 
 - Slider handles are thin rectangles, a little shorter than the circles

@@ -172,6 +172,11 @@ audio-volume = Volume
 packages-require_signatures = Require signatures
     .description = Only accept packages with a valid Ed25519 signature
 
+## [updates]
+
+updates-check_automatically = Check automatically
+    .description = Look for a newer Sue when it starts, at most once a day
+
 ## [sue_paint]
 
 sue_paint-width = Width

@@ -1093,6 +1093,12 @@ impl Shell {
         }
         let palette = tr!("command-palette", command_palette = keymap.command_palette);
         items.push(sue_item(run, palette, ShellRequest::Palette, false));
+        items.push(sue_item(
+            run,
+            tr!("check-for-updates"),
+            ShellRequest::Command("app.check_updates".to_owned()),
+            false,
+        ));
         items.push(
             sue_item(
                 run,

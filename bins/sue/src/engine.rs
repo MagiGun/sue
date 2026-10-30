@@ -176,6 +176,11 @@ pub fn shell_declarations() -> Vec<RiceDeclaration> {
             toggle(true),
             "Only accept packages with a valid Ed25519 signature",
         ),
+        declare(
+            "updates.check_automatically",
+            toggle(true),
+            "Look for a newer Sue when it starts, at most once a day",
+        ),
     ]
 }
 
@@ -527,6 +532,17 @@ impl Engine {
                     group(tr!("installed-applets"), vec![table("applets")]),
                     group(tr!("packages"), vec![table("packages")]),
                     group(
+                        tr!("sue-updates"),
+                        vec![
+                            fact("updates.version"),
+                            param("updates.check_automatically"),
+                            SettingsItem::Actions(vec![CommandButton::new(
+                                tr!("check-for-updates"),
+                                "app.check_updates",
+                            )]),
+                        ],
+                    ),
+                    group(
                         tr!("updates"),
                         vec![fact("packages.generation"), fact("packages.health")],
                     ),
@@ -652,6 +668,11 @@ impl Engine {
                 .insert(id.to_owned(), (label.to_owned(), value));
         };
         facts("rice.path", &tr!("file"), self.rice_source.to_string());
+        facts(
+            "updates.version",
+            &tr!("version"),
+            sue_core::SUE_VERSION.to_owned(),
+        );
         let target = {
             let mut scheduler =
                 sue_wm::FrameScheduler::new(self.profile, self.capabilities.display_refresh_hz);

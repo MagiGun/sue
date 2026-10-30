@@ -20,6 +20,7 @@ save-project-as = Save Project As
 save-project-as-ellipsis = Save Project As...
 open-at-launch = Open { $name } at Launch
 command-palette = Command Palette ({ $command_palette })
+check-for-updates = Check for Updates
 settings = Settings
 quit-sue = Quit Sue
 # The Sue menu's language submenu. Other languages add the English word in

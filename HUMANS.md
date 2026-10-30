@@ -139,7 +139,35 @@ The Sue button opens the **Sue menu**, for Sue as a whole:
   middle. Phones and tablets switch between their two layouts. It works in
   the browser too, and Sue remembers it;
 - **Open ... at Launch**: pin what is open, as the Hub's pin does;
-- the command palette, Settings and Quit Sue.
+- the command palette, **Check for Updates**, Settings and Quit Sue.
+
+### Keeping Sue up to date
+
+When Sue starts it looks for a newer release, at most once a day, without
+getting in your way: if there is one, a small window in the bottom right
+corner says so and shows what is new. **Check for Updates** in the Sue menu
+(or in Settings, under Packages & Updates) looks right away. Turn **Check
+automatically** off in Settings and Sue only looks when you ask.
+
+Updating follows how you installed Sue:
+
+- **Windows**, installed with the setup program, the .msi or winget:
+  **Install and Restart** downloads the new setup program, closes Sue and
+  starts it; it replaces the old version in place. Scoop shows its command
+  (`scoop update sue`) to copy. The portable zip opens the release page.
+- **macOS**: Sue downloads the disk image and opens it; quit Sue and drag
+  the new one into Applications.
+- **Linux**: an AppImage replaces itself and starts again. The .deb, .rpm,
+  Arch package and Flatpak are downloaded to your Downloads folder, with
+  the command that installs them to copy. The tarball opens the release
+  page.
+- **Android**: Sue downloads the new APK and hands it to Android's
+  installer, which asks you first.
+- **iOS** opens the release page, and the **browser** version is always
+  the newest already.
+
+Everything is downloaded in the background while you keep working, and
+checked against the release's list of checksums before it is used.
 
 ### The Image Viewer
 
@@ -266,7 +294,8 @@ machine). **GPU preference** chooses which graphics card draws the window:
 Auto uses the one your screen is plugged into, Integrated the power-saving
 one and Discrete the fast one. Sue shows which card it is drawing on and
 every card it found; the choice takes effect when Sue starts, so press
-**Restart Sue** after changing it. **MCP** (connecting Sue to AI tools) is
+**Restart Sue** after changing it. Packages & Updates shows the version you
+have, **Check automatically** for new releases, and **Check for Updates**. **MCP** (connecting Sue to AI tools) is
 not yet available.
 
 ### Languages
