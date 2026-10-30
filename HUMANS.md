@@ -441,12 +441,11 @@ Once a canvas is open:
 - **Drawing tablets:** pressure works with Windows Ink and with WinTab, so
   Huion, XP-Pen and Wacom tablets work whether or not Windows Ink is turned
   on in their driver. In the browser version, a pen's pressure works too.
-- **Clean lines without lag:** stabilization smooths out the shake of your
-  hand as Clip Studio does, by following the average of your own line over
-  a short stretch behind the pen. The line stays the same small distance
-  behind however fast you draw, and when you lift the pen it finishes along
-  your line to where you lifted, never with a straight jump. It smooths less
-  the faster you move ("Adjust by speed"). When you lift the pen, Sue tidies
+- **Clean lines without lag:** pens smooth out the shake of your hand, and
+  smooth less the faster you move ("Adjust by speed"). However fast you
+  draw, the line never falls more than a short way behind the pen, and when
+  you lift the pen it finishes along the way your pen went instead of
+  jumping straight there. When you lift the pen, Sue tidies
   the line: it removes the little hook at the end, turns a few fast mouse
   points into a smooth curve, evens out wobbles while keeping sharp corners
   sharp ("Correction"), thins the end into a point ("Taper"), and lets a

@@ -11,21 +11,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Changed
-
-- Stabilization in Sue Paint works as in Clip Studio Paint: the line
-  follows the average of your own line just behind the pen, so it stays
-  the same small distance behind however fast you draw, and when you lift
-  the pen it finishes along your line to where you lifted instead of
-  jumping there in a straight line.
-
 ### Fixed
 
-- Sue Paint's brushes keep up with lower opacity and hardness and with
-  color mixing and paper grain: with a big brush each of these made
-  painting several times slower, most of all in the browser. Soft brushes,
-  airbrushes, mixing brushes, the soft eraser and the Blend tool are faster
-  too, and lifting the pen after a big tapered stroke no longer stalls.
+- Sue Paint's stabilization never lets the line fall far behind the pen,
+  however fast you draw, and when you lift the pen the line finishes along
+  the way your pen went instead of jumping there in a straight line.
+- Sue Paint's brushes keep up better with lower opacity and hardness and
+  with color mixing and paper grain, which made big brushes several times
+  slower, most of all in the browser. Strokes look exactly as before.
 
 ## [0.0.5] - 2026-10-29
 

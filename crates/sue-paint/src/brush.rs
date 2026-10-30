@@ -879,7 +879,8 @@ pub struct Stroke {
     /// Painting the waiting point now, however close.
     flushing: bool,
     /// The radius and strength the line last ended with, at the point it
-    /// goes on from: what is behind that point is painted already.
+    /// goes on from, when it was even (see [`Self::capsule`]): what is
+    /// behind that point is painted already.
     ended: Option<(f32, f32)>,
     /// The tip's soft edge, looked up.
     falloff: Option<std::sync::Arc<Falloff>>,
@@ -1056,8 +1057,7 @@ impl Stroke {
                     if self.tip.dabbed() {
                         self.dab(raster, sample, 0.0, selection);
                     } else {
-                        ended =
-                            Some(self.capsule(raster, sample, sample, 0.0, 0.0, None, selection));
+                        ended = self.capsule(raster, sample, sample, 0.0, 0.0, None, selection);
                     }
                 }
                 self.ended = ended;
@@ -1070,20 +1070,9 @@ impl Stroke {
                 // A continuous line redraws the brush's whole width for
                 // each point, so a big brush waits until it has moved a
                 // twenty-fifth of its width: a 1500 pixel brush paints
-                // every 30 pixels, not every 3, and looks the same. A soft
-                // brush redraws its whole fading front each time for
-                // changes too faint to see, so it waits up to three times
-                // as long.
+                // every 30 pixels, not every 3, and looks the same.
                 let radius = self.tip.size * 0.5 * self.width;
-                let mut wait = 0.04 + 0.08 * (1.0 - self.tip.hardness.clamp(0.0, 1.0));
-                if self.total.is_some() {
-                    // Finishing: the path is a smooth curve already, and
-                    // nobody waits on its head, so it goes in longer
-                    // steps (an eighth of the width bends a curve less
-                    // than a pixel at any width).
-                    wait = wait.max(0.12);
-                }
-                if !self.tip.dabbed() && !self.flushing && length < radius * wait {
+                if !self.tip.dabbed() && !self.flushing && length < radius * 0.04 {
                     self.pending = Some(sample);
                     return;
                 }
@@ -1102,15 +1091,8 @@ impl Stroke {
                             after = self.since_dab;
                         }
                     } else {
-                        ended = Some(self.capsule(
-                            raster,
-                            a,
-                            b,
-                            start,
-                            start + length,
-                            before,
-                            selection,
-                        ));
+                        ended =
+                            self.capsule(raster, a, b, start, start + length, before, selection);
                     }
                 }
                 self.ended = ended;
@@ -1352,10 +1334,12 @@ impl Stroke {
         up.min(down)
     }
 
-    /// Paints the tapered capsule from `a` (arc length `s0`) to `b` (`s1`),
-    /// and answers the radius and strength it ends with. `ended` is what
-    /// the line before it ended with at `a`: when `a` starts the same,
-    /// what lies behind `a` is that line's end already, and is passed over.
+    /// Paints the tapered capsule from `a` (arc length `s0`) to `b` (`s1`).
+    /// When its radius and strength are the same all along, it answers
+    /// them: everything within that radius of `b` is then covered at least
+    /// as much as a disc there would cover it. `ended` is that answer from
+    /// the line before, ending at `a`: when `a` starts the same, what lies
+    /// behind `a` is covered already, and is passed over.
     #[allow(clippy::too_many_arguments)]
     fn capsule(
         &mut self,
@@ -1366,7 +1350,7 @@ impl Stroke {
         s1: f32,
         ended: Option<(f32, f32)>,
         selection: Option<&Selection>,
-    ) -> (f32, f32) {
+    ) -> Option<(f32, f32)> {
         let (ra, sa) = self.tip.dab_at(a.pressure, a.speed, self.chance(s0));
         let (rb, sb) = self.tip.dab_at(b.pressure, b.speed, self.chance(s1));
         let (ra, sa) = (ra * a.width, sa * a.alpha);
@@ -1442,7 +1426,9 @@ impl Stroke {
                 None => tip.coverage(d2.sqrt(), radius) * strength,
             }
         });
-        (rb, sb)
+        // A capsule that widens or strengthens along its length does not
+        // hold the disc at its end, so only an even one vouches for it.
+        (ra == rb && sa == sb).then_some((rb, sb))
     }
 
     /// Stamps dabs every `spacing` from `a` (arc length `start`) to `b`.
@@ -2336,45 +2322,44 @@ fn catmull_rom([p0, p1, p2, p3]: [[f32; 2]; 4], u: f32) -> [f32; 2] {
 
 // ----- Stabilization ------------------------------------------------------------------
 
-/// Smooths the pointer as Clip Studio does: the brush follows the average
-/// of the pen's own path over a stretch behind it, measured along the path
-/// (`level` 0 follows exactly, 100 averages the most). The line keeps the
-/// same small distance behind the pen however fast it moves, takes no
-/// shortcuts across the curve, and when the pen lifts it finishes along
-/// the path to where the pen lifted.
-///
-/// With adjust by speed, the stretch shortens as the pen speeds up, so
-/// quick lines stay snappy while slow ones lose their tremor.
+/// Smooths the pointer: the brush follows it through a time-based filter
+/// (`level` 0 follows exactly, 100 trails far behind). With adjust by speed,
+/// the filter loosens as the pen speeds up, so quick lines stay snappy while
+/// slow ones lose their tremor. However fast the pen moves, the brush never
+/// trails it by more than [`Stabilizer::most_behind`], and when the pen
+/// lifts the line finishes along the pen's own last stretch of path.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Stabilizer {
     level: u32,
     by_speed: bool,
-    /// The pen's path behind it, one point every [`Self::STEP`] screen
-    /// points, the newest last.
-    path: std::collections::VecDeque<[f32; 2]>,
+    at: Option<[f32; 2]>,
     raw: Option<[f32; 2]>,
+    speed: f32,
     /// Screen points per layer pixel, as last told.
     scale: f32,
-    speed: f32,
+    /// The pen's recent raw points, newest last, for finishing along them.
+    trail: std::collections::VecDeque<[f32; 2]>,
 }
 
 impl Stabilizer {
-    /// Distance between the path's points, in screen points.
-    const STEP: f32 = 1.5;
-    /// The stretch averaged at level 100, in screen points.
-    const MOST: f32 = 160.0;
-
     /// A stabilizer of `level` 0 to 100.
     #[must_use]
     pub fn new(level: u32, by_speed: bool) -> Self {
         Self {
             level: level.min(100),
             by_speed,
-            path: std::collections::VecDeque::new(),
+            at: None,
             raw: None,
-            scale: 1.0,
             speed: 0.0,
+            scale: 1.0,
+            trail: std::collections::VecDeque::new(),
         }
+    }
+
+    /// The farthest the brush trails the pen, in screen points: a little
+    /// more with each level.
+    fn most_behind(&self) -> f32 {
+        10.0 + self.level as f32 * 1.5
     }
 
     /// The pointer's recent speed, in screen points per second.
@@ -2383,115 +2368,87 @@ impl Stabilizer {
         self.speed
     }
 
-    /// How many of the path's points are averaged now.
-    fn window(&self) -> usize {
+    /// The smoothed position for a raw sample (layer pixels). `scale` is
+    /// screen points per layer pixel (the zoom) and `dt` the seconds since
+    /// the previous sample.
+    pub fn sample(&mut self, raw: [f32; 2], scale: f32, dt: f32) -> [f32; 2] {
+        let dt = dt.clamp(1e-4, 0.1);
+        if let Some(previous) = self.raw {
+            let now = distance(previous, raw) * scale.max(1e-3) / dt;
+            self.speed = self.speed * 0.6 + now * 0.4;
+        }
+        self.raw = Some(raw);
+        self.scale = scale.max(1e-3);
+        self.trail.push_back(raw);
+        if self.trail.len() > 256 {
+            self.trail.pop_front();
+        }
         let mut level = self.level as f32;
         if self.by_speed {
             let fast = ((self.speed - 150.0) / 1350.0).clamp(0.0, 1.0);
             level *= 1.0 - 0.9 * fast;
         }
-        let stretch = Self::MOST * level / 100.0;
-        ((stretch / Self::STEP).round() as usize).max(1)
-    }
-
-    /// The average of the newest points of the path, the newest weighing
-    /// most (a triangle, so the line leans toward the pen).
-    fn average(&self) -> Option<[f32; 2]> {
-        let count = self.window().min(self.path.len());
-        if count == 0 {
-            return None;
-        }
-        let mut sum = [0.0_f32; 2];
-        let mut total = 0.0;
-        for (age, point) in self.path.iter().rev().take(count).enumerate() {
-            let weight = (count - age) as f32;
-            sum[0] += point[0] * weight;
-            sum[1] += point[1] * weight;
-            total += weight;
-        }
-        Some([sum[0] / total, sum[1] / total])
-    }
-
-    /// Adds the path from its last point to `to` (layer pixels), a point
-    /// every [`Self::STEP`] screen points, and the smoothed points it
-    /// gives.
-    fn extend(&mut self, to: [f32; 2], out: &mut Vec<[f32; 2]>) {
-        let step = Self::STEP / self.scale.max(1e-3);
-        let Some(&last) = self.path.back() else {
-            self.path.push_back(to);
-            out.extend(self.average());
-            return;
+        let lag = level * 0.004;
+        let follow = if lag <= 0.0 {
+            1.0
+        } else {
+            1.0 - (-dt / lag).exp()
         };
-        let length = distance(last, to);
-        if length < step {
-            return;
+        let mut next = match self.at {
+            Some(at) => [
+                at[0] + (raw[0] - at[0]) * follow,
+                at[1] + (raw[1] - at[1]) * follow,
+            ],
+            None => raw,
+        };
+        // Never too far behind: pulled toward the pen to at most that.
+        let most = self.most_behind() / self.scale;
+        let behind = distance(next, raw);
+        if behind > most {
+            let keep = most / behind;
+            next = [
+                raw[0] + (next[0] - raw[0]) * keep,
+                raw[1] + (next[1] - raw[1]) * keep,
+            ];
         }
-        // Exactly a step apart, the rest left for the next sample; a long
-        // jump (a fast mouse) in at most 256 points.
-        let step = step.max(length / 256.0);
-        let unit = [(to[0] - last[0]) / length, (to[1] - last[1]) / length];
-        let mut along = step;
-        while along <= length {
-            self.path
-                .push_back([last[0] + unit[0] * along, last[1] + unit[1] * along]);
-            if let Some(point) = self.average() {
-                out.push(point);
-            }
-            along += step;
-        }
-        let keep = (Self::MOST / Self::STEP) as usize + 1;
-        while self.path.len() > keep {
-            self.path.pop_front();
-        }
+        self.at = Some(next);
+        next
     }
 
-    /// The smoothed points for a raw sample (layer pixels): none while the
-    /// pen has barely moved, several after a long move. `scale` is screen
-    /// points per layer pixel (the zoom) and `dt` the seconds since the
-    /// previous sample.
-    pub fn sample(&mut self, raw: [f32; 2], scale: f32, dt: f32) -> Vec<[f32; 2]> {
-        let dt = dt.clamp(1e-4, 0.1);
-        self.scale = scale.max(1e-3);
-        if let Some(previous) = self.raw {
-            let now = distance(previous, raw) * self.scale / dt;
-            self.speed = self.speed * 0.6 + now * 0.4;
-        }
-        self.raw = Some(raw);
-        if self.level == 0 {
-            return vec![raw];
-        }
-        let mut out = Vec::new();
-        self.extend(raw, &mut out);
-        out
-    }
-
-    /// The points that finish the line as the pen lifts at `raw`: the
-    /// average slides along the path's own end to `raw`, so the line ends
-    /// where the pen lifted without a straight jump across the curve.
+    /// Points that close the gap to `raw` when the pen lifts: along the
+    /// pen's own last points from the one nearest the brush, so the line
+    /// follows where the pen went instead of cutting straight across.
     pub fn catch_up(&mut self, raw: [f32; 2]) -> Vec<[f32; 2]> {
-        if self.level == 0 || self.path.is_empty() {
+        let Some(at) = self.at else {
             return vec![raw];
+        };
+        self.trail.push_back(raw);
+        // The raw point nearest the brush, among the newest ones.
+        let nearest = self
+            .trail
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| distance(**a, at).total_cmp(&distance(**b, at)))
+            .map_or(self.trail.len() - 1, |(index, _)| index);
+        let mut route = vec![at];
+        route.extend(self.trail.iter().skip(nearest + 1).copied());
+        let mut points = Vec::new();
+        for pair in route.windows(2) {
+            let (from, to) = (pair[0], pair[1]);
+            let steps = ((distance(from, to) / 2.0).ceil() as usize).clamp(1, 48);
+            points.extend((1..=steps).map(|step| {
+                let t = step as f32 / steps as f32;
+                [
+                    from[0] + (to[0] - from[0]) * t,
+                    from[1] + (to[1] - from[1]) * t,
+                ]
+            }));
         }
-        let mut out = Vec::new();
-        self.extend(raw, &mut out);
-        // The newest point again and again, until the average is there.
-        let count = self.window().min(self.path.len());
-        for _ in 0..count {
-            self.path.push_back(raw);
-            if self.path.len() > count {
-                self.path.pop_front();
-            }
-            if let Some(point) = self.average() {
-                out.push(point);
-            }
+        if points.last() != Some(&raw) {
+            points.push(raw);
         }
-        out.push(raw);
-        out.dedup_by(|a, b| distance(*a, *b) < 0.05);
-        // Exactly where the pen lifted (a point a hair away was kept for it).
-        if let Some(last) = out.last_mut() {
-            *last = raw;
-        }
-        out
+        self.at = Some(raw);
+        points
     }
 }
 
@@ -3334,56 +3291,60 @@ mod tests {
     }
 
     #[test]
-    fn the_stabilizer_trails_a_steady_distance_and_ends_where_the_pen_lifts() {
+    fn the_stabilizer_lags_when_slow_and_keeps_up_when_fast() {
         let mut free = Stabilizer::new(0, false);
-        assert_eq!(free.sample([10.0, 0.0], 1.0, 0.008), vec![[10.0, 0.0]]);
-        assert_eq!(free.sample([20.0, 0.0], 1.0, 0.008), vec![[20.0, 0.0]]);
-        // How far behind the pen the line is after a straight stroke, at
-        // a speed of `step` layer pixels a sample.
-        let lag = |level: u32, by_speed: bool, step: f32| {
-            let mut steady = Stabilizer::new(level, by_speed);
+        assert_eq!(free.sample([10.0, 0.0], 1.0, 0.008), [10.0, 0.0]);
+        assert_eq!(free.sample([20.0, 0.0], 1.0, 0.008), [20.0, 0.0]);
+        // The same level, moving slowly and moving fast.
+        let lag = |by_speed: bool, step: f32| {
+            let mut steady = Stabilizer::new(30, by_speed);
             let mut at = [0.0, 0.0];
             let mut x = 0.0;
-            for _ in 0..200 {
+            for _ in 0..40 {
                 x += step;
-                if let Some(&last) = steady.sample([x, 0.0], 1.0, 0.008).last() {
-                    at = last;
-                }
+                at = steady.sample([x, 0.0], 1.0, 0.005);
             }
             x - at[0]
         };
-        // The same distance behind, slow or fast: it never falls further
-        // back as the pen speeds up.
-        let (slow, fast) = (lag(50, false, 2.0), lag(50, false, 12.0));
-        assert!(slow > 5.0, "it smooths: {slow}");
-        assert!((fast - slow).abs() < 3.0, "the same lag: {slow} and {fast}");
-        // Adjust by speed trails less on a quick stroke.
-        assert!(lag(50, true, 12.0) < fast * 0.5);
-        // Higher levels trail more, low ones little.
-        assert!(lag(100, false, 4.0) > lag(50, false, 4.0));
-        assert!(lag(5, false, 4.0) < 4.0);
+        let slow = lag(true, 0.5) / 0.5;
+        let fast = lag(true, 20.0) / 20.0;
+        assert!(
+            fast < slow / 3.0,
+            "fast strokes trail fewer samples: {fast} vs {slow}"
+        );
+        assert!(
+            lag(false, 20.0) / 20.0 > fast,
+            "without adjust by speed it lags more (up to its most behind)"
+        );
+        let mut steady = Stabilizer::new(30, true);
+        steady.sample([0.0, 0.0], 1.0, 0.005);
+        steady.sample([100.0, 0.0], 1.0, 0.005);
+        let rest = steady.catch_up([100.0, 0.0]);
+        assert_eq!(rest.last(), Some(&[100.0, 0.0]));
 
-        // Lifting at the end of a curve: the line finishes along the curve
-        // to the pen, never cutting across it.
-        let mut steady = Stabilizer::new(80, false);
-        let curve = |t: f32| [200.0 * t.cos(), 200.0 * t.sin()];
-        let mut drawn = Vec::new();
-        for step in 0..=150 {
-            drawn.extend(steady.sample(curve(step as f32 / 100.0), 1.0, 0.008));
+        // However fast, never more than its most behind.
+        let mut steady = Stabilizer::new(30, false);
+        let mut at = [0.0, 0.0];
+        for step in 1..=60 {
+            at = steady.sample([step as f32 * 40.0, 0.0], 1.0, 0.005);
         }
-        let lift = curve(1.5);
-        let rest = steady.catch_up(lift);
-        assert_eq!(rest.last(), Some(&lift));
-        for pair in rest.windows(2) {
-            assert!(
-                distance(pair[0], pair[1]) < 6.0,
-                "no straight jump: {pair:?}"
-            );
+        assert!(2400.0 - at[0] <= steady.most_behind() + 0.01);
+
+        // Lifting after a turn: the line goes round the turn the pen took,
+        // not straight across it.
+        let mut steady = Stabilizer::new(60, false);
+        for step in 0..=40 {
+            steady.sample([step as f32 * 2.0, 0.0], 1.0, 0.008);
         }
-        for point in &rest {
-            let radius = point[0].hypot(point[1]);
-            assert!(radius > 185.0, "it stays near the curve: {point:?}");
+        for step in 1..=20 {
+            steady.sample([80.0, step as f32 * 2.0], 1.0, 0.008);
         }
+        let rest = steady.catch_up([80.0, 40.0]);
+        assert_eq!(rest.last(), Some(&[80.0, 40.0]));
+        assert!(
+            rest.iter().any(|point| point[0] > 79.0 && point[1] < 10.0),
+            "it goes by the corner: {rest:?}"
+        );
     }
 }
 
@@ -3416,9 +3377,8 @@ mod sheet {
             let p = curve(t);
             raw = [p[0] + jx * tremor, p[1] + jy * tremor];
             let pressure = (t * std::f32::consts::PI).sin().powf(0.6).max(0.05);
-            for at in stabilizer.sample(raw, 1.0, 0.006) {
-                stroke.to(raster, at, pressure, None);
-            }
+            let at = stabilizer.sample(raw, 1.0, 0.006);
+            stroke.to(raster, at, pressure, None);
         }
         for at in stabilizer.catch_up(raw) {
             stroke.to(raster, at, 0.1, None);

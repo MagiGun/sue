@@ -1248,11 +1248,7 @@ impl SuePaint {
                 });
                 let local = snap.as_ref().map_or(local, |snap| snap.project(local));
                 let mut stabilizer = Stabilizer::new(sub.stabilization, sub.adjust_by_speed);
-                let start = stabilizer
-                    .sample(local, doc.view.zoom, self.clock.1)
-                    .last()
-                    .copied()
-                    .unwrap_or(local);
+                let start = stabilizer.sample(local, doc.view.zoom, self.clock.1);
                 let pressure = self.pen_pressure();
                 // Vector lines are kept whole, not cut by the selection.
                 let selection = (!vector)
@@ -2400,16 +2396,14 @@ impl SuePaint {
                     trail.drain(..trail.len() - 64);
                 }
                 let smooth = stabilizer.sample(local, doc.view.zoom, step);
+                let smooth = snap.as_ref().map_or(smooth, |snap| snap.project(smooth));
                 // Fast is 2000 screen points a second (velocity dynamics).
                 stroke.set_speed(stabilizer.speed() / 2000.0);
                 let selection = (!*vector)
                     .then(|| shifted.as_ref().or(doc.selection.as_ref()))
                     .flatten();
                 if let Some(raster) = doc::raster_mut(&mut cx.world.arena, stroke.layer()) {
-                    for point in smooth {
-                        let point = snap.as_ref().map_or(point, |snap| snap.project(point));
-                        stroke.to(raster, point, pressure, selection);
-                    }
+                    stroke.to(raster, smooth, pressure, selection);
                 }
             }
             Gesture::Pan { last } => {

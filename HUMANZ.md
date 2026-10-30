@@ -1411,7 +1411,7 @@ clean without the brush feeling slow. A stroke passes through these stages:
 | --- | --- |
 | Input | egui's raw event stream, in order, so a fast stroke keeps every sample between frames; each frame's samples are spread over its time, so speeds are real. Pen pressure comes from egui touch events with force (Windows Ink, macOS, Linux, phones), else from `sue_platform::stylus` (a WinTab tablet on Windows, drained each frame through the `wintab` crate, or a pen's pointer events in a browser, which winit hands over as a mouse), through the pen pressure curve every tool shares (`sue_paint.pen_pressure`, a `Response`, by default `0,0 0.4,0.5 1,1`). |
 | Dynamics | Brush Size and Opacity each have a `Dynamics`, as in Clip Studio Paint: pen pressure, velocity (the pen's speed, still to 2,000 points per second) and random, each on or off with a minimum value and, for pressure and velocity, its own curve; the inputs multiply. Random is steady along the path, so the stroke painted again from its corrected path keeps its sizes. *Specify by size on screen* keeps the brush the same size at any zoom; *At least 1 pixel* keeps a light line from thinning below a pixel. |
-| Stabilization | Clip Studio's kind (`Stabilizer`): the pen's path is kept as points 1.5 screen points apart, and the brush follows their average over the stretch behind the pen (1.6 screen points per level, the newest weighing most), so the line trails the pen by the same distance at any speed and never cuts across a curve. *Adjust by speed* shortens the stretch as the pen speeds up (from 150 to 1500 points per second it drops to a tenth). On lift the newest point is repeated until the average reaches it, so the line finishes along its own path to where the pen lifted. |
+| Stabilization | A time-based filter (lag of about 4 ms per level, the same at any sample rate) that the brush follows. *Adjust by speed* loosens it as the pen speeds up (from 150 to 1500 points per second the lag drops to a tenth), so slow lines lose their tremor while quick hatching stays snappy. However fast the pen, the brush never trails it by more than 10 screen points plus 1.5 per level (`Stabilizer::most_behind`). On lift the brush catches up along the pen's own recent points, from the one nearest the brush, so it follows the way the pen went instead of cutting straight across. |
 | Painting live | Pen-like tips paint a continuous tapered capsule between consecutive samples: each pixel's coverage comes from its exact distance to the segment (four anti-aliasing widths, hardness falloff), so there are no gaps, ridges or beads at any speed, and lines thinner than a pixel stay unbroken as lighter ink. Airbrushes and mixing brushes stamp dabs at a tight spacing instead, because their dabs add up. The start taper grows the line from a point. |
 | Finishing on lift | The hooks a pen leaves when it touches down and lifts are trimmed; the samples become a centripetal Catmull-Rom spline (no loops or overshoot), so even a fast mouse that reported a few points ends as a curve; *post correction* (0 to 10) resamples the path evenly, finds deliberate corners (a turn of more than about 65 degrees over arms a brush wide, on a lightly smoothed copy) and smooths everything between them with a gaussian along the path that grows with the level and the brush; a quick *flick* (over 700 points per second) carries the line on along the pen's momentum. The stroke is then painted again from the finished path with its end tapered, the flick thinning to a point. |
 | Color mixing | Mixing brushes pick up the color under them and are reloaded with their own paint, both per distance travelled, so a stroke settles at the mix amount of the canvas color whatever the spacing. |
@@ -1441,12 +1441,13 @@ and skips pixels it already covers as strongly as it would now (and whole
 skips as well as full). Paper grain and the selection shade a pen's pixels
 as they are written rather than its coverage, so grained and selected
 strokes skip the same way. A continuous line skips what lies behind the
-point it goes on from (the line before ended there with the same radius and
-strength), looks a soft edge up in a table by squared distance instead of a
+point it goes on from when the segment before was even (the same radius and
+strength all along, so it covers the disc at its end; a widening one does
+not), looks a soft edge up in a table by squared distance instead of a
 square root and a smoothstep per pixel, and waits until it has moved a
-twenty-fifth of the brush's width before painting again (up to three times
-that for a fully soft brush, an eighth when finishing; `Stroke::flush`
-paints the waiting point when the pen lifts). Pixels are blended over
+twenty-fifth of the brush's width before painting again (`Stroke::flush`
+paints the waiting point when the pen lifts). None of this changes a pixel:
+the stroke sheet paints as before to within rounding. Pixels are blended over
 straight alpha in place, with a byte table and rounding without the
 library call, and a pixel that comes out unchanged is not reported. Areas
 with a lot left to paint split into bands of tile rows on every core
