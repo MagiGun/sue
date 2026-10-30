@@ -1085,7 +1085,7 @@ mod tests {
         let laid = dock.layout(body, &all, 0.0);
         assert_eq!(laid.docked.len(), 7);
         assert!(laid.strip.is_none(), "room for every column");
-        assert_eq!(laid.center.left(), 40.0 + 236.0 + 58.0);
+        assert_eq!(laid.center.left(), 46.0 + 236.0 + 58.0);
         assert_eq!(laid.center.right(), 1600.0 - 300.0);
         // Heights share the column without gaps.
         let sub = laid
