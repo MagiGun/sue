@@ -263,6 +263,55 @@ impl egui::Widget for Wedge<'_> {
     }
 }
 
+/// A tall slider down `lane` below its `label` space: a thin track with a
+/// round knob, the top being 1. `fading` draws the track as a fade, for
+/// opacity. The new place while it is dragged.
+fn tall_slider(
+    ui: &mut Ui,
+    lane: Rect,
+    label: f32,
+    at: f32,
+    fading: bool,
+    salt: &str,
+    theme: &Theme,
+) -> Option<f32> {
+    let track = Rect::from_center_size(
+        pos2(
+            lane.center().x,
+            (lane.top() + label + 8.0 + lane.bottom() - 10.0) / 2.0,
+        ),
+        vec2(4.0, (lane.height() - label - 18.0).max(20.0)),
+    );
+    let response = ui.interact(
+        track.expand2(vec2(10.0, 8.0)),
+        Id::unique(salt),
+        Sense::click_and_drag(),
+    );
+    let painter = ui.painter();
+    if fading {
+        // Light at the top, fading to nothing at the bottom.
+        let mut mesh = Mesh::default();
+        let (top, bottom) = (theme.text, theme.void);
+        mesh.colored_vertex(track.left_top(), top);
+        mesh.colored_vertex(track.right_top(), top);
+        mesh.colored_vertex(track.right_bottom(), bottom);
+        mesh.colored_vertex(track.left_bottom(), bottom);
+        mesh.add_triangle(0, 1, 2);
+        mesh.add_triangle(0, 2, 3);
+        painter.add(Shape::mesh(mesh));
+    } else {
+        painter.rect_filled(track, 2.0, theme.void);
+    }
+    let y = track.bottom() - at.clamp(0.0, 1.0) * track.height();
+    let knob = pos2(track.center().x, y);
+    painter.circle_filled(knob, 7.0, theme.text);
+    painter.circle_stroke(knob, 7.0, Stroke::new(1.0, theme.border));
+    let pointer = response
+        .interact_pointer_pos()
+        .filter(|_| response.dragged() || response.clicked())?;
+    Some(((track.bottom() - pointer.y) / track.height()).clamp(0.0, 1.0))
+}
+
 /// A labelled horizontal slider row.
 fn slider_row(
     ui: &mut Ui,
@@ -2759,19 +2808,27 @@ impl SuePaint {
         let main = Rect::from_min_size(row.min, vec2(20.0, 20.0));
         let sub = Rect::from_min_size(row.min + vec2(12.0, 8.0), vec2(20.0, 20.0));
         self.color_chips(ui, main, sub, theme);
-        let text = format!(
-            "H {:.0}  S {:.0}  V {:.0}",
-            hsv.h,
-            hsv.s * 100.0,
-            hsv.v * 100.0
-        );
-        ui.painter().text(
-            pos2(row.left() + 44.0, row.top() + 14.0),
-            Align2::LEFT_CENTER,
-            text,
-            theme.font(theme.small_size + 0.5),
-            theme.muted,
-        );
+        // Red, green and blue, each behind a chip of its own, as Clip
+        // Studio Paint shows them under its wheel.
+        let rgb = self.drawing_color();
+        let chips = [
+            Color32::from_rgb(200, 40, 40),
+            Color32::from_rgb(40, 160, 60),
+            Color32::from_rgb(40, 70, 200),
+        ];
+        let step = ((body.right() - row.left() - 48.0) / 3.0).clamp(28.0, 44.0);
+        for (index, (value, chip)) in rgb.iter().zip(chips).enumerate() {
+            let x = row.left() + 46.0 + index as f32 * step;
+            let mark = Rect::from_center_size(pos2(x + 3.0, row.top() + 14.0), vec2(6.0, 6.0));
+            ui.painter().rect_filled(mark, 1.0, chip);
+            ui.painter().text(
+                pos2(x + 10.0, row.top() + 14.0),
+                Align2::LEFT_CENTER,
+                value.to_string(),
+                theme.font(theme.small_size + 0.5),
+                theme.text,
+            );
+        }
     }
 
     fn color_sliders(&mut self, ui: &mut Ui, theme: &Theme) {
@@ -3189,6 +3246,8 @@ impl SuePaint {
 
     // ----- Brush size sliders ---------------------------------------------------------
 
+    /// Clip Studio Paint's Tool Sliders: the brush size and opacity as two
+    /// tall sliders side by side, their values above them.
     pub(crate) fn size_column(&mut self, ui: &mut Ui, rect: Rect, theme: &Theme) {
         ui.painter().rect_filled(rect, 0.0, theme.panel);
         ui.painter()
@@ -3196,7 +3255,7 @@ impl SuePaint {
         let (body, _) = header(
             ui,
             rect,
-            &[(tr!("size-2"), Icon::BrushSize, true)],
+            &[(tr!("tool-sliders"), Icon::Sliders, true)],
             0,
             theme,
         );
@@ -3205,42 +3264,85 @@ impl SuePaint {
             return;
         }
         let tip = &mut self.toolbox.current_mut().tip;
-        let mut inner = child(ui, body.shrink2(vec2(4.0, 8.0)), "size-column");
-        let height = (body.height() - 80.0).max(60.0);
-        inner.spacing_mut().slider_width = height / 2.0 - 30.0;
-        inner.vertical_centered(|ui| {
-            ui.label(
-                RichText::new(format!("{:.1}\npx", tip.size))
-                    .size(theme.small_size)
-                    .color(theme.text),
-            );
-            ui.add(
-                egui::Slider::new(&mut tip.size, 0.5..=1000.0)
-                    .logarithmic(true)
-                    .vertical()
-                    .show_value(false),
-            );
-            ui.add_space(12.0);
-            let mut opacity = tip.opacity * 100.0;
-            ui.label(
-                RichText::new(format!("{opacity:.0}\n%"))
-                    .size(theme.small_size)
-                    .color(theme.text),
-            );
-            if ui
-                .add(
-                    egui::Slider::new(&mut opacity, 0.0..=100.0)
-                        .vertical()
-                        .show_value(false),
-                )
-                .changed()
-            {
-                tip.opacity = opacity / 100.0;
-            }
-        });
+        let half = body.width() / 2.0;
+        let label = 30.0;
+        let lanes = [
+            Rect::from_min_max(body.min, pos2(body.left() + half, body.bottom())),
+            Rect::from_min_max(pos2(body.left() + half, body.top()), body.max),
+        ];
+        // Size, from small at the bottom to large at the top.
+        let (low, high) = (0.5_f32.ln(), 1000.0_f32.ln());
+        ui.painter().text(
+            pos2(lanes[0].center().x, lanes[0].top() + label / 2.0),
+            Align2::CENTER_CENTER,
+            format!("{:.1}\npx", tip.size),
+            theme.font(theme.small_size),
+            theme.text,
+        );
+        let at = (tip.size.max(0.5).ln() - low) / (high - low);
+        if let Some(t) = tall_slider(ui, lanes[0], label, at, false, "sue-paint-tool-size", theme) {
+            tip.size = (low + t * (high - low)).exp();
+        }
+        // Opacity, its value in a dark disc as Clip Studio Paint shows it.
+        let disc = pos2(lanes[1].center().x, lanes[1].top() + label / 2.0);
+        ui.painter().circle_filled(disc, 12.0, theme.void);
+        ui.painter().text(
+            disc,
+            Align2::CENTER_CENTER,
+            format!("{:.0}\n%", tip.opacity * 100.0),
+            theme.font(theme.small_size - 1.0),
+            theme.text,
+        );
+        if let Some(t) = tall_slider(
+            ui,
+            lanes[1],
+            label,
+            tip.opacity,
+            true,
+            "sue-paint-tool-opacity",
+            theme,
+        ) {
+            tip.opacity = t;
+        }
     }
 
     // ----- Right column: navigator and layers ------------------------------------------
+
+    /// A palette of its own for what is also a tab elsewhere (Clip Studio
+    /// Paint's Material, Layer Property, History, Animation Cels, Sub
+    /// View, Auto Action, Item Bank and Info palettes).
+    pub(crate) fn single_palette(
+        &mut self,
+        ui: &mut Ui,
+        palette: crate::dock::Palette,
+        rect: Rect,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        use crate::dock::Palette;
+        let (body, _) = header(
+            ui,
+            rect,
+            &[(palette.title(), palette.icon(), true)],
+            0,
+            theme,
+        );
+        match palette {
+            Palette::Material => self.material_panel(ui, body, cx, theme),
+            Palette::LayerProperty => {
+                let current = self.layer_info(&cx.world.arena);
+                let mut inner = child(ui, body.shrink(8.0), "layer-property-palette");
+                self.layer_property(&mut inner, current.as_ref(), cx, theme);
+            }
+            Palette::History => self.history_tab(ui, body, cx, theme),
+            Palette::Cels => self.cels_tab(ui, body, cx, theme),
+            Palette::SubView => self.sub_view(ui, body.shrink(6.0), cx, theme),
+            Palette::AutoAction => self.auto_tab(ui, body, cx, theme),
+            Palette::ItemBank => self.item_bank_tab(ui, body, cx, theme),
+            Palette::Info => self.info_tab(ui, body, cx, theme),
+            _ => {}
+        }
+    }
 
     pub(crate) fn navigator(
         &mut self,
@@ -3255,9 +3357,6 @@ impl SuePaint {
             &[
                 (tr!("navigator"), Icon::Navigator, true),
                 (tr!("sub-view"), Icon::SubView, true),
-                (tr!("info"), Icon::Info, true),
-                (tr!("auto-actions"), Icon::AutoAction, true),
-                (tr!("item-bank"), Icon::ItemBank, true),
             ],
             self.nav_tab,
             theme,
@@ -3277,7 +3376,7 @@ impl SuePaint {
             return;
         }
         let viewport = self.viewport;
-        let controls = 86.0;
+        let controls = 58.0;
         let thumb_area = Rect::from_min_max(body.min, pos2(body.right(), body.bottom() - controls));
         ui.painter().rect_filled(thumb_area, 0.0, theme.void);
         let Some(doc) = self.docs.get_mut(self.active) else {
@@ -3326,7 +3425,8 @@ impl SuePaint {
             .with_clip_rect(thumb_area)
             .add(Shape::closed_line(
                 corners.to_vec(),
-                Stroke::new(1.5, theme.border_active),
+                // Red, as Clip Studio Paint draws the part the canvas shows.
+                Stroke::new(1.5, Color32::from_rgb(220, 40, 40)),
             ));
         let response = ui.interact(
             thumb_area,
@@ -3343,7 +3443,7 @@ impl SuePaint {
         // value, a wedge and its buttons on one row; fit and the flips
         // below.
         let row = 22.0;
-        let buttons_width = 3.0 * (row + 2.0);
+        let buttons_width = 5.0 * (row + 4.0);
         let wedge_width = (body.width() - 62.0 - 8.0 - buttons_width - 4.0).max(24.0);
         let mut zoom_button = None;
         let mut turn_button = None;
@@ -3375,6 +3475,7 @@ impl SuePaint {
                 (Icon::ZoomOut, tr!("zoom-out")),
                 (Icon::ZoomIn, tr!("zoom-in")),
                 (Icon::Actual, "100%".to_owned()),
+                (Icon::Fit, tr!("fit-to-screen-2")),
             ]
             .into_iter()
             .enumerate()
@@ -3408,29 +3509,20 @@ impl SuePaint {
                 (Icon::RotateLeft, tr!("rotate-left")),
                 (Icon::RotateRight, tr!("rotate-right")),
                 (Icon::Reset, tr!("reset-rotation")),
+                (Icon::FlipH, tr!("flip-horizontally")),
+                (Icon::FlipV, tr!("flip-vertically")),
             ]
             .into_iter()
             .enumerate()
             {
                 let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(row), Sense::hover());
-                if icon_button(ui, rect, icon, true, false, &tip, theme) {
-                    turn_button = Some(index);
-                }
-            }
-        });
-        let mut view_button = None;
-        inner.horizontal(|ui| {
-            for (index, (icon, tip, active)) in [
-                (Icon::Fit, tr!("fit-to-screen-2"), false),
-                (Icon::FlipH, tr!("flip-horizontally"), doc.view.flip_h),
-                (Icon::FlipV, tr!("flip-vertically"), doc.view.flip_v),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(row), Sense::hover());
+                let active = match index {
+                    3 => doc.view.flip_h,
+                    4 => doc.view.flip_v,
+                    _ => false,
+                };
                 if icon_button(ui, rect, icon, true, active, &tip, theme) {
-                    view_button = Some(index);
+                    turn_button = Some(index);
                 }
             }
         });
@@ -3445,18 +3537,15 @@ impl SuePaint {
         match zoom_button {
             Some(0) => doc.view.zoom_at(viewport, size, center, 0.8),
             Some(1) => doc.view.zoom_at(viewport, size, center, 1.25),
-            Some(_) => doc.view.set_zoom_at(viewport, size, center, 1.0),
+            Some(2) => doc.view.set_zoom_at(viewport, size, center, 1.0),
+            Some(_) => doc.view.fit(viewport, size),
             None => {}
         }
         match turn_button {
             Some(0) => doc.view.rotate_by(viewport, size, -15.0),
             Some(1) => doc.view.rotate_by(viewport, size, 15.0),
-            Some(_) => doc.view.set_rotation(viewport, size, 0.0),
-            None => {}
-        }
-        match view_button {
-            Some(0) => doc.view.fit(viewport, size),
-            Some(1) => doc.view.flip(viewport, size, true),
+            Some(2) => doc.view.set_rotation(viewport, size, 0.0),
+            Some(3) => doc.view.flip(viewport, size, true),
             Some(_) => doc.view.flip(viewport, size, false),
             None => {}
         }

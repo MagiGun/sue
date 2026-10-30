@@ -65,9 +65,10 @@ impl SuePaint {
             pos2(rect.left(), rect.bottom() - chrome + slide),
             pos2(rect.right(), rect.bottom() + slide),
         );
+        let scroll = if self.bare { 0.0 } else { SCROLLBAR };
         let mut viewport = Rect::from_min_max(
             pos2(rect.left(), tabs.bottom()),
-            pos2(rect.right(), status.top()),
+            pos2(rect.right() - scroll, status.top()),
         );
         if self.tiled && self.docs.len() > 1 {
             viewport = self.tile_others(ui, viewport, cx, theme);
@@ -82,7 +83,7 @@ impl SuePaint {
         let Some(size) = size else {
             self.empty_canvas(ui, viewport, cx, theme);
             if !self.bare {
-                self.status_strip(ui, status, None, cx, theme);
+                self.status_strip(ui, status, None, theme);
             }
             return;
         };
@@ -142,7 +143,27 @@ impl SuePaint {
             self.transform_ui(ui, viewport, size, cx, theme);
         }
         if !self.bare {
-            self.status_strip(ui, status, Some(size), cx, theme);
+            self.status_strip(ui, status, Some(size), theme);
+            let bar = Rect::from_min_max(
+                pos2(viewport.right(), viewport.top()),
+                pos2(viewport.right() + SCROLLBAR, viewport.bottom()),
+            );
+            ui.painter().rect_filled(bar, 0.0, theme.panel);
+            if let Some(doc) = self.docs.get_mut(self.active) {
+                let extent = size[1] as f32 * doc.view.zoom;
+                if let Some(pan) = scrollbar(
+                    ui,
+                    bar,
+                    false,
+                    doc.view.pan.y,
+                    extent,
+                    viewport.height(),
+                    "sue-paint-scroll-v",
+                    theme,
+                ) {
+                    doc.view.pan.y = pan;
+                }
+            }
         }
     }
 
@@ -3830,14 +3851,7 @@ impl SuePaint {
         let _ = cx;
     }
 
-    fn status_strip(
-        &mut self,
-        ui: &mut Ui,
-        strip: Rect,
-        size: Option<[u32; 2]>,
-        cx: &mut AppletContext<'_>,
-        theme: &Theme,
-    ) {
+    fn status_strip(&mut self, ui: &mut Ui, strip: Rect, size: Option<[u32; 2]>, theme: &Theme) {
         ui.painter().rect_filled(strip, 0.0, theme.pill);
         ui.painter()
             .hline(strip.x_range(), strip.top(), theme.hairline());
@@ -3846,129 +3860,183 @@ impl SuePaint {
         };
         let viewport = self.viewport;
         let mut inner = child(ui, strip.shrink2(vec2(8.0, 2.0)), "status-strip");
-        let pointer = self.pointer;
-        let layer_name = self
-            .layer_info(&cx.world.arena)
-            .map(|info| info.name)
-            .unwrap_or_default();
-        let dpi = self
-            .picture()
-            .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
-            .and_then(|entity| {
-                entity
-                    .property(picture::DPI)
-                    .and_then(sue_core::Value::as_f64)
-            })
-            .unwrap_or(72.0);
         let Some(doc) = self.docs.get_mut(self.active) else {
             return;
         };
-        inner.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            let mut percent = doc.view.zoom * 100.0;
-            if ui
-                .add(
-                    egui::DragValue::new(&mut percent)
-                        .range(1.0..=6400.0)
-                        .max_decimals(1)
-                        .suffix(" %"),
-                )
-                .changed()
-            {
-                doc.view
-                    .set_zoom_at(viewport, size, viewport.center(), percent / 100.0);
-            }
-            if ui
-                .small_button("-")
-                .on_hover_text(tr!("zoom-out"))
-                .clicked()
-            {
-                doc.view.zoom_at(viewport, size, viewport.center(), 0.8);
-            }
-            if ui.small_button("+").on_hover_text(tr!("zoom-in")).clicked() {
-                doc.view.zoom_at(viewport, size, viewport.center(), 1.25);
-            }
-            ui.separator();
-            let mut rotation = doc.view.rotation;
-            if ui
-                .add(
-                    egui::DragValue::new(&mut rotation)
-                        .range(-180.0..=180.0)
-                        .max_decimals(1)
-                        .suffix(" \u{b0}"),
-                )
-                .changed()
-            {
-                doc.view.set_rotation(viewport, size, rotation);
-            }
-            if ui
-                .small_button("\u{21ba}")
-                .on_hover_text(tr!("rotate-left"))
-                .clicked()
-            {
-                doc.view.rotate_by(viewport, size, -15.0);
-            }
-            if ui
-                .small_button("\u{21bb}")
-                .on_hover_text(tr!("rotate-right"))
-                .clicked()
-            {
-                doc.view.rotate_by(viewport, size, 15.0);
-            }
-            if ui
-                .small_button("0\u{b0}")
-                .on_hover_text(tr!("reset-rotation"))
-                .clicked()
-            {
-                doc.view.set_rotation(viewport, size, 0.0);
-            }
-            if ui
-                .selectable_label(doc.view.flip_h, tr!("flip"))
-                .on_hover_text(tr!("flip-view-left-right"))
-                .clicked()
-            {
-                doc.view.flip(viewport, size, true);
-            }
-            if ui
-                .small_button(tr!("fit"))
-                .on_hover_text(tr!("fit-to-screen-ctrl-0"))
-                .clicked()
-            {
-                doc.view.fit(viewport, size);
-            }
-            if ui
-                .small_button("100%")
-                .on_hover_text(tr!("actual-pixels-ctrl-alt-0"))
-                .clicked()
-            {
-                doc.view.set_zoom_at(viewport, size, viewport.center(), 1.0);
-            }
-            ui.separator();
-            let small = |text: String| {
-                RichText::new(text)
-                    .size(theme.small_size + 0.5)
-                    .color(theme.muted)
-            };
-            ui.label(small(tr!(
-                "x-px-dpi",
-                value = size[0],
-                value2 = size[1],
-                dpi = sue_lang::number(dpi, 0)
-            )));
-            if let Some(pointer) = pointer {
-                let p = doc.view.to_picture(viewport, size, pointer);
-                if p.x >= 0.0 && p.y >= 0.0 && p.x < size[0] as f32 && p.y < size[1] as f32 {
-                    ui.separator();
-                    ui.label(small(format!("{:.0}, {:.0}", p.x.floor(), p.y.floor())));
+        // As Clip Studio Paint's: the zoom and the turn, each a value and a
+        // wedge with its buttons, then the horizontal scrollbar.
+        let mut turn_button = None;
+        let mut zoom_button = None;
+        let (mut percent, mut rotation) = (doc.view.zoom * 100.0, doc.view.rotation);
+        let (mut zoomed, mut turned) = (false, false);
+        let controls = inner
+            .horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                zoomed |= ui
+                    .add_sized(
+                        vec2(46.0, 18.0),
+                        egui::DragValue::new(&mut percent)
+                            .range(1.0..=6400.0)
+                            .max_decimals(1),
+                    )
+                    .on_hover_text(tr!("zoom"))
+                    .changed();
+                zoomed |= ui
+                    .add(
+                        crate::panels::Wedge::new(&mut percent, 1.0..=6400.0, 60.0, theme)
+                            .logarithmic(),
+                    )
+                    .changed();
+                for (index, (icon, tip)) in [
+                    (Icon::ZoomOut, tr!("zoom-out")),
+                    (Icon::ZoomIn, tr!("zoom-in")),
+                    (Icon::Fit, tr!("fit-to-screen-ctrl-0")),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let (rect, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+                    if crate::panels::icon_button(ui, rect, icon, true, false, &tip, theme) {
+                        zoom_button = Some(index);
+                    }
                 }
+                ui.add_space(6.0);
+                turned |= ui
+                    .add_sized(
+                        vec2(40.0, 18.0),
+                        egui::DragValue::new(&mut rotation)
+                            .range(-180.0..=180.0)
+                            .max_decimals(1),
+                    )
+                    .on_hover_text(tr!("rotation"))
+                    .changed();
+                turned |= ui
+                    .add(crate::panels::Wedge::new(
+                        &mut rotation,
+                        -180.0..=180.0,
+                        60.0,
+                        theme,
+                    ))
+                    .changed();
+                for (index, (icon, tip, active)) in [
+                    (Icon::RotateLeft, tr!("rotate-left"), false),
+                    (Icon::RotateRight, tr!("rotate-right"), false),
+                    (Icon::Reset, tr!("reset-rotation"), false),
+                    (Icon::FlipH, tr!("flip-view-left-right"), doc.view.flip_h),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let (rect, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+                    if crate::panels::icon_button(ui, rect, icon, true, active, &tip, theme) {
+                        turn_button = Some(index);
+                    }
+                }
+            })
+            .response
+            .rect;
+        let center = viewport.center();
+        if zoomed {
+            doc.view
+                .set_zoom_at(viewport, size, center, percent / 100.0);
+        }
+        if turned {
+            doc.view.set_rotation(viewport, size, rotation);
+        }
+        match zoom_button {
+            Some(0) => doc.view.zoom_at(viewport, size, center, 0.8),
+            Some(1) => doc.view.zoom_at(viewport, size, center, 1.25),
+            Some(_) => doc.view.fit(viewport, size),
+            None => {}
+        }
+        match turn_button {
+            Some(0) => doc.view.rotate_by(viewport, size, -15.0),
+            Some(1) => doc.view.rotate_by(viewport, size, 15.0),
+            Some(2) => doc.view.set_rotation(viewport, size, 0.0),
+            Some(_) => doc.view.flip(viewport, size, true),
+            None => {}
+        }
+        let bar = Rect::from_min_max(
+            pos2(controls.right() + 12.0, strip.center().y - SCROLLBAR / 2.0),
+            pos2(
+                strip.right() - SCROLLBAR - 4.0,
+                strip.center().y + SCROLLBAR / 2.0,
+            ),
+        );
+        if bar.width() > 40.0 {
+            let extent = size[0] as f32 * doc.view.zoom;
+            if let Some(pan) = scrollbar(
+                ui,
+                bar,
+                true,
+                doc.view.pan.x,
+                extent,
+                viewport.width(),
+                "sue-paint-scroll-h",
+                theme,
+            ) {
+                doc.view.pan.x = pan;
             }
-            if !layer_name.is_empty() {
-                ui.separator();
-                ui.label(small(layer_name.clone()));
-            }
-        });
+        }
         let _ = Align2::LEFT_CENTER;
     }
+}
+
+/// How thick the canvas's scrollbars are.
+const SCROLLBAR: f32 = 12.0;
+
+/// A scrollbar along `bar` for a picture `extent` points long seen through
+/// a view `seen` long, at `pan` (the picture's center from the view's).
+/// The picture can scroll until its edge reaches the view's middle. The new
+/// pan while the thumb is dragged.
+#[allow(clippy::too_many_arguments, reason = "a scrollbar's whole state")]
+fn scrollbar(
+    ui: &mut Ui,
+    bar: Rect,
+    horizontal: bool,
+    pan: f32,
+    extent: f32,
+    seen: f32,
+    salt: &str,
+    theme: &Theme,
+) -> Option<f32> {
+    let along = |rect: Rect| {
+        if horizontal {
+            rect.width()
+        } else {
+            rect.height()
+        }
+    };
+    let start = |rect: Rect| if horizontal { rect.left() } else { rect.top() };
+    let reach = (extent + seen) / 2.0;
+    let length = along(bar);
+    let thumb = (length * seen / (extent + seen).max(1.0)).clamp(16.0, length);
+    // Panning right moves the picture right, so the thumb goes left.
+    let t = ((reach - pan) / (2.0 * reach).max(1.0)).clamp(0.0, 1.0);
+    let at = start(bar) + t * (length - thumb);
+    let thumb_rect = if horizontal {
+        Rect::from_min_size(pos2(at, bar.top() + 2.0), vec2(thumb, bar.height() - 4.0))
+    } else {
+        Rect::from_min_size(pos2(bar.left() + 2.0, at), vec2(bar.width() - 4.0, thumb))
+    };
+    let response = ui.interact(bar, Id::unique(salt), Sense::click_and_drag());
+    let painter = ui.painter();
+    painter.rect_filled(bar, 0.0, theme.void);
+    painter.rect_filled(
+        thumb_rect,
+        3.0,
+        if response.dragged() || response.hovered() {
+            theme.text.gamma_multiply(0.8)
+        } else {
+            theme.muted.gamma_multiply(0.75)
+        },
+    );
+    let pointer = response
+        .interact_pointer_pos()
+        .filter(|_| response.dragged() || response.clicked())?;
+    let p = if horizontal { pointer.x } else { pointer.y };
+    let t = ((p - start(bar) - thumb / 2.0) / (length - thumb).max(1.0)).clamp(0.0, 1.0);
+    Some(reach - t * 2.0 * reach)
 }
 
 /// Draws `rulers` (picture pixels, `screen` maps them) in Clip Studio

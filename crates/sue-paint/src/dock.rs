@@ -30,7 +30,36 @@ pub(crate) enum Palette {
     Navigator,
     /// The layers, their properties, history and animation cels.
     Layer,
+    /// The materials.
+    Material,
+    /// The current layer's properties and effects.
+    LayerProperty,
+    /// The undo history.
+    History,
+    /// The light table and cel buttons.
+    Cels,
+    /// A picture to look at or pick colors from.
+    SubView,
+    /// Recorded steps to play again.
+    AutoAction,
+    /// Things kept to use again.
+    ItemBank,
+    /// The pointer's place and the canvas's size.
+    Info,
 }
+
+/// The palettes Clip Studio Paint keeps folded in the strip at the right
+/// from the start.
+pub(crate) const STRIP_PALETTES: [Palette; 8] = [
+    Palette::Material,
+    Palette::LayerProperty,
+    Palette::Cels,
+    Palette::History,
+    Palette::SubView,
+    Palette::AutoAction,
+    Palette::ItemBank,
+    Palette::Info,
+];
 
 impl Palette {
     /// What its window and icon are called.
@@ -43,6 +72,14 @@ impl Palette {
             Self::ColorSet => tr!("color-set"),
             Self::Navigator => tr!("navigator"),
             Self::Layer => tr!("layer-2"),
+            Self::Material => tr!("material"),
+            Self::LayerProperty => tr!("layer-property"),
+            Self::History => tr!("history"),
+            Self::Cels => tr!("animation-cels"),
+            Self::SubView => tr!("sub-view"),
+            Self::AutoAction => tr!("auto-actions"),
+            Self::ItemBank => tr!("item-bank"),
+            Self::Info => tr!("info"),
         }
     }
 
@@ -56,6 +93,14 @@ impl Palette {
             Self::ColorSet => Icon::Swatches,
             Self::Navigator => Icon::Navigator,
             Self::Layer => Icon::Layers,
+            Self::Material => Icon::Material,
+            Self::LayerProperty => Icon::LayerProperty,
+            Self::History => Icon::History,
+            Self::Cels => Icon::Cel,
+            Self::SubView => Icon::SubView,
+            Self::AutoAction => Icon::AutoAction,
+            Self::ItemBank => Icon::ItemBank,
+            Self::Info => Icon::Info,
         }
     }
 
@@ -63,7 +108,7 @@ impl Palette {
     pub fn fixed_width(self) -> Option<f32> {
         match self {
             Self::Tools => Some(46.0),
-            Self::BrushSize => Some(58.0),
+            Self::BrushSize => Some(76.0),
             _ => None,
         }
     }
@@ -87,6 +132,14 @@ impl Palette {
             Self::ColorSet => panels.color_set,
             Self::Navigator => panels.navigator,
             Self::Layer => panels.layer,
+            Self::Material
+            | Self::LayerProperty
+            | Self::History
+            | Self::Cels
+            | Self::SubView
+            | Self::AutoAction
+            | Self::ItemBank
+            | Self::Info => true,
         }
     }
 
@@ -178,14 +231,14 @@ impl Default for Dock {
                     ],
                     236.0,
                 ),
-                column(&[(Palette::BrushSize, 1.0)], 58.0),
+                column(&[(Palette::BrushSize, 1.0)], 76.0),
             ],
             right: vec![column(
                 &[(Palette::Navigator, 0.42), (Palette::Layer, 0.58)],
                 300.0,
             )],
             floating: Vec::new(),
-            iconized: Vec::new(),
+            iconized: STRIP_PALETTES.to_vec(),
             popped: None,
             menu: None,
             timeline: 160.0,
@@ -222,7 +275,7 @@ pub(crate) struct Laid {
 }
 
 /// Every palette, for reading layouts back.
-const PALETTES: [Palette; 7] = [
+const PALETTES: [Palette; 15] = [
     Palette::Tools,
     Palette::SubTool,
     Palette::BrushSize,
@@ -230,6 +283,14 @@ const PALETTES: [Palette; 7] = [
     Palette::ColorSet,
     Palette::Navigator,
     Palette::Layer,
+    Palette::Material,
+    Palette::LayerProperty,
+    Palette::History,
+    Palette::Cels,
+    Palette::SubView,
+    Palette::AutoAction,
+    Palette::ItemBank,
+    Palette::Info,
 ];
 
 fn palette_named(title: &str) -> Option<Palette> {
@@ -340,7 +401,24 @@ impl Dock {
             || !dock.right.is_empty()
             || !dock.floating.is_empty()
             || !dock.iconized.is_empty();
+        // A layout from before a palette existed keeps it in the strip.
+        for palette in STRIP_PALETTES {
+            if !dock.has(palette) {
+                dock.iconized.push(palette);
+            }
+        }
         placed.then_some(dock)
+    }
+
+    /// `palette` is somewhere: docked, floating or in the strip.
+    #[must_use]
+    pub fn has(&self, palette: Palette) -> bool {
+        self.left
+            .iter()
+            .chain(self.right.iter())
+            .any(|column| column.palettes.iter().any(|(found, _)| *found == palette))
+            || self.floating.iter().any(|(found, _)| *found == palette)
+            || self.iconized.contains(&palette)
     }
 
     /// Takes `palette` out of wherever it is.
@@ -619,6 +697,7 @@ impl SuePaint {
             Palette::ColorSet => self.color_set_panel(ui, rect, cx, theme),
             Palette::Navigator => self.navigator(ui, rect, cx, theme),
             Palette::Layer => self.layer_panel(ui, rect, cx, theme),
+            other => self.single_palette(ui, other, rect, cx, theme),
         }
     }
 
@@ -726,6 +805,8 @@ impl SuePaint {
             Palette::ColorSet => panels.color_set = false,
             Palette::Navigator => panels.navigator = false,
             Palette::Layer => panels.layer = false,
+            // The others fold back into the strip, as in Clip Studio Paint.
+            other => self.dock.iconize(other),
         }
         if self.dock.popped == Some(palette) {
             self.dock.popped = None;
@@ -1156,9 +1237,13 @@ mod tests {
         let body = Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 900.0));
         let laid = dock.layout(body, &all, 0.0);
         assert_eq!(laid.docked.len(), 7);
-        assert!(laid.strip.is_none(), "room for every column");
-        assert_eq!(laid.center.left(), 46.0 + 236.0 + 58.0);
-        assert_eq!(laid.center.right(), 1600.0 - 300.0);
+        assert!(
+            laid.strip.is_some(),
+            "the folded palettes, as Clip Studio Paint"
+        );
+        assert_eq!(laid.icons.len(), STRIP_PALETTES.len());
+        assert_eq!(laid.center.left(), 46.0 + 236.0 + 76.0);
+        assert_eq!(laid.center.right(), 1600.0 - 300.0 - STRIP);
         // Heights share the column without gaps.
         let sub = laid
             .docked
@@ -1208,9 +1293,10 @@ mod tests {
         dock.iconize(Palette::Navigator);
         let body = Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 900.0));
         let laid = dock.layout(body, &all, 0.0);
-        assert_eq!(laid.icons, [Palette::Navigator]);
+        assert_eq!(laid.icons.last(), Some(&Palette::Navigator));
+        assert_eq!(laid.icons.len(), STRIP_PALETTES.len() + 1);
         dock.dock(Palette::Navigator, Side::Left);
-        assert!(dock.iconized.is_empty());
+        assert!(!dock.iconized.contains(&Palette::Navigator));
         dock.dock(Palette::BrushSize, Side::Right);
         assert!(
             dock.right

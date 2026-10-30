@@ -1998,3 +1998,9 @@ comic-settings = Comic settings
 animation-settings = Animation settings
 animated-illustration-hint = To create an animated illustration,
     turn this option on and specify the number of cels.
+tool-sliders = Tool Sliders
+lens-blur = Lens Blur
+lens-blur-ellipsis = Lens Blur...
+remove-jpeg-noise = Remove JPEG Noise
+remove-jpeg-noise-ellipsis = Remove JPEG Noise...
+radius = Radius

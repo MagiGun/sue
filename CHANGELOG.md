@@ -13,6 +13,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint opens with Clip Studio Paint's layout: a strip of folded
+  palettes at the far right (Material, Layer Property, Animation Cels,
+  History, Sub View, Auto Actions, Item Bank and Info, each a palette of
+  its own), the Tool Sliders column with brush size and opacity side by
+  side, a two-row Navigator with a red view frame, scrollbars on the
+  canvas, the zoom and turn wedges under it, and red, green and blue
+  values under the color wheel. New filters: Lens Blur and Remove JPEG
+  Noise.
 - On a computer, Sue Paint's dialogs and floating palettes are windows of
   their own: move them anywhere, outside Sue's window or onto another
   screen, and resize them. Closing a floating palette's window docks it

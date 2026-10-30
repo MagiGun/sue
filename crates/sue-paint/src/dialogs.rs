@@ -1421,6 +1421,7 @@ impl SuePaint {
                             | Filter::Twirl { .. }
                             | Filter::ZigZag { .. }
                             | Filter::Crystallize { .. }
+                            | Filter::JpegNoise { .. }
                             | Filter::Fisheye { .. }
                             | Filter::Aberration { .. }
                             | Filter::Retro { .. }
@@ -2779,6 +2780,12 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
         Filter::ZigZag { amplitude, folds } => {
             ui.add(egui::Slider::new(amplitude, 0.0..=100.0).text(tr!("amplitude")));
             ui.add(egui::Slider::new(folds, 1.0..=20.0).text(tr!("folds")));
+        }
+        Filter::LensBlur { radius } => {
+            ui.add(egui::Slider::new(radius, 1..=64).text(tr!("radius")));
+        }
+        Filter::JpegNoise { strength } => {
+            ui.add(egui::Slider::new(strength, 0.0..=1.0).text(tr!("strength")));
         }
         Filter::Crystallize { size } => {
             ui.add(egui::Slider::new(size, 2..=200).text(tr!("cell-size")));

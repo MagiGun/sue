@@ -656,6 +656,7 @@ pub fn menus() -> Vec<Menu> {
                         act(&tr!("motion-blur-ellipsis"), "filter.motion_blur"),
                         act(&tr!("radial-blur-ellipsis"), "filter.radial_blur"),
                         act(&tr!("zoom-blur-ellipsis"), "filter.zoom_blur"),
+                        act(&tr!("lens-blur-ellipsis"), "filter.lens_blur"),
                         act(&tr!("smooth"), "filter.smooth"),
                     ],
                 ),
@@ -663,6 +664,7 @@ pub fn menus() -> Vec<Menu> {
                     &tr!("correct-line"),
                     vec![
                         act(&tr!("remove-dust-ellipsis"), "filter.dust"),
+                        act(&tr!("remove-jpeg-noise-ellipsis"), "filter.jpeg_noise"),
                         act(&tr!("line-width-ellipsis"), "filter.line_width"),
                     ],
                 ),

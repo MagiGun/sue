@@ -124,6 +124,18 @@ pub enum Filter {
         /// How many folds from the middle to the edge.
         folds: f32,
     },
+    /// Lens Blur: each pixel the average of a disc, as an out of focus lens
+    /// blurs.
+    LensBlur {
+        /// The disc's radius, pixels.
+        radius: u32,
+    },
+    /// Remove JPEG Noise: the blocks and ringing of a JPEG smoothed away,
+    /// edges kept.
+    JpegNoise {
+        /// 0 to 1.
+        strength: f32,
+    },
     /// Crystallize: cells of one color each, round scattered points.
     Crystallize {
         /// How big a cell is, pixels.
@@ -302,6 +314,8 @@ impl Filter {
             Self::Twirl { .. } => tr!("twirl"),
             Self::ZigZag { .. } => tr!("zigzag"),
             Self::Crystallize { .. } => tr!("crystallize"),
+            Self::LensBlur { .. } => tr!("lens-blur"),
+            Self::JpegNoise { .. } => tr!("remove-jpeg-noise"),
             Self::Aberration { .. } => tr!("chromatic-aberration"),
             Self::Retro { .. } => tr!("retro"),
             Self::PerlinNoise { .. } => tr!("perlin-noise"),
@@ -427,6 +441,10 @@ impl Filter {
                 });
             }
             Self::Crystallize { size } => crystallize(pixels, width, height, size.max(2)),
+            Self::LensBlur { radius } => lens_blur(pixels, width, height, radius.clamp(1, 64)),
+            Self::JpegNoise { strength } => {
+                remove_jpeg_noise(pixels, width, height, strength.clamp(0.0, 1.0));
+            }
             Self::Pinch { amount } => {
                 let (cx, cy, r) = (
                     width as f32 / 2.0,
@@ -920,6 +938,8 @@ impl Filter {
             | Self::Twirl { .. }
             | Self::ZigZag { .. }
             | Self::Crystallize { .. }
+            | Self::LensBlur { .. }
+            | Self::JpegNoise { .. }
             | Self::Aberration { .. }
             | Self::Retro { .. }
             | Self::PerlinNoise { .. }
@@ -1235,6 +1255,96 @@ fn mosaic(pixels: &mut [u8], width: u32, height: u32, size: u32) {
     }
 }
 
+/// Lens Blur: every pixel the average of the disc of `radius` around it,
+/// row by row through a running sum of each row's span in the disc.
+fn lens_blur(pixels: &mut [u8], width: u32, height: u32, radius: u32) {
+    let (w, h, r) = (width as i64, height as i64, i64::from(radius));
+    let source = pixels.to_vec();
+    // Each row's half width in the disc.
+    let spans: Vec<i64> = (-r..=r)
+        .map(|dy| (((r * r - dy * dy) as f64).sqrt()).floor() as i64)
+        .collect();
+    // Prefix sums of every row, per channel.
+    let stride = (w + 1) as usize;
+    let mut sums = vec![[0_u64; 4]; stride * h as usize];
+    for y in 0..h as usize {
+        for x in 0..w as usize {
+            let at = (y * w as usize + x) * 4;
+            let mut next = sums[y * stride + x];
+            for channel in 0..4 {
+                next[channel] += u64::from(source[at + channel]);
+            }
+            sums[y * stride + x + 1] = next;
+        }
+    }
+    for y in 0..h {
+        for x in 0..w {
+            let mut total = [0_u64; 4];
+            let mut count = 0_u64;
+            for (index, dy) in (-r..=r).enumerate() {
+                let row = y + dy;
+                if row < 0 || row >= h {
+                    continue;
+                }
+                let span = spans[index];
+                let (from, to) = ((x - span).max(0), (x + span + 1).min(w));
+                let base = row as usize * stride;
+                let (a, b) = (sums[base + from as usize], sums[base + to as usize]);
+                for channel in 0..4 {
+                    total[channel] += b[channel] - a[channel];
+                }
+                count += (to - from) as u64;
+            }
+            let at = ((y * w + x) * 4) as usize;
+            for channel in 0..4 {
+                pixels[at + channel] = (total[channel] / count.max(1)) as u8;
+            }
+        }
+    }
+}
+
+/// Remove JPEG Noise: each pixel moved toward its neighbours that are
+/// close to it in color (the blocks and ringing), not across edges.
+fn remove_jpeg_noise(pixels: &mut [u8], width: u32, height: u32, strength: f32) {
+    let source = pixels.to_vec();
+    let limit = 8.0 + 40.0 * strength;
+    let (w, h) = (width as i64, height as i64);
+    for y in 0..h {
+        for x in 0..w {
+            let at = ((y * w + x) * 4) as usize;
+            let mut total = [0.0_f32; 3];
+            let mut weight = 0.0;
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if nx < 0 || ny < 0 || nx >= w || ny >= h {
+                        continue;
+                    }
+                    let near = ((ny * w + nx) * 4) as usize;
+                    let distance = (0..3)
+                        .map(|channel| {
+                            (f32::from(source[near + channel]) - f32::from(source[at + channel]))
+                                .abs()
+                        })
+                        .fold(0.0, f32::max);
+                    if distance <= limit {
+                        let k = 1.0 - distance / (limit + 1.0);
+                        for channel in 0..3 {
+                            total[channel] += f32::from(source[near + channel]) * k;
+                        }
+                        weight += k;
+                    }
+                }
+            }
+            for channel in 0..3 {
+                let smooth = total[channel] / weight.max(1e-3);
+                let was = f32::from(source[at + channel]);
+                pixels[at + channel] = (was + (smooth - was) * strength).round() as u8;
+            }
+        }
+    }
+}
+
 /// Crystallize: a scattered point in each `size` square, and every pixel
 /// the color of the point nearest it.
 fn crystallize(pixels: &mut [u8], width: u32, height: u32, size: u32) {
@@ -1340,6 +1450,17 @@ mod tests {
             dot()
         );
         assert_ne!(run(Filter::Crystallize { size: 6 }), dot());
+        assert!(
+            gray(&run(Filter::LensBlur { radius: 4 }), 20, 20) < 255,
+            "the dot spreads"
+        );
+        // A faint speck smooths away; the dot's hard edge stays.
+        let mut speck = dot();
+        speck[0] = speck[0].saturating_sub(10);
+        let before = speck[0];
+        Filter::JpegNoise { strength: 1.0 }.apply(&mut speck, w, h, None, [0, 0]);
+        assert!(speck[0] > before, "the speck fades into its neighbours");
+        assert_eq!(gray(&speck, 20, 20), gray(&dot(), 20, 20), "edges stay");
         let aberrated = run(Filter::Aberration { shift: 3.0 });
         assert_ne!(aberrated, dot());
         let retro = run(Filter::Retro { amount: 1.0 });

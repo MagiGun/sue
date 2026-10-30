@@ -948,6 +948,8 @@ fn implemented(command: &str) -> bool {
             | "filter.twirl"
             | "filter.zigzag"
             | "filter.crystallize"
+            | "filter.lens_blur"
+            | "filter.jpeg_noise"
             | "filter.polar"
             | "filter.ripple"
             | "filter.fisheye"
@@ -4138,6 +4140,8 @@ impl SuePaint {
                 },
             ),
             "filter.crystallize" => self.filter_dialog(cx, Filter::Crystallize { size: 20 }),
+            "filter.lens_blur" => self.filter_dialog(cx, Filter::LensBlur { radius: 8 }),
+            "filter.jpeg_noise" => self.filter_dialog(cx, Filter::JpegNoise { strength: 0.6 }),
             "filter.aberration" => self.filter_dialog(cx, Filter::Aberration { shift: 6.0 }),
             "filter.retro" => self.filter_dialog(cx, Filter::Retro { amount: 0.6 }),
             "filter.perlin" => self.filter_dialog(

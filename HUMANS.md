@@ -486,6 +486,13 @@ Once a canvas is open:
 - **Dialogs are windows:** on a computer, Sue Paint's dialogs (New,
   Preferences, the filters and the rest) open as windows of their own,
   which you can move anywhere, outside Sue's window too, and resize.
+- **Laid out like Clip Studio Paint:** Sue Paint starts with the same
+  frame: tools, Sub Tool, the color wheel and color set at the left, Tool
+  Sliders beside them, the Navigator and layers at the right, and a strip
+  of folded palettes at the far right (Material, Layer Property,
+  Animation Cels, History, Sub View, Auto Actions, Item Bank and Info);
+  click an icon to open one. The canvas has scrollbars, with the zoom and
+  turn controls beside the bottom one.
 - **Arrange the palettes your way:** drag the edge of a column to make it
   wider, or the line between two palettes to share the height differently.
   Each palette's menu (the three lines at its top right) docks it on the

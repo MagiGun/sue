@@ -904,20 +904,20 @@ impl SuePaint {
         ui.painter()
             .vline(names.right(), tracks.y_range(), theme.hairline());
         let Some((picture, sequence, length)) = self.timeline_here(&cx.world.arena) else {
-            ui.painter().text(
-                names.left_top() + vec2(10.0, 14.0),
-                Align2::LEFT_CENTER,
-                "No timeline",
-                theme.font(theme.small_size + 0.5),
-                theme.muted.gamma_multiply(0.7),
-            );
-            ui.painter().text(
-                pos2(names.right() + 16.0, tracks.top() + 30.0),
-                Align2::LEFT_CENTER,
-                "New timeline (or New animation cel) starts an animation; File, New, Animation makes one",
-                theme.font(theme.small_size + 0.5),
+            // As Clip Studio Paint: an empty timeline list and nothing else.
+            let title =
+                Rect::from_min_size(names.min + vec2(6.0, 6.0), vec2(names.width() - 12.0, 22.0));
+            ui.painter().rect_filled(title, 2.0, theme.pill);
+            ui.painter()
+                .rect_stroke(title, 2.0, theme.hairline(), egui::StrokeKind::Inside);
+            crate::icons::paint(
+                ui.painter(),
+                Rect::from_center_size(title.right_center() - vec2(10.0, 0.0), vec2(9.0, 9.0)),
+                Icon::Down,
                 theme.muted,
             );
+            ui.interact(title, ui.scope_id().with("timeline-list"), Sense::hover())
+                .on_hover_text(tr!("new-timeline-2"));
             return;
         };
         let (frame, track) = self.doc().map_or((0, 0), |doc| (doc.frame, doc.track));
