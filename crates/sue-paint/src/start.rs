@@ -1797,6 +1797,7 @@ impl SuePaint {
                         }
                         page::gap(ui);
                         let rows = [
+                            Row::new(Some(Glyph::Draw), tr!("start-pen-pressure"), Trailing::More),
                             Row::new(
                                 Some(Glyph::Wrench),
                                 tr!("start-maintenance-menu"),
@@ -1809,8 +1810,17 @@ impl SuePaint {
                             ),
                         ];
                         match page::group(ui, &rows, theme) {
-                            Some(0) => next = Some(Popup::Maintenance),
-                            Some(1) => {
+                            Some(0) => {
+                                // Fitting the pen's pressure to the hand.
+                                cx.request(ShellRequest::AppletCommand {
+                                    applet: sue_wm::AppletId::new(crate::studio::ID)
+                                        .expect("a valid id"),
+                                    command: "file.pressure".to_owned(),
+                                });
+                                next = None;
+                            }
+                            Some(1) => next = Some(Popup::Maintenance),
+                            Some(2) => {
                                 cx.request(ShellRequest::OpenSettings(Some("studios".to_owned())));
                                 next = Some(Popup::Settings);
                             }

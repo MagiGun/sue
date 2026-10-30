@@ -749,6 +749,30 @@ impl SuePaint {
 
     // ----- Input ------------------------------------------------------------------
 
+    /// How hard the pen presses, through the pen pressure curve: from the
+    /// window's touch events (Windows Ink, macOS, Linux, phones), else from
+    /// a WinTab tablet or a pen in a browser, else full (a mouse).
+    fn pen_pressure(&self) -> f32 {
+        self.pressure
+            .or_else(|| sue_platform::stylus::pressure().map(|raw| self.pen_curve.eval(raw)))
+            .unwrap_or(1.0)
+    }
+
+    /// The first time a pen's pressure shows up while its curve is still
+    /// the one Sue Paint starts with, says where to fit it to the hand.
+    fn pen_seen(&mut self, cx: &mut AppletContext<'_>) {
+        if self.pen_hinted {
+            return;
+        }
+        self.pen_hinted = true;
+        let default = crate::dialogs::DEFAULT_PEN_PRESSURE
+            .parse::<sue_model::Response>()
+            .unwrap_or_default();
+        if self.pen_curve == default {
+            cx.notify(tr!("pen-pressure-found-hint"));
+        }
+    }
+
     fn canvas_input(
         &mut self,
         ui: &Ui,
@@ -768,6 +792,9 @@ impl SuePaint {
                 input.modifiers,
             )
         });
+        if sue_platform::stylus::pressure().is_some() {
+            self.pen_seen(cx);
+        }
         // Studio Mode's modifier keys count as held.
         let held = held | self.touch.modifiers();
         self.modifiers = held;
@@ -801,6 +828,9 @@ impl SuePaint {
                             }
                         }
                         TouchPhase::End | TouchPhase::Cancel => self.pressure = None,
+                    }
+                    if force.is_some() {
+                        self.pen_seen(cx);
                     }
                 }
                 Event::PointerButton {
@@ -1174,7 +1204,7 @@ impl SuePaint {
                 let local = snap.as_ref().map_or(local, |snap| snap.project(local));
                 let mut stabilizer = Stabilizer::new(sub.stabilization, sub.adjust_by_speed);
                 let start = stabilizer.sample(local, doc.view.zoom, self.clock.1);
-                let pressure = self.pressure.unwrap_or(1.0);
+                let pressure = self.pen_pressure();
                 // Vector lines are kept whole, not cut by the selection.
                 let selection = (!vector)
                     .then(|| shifted.as_ref().or(doc.selection.as_ref()))
@@ -1786,7 +1816,7 @@ impl SuePaint {
     fn correct_to(&mut self, local: [f32; 2], cx: &mut AppletContext<'_>) {
         use crate::correct::{self, Widen};
         let sub = self.toolbox.current().clone();
-        let pressure = self.pressure.unwrap_or(1.0);
+        let pressure = self.pen_pressure();
         let Some(Gesture::Correct {
             lines,
             base,
@@ -2282,7 +2312,7 @@ impl SuePaint {
             self.warp_preview(cx);
             return;
         }
-        let pressure = self.pressure.unwrap_or(1.0);
+        let pressure = self.pen_pressure();
         let (time, step) = self.clock;
         let (Some(gesture), Some(doc)) = (self.gesture.as_mut(), self.docs.get_mut(self.active))
         else {
@@ -2418,7 +2448,7 @@ impl SuePaint {
         let Some(gesture) = self.gesture.take() else {
             return;
         };
-        let pressure = self.pressure.unwrap_or(1.0);
+        let pressure = self.pen_pressure();
         match gesture {
             Gesture::Stroke {
                 mut stroke,

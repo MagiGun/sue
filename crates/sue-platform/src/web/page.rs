@@ -527,6 +527,27 @@ pub(crate) fn connect(waker: impl Fn() + 'static, let_through: impl Fn(bool) + '
     let Some(window) = web_sys::window() else {
         return;
     };
+    // A pen's pressure: winit hands a pen to Sue as a mouse, without it.
+    for (kind, lifts) in [
+        ("pointerdown", false),
+        ("pointermove", false),
+        ("pointerup", true),
+        ("pointercancel", true),
+    ] {
+        listen(&window, kind, true, move |event| {
+            let Some(pointer) = event.dyn_ref::<web_sys::PointerEvent>() else {
+                return;
+            };
+            if pointer.pointer_type() != "pen" {
+                return;
+            }
+            let touching = !lifts && pointer.buttons() & 1 != 0;
+            crate::stylus::set(
+                crate::stylus::PenSource::Browser,
+                touching.then(|| pointer.pressure()),
+            );
+        });
+    }
     let Some(document) = window.document() else {
         return;
     };

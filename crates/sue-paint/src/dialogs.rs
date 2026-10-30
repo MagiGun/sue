@@ -256,6 +256,12 @@ impl FilterDialog {
 /// The setting that holds the pen pressure curve every tool uses.
 pub(crate) const PEN_PRESSURE: &str = "sue_paint.pen_pressure";
 
+/// The pen pressure curve Sue Paint starts with: a little softer than
+/// straight, as most hands press drawing tablets, so a usual press is
+/// already more than half a line. File, Pen Pressure Settings fits it to a
+/// hand.
+pub(crate) const DEFAULT_PEN_PRESSURE: &str = "0,0 0.4,0.5 1,1";
+
 /// Pen Pressure Settings (Clip Studio Paint's Adjust pen pressure): draw
 /// on the pad as you normally would and the curve is fitted to how hard
 /// you press, then made stronger or lighter by hand or on the graph.
@@ -1927,7 +1933,7 @@ fn pressure_ui(ui: &mut Ui, pressure: &mut PressureDialog, theme: &Theme) -> Out
                 .add_sized(wide, egui::Button::new(tr!("reset-to-default")))
                 .clicked()
             {
-                pressure.curve = Response::LINEAR;
+                pressure.curve = DEFAULT_PEN_PRESSURE.parse().unwrap_or_default();
                 pressure.raw.clear();
                 pressure.lines.clear();
                 pressure.checked = false;
@@ -1949,6 +1955,9 @@ fn pressure_ui(ui: &mut Ui, pressure: &mut PressureDialog, theme: &Theme) -> Out
     });
     if let Some(force) = touch {
         pressure.force = force.map(|force| force.clamp(0.0, 1.0));
+    } else if sue_platform::stylus::source().is_some() {
+        // A WinTab tablet or a pen in a browser.
+        pressure.force = sue_platform::stylus::pressure();
     }
     if response.drag_started() {
         pressure.lines.push(Vec::new());
@@ -2593,6 +2602,22 @@ fn filter_ui(ui: &mut Ui, dialog: &mut FilterDialog, theme: &Theme) -> Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_default_pen_curve_is_a_little_soft() {
+        let curve: Response = DEFAULT_PEN_PRESSURE.parse().unwrap();
+        assert!((curve.eval(0.0)).abs() < 1e-3);
+        assert!((curve.eval(1.0) - 1.0).abs() < 1e-3);
+        let usual = curve.eval(0.4);
+        assert!(usual > 0.42 && usual < 0.6, "softer than straight: {usual}");
+        // Rising all the way.
+        let mut last = 0.0;
+        for step in 1..=20 {
+            let value = curve.eval(step as f32 / 20.0);
+            assert!(value >= last);
+            last = value;
+        }
+    }
 
     #[test]
     fn pen_pressure_fits_to_how_hard_someone_presses() {

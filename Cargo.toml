@@ -41,6 +41,9 @@ jxl-oxide = "0.12"
 pollster = "1"
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "dx12", "metal", "gles", "vulkan", "wgsl"] }
 winit = "0.30"
+# Pen pressure from WinTab tablet drivers on Windows; its HWND type.
+wintab = "0.1.1"
+windows = { version = "0.62", default-features = false, features = ["Win32_Foundation"] }
 zune-core = "0.5"
 zune-jpegxl = "0.5"
 bytemuck = "1"

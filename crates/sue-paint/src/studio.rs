@@ -489,6 +489,8 @@ pub struct SuePaint {
     pub(crate) pressure: Option<f32>,
     /// The pen pressure curve every tool uses (Pen Pressure Settings).
     pub(crate) pen_curve: sue_model::Response,
+    /// The hint about fitting pen pressure was given (once a run).
+    pub(crate) pen_hinted: bool,
     pub(crate) panels: Panels,
     pub(crate) color_tab: u8,
     /// The Intermediate Color palette's corner colors (top left, top right,
@@ -610,7 +612,10 @@ impl Default for SuePaint {
             light_opacity: 0.5,
             looping: true,
             pressure: None,
-            pen_curve: sue_model::Response::LINEAR,
+            pen_curve: crate::dialogs::DEFAULT_PEN_PRESSURE
+                .parse()
+                .unwrap_or_default(),
+            pen_hinted: false,
             panels: Panels::default(),
             color_tab: 0,
             intermediate: (
@@ -5751,7 +5756,7 @@ impl SueApplet for SuePaint {
             RiceDeclaration::new(
                 crate::dialogs::PEN_PRESSURE,
                 RiceParameter::Text {
-                    value: sue_model::Response::LINEAR.to_string(),
+                    value: crate::dialogs::DEFAULT_PEN_PRESSURE.to_owned(),
                 },
                 "Pen pressure curve for every tool, as pressure,output points (File, Pen Pressure Settings draws it)",
             ),

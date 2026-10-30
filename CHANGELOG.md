@@ -23,6 +23,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Pen pressure works with drawing tablets whose driver has Windows Ink
+  turned off (WinTab, common with Huion and XP-Pen), and with pens in the
+  browser version. Sue Paint starts with a slightly soft pressure curve,
+  says where to fit it to your hand the first time it sees your pen, and
+  the start page's Settings has Pen Pressure.
 - Sue Paint no longer crashes on a short stroke with post correction
   ("min > max", seen in the browser).
 

@@ -225,6 +225,10 @@ pub struct DesktopHost {
     clear: egui::Color32,
     repaint_at: Option<Instant>,
     exit_requested: bool,
+    /// A WinTab tablet's pen pressure (see `crate::stylus`): `None` until
+    /// the first frame looks for one, then whether there is one.
+    #[cfg(target_os = "windows")]
+    tablet: Option<Option<crate::wintab_pen::Tablet>>,
 }
 
 impl std::fmt::Debug for DesktopHost {
@@ -431,6 +435,8 @@ impl DesktopHost {
             clear: egui::Color32::BLACK,
             repaint_at: None,
             exit_requested: false,
+            #[cfg(target_os = "windows")]
+            tablet: None,
         })
     }
 
@@ -469,6 +475,18 @@ impl DesktopHost {
 
     /// Builds, paints and presents one frame.
     fn frame<A: DesktopApp>(&mut self, app: &mut A) {
+        // A WinTab tablet's pen pressure for this frame. The context opens
+        // on the first frame, once the window is shown.
+        #[cfg(target_os = "windows")]
+        {
+            let window = &self.window;
+            let tablet = self
+                .tablet
+                .get_or_insert_with(|| crate::wintab_pen::Tablet::open(window));
+            if let Some(tablet) = tablet {
+                tablet.poll();
+            }
+        }
         #[cfg_attr(
             not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")),
             allow(unused_mut)

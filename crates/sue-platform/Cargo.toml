@@ -44,6 +44,12 @@ winit = { workspace = true, features = ["android-native-activity"] }
 [target.'cfg(target_os = "ios")'.dependencies]
 sue-ios = { path = "ios" }
 
+# Pen pressure from tablet drivers that speak WinTab (their Windows Ink is
+# often off), through the driver's own wintab32.dll.
+[target.'cfg(target_os = "windows")'.dependencies]
+wintab.workspace = true
+windows.workspace = true
+
 # The browser: WebGPU with WebGL2 as the fallback, its page, storage,
 # clipboard and file pickers, and a clock (std's panics there).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -80,6 +86,7 @@ web-sys = { workspace = true, features = [
     "IdbTransaction",
     "IdbTransactionMode",
     "KeyboardEvent",
+    "PointerEvent",
     "MediaQueryList",
     "Navigator",
     "Url",

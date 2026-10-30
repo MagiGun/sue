@@ -394,10 +394,16 @@ Once a canvas is open:
   an empty spot to add one, drag one out or double-click it to take it
   away). Brush Size also offers **Specify by size on screen** and **At least
   1 pixel**.
-- **Pen Pressure Settings** (File menu): draw on the pad the way you
-  normally draw, choose **Check adjusted settings**, and Sue fits the
-  pressure to your hand; **Stronger** and **Lighter** fine-tune it, or shape
-  the graph yourself. **Done** keeps it for every tool.
+- **Pen Pressure Settings** (File menu, or Pen Pressure in the start
+  page's Settings): draw on the pad the way you normally draw, choose
+  **Check adjusted settings**, and Sue fits the pressure to your hand;
+  **Stronger** and **Lighter** fine-tune it, or shape the graph yourself.
+  **Done** keeps it for every tool. Out of the box the curve is already a
+  little soft, as most hands press tablets, and the first time your pen's
+  pressure shows up Sue says where to fit it.
+- **Drawing tablets:** pressure works with Windows Ink and with WinTab, so
+  Huion, XP-Pen and Wacom tablets work whether or not Windows Ink is turned
+  on in their driver. In the browser version, a pen's pressure works too.
 - **Clean lines without lag:** pens smooth out the shake of your hand, and
   smooth less the faster you move, so quick strokes never trail behind
   ("Adjust by speed"). When you lift the pen, Sue tidies the line: it removes

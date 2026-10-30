@@ -44,6 +44,7 @@ mod paths;
     )
 )]
 mod picks;
+pub mod stylus;
 pub mod time;
 #[cfg_attr(
     not(target_arch = "wasm32"),
@@ -55,6 +56,8 @@ pub mod time;
 mod vfs;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
+#[cfg(target_os = "windows")]
+mod wintab_pen;
 
 pub use audio::{
     AudioConfig, AudioOutput, AudioSink, AudioStreamInfo, NullAudio, RealtimeStatus,
