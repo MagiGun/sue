@@ -107,6 +107,24 @@ code.
 - At hand-off, explain in plain language what changed and why, and what was
   verified.
 
+## Rule 9: Working alongside other agents
+
+- Several agents may work at once, each in its own worktree and branch.
+  They coordinate on a board in the shared Git directory
+  (`$(git rev-parse --git-common-dir)/sue-agents/`): before changing
+  anything, read the others' claims and your messages, then write your own
+  claim of the paths you will change. [`docs/agents.md`](docs/agents.md)
+  says how.
+- Never edit a path another agent claims; ask it on the board instead.
+  Shared files (the changelog, the guides, language and settings files,
+  `Cargo.lock`) take additions only, never rewrites of others' lines.
+- Never switch, commit, merge, reset or stash in a checkout that is not
+  yours, and move a branch only with `git update-ref` after
+  `git worktree list` shows nobody has it out.
+- When work clashes: the older claim keeps its paths; on merge conflicts
+  the later merger keeps both sides and re-runs the definition of done;
+  when both changes cannot stand, stop and ask the human.
+
 ## Do and do not, in short
 
 Do:
