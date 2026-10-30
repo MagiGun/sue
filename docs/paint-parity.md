@@ -17,7 +17,9 @@ rows are at the end.
   the note names the shared crate it lives in or should.
 - Statuses were set on 2026-10-30 from Sue's code (`crates/sue-paint`,
   its menu table `menus.rs` and the handlers in `studio.rs`), from the
-  guide in `HUMANS.md`, and from the commit history. Every menu command
+  guide in `HUMANS.md`, and from the commit history. They were checked
+  against the code again the same day, after Advanced Fill, the tool
+  palette and the filter set landed on `main`. Every menu command
   Sue shows has a handler, so `partial` usually means "the command runs,
   but nobody has checked it against Clip Studio yet"; such notes say
   **verify**. Check a row against the running apps before you build on
@@ -27,32 +29,32 @@ rows are at the end.
 
 | Area | done | partial | missing | percent |
 | --- | --- | --- | --- | --- |
-| File: new, open and save | 8 | 3 | 5 | 59 |
+| File: new, open and save | 10 | 1 | 5 | 66 |
 | File: export | 10 | 1 | 7 | 58 |
 | File: import, batch and scanning | 3 | 4 | 8 | 33 |
-| Edit: undo, clipboard and fills | 9 | 4 | 0 | 85 |
+| Edit: undo, clipboard and fills | 8 | 5 | 0 | 81 |
 | Edit: transform and canvas size | 8 | 6 | 0 | 79 |
 | Tonal correction and color | 10 | 1 | 1 | 88 |
-| Filters | 10 | 9 | 1 | 73 |
+| Filters | 19 | 0 | 1 | 95 |
 | Layers | 17 | 5 | 0 | 89 |
 | Selection | 9 | 0 | 0 | 100 |
 | Rulers and symmetry | 7 | 1 | 0 | 94 |
 | Comics: frames, balloons and webtoons | 7 | 1 | 0 | 94 |
 | Story: multi-page works (EX) | 4 | 5 | 4 | 50 |
 | Animation | 12 | 1 | 1 | 89 |
-| Tools and drawing | 23 | 6 | 3 | 81 |
+| Tools and drawing | 26 | 7 | 3 | 82 |
 | Text | 5 | 3 | 2 | 65 |
 | Vector | 6 | 2 | 0 | 88 |
 | 3D | 5 | 0 | 8 | 38 |
 | Colors | 9 | 0 | 1 | 90 |
 | View and navigation | 9 | 3 | 0 | 88 |
-| Window, palettes and workspaces | 13 | 4 | 1 | 83 |
+| Window, palettes and workspaces | 14 | 3 | 1 | 86 |
 | Materials and assets | 6 | 3 | 2 | 68 |
 | Print | 0 | 2 | 2 | 25 |
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 9 | 2 | 3 | 71 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 211 | 68 | 50 | 74 |
+| **All of Sue Paint** | 225 | 58 | 50 | 76 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -106,7 +108,7 @@ The order of work is the plan at the end.
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
 | New canvas with its six projects (Illustration, Webtoon, Comic, Printing of fanzine, Show all comic settings, Animation) | File > New | done | New is laid out as Clip Studio's, each project at its usual size |
-| Create New from Clipboard | File > Create New from Clipboard | partial | Command exists; verify the picture lands as a new canvas |
+| Create New from Clipboard | File > Create New from Clipboard | done | A new canvas from the picture on the clipboard |
 | Create new from movie | File > Create new from movie | missing | An animation project from a video |
 | Open pictures and projects | File > Open | done | PNG, JPEG, JPEG XL and Sue projects through the system's own dialog (`FilePick`) |
 | Open .clip files | File > Open | partial | Layers, folders, blend modes, opacity, clipping and tones come in; pixel, text and vector layers arrive as the pixels Clip Studio last drew, and correction, gradient and fill layers as empty layers |
@@ -115,7 +117,7 @@ The order of work is the plan at the end.
 | Save (keeps the .clip format) | File > Save | done | Save keeps a .clip that Clip Studio opens with everything; the file also carries Sue's own copy of the picture |
 | Save as | File > Save as | done | A Sue project, a Photoshop document or a flat picture |
 | Save Duplicate: BMP, JPEG, PNG, TIFF, Targa, WebP, PSB, PSD | File > Save Duplicate | done | JPEG XL too |
-| Revert | File > Revert | partial | Command exists; verify it restores the saved file exactly |
+| Revert | File > Revert | done | Reloads the last saved file, and says so when nothing was saved yet |
 | Manage fonts | File > Manage fonts | missing | Text reads the installed fonts from `sue_wm::fonts`; no manager yet |
 | Connect to smartphone | File > Connect to smartphone | missing | Companion Mode, a phone as a second screen |
 | Files in the CLIP STUDIO cloud | File > Manage files in Clip Studio | missing | Sue's projects and package manager serve the same end |
@@ -175,7 +177,7 @@ The order of work is the plan at the end.
 | Delete | Edit | done | |
 | Delete Outside Selection | Edit | done | Shift+Delete |
 | Fill with the main color | Edit > Fill | done | Alt+Delete |
-| Advanced Fill dialog (EX) | Edit > Fill (Advanced) | done | Close gap, Area scaling, fill up to several layers |
+| Advanced Fill dialog (EX) | Edit > Fill (Advanced) | partial | Every option but Fill up to vector path and Exclude |
 | Smart Smoothing (5.0) | Edit > Smart Smoothing | done | Smooths jagged lines, keeps their thickness and darkness |
 | Convert to Drawing Color | Edit > Convert to drawing color | partial | Command exists; verify |
 | Outline Selection | Edit > Outline Selection | partial | Command exists; verify |
@@ -197,7 +199,7 @@ The order of work is the plan at the end.
 | Flip Horizontal, Flip Vertical, Rotate 180 (the layer) | Edit > Transform | done | |
 | Change Image Resolution | Edit > Change Image Resolution | done | |
 | Change Canvas Size | Edit > Change Canvas Size | done | Around a reference point |
-| Change Canvas Height (webtoons) | Edit > Change Canvas Height | partial | Command exists; verify |
+| Change Canvas Height (webtoons) | Edit > Change Canvas Height | partial | It opens Change Canvas Size to do it |
 | Crop | Edit > Crop | done | To the selection |
 | Canvas Properties | Edit > Canvas Properties | partial | Command exists; verify |
 | Align/Distribute a layer's drawing | Edit > Align/Distribute | done | To the canvas edges and middle |
@@ -227,20 +229,20 @@ The order of work is the plan at the end.
 | Quick Effects | Filter > Quick Effects | done | Glow, Halftone, Pixel art and the rest; apply to all works on a merged layer |
 | Blur, Blur (Strong) | Filter > Blur | done | |
 | Gaussian Blur | Filter > Blur | done | |
-| Motion, Radial, Zoom and Lens blur | Filter > Blur | partial | Commands exist; verify the dialogs |
-| Smooth | Filter > Blur | partial | Command exists; verify |
+| Motion, Radial, Zoom and Lens blur | Filter > Blur | done | Angle, distance and amount, each with its dialog |
+| Smooth | Filter > Blur | done | A light smoothing, as Clip Studio's |
 | Remove Dust | Filter > Correction | done | Clears the specks on a raster layer |
-| Remove JPEG Noise, Line Width | Filter > Correction | partial | Commands exist; verify |
-| Distort: Wave, Pinch, Polar Coordinates, Ripple, Fisheye, Twirl, Zigzag | Filter > Distort | partial | Commands exist; verify each dialog |
-| Mosaic, Crystallize | Filter > Effect | partial | Commands exist; verify |
-| Add Noise | Filter > Effect | partial | Command exists; verify |
+| Remove JPEG Noise, Line Width | Filter > Correction | done | |
+| Distort: Wave, Pinch, Polar Coordinates, Ripple, Fisheye, Twirl, Zigzag | Filter > Distort | done | Each with its own settings |
+| Mosaic, Crystallize | Filter > Effect | done | |
+| Add Noise | Filter > Effect | done | |
 | Line Extraction | Filter > Effect > Line extraction | done | A picture into clean black lines |
-| Chromatic Aberration | Filter > Effect | partial | Command exists; verify |
-| Retro | Filter > Effect | partial | Command exists; verify |
+| Chromatic Aberration | Filter > Effect | done | |
+| Retro | Filter > Effect | done | |
 | Glow, Inflate, Drop shadow (5.1) | Filter > Effect | missing | Quick Effects already has a look like Glow |
 | Focus Lines, Speed Lines | Filter > Render | done | |
 | Screentone | Filter > Render > Screentone | done | |
-| Perlin Noise, Clouds | Filter > Render | partial | Commands exist; verify |
+| Perlin Noise, Clouds | Filter > Render | done | |
 | Sharpen, Sharpen (Strong), Unsharp Mask | Filter > Sharpen | done | |
 | Convert to Lines and Tones (EX) | Filter, and Layer | done | Line art and tone on layers of their own, from a picture or a 3D render |
 
@@ -352,12 +354,14 @@ The order of work is the plan at the end.
 
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
-| Pen and Pencil tools with sub tools (G-pen, mapping pen and more) | Tools | done | Sub tools ready-made; breadth below |
+| Pen tools with sub tools | Tools | done | Clip Studio's eleven pens, G-pen to Flat marker |
+| Sketch tools: Pencil, Mechanical pencil, Charcoal, Crayon, Pastel, Chalk | Tool > Sketch | done | Clip Studio's six sketch tools |
 | Brush tools with color mixing | Tools | done | Watercolor and gouache pick up and drag the color underneath |
 | Airbrush | Tools | done | A soft sub tool |
-| Decoration tool | Tool | missing | Patterns laid along the stroke |
+| Decoration tool | Tool | missing | Its slot sits in Clip Studio's order, grayed out |
+| Tool palette in Clip Studio Paint 4's order, with the main and sub colors and the transparent color beneath | Tool palette | done | Move holds hand, zoom and move layer; Comic holds frame border and balloon |
 | Eraser with Vector modes | Tool | done | Only where it touches, up to where lines cross, or whole lines |
-| Blend: Blur, Finger Tip, Liquify | Tool | done | Liquify pushes, swells, pinches and twirls |
+| Blend: Blur, Finger Tip, Liquify | Tool | done | Liquify has its own slot in Clip Studio's order; it pushes, swells, pinches and twirls |
 | Fill bucket: Close gap, Area scaling | Tool | done | Paint stays inside lines with small breaks, no white edge |
 | Auto Select (magic wand) | Tool | done | Looks at reference layers only when set |
 | Gradient tool | Tool | partial | Gradient layers exist; verify the tool's dials |
@@ -367,10 +371,12 @@ The order of work is the plan at the end.
 | Ruler tools | Tool | done | |
 | Frame Border tool | Tool | done | |
 | Balloon tool | Tool | done | |
-| Eyedropper, Hand and Zoom | Tools | done | |
+| Eyedropper, and Move with hand, zoom and move layer | Tools | done | Click again to step through Move's tools |
 | Object tool (Operation) | Tool | done | Vector lines, 3D layers and camera folders in one tool |
 | Correct Line and Control Point tools | Tool | done | Reshape, pinch, smooth, join, thicken, redraw, give pen pressure |
-| Sub tool library breadth | Tools | partial | Hundreds of ready-made sub tools in Clip Studio; Sue grows its set |
+| Sub tool library breadth | Tools | partial | Clip Studio's eleven pens and six sketch tools are there; breadth grows next |
+| Tool Group palette: each brush's own stroke preview, Add from downloads and the Downloads folder | Tool Group palette | partial | The button does nothing yet, so no sub tools arrive from downloads |
+| A tap with the pen leaves a dot the size of the brush | Drawing | done | Pens no longer start thin with a mouse either |
 | Tool Settings: size, opacity, hardness, smoothing, pressure | Palette | done | Changes stick to the sub tool |
 | Dynamics by pen pressure, speed and chance, along curves | Tool Settings | done | Each with a minimum you choose |
 | Starting and Ending: pixels, share of the line, fade | Tool Settings | done | Thin the line, fade it, or both, longer when you draw fast |
@@ -478,9 +484,9 @@ The order of work is the plan at the end.
 | Palettes: Color Wheel, Color Slider, Color Set, Color History, Intermediate Color, Approximate Color | Window | done | |
 | Palettes: Navigator, Sub View, Layer, Layer Property, History | Window | done | |
 | Palettes: Timeline, Animation Cels, Material | Window | done | |
-| Auto Action palette (recorded sequences) | Window > Auto Action Palette | partial | The palette exists; verify recording and playback |
-| Item Bank palette | Window > Item Bank | partial | To verify |
-| Information palette | Window > Information | partial | To verify |
+| Auto Action palette (recorded sequences) | Window > Auto Action Palette | partial | Records and plays menu commands; it does not record tool strokes as Clip Studio's can |
+| Item Bank palette | Window > Item Bank | done | Keeps sub tools to add again |
+| Information palette | Window > Information | partial | Canvas size, resolution and physical size; not the cursor position or selection info |
 | Cascade, Tile, New Window | Window > Canvas | partial | Commands exist; verify |
 | Interface: Automatic, Desktop, Tablet, Phone | Window > Interface | done | |
 | Companion Mode | Window | missing | A phone as a second screen |
@@ -567,8 +573,8 @@ the rest:
    Split Pages, project and page settings. Multi-page is what EX sells.
 3. Export: APNG and Animated WebP, movie export with its sound, Batch
    process and fanzine printing data, Export vectors and layer comps.
-4. Filter depth: check the wired blur, distort and effect dialogs
-   against Clip Studio's, then add Glow, Inflate and Drop shadow.
+4. The last filters: Glow, Inflate and Drop shadow; the rest of the set
+   is built, so check each dialog against Clip Studio's as you go.
 5. Smart Shape, Clip Studio 5.0's headline feature, on every pen and
    brush.
 6. 3D: drawing figures with poses, painting directly on 3D, heads and
