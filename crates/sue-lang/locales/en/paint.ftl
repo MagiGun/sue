@@ -1571,3 +1571,28 @@ start-transfer-done = Done { $when }
 start-transfer-failed = Failed: { $why }
 start-transfer-cancelled = Cancelled
 start-cancel = Cancel
+
+## mobile.rs and templates.rs: phones and tablets
+
+start-create-new-file = Create new file
+start-new-from-device = New from device storage
+start-open-file = Open file
+start-your-projects = Your projects
+start-back = Back
+start-new-canvas = New canvas
+start-advanced-settings = Advanced Settings
+start-continue-drawing = Continue drawing
+start-import = Import
+start-nothing-to-continue = Pictures and projects you work on show here.
+start-see-list-of-projects = See list of projects
+template-px = { $width } x { $height } px
+template-mm = { $width } x { $height } mm
+template-create-from-image = Create from image
+template-custom-size = Custom size
+template-screen-size = Screen size
+template-a4-color = A4 Color
+template-a5-color = A5 Color
+template-a6-color = A6 Color
+template-create-from-movie = Create from movie
+template-square = 1:1
+template-vertical = 9:16

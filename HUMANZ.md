@@ -1610,8 +1610,28 @@ Manage Materials reads the `Library`. Help opens the Sue site and GitHub
 pages through `open-url:`; Settings writes `sue_paint.theme` (dark mode:
 Gray or Paper) and `sue_paint.materials_dir`, so Sue's Settings shows the
 same values. Popups and pages open by name for scripts and snapshots
-(`navigate("start/materials")`, `start/help` and so on). Phones and tablets
-keep the canvas.
+(`navigate("start/materials")`, `start/help` and so on).
+
+On phones and tablets (`FormFactor::Mobile`, `Tablet`) the start page is
+`mobile.rs`: `mobile_header` draws Sue Paint, Help and Settings in Sue's
+top bar (`bar_ui`), the page is Projects (Create new file, New from device
+storage, Open file, then the cards by shelf) or Manage Materials (kinds as
+chips), over `sue_wm::start::tab_bar` with the round Draw in the middle,
+and the popups become `sue_wm::start::sheet`s over the whole screen. Draw
+opens the newest project or the New canvas page: the categories as
+`start::tabs`, their templates as `start::tile`s in a row that scrolls
+sideways, Continue drawing (the newest projects) with Import, and See list
+of projects. Advanced Settings opens the New dialog on the category's work.
+
+**Canvas templates** (`templates.rs`). `CanvasTemplates` registers
+categories (`sue_paint.illustration`, `webtoon`, `comic`, `animation`) and
+templates: an id, a category, an English name (empty for one named by its
+size), how it makes its canvas (`Make::Size` in px or mm at a resolution,
+`Screen` for the device's pixels, `FromImage`, `FromMovie`, `Custom`) and
+its work (`Work::Illustration`, `Comic`, `Animation`, which pick
+`make_picture`, `make_story` or `make_animation`). Adding one is a line in
+`builtin` or a `register` call. Pictures may be up to 20000 pixels a side
+(`doc::MAX_SIDE`), for webtoons.
 
 **Camera folders.** A camera folder (Animation, New Animation Layer, Camera
 Folder) is a layer folder flagged `folder.camera` whose camera keyframes are

@@ -20,6 +20,11 @@ follow [Semantic Versioning](https://semver.org/).
   pictures and brush tips. Data Transfers lists what Sue opened, saved and
   copied; Help and Settings sit beside it. Everything stays on your
   device. File, Start Page brings it back.
+- Sue Paint's start page on phones and tablets: big buttons to create a
+  file, start from a picture or open a file, your projects, and a round
+  Draw button in a bar along the bottom. The New canvas page offers
+  templates for illustrations, webtoons, comics and animations, and
+  Continue drawing. Canvases can now be up to 20000 pixels a side.
 - Try Sue in your browser at https://magigun.github.io/sue/try/, with
   nothing to install: the Hub, Sue Paint, Sue Writer and the tools, opening
   files from your computer (or dropped on the page), saving them as

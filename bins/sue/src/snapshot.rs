@@ -586,6 +586,30 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
             camera.now,
         );
         shoot(&mut runtime, &mut camera, &format!("{prefix}-sue-paint"))?;
+        // Sue Paint's start page on a touch screen: Projects, the New
+        // canvas page (Illustration and Comic), the materials, and
+        // Settings and Help as sheets.
+        for (targets, name) in [
+            (&["start/show"][..], "paint-start"),
+            (&["start/new"], "paint-new-canvas"),
+            (&["start/new/2"], "paint-new-comic"),
+            (
+                &["start/hide", "start/show", "start/materials"],
+                "paint-materials",
+            ),
+            (&["start/projects", "start/settings"], "paint-settings"),
+            (&["start/close", "start/help"], "paint-help"),
+        ] {
+            if let Some(applet) = runtime.applets.get_mut(&paint) {
+                for target in targets {
+                    applet.navigate(target);
+                }
+            }
+            shoot(&mut runtime, &mut camera, &format!("{prefix}-{name}"))?;
+        }
+        if let Some(applet) = runtime.applets.get_mut(&paint) {
+            applet.navigate("start/hide");
+        }
         runtime.request(
             ShellRequest::OpenIn {
                 entity: novel,

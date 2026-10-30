@@ -206,6 +206,16 @@ pub(crate) fn shown(items: &[Item], state: &ProjectsState, work: &sue_wm::WorkLi
     shown
 }
 
+impl ProjectsState {
+    /// Every project on `shelf`, newest first.
+    pub(crate) fn on_shelf(shelf: Shelf) -> Self {
+        Self {
+            shelf,
+            ..Self::default()
+        }
+    }
+}
+
 /// The Projects page's state.
 #[derive(Debug, Default)]
 pub(crate) struct ProjectsState {
@@ -275,14 +285,14 @@ impl Default for MaterialsState {
 
 /// A picture made small for a card.
 #[derive(Clone, Debug)]
-struct Thumb {
-    size: [u32; 2],
-    pixels: Vec<u8>,
+pub(crate) struct Thumb {
+    pub(crate) size: [u32; 2],
+    pub(crate) pixels: Vec<u8>,
 }
 
 /// Project thumbnails, made in the background.
 #[derive(Debug, Default)]
-struct Thumbs {
+pub(crate) struct Thumbs {
     pool: Option<JobPool>,
     jobs: HashMap<PathBuf, (u64, JobHandle<Thumb>)>,
     done: HashMap<PathBuf, (u64, Option<Thumb>)>,
@@ -300,7 +310,7 @@ fn stamp(path: &Path) -> u64 {
 impl Thumbs {
     /// The thumbnail of `path`, starting it in the background if it is
     /// new or changed.
-    fn get(&mut self, path: &Path) -> Option<(u64, &Thumb)> {
+    pub(crate) fn get(&mut self, path: &Path) -> Option<(u64, &Thumb)> {
         let now = stamp(path);
         let fresh = self.done.get(path).is_some_and(|(at, _)| *at == now);
         if !fresh && !self.jobs.contains_key(path) {
@@ -318,7 +328,7 @@ impl Thumbs {
 
     /// Takes in what the background finished. Returns `true` while any
     /// still runs.
-    fn poll(&mut self) -> bool {
+    pub(crate) fn poll(&mut self) -> bool {
         let mut finished = Vec::new();
         for (path, (at, job)) in &mut self.jobs {
             if let Some(result) = job.try_take() {
@@ -438,7 +448,7 @@ fn shrink(tile: &sue_core::RasterTile2D, side: u32) -> Thumb {
 }
 
 /// A texture key for `text`, apart from the canvases' keys.
-fn texture_key(text: &str) -> u64 {
+pub(crate) fn texture_key(text: &str) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     ("sue-paint-start", text).hash(&mut hasher);
@@ -456,20 +466,36 @@ pub(crate) struct StartPage {
     pub(crate) materials: MaterialsState,
     /// The material library, found when first shown.
     library: Option<(Option<PathBuf>, Library)>,
-    thumbs: Thumbs,
+    pub(crate) thumbs: Thumbs,
     /// Material files being copied in, by transfer id.
     copies: Vec<u64>,
     /// Remove (a material or a kept project) was clicked once in a popup.
     armed: bool,
+    /// Popups fill the screen (phones and tablets).
+    pub(crate) full: bool,
+    /// The New canvas page (phones and tablets) shows, on this category.
+    pub(crate) new_canvas: Option<usize>,
+    /// The device's screen in pixels, for the Screen size template.
+    pub(crate) screen: [u32; 2],
 }
 
 /// What the start page asks the studio for, after drawing.
-enum Act {
+pub(crate) enum Act {
     Draw,
     Open(Item),
     Paste(EntityId),
     PickMaterial,
     PickLocation,
+    /// Show the materials.
+    Materials,
+    /// Make a canvas from the template with this id.
+    Template(String),
+    /// The full New dialog, for a category.
+    Advanced(usize),
+    /// A picture from the device becomes a new canvas.
+    ImportImage,
+    /// Open any file Sue opens.
+    OpenFile,
 }
 
 impl StartPage {
@@ -495,12 +521,26 @@ impl StartPage {
             "start/settings" => self.popup = Some(Popup::Settings),
             "start/maintenance" => self.popup = Some(Popup::Maintenance),
             "start/close" => self.popup = None,
-            _ => return false,
+            "start/show" => self.forced = true,
+            "start/hide" => {
+                self.forced = false;
+                self.popup = None;
+                self.new_canvas = None;
+                self.tab = Tab::Projects;
+            }
+            "start/new" => self.new_canvas = Some(0),
+            other => match other
+                .strip_prefix("start/new/")
+                .and_then(|n| n.parse().ok())
+            {
+                Some(category) => self.new_canvas = Some(category),
+                None => return false,
+            },
         }
         true
     }
 
-    fn library(
+    pub(crate) fn library(
         &mut self,
         kinds: &crate::materials::MaterialKinds,
         folder: Option<PathBuf>,
@@ -647,7 +687,7 @@ impl SuePaint {
         }
     }
 
-    fn start_act(&mut self, act: Act, cx: &mut AppletContext<'_>) {
+    pub(crate) fn start_act(&mut self, act: Act, cx: &mut AppletContext<'_>) {
         match act {
             Act::Draw => {
                 if !self.docs.is_empty() {
@@ -663,6 +703,7 @@ impl SuePaint {
                     .max_by_key(|item| item.when);
                 match last {
                     Some(item) => self.start_act(Act::Open(item), cx),
+                    None if self.start.full => self.start.new_canvas = Some(0),
                     None => {
                         self.dialog = Some(crate::dialogs::Dialog::New(Self::new_dialog(cx)));
                     }
@@ -698,6 +739,14 @@ impl SuePaint {
                     .extensions(&["png"]);
                 cx.request(ShellRequest::PickFile(pick));
             }
+            Act::Materials => {
+                self.start.tab = Tab::Materials;
+                self.start.new_canvas = None;
+            }
+            Act::Template(id) => self.make_from_template(&id, cx),
+            Act::Advanced(category) => self.advanced_new(category, cx),
+            Act::ImportImage => self.pick_image(cx, false),
+            Act::OpenFile => cx.request(ShellRequest::Command("file.open".to_owned())),
             Act::PickLocation => {
                 let pick = FilePick::open(
                     Some(me()),
@@ -744,6 +793,10 @@ impl SuePaint {
                 self.start.copies.push(id);
                 true
             }
+            "new-from-movie" => {
+                self.new_from_movie(path, cx);
+                true
+            }
             "materials-location" => {
                 let text = path.display().to_string();
                 if let Err(error) = cx.edit_rice(sue_rice::SetRiceValue::new(
@@ -762,7 +815,7 @@ impl SuePaint {
 
     /// The projects: labels on the left; search, type chips, the toolbar
     /// and the cards on the right.
-    fn projects_ui(
+    pub(crate) fn projects_ui(
         &mut self,
         ui: &mut Ui,
         body: Rect,
@@ -1176,7 +1229,7 @@ impl SuePaint {
 
     /// The materials: the tree on the left; search, origin chips, the
     /// toolbar and the cards on the right.
-    fn materials_ui(
+    pub(crate) fn materials_ui(
         &mut self,
         ui: &mut Ui,
         body: Rect,
@@ -1572,7 +1625,7 @@ impl SuePaint {
     }
 
     /// The popup over the start page, if one is open.
-    fn popup_ui(
+    pub(crate) fn popup_ui(
         &mut self,
         ctx: &egui::Context,
         start: &mut StartPage,
@@ -1583,33 +1636,36 @@ impl SuePaint {
         let Some(popup) = start.popup.clone() else {
             return;
         };
+        let full = start.full;
         let outcome = match &popup {
-            Popup::Transfers => transfers_popup(ctx, cx, theme),
-            Popup::Help => page::popup(
+            Popup::Transfers => transfers_popup(full, ctx, cx, theme),
+            Popup::Help => show(
+                full,
                 ctx,
                 "help",
                 &tr!("start-help"),
                 vec2(460.0, 330.0),
                 theme,
                 |ui| {
-                    let rows = [
-                        (
-                            Row::new(
-                                Some(Glyph::Book),
-                                tr!("start-basic-tips"),
-                                Trailing::External,
-                            ),
-                            SITE,
+                    let mut rows = vec![(
+                        Row::new(
+                            Some(Glyph::Book),
+                            tr!("start-basic-tips"),
+                            Trailing::External,
                         ),
-                        (
+                        SITE,
+                    )];
+                    // Phones keep Help short.
+                    if !full {
+                        rows.push((
                             Row::new(
                                 Some(Glyph::Projects),
                                 tr!("start-using-sue-paint"),
                                 Trailing::External,
                             ),
                             GUIDE,
-                        ),
-                    ];
+                        ));
+                    }
                     link_group(ui, &rows, cx, theme);
                     page::gap(ui);
                     let rows = [
@@ -1643,7 +1699,8 @@ impl SuePaint {
                     .trim()
                     .is_empty();
                 let mut next = None;
-                let outcome = page::popup(
+                let outcome = show(
+                    full,
                     ctx,
                     "settings",
                     &tr!("start-settings"),
@@ -1665,6 +1722,29 @@ impl SuePaint {
                             }
                         }
                         page::gap(ui);
+                        if full {
+                            // On phones Settings also leads to the transfers
+                            // and the materials.
+                            let rows = [Row::new(
+                                Some(Glyph::Transfers),
+                                tr!("start-data-transfers"),
+                                Trailing::More,
+                            )];
+                            if page::group(ui, &rows, theme).is_some() {
+                                next = Some(Popup::Transfers);
+                            }
+                            page::gap(ui);
+                            let rows = [Row::new(
+                                Some(Glyph::Materials),
+                                tr!("start-manage-materials"),
+                                Trailing::More,
+                            )];
+                            if page::group(ui, &rows, theme).is_some() {
+                                acts.push(Act::Materials);
+                                next = Some(Popup::Settings);
+                            }
+                            page::gap(ui);
+                        }
                         let shown = location.as_ref().map_or_else(
                             || tr!("start-nowhere"),
                             |folder| folder.display().to_string(),
@@ -1739,19 +1819,21 @@ impl SuePaint {
                     },
                 );
                 match next {
-                    // The Maintenance Menu replaces Settings.
-                    Some(Popup::Maintenance) => {
-                        start.popup = Some(Popup::Maintenance);
+                    // Settings itself closes it (Sue's Settings or the
+                    // materials come up instead).
+                    Some(Popup::Settings) => PopupOutcome::Closed,
+                    // The Maintenance Menu or the transfers replace it.
+                    Some(other) => {
+                        start.popup = Some(other);
                         return;
                     }
-                    // Sue's Settings opens over the page.
-                    Some(_) => PopupOutcome::Closed,
                     None => outcome,
                 }
             }
             Popup::Maintenance => {
                 let mut done = None;
-                let outcome = page::popup(
+                let outcome = show(
+                    full,
                     ctx,
                     "maintenance",
                     &tr!("start-maintenance-menu"),
@@ -1830,6 +1912,7 @@ impl SuePaint {
         theme: &Theme,
     ) -> PopupOutcome {
         let now = unix_now();
+        let full = start.full;
         let mut close = false;
         let picture = start.thumbs.get(&item.path).and_then(|(at, thumb)| {
             cx.textures
@@ -1845,7 +1928,8 @@ impl SuePaint {
         });
         let armed = start.armed;
         let mut arm = None;
-        let outcome = page::popup(
+        let outcome = show(
+            full,
             ctx,
             "project",
             &item.title,
@@ -1972,6 +2056,7 @@ impl SuePaint {
             .texture(key, 1, [side, side], 4, thumb, false)
             .map(|texture| (texture, [side, side]));
         let canvas = !self.docs.is_empty();
+        let full = start.full;
         let armed = start.armed;
         let mut close = false;
         let mut favorite = None;
@@ -1981,88 +2066,96 @@ impl SuePaint {
             .map(|kind| crate::localize(&kind.name))
             .unwrap_or_default();
         let title = crate::localize(&entry.material.name);
-        let outcome = page::popup(ctx, "material", &title, vec2(460.0, 600.0), theme, |ui| {
-            preview(ui, picture, Glyph::Materials, theme);
-            page::gap(ui);
-            let mut put = Row::new(Some(Glyph::Draw), tr!("paste-to-canvas"), Trailing::More);
-            if !canvas {
-                put = put.detail(tr!("start-open-canvas-for-materials"));
-                put.enabled = false;
-            }
-            let rows = [
-                put,
-                Row::new(
-                    Some(Glyph::Heart),
-                    tr!("start-favorite"),
-                    Trailing::Switch(entry.favorite),
-                ),
-            ];
-            match page::group(ui, &rows, theme) {
-                Some(0) => {
-                    acts.push(Act::Paste(id));
-                    close = true;
-                }
-                Some(1) => favorite = Some(!entry.favorite),
-                _ => {}
-            }
-            page::gap(ui);
-            let used = if entry.used > 0 {
-                ago(u64::try_from(entry.used).unwrap_or(0), unix_now())
-            } else {
-                tr!("start-never")
-            };
-            let mut rows = vec![
-                Row::new(None, tr!("start-kind"), Trailing::Text(kind.clone())),
-                Row::new(None, tr!("start-last-used"), Trailing::Text(used)),
-            ];
-            if let crate::materials::Source::File(path) = &entry.material.source {
-                rows.push(
-                    Row::new(
-                        Some(Glyph::Folder),
-                        tr!("start-show-in-folder"),
-                        Trailing::External,
-                    )
-                    .detail(path.display().to_string()),
-                );
-            } else {
-                rows.push(Row::new(
-                    None,
-                    tr!("start-where"),
-                    Trailing::Text(tr!("start-sue-paints-own")),
-                ));
-            }
-            if page::group(ui, &rows, theme) == Some(2)
-                && let crate::materials::Source::File(path) = &entry.material.source
-            {
-                cx.request(ShellRequest::Command(format!(
-                    "reveal-file:{}",
-                    path.display()
-                )));
-            }
-            if entry.material.removable() {
+        let outcome = show(
+            full,
+            ctx,
+            "material",
+            &title,
+            vec2(460.0, 600.0),
+            theme,
+            |ui| {
+                preview(ui, picture, Glyph::Materials, theme);
                 page::gap(ui);
-                let text = if armed {
-                    tr!("start-really-delete-materials")
-                } else {
-                    tr!("start-delete-materials")
-                };
-                if page::group(
-                    ui,
-                    &[Row::new(Some(Glyph::Delete), text, Trailing::None)],
-                    theme,
-                )
-                .is_some()
-                {
-                    if armed {
-                        delete_materials(std::slice::from_ref(&entry), &[id], cx);
-                        start_rescan(&mut self.material_thumbs);
+                let mut put = Row::new(Some(Glyph::Draw), tr!("paste-to-canvas"), Trailing::More);
+                if !canvas {
+                    put = put.detail(tr!("start-open-canvas-for-materials"));
+                    put.enabled = false;
+                }
+                let rows = [
+                    put,
+                    Row::new(
+                        Some(Glyph::Heart),
+                        tr!("start-favorite"),
+                        Trailing::Switch(entry.favorite),
+                    ),
+                ];
+                match page::group(ui, &rows, theme) {
+                    Some(0) => {
+                        acts.push(Act::Paste(id));
                         close = true;
+                    }
+                    Some(1) => favorite = Some(!entry.favorite),
+                    _ => {}
+                }
+                page::gap(ui);
+                let used = if entry.used > 0 {
+                    ago(u64::try_from(entry.used).unwrap_or(0), unix_now())
+                } else {
+                    tr!("start-never")
+                };
+                let mut rows = vec![
+                    Row::new(None, tr!("start-kind"), Trailing::Text(kind.clone())),
+                    Row::new(None, tr!("start-last-used"), Trailing::Text(used)),
+                ];
+                if let crate::materials::Source::File(path) = &entry.material.source {
+                    rows.push(
+                        Row::new(
+                            Some(Glyph::Folder),
+                            tr!("start-show-in-folder"),
+                            Trailing::External,
+                        )
+                        .detail(path.display().to_string()),
+                    );
+                } else {
+                    rows.push(Row::new(
+                        None,
+                        tr!("start-where"),
+                        Trailing::Text(tr!("start-sue-paints-own")),
+                    ));
+                }
+                if page::group(ui, &rows, theme) == Some(2)
+                    && let crate::materials::Source::File(path) = &entry.material.source
+                {
+                    cx.request(ShellRequest::Command(format!(
+                        "reveal-file:{}",
+                        path.display()
+                    )));
+                }
+                if entry.material.removable() {
+                    page::gap(ui);
+                    let text = if armed {
+                        tr!("start-really-delete-materials")
                     } else {
-                        arm = true;
+                        tr!("start-delete-materials")
+                    };
+                    if page::group(
+                        ui,
+                        &[Row::new(Some(Glyph::Delete), text, Trailing::None)],
+                        theme,
+                    )
+                    .is_some()
+                    {
+                        if armed {
+                            delete_materials(std::slice::from_ref(&entry), &[id], cx);
+                            start_rescan(&mut self.material_thumbs);
+                            close = true;
+                        } else {
+                            arm = true;
+                        }
                     }
                 }
-            }
-        });
+            },
+        );
         if let Some(on) = favorite
             && let Err(error) = start.library(&kinds, folder).set_favorite(id, on)
         {
@@ -2087,7 +2180,7 @@ fn me() -> AppletId {
 
 /// Forgets a project in the work Sue remembers (files stay on disk), or
 /// throws away kept work.
-fn forget(item: &Item, cx: &mut AppletContext<'_>) {
+pub(crate) fn forget(item: &Item, cx: &mut AppletContext<'_>) {
     match &item.key {
         ProjectKey::File(path) => cx.request(ShellRequest::Forget(path.clone())),
         ProjectKey::Kept(id) => cx.request(ShellRequest::Discard(id.clone())),
@@ -2206,6 +2299,24 @@ fn lay_out(
     }
 }
 
+/// A popup in the middle of the page, or a sheet over the whole screen
+/// (`full`, on phones and tablets).
+fn show(
+    full: bool,
+    ctx: &egui::Context,
+    id: &str,
+    title: &str,
+    size: Vec2,
+    theme: &Theme,
+    body: impl FnOnce(&mut Ui),
+) -> PopupOutcome {
+    if full {
+        page::sheet(ctx, id, title, theme, body)
+    } else {
+        page::popup(ctx, id, title, size, theme, body)
+    }
+}
+
 /// A large picture at the top of a popup.
 fn preview(
     ui: &mut Ui,
@@ -2250,9 +2361,15 @@ fn link_group(ui: &mut Ui, rows: &[(Row, &str)], cx: &mut AppletContext<'_>, the
 
 /// The Data Transfers popup: what Sue brought in, wrote out and copied in
 /// this run, still going or done.
-fn transfers_popup(ctx: &egui::Context, cx: &mut AppletContext<'_>, theme: &Theme) -> PopupOutcome {
+fn transfers_popup(
+    full: bool,
+    ctx: &egui::Context,
+    cx: &mut AppletContext<'_>,
+    theme: &Theme,
+) -> PopupOutcome {
     let now = unix_now();
-    page::popup(
+    show(
+        full,
         ctx,
         "transfers",
         &tr!("start-data-transfers"),

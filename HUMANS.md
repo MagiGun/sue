@@ -309,7 +309,23 @@ feedback on the Sue site and GitHub; **Settings** turns dark mode on or off,
 shows or changes where your materials are kept, has a Maintenance Menu
 (draw thumbnails again, look for materials again, forget projects that are
 gone) and shows Sue Paint's version. Nothing on the start page goes
-online. On phones and tablets Sue Paint opens straight on its canvas.
+online.
+
+**On a phone or tablet** the start page is laid out for fingers. The top
+bar shows Sue Paint with Help and Settings; Projects starts with three big
+buttons, **Create new file**, **New from device storage** (a picture
+becomes a new canvas) and **Open file**, then your projects, sorted by
+label. Along the bottom: Projects, the round **Draw** button and Manage
+Materials. Help, Settings and the rest come up over the whole screen.
+
+Draw opens your last project, or the **New canvas** page when there is
+none: Illustration, Webtoon, Comic and Animation tabs, each with a row of
+templates to swipe through (Create from image, Custom size, your screen's
+size; 690 x 20000, 1380 x 20000 and 800 x 10000 px webtoons; A4, A5 and A6
+color comics; an animation from a movie, 1:1 or 9:16). Tap one and draw.
+**Advanced Settings** opens every setting. Under the templates,
+**Continue drawing** lists your recent work, **Import** brings in a
+picture, and **See list of projects** goes back to Projects.
 
 Once a canvas is open:
 
