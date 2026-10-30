@@ -1343,7 +1343,7 @@ register its own:
 | Applet | Role | Templates | What it does |
 | --- | --- | --- | --- |
 | Sue Paint | Studio | Picture: Illustration, Print A4, Full HD, Square Post, Sprite, Custom... | The painting studio (§3.7) |
-| Sue Writer | Studio | Writing: Blank Document, Novel, Short Story, Screenplay and the other project templates (§3.8) | The writing and publishing studio (§3.8) |
+| Sue Writer | Studio | Document (Blank Document, Letter, Resume, Report and the other templates) and Presets (Novel, Short Story, Screenplay, ...), all read from template files (§3.8) | The writing and publishing studio (§3.8) |
 | Image Viewer | Tool | n/a | One picture filling its page: fit, 100% and wheel zoom, panning, the project's next and previous pictures; simple edits (turn, mirror, crop, resize, brightness and contrast, saturation and hue, grayscale, invert), each one undo step on the same entity (`ReplaceComponent`); menus File (Open Picture, Save As in any picture format, Save Over, a lossless JPEG XL re-encode, Show in Folder, Back to the Hub), Image, View and Send (the Converter, Sue Paint and Sue Writer by `EntityId`), and a toolbar under them |
 | Converter | Tool | n/a | Any file in (Add Files, Add a Folder, the project's pictures and sounds, or Send To from any studio or tool); a target per kind (pictures: PNG, JPEG, JPEG XL, WebP, TIFF, BMP, GIF, TGA, QOI, ICO, PPM; sounds: FLAC, WAV, AIFF; text: tidied, Markdown to HTML, CSV, TSV, JSON; anything: Base64, hex dump, byte map, copy); picture resizing with Lanczos, bicubic, bilinear or nearest in premultiplied alpha, turns, mirrors, brightness, contrast, saturation, grays, flattening; sound trimming, channels, Lanczos resampling, speed, reverse, gain or normalizing, fades, depth; text tidying; output folder ("Next to each file" asks for one first where a result beside its file would stay in Sue's cache, `stays_in_cache`), name pattern and keep or replace (never the source); files convert on a background thread; menus File and Convert (`Ctrl+Enter`) |
 | Settings | Window | n/a | Preferences by category (§4.3) |
@@ -1931,7 +1931,16 @@ parents) for headings, alignment, page breaks and character formatting,
 nested lists numbered or bulleted by their list styles, links, footnotes,
 tables with their header rows and column widths, and a table of contents
 as a contents entity; frames and annotations are left out. The registry
-reads OpenDocument now too.
+reads OpenDocument now too. `from_pdf` (`publish/pdf_read.rs`, written from
+ISO 32000-1) reads a PDF's text: every `n g obj` and object streams, Flate
+with PNG predictors, the classic trailer or a cross-reference stream, the
+page tree in order with inherited resources, fonts through their ToUnicode
+CMaps (`bfchar`, `bfrange`, one or two byte codes) or the Windows encoding,
+and the text operators (`Tf`, `Tm`, `Td`, `TD`, `T*`, `Tj`, `TJ`, `'`).
+Lines on one baseline join, a pen shift back of an eighth of the size is a
+space, lines join into paragraphs by their gaps, the body size is the one
+most text is set in and bigger lines become title and headings; lone
+page numbers and running heads repeated on most pages are left out.
 
 **Spelling (`sue-type::spell`).** Every studio that sets text checks
 spelling the same way. English ships inside Sue: the public-domain Moby
@@ -2141,9 +2150,29 @@ Composition mode (`F11`) leaves only the text, set large on dark paper with
 typewriter scrolling. Find and replace work in what is shown or across the
 whole project. Compile (`Ctrl+Shift+E`) puts the draft together (folder
 titles as chapter headings, scene breaks or new pages between documents, a
-title page) and writes any of the formats above. Projects come from
-templates: blank document, novel, short story, screenplay, non-fiction book,
-essay or paper, poetry collection, letter and report.
+title page) and writes any of the formats above.
+
+**Templates are data** (`sue-writer::templates`). Each is a `.template`
+file: a header of `key: value` lines (name and about, `tr:key` for the
+language database; `group: template` for a start page card or `preset` for
+the Presets list; `order`; and project settings: `sheet`, `page` (`auto` is
+A4 or Letter by the language's region), `orientation`, `margin`, `font`,
+`size`, `header`, `footer`, `different-first`, `target`, `session-target`,
+`binder`), then `draft:` and `research:` trees of `folder`, `document`,
+`synopsis` and paragraphs (`style.mod text`, mods `bullet`, `number`,
+`center`, `right`, `justify`, `bold`, `italic`, `break`; `{date}` filled in).
+`crates/sue-writer/templates/README.md` is the reference. `build.rs` embeds
+every file in `crates/sue-writer/templates`, so no list names them;
+`Templates::load` adds the files in `PlatformPaths::templates_dir()/writer`,
+where one with the same key replaces Sue's and `.docx`, `.dotx`, `.odt`,
+`.ott`, Markdown, HTML and text files are one-document templates read
+through the importers. `project::create(&Template, ...)` makes the project
+as one undo step and records its key (`sue_writer.template`);
+`Template::from_project` and `to_text` write a project back as a template
+(File, Save as Template), and the tests check that a project saved and made
+again comes out the same. Projects made before keep every property they
+had, and the old keys (`novel`, `blank`, ...) still name templates, so
+nothing about opening them changed.
 
 **Woven in.** A project is an entity of the arena; its documents are the
 shared rich text, its pictures the shared pictures. The Sue menu offers Send

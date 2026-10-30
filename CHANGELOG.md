@@ -11,6 +11,19 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Sue Writer starts like Word: a blank document and templates shown as
+  pictures of their first page (letter, cover letter, resume, report,
+  essay, newsletter, memo, meeting notes). Novels, short stories,
+  screenplays, non-fiction and poetry are in a Presets list beside them.
+- Your own templates: File, Save as Template keeps the open document as
+  one, and Word, LibreOffice and Sue Writer templates in the templates
+  folder (File, Templates Folder) are offered for new documents.
+- Sue Writer opens PDF files (their text, paragraphs and headings) and
+  Word and LibreOffice templates (`.dotx`, `.ott`).
+- Pages on their side: Sue Writer's Project Settings, Orientation.
+
 ### Changed
 
 - Slider handles are thin rectangles, a little shorter than the circles
@@ -22,6 +35,12 @@ follow [Semantic Versioning](https://semver.org/).
   detail the screen can show and fills in the rest a moment later.
 
 ### Fixed
+
+- Sue Writer on a phone shows the whole page across the screen, upright
+  or turned, instead of a strip of text; tablets fit the whole page too.
+- The paragraph style box on a phone's toolbar holds its name and arrow
+  again (some boxes near the shape of a slider handle were drawn too
+  narrow).
 
 - Pen pressure works with drawing tablets whose driver has Windows Ink
   turned off (WinTab, common with Huion and XP-Pen), and with pens in the

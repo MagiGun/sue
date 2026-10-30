@@ -95,7 +95,7 @@ of work is by how much people miss each one (the plan at the end).
 | Feature | Source | Sue | Notes |
 | --- | --- | --- | --- |
 | Page size and margins | WL | done | Project settings, from page presets |
-| Orientation | WL | partial | Through the page size only |
+| Orientation | WL | done | Project Settings and templates (`orientation`) |
 | Page break | WL | done | |
 | Line break inside a paragraph | WL | done | Shift+Enter |
 | Column break | WL | missing | |
@@ -270,7 +270,7 @@ of work is by how much people miss each one (the plan at the end).
 | Feature | Source | Sue | Notes |
 | --- | --- | --- | --- |
 | Master documents and subdocuments | L | partial | A project's binder plays this part |
-| Templates: new from, save as | WL | partial | Built-in project templates; no save as template |
+| Templates: new from, save as | WL | done | Template files (built in and a templates folder, `.dotx` and `.ott` too), a Presets list, File, Save as Template |
 | Text from file (insert document) | WL | missing | |
 | AutoText, Quick Parts, building blocks | WL | missing | |
 | Form controls (check box, list, text field) | WL | missing | |
@@ -311,7 +311,7 @@ of work is by how much people miss each one (the plan at the end).
 | RTF export | WL | done | |
 | RTF import | WL | missing | |
 | PDF export | WL | done | Typeset with the project's fonts |
-| PDF import | L | missing | |
+| PDF import | L | partial | Text, paragraphs and headings; no pictures or layout |
 | EPUB export | L | done | |
 | HTML export and import | WL | done | |
 | Markdown export and import | WL | done | |

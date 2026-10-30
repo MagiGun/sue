@@ -625,10 +625,19 @@ shortens it, and "Instant transitions" makes it immediate.
 ## Sue Writer: writing and publishing
 
 **Sue Writer** is where you write, from a letter to a trilogy. Open it from
-the Hub or the Sue menu's Studios, or with the Sue menu's New, Writing, which
-starts a project from a template: a blank document, a novel, a short story, a
-screenplay, a non-fiction book, an essay or paper, a poetry collection, a
-letter or a report.
+the Hub or the Sue menu's Studios. Its start page works like Word's: a blank
+document first, then templates shown as little pictures of their first page
+(a letter, a cover letter, a resume, a report, an essay or paper, a
+newsletter, a memo and meeting notes). Long work is in the **Presets** list
+beside them: a novel, a short story, a screenplay, a non-fiction book and a
+poetry collection, each with its chapters, research and manuscript
+formatting ready. The Sue menu's New offers the same.
+
+Templates are files, so you can add your own. File, **Save as Template**
+keeps the open document (its page, fonts, headers and footers, styles and
+starter text) as a template, and File, **Templates Folder** opens the folder
+they live in. Word (`.docx`, `.dotx`) and LibreOffice (`.odt`, `.ott`)
+files you drop there are offered as templates too.
 
 It looks like a word processor: pages that fit the window and one short
 toolbar, with what Word and LibreOffice Writer keep at hand: Undo and Redo,
@@ -752,9 +761,10 @@ as a PDF (set in your fonts, with bookmarks and page numbers), a Word
 document, an OpenDocument file, an EPUB e-book, a web page, RTF, Markdown or
 plain text. `Ctrl+P` goes straight to PDF.
 
-**Sue Writer on a phone** gives the screen to your words. The text flows to
-the width of the screen at a size you can read (View, Page View shows the
-pages instead). The top bar has the Sue button, a menu button with every
+**Sue Writer on a phone** shows the whole page across the screen, upright or
+turned on its side, and pinching zooms in and out (View, Draft View flows
+the text to the width of the screen at a size you can read instead, on
+paper that fills the screen). The top bar has the Sue button, a menu button with every
 menu, Undo, Redo, the binder and Find. The formatting is a row of big
 buttons at the bottom (style, bold, italic, underline, alignment, lists,
 indents, font, size and colors; swipe it sideways for the rest), so it sits
@@ -764,10 +774,14 @@ above it, on Android phones and on iPhones alike. The binder covers the
 page when you open it and closes when you pick a scene. **On a tablet** the
 toolbar's buttons are larger, for fingers.
 
+Pages can be turned on their side: Project Settings, Orientation,
+Landscape.
+
 Sue Writer works with the rest of Sue. Pictures from Sue Paint go straight
 into your text with the Sue menu's Send To. Open a Word, OpenDocument
-(LibreOffice), Markdown, HTML or plain text file anywhere in Sue and it comes
-into Sue Writer, formatting and all; tables come in as tables, heading rows
+(LibreOffice), PDF, Markdown, HTML or plain text file anywhere in Sue and it
+comes into Sue Writer, formatting and all (a PDF brings its text, paragraphs
+and headings; its pictures and exact layout stay behind); tables come in as tables, heading rows
 and column widths kept, and an OpenDocument table of contents comes in as
 one.
 Everything you do can be undone, and it all saves inside your project.
