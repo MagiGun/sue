@@ -149,8 +149,9 @@ pub struct Editor {
     touch: bool,
     /// A long press began a selection that the finger now drags.
     touch_select: bool,
-    /// A finger is down on the page, scrolling it as it moves.
-    finger: bool,
+    /// A finger down on the page, scrolling it as it moves: where it
+    /// was last frame, and its recent moves (when, how far) for a flick.
+    finger: Option<(Pos2, Vec<(f64, Vec2)>)>,
     docs: Vec<EntityId>,
     texts: Vec<String>,
     marks: Vec<TextMarks>,
@@ -215,7 +216,7 @@ impl Editor {
             clicks: (f64::NEG_INFINITY, Pos2::ZERO, 0),
             touch: false,
             touch_select: false,
-            finger: false,
+            finger: None,
             docs: Vec::new(),
             texts: Vec::new(),
             marks: Vec::new(),
@@ -2003,7 +2004,65 @@ impl Editor {
 
     // ----- Input -------------------------------------------------------------------
 
+    /// A finger on a touch screen moves the page with it, point for point
+    /// and at once (egui's eased scrolling would lag it and lose some of
+    /// the way), and a flick sends the page on as far as the finger's
+    /// speed carries it.
+    fn finger_scroll(&mut self, ui: &Ui, response: &egui::Response) {
+        let (pressed, down, at, time) = ui.input(|input| {
+            (
+                input.pointer.any_pressed(),
+                input.pointer.any_down(),
+                input.pointer.latest_pos(),
+                input.time,
+            )
+        });
+        if pressed && response.hovered() {
+            if let Some(at) = at {
+                self.finger = Some((at, Vec::new()));
+            }
+            // A new touch stops a page still gliding from a flick.
+            ui.scroll_with_delta_animation(Vec2::ZERO, egui::style::ScrollAnimation::none());
+            return;
+        }
+        let Some((last, mut moves)) = self.finger.take() else {
+            return;
+        };
+        if down {
+            let Some(at) = at else {
+                self.finger = Some((last, moves));
+                return;
+            };
+            let delta = at - last;
+            if delta != Vec2::ZERO {
+                ui.scroll_with_delta_animation(delta, egui::style::ScrollAnimation::none());
+                moves.push((time, delta));
+                moves.retain(|(when, _)| time - when <= 0.1);
+            }
+            self.finger = Some((at, moves));
+            return;
+        }
+        // Lifted: a flick is the last tenth of a second's moves, if the
+        // finger was still moving when it left the glass.
+        let moving = moves.last().is_some_and(|(when, _)| time - when < 0.06);
+        let span = moves
+            .first()
+            .map_or(0.0, |(when, _)| (time - when) as f32)
+            .max(1.0 / 60.0);
+        let velocity = moves
+            .iter()
+            .fold(Vec2::ZERO, |sum, (_, delta)| sum + *delta)
+            / span;
+        if moving && velocity.length() > 250.0 {
+            let glide = (velocity * 0.35).clamp(Vec2::splat(-4000.0), Vec2::splat(4000.0));
+            ui.scroll_with_delta_animation(glide, egui::style::ScrollAnimation::duration(0.7));
+        }
+    }
+
     fn pointer(&mut self, ui: &Ui, response: &egui::Response, output: &mut EditorOutput) {
+        if self.touch && !self.touch_select {
+            self.finger_scroll(ui, response);
+        }
         let Some(pos) = response
             .interact_pointer_pos()
             .or_else(|| ui.input(|input| input.pointer.hover_pos()))
@@ -2016,13 +2075,7 @@ impl Editor {
         let (pressed, modifiers, time) =
             ui.input(|input| (input.pointer.primary_pressed(), input.modifiers, input.time));
         if self.touch {
-            let (down, delta, velocity) = ui.input(|input| {
-                (
-                    input.pointer.any_down(),
-                    input.pointer.delta(),
-                    input.pointer.velocity(),
-                )
-            });
+            let down = ui.input(|input| input.pointer.any_down());
             if self.touch_select {
                 // The finger moves the selection's end; lifting it ends
                 // the selection (it is no tap).
@@ -2037,27 +2090,12 @@ impl Editor {
                 }
                 return;
             }
-            // The page follows the finger, and glides on a little after a
-            // flick.
-            if !self.touch_select {
-                if response.is_pointer_button_down_on() {
-                    self.finger = true;
-                    if delta != Vec2::ZERO {
-                        ui.scroll_with_delta(delta);
-                    }
-                } else if std::mem::take(&mut self.finger) && velocity.length() > 300.0 {
-                    ui.scroll_with_delta_animation(
-                        velocity * 0.3,
-                        egui::style::ScrollAnimation::duration(0.5),
-                    );
-                }
-            }
-            if !self.touch_select && response.long_touched() {
+            if response.long_touched() {
                 // A long press selects the word under the finger; dragging
                 // on grows the selection from it. The keyboard stays down,
                 // so the page does not move under the finger.
                 self.cell = None;
-                self.finger = false;
+                self.finger = None;
                 let caret = self.hit(pos);
                 let text = self.doc_text(caret.doc);
                 let (start, end) = word_around(text, caret.offset);

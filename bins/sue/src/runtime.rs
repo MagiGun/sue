@@ -1715,7 +1715,7 @@ pub(crate) mod tests {
             ],
         );
         let mut at = from;
-        for _ in 0..20 {
+        for _ in 0..10 {
             at.y -= 12.0;
             step(
                 &mut runtime,
@@ -1724,6 +1724,10 @@ pub(crate) mod tests {
                     egui::Event::PointerMoved(at),
                 ],
             );
+        }
+        // The finger rests before it lifts: no flick.
+        for _ in 0..10 {
+            step(&mut runtime, Vec::new());
         }
         step(
             &mut runtime,
@@ -1747,8 +1751,8 @@ pub(crate) mod tests {
         }
         let after = after.expect("still drawn");
         assert!(
-            after < before - 100.0,
-            "the page scrolls with the finger: {before} then {after}"
+            (before - after - 120.0).abs() < 1.0,
+            "the page moves as far as the finger, 120 points: {before} then {after}"
         );
         assert!(!selected, "a scroll selects nothing");
         // A long press on the heading selects it, and the finger's drag
