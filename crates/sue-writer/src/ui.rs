@@ -2498,7 +2498,12 @@ impl SueWriter {
                 .max_rect(zoom)
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
         );
+        // Sized to the bar: Sue's buttons are taller than it, and the
+        // Draft and Page switch hung into the bar below.
+        child.set_clip_rect(rect.intersect(ui.clip_rect()));
         child.spacing_mut().item_spacing.x = 4.0;
+        child.spacing_mut().interact_size.y = (zoom.height() - 6.0).max(12.0);
+        child.spacing_mut().button_padding = vec2(6.0, 0.0);
         if child
             .small_button("+")
             .on_hover_text(tr!("zoom-in-2"))
