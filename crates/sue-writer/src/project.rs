@@ -940,8 +940,8 @@ pub fn history_with(entity: &Entity, day: &str, words: i64) -> Value {
 /// Today's date, `YYYY-MM-DD` (UTC).
 #[must_use]
 pub fn today() -> String {
-    let days = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let days = sue_platform::time::SystemTime::now()
+        .duration_since(sue_platform::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_secs() / 86_400) as i64;
     // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
     let z = days + 719_468;

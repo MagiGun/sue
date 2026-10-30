@@ -20,7 +20,7 @@ pub fn human_bytes(bytes: u64) -> String {
 
 /// `path`, or a free sibling such as `photo (2).png` when it exists.
 pub fn free_path(path: &Path) -> PathBuf {
-    if !path.exists() {
+    if !sue_platform::fs::exists(path) {
         return path.to_path_buf();
     }
     let stem = path
@@ -32,7 +32,7 @@ pub fn free_path(path: &Path) -> PathBuf {
         .unwrap_or_default();
     (2..)
         .map(|index| path.with_file_name(format!("{stem} ({index}){extension}")))
-        .find(|candidate| !candidate.exists())
+        .find(|candidate| !sue_platform::fs::exists(candidate))
         .unwrap_or_else(|| path.to_path_buf())
 }
 

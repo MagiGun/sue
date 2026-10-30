@@ -20,13 +20,14 @@ winit.workspace = true
 
 # The system clipboard, web links and the Linux display servers, everywhere
 # but iOS, where the clipboard crate would build its Linux (Wayland and X11)
-# side and cannot.
-[target.'cfg(not(target_os = "ios"))'.dependencies]
+# side and cannot, and the browser, which has its own clipboard.
+[target.'cfg(not(any(target_os = "ios", target_arch = "wasm32")))'.dependencies]
 egui-winit = { workspace = true, features = ["clipboard", "links", "wayland", "x11"] }
 
 # The system clipboard, native dialogs, the opener and real-time audio
-# threads exist on desktops only; phones and tablets go without them.
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+# threads exist on desktops only; phones, tablets and the browser go
+# without them.
+[target.'cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))'.dependencies]
 arboard.workspace = true
 audio_thread_priority.workspace = true
 open.workspace = true
@@ -42,6 +43,48 @@ winit = { workspace = true, features = ["android-native-activity"] }
 # crates/sue-platform/ios.
 [target.'cfg(target_os = "ios")'.dependencies]
 sue-ios = { path = "ios" }
+
+# The browser: WebGPU with WebGL2 as the fallback, its page, storage,
+# clipboard and file pickers, and a clock (std's panics there).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-time.workspace = true
+wgpu = { workspace = true, features = ["webgpu", "webgl"] }
+web-sys = { workspace = true, features = [
+    "Blob",
+    "BlobPropertyBag",
+    "Clipboard",
+    "ClipboardEvent",
+    "console",
+    "CssStyleDeclaration",
+    "DataTransfer",
+    "Document",
+    "DomException",
+    "DragEvent",
+    "Element",
+    "Event",
+    "EventTarget",
+    "File",
+    "FileList",
+    "HtmlAnchorElement",
+    "HtmlCanvasElement",
+    "HtmlElement",
+    "HtmlInputElement",
+    "IdbDatabase",
+    "IdbFactory",
+    "IdbObjectStore",
+    "IdbOpenDbRequest",
+    "IdbRequest",
+    "IdbTransaction",
+    "IdbTransactionMode",
+    "KeyboardEvent",
+    "MediaQueryList",
+    "Navigator",
+    "Url",
+    "Window",
+] }
 
 [lints]
 workspace = true

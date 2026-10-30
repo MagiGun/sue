@@ -62,7 +62,7 @@ impl Default for SubView {
 /// # Errors
 /// If no codec reads it.
 pub(crate) fn decode(path: &Path) -> Result<([u32; 2], Vec<u8>), String> {
-    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+    let bytes = sue_platform::fs::read(path).map_err(|error| error.to_string())?;
     let extension = path
         .extension()
         .map(|extension| extension.to_string_lossy().to_ascii_lowercase())

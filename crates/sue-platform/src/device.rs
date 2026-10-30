@@ -15,7 +15,9 @@ pub enum OsFamily {
     Android,
     /// Apple iOS / iPadOS.
     Ios,
-    /// Anything else (BSDs, WASM hosts, …); treated like Linux for paths.
+    /// A web browser (Sue built to WebAssembly).
+    Web,
+    /// Anything else (BSDs, …); treated like Linux for paths.
     Other,
 }
 
@@ -33,6 +35,8 @@ impl OsFamily {
             Self::MacOs
         } else if cfg!(target_os = "ios") {
             Self::Ios
+        } else if cfg!(target_arch = "wasm32") {
+            Self::Web
         } else {
             Self::Other
         }
@@ -53,6 +57,7 @@ impl OsFamily {
             Self::MacOs => "macOS",
             Self::Android => "Android",
             Self::Ios => "iOS",
+            Self::Web => "Web",
             Self::Other => "Other",
         }
     }
@@ -143,6 +148,8 @@ pub enum GraphicsApi {
     Dx12,
     /// Apple Metal.
     Metal,
+    /// The browser's WebGPU.
+    WebGpu,
 }
 
 /// Coarse GPU performance class.
@@ -240,8 +247,13 @@ impl HardwareCapabilities {
     /// the core count. Everything else is reported as unknown.
     #[must_use]
     pub fn probe_portable() -> Self {
+        // std knows no core count in the browser; the page does.
+        #[cfg(target_arch = "wasm32")]
+        let logical_cores = crate::web::page::logical_cores();
+        #[cfg(not(target_arch = "wasm32"))]
+        let logical_cores = std::thread::available_parallelism().map_or(1, usize::from);
         Self {
-            logical_cores: std::thread::available_parallelism().map_or(1, usize::from),
+            logical_cores,
             display_refresh_hz: Self::DEFAULT_REFRESH_HZ,
             graphics_api: GraphicsApi::None,
             gpu_tier: GpuTier::Unknown,

@@ -9,7 +9,7 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use sue_platform::time::Instant;
 
 use egui::Ui;
 use sue_core::{Arena, AssetHandle, CoreError, Entity, ReversibleTransaction, TxnError, UndoStack};

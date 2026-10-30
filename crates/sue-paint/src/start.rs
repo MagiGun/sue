@@ -290,10 +290,10 @@ struct Thumbs {
 
 /// When `path` last changed, in seconds since 1970 (0: unknown).
 fn stamp(path: &Path) -> u64 {
-    std::fs::metadata(path)
-        .and_then(|metadata| metadata.modified())
+    sue_platform::fs::metadata(path)
         .ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|metadata| metadata.modified())
+        .and_then(|time| time.duration_since(sue_platform::time::UNIX_EPOCH).ok())
         .map_or(0, |since| since.as_secs())
 }
 
@@ -340,7 +340,7 @@ impl Thumbs {
 /// A picture file or a Sue project made at most `side` pixels on its long
 /// edge: the picture, or the project's first picture flattened.
 fn thumbnail(path: &Path, side: u32, job: &sue_core::JobContext) -> Option<Thumb> {
-    let bytes = std::fs::read(path).ok()?;
+    let bytes = sue_platform::fs::read(path).ok()?;
     job.set_progress(0.3);
     let raster = if sue_core::SueFile::sniff(&bytes) {
         let arena = sue_core::SueFile::from_bytes(&bytes)
@@ -657,7 +657,9 @@ impl SuePaint {
                 // The last Paint project opened, else a new one.
                 let last = items(cx.work)
                     .into_iter()
-                    .filter(|item| item.kind != Type::Unsaved && item.path.exists())
+                    .filter(|item| {
+                        item.kind != Type::Unsaved && sue_platform::fs::exists(&item.path)
+                    })
                     .max_by_key(|item| item.when);
                 match last {
                     Some(item) => self.start_act(Act::Open(item), cx),
@@ -670,7 +672,7 @@ impl SuePaint {
                 self.start.forced = false;
                 match item.key {
                     ProjectKey::Kept(id) => cx.request(ShellRequest::Recover(id)),
-                    ProjectKey::File(path) if !path.exists() => {
+                    ProjectKey::File(path) if !sue_platform::fs::exists(&path) => {
                         cx.fail(tr!("is-gone", path = path.display()));
                         cx.request(ShellRequest::Forget(path));
                     }
@@ -1683,7 +1685,7 @@ impl SuePaint {
                         match page::group(ui, &rows, theme) {
                             Some(0) => {
                                 if let Some(folder) = &location {
-                                    let _ = std::fs::create_dir_all(folder);
+                                    let _ = sue_platform::fs::create_dir_all(folder);
                                     cx.request(ShellRequest::Command(format!(
                                         "reveal:{}",
                                         folder.display()
@@ -1782,7 +1784,9 @@ impl SuePaint {
                     Some(2) => {
                         let gone: Vec<Item> = items(cx.work)
                             .into_iter()
-                            .filter(|item| item.kind != Type::Unsaved && !item.path.exists())
+                            .filter(|item| {
+                                item.kind != Type::Unsaved && !sue_platform::fs::exists(&item.path)
+                            })
                             .collect();
                         for item in &gone {
                             forget(item, cx);
@@ -2098,7 +2102,7 @@ fn delete_materials(
 ) {
     for entry in entries.iter().filter(|entry| ids.contains(&entry.id)) {
         if let crate::materials::Source::File(path) = &entry.material.source
-            && let Err(error) = std::fs::remove_file(path)
+            && let Err(error) = sue_platform::fs::remove_file(path)
         {
             cx.fail(tr!("cannot-delete-the-material", error = error));
         }
@@ -2384,8 +2388,8 @@ mod tests {
     fn temp(tag: &str) -> PathBuf {
         let dir =
             std::env::temp_dir().join(format!("sue-paint-start-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let _ = sue_platform::fs::remove_dir_all(&dir);
+        sue_platform::fs::create_dir_all(&dir).unwrap();
         dir
     }
 
@@ -2399,7 +2403,7 @@ mod tests {
         let story = root.join("story.sue");
         let notes = root.join("notes.txt");
         for file in [&cat, &comic, &story, &notes] {
-            std::fs::write(file, b"x").unwrap();
+            sue_platform::fs::write(file, b"x").unwrap();
         }
         let mut work = sue_wm::WorkList::open(root.join("work"));
         work.remember(&cat, false, Some(paint.clone()), 100)
@@ -2457,7 +2461,7 @@ mod tests {
         state.types.clear();
         state.search = "CO".to_owned();
         assert_eq!(titles(&shown(&all, &state, &work)), ["Comic"]);
-        let _ = std::fs::remove_dir_all(&root);
+        let _ = sue_platform::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -2477,7 +2481,7 @@ mod tests {
         let root = temp("thumb");
         let png = sue_io::encode_png_rgba(64, 32, &vec![0; 64 * 32 * 4]).unwrap();
         let path = root.join("small.png");
-        std::fs::write(&path, png).unwrap();
+        sue_platform::fs::write(&path, png).unwrap();
         let mut thumbs = Thumbs::default();
         assert!(thumbs.get(&path).is_none());
         let start = std::time::Instant::now();
@@ -2486,7 +2490,7 @@ mod tests {
             std::thread::yield_now();
         }
         assert_eq!(thumbs.get(&path).unwrap().1.size, [64, 32]);
-        let _ = std::fs::remove_dir_all(&root);
+        let _ = sue_platform::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -285,12 +285,12 @@ fn scan_tips(folder: Option<&Path>) -> Vec<Material> {
 
 /// The PNG files in `dir` as materials of `kind`, by name.
 fn scan_pngs(dir: Option<PathBuf>, kind: &str) -> Vec<Material> {
-    let Some(entries) = dir.and_then(|dir| std::fs::read_dir(dir).ok()) else {
+    let Some(entries) = dir.and_then(|dir| sue_platform::list_dir(&dir, true).ok()) else {
         return Vec::new();
     };
     let mut files: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
+        .into_iter()
+        .map(|entry| entry.path)
         .filter(|path| {
             path.extension()
                 .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
@@ -333,7 +333,7 @@ pub fn picture(material: &Material, size: [u32; 2], color: [u8; 3]) -> Option<Ra
             .get(*index)
             .map(|(_, _, ink)| draw(size, color, *ink)),
         Source::File(path) => {
-            let bytes = std::fs::read(path).ok()?;
+            let bytes = sue_platform::fs::read(path).ok()?;
             sue_io::decode_png(&bytes).ok().map(|decoded| decoded.tile)
         }
     }
@@ -447,7 +447,7 @@ pub fn register(folder: &Path, name: &str, tile: &RasterTile2D) -> Result<PathBu
         safe.trim().to_owned()
     };
     let dir = folder.join("materials");
-    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    sue_platform::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     let path = dir.join(format!("{safe}.png"));
     sue_platform::write_atomic(&path, &png).map_err(|error| error.to_string())?;
     Ok(path)
@@ -515,7 +515,7 @@ impl Library {
     #[must_use]
     pub fn scan(kinds: &MaterialKinds, folder: Option<&Path>) -> Self {
         let kept: Vec<Entity> = folder
-            .and_then(|folder| std::fs::read(folder.join(LIBRARY_FILE)).ok())
+            .and_then(|folder| sue_platform::fs::read(folder.join(LIBRARY_FILE)).ok())
             .and_then(|bytes| SueFile::from_bytes(&bytes).ok())
             .and_then(|file| file.arena(&sue_model::registry()).ok())
             .map(|arena| {
@@ -536,10 +536,12 @@ impl Library {
                 Some(entity) => entity.clone(),
                 None => {
                     let added = match &material.source {
-                        Source::File(path) => std::fs::metadata(path)
-                            .and_then(|metadata| metadata.modified())
+                        Source::File(path) => sue_platform::fs::metadata(path)
                             .ok()
-                            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                            .and_then(|metadata| metadata.modified())
+                            .and_then(|time| {
+                                time.duration_since(sue_platform::time::UNIX_EPOCH).ok()
+                            })
                             .map_or(0, |since| i64::try_from(since.as_secs()).unwrap_or(0)),
                         Source::Builtin(_) => 0,
                     };
@@ -652,7 +654,7 @@ impl Library {
         };
         let mut file = SueFile::new();
         file.set_arena(&self.arena);
-        std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+        sue_platform::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
         sue_platform::write_atomic(&folder.join(LIBRARY_FILE), &file.to_bytes())
             .map_err(|error| error.to_string())
     }
@@ -671,7 +673,7 @@ pub fn add_file(folder: &Path, kind: &str, from: &Path) -> Result<PathBuf, Strin
         return Err(tr!("materials-are-png-files"));
     }
     let dir = folder.join(if kind == TIP { "tips" } else { "materials" });
-    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    sue_platform::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     let name = from
         .file_name()
         .map_or_else(|| "material.png".into(), |name| name.to_os_string());
@@ -681,11 +683,12 @@ pub fn add_file(folder: &Path, kind: &str, from: &Path) -> Result<PathBuf, Strin
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default();
     let mut n = 2;
-    while to.exists() {
+    while sue_platform::fs::exists(&to) {
         to = dir.join(format!("{stem} ({n}).png"));
         n += 1;
     }
-    std::fs::copy(from, &to).map_err(|error| error.to_string())?;
+    let bytes = sue_platform::fs::read(from).map_err(|error| error.to_string())?;
+    sue_platform::write_atomic(&to, &bytes).map_err(|error| error.to_string())?;
     Ok(to)
 }
 
@@ -720,7 +723,7 @@ mod tests {
 
         // A picture registered is cut to what it covers and comes back.
         let folder = std::env::temp_dir().join(format!("sue-materials-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&folder);
+        let _ = sue_platform::fs::remove_dir_all(&folder);
         let mut pixels = vec![0_u8; 40 * 30 * 4];
         for y in 10..20 {
             for x in 5..25 {
@@ -744,7 +747,7 @@ mod tests {
         let at = |x: usize, y: usize| placed.bytes().unwrap()[(y * 100 + x) * 4 + 3];
         assert_eq!(at(50, 25), 255);
         assert_eq!(at(5, 5), 0);
-        let _ = std::fs::remove_dir_all(&folder);
+        let _ = sue_platform::fs::remove_dir_all(&folder);
     }
 
     #[test]
@@ -764,7 +767,7 @@ mod tests {
         assert_eq!(kinds.iter().count(), 5);
 
         let folder = std::env::temp_dir().join(format!("sue-library-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&folder);
+        let _ = sue_platform::fs::remove_dir_all(&folder);
         let mut pixels = vec![0_u8; 8 * 8 * 4];
         pixels[3] = 255;
         let tile = RasterTile2D::from_bytes(8, 8, PixelFormat::Rgba8, pixels).unwrap();
@@ -824,6 +827,6 @@ mod tests {
                 .count(),
             2
         );
-        let _ = std::fs::remove_dir_all(&folder);
+        let _ = sue_platform::fs::remove_dir_all(&folder);
     }
 }

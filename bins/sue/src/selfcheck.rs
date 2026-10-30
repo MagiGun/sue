@@ -3,7 +3,7 @@
 
 use std::f32::consts::TAU;
 use std::fmt;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use sue_ai::{
     AiTask, ComputeBackend, GgufHeader, LocalModelRegistry, MidSideStemSplit, ZeroCopyTensorTask,
@@ -18,6 +18,7 @@ use sue_pkg::{
     AtomicUpdater, Dependency, PackageIndex, PackageKind, PackageManifest, SignedManifest,
     SigningKey, TrustStore, UpdateOutcome, Version, resolve,
 };
+use sue_platform::time::Instant;
 use sue_platform::{
     EguiPainter, FramePacing, GpuContext, HeadlessHost, NoTextures, PlatformHost, SurfaceDescriptor,
 };
@@ -333,7 +334,10 @@ fn check_sniffer(subject: &mut Subject) -> Result<String, String> {
         .collect();
 
     let arena = &mut subject.runtime.engine.world.arena;
-    let options = IngestOptions { byte_map_width: 64 };
+    let options = IngestOptions {
+        byte_map_width: 64,
+        clock: sue_platform::time::since_start,
+    };
     let image = ingest_bytes(arena, "card.jxl", jxl.clone(), &pipeline, options).map_err(text)?;
     ensure(
         image.view == IngestView::Raster,

@@ -9,7 +9,7 @@
 //! nothing on disk.
 
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use sue_platform::time::{SystemTime, UNIX_EPOCH};
 
 use crate::AppletId;
 
@@ -336,7 +336,7 @@ impl WorkList {
     fn read_labels(&mut self) {
         if let Some(labels) = self
             .labels_path()
-            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|path| sue_platform::fs::read_to_string(path).ok())
             .and_then(|text| Labels::parse(&text))
         {
             self.labels = labels;
@@ -348,7 +348,7 @@ impl WorkList {
             return Ok(());
         };
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
+            sue_platform::fs::create_dir_all(dir)?;
         }
         sue_platform::write_atomic(&path, self.labels.text().as_bytes())
     }
@@ -434,7 +434,7 @@ impl WorkList {
     fn read(&mut self) {
         self.files = self
             .recent_path()
-            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|path| sue_platform::fs::read_to_string(path).ok())
             .map(|text| parse_recent(&text))
             .unwrap_or_default();
         self.read_autosaves();
@@ -446,10 +446,10 @@ impl WorkList {
         let mut autosaves = Vec::new();
         if let Some(entries) = self
             .autosave_dir()
-            .and_then(|dir| std::fs::read_dir(dir).ok())
+            .and_then(|dir| sue_platform::list_dir(&dir, true).ok())
         {
-            for entry in entries.flatten() {
-                let note = entry.path();
+            for entry in entries {
+                let note = entry.path;
                 if note.extension().and_then(|ext| ext.to_str()) != Some("txt") {
                     continue;
                 }
@@ -457,10 +457,10 @@ impl WorkList {
                     continue;
                 };
                 let file = note.with_extension("sue");
-                if !file.is_file() {
+                if !sue_platform::fs::is_file(&file) {
                     continue;
                 }
-                if let Some(autosave) = std::fs::read_to_string(&note)
+                if let Some(autosave) = sue_platform::fs::read_to_string(&note)
                     .ok()
                     .and_then(|text| Autosave::parse(id, file, &text))
                 {
@@ -479,14 +479,15 @@ impl WorkList {
         if self.dir.is_some() {
             self.files = self
                 .recent_path()
-                .and_then(|path| std::fs::read_to_string(path).ok())
+                .and_then(|path| sue_platform::fs::read_to_string(path).ok())
                 .map(|text| parse_recent(&text))
                 .unwrap_or_default();
             self.read_autosaves();
             self.read_labels();
         }
         let before = self.files.len();
-        self.files.retain(|file| file.path.exists());
+        self.files
+            .retain(|file| sue_platform::fs::exists(&file.path));
         if self.files.len() != before {
             let _ = self.write_recent();
         }
@@ -498,8 +499,8 @@ impl WorkList {
                 autosave
                     .project
                     .as_ref()
-                    .and_then(|project| std::fs::metadata(project).ok())
-                    .and_then(|metadata| metadata.modified().ok())
+                    .and_then(|project| sue_platform::fs::metadata(project).ok())
+                    .and_then(|metadata| metadata.modified())
                     .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
                     .is_some_and(|modified| modified.as_secs() > autosave.at)
             })
@@ -578,7 +579,7 @@ impl WorkList {
             ));
         }
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
+            sue_platform::fs::create_dir_all(dir)?;
         }
         sue_platform::write_atomic(&path, text.as_bytes())
     }
@@ -616,7 +617,7 @@ impl WorkList {
             return id.clone();
         }
         self.made += 1;
-        let id = format!("{now}-{}-{}", std::process::id(), self.made);
+        let id = format!("{now}-{}-{}", sue_platform::process_id(), self.made);
         self.own = Some(id.clone());
         id
     }
@@ -652,7 +653,7 @@ impl WorkList {
         let Some(dir) = self.autosave_dir() else {
             return Ok(());
         };
-        std::fs::create_dir_all(&dir)?;
+        sue_platform::fs::create_dir_all(&dir)?;
         let autosave = Autosave {
             file: dir.join(format!("{id}.sue")),
             id: id.clone(),
@@ -691,7 +692,7 @@ impl WorkList {
         let autosave = self.autosaves.remove(index);
         self.revision += 1;
         for file in [autosave.file.clone(), autosave.file.with_extension("txt")] {
-            match std::fs::remove_file(&file) {
+            match sue_platform::fs::remove_file(&file) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error),
@@ -733,9 +734,11 @@ mod tests {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_nanos());
-        let dir =
-            std::env::temp_dir().join(format!("sue-work-{tag}-{}-{unique}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "sue-work-{tag}-{}-{unique}",
+            sue_platform::process_id()
+        ));
+        sue_platform::fs::create_dir_all(&dir).unwrap();
         dir
     }
 
@@ -746,7 +749,7 @@ mod tests {
         let story = root.join("story.sue");
         let album = root.join("Album.sue");
         for file in [&picture, &story, &album] {
-            std::fs::write(file, b"x").unwrap();
+            sue_platform::fs::write(file, b"x").unwrap();
         }
         let paint = AppletId::new("sue-paint").unwrap();
         let mut list = WorkList::open(root.join("work"));
@@ -773,12 +776,12 @@ mod tests {
         assert_eq!(projects, ["Album", "story"]);
 
         // A file that is gone is forgotten; so is one asked for.
-        std::fs::remove_file(&album).unwrap();
+        sue_platform::fs::remove_file(&album).unwrap();
         again.refresh();
         assert_eq!(again.recent().count(), 2);
         again.forget(&picture).unwrap();
         assert_eq!(WorkList::open(root.join("work")).recent().count(), 1);
-        let _ = std::fs::remove_dir_all(&root);
+        let _ = sue_platform::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -803,7 +806,7 @@ mod tests {
         assert_eq!(kept.id, own);
         assert_eq!(kept.title(), "Novel");
         assert_eq!(kept.page, Some(writer));
-        assert_eq!(std::fs::read(&kept.file).unwrap(), b"one");
+        assert_eq!(sue_platform::fs::read(&kept.file).unwrap(), b"one");
 
         // Kept again after it was saved as a project, it says which.
         first
@@ -825,12 +828,12 @@ mod tests {
         // Kept work its project file caught up with is let go.
         let mut third = WorkList::open(root.join("work"));
         third.keep(b"three", Some(&project), "", None, 10).unwrap();
-        std::fs::write(&project, b"saved later").unwrap();
+        sue_platform::fs::write(&project, b"saved later").unwrap();
         let mut fourth = WorkList::open(root.join("work"));
         assert_eq!(fourth.unsaved().count(), 1);
         fourth.refresh();
         assert_eq!(fourth.unsaved().count(), 0);
-        let _ = std::fs::remove_dir_all(&root);
+        let _ = sue_platform::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -905,6 +908,6 @@ mod tests {
         let again = WorkList::open(root.join("work"));
         assert_eq!(again.labels(), ["Manga".to_owned()]);
         assert!(!again.has_label(&picture, &work) && !again.is_favorite(&picture));
-        let _ = std::fs::remove_dir_all(&root);
+        let _ = sue_platform::fs::remove_dir_all(&root);
     }
 }

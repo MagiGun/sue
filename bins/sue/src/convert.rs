@@ -287,7 +287,7 @@ impl Convert {
     }
 
     fn add_path(&mut self, path: &Path) {
-        if path.is_dir() {
+        if sue_platform::fs::is_dir(path) {
             let Ok(entries) = sue_platform::list_dir(path, false) else {
                 return;
             };
@@ -307,20 +307,12 @@ impl Convert {
         {
             return;
         }
-        let head: Vec<u8> = std::fs::File::open(path)
-            .ok()
-            .map(|file| {
-                use std::io::Read;
-                let mut head = Vec::new();
-                let _ = file.take(4096).read_to_end(&mut head);
-                head
-            })
-            .unwrap_or_default();
+        let head: Vec<u8> = sue_platform::fs::read_head(path, 4096).unwrap_or_default();
         self.inputs.push(Input {
             source: Source::File(path.to_path_buf()),
             name: file_name(path),
             kind: ops::kind_of(path, &head),
-            size: std::fs::metadata(path).map_or(0, |meta| meta.len()),
+            size: sue_platform::fs::metadata(path).map_or(0, |meta| meta.len()),
             status: Status::Waiting,
         });
     }
@@ -350,7 +342,10 @@ impl Convert {
             })
             .collect();
         for (handle, name, source, kind) in found {
-            match source.map(PathBuf::from).filter(|path| path.is_file()) {
+            match source
+                .map(PathBuf::from)
+                .filter(|path| sue_platform::fs::is_file(path))
+            {
                 Some(path) => self.add_path(&path),
                 None if !self
                     .inputs
@@ -461,26 +456,33 @@ impl Convert {
         }
         let (sender, receiver) = channel();
         self.results = Some(receiver);
-        let _ = std::thread::Builder::new()
-            .name("sue-convert".to_owned())
-            .spawn(move || {
-                for (index, path, kind, target, out) in jobs {
-                    let result = std::fs::read(&path)
-                        .map_err(|error| error.to_string())
-                        .and_then(|bytes| ops::convert(&path, bytes, kind, target, &options))
-                        .and_then(|(bytes, note)| {
-                            if let Some(folder) = out.parent() {
-                                std::fs::create_dir_all(folder)
-                                    .map_err(|error| error.to_string())?;
-                            }
-                            write_atomic(&out, &bytes).map_err(|error| error.to_string())?;
-                            Ok((out, format!("{note}, {}", human_bytes(bytes.len() as u64))))
-                        });
-                    if sender.send((index, result)).is_err() {
-                        return;
-                    }
+        let work = move || {
+            for (index, path, kind, target, out) in jobs {
+                let result = sue_platform::fs::read(&path)
+                    .map_err(|error| error.to_string())
+                    .and_then(|bytes| ops::convert(&path, bytes, kind, target, &options))
+                    .and_then(|(bytes, note)| {
+                        if let Some(folder) = out.parent() {
+                            sue_platform::fs::create_dir_all(folder)
+                                .map_err(|error| error.to_string())?;
+                        }
+                        write_atomic(&out, &bytes).map_err(|error| error.to_string())?;
+                        Ok((out, format!("{note}, {}", human_bytes(bytes.len() as u64))))
+                    });
+                if sender.send((index, result)).is_err() {
+                    return;
                 }
-            });
+            }
+        };
+        // Without threads (the browser) the files convert here, and the
+        // results are read on the next frame as from a worker.
+        if sue_platform::THREADS {
+            let _ = std::thread::Builder::new()
+                .name("sue-convert".to_owned())
+                .spawn(work);
+        } else {
+            work();
+        }
     }
 
     /// Converts a picture or sound held only in the project.
@@ -538,7 +540,7 @@ impl Convert {
             Kind::Text | Kind::Data => return Err(tr!("only-files-disk-convert-as-text")),
         };
         if let Some(folder) = out.parent() {
-            std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+            sue_platform::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
         }
         write_atomic(out, &bytes).map_err(|error| error.to_string())?;
         Ok(format!("{note}, {}", human_bytes(bytes.len() as u64)))
@@ -1419,7 +1421,7 @@ impl SueApplet for Convert {
             repaint: arrived,
             wake: self
                 .busy()
-                .then(|| std::time::Instant::now() + Duration::from_millis(100)),
+                .then(|| sue_platform::time::Instant::now() + Duration::from_millis(100)),
             ..Tick::default()
         }
     }
@@ -1457,10 +1459,9 @@ impl SueApplet for Convert {
         let Ok(found) = cx.arena().get(handle) else {
             return;
         };
-        let source = found
-            .meta(meta::SOURCE)
-            .map(PathBuf::from)
-            .filter(|path| path.is_file() && !sue_model::picture::is_picture(found));
+        let source = found.meta(meta::SOURCE).map(PathBuf::from).filter(|path| {
+            sue_platform::fs::is_file(path) && !sue_model::picture::is_picture(found)
+        });
         let name = found.name().to_owned();
         let kind = Self::kind_of_entity(found);
         match (source, kind) {
@@ -1489,7 +1490,7 @@ impl SueApplet for Convert {
         match pick.purpose.as_str() {
             "add" => self.add_path(path),
             "folder" | "run" => {
-                let folder = if path.is_dir() {
+                let folder = if sue_platform::fs::is_dir(path) {
                     path.to_path_buf()
                 } else {
                     path.parent().map(Path::to_path_buf).unwrap_or_default()

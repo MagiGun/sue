@@ -63,7 +63,7 @@ pub(crate) struct Doc {
     /// The animation folder (timeline track) being edited.
     pub track: usize,
     /// Playing since then, from that frame.
-    pub playing: Option<(std::time::Instant, u32)>,
+    pub playing: Option<(sue_platform::time::Instant, u32)>,
     /// Strokes follow the special, perspective and symmetrical rulers
     /// (Snap to Special Ruler).
     pub ruler_on: bool,
@@ -1579,7 +1579,7 @@ impl SuePaint {
         let extension = path
             .extension()
             .map(|ext| ext.to_string_lossy().to_ascii_lowercase());
-        let decoded = std::fs::read(path)
+        let decoded = sue_platform::fs::read(path)
             .map_err(|error| error.to_string())
             .and_then(|bytes| {
                 sue_io::decode_audio(bytes, extension.as_deref()).map_err(|(error, _)| error)
@@ -1603,7 +1603,7 @@ impl SuePaint {
         let name = path
             .file_stem()
             .map_or_else(|| tr!("model"), |stem| stem.to_string_lossy().into_owned());
-        let bundle = std::fs::read(path)
+        let bundle = sue_platform::fs::read(path)
             .map_err(|error| error.to_string())
             .and_then(|bytes| {
                 sue_io::ObjFormat
@@ -2631,7 +2631,7 @@ impl SuePaint {
         if let Some(dir) = path.parent() {
             self.last_dir = Some(dir.to_path_buf());
         }
-        match std::fs::read(path) {
+        match sue_platform::fs::read(path) {
             Ok(bytes) => match self.open_bytes(cx, path, &bytes, as_layer) {
                 Ok(()) => {
                     if !as_layer {
@@ -2773,7 +2773,7 @@ impl SuePaint {
             || tr!("imported"),
             |stem| stem.to_string_lossy().into_owned(),
         );
-        let bytes = match std::fs::read(path) {
+        let bytes = match sue_platform::fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) => {
                 cx.fail(tr!("cannot-read", path = path.display(), error = error));
@@ -2901,8 +2901,8 @@ impl SuePaint {
         if let Some(folder) = crate::materials::location(cx).map(|folder| folder.join("tips"))
             && let Ok(png) = sue_io::encode_png_rgba(cw, ch, &cut)
         {
-            let _ = std::fs::create_dir_all(&folder)
-                .and_then(|()| std::fs::write(folder.join(format!("{name}.png")), png));
+            let _ = sue_platform::fs::create_dir_all(&folder)
+                .and_then(|()| sue_platform::fs::write(folder.join(format!("{name}.png")), png));
         }
         let id = crate::brush::register_shape(shape);
         let tip = crate::brush::Tip {
@@ -2950,8 +2950,8 @@ impl SuePaint {
             .map_or_else(std::env::temp_dir, |folder| folder.join("print"));
         let path = folder.join(format!("{}.pdf", name.replace(['/', '\\', ':'], "_")));
         let printed = crate::print::pdf(&self.print, &pages, dpi, &name).and_then(|bytes| {
-            std::fs::create_dir_all(&folder)
-                .and_then(|()| std::fs::write(&path, bytes))
+            sue_platform::fs::create_dir_all(&folder)
+                .and_then(|()| sue_platform::fs::write(&path, bytes))
                 .map_err(|error| error.to_string())?;
             sue_platform::open_document(&path).map_err(|error| error.to_string())
         });
@@ -2999,9 +2999,9 @@ impl SuePaint {
                 .get_by_id(picture)
                 .map_or_else(|_| tr!("picture"), |entity| entity.name().to_owned());
             let target = free_path(&dir.join(format!("{stem}-{name}.{extension}")));
-            match sue_io::encode_as(&flat, &extension, jpeg_quality(cx), jxl_effort(cx))
-                .and_then(|bytes| std::fs::write(&target, bytes).map_err(|error| error.to_string()))
-            {
+            match sue_io::encode_as(&flat, &extension, jpeg_quality(cx), jxl_effort(cx)).and_then(
+                |bytes| sue_platform::fs::write(&target, bytes).map_err(|error| error.to_string()),
+            ) {
                 Ok(()) => written += 1,
                 Err(error) => {
                     cx.fail(tr!("cannot-export-2", name = name, error = error));
@@ -3579,7 +3579,7 @@ impl SuePaint {
                     .and_then(|index| self.recent_files.get(index))
                     .cloned()
                 {
-                    if path.exists() {
+                    if sue_platform::fs::exists(&path) {
                         self.open_picked(cx, &path, false);
                     } else {
                         cx.fail(tr!("is-gone", path = path.display()));
@@ -5506,7 +5506,7 @@ fn export_dir(cx: &AppletContext<'_>) -> PathBuf {
 
 /// `path`, or `name (2).ext` and so on if it exists.
 fn free_path(path: &Path) -> PathBuf {
-    if !path.exists() {
+    if !sue_platform::fs::exists(path) {
         return path.to_path_buf();
     }
     let stem = path
@@ -5518,7 +5518,7 @@ fn free_path(path: &Path) -> PathBuf {
         .unwrap_or_default();
     (2..)
         .map(|n| path.with_file_name(format!("{stem} ({n}){ext}")))
-        .find(|candidate| !candidate.exists())
+        .find(|candidate| !sue_platform::fs::exists(candidate))
         .unwrap_or_else(|| path.to_path_buf())
 }
 
@@ -5671,7 +5671,7 @@ impl SueApplet for SuePaint {
             })
             .and_then(|entity| entity.meta(sue_io::meta::SOURCE))
             .map(PathBuf::from)
-            .filter(|path| path.is_file());
+            .filter(|path| sue_platform::fs::is_file(path));
         match file {
             Some(path) => vec![sue_wm::SueAction::new(
                 sue_wm::sue_menu::SEND_TO,
@@ -5754,7 +5754,7 @@ impl SueApplet for SuePaint {
             "subview" => self.add_reference(path, cx),
             "model3d" => self.import_3d(cx, path),
             "anim-audio" => self.import_audio(cx, path),
-            "colorset-import" => match std::fs::read_to_string(path) {
+            "colorset-import" => match sue_platform::fs::read_to_string(path) {
                 Ok(text) => {
                     let colors = crate::colorsets::import(&text);
                     if colors.is_empty() {

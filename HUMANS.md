@@ -743,8 +743,9 @@ engineers' map of how each idea fits is in `HUMANZ.md` §8.
 
 ## One app on every device
 
-Sue runs on **Windows, Linux, macOS, Android and iOS**. It is the same app with
-the same files and the same tools on each.
+Sue runs on **Windows, Linux, macOS, Android and iOS**, and you can **try it in
+your browser**. It is the same app with the same files and the same tools on
+each.
 
 Everywhere it is laid out the same way: the Sue button at the top left with
 the menus after it, the Hub or a studio or tool filling the page, and the
@@ -792,6 +793,36 @@ then Run anyway; or install it with Scoop (`scoop install
 https://github.com/MagiGun/sue/releases/latest/download/sue.json`), which
 does not warn. Opening and saving on Android and iOS go through the
 system's own picker, which needs no permission.
+
+**Trying Sue in your browser.** Open https://magigun.github.io/sue/try/ in a
+recent Chrome, Edge, Firefox or Safari: Sue downloads once (about 5 MB) and
+opens with nothing to install. It is the same Sue, with the Hub, Sue Paint,
+Sue Writer, the Image Viewer and the Converter.
+
+- **Opening** a file brings up the browser's own file chooser, or drop files
+  from your computer onto the page.
+- **Saving** asks where to save in Chrome and Edge, and later saves go to that
+  same file. Other browsers save a download each time.
+- **Settings and unsaved work** stay in the browser, for this site only, until
+  you clear its site data; the Hub offers to recover unsaved work after a
+  reload. Files you opened are not kept, so open them again.
+- **Typing** works from a keyboard. Input methods that compose text (such as
+  for Japanese or Chinese) do not reach Sue yet.
+
+What the browser version leaves out, because a web page cannot do it, or
+because it runs as plain files with no server behind it:
+
+- **Your installed fonts.** Text uses Sue's own fonts.
+- **Typing on phones and tablets.** The on-screen keyboard does not come up,
+  so use a computer to write.
+- **Work in the background.** The Converter and other long jobs make the page
+  wait until they finish.
+- **Show in Folder and opening other programs.**
+- **Files outside the browser.** Sue sees only the files you choose or drop;
+  your other files and folders stay private, and anything you do not save
+  or download stays only in the browser.
+- **Updates and packages.** The page is always the newest Sue from `main`;
+  reload to get it.
 
 ---
 

@@ -7,9 +7,13 @@
 //! also calls `request_repaint`), and when does egui want its next frame
 //! (a hover fade, a caret blink)? With neither, it blocks in
 //! [`ControlFlow::Wait`] and draws nothing until input arrives.
+//!
+//! In the browser the window is the page's canvas and the loop is the
+//! browser's own: the GPU and the page's saved files arrive later
+//! (nothing may block there), so the host is made once they come.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -19,6 +23,7 @@ use winit::window::{Icon, Window, WindowId};
 
 use crate::gpu::{GpuContext, GpuPreference, WindowSurface};
 use crate::paint::EguiPainter;
+use crate::time::Instant;
 use crate::{
     FormFactor, HardwareCapabilities, InputEvent, OsFamily, PlatformError, PlatformHost,
     PlatformPaths, SafeAreaInsets, SurfaceDescriptor, SurfaceId, SurfaceInfo,
@@ -106,6 +111,23 @@ fn system_attributes(
         // One name serves both: Wayland's app id and X11's WM_CLASS.
         attributes.with_name(options.app_id.clone(), options.app_id.clone())
     }
+}
+
+/// The browser draws Sue on the page's `<canvas id="sue">`, which the
+/// page sizes, or on a canvas of its own added to the page.
+#[cfg(target_arch = "wasm32")]
+fn web_attributes(attributes: winit::window::WindowAttributes) -> winit::window::WindowAttributes {
+    use wasm_bindgen::JsCast;
+    use winit::platform::web::WindowAttributesExtWebSys;
+    let canvas = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id("sue"))
+        .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok());
+    attributes
+        .with_append(canvas.is_none())
+        .with_canvas(canvas)
+        .with_prevent_default(true)
+        .with_focusable(true)
 }
 
 /// Elsewhere the system takes the icon from the app bundle or package.
@@ -286,15 +308,21 @@ impl DesktopHost {
         Ok(())
     }
 
-    fn create(
+    /// Opens the window (in the browser, takes the page's canvas).
+    fn open_window(
         event_loop: &ActiveEventLoop,
         options: &DesktopOptions,
-    ) -> Result<Self, PlatformError> {
+    ) -> Result<Arc<Window>, PlatformError> {
         let attributes = Window::default_attributes()
             .with_title(options.title.clone())
-            .with_inner_size(LogicalSize::new(options.width, options.height))
-            .with_min_inner_size(LogicalSize::new(360.0, 480.0))
             .with_window_icon(pixel_icon(options));
+        // The page sizes the canvas; a window sizes itself.
+        #[cfg(target_arch = "wasm32")]
+        let attributes = web_attributes(attributes);
+        #[cfg(not(target_arch = "wasm32"))]
+        let attributes = attributes
+            .with_inner_size(LogicalSize::new(options.width, options.height))
+            .with_min_inner_size(LogicalSize::new(360.0, 480.0));
         let window = Arc::new(
             event_loop
                 .create_window(system_attributes(attributes, options))
@@ -302,44 +330,33 @@ impl DesktopHost {
         );
         #[cfg(target_os = "windows")]
         resource_icons(&window);
-        // An Android window takes one graphics API: try Vulkan alone, then
-        // OpenGL ES alone, so a surface of one never blocks the other.
-        // Elsewhere every backend is offered at once.
-        let attempts: &[Option<wgpu::Backends>] = if cfg!(target_os = "android") {
-            &[Some(wgpu::Backends::VULKAN), Some(wgpu::Backends::GL)]
-        } else {
-            &[None]
-        };
-        let mut chosen = None;
-        let mut last_error = PlatformError::Gpu("no GPU can draw this window".to_owned());
-        for backends in attempts {
-            let mut descriptor = wgpu::InstanceDescriptor::new_with_display_handle_from_env(
-                Box::new(event_loop.owned_display_handle()),
-            );
-            if let Some(backends) = backends {
-                descriptor.backends = *backends;
-            }
-            let instance = wgpu::Instance::new(descriptor);
-            let surface = match instance.create_surface(Arc::clone(&window)) {
-                Ok(surface) => surface,
-                Err(error) => {
-                    last_error = PlatformError::Gpu(error.to_string());
-                    continue;
-                }
-            };
-            match pollster::block_on(GpuContext::with_instance(
-                instance,
-                Some(&surface),
-                options.gpu,
-            )) {
-                Ok(gpu) => {
-                    chosen = Some((gpu, surface));
-                    break;
-                }
-                Err(error) => last_error = error,
-            }
-        }
-        let (gpu, surface) = chosen.ok_or(last_error)?;
+        Ok(window)
+    }
+
+    /// Opens the window and its GPU, waiting for the GPU (not in the
+    /// browser, where nothing may wait).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn create(
+        event_loop: &ActiveEventLoop,
+        options: &DesktopOptions,
+    ) -> Result<Self, PlatformError> {
+        let window = Self::open_window(event_loop, options)?;
+        let (gpu, surface) = pollster::block_on(open_gpu(
+            Arc::clone(&window),
+            event_loop.owned_display_handle(),
+            options.gpu,
+        ))?;
+        Self::assemble(event_loop, window, gpu, surface, options)
+    }
+
+    /// The host for a window whose GPU is open.
+    fn assemble(
+        event_loop: &ActiveEventLoop,
+        window: Arc<Window>,
+        gpu: GpuContext,
+        surface: wgpu::Surface<'static>,
+        options: &DesktopOptions,
+    ) -> Result<Self, PlatformError> {
         let size = window.inner_size();
         let surface = WindowSurface::new(surface, &gpu, size.width, size.height)?;
         let painter = EguiPainter::new(&gpu, surface.format());
@@ -353,6 +370,14 @@ impl DesktopHost {
             window.theme(),
             Some(painter.max_texture_side()),
         );
+        // The browser's own copy, cut and paste events carry the clipboard
+        // (`crate::web::page`); the keys alone would paste only Sue's copies.
+        #[cfg(target_arch = "wasm32")]
+        let egui = {
+            let mut egui = egui;
+            egui.set_clipboard_shortcuts(false);
+            egui
+        };
 
         let os = OsFamily::current();
         let paths = PlatformPaths::detect()?;
@@ -362,11 +387,27 @@ impl DesktopHost {
             .map_or(HardwareCapabilities::DEFAULT_REFRESH_HZ, |millihertz| {
                 millihertz.div_ceil(1000)
             });
-        let capabilities = gpu.describe(HardwareCapabilities {
+        #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
+        let mut capabilities = gpu.describe(HardwareCapabilities {
             display_refresh_hz: refresh_hz,
             ..HardwareCapabilities::probe_portable()
         });
         let scale = window.scale_factor() as f32;
+        // Phones and tablets by their shorter side; computers are desktops.
+        // A browser is a phone or tablet when touch is how it is used.
+        let shorter_side = size.width.min(size.height) as f32 / scale;
+        let form_factor = FormFactor::classify(os, shorter_side);
+        #[cfg(target_arch = "wasm32")]
+        let form_factor = {
+            capabilities.touch = crate::web::page::touch_screen();
+            match (capabilities.touch, shorter_side) {
+                (false, _) => form_factor,
+                (true, side) if side >= FormFactor::TABLET_MIN_SMALLEST_SIDE_DP => {
+                    FormFactor::Tablet
+                }
+                (true, _) => FormFactor::Mobile,
+            }
+        };
         let info = SurfaceInfo {
             id: MAIN_SURFACE,
             title: options.title.clone(),
@@ -383,8 +424,7 @@ impl DesktopHost {
             egui,
             ctx,
             os,
-            // Phones and tablets by their shorter side; computers are desktops.
-            form_factor: FormFactor::classify(os, size.width.min(size.height) as f32 / scale),
+            form_factor,
             capabilities,
             paths,
             info,
@@ -429,7 +469,10 @@ impl DesktopHost {
 
     /// Builds, paints and presents one frame.
     fn frame<A: DesktopApp>(&mut self, app: &mut A) {
-        #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(unused_mut))]
+        #[cfg_attr(
+            not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")),
+            allow(unused_mut)
+        )]
         let mut raw = self.egui.take_egui_input(&self.window);
         #[cfg(target_os = "android")]
         if let Some(safe) = self.android_safe_rect() {
@@ -444,8 +487,28 @@ impl DesktopHost {
             self.info.safe_area.bottom = keyboard;
             screen.max.y = (screen.max.y - keyboard).max(screen.min.y);
         }
+        // The page's clipboard events, and files dropped on it (staged).
+        #[cfg(target_arch = "wasm32")]
+        {
+            let (events, dropped) = crate::web::page::take_input();
+            raw.events.extend(events);
+            raw.dropped_files
+                .extend(dropped.into_iter().map(crate::web::page::Staged::handle));
+        }
         let ctx = self.ctx.clone();
         let output = ctx.run_ui(raw, |ui| app.ui(ui, self));
+        #[cfg(target_arch = "wasm32")]
+        for command in &output.platform_output.commands {
+            match command {
+                egui::OutputCommand::CopyText(text) => {
+                    let _ = crate::web::page::copy_text(text);
+                }
+                egui::OutputCommand::OpenUrl(open) => {
+                    let _ = crate::web::page::open_url(&open.url);
+                }
+                _ => {}
+            }
+        }
         self.egui
             .handle_platform_output(&self.window, output.platform_output);
         let delay = output
@@ -555,7 +618,13 @@ impl PlatformHost for DesktopHost {
 ///
 /// # Errors
 /// Window, GPU or application start-up failures.
-pub fn run_desktop<A: DesktopApp>(app: A, options: DesktopOptions) -> Result<(), PlatformError> {
+///
+/// In the browser it returns at once: the page's own loop runs `app`, and
+/// a failure to start is shown on the page's loading screen.
+pub fn run_desktop<A: DesktopApp + 'static>(
+    app: A,
+    options: DesktopOptions,
+) -> Result<(), PlatformError> {
     #[cfg(target_os = "android")]
     let event_loop = {
         use winit::platform::android::EventLoopBuilderExtAndroid;
@@ -567,9 +636,16 @@ pub fn run_desktop<A: DesktopApp>(app: A, options: DesktopOptions) -> Result<(),
             .build()
             .map_err(|error| PlatformError::Window(error.to_string()))?
     };
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_arch = "wasm32")]
+    crate::web::page::catch_panics();
+    #[cfg(target_arch = "wasm32")]
+    let event_loop = EventLoop::<Wake>::with_user_event()
+        .build()
+        .map_err(|error| PlatformError::Window(error.to_string()))?;
+    #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
     let event_loop = EventLoop::new().map_err(|error| PlatformError::Window(error.to_string()))?;
     event_loop.set_control_flow(ControlFlow::Wait);
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let mut runner = Runner {
         app,
         options,
@@ -578,18 +654,92 @@ pub fn run_desktop<A: DesktopApp>(app: A, options: DesktopOptions) -> Result<(),
         last_frame: None,
         exiting: false,
         paused: false,
+        #[cfg(target_arch = "wasm32")]
+        proxy: event_loop.create_proxy(),
+        #[cfg(target_arch = "wasm32")]
+        opening: None,
     };
-    event_loop
-        .run_app(&mut runner)
-        .map_err(|error| PlatformError::Window(error.to_string()))?;
-    runner.error.map_or(Ok(()), Err)
+    #[cfg(target_arch = "wasm32")]
+    {
+        use winit::platform::web::EventLoopExtWebSys;
+        event_loop.spawn_app(runner);
+        Ok(())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        event_loop
+            .run_app(&mut runner)
+            .map_err(|error| PlatformError::Window(error.to_string()))?;
+        runner.error.map_or(Ok(()), Err)
+    }
 }
+
+/// Opens a GPU that draws into `window`. An Android window takes one
+/// graphics API: try Vulkan alone, then OpenGL ES alone, so a surface of
+/// one never blocks the other. A browser offers WebGPU where it works and
+/// WebGL2 otherwise (it decides before the canvas is touched, which takes
+/// one kind of drawing only). Elsewhere every backend is offered at once.
+async fn open_gpu(
+    window: Arc<Window>,
+    display: winit::event_loop::OwnedDisplayHandle,
+    preference: GpuPreference,
+) -> Result<(GpuContext, wgpu::Surface<'static>), PlatformError> {
+    let attempts: &[Option<wgpu::Backends>] = if cfg!(target_os = "android") {
+        &[Some(wgpu::Backends::VULKAN), Some(wgpu::Backends::GL)]
+    } else if cfg!(target_arch = "wasm32") {
+        &[Some(
+            wgpu::Backends::BROWSER_WEBGPU.union(wgpu::Backends::GL),
+        )]
+    } else {
+        &[None]
+    };
+    let mut last_error = PlatformError::Gpu("no GPU can draw this window".to_owned());
+    for backends in attempts {
+        let mut descriptor =
+            wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(display.clone()));
+        if let Some(backends) = backends {
+            descriptor.backends = *backends;
+        }
+        #[cfg(target_arch = "wasm32")]
+        let instance = wgpu::util::new_instance_with_webgpu_detection(descriptor).await;
+        #[cfg(not(target_arch = "wasm32"))]
+        let instance = wgpu::Instance::new(descriptor);
+        let surface = match instance.create_surface(Arc::clone(&window)) {
+            Ok(surface) => surface,
+            Err(error) => {
+                last_error = PlatformError::Gpu(error.to_string());
+                continue;
+            }
+        };
+        match GpuContext::with_instance(instance, Some(&surface), preference).await {
+            Ok(gpu) => return Ok((gpu, surface)),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
+}
+
+/// What the browser hands the loop once the page's files and the GPU
+/// are ready.
+#[cfg(target_arch = "wasm32")]
+enum Wake {
+    Ready(Result<(GpuContext, wgpu::Surface<'static>), PlatformError>),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type Wake = ();
 
 struct Runner<A> {
     app: A,
     options: DesktopOptions,
     host: Option<DesktopHost>,
     error: Option<PlatformError>,
+    /// Reaches the loop from the browser's start-up.
+    #[cfg(target_arch = "wasm32")]
+    proxy: winit::event_loop::EventLoopProxy<Wake>,
+    /// The canvas, while its GPU is being opened.
+    #[cfg(target_arch = "wasm32")]
+    opening: Option<Arc<Window>>,
     last_frame: Option<Instant>,
     exiting: bool,
     /// The system took the window away (Android in the background): nothing
@@ -642,6 +792,65 @@ fn plan_step(
 }
 
 impl<A: DesktopApp> Runner<A> {
+    /// Starts the application on a new host.
+    fn begin(&mut self, event_loop: &ActiveEventLoop, created: Result<DesktopHost, PlatformError>) {
+        match created {
+            Ok(mut host) => match self.app.start(&mut host) {
+                Ok(()) => {
+                    // On Windows the window is still hidden: draw its first
+                    // frame, then show it, whole and with nothing left to do
+                    // when the taskbar asks it for its icon.
+                    #[cfg(target_os = "windows")]
+                    {
+                        host.frame(&mut self.app);
+                        self.last_frame = Some(Instant::now());
+                        host.window.set_visible(true);
+                    }
+                    host.window.request_redraw();
+                    self.host = Some(host);
+                }
+                Err(reason) => {
+                    self.error = Some(PlatformError::App(reason));
+                    event_loop.exit();
+                }
+            },
+            Err(error) => {
+                self.error = Some(error);
+                event_loop.exit();
+            }
+        }
+    }
+
+    /// Takes the page's canvas, then reads the page's saved files and
+    /// opens its GPU, which the browser only does while Sue waits for it;
+    /// [`Wake::Ready`] brings them back to the loop.
+    #[cfg(target_arch = "wasm32")]
+    fn open_in_browser(&mut self, event_loop: &ActiveEventLoop) {
+        if self.opening.is_some() {
+            return;
+        }
+        let window = match DesktopHost::open_window(event_loop, &self.options) {
+            Ok(window) => window,
+            Err(error) => {
+                crate::web::page::failed(&error.to_string());
+                self.error = Some(error);
+                return;
+            }
+        };
+        self.opening = Some(Arc::clone(&window));
+        let proxy = self.proxy.clone();
+        let display = event_loop.owned_display_handle();
+        let preference = self.options.gpu;
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Err(why) = crate::web::store::load().await {
+                // Sue runs without them; nothing will survive a reload.
+                web_sys::console::warn_1(&format!("sue: no saved files: {why}").into());
+            }
+            let ready = open_gpu(window, display, preference).await;
+            let _ = proxy.send_event(Wake::Ready(ready));
+        });
+    }
+
     fn finish(&mut self, event_loop: &ActiveEventLoop) {
         if !self.exiting {
             self.exiting = true;
@@ -653,7 +862,24 @@ impl<A: DesktopApp> Runner<A> {
     }
 }
 
-impl<A: DesktopApp> ApplicationHandler for Runner<A> {
+/// Wires the page to the window: its clipboard, dropped files and picker
+/// answers draw a frame, and the loading screen goes.
+#[cfg(target_arch = "wasm32")]
+fn connect_page(host: &DesktopHost) {
+    use winit::platform::web::WindowExtWebSys;
+    let wake = Arc::clone(&host.window);
+    let through = Arc::clone(&host.window);
+    crate::web::page::connect(
+        move || wake.request_redraw(),
+        move |pass| through.set_prevent_default(!pass),
+    );
+    if let Some(canvas) = host.window.canvas() {
+        let _ = canvas.focus();
+    }
+    crate::web::page::started();
+}
+
+impl<A: DesktopApp> ApplicationHandler<Wake> for Runner<A> {
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: StartCause) {}
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
@@ -734,30 +960,28 @@ impl<A: DesktopApp> ApplicationHandler for Runner<A> {
             return;
         }
         self.paused = false;
-        match DesktopHost::create(event_loop, &self.options) {
-            Ok(mut host) => match self.app.start(&mut host) {
-                Ok(()) => {
-                    // On Windows the window is still hidden: draw its first
-                    // frame, then show it, whole and with nothing left to do
-                    // when the taskbar asks it for its icon.
-                    #[cfg(target_os = "windows")]
-                    {
-                        host.frame(&mut self.app);
-                        self.last_frame = Some(Instant::now());
-                        host.window.set_visible(true);
-                    }
-                    host.window.request_redraw();
-                    self.host = Some(host);
-                }
-                Err(reason) => {
-                    self.error = Some(PlatformError::App(reason));
-                    event_loop.exit();
-                }
-            },
-            Err(error) => {
-                self.error = Some(error);
-                event_loop.exit();
-            }
+        #[cfg(target_arch = "wasm32")]
+        self.open_in_browser(event_loop);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.begin(event_loop, DesktopHost::create(event_loop, &self.options));
+    }
+
+    /// The browser's start-up is done: the page's files are read and the
+    /// GPU is open (or failed).
+    #[cfg(target_arch = "wasm32")]
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Wake) {
+        let Wake::Ready(ready) = event;
+        let Some(window) = self.opening.take() else {
+            return;
+        };
+        let created = ready.and_then(|(gpu, surface)| {
+            DesktopHost::assemble(event_loop, window, gpu, surface, &self.options)
+        });
+        self.begin(event_loop, created);
+        match (&self.host, &self.error) {
+            (Some(host), _) => connect_page(host),
+            (None, Some(error)) => crate::web::page::failed(&error.to_string()),
+            (None, None) => {}
         }
     }
 

@@ -26,7 +26,7 @@ pub mod android;
 mod audio;
 mod desktop;
 mod device;
-mod fs;
+pub mod fs;
 mod gpu;
 mod host;
 mod input;
@@ -44,6 +44,17 @@ mod paths;
     )
 )]
 mod picks;
+pub mod time;
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(
+        dead_code,
+        reason = "only the browser keeps its files in memory; the tests run it everywhere"
+    )
+)]
+mod vfs;
+#[cfg(target_arch = "wasm32")]
+pub mod web;
 
 pub use audio::{
     AudioConfig, AudioOutput, AudioSink, AudioStreamInfo, NullAudio, RealtimeStatus,
@@ -73,5 +84,42 @@ pub use os::{
 };
 pub use paint::{EguiPainter, NoTextures, TextureUpload};
 pub use paths::{PlatformPaths, font_dirs, system_font_dirs};
+/// Random bits for seeding entity ids (`sue_core::seed_entity_ids`): the
+/// page's own randomness in the browser, where std has none; elsewhere
+/// std's hasher keys, which the system fills.
+#[must_use]
+pub fn random_seed() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web::random_seed()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::hash::{BuildHasher, Hasher};
+        let mut hasher = std::hash::RandomState::new().build_hasher();
+        hasher.write_u32(std::process::id());
+        hasher.finish()
+    }
+}
+
+/// This run's process id; in the browser, which has none, a number
+/// drawn once per page so two tabs still tell their work apart.
+#[must_use]
+pub fn process_id() -> u32 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        static ID: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+        *ID.get_or_init(|| (web::random_seed() >> 32) as u32)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::process::id()
+    }
+}
+
+/// `false` where Sue cannot start threads of its own (the browser, as a
+/// static page without wasm threads): work meant for a worker runs where
+/// it is asked for.
+pub const THREADS: bool = !cfg!(target_arch = "wasm32");
 /// The `wgpu` version Sue renders with, re-exported so renderers match it.
 pub use wgpu;

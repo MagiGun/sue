@@ -4,11 +4,12 @@
 //! frame time), and paints each scene with the GPU into a PNG.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use egui::{Pos2, Rect, vec2};
 use sue_core::{PCMFloat1D, PixelFormat, RasterTile2D};
 use sue_io::{JxlPipeline, NativeJxlPipeline, encode_png, encode_png_rgba, encode_wav};
+use sue_platform::time::Instant;
 use sue_platform::{
     EguiPainter, FormFactor, FramePacing, GpuContext, HardwareCapabilities, HeadlessHost, OsFamily,
     PlatformPaths, wgpu,

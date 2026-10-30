@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Sue, the Singular Unified Engine, in your browser.">
+  <title>Sue</title>
+  <link rel="icon" type="image/png" href="icon.png">
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      color: #fff;
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    /* Sue draws the whole page; the canvas follows the window. */
+    #sue {
+      display: block;
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      outline: none;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #loading {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      padding: 24px;
+      background: #000;
+      text-align: center;
+    }
+    #loading img {
+      width: 96px;
+      height: 96px;
+      border-radius: 22px;
+    }
+    #loading p {
+      margin: 0;
+      max-width: 34em;
+    }
+    #loading .bar {
+      width: 160px;
+      height: 2px;
+      overflow: hidden;
+      background: #333;
+    }
+    #loading .bar::after {
+      content: "";
+      display: block;
+      width: 40%;
+      height: 100%;
+      background: #fff;
+      animation: slide 1.2s ease-in-out infinite;
+    }
+    #loading.failed .bar {
+      display: none;
+    }
+    #loading a {
+      color: #fff;
+    }
+    @keyframes slide {
+      from { transform: translateX(-100%); }
+      to { transform: translateX(250%); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #loading .bar::after { animation: none; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="sue" tabindex="0" aria-label="Sue"></canvas>
+  <div id="loading">
+    <img src="icon.png" alt="">
+    <p id="loading-message">Loading Sue</p>
+    <div class="bar"></div>
+    <noscript><p>Sue needs JavaScript to run in the browser.</p></noscript>
+  </div>
+  <script type="module">
+    const screen = document.getElementById("loading");
+    const message = document.getElementById("loading-message");
+    function fail(text) {
+      screen.className = "failed";
+      message.textContent = text;
+      const more = document.createElement("p");
+      more.innerHTML = 'You can <a href="../">download Sue</a> for your computer, phone or tablet instead.';
+      screen.appendChild(more);
+    }
+    // Sue draws with WebGPU, or WebGL2 where WebGPU is missing.
+    const webgpu = "gpu" in navigator;
+    const webgl2 = !!document.createElement("canvas").getContext("webgl2");
+    if (!webgpu && !webgl2) {
+      fail("This browser can draw with neither WebGPU nor WebGL2, which Sue needs. A recent Chrome, Edge, Firefox or Safari has them; check that hardware acceleration is on.");
+    } else {
+      try {
+        const sue = await import("./sue.js");
+        await sue.default({ module_or_path: new URL("sue_bg.wasm", import.meta.url) });
+      } catch (error) {
+        console.error(error);
+        if (!screen.classList.contains("failed")) {
+          fail("Sue could not start in this browser: " + error);
+        }
+      }
+    }
+  </script>
+</body>
+</html>

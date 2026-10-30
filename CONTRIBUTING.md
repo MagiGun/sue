@@ -135,6 +135,7 @@ draft creates the tag.
 | FreeBSD | `packaging/freebsd/build.sh` (on FreeBSD, with `pkgconf` and `alsa-lib`) | a tarball for `/usr/local` |
 | iPhone and iPad | `packaging/ios/build.sh` (on a Mac with Xcode) | an unsigned `.ipa` and a simulator build |
 | Android phones and tablets | `python packaging/android/build_apk.py --release` | one APK for arm64, armv7 and x86_64 |
+| The browser | `packaging/web/build.sh` (needs the `wasm32-unknown-unknown` target, `wasm-bindgen-cli` of the version in `Cargo.lock`, and `wasm-opt` from binaryen to make it smaller) | `dist/web/`, static files for any web host; the Web workflow publishes it into `try/` on `gh-pages` on every push to `main` |
 
 Windows calls unsigned programs "Unknown publisher" and warns before
 running them. `build.ps1` signs every program and installer it makes when

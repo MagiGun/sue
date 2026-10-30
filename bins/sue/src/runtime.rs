@@ -17,11 +17,12 @@
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use egui::{Align2, Id, Order, RichText, Sense};
 use sue_core::{SueFile, UndoStack};
 use sue_io::{IngestOptions, NativeJxlPipeline, ingest_bytes, meta};
+use sue_platform::time::Instant;
 use sue_platform::{
     AudioConfig, AudioOutput, AudioSink, FramePacing, PickNews, Picking, TextureUpload,
     write_atomic,
@@ -264,12 +265,13 @@ impl Runtime {
             return self;
         }
         let dir = self.engine.paths.data_dir.join("work");
-        let first = !dir.join("recent.txt").exists();
+        let first = !sue_platform::fs::exists(dir.join("recent.txt"));
         self.work = WorkList::open(dir);
         // Sue Paint kept its own recent files before Sue did.
         if first
-            && let Ok(text) =
-                std::fs::read_to_string(self.engine.paths.data_dir.join("paint").join("recent.txt"))
+            && let Ok(text) = sue_platform::fs::read_to_string(
+                self.engine.paths.data_dir.join("paint").join("recent.txt"),
+            )
         {
             let paint = AppletId::new(sue_paint::ID).ok();
             let now = unix_now();
@@ -740,7 +742,7 @@ impl Runtime {
             self.shell.notify(tr!("that-unsaved-work-is-gone"), true);
             return;
         };
-        let file = std::fs::read(&kept.file)
+        let file = sue_platform::fs::read(&kept.file)
             .map_err(|error| error.to_string())
             .and_then(|bytes| SueFile::from_bytes(&bytes).map_err(|error| error.to_string()));
         let file = match file {
@@ -1230,14 +1232,14 @@ impl Runtime {
         let limit = u64::try_from(limit_mib)
             .unwrap_or(u64::MAX)
             .saturating_mul(1024 * 1024);
-        let bytes = match std::fs::metadata(path) {
+        let bytes = match sue_platform::fs::metadata(path) {
             Ok(metadata) if metadata.is_dir() => Err(tr!("it-is-a-folder")),
             Ok(metadata) if metadata.len() > limit => Err(tr!(
                 "over-mib-limit-io-max-ingest",
                 value = human_bytes(metadata.len()),
                 limit_mib = limit_mib
             )),
-            Ok(_) => std::fs::read(path).map_err(|error| error.to_string()),
+            Ok(_) => sue_platform::fs::read(path).map_err(|error| error.to_string()),
             Err(error) => Err(error.to_string()),
         };
         let bytes = match bytes {
@@ -1282,6 +1284,7 @@ impl Runtime {
             &NativeJxlPipeline,
             IngestOptions {
                 byte_map_width: width,
+                clock: sue_platform::time::since_start,
             },
         ) {
             Ok(ingested) => ingested,
@@ -1358,7 +1361,7 @@ impl Runtime {
     /// Re-reads the rice file and applies what differs as one undoable step.
     fn reload_rice(&mut self) {
         let path = self.engine.rice_path();
-        let text = match std::fs::read_to_string(&path) {
+        let text = match sue_platform::fs::read_to_string(&path) {
             Ok(text) => text,
             Err(error) => {
                 self.shell.notify(

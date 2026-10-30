@@ -50,7 +50,7 @@ pub use error::CoreError;
 pub use file::{Chunk, SueFile};
 pub use format::{Bundle, FormatError, FormatHandler, FormatInfo, FormatRegistry, InsertBundle};
 pub use handle::AssetHandle;
-pub use id::EntityId;
+pub use id::{EntityId, seed_entity_ids};
 pub use jobs::{JobContext, JobError, JobHandle, JobPool};
 pub use operator::{FnOperator, Operator, OperatorRegistry, Plan, Preset, PresetLibrary};
 pub use projection::{Projection, ProjectionMask};

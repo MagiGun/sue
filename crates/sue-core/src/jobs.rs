@@ -132,10 +132,8 @@ pub struct JobPool {
 }
 
 impl JobPool {
-    /// A pool with `threads` workers (at least one).
-    ///
-    /// # Panics
-    /// If the operating system refuses to start a thread.
+    /// A pool with `threads` workers (at least one). Where no thread can
+    /// start (a browser), it is [`Self::inline`] instead.
     #[must_use]
     pub fn new(threads: usize) -> Self {
         let (sender, receiver) = mpsc::channel::<Work>();
@@ -158,12 +156,24 @@ impl JobPool {
                             }
                         }
                     })
-                    .expect("failed to start a job thread")
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>();
+        let Ok(workers) = workers else {
+            return Self::inline();
+        };
         Self {
             sender: Some(sender),
             workers,
+        }
+    }
+
+    /// A pool without threads: each job runs at once on the thread that
+    /// spawns it, and its handle is finished when `spawn` returns.
+    #[must_use]
+    pub fn inline() -> Self {
+        Self {
+            sender: None,
+            workers: Vec::new(),
         }
     }
 
@@ -216,8 +226,12 @@ impl JobPool {
             // The handle may have been dropped; the result is then unwanted.
             let _ = reply.send(outcome);
         });
-        if let Some(sender) = &self.sender {
-            let _ = sender.send(run);
+        match &self.sender {
+            Some(sender) => {
+                let _ = sender.send(run);
+            }
+            None if self.workers.is_empty() => run(),
+            None => {}
         }
         JobHandle {
             label: label.into(),
@@ -267,6 +281,21 @@ mod tests {
         };
         assert_eq!(value, Ok(7));
         assert_eq!(data.holders(), 1, "the job released its handle");
+    }
+
+    #[test]
+    fn an_inline_pool_runs_each_job_as_it_is_spawned() {
+        let pool = JobPool::inline();
+        assert_eq!(pool.threads(), 0);
+        let mut job = pool.spawn("sum", |context| {
+            context.set_progress(0.5);
+            Ok(2 + 2)
+        });
+        assert!(job.is_finished());
+        assert!((job.progress() - 1.0).abs() < f32::EPSILON);
+        assert_eq!(job.wait(), Ok(4));
+        let failed = pool.spawn::<(), _>("fail", |_| Err("no".to_owned()));
+        assert_eq!(failed.wait(), Err(JobError::Failed("no".to_owned())));
     }
 
     #[test]

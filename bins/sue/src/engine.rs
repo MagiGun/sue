@@ -766,7 +766,7 @@ impl Engine {
 /// file is migrated in place (keeping a backup), and an unreadable file is
 /// set aside.
 fn load_rice(path: &Path) -> Result<(RiceSchema, RiceSource), String> {
-    let text = match std::fs::read_to_string(path) {
+    let text = match sue_platform::fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             let schema =
@@ -804,7 +804,7 @@ fn load_rice(path: &Path) -> Result<(RiceSchema, RiceSource), String> {
 fn recover(path: &Path, text: &str, error: &str) -> Result<(RiceSchema, RiceSource), String> {
     let backup = path.with_extension("suerice.broken");
     write_atomic(&backup, text.as_bytes())
-        .and_then(|()| std::fs::remove_file(path))
+        .and_then(|()| sue_platform::fs::remove_file(path))
         .map_err(|io| format!("rice: {error}, and the file cannot be set aside: {io}"))?;
     let schema = RiceSchema::parse(DEFAULT_RICE).map_err(|error| format!("rice: {error}"))?;
     Ok((

@@ -1,7 +1,6 @@
 //! The live GPU window: the runtime driven by the native desktop host.
 
-use std::time::Instant;
-
+use sue_platform::time::Instant;
 use sue_platform::{
     DesktopApp, DesktopHost, DesktopOptions, FramePacing, GpuPreference, PlatformHost,
     PlatformPaths, audio_output_devices, run_desktop, write_atomic,
@@ -22,7 +21,7 @@ struct DesktopShell {
 impl DesktopApp for DesktopShell {
     fn start(&mut self, host: &mut DesktopHost) -> Result<(), String> {
         let rice_path = host.paths().rice_dir().join(RICE_FILE);
-        if !rice_path.exists() {
+        if !sue_platform::fs::exists(&rice_path) {
             // Seed the live rice file with the shipped defaults, byte for byte.
             write_atomic(&rice_path, DEFAULT_RICE.as_bytes())
                 .map_err(|error| format!("cannot create {}: {error}", rice_path.display()))?;
@@ -90,6 +89,7 @@ impl DesktopApp for DesktopShell {
 /// # Errors
 /// Window, GPU or boot failures.
 pub fn run() -> Result<(), String> {
+    sue_core::seed_entity_ids(sue_platform::random_seed());
     run_desktop(
         DesktopShell::default(),
         DesktopOptions {
@@ -110,7 +110,7 @@ pub fn run() -> Result<(), String> {
 fn gpu_preference() -> GpuPreference {
     PlatformPaths::detect()
         .ok()
-        .and_then(|paths| std::fs::read_to_string(paths.rice_dir().join(RICE_FILE)).ok())
+        .and_then(|paths| sue_platform::fs::read_to_string(paths.rice_dir().join(RICE_FILE)).ok())
         .and_then(|text| RiceSchema::parse(&text).ok())
         .and_then(|rice| {
             rice.get_str("display.gpu_preference")

@@ -628,7 +628,7 @@ impl SueWriter {
             || tr!("imported"),
             |stem| stem.to_string_lossy().into_owned(),
         );
-        let bytes = match std::fs::read(path) {
+        let bytes = match sue_platform::fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) => {
                 cx.fail(tr!("could-not-read", path = path.display(), error = error));
@@ -734,7 +734,7 @@ impl SueWriter {
         };
         let look = self.look(cx);
         match compile::compile(cx.arena(), &options, &look) {
-            Ok(bytes) => match std::fs::write(path, &bytes) {
+            Ok(bytes) => match sue_platform::fs::write(path, &bytes) {
                 Ok(()) => {
                     let name =
                         compile::format_name(FORMATS[choices.format.min(FORMATS.len() - 1)].0);
@@ -2217,7 +2217,7 @@ impl SueApplet for SueWriter {
             }
             "picture" => {
                 // Read the picture into the arena, then into the text.
-                match std::fs::read(path) {
+                match sue_platform::fs::read(path) {
                     Ok(bytes) => {
                         let name = path.file_name().map_or_else(
                             || tr!("picture"),

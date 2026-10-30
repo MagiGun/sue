@@ -45,7 +45,7 @@ sue-io        ──► sue-model, sue-core                 + jxl-oxide, zune-jp
 sue-model     ──► sue-core
 sue-pkg       ──► sha2, ed25519-dalek, semver         (no engine crates)
 sue-core      ──► nothing                              (leaf)
-sue-platform  ──► winit, wgpu, egui, egui-winit, egui-wgpu, arboard, pollster, cpal, audio_thread_priority, rfd, open, sys-locale   (no engine crates)
+sue-platform  ──► winit, wgpu, egui, egui-winit, egui-wgpu, arboard, pollster, cpal, audio_thread_priority, rfd, open, sys-locale; in the browser wasm-bindgen, web-sys, js-sys, web-time   (no engine crates)
 ```
 
 The graph is acyclic by construction. `sue-core` and `sue-platform` are leaves
@@ -54,8 +54,9 @@ system, and the OS layer never depends on the data model. `winit` (windows and
 OS input), `cpal` (audio devices), `rfd` (native dialogs on desktops), `jni`
 (Android's file pickers, in Java), `objc2-ui-kit` (iOS's, in `sue-ios`) and
 `open` (the system browser and file manager), `arboard` (the clipboard),
-`egui-winit` (OS input for egui) and `egui-wgpu` (egui's painter) are used only
-by `sue-platform`. `egui` itself is a portable, immediate-mode widget library with
+`egui-winit` (OS input for egui), `egui-wgpu` (egui's painter) and, in the
+browser, `wasm-bindgen`, `web-sys`, `js-sys` and `web-time` are used only by
+`sue-platform`. `egui` itself is a portable, immediate-mode widget library with
 no OS bindings: `sue-wm` builds the whole shell with it, and the platform host
 paints what it produces. `unsafe` code is forbidden workspace-wide
 (`[workspace.lints] rust.unsafe_code = "forbid"`). The `wgpu` window surface is
@@ -488,7 +489,8 @@ cancellation; a panic inside a job becomes `JobError::Panicked` instead of
 taking Sue down. Jobs read data through `Shared<T>` handles (reference counted,
 copy-on-write: a write copies only while someone else still holds the buffer),
 and hand back a result that the interface applies as a transaction, so undo
-covers background work too.
+covers background work too. Where no thread can start (the browser), `JobPool::new` gives
+`JobPool::inline`, which runs each job on the spot as it is spawned.
 
 ### 1.13 Shared data models (`sue-model`)
 
@@ -654,7 +656,7 @@ the `PlatformHost` trait and the portable services next to it:
 
 | `PlatformHost` method | Abstracts |
 | --- | --- |
-| `os`, `form_factor` | `OsFamily::{Windows, Linux, MacOs, Android, Ios, Other}`, `FormFactor` |
+| `os`, `form_factor` | `OsFamily::{Windows, Linux, MacOs, Android, Ios, Web, Other}`, `FormFactor` |
 | `capabilities` | `HardwareCapabilities`: logical cores, refresh rate, graphics API, GPU tier and vendor, memory, power source, touch, stylus |
 | `paths` | `PlatformPaths`: config, data, cache and home folders, plus derived `rice_dir`, `packages_dir`, `models_dir` |
 | `create_surface`, `resize_surface`, `destroy_surface`, `surface` | Window / swap-chain surfaces with logical size, scale factor and safe-area insets |
@@ -663,8 +665,11 @@ the `PlatformHost` trait and the portable services next to it:
 | Service | What it does |
 | --- | --- |
 | `AudioOutput` / `AudioSink` | A `cpal` output stream fed from a lock-free ring (§3.5); `NullAudio` is a device-free clock for tests |
+| `fs::{read, read_to_string, write, metadata, exists, is_file, is_dir, create_dir_all, remove_file, remove_dir_all, rename}` | The file calls everything above the platform makes: std's own on computers, phones and tablets; the page's files in the browser (below) |
+| `time::{Instant, SystemTime, UNIX_EPOCH, since_start}` | The clock everything above the platform reads: std's, except in the browser, where std's panics and `web-time` reads the page's clock; `since_start` is a plain function for code below the platform that times its work (ingest) |
+| `random_seed`, `THREADS` | Random bits for `sue_core::seed_entity_ids` (the browser gives std's hasher no randomness), and whether Sue may start threads (not in the browser: work meant for a worker runs where it is asked for, such as the Converter's) |
 | `list_dir`, `hidden_by_os`, `write_atomic` | Sorted folder listings (the Converter adds a whole folder), without dot files or, on Windows, the legacy junctions (`NetHood`, `PrintHood`, `Cookies`, `SendTo`, `Recent`, `Start Menu`, `Templates`, `Application Data`, `Local Settings`, `My Documents`); crash-safe writes (temporary file, sync, rename) |
-| `copy_text` | The system clipboard (`arboard`) for buttons such as Copy All; text fields copy and paste through `egui-winit` |
+| `copy_text` | The system clipboard (`arboard`; the browser's in the browser) for buttons such as Copy All; text fields copy and paste through `egui-winit` |
 | `EguiPainter`, `TextureUpload` | Paints egui frames with `egui-wgpu` into the window or an offscreen texture; uploads image pixels the caller borrows from the arena straight into GPU textures (rule 5) |
 | `open_url`, `reveal_folder` | The system browser (only `http` and `https`, validated by `web_url`) and file manager |
 | `pick_open_file`, `pick_save_file`, `pick_folder` | The system's own open, save and folder dialogs: every file Sue asks for goes through them. Each answers a `Picking`: `Chosen(path)`, `Cancelled`, `Failed(why)`, or `Waiting` on phones and tablets (below) |
@@ -681,6 +686,7 @@ so it can be tested without touching the real environment:
 | macOS | `~/Library/Application Support/Sue` | same | `~/Library/Caches/Sue` |
 | Linux / other | `$XDG_CONFIG_HOME/sue` or `~/.config/sue` | `$XDG_DATA_HOME/sue` or `~/.local/share/sue` | `$XDG_CACHE_HOME/sue` or `~/.cache/sue` |
 | Android / iOS | `<sandbox>/config` | `<sandbox>/data` | `<sandbox>/cache` |
+| Web | `/sue/config` | `/sue/data` | `/sue/cache` |
 
 Relative `XDG_*` values are ignored, as the XDG Base Directory specification
 requires. On mobile, the sandbox root comes from the native runtime (for example
@@ -838,6 +844,69 @@ stand-in:
 | Open | `ACTION_OPEN_DOCUMENT` (MIME types from the extensions, any file when one is unknown); the copy's writes go back to the document | `initForOpeningContentTypes:asCopy:` with `UTType`s from the extensions; the copy is Sue's own |
 | Save | `ACTION_CREATE_DOCUMENT` asks first; every write to the staged path (`Ctrl+S` too) goes to the document (`"wt"`, else `"w"`) | The staged path is the answer at once; once written, `initForExportingURLs:asCopy:` asks where it goes, each time |
 | Folder | `ACTION_OPEN_DOCUMENT_TREE`; the tree's top-level files are copied in first on a worker thread (`listIn`, at most 500, hidden ones left out) and each written back to its own document; each new file written in the staged folder becomes a document in the tree (`createDocument`), then is updated in place | The folder's own path, with security-scoped access started |
+
+**The browser.** `sue-platform` also builds for `wasm32-unknown-unknown`,
+with the desktop-only crates left out by target and everything that
+touches the browser in `src/web/` (`page.rs`, `store.rs`) and behind
+`cfg(target_arch = "wasm32")` in the host. It needs only static files
+(`packaging/web`): no server and no wasm threads, which would need the COOP
+and COEP headers that static hosts such as GitHub Pages cannot send. The
+host:
+
+- draws on the page's `<canvas id="sue">`, which the page sizes to the
+  window, through winit's web event loop (`EventLoopExtWebSys::spawn_app`,
+  so `run_desktop` returns at once);
+- opens the GPU without blocking, which the browser forbids: the window
+  opens in `resumed`, an async task reads the page's saved files and opens
+  WebGPU where the browser has it (`wgpu::util::new_instance_with_webgpu_detection`
+  decides before the canvas is touched, since a canvas takes one kind of
+  drawing) and WebGL2 otherwise, and a winit user event (`Wake::Ready`)
+  brings the GPU back to the loop, which then makes the host and starts the
+  application; a failure, or a panic later, shows on the page's loading
+  screen;
+- keeps files in a `Vfs` (`src/vfs.rs`, plain Rust and tested everywhere),
+  an in-memory tree of files and folders under `/sue`, which `fs::*`,
+  `list_dir` and `write_atomic` reach; whatever is written under
+  `/sue/config`, `/sue/data` and `/sue/documents` (settings, autosaves,
+  documents) is put into IndexedDB (database `sue`, store `files`, keyed by
+  path) as it is written and read back before Sue starts, so it survives a
+  reload; caches and staged files stay in memory;
+- picks files like a phone: `pick_open_file` and `pick_folder` click a
+  hidden `<input type=file>` (`webkitdirectory` for folders; its `cancel`
+  event answers `Cancelled`) and answer `Waiting`; the chosen file's bytes
+  are staged under `/sue/picked/<n>/<name>`, and that path is the answer;
+  `pick_save_file` uses the File System Access API's `showSaveFilePicker`
+  where the browser has it (Chrome and Edge) and answers with a staged path
+  once it closes, else answers a staged path at once; `deliver_picked_files`
+  hands every staged file Sue wrote since the last call back, into the
+  chosen file (`createWritable`) or as a download (a `Blob` and an
+  `<a download>`), so an opened file saved again downloads too;
+- turns files dropped on the page (the page's `drop` event, which winit's
+  web backend does not report) into staged files egui gets as
+  `dropped_files`, so the shell opens them as it opens dropped files on a
+  desktop;
+- carries the clipboard through the browser's own `copy`, `cut` and `paste`
+  events (egui-winit's clipboard shortcuts are off): winit keeps every key
+  from the browser, so a capture listener lets Ctrl or Cmd with C, X or V
+  through for that one key, and `CopyText` output goes to
+  `navigator.clipboard.writeText`;
+- plays sound through `cpal`'s Web Audio host, on the browser's own audio
+  thread; seeds entity ids from the page (`random_seed`); runs background
+  work where it is asked for (`THREADS` is `false`), and the font scan
+  finds nothing, so text uses the bundled Sue Sans and Sue Mono;
+- counts as a tablet or phone (by the shorter side) when touch is how the
+  page is used (touch points and no fine pointer), else as a desktop;
+  `OsFamily::Web`, and `GraphicsApi::WebGpu` or `Gles` (WebGL2).
+
+`packaging/web/build.sh` builds the `web` profile (`opt-level = "s"`, fat
+LTO, one codegen unit), runs `wasm-bindgen --target web` (of the version in
+`Cargo.lock`) and `wasm-opt -Os`, and writes `dist/web/`: `index.html`
+(the canvas, a loading screen, and a message when the browser has neither
+WebGPU nor WebGL2), `sue.js`, `sue_bg.wasm` and `icon.png`, every path
+relative. The Web workflow (`.github/workflows/web.yml`) builds it on every
+push to `main` and commits it into the `try/` folder of the `gh-pages`
+branch, leaving the rest of the site alone; CI checks and lints the wasm
+build on every push and pull request.
 
 **Packages.** `packaging/` has a script per system: for Windows a portable
 zip, an `.msi` (WiX, with Sue's icon on its pages and its Start menu

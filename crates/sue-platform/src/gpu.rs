@@ -250,7 +250,10 @@ pub fn describe_adapter(
         wgpu::Backend::Vulkan => GraphicsApi::Vulkan,
         wgpu::Backend::Dx12 => GraphicsApi::Dx12,
         wgpu::Backend::Metal => GraphicsApi::Metal,
+        // In the browser, wgpu's GL is WebGL2, which is OpenGL ES 3.
+        wgpu::Backend::Gl if cfg!(target_arch = "wasm32") => GraphicsApi::Gles,
         wgpu::Backend::Gl => GraphicsApi::OpenGl,
+        wgpu::Backend::BrowserWebGpu => GraphicsApi::WebGpu,
         _ => GraphicsApi::None,
     };
     let gpu_vendor = match info.vendor {
@@ -270,7 +273,7 @@ pub fn describe_adapter(
         wgpu::DeviceType::Other => GpuTier::Unknown,
     };
     // A GL-only driver is treated as legacy hardware, however fast the chip.
-    let gpu_tier = if graphics_api == GraphicsApi::OpenGl {
+    let gpu_tier = if matches!(graphics_api, GraphicsApi::OpenGl | GraphicsApi::Gles) {
         tier.min(GpuTier::Legacy)
     } else {
         tier

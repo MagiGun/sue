@@ -1801,7 +1801,7 @@ impl SuePaint {
         if let Some(material) = delete
             && let crate::materials::Source::File(path) = &material.source
         {
-            match std::fs::remove_file(path) {
+            match sue_platform::fs::remove_file(path) {
                 Ok(()) => cx.notify(tr!("is-no-longer-a-material", name = material.name)),
                 Err(error) => cx.fail(tr!("cannot-delete-the-material", error = error)),
             }
