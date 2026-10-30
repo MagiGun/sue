@@ -247,6 +247,7 @@ pub fn menus() -> Vec<Menu> {
                 act(&tr!("paste-to-shown-position"), "edit.paste_here"),
                 act(&tr!("delete"), "edit.clear").key("Del"),
                 act(&tr!("delete-outside-selection"), "edit.clear_outside").key("Shift+Del"),
+                act(&tr!("smart-smoothing-ellipsis"), "edit.smart_smoothing"),
                 act(&tr!("fill"), "edit.fill").key("Alt+Del"),
                 act(&tr!("convert-to-drawing-color"), "edit.recolor"),
                 act(&tr!("outline-selection-ellipsis"), "edit.outline_selection"),

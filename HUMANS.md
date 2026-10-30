@@ -506,6 +506,10 @@ Once a canvas is open:
   click one, set its strength and see it on the canvas. Apply to all
   works on a merged layer of everything shown, so the layers stay as
   they were.
+- **Smart Smoothing:** Edit, Smart Smoothing smooths jagged, pixelated
+  line art (a small scan, or lines drawn without anti-aliasing) while
+  keeping each line as thick and as dark as it was. Works on a layer of
+  lines on clear, or ink on white.
 - **Align a layer:** Edit, Align/Distribute lines the layer's drawing up
   with the canvas's left, right, top or bottom edge, or its middle.
 - **Arrange the palettes your way:** drag the edge of a column to make it

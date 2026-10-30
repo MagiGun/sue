@@ -2066,3 +2066,6 @@ quick-vignette = Vignette
 quick-poster = Poster
 quick-watercolor = Watercolor
 quick-emboss = Emboss
+smart-smoothing = Smart Smoothing
+smart-smoothing-ellipsis = Smart Smoothing...
+smoothness = Smoothness

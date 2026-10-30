@@ -13,6 +13,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Edit, Smart Smoothing, as in Clip Studio Paint: jagged, stair-stepped
+  line art becomes smooth, with lines kept as thick and as dark, previewed
+  on the canvas as you set its strength.
 - Filter, Quick Filters and Quick Effects, as in Clip Studio Paint: a
   gallery of one-click looks, each shown on your own layer, with a
   strength. Quick Filters recolor (Vivid, Soft, Warm, Cool, Sepia,

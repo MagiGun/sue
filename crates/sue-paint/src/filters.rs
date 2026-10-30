@@ -124,6 +124,12 @@ pub enum Filter {
         /// How many folds from the middle to the edge.
         folds: f32,
     },
+    /// Smart Smoothing: jagged, stair-stepped edges of line art made
+    /// smooth and anti-aliased, lines kept as thick and as dark.
+    SmartSmooth {
+        /// 0 to 1: how far the smoothing reaches.
+        strength: f32,
+    },
     /// Quick Filters and Quick Effects: a one-click look (see
     /// [`crate::quick`]) at a strength.
     Quick {
@@ -325,6 +331,7 @@ impl Filter {
             Self::ZigZag { .. } => tr!("zigzag"),
             Self::Crystallize { .. } => tr!("crystallize"),
             Self::LensBlur { .. } => tr!("lens-blur"),
+            Self::SmartSmooth { .. } => tr!("smart-smoothing"),
             Self::Quick { effect, look, .. } => crate::quick::name(*effect, *look),
             Self::JpegNoise { .. } => tr!("remove-jpeg-noise"),
             Self::Aberration { .. } => tr!("chromatic-aberration"),
@@ -453,6 +460,7 @@ impl Filter {
             }
             Self::Crystallize { size } => crystallize(pixels, width, height, size.max(2)),
             Self::LensBlur { radius } => lens_blur(pixels, width, height, radius.clamp(1, 64)),
+            Self::SmartSmooth { strength } => smart_smooth(pixels, width, height, strength),
             Self::Quick {
                 effect,
                 look,
@@ -955,6 +963,7 @@ impl Filter {
             | Self::ZigZag { .. }
             | Self::Crystallize { .. }
             | Self::LensBlur { .. }
+            | Self::SmartSmooth { .. }
             | Self::Quick { .. }
             | Self::JpegNoise { .. }
             | Self::Aberration { .. }
@@ -1272,6 +1281,92 @@ fn mosaic(pixels: &mut [u8], width: u32, height: u32, size: u32) {
     }
 }
 
+/// Smart Smoothing. Each edge is blurred a little, then sharpened again
+/// around half of the nearby peak, so a staircase becomes a smooth,
+/// anti-aliased curve while a line keeps its thickness and darkness.
+/// Layers with see-through parts smooth their coverage (new edge pixels
+/// take the blurred color); opaque layers (ink on white) smooth each
+/// color channel's darkness.
+fn smart_smooth(pixels: &mut [u8], width: u32, height: u32, strength: f32) {
+    let sigma = 0.8 + 2.2 * strength.clamp(0.0, 1.0);
+    let reach = (sigma * 2.0).ceil() as usize;
+    let (w, h) = (width as usize, height as usize);
+    // The largest value within `reach` of each place, rows then columns.
+    let nearby_peak = |field: &[f32]| -> Vec<f32> {
+        let mut rows = vec![0.0_f32; field.len()];
+        for y in 0..h {
+            for x in 0..w {
+                let (from, to) = (x.saturating_sub(reach), (x + reach + 1).min(w));
+                rows[y * w + x] = field[y * w + from..y * w + to]
+                    .iter()
+                    .copied()
+                    .fold(0.0, f32::max);
+            }
+        }
+        let mut peak = vec![0.0_f32; field.len()];
+        for x in 0..w {
+            for y in 0..h {
+                let (from, to) = (y.saturating_sub(reach), (y + reach + 1).min(h));
+                peak[y * w + x] = (from..to).map(|row| rows[row * w + x]).fold(0.0, f32::max);
+            }
+        }
+        peak
+    };
+    // A value field smoothed: blurred, then cut again where the original
+    // edge was. How thin the line is (its blurred peak against its own)
+    // sets that level, so thin lines keep their width and every line its
+    // darkness.
+    let smooth_field = |field: &[f32]| -> Vec<f32> {
+        let soft = blurred_values(field, width, height, sigma);
+        let (soft_peak, own_peak) = (nearby_peak(&soft), nearby_peak(field));
+        soft.iter()
+            .zip(soft_peak.iter().zip(&own_peak))
+            .map(|(value, (top, own))| {
+                if *top <= 1e-3 || *own <= 1e-3 {
+                    return 0.0;
+                }
+                let thin = (top / own).clamp(0.0, 1.0);
+                let level = (-0.785 * thin * thin).exp();
+                // A softer edge where there is room for one.
+                let band = 0.3 * (1.0 - level) + 0.03;
+                let t = ((value / top - level) / band + 0.5).clamp(0.0, 1.0);
+                own * t * t * (3.0 - 2.0 * t)
+            })
+            .collect()
+    };
+    let see_through = pixels.as_chunks::<4>().0.iter().any(|pixel| pixel[3] < 250);
+    if see_through {
+        let alpha: Vec<f32> = pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| f32::from(pixel[3]) / 255.0)
+            .collect();
+        let smoothed = smooth_field(&alpha);
+        let mut colors = pixels.to_vec();
+        blur(&mut colors, width, height, sigma);
+        for (index, pixel) in pixels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            if pixel[3] == 0 {
+                pixel[..3].copy_from_slice(&colors[index * 4..index * 4 + 3]);
+            }
+            pixel[3] = (smoothed[index] * 255.0).round() as u8;
+        }
+    } else {
+        for channel in 0..3 {
+            let dark: Vec<f32> = pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|pixel| 1.0 - f32::from(pixel[channel]) / 255.0)
+                .collect();
+            let smoothed = smooth_field(&dark);
+            for (pixel, value) in pixels.as_chunks_mut::<4>().0.iter_mut().zip(smoothed) {
+                pixel[channel] = ((1.0 - value) * 255.0).round() as u8;
+            }
+        }
+    }
+}
+
 /// Lens Blur: every pixel the average of the disc of `radius` around it,
 /// row by row through a running sum of each row's span in the disc.
 fn lens_blur(pixels: &mut [u8], width: u32, height: u32, radius: u32) {
@@ -1467,6 +1562,58 @@ mod tests {
             dot()
         );
         assert_ne!(run(Filter::Crystallize { size: 6 }), dot());
+        // Smart Smoothing: a jagged staircase line gets soft edge steps,
+        // and a one pixel line stays as dark.
+        let (sw, sh) = (40_u32, 40_u32);
+        let mut stairs = vec![0_u8; (sw * sh * 4) as usize];
+        for y in 0..sh {
+            // Steps four pixels wide, two pixels thick.
+            let x0 = (y / 4) * 4;
+            for x in x0..(x0 + 6).min(sw) {
+                let at = ((y * sw + x) * 4) as usize;
+                stairs[at..at + 4].copy_from_slice(&[0, 0, 0, 255]);
+            }
+        }
+        let before_ink: u32 = stairs
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|p| u32::from(p[3]))
+            .sum();
+        Filter::SmartSmooth { strength: 0.5 }.apply(&mut stairs, sw, sh, None, [0, 0]);
+        // Where each row's line starts: four pixel jumps before, at most
+        // two after (a smooth diagonal).
+        let start =
+            |pixels: &[u8], y: u32| (0..sw).find(|x| pixels[((y * sw + x) * 4 + 3) as usize] > 127);
+        let jumps: Vec<u32> = (5..sh - 5)
+            .filter_map(|y| Some(start(&stairs, y)?.abs_diff(start(&stairs, y - 1)?)))
+            .collect();
+        assert!(
+            jumps.iter().all(|jump| *jump <= 2),
+            "smooth steps: {jumps:?}"
+        );
+        let after_ink: u32 = stairs
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|p| u32::from(p[3]))
+            .sum();
+        let ratio = after_ink as f32 / before_ink as f32;
+        assert!((0.75..1.25).contains(&ratio), "as much ink: {ratio}");
+        let mut thin = vec![0_u8; (sw * sh * 4) as usize];
+        for x in 0..sw {
+            let at = ((20 * sw + x) * 4) as usize;
+            thin[at..at + 4].copy_from_slice(&[0, 0, 0, 255]);
+        }
+        Filter::SmartSmooth { strength: 1.0 }.apply(&mut thin, sw, sh, None, [0, 0]);
+        let darkest = thin
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|p| p[3])
+            .max()
+            .unwrap_or(0);
+        assert!(darkest > 200, "a thin line survives: {darkest}");
         assert!(
             gray(&run(Filter::LensBlur { radius: 4 }), 20, 20) < 255,
             "the dot spreads"

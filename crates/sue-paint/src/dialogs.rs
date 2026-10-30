@@ -1453,6 +1453,7 @@ impl SuePaint {
                             | Filter::Crystallize { .. }
                             | Filter::JpegNoise { .. }
                             | Filter::Quick { .. }
+                            | Filter::SmartSmooth { .. }
                             | Filter::Fisheye { .. }
                             | Filter::Aberration { .. }
                             | Filter::Retro { .. }
@@ -2815,6 +2816,9 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
         Filter::ZigZag { amplitude, folds } => {
             ui.add(egui::Slider::new(amplitude, 0.0..=100.0).text(tr!("amplitude")));
             ui.add(egui::Slider::new(folds, 1.0..=20.0).text(tr!("folds")));
+        }
+        Filter::SmartSmooth { strength } => {
+            ui.add(egui::Slider::new(strength, 0.0..=1.0).text(tr!("smoothness")));
         }
         Filter::Quick { strength, .. } => {
             ui.add(egui::Slider::new(strength, 0.0..=1.0).text(tr!("strength")));

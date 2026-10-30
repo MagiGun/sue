@@ -981,6 +981,7 @@ fn implemented(command: &str) -> bool {
             | "filter.zigzag"
             | "filter.crystallize"
             | "filter.lens_blur"
+            | "edit.smart_smoothing"
             | "filter.quick.layer"
             | "filter.quick.all"
             | "filter.effects.layer"
@@ -4288,6 +4289,9 @@ impl SuePaint {
             ),
             "filter.crystallize" => self.filter_dialog(cx, Filter::Crystallize { size: 20 }),
             "filter.lens_blur" => self.filter_dialog(cx, Filter::LensBlur { radius: 8 }),
+            "edit.smart_smoothing" => {
+                self.filter_dialog(cx, Filter::SmartSmooth { strength: 0.5 });
+            }
             "filter.quick.layer"
             | "filter.quick.all"
             | "filter.effects.layer"
