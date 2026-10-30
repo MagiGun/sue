@@ -1136,7 +1136,8 @@ impl SueWriter {
             "file.open" | "file.import" => {
                 let pick = FilePick::open(Some(me()), "import", &tr!("import-a-document"))
                     .extensions(&[
-                        "docx", "odt", "md", "markdown", "txt", "html", "htm", "fountain",
+                        "docx", "dotx", "odt", "ott", "pdf", "md", "markdown", "txt", "html",
+                        "htm", "fountain",
                     ])
                     .starting_in(Self::export_dir(cx));
                 cx.request(ShellRequest::PickFile(pick));

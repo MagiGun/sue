@@ -464,8 +464,10 @@ pub fn import(name: &str, bytes: &[u8]) -> Result<sue_io::publish::Imported, Str
         entities: Vec::new(),
     };
     match ext.as_str() {
-        "docx" => sue_io::publish::read_docx(bytes),
-        "odt" => sue_io::publish::read_odt(bytes),
+        // Templates are the same files under another name.
+        "docx" | "dotx" | "docm" => sue_io::publish::read_docx(bytes),
+        "odt" | "ott" => sue_io::publish::read_odt(bytes),
+        "pdf" => sue_io::publish::from_pdf(bytes).map(plain),
         "html" | "htm" | "xhtml" => Ok(plain(sue_io::publish::from_html(&text()))),
         "md" | "markdown" => Ok(plain(sue_io::publish::from_markdown(&text()))),
         "txt" | "text" | "" | "fountain" => {
@@ -537,6 +539,23 @@ mod tests {
             options.format = (*format).to_owned();
             let bytes = compile(&arena, &options, &look).unwrap();
             assert!(bytes.len() > 40, "{format}");
+            // What Writer saves as Word, OpenDocument or PDF opens again,
+            // the text and the headings kept.
+            if matches!(*format, "docx" | "odt" | "pdf") {
+                let read = import(&format!("Book.{format}"), &bytes).unwrap();
+                assert!(read.text.contains("It began."), "{format}: {}", read.text);
+                let chapter = read
+                    .text
+                    .lines()
+                    .position(|line| line == "Chapter 1")
+                    .unwrap_or_else(|| panic!("{format}: {}", read.text));
+                assert!(
+                    read.marks
+                        .paragraph_value(&read.text, chapter, kind::STYLE)
+                        .is_some(),
+                    "{format}: Chapter 1 is a heading"
+                );
+            }
         }
         // Leaving everything out leaves nothing to compile.
         for child in manuscript::children(&arena, draft) {

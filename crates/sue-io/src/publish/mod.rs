@@ -1,7 +1,7 @@
 //! Publishing rich text: a [`Book`] (sections of rich text with the
 //! paragraph styles they use) written as Word, OpenDocument, EPUB, HTML,
-//! RTF, Markdown or plain text, and Word, OpenDocument, HTML and Markdown
-//! read back into rich text. Any studio that publishes (a writing studio, notes, a page
+//! RTF, Markdown or plain text, and Word, OpenDocument, PDF, HTML and
+//! Markdown read back into rich text. Any studio that publishes (a writing studio, notes, a page
 //! layout studio) fills a [`Book`]; the formats never know who made it.
 //!
 //! Lengths are in points.
@@ -12,6 +12,7 @@ mod html;
 mod markdown;
 mod odt;
 mod odt_read;
+mod pdf_read;
 mod pictures;
 mod rtf;
 pub mod xml;
@@ -30,6 +31,7 @@ pub use html::{from_html, to_html};
 pub use markdown::{from_markdown, to_markdown};
 pub use odt::to_odt;
 pub use odt_read::{from_odt, read_odt};
+pub use pdf_read::from_pdf;
 pub use pictures::{PictureBook, picture_epub, picture_pdf};
 pub use rtf::to_rtf;
 
