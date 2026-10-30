@@ -11,6 +11,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-10-29
+
 ### Added
 
 - Sue Writer starts like Word: a blank document and templates shown as
@@ -336,7 +338,8 @@ The first release.
 - Packages for Windows, macOS, Linux, Android and iOS, under the Sayn
   License.
 
-[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.4...HEAD
+[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.5...HEAD
+[0.0.5]: https://github.com/MagiGun/sue/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/MagiGun/sue/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/MagiGun/sue/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/MagiGun/sue/compare/v0.0.1...v0.0.2
