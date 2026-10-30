@@ -651,6 +651,42 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         if let Some(applet) = runtime.applets.get_mut(&paint) {
             applet.navigate("start/hide");
         }
+        // Simple Mode: the canvas, then its "..." menu.
+        shoot(&mut runtime, &mut camera, &format!("{prefix}-paint-simple"))?;
+        if let Some(applet) = runtime.applets.get_mut(&paint) {
+            applet.navigate("sheet/more");
+        }
+        shoot(
+            &mut runtime,
+            &mut camera,
+            &format!("{prefix}-paint-simple-more"),
+        )?;
+        if let Some(applet) = runtime.applets.get_mut(&paint) {
+            applet.navigate("sheet/close");
+        }
+        // Studio Mode: the canvas, its modifier key bar and its Menu.
+        let _ = runtime.engine.world.rice.set(
+            sue_paint::simple::MODE_KEY,
+            sue_rice::RiceValue::Text("studio".to_owned()),
+        );
+        shoot(&mut runtime, &mut camera, &format!("{prefix}-paint-studio"))?;
+        for (target, name) in [
+            ("keys/open", "paint-studio-keys"),
+            ("sheet/menu", "paint-studio-menu"),
+        ] {
+            if let Some(applet) = runtime.applets.get_mut(&paint) {
+                applet.navigate("sheet/close");
+                applet.navigate(target);
+            }
+            shoot(&mut runtime, &mut camera, &format!("{prefix}-{name}"))?;
+        }
+        if let Some(applet) = runtime.applets.get_mut(&paint) {
+            applet.navigate("sheet/close");
+        }
+        let _ = runtime.engine.world.rice.set(
+            sue_paint::simple::MODE_KEY,
+            sue_rice::RiceValue::Text("simple".to_owned()),
+        );
         runtime.request(
             ShellRequest::OpenIn {
                 entity: novel,

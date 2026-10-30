@@ -452,6 +452,13 @@ pub struct SuePaint {
     pub(crate) material_kinds: crate::materials::MaterialKinds,
     /// The start page, shown while no canvas is open.
     pub(crate) start: crate::start::StartPage,
+    /// The drawing tool Simple Mode's swap button goes back to from the
+    /// eraser.
+    pub(crate) drawing_tool: crate::tools::Tool,
+    /// The canvas shows without its tabs and status strip (Simple Mode).
+    pub(crate) bare: bool,
+    /// Studio Mode's fullscreen and modifier keys.
+    pub(crate) touch: crate::studio_mode::Touch,
     /// The New canvas page's templates, registered at start.
     pub(crate) canvas_templates: crate::templates::CanvasTemplates,
     /// Each recording picture's compositor version at its last timelapse
@@ -582,6 +589,9 @@ impl Default for SuePaint {
             material_kinds: crate::materials::MaterialKinds::builtin(),
             start: crate::start::StartPage::default(),
             canvas_templates: crate::templates::CanvasTemplates::builtin(),
+            drawing_tool: crate::tools::Tool::Pen,
+            bare: false,
+            touch: crate::studio_mode::Touch::default(),
             timelapse: HashMap::new(),
             timelapse_export: crate::timelapse::Export::default(),
             transform: None,
@@ -3530,6 +3540,17 @@ impl SuePaint {
     /// Runs a command of the menus, the command bar or a shortcut.
     #[allow(clippy::too_many_lines, reason = "one arm per command")]
     pub(crate) fn run(&mut self, command: &str, cx: &mut AppletContext<'_>) {
+        // Studio Mode's keys T1 to T7 run the commands the rice names.
+        if let Some(index) = command
+            .strip_prefix("touch.custom.")
+            .and_then(|index| index.parse::<usize>().ok())
+        {
+            let custom = self.custom_command(index, cx);
+            if !custom.starts_with("touch.") && !custom.is_empty() {
+                self.run(&custom, cx);
+            }
+            return;
+        }
         self.record_auto(command);
         if command.starts_with("story.") && self.story_command(command, cx) {
             return;
@@ -5228,8 +5249,18 @@ impl SuePaint {
             return;
         }
         self.start.full = false;
-        if form == sue_platform::FormFactor::Mobile {
-            self.phone_frame(ui, full, cx, &theme);
+        // Simple Mode, unless Studio Mode was chosen.
+        self.bare = form != sue_platform::FormFactor::Desktop && !crate::simple::studio_mode(cx);
+        if self.bare {
+            self.simple_frame(ui, full, cx, &theme);
+            if self.ready {
+                self.dialog_ui(&ctx, cx, &theme);
+            }
+            return;
+        }
+        // Studio Mode on phones and tablets.
+        if form != sue_platform::FormFactor::Desktop {
+            self.studio_frame(ui, full, cx, &theme);
             if self.ready {
                 self.dialog_ui(&ctx, cx, &theme);
             }
@@ -5573,6 +5604,14 @@ impl SueApplet for SuePaint {
                 "Where Sue Paint keeps its materials and brush tips (empty: its own folder)",
             ),
             RiceDeclaration::new(
+                crate::simple::MODE_KEY,
+                RiceParameter::EnumChoice {
+                    value: "simple".to_owned(),
+                    options: vec!["simple".to_owned(), "studio".to_owned()],
+                },
+                "Sue Paint on phones and tablets: Simple Mode or Studio Mode",
+            ),
+            RiceDeclaration::new(
                 "sue_paint.theme",
                 RiceParameter::EnumChoice {
                     value: "gray".to_owned(),
@@ -5607,6 +5646,17 @@ impl SueApplet for SuePaint {
                 tr!("what-does-canvas-file-modifier-key", name = name),
             ));
         }
+        declarations.extend(crate::studio_mode::CUSTOM_DEFAULTS.iter().enumerate().map(
+            |(index, command)| {
+                RiceDeclaration::new(
+                    crate::studio_mode::custom_key(index),
+                    RiceParameter::Text {
+                        value: (*command).to_owned(),
+                    },
+                    format!("The command Studio Mode's key T{} runs", index + 1),
+                )
+            },
+        ));
         declarations.extend(Self::custom_colors());
         declarations.extend(sue_wm::shortcuts::declarations(
             KEYS_SECTION,
@@ -5630,12 +5680,16 @@ impl SueApplet for SuePaint {
             self.mobile_header(ui, rect, &theme);
             return;
         }
-        if cx.view.form_factor == sue_platform::FormFactor::Mobile {
-            // A phone's row of large buttons: the menus as a sheet, undo,
-            // redo and the palettes.
-            if let Some(command) = self.phone_bar(ui, rect, cx, &theme) {
+        if cx.view.form_factor != sue_platform::FormFactor::Desktop
+            && !crate::simple::studio_mode(cx)
+        {
+            if let Some(command) = self.simple_bar(ui, rect, cx, &theme) {
                 self.run(&command, cx);
             }
+            return;
+        }
+        if cx.view.form_factor != sue_platform::FormFactor::Desktop {
+            self.studio_bar(ui, rect, cx, &theme);
             return;
         }
         // The start page has no menus; everything is on its buttons.
@@ -5918,6 +5972,27 @@ impl SueApplet for SuePaint {
                 true
             }
             start if start.starts_with("start/") => self.start.navigate(start),
+            "sheet/more" => {
+                self.sheet = Some(crate::phone::Sheet::More);
+                true
+            }
+            "sheet/pens" => {
+                self.sheet = Some(crate::phone::Sheet::Pens);
+                true
+            }
+            "sheet/close" => {
+                self.sheet = None;
+                self.touch.keys = false;
+                true
+            }
+            "sheet/menu" => {
+                self.sheet = Some(crate::phone::Sheet::Menu);
+                true
+            }
+            "keys/open" => {
+                self.touch.keys = true;
+                true
+            }
             "dialog/close" => {
                 self.dialog = None;
                 self.menubar.close();

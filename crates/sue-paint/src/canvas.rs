@@ -54,11 +54,15 @@ impl SuePaint {
     ) {
         // While the studio comes in or goes out, the tabs and the status
         // strip slide off with the panels and the view takes their room.
-        let slide = self.hide * 26.0;
-        let tabs = Rect::from_min_size(rect.min - vec2(0.0, slide), vec2(rect.width(), 26.0));
-        self.tabs(ui, tabs, cx, theme);
+        // Simple Mode shows the canvas bare: no tabs, no status strip.
+        let chrome = if self.bare { 0.0 } else { 26.0 };
+        let slide = self.hide * chrome;
+        let tabs = Rect::from_min_size(rect.min - vec2(0.0, slide), vec2(rect.width(), chrome));
+        if !self.bare {
+            self.tabs(ui, tabs, cx, theme);
+        }
         let status = Rect::from_min_max(
-            pos2(rect.left(), rect.bottom() - 26.0 + slide),
+            pos2(rect.left(), rect.bottom() - chrome + slide),
             pos2(rect.right(), rect.bottom() + slide),
         );
         let mut viewport = Rect::from_min_max(
@@ -77,7 +81,9 @@ impl SuePaint {
             .and_then(picture::size);
         let Some(size) = size else {
             self.empty_canvas(ui, viewport, cx, theme);
-            self.status_strip(ui, status, None, cx, theme);
+            if !self.bare {
+                self.status_strip(ui, status, None, cx, theme);
+            }
             return;
         };
         let (hide, ready, leaving) = (self.hide, self.ready, self.leaving());
@@ -135,7 +141,9 @@ impl SuePaint {
         if self.transform.is_some() {
             self.transform_ui(ui, viewport, size, cx, theme);
         }
-        self.status_strip(ui, status, Some(size), cx, theme);
+        if !self.bare {
+            self.status_strip(ui, status, Some(size), cx, theme);
+        }
     }
 
     /// Keeps track of the fingers on the canvas. A second finger takes back
@@ -758,8 +766,10 @@ impl SuePaint {
                 input.modifiers,
             )
         });
+        // Studio Mode's modifier keys count as held.
+        let held = held | self.touch.modifiers();
         self.modifiers = held;
-        let space = space && !ctx.text_edit_focused();
+        let space = (space || self.touch.space) && !ctx.text_edit_focused();
         // Spread this frame's pointer samples evenly over the frame's time,
         // so the stabilizer and flicks see the pen's real speed.
         let moves = events
