@@ -107,6 +107,11 @@ none = None
 add-another-shortcut-as-many-as = Add another shortcut for this (as many as you like)
 filter-settings-ellipsis = Filter settings...
 results-for = Results for "{ $filter }"
+settings-reset = Reset
+settings-reset-hint = Back to how Sue comes
+settings-reset-page = Reset This Page
+settings-reset-all = Reset All Settings
+settings-reset-all-confirm = Click Again to Reset Every Setting
 all-settings = All settings
 
 applet-name = Settings
