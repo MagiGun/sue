@@ -398,19 +398,23 @@ impl DesktopHost {
         });
         let scale = window.scale_factor() as f32;
         // Phones and tablets by their shorter side; computers are desktops.
-        // A browser is a phone or tablet when touch is how it is used.
+        // A browser is a phone or tablet when touch is how it is used, and
+        // a desktop when a phone's browser was asked for the desktop site.
         let shorter_side = size.width.min(size.height) as f32 / scale;
+        #[cfg(not(target_arch = "wasm32"))]
         let form_factor = FormFactor::classify(os, shorter_side);
         #[cfg(target_arch = "wasm32")]
         let form_factor = {
             capabilities.touch = crate::web::page::touch_screen();
-            match (capabilities.touch, shorter_side) {
-                (false, _) => form_factor,
-                (true, side) if side >= FormFactor::TABLET_MIN_SMALLEST_SIDE_DP => {
-                    FormFactor::Tablet
-                }
-                (true, _) => FormFactor::Mobile,
-            }
+            // The device's screen, not the page: a phone showing the
+            // desktop site lays the page out wider than it is.
+            let side = crate::web::page::screen_side()
+                .map_or(shorter_side, |screen| screen.min(shorter_side));
+            FormFactor::for_browser(
+                capabilities.touch,
+                FormFactor::mobile_agent(&crate::web::page::user_agent()),
+                side,
+            )
         };
         let info = SurfaceInfo {
             id: MAIN_SURFACE,

@@ -96,6 +96,7 @@ web-sys = { workspace = true, features = [
     "KeyboardEvent",
     "PointerEvent",
     "MediaQueryList",
+    "Screen",
     "Navigator",
     "Url",
     "Window",

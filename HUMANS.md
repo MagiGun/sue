@@ -925,6 +925,11 @@ recent Chrome, Edge, Firefox or Safari: Sue downloads once (about 5 MB) and
 opens with nothing to install. It is the same Sue, with the Hub, Sue Paint,
 Sue Writer, the Image Viewer and the Converter.
 
+- **The layout** follows your device: a computer gets the desktop layout,
+  a tablet the tablet one and a phone the phone one. On a phone, turn on
+  your browser's Request Desktop Site (or Desktop Site) and reload to get
+  the desktop layout. Tablets keep the tablet layout, since their browsers
+  ask for desktop sites by themselves. The Sue menu switches layouts too.
 - **Opening** a file brings up the browser's own file chooser, or drop files
   from your computer onto the page.
 - **Saving** asks where to save in Chrome and Edge, and later saves go to that
