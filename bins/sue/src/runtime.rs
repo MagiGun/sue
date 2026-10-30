@@ -3633,6 +3633,98 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_figures_pose_and_become_vector_lines() {
+        let (mut runtime, root) = runtime("paint-figure");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.focus())
+            .unwrap();
+        let command = |runtime: &mut Runtime, command: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: command.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let layers =
+            |runtime: &Runtime| sue_paint::doc::layers(&runtime.engine.world.arena, picture);
+        // Layer, New Layer, 3D Drawing Figure: a standing figure, drawn.
+        command(&mut runtime, "layer.new.figure");
+        step(&mut runtime, Vec::new());
+        let arena = &runtime.engine.world.arena;
+        let layer = layers(&runtime)
+            .into_iter()
+            .find(|info| sue_paint::figure::of_layer(arena, info.id).is_some())
+            .map(|info| info.id)
+            .expect("a figure layer");
+        let pixels = |runtime: &Runtime| {
+            sue_paint::doc::raster(&runtime.engine.world.arena, layer)
+                .unwrap()
+                .bytes()
+                .unwrap()
+                .to_vec()
+        };
+        let standing = pixels(&runtime);
+        assert!(
+            standing.chunks(4).any(|pixel| pixel[3] > 0),
+            "the figure shows"
+        );
+        // A preset pose draws it again, as one undo step.
+        let depth = runtime.engine.history.depth();
+        command(&mut runtime, "figure.preset.1");
+        step(&mut runtime, Vec::new());
+        assert_ne!(pixels(&runtime), standing, "arms out");
+        assert_eq!(runtime.engine.history.depth(), depth + 1);
+        // Convert to Vector Lines and Tones: the figure's lines as strokes.
+        let before = layers(&runtime).len();
+        command(&mut runtime, "layer.lines_tones_vector");
+        step(&mut runtime, Vec::new());
+        let arena = &runtime.engine.world.arena;
+        let vector = layers(&runtime)
+            .into_iter()
+            .find(|info| sue_paint::vector::is_vector(arena, info.id))
+            .expect("a vector layer of lines");
+        let strokes = sue_paint::vector::lines(&sue_paint::vector::geometry(arena, vector.id));
+        assert!(
+            strokes.len() >= 5,
+            "the outline and folds as strokes: {}",
+            strokes.len()
+        );
+        assert_eq!(layers(&runtime).len(), before + 2, "tones and lines");
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        assert_eq!(layers(&runtime).len(), before, "undone as one step");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_3d_layers_turn_and_become_lines_and_tones() {
         let (mut runtime, root) = runtime("paint-3d");
         let ctx = egui::Context::default();

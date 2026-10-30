@@ -2144,3 +2144,5 @@ name-sit = Sit
 name-arms-up = Arms up
 name-think = Think
 pick-a-drawing-figure-layer = Pick a 3D drawing figure layer first.
+convert-to-vector-lines-and-tones = Convert to Vector Lines and Tones
+pick-a-3d-layer-first = Pick a 3D layer first: its model becomes the lines.

@@ -814,6 +814,7 @@ fn implemented(command: &str) -> bool {
             | "view.scroll_bar"
             | "layer.new.raster_top"
             | "layer.new.figure"
+            | "layer.lines_tones_vector"
             | "figure.flip"
             | "figure.reset"
             | "file.new_clipboard"
@@ -2066,7 +2067,7 @@ impl SuePaint {
             .layer()
             .filter(|layer| crate::three::is_3d(&cx.world.arena, *layer))
         {
-            self.lines_and_tones_3d(cx, layer);
+            self.lines_and_tones_3d(cx, layer, false);
             return;
         }
         let (Some(picture), Some(info)) = (self.picture(), self.paintable(&cx.world.arena).ok())
@@ -2153,7 +2154,7 @@ impl SuePaint {
     /// Convert to Lines and Tones for a 3D layer: its outline and folds as
     /// lines, its shading as tone, each on a layer of its own, the 3D layer
     /// hidden, as one step (Clip Studio Paint's LT conversion of 3D).
-    fn lines_and_tones_3d(&mut self, cx: &mut AppletContext<'_>, layer: EntityId) {
+    fn lines_and_tones_3d(&mut self, cx: &mut AppletContext<'_>, layer: EntityId, vector: bool) {
         let Some(picture) = self.picture() else {
             return;
         };
@@ -2197,20 +2198,47 @@ impl SuePaint {
                 pixels,
             )
         };
+        // As vector lines: the drawn lines traced to their middles, each
+        // an editable stroke on a vector layer.
+        let traced = if vector {
+            let traced = crate::vector::trace(&lines, size[0], size[1]);
+            if traced.is_empty() {
+                cx.fail(tr!("there-nothing-layer-trace"));
+                return;
+            }
+            Some(traced)
+        } else {
+            None
+        };
         let (Ok(lines), Ok(tones)) = (tile(lines), tile(tones)) else {
             return;
         };
-        let Ok((spawns, ids)) = doc::add_layers_pixels(
-            &cx.world.arena,
-            picture,
-            Some(layer),
-            vec![(tr!("tones"), tones), (tr!("lines"), lines)],
-        ) else {
+        let rasters = if traced.is_some() {
+            vec![(tr!("tones"), tones)]
+        } else {
+            vec![(tr!("tones"), tones), (tr!("lines"), lines)]
+        };
+        let Ok((spawns, mut ids)) =
+            doc::add_layers_pixels(&cx.world.arena, picture, Some(layer), rasters)
+        else {
             return;
         };
         let mut edit = doc::Edit::new(tr!("convert-to-lines-and-tones"));
         for spawn in spawns {
             edit = edit.then(spawn);
+        }
+        if let Some(traced) = traced {
+            let Ok((spawn, id)) = doc::add_vector_lines(
+                &cx.world.arena,
+                picture,
+                Some(ids[0]),
+                tr!("lines"),
+                &traced,
+            ) else {
+                return;
+            };
+            edit = edit.then(spawn);
+            ids.push(id);
         }
         let edit = edit
             .then(SetProperty::new(ids[0], crate::effects::TONE, true))
@@ -4331,6 +4359,17 @@ impl SuePaint {
                     rgb: self.drawing_color(),
                 },
             ),
+            // Clip Studio Paint's Convert to lines and tones with the lines
+            // as a vector layer: a 3D layer's outline and folds as strokes.
+            "layer.lines_tones_vector" => {
+                match self
+                    .layer()
+                    .filter(|layer| crate::three::is_3d(&cx.world.arena, *layer))
+                {
+                    Some(layer) => self.lines_and_tones_3d(cx, layer, true),
+                    None => cx.notify(tr!("pick-a-3d-layer-first")),
+                }
+            }
             "layer.new.raster_top" => {
                 self.run("layer.new", cx);
             }

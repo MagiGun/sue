@@ -13,6 +13,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Layer, Convert to Vector Lines and Tones: a 3D layer (a shape, a model
+  or a posed drawing figure) becomes its tone and a vector layer of
+  editable strokes along its outline and folds.
 - 3D drawing figures in Sue Paint (Layer, New Layer, 3D Drawing Figure),
   as in Clip Studio Paint: a body of seventeen joints to pose by dragging
   a body part with the Object tool (Shift twists it), or by its Bend,

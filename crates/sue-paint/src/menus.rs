@@ -580,6 +580,10 @@ pub fn menus() -> Vec<Menu> {
                     &tr!("convert-to-lines-and-tones-ellipsis"),
                     "filter.lines_tones",
                 ),
+                act(
+                    &tr!("convert-to-vector-lines-and-tones"),
+                    "layer.lines_tones_vector",
+                ),
                 act(&tr!("create-selection-from-layer"), "select.from_layer"),
             ],
         ),
