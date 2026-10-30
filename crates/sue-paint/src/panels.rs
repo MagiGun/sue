@@ -84,12 +84,22 @@ fn header(
     let painter = ui.painter().clone();
     painter.rect_filled(strip, 0.0, theme.pill);
     painter.hline(strip.x_range(), strip.bottom(), theme.hairline());
-    let font = theme.font(theme.small_size + 0.5);
     let icon_side = 18.0;
-    let galleys: Vec<_> = tabs
-        .iter()
-        .map(|(title, _, _)| painter.layout_no_wrap(title.clone(), font.clone(), theme.text))
-        .collect();
+    let lay_out = |size: f32| -> Vec<_> {
+        tabs.iter()
+            .map(|(title, _, _)| {
+                painter.layout_no_wrap(title.clone(), theme.font(size), theme.text)
+            })
+            .collect()
+    };
+    let mut galleys = lay_out(theme.small_size + 0.5);
+    // A lone tab in a narrow column (Tool Sliders) keeps its whole name in
+    // a smaller font, clear of the palette's menu button.
+    if let [galley] = galleys.as_slice()
+        && icon_side + 6.0 + galley.size().x + 14.0 > strip.width() - 24.0
+    {
+        galleys = lay_out(theme.small_size - 1.5);
+    }
     let labelled = |galley: &std::sync::Arc<egui::Galley>| icon_side + 6.0 + galley.size().x + 14.0;
     let bare = icon_side + 14.0;
     let all: f32 = galleys.iter().map(labelled).sum::<f32>() + 2.0 * tabs.len() as f32;
@@ -3364,12 +3374,7 @@ impl SuePaint {
         if let Some(tab) = clicked {
             self.nav_tab = tab;
         }
-        match self.nav_tab {
-            2 => return self.info_tab(ui, body, cx, theme),
-            3 => return self.auto_tab(ui, body, cx, theme),
-            4 => return self.item_bank_tab(ui, body, cx, theme),
-            _ => {}
-        }
+        self.nav_tab = self.nav_tab.min(1);
         let body = body.shrink(6.0);
         if self.nav_tab == 1 {
             self.sub_view(ui, body, cx, theme);

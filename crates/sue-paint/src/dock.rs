@@ -108,7 +108,7 @@ impl Palette {
     pub fn fixed_width(self) -> Option<f32> {
         match self {
             Self::Tools => Some(46.0),
-            Self::BrushSize => Some(76.0),
+            Self::BrushSize => Some(86.0),
             _ => None,
         }
     }
@@ -231,7 +231,7 @@ impl Default for Dock {
                     ],
                     236.0,
                 ),
-                column(&[(Palette::BrushSize, 1.0)], 76.0),
+                column(&[(Palette::BrushSize, 1.0)], 86.0),
             ],
             right: vec![column(
                 &[(Palette::Navigator, 0.42), (Palette::Layer, 0.58)],
@@ -249,6 +249,10 @@ impl Default for Dock {
 
 /// The width of the icon strip.
 pub(crate) const STRIP: f32 = 34.0;
+
+/// The bar at the top of every column, with Clip Studio Paint's arrows
+/// that fold the column into the strip.
+pub(crate) const COLUMN_BAR: f32 = 12.0;
 
 /// The canvas never gets narrower than this while columns can collapse.
 const MIN_CANVAS: f32 = 300.0;
@@ -595,6 +599,7 @@ impl Dock {
                 Side::Right => &self.right[index],
             };
             laid.columns.push((side, index, rect));
+            let rect = Rect::from_min_max(pos2(rect.left(), rect.top() + COLUMN_BAR), rect.max);
             let palettes = visible(column);
             let total: f32 = palettes.iter().map(|(_, weight)| weight.max(0.01)).sum();
             let mut heights: Vec<f32> = palettes
@@ -825,8 +830,68 @@ impl SuePaint {
         let panels = self.panels;
         let shown = move |palette: Palette| palette.shown(&panels);
         let laid = self.dock.layout(body, &shown, self.hide);
-        for (_, _, rect) in &laid.columns {
+        let mut fold = None;
+        for (side, index, rect) in &laid.columns {
             ui.painter().rect_filled(*rect, 0.0, theme.panel);
+            // The column's bar, its arrows pointing out to fold it away.
+            let bar = Rect::from_min_size(rect.min, vec2(rect.width(), COLUMN_BAR));
+            ui.painter().rect_filled(bar, 0.0, theme.void);
+            let arrows = Rect::from_min_size(
+                match side {
+                    Side::Left => bar.min,
+                    Side::Right => pos2(bar.right() - 16.0, bar.top()),
+                },
+                vec2(16.0, COLUMN_BAR),
+            );
+            let response = ui
+                .interact(
+                    arrows,
+                    Id::unique(("sue-paint-fold-column", *side == Side::Left, *index)),
+                    Sense::click(),
+                )
+                .on_hover_text(tr!("fold-column-into-icons"));
+            let color = if response.hovered() {
+                theme.text
+            } else {
+                theme.muted
+            };
+            let point = if *side == Side::Left { -1.0 } else { 1.0 };
+            for step in [0.0, 4.0] {
+                let x = arrows.center().x + (step - 2.0) * point;
+                ui.painter().add(egui::Shape::line(
+                    vec![
+                        pos2(x - 1.5 * point, arrows.center().y - 3.0),
+                        pos2(x + 1.5 * point, arrows.center().y),
+                        pos2(x - 1.5 * point, arrows.center().y + 3.0),
+                    ],
+                    Stroke::new(1.0, color),
+                ));
+            }
+            if response.clicked() {
+                fold = Some((*side, *index));
+            }
+        }
+        if let Some((side, index)) = fold {
+            let column = match side {
+                Side::Left => self.dock.left.get(index),
+                Side::Right => self.dock.right.get(index),
+            };
+            let palettes: Vec<Palette> = column
+                .map(|column| {
+                    column
+                        .palettes
+                        .iter()
+                        .map(|(palette, _)| *palette)
+                        .collect()
+                })
+                .unwrap_or_default();
+            // The tools stay, as Clip Studio Paint keeps its tool strip.
+            for palette in palettes
+                .into_iter()
+                .filter(|palette| *palette != Palette::Tools)
+            {
+                self.dock.iconize(palette);
+            }
         }
         for (palette, rect) in &laid.docked {
             self.draw_palette(ui, *palette, *rect, cx, theme);
@@ -1242,7 +1307,7 @@ mod tests {
             "the folded palettes, as Clip Studio Paint"
         );
         assert_eq!(laid.icons.len(), STRIP_PALETTES.len());
-        assert_eq!(laid.center.left(), 46.0 + 236.0 + 76.0);
+        assert_eq!(laid.center.left(), 46.0 + 236.0 + 86.0);
         assert_eq!(laid.center.right(), 1600.0 - 300.0 - STRIP);
         // Heights share the column without gaps.
         let sub = laid
@@ -1257,7 +1322,7 @@ mod tests {
             .find(|(p, _)| *p == Palette::ColorSet)
             .unwrap()
             .1;
-        assert_eq!(sub.top(), 0.0);
+        assert_eq!(sub.top(), COLUMN_BAR, "below the column's bar");
         assert!((set.bottom() - 900.0).abs() < 0.5);
         assert_eq!(laid.splits.len(), 3);
         assert_eq!(laid.edges.len(), 2, "the two wide columns resize");

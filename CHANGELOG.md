@@ -13,6 +13,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint's menus use Clip Studio Paint's names (Delete, Delete Outside
+  Selection, Select All, Save as, Tool Group, Tool Settings, Tool Sliders,
+  Information) and gain Edit, Align/Distribute (line the layer's drawing
+  up with the canvas's edges or middle), View, Scroll Bar, and New Raster
+  Layer at the top of the Layer menu. Each palette column has Clip
+  Studio's bar with arrows that fold it into the strip.
 - Sue Paint opens with Clip Studio Paint's layout: a strip of folded
   palettes at the far right (Material, Layer Property, Animation Cels,
   History, Sub View, Auto Actions, Item Bank and Info, each a palette of

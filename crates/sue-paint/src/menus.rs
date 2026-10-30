@@ -141,7 +141,7 @@ pub fn menus() -> Vec<Menu> {
                 act(&tr!("close"), "file.close").key("Ctrl+W"),
                 SEP,
                 act(&tr!("save"), "file.save").key("Ctrl+S"),
-                act(&tr!("save-project-as-ellipsis"), "file.save_as"),
+                act(&tr!("save-as-ellipsis"), "file.save_as").key("Shift+Alt+S"),
                 sub(
                     &tr!("save-duplicate"),
                     vec![
@@ -244,8 +244,8 @@ pub fn menus() -> Vec<Menu> {
                 act(&tr!("copy-2"), "edit.copy").key("Ctrl+C"),
                 act(&tr!("paste"), "edit.paste").key("Ctrl+V"),
                 act(&tr!("paste-to-shown-position"), "edit.paste_here"),
-                act(&tr!("clear"), "edit.clear").key("Del"),
-                act(&tr!("clear-outside-selection-2"), "edit.clear_outside"),
+                act(&tr!("delete"), "edit.clear").key("Del"),
+                act(&tr!("delete-outside-selection"), "edit.clear_outside").key("Shift+Del"),
                 act(&tr!("fill"), "edit.fill").key("Alt+Del"),
                 act(&tr!("change-color-to-drawing-color"), "edit.recolor"),
                 act(&tr!("outline-selection-ellipsis"), "edit.outline_selection"),
@@ -285,6 +285,18 @@ pub fn menus() -> Vec<Menu> {
                         act(&tr!("puppet-warp-ellipsis"), "edit.transform.puppet"),
                     ],
                 ),
+                sub(
+                    &tr!("align-distribute"),
+                    vec![
+                        act(&tr!("align-left"), "edit.align.left"),
+                        act(&tr!("align-horizontal-center"), "edit.align.hcenter"),
+                        act(&tr!("align-right"), "edit.align.right"),
+                        SEP,
+                        act(&tr!("align-top"), "edit.align.top"),
+                        act(&tr!("align-vertical-center"), "edit.align.vcenter"),
+                        act(&tr!("align-bottom"), "edit.align.bottom"),
+                    ],
+                ),
                 SEP,
                 act(&tr!("change-image-resolution-ellipsis"), "edit.resolution"),
                 act(&tr!("change-canvas-size-ellipsis"), "edit.canvas_size"),
@@ -302,7 +314,7 @@ pub fn menus() -> Vec<Menu> {
                 act(&tr!("canvas-properties-ellipsis"), "edit.canvas_properties"),
                 sub(
                     &tr!("clear-work-history"),
-                    vec![act(&tr!("history"), "edit.clear_history")],
+                    vec![act(&tr!("this-canvas"), "edit.clear_history")],
                 ),
                 SEP,
                 act(
@@ -432,6 +444,7 @@ pub fn menus() -> Vec<Menu> {
         Menu::new(
             tr!("layer-2"),
             vec![
+                act(&tr!("new-raster-layer"), "layer.new.raster_top"),
                 sub(
                     &tr!("new-layer"),
                     vec![
@@ -564,7 +577,7 @@ pub fn menus() -> Vec<Menu> {
         Menu::new(
             tr!("select"),
             vec![
-                act(&tr!("all"), "select.all").key("Ctrl+A"),
+                act(&tr!("select-all"), "select.all").key("Ctrl+A"),
                 act(&tr!("deselect"), "select.none").key("Ctrl+D"),
                 act(&tr!("reselect"), "select.again").key("Ctrl+Shift+D"),
                 act(&tr!("invert-selected-area-2"), "select.invert").key("Ctrl+Shift+I"),
@@ -620,6 +633,8 @@ pub fn menus() -> Vec<Menu> {
                 act(&tr!("reset-display"), "view.reset_display"),
                 act(&tr!("fit-to-navigator"), "view.fit_navigator"),
                 act(&tr!("print-size-2"), "view.print_size"),
+                SEP,
+                act(&tr!("scroll-bar"), "view.scroll_bar"),
                 SEP,
                 act(&tr!("grid"), "view.grid"),
                 act(&tr!("pixel-grid"), "view.pixel_grid"),
@@ -758,9 +773,9 @@ pub fn menus() -> Vec<Menu> {
                 SEP,
                 act(&tr!("command-bar"), "window.command_bar"),
                 act(&tr!("tool"), "window.tool"),
-                act(&tr!("sub-tool"), "window.sub_tool"),
-                act(&tr!("tool-property"), "window.tool_property"),
-                act(&tr!("brush-size"), "window.brush_size"),
+                act(&tr!("tool-group"), "window.sub_tool"),
+                act(&tr!("tool-settings"), "window.tool_property"),
+                act(&tr!("tool-sliders"), "window.brush_size"),
                 act(&tr!("color-wheel"), "window.color_wheel"),
                 act(&tr!("color-slider"), "window.color_slider"),
                 act(&tr!("color-set"), "window.color_set"),
@@ -777,7 +792,7 @@ pub fn menus() -> Vec<Menu> {
                 act(&tr!("material"), "window.material"),
                 act(&tr!("auto-actions"), "window.auto_actions"),
                 act(&tr!("item-bank"), "window.item_bank"),
-                act(&tr!("info"), "window.info"),
+                act(&tr!("information"), "window.info"),
                 SEP,
                 act(&tr!("back-to-the-hub"), "file.leave"),
             ],

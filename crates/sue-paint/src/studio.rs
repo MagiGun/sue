@@ -384,6 +384,8 @@ pub struct SuePaint {
     pub(crate) bar_extra: Vec<String>,
     /// Rulers along the canvas's top and left (View, Ruler Bar).
     pub(crate) ruler_bar: bool,
+    /// The canvas's scrollbars show (View, Scroll Bar).
+    pub(crate) scroll_bars: bool,
     /// `display.interface` as the rice has it (for the Interface menu).
     pub(crate) interface: String,
     /// Strokes near a grid line follow it (View, Snap to Grid).
@@ -585,6 +587,7 @@ impl Default for SuePaint {
             bar_hidden: HashSet::new(),
             bar_extra: Vec::new(),
             ruler_bar: false,
+            scroll_bars: true,
             interface: "auto".to_owned(),
             snap_grid: false,
             crop_frame: true,
@@ -764,6 +767,14 @@ fn implemented(command: &str) -> bool {
             | "edit.fill"
             | "edit.recolor"
             | "edit.luma_to_alpha"
+            | "edit.align.left"
+            | "edit.align.hcenter"
+            | "edit.align.right"
+            | "edit.align.top"
+            | "edit.align.vcenter"
+            | "edit.align.bottom"
+            | "view.scroll_bar"
+            | "layer.new.raster_top"
             | "edit.flip_h"
             | "edit.flip_v"
             | "edit.rotate180"
@@ -1064,6 +1075,61 @@ pub(crate) struct WarpSession {
 }
 
 impl SuePaint {
+    /// Edit, Align/Distribute: moves the current layer so its drawn
+    /// pixels line up with the canvas's `edge` (left, hcenter, right, top,
+    /// vcenter or bottom), one undo step.
+    pub(crate) fn align_layer(&mut self, edge: &str, cx: &mut AppletContext<'_>) {
+        let Some(info) = self.layer_info(&cx.world.arena) else {
+            return;
+        };
+        let Some(size) = self
+            .picture()
+            .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
+            .and_then(picture::size)
+        else {
+            return;
+        };
+        let Some(raster) = doc::raster(&cx.world.arena, info.id) else {
+            return;
+        };
+        let Some(bytes) = raster.bytes() else {
+            return;
+        };
+        let (width, height) = (raster.width() as usize, raster.height() as usize);
+        let mut bounds: Option<[usize; 4]> = None;
+        for y in 0..height {
+            for x in 0..width {
+                if bytes[(y * width + x) * 4 + 3] > 0 {
+                    let b = bounds.get_or_insert([x, y, x, y]);
+                    b[0] = b[0].min(x);
+                    b[1] = b[1].min(y);
+                    b[2] = b[2].max(x);
+                    b[3] = b[3].max(y);
+                }
+            }
+        }
+        let Some([left, top, right, bottom]) = bounds else {
+            cx.notify(tr!("nothing-drawn-to-align"));
+            return;
+        };
+        let [ox, oy] = info.style.offset;
+        let (left, top) = (left as i64 + ox, top as i64 + oy);
+        let (right, bottom) = (right as i64 + 1 + ox, bottom as i64 + 1 + oy);
+        let (w, h) = (i64::from(size[0]), i64::from(size[1]));
+        let (key, by) = match edge {
+            "left" => (picture::X, -left),
+            "hcenter" => (picture::X, (w - (right - left)) / 2 - left),
+            "right" => (picture::X, w - right),
+            "top" => (picture::Y, -top),
+            "vcenter" => (picture::Y, (h - (bottom - top)) / 2 - top),
+            _ => (picture::Y, h - bottom),
+        };
+        if by != 0 {
+            let now = if key == picture::X { ox } else { oy };
+            Self::apply(cx, doc::set(info.id, key, now + by));
+        }
+    }
+
     // ----- Puppet warp ------------------------------------------------------
 
     /// Starts puppet warp on the current layer.
@@ -3568,6 +3634,12 @@ impl SuePaint {
             | "edit.fill"
             | "edit.recolor"
             | "edit.luma_to_alpha"
+            | "edit.align.left"
+            | "edit.align.hcenter"
+            | "edit.align.right"
+            | "edit.align.top"
+            | "edit.align.vcenter"
+            | "edit.align.bottom"
             | "edit.flip_h"
             | "edit.flip_v"
             | "edit.rotate180"
@@ -3680,12 +3752,13 @@ impl SuePaint {
             "window.color_history" => flag(self.panels.color_set && self.set_tab == 1),
             "window.navigator" => flag(self.panels.navigator),
             "window.sub_view" => flag(self.panels.navigator && self.nav_tab == 1),
-            "window.info" => flag(self.panels.navigator && self.nav_tab == 2),
-            "window.auto_actions" => flag(self.panels.navigator && self.nav_tab == 3),
-            "window.item_bank" => flag(self.panels.navigator && self.nav_tab == 4),
             "window.cels" => flag(self.panels.layer && self.layer_tab == 3),
             "window.tile" => flag(self.tiled),
             "view.ruler_bar" => flag(self.ruler_bar),
+            "view.scroll_bar" => flag(self.scroll_bars),
+            "window.info" => flag(self.dock.has(crate::dock::Palette::Info)),
+            "window.auto_actions" => flag(self.dock.has(crate::dock::Palette::AutoAction)),
+            "window.item_bank" => flag(self.dock.has(crate::dock::Palette::ItemBank)),
             interface if interface.starts_with("window.interface.") => {
                 flag(self.interface == interface["window.interface.".len()..])
             }
@@ -4049,6 +4122,12 @@ impl SuePaint {
                     rgb: self.drawing_color(),
                 },
             ),
+            "layer.new.raster_top" => {
+                self.run("layer.new", cx);
+            }
+            align if align.starts_with("edit.align.") => {
+                self.align_layer(&align["edit.align.".len()..], cx);
+            }
             "edit.luma_to_alpha" => self.filter_now(
                 cx,
                 Filter::BrightnessToOpacity {
@@ -5322,6 +5401,7 @@ impl SuePaint {
             "view.fit" => self.with_view(cx, |view, rect, size| view.fit(rect, size)),
             "view.grid" => self.grid = !self.grid,
             "view.ruler_bar" => self.ruler_bar = !self.ruler_bar,
+            "view.scroll_bar" => self.scroll_bars = !self.scroll_bars,
             interface if interface.starts_with("window.interface.") => {
                 let chosen = interface["window.interface.".len()..].to_owned();
                 match cx.edit_rice(sue_rice::SetRiceValue::new(
@@ -5401,14 +5481,24 @@ impl SuePaint {
                     self.use_workspace(index);
                 }
             }
-            "window.sub_view" | "window.info" | "window.auto_actions" | "window.item_bank" => {
+            "window.sub_view" => {
                 self.panels.navigator = true;
-                self.nav_tab = match command {
-                    "window.sub_view" => 1,
-                    "window.info" => 2,
-                    "window.auto_actions" => 3,
-                    _ => 4,
+                self.nav_tab = 1;
+            }
+            // Palettes of their own, opened from the strip.
+            "window.info" | "window.auto_actions" | "window.item_bank" => {
+                use crate::dock::Palette;
+                let palette = match command {
+                    "window.info" => Palette::Info,
+                    "window.auto_actions" => Palette::AutoAction,
+                    _ => Palette::ItemBank,
                 };
+                if !self.dock.has(palette) {
+                    self.dock.iconize(palette);
+                }
+                if self.dock.iconized.contains(&palette) {
+                    self.dock.popped = Some(palette);
+                }
             }
             "window.cels" => {
                 self.panels.layer = true;

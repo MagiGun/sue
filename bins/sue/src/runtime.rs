@@ -1667,7 +1667,7 @@ pub(crate) mod tests {
     /// Where Sue Paint's canvas has its middle in a 1440 by 900 window: the
     /// page's middle, moved by Sue Paint's palettes.
     fn paint_middle(runtime: &Runtime) -> Pos2 {
-        runtime.shell.page_rect().center() + vec2(3.0, -63.0)
+        runtime.shell.page_rect().center() + vec2(8.0, -63.0)
     }
 
     /// One frame of `size` with `events`, at `now`.

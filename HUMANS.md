@@ -491,8 +491,11 @@ Once a canvas is open:
   Sliders beside them, the Navigator and layers at the right, and a strip
   of folded palettes at the far right (Material, Layer Property,
   Animation Cels, History, Sub View, Auto Actions, Item Bank and Info);
-  click an icon to open one. The canvas has scrollbars, with the zoom and
-  turn controls beside the bottom one.
+  click an icon to open one. The arrows at the top of a column fold the
+  whole column into that strip. The canvas has scrollbars (View, Scroll
+  Bar hides them), with the zoom and turn controls beside the bottom one.
+- **Align a layer:** Edit, Align/Distribute lines the layer's drawing up
+  with the canvas's left, right, top or bottom edge, or its middle.
 - **Arrange the palettes your way:** drag the edge of a column to make it
   wider, or the line between two palettes to share the height differently.
   Each palette's menu (the three lines at its top right) docks it on the

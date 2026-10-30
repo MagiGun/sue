@@ -65,7 +65,8 @@ impl SuePaint {
             pos2(rect.left(), rect.bottom() - chrome + slide),
             pos2(rect.right(), rect.bottom() + slide),
         );
-        let scroll = if self.bare { 0.0 } else { SCROLLBAR };
+        let bars = self.scroll_bars && !self.bare;
+        let scroll = if bars { SCROLLBAR } else { 0.0 };
         let mut viewport = Rect::from_min_max(
             pos2(rect.left(), tabs.bottom()),
             pos2(rect.right() - scroll, status.top()),
@@ -144,6 +145,8 @@ impl SuePaint {
         }
         if !self.bare {
             self.status_strip(ui, status, Some(size), theme);
+        }
+        if bars {
             let bar = Rect::from_min_max(
                 pos2(viewport.right(), viewport.top()),
                 pos2(viewport.right() + SCROLLBAR, viewport.bottom()),
@@ -3963,7 +3966,7 @@ impl SuePaint {
                 strip.center().y + SCROLLBAR / 2.0,
             ),
         );
-        if bar.width() > 40.0 {
+        if bar.width() > 40.0 && self.scroll_bars {
             let extent = size[0] as f32 * doc.view.zoom;
             if let Some(pan) = scrollbar(
                 ui,
