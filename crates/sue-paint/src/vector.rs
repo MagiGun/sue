@@ -735,6 +735,10 @@ pub(crate) fn touch(samples: &[Sample], arcs: &[f32], at: [f32; 2], reach: f32) 
 
 /// The sample `along` the line, between its samples.
 pub(crate) fn at_arc(samples: &[Sample], arcs: &[f32], along: f32) -> Sample {
+    // A line of one sample is that sample (and `clamp` below would panic).
+    if let [only] = samples {
+        return *only;
+    }
     let index = arcs
         .partition_point(|arc| *arc < along)
         .clamp(1, samples.len() - 1);

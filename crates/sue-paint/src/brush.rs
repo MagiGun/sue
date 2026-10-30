@@ -1636,7 +1636,11 @@ fn correct(path: &[Sample], level: u32, size: f32) -> Vec<Sample> {
     // a brush wide, the sharpest turn around it, found on a lightly smoothed
     // copy so that tremor does not count as corners.
     let calm = gaussian(&points, &vec![false; count], (size * 0.2).max(1.5) / step);
-    let reach = ((size.max(6.0) / step).ceil() as usize).clamp(3, count / 3 + 1);
+    // At least three points, but never more than a third of a short
+    // stroke (`clamp` would panic when that third is under three).
+    let reach = ((size.max(6.0) / step).ceil() as usize)
+        .max(3)
+        .min(count / 3 + 1);
     let turn = |i: usize| {
         let (a, b, c) = (calm[i - reach].at, calm[i].at, calm[i + reach].at);
         let (u, v) = ([b[0] - a[0], b[1] - a[1]], [c[0] - b[0], c[1] - b[1]]);
@@ -2049,6 +2053,27 @@ mod tests {
         tap.to(&mut dot, [10.3, 10.0], 1.0, None);
         tap.end(&mut dot, Finish::default(), None);
         assert!(alpha(&dot, 10, 10) > 0);
+    }
+
+    #[test]
+    fn post_correction_takes_strokes_of_any_length() {
+        // Short strokes once panicked: the reach's floor (3) passed a
+        // third of the points.
+        for points in 0..40 {
+            let path: Vec<Sample> = (0..points)
+                .map(|i| Sample {
+                    at: [i as f32 * 0.9, (i % 3) as f32],
+                    pressure: 1.0,
+                    speed: 0.0,
+                    width: 1.0,
+                    alpha: 1.0,
+                })
+                .collect();
+            for size in [1.0, 6.0, 80.0, 900.0] {
+                let out = correct(&path, 10, size);
+                assert!(path.is_empty() || !out.is_empty(), "{points} points, size {size}");
+            }
+        }
     }
 
     #[test]
