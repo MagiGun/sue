@@ -3234,7 +3234,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "sue"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "egui",
  "sue-ai",
@@ -3253,7 +3253,7 @@ dependencies = [
 
 [[package]]
 name = "sue-ai"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "sue-core",
  "sue-platform",
@@ -3261,7 +3261,7 @@ dependencies = [
 
 [[package]]
 name = "sue-android"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "sue",
  "sue-platform",
@@ -3269,11 +3269,11 @@ dependencies = [
 
 [[package]]
 name = "sue-core"
-version = "0.0.3"
+version = "0.0.4"
 
 [[package]]
 name = "sue-io"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "flacenc",
  "image",
@@ -3292,7 +3292,7 @@ dependencies = [
 
 [[package]]
 name = "sue-ios"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "block2 0.6.2",
  "objc2 0.6.5",
@@ -3303,7 +3303,7 @@ dependencies = [
 
 [[package]]
 name = "sue-lang"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "fluent-bundle",
  "fluent-syntax",
@@ -3313,14 +3313,14 @@ dependencies = [
 
 [[package]]
 name = "sue-model"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "sue-core",
 ]
 
 [[package]]
 name = "sue-paint"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "egui",
  "sue-core",
@@ -3335,7 +3335,7 @@ dependencies = [
 
 [[package]]
 name = "sue-pkg"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "ed25519-dalek",
  "semver",
@@ -3344,7 +3344,7 @@ dependencies = [
 
 [[package]]
 name = "sue-platform"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "arboard",
  "audio_thread_priority",
@@ -3369,7 +3369,7 @@ dependencies = [
 
 [[package]]
 name = "sue-rice"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "sue-core",
  "sue-platform",
@@ -3377,7 +3377,7 @@ dependencies = [
 
 [[package]]
 name = "sue-type"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "egui",
  "miniz_oxide 0.8.9",
@@ -3392,7 +3392,7 @@ dependencies = [
 
 [[package]]
 name = "sue-wm"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "egui",
  "sue-core",
@@ -3407,7 +3407,7 @@ dependencies = [
 
 [[package]]
 name = "sue-writer"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "egui",
  "sue-core",

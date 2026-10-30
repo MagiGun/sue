@@ -11,13 +11,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-10-29
+
 ### Added
 
 - Sue Paint opens and saves Clip Studio Paint `.clip` files. Save keeps a
   picture as a `.clip` that Clip Studio Paint opens with its layers,
   folders, blend modes, opacity and clipping, and that Sue opens again
   with everything. Settings can make Save write a Sue project instead.
-
 - Settings fits every screen: full screen on a phone, with the categories
   as a list that opens one page at a time and controls big enough for a
   thumb; a large sheet with the categories at the side on a tablet, upright
@@ -28,7 +29,6 @@ follow [Semantic Versioning](https://semver.org/).
   as on a tablet or phone) and back, at once. **Phone Shaped** keeps the
   phone layout to a phone-wide column. Mouse and keyboard keep working,
   and Sue remembers your choice.
-
 - Sue Paint opens on a start page on the desktop: **Draw** opens your last
   picture or project (or a new canvas), **Projects** shows your pictures
   and Sue Paint projects with thumbnails, sorted into Favorite, Work and
@@ -93,7 +93,6 @@ follow [Semantic Versioning](https://semver.org/).
   and columns, a heading row that repeats on every page, and text to table
   and back. Tables print in PDFs and go into Word, OpenDocument, EPUB, web
   pages, RTF, Markdown and plain text.
-
 - The Hub is Sue's home page: a box for every studio (Sue Paint, Sue
   Writer) and every tool (the Image Viewer, the Converter). The pin at a
   box's bottom right makes Sue open straight into it; one pin at a time,
@@ -127,10 +126,8 @@ follow [Semantic Versioning](https://semver.org/).
 - The two fonts Sue carries go by their real names, Ubuntu Light and
   Hack, instead of "Sue Sans" and "Sue Mono". Documents that use the
   old names open as before.
-
 - Sue Paint's File, Open Recent now shows the pictures from Sue's one list
   of recent files, the same one the Hub shows.
-
 - Sue Writer on a phone: the text flows to the screen's width at a size you
   can read, the formatting is a row of big buttons right above the keyboard,
   and the line you are writing stays in sight when the keyboard comes up.
@@ -258,7 +255,8 @@ The first release.
 - Packages for Windows, macOS, Linux, Android and iOS, under the Sayn
   License.
 
-[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.3...HEAD
+[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/MagiGun/sue/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/MagiGun/sue/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/MagiGun/sue/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/MagiGun/sue/releases/tag/v0.0.1
