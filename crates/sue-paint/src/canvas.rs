@@ -832,6 +832,7 @@ impl SuePaint {
         let step = frame / moves as f32;
         self.clock = (time - f64::from(frame), step);
         self.pointer = response.hover_pos();
+        let mut lifted = false;
         for event in events {
             match event {
                 Event::Touch {
@@ -849,7 +850,11 @@ impl SuePaint {
                                 self.pressure = Some(self.pen_curve.eval(force.clamp(0.0, 1.0)));
                             }
                         }
-                        TouchPhase::End | TouchPhase::Cancel => self.pressure = None,
+                        // The pen's release comes after its lift, in the same
+                        // frame, and its last point keeps the pen's last
+                        // pressure, not a full one: the pressure goes once
+                        // this frame's events are handled.
+                        TouchPhase::End | TouchPhase::Cancel => lifted = true,
                     }
                     if force.is_some() {
                         self.pen_seen(cx);
@@ -897,6 +902,9 @@ impl SuePaint {
                 }
                 _ => {}
             }
+        }
+        if lifted {
+            self.pressure = None;
         }
         // Two fingers or more move, zoom and turn the view.
         let pinch = ctx.input(egui::InputState::multi_touch);

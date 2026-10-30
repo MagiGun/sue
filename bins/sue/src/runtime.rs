@@ -3943,6 +3943,114 @@ f 2 3 4
     }
 
     #[test]
+    fn sue_paint_a_light_pen_stroke_ends_light() {
+        let (mut runtime, root) = runtime("paint-light-end");
+        let ctx = egui::Context::default();
+        let mut now = Instant::now();
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        // A bigger G-pen, so a full-pressure blob would show.
+        for _ in 0..8 {
+            step(
+                &mut runtime,
+                vec![key(egui::Key::CloseBracket, egui::Modifiers::NONE)],
+            );
+        }
+        let touch = |phase, pos| egui::Event::Touch {
+            device_id: egui::TouchDeviceId(1),
+            id: egui::TouchId(1),
+            phase,
+            pos,
+            force: Some(0.15),
+        };
+        let start = paint_middle(&runtime) - vec2(120.0, 0.0);
+        step(
+            &mut runtime,
+            vec![
+                touch(egui::TouchPhase::Start, start),
+                egui::Event::PointerMoved(start),
+                egui::Event::PointerButton {
+                    pos: start,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        let mut at = start;
+        for _ in 0..30 {
+            at += vec2(8.0, 0.0);
+            step(
+                &mut runtime,
+                vec![
+                    touch(egui::TouchPhase::Move, at),
+                    egui::Event::PointerMoved(at),
+                ],
+            );
+        }
+        // A real pen lifts a little away from its last move.
+        let lift = at + vec2(3.0, 0.0);
+        step(
+            &mut runtime,
+            vec![
+                touch(egui::TouchPhase::End, lift),
+                egui::Event::PointerButton {
+                    pos: lift,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        step(&mut runtime, Vec::new());
+        let arena = &runtime.engine.world.arena;
+        let picture = arena
+            .iter()
+            .find(|(_, entity)| sue_model::picture::is_picture(entity))
+            .map(|(_, entity)| entity.id())
+            .unwrap();
+        let layer = sue_paint::doc::layers(arena, picture).last().unwrap().id;
+        let raster = sue_paint::doc::raster(arena, layer).unwrap();
+        let bytes = raster.bytes().unwrap();
+        let width = raster.width() as usize;
+        // The painted columns, and each one's thickness.
+        let thick = |x: usize| {
+            (0..raster.height() as usize)
+                .filter(|y| bytes[(y * width + x) * 4 + 3] > 128)
+                .count()
+        };
+        let columns: Vec<usize> = (0..width).filter(|x| thick(*x) > 0).collect();
+        assert!(columns.len() > 20, "the stroke was painted");
+        let middle = thick(columns[columns.len() / 2]);
+        let end = columns[columns.len().saturating_sub(12)..]
+            .iter()
+            .map(|x| thick(*x))
+            .max()
+            .unwrap();
+        assert!(
+            end <= middle + 1,
+            "the end ({end} px) is no blob over the middle ({middle} px)"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_pinching_takes_back_the_touch_and_undoes_nothing() {
         let (mut runtime, root) = runtime("paint-pinch");
         let ctx = egui::Context::default();
