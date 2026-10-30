@@ -831,7 +831,11 @@ impl SuePaint {
         let frame = dt.clamp(0.001, 0.1);
         let step = frame / moves as f32;
         self.clock = (time - f64::from(frame), step);
-        self.pointer = response.hover_pos();
+        // Under a menu, popup, dialog or sheet the canvas neither paints
+        // nor shows its brush (see sue_wm::cover).
+        let layer = ui.layer_id();
+        let covered = |pos: Pos2| sue_wm::cover::covered(&ctx, layer, pos);
+        self.pointer = response.hover_pos().filter(|pos| !covered(*pos));
         let mut lifted = false;
         for event in events {
             match event {
@@ -842,6 +846,11 @@ impl SuePaint {
                     force,
                     ..
                 } => {
+                    // A finger landing on something over the canvas is not
+                    // the canvas's.
+                    if phase == TouchPhase::Start && covered(pos) {
+                        continue;
+                    }
                     self.track_touch(id.0, phase, pos, time, viewport, size, cx);
                     match phase {
                         TouchPhase::Start | TouchPhase::Move => {
@@ -872,6 +881,7 @@ impl SuePaint {
                         || self.touches.len() >= 2
                         || !viewport.contains(pos)
                         || !response.hovered()
+                        || covered(pos)
                     {
                         continue;
                     }
@@ -907,7 +917,9 @@ impl SuePaint {
             self.pressure = None;
         }
         // Two fingers or more move, zoom and turn the view.
-        let pinch = ctx.input(egui::InputState::multi_touch);
+        let pinch = ctx
+            .input(egui::InputState::multi_touch)
+            .filter(|touch| !covered(touch.center_pos));
         if let Some(touch) = pinch.filter(|_| !blocked)
             && let Some(doc) = self.docs.get_mut(self.active)
         {
@@ -929,9 +941,10 @@ impl SuePaint {
                     input.modifiers.shift,
                 )
             });
-            if let (Some(pointer), Some(doc)) =
-                (response.hover_pos(), self.docs.get_mut(self.active))
-            {
+            if let (Some(pointer), Some(doc)) = (
+                response.hover_pos().filter(|pos| !covered(*pos)),
+                self.docs.get_mut(self.active),
+            ) {
                 if shift && (scroll.x != 0.0 || scroll.y != 0.0) {
                     // Shift and the wheel turn the view.
                     doc.view

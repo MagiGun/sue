@@ -3943,6 +3943,87 @@ f 2 3 4
     }
 
     #[test]
+    fn sue_paint_paints_nothing_under_a_menu_or_sheet() {
+        let (mut runtime, root) = runtime("paint-covered");
+        let ctx = egui::Context::default();
+        let mut now = Instant::now();
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        step(&mut runtime, Vec::new());
+        let bytes = |runtime: &Runtime| {
+            let arena = &runtime.engine.world.arena;
+            let picture = arena
+                .iter()
+                .find(|(_, entity)| sue_model::picture::is_picture(entity))
+                .map(|(_, entity)| entity.id())
+                .unwrap();
+            let layer = sue_paint::doc::layers(arena, picture).last().unwrap().id;
+            sue_paint::doc::raster(arena, layer)
+                .unwrap()
+                .bytes()
+                .unwrap()
+                .to_vec()
+        };
+        let middle = paint_middle(&runtime);
+        // A sheet painted over the left of the canvas, as a phone's are: on
+        // the page's layer, over the stroke's path.
+        let sheet =
+            egui::Rect::from_min_max(middle - vec2(300.0, 200.0), middle + vec2(0.0, 200.0));
+        let stroke = |runtime: &mut Runtime,
+                      step: &mut dyn FnMut(&mut Runtime, Vec<egui::Event>),
+                      from: egui::Pos2| {
+            let press = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            step(
+                runtime,
+                vec![egui::Event::PointerMoved(from), press(from, true)],
+            );
+            for i in 1..=6 {
+                let at = from + vec2(20.0 * i as f32, 0.0);
+                step(runtime, vec![egui::Event::PointerMoved(at)]);
+            }
+            step(runtime, vec![press(from + vec2(120.0, 0.0), false)]);
+        };
+        let before = bytes(&runtime);
+        let depth = runtime.engine.history.depth();
+        let covered_frames = |ctx: &egui::Context| {
+            sue_wm::cover::cover(ctx, egui::LayerId::background(), sheet);
+        };
+        covered_frames(&ctx);
+        let mut covered_step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            covered_frames(&ctx);
+            step(runtime, events);
+        };
+        stroke(&mut runtime, &mut covered_step, middle - vec2(250.0, 0.0));
+        assert_eq!(bytes(&runtime), before, "nothing painted under the sheet");
+        assert_eq!(runtime.engine.history.depth(), depth);
+        // Beside the sheet the canvas paints as ever.
+        stroke(&mut runtime, &mut covered_step, middle + vec2(40.0, 0.0));
+        assert_ne!(bytes(&runtime), before, "painted beside it");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_a_light_pen_stroke_ends_light() {
         let (mut runtime, root) = runtime("paint-light-end");
         let ctx = egui::Context::default();

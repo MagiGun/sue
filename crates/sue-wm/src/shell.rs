@@ -1383,6 +1383,7 @@ impl Shell {
     pub fn ui(&mut self, root: &mut Ui, io: &mut ShellIo<'_>, now: Instant) {
         let _language = sue_lang::scope(&crate::sue_language(&io.world.rice));
         let ctx = root.ctx().clone();
+        crate::cover::begin_frame(&ctx);
         self.cover_scripts(&ctx, io);
         // Real wall-clock time, clamped; after a sleep, one nominal frame.
         let nominal = 1.0 / self.scheduler.target_hz().max(1) as f32;
