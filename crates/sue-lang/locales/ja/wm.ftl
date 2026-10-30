@@ -26,6 +26,14 @@ language-system = システム ({ $language })
 language-follow-sue = Sue に合わせる ({ $language })
 language-changed = Sue の言語: { $language }
 could-not-change-language = 言語を変更できませんでした: { $error }
+layout-menu = レイアウト
+layout-automatic = 自動 ({ $layout })
+layout-desktop = デスクトップ
+layout-tablet = タブレット
+layout-phone = スマートフォン
+layout-phone-shaped = スマートフォンの形
+layout-changed = Sue のレイアウト: { $layout }
+could-not-change-layout = レイアウトを変更できませんでした: { $error }
 
 ## ハブとピン
 

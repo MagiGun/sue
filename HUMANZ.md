@@ -755,7 +755,16 @@ Desktop operating systems are `Desktop`.
 People can override it: `display.interface` (`auto`, `desktop`, `tablet`,
 `phone`) goes through `FormFactor::chosen` before the shell lays out or hands
 `ShellView::form_factor` to applets, so a phone can run the desktop layout and
-a desktop the touch ones. Every form factor has the same structure: the top
+a desktop the touch ones. `Shell::form_factor` is that one path: the shell's
+layout, the Hub and every `ShellView` read it, so no studio has code of its
+own for the switch. The Sue menu's Layout sets it (`ShellRequest::Interface`,
+an undoable rice edit that the shell takes at once), offering Automatic,
+Desktop, Tablet and Phone on a computer and only Automatic, Tablet and Phone
+on a touch device. `display.phone_frame` (Phone Shaped,
+`ShellRequest::PhoneFrame`) lays the whole app out in a 412 point column in
+the middle of a computer's window while it shows the phone layout
+(`Shell::frame`). Input stays what the device has: mouse and keyboard keep
+working in the touch layouts. Every form factor has the same structure: the top
 bar with the Sue button, the page (the Hub, a studio or a tool) across the
 whole width, and the status bar. Sue Paint draws its own phone layout
 (`phone.rs`: its row of 44 point buttons in the top bar after the Sue button, a
@@ -1142,6 +1151,8 @@ down under the button, built for what is open (`MenuBar::dropdown`):
 | Project | Open Project, Save Project (`Ctrl+S`), Save Project As |
 | Send To | What the page works on (`focus`), into every other studio or tool whose `accepts` takes it (`ShellRequest::OpenIn`), and what applets add (`SueAction`s, such as Converter, or Sue Writer for a picture) |
 | Any other submenu | `SueAction`s on a menu of an applet's own |
+| Language | Sue's language (`ShellRequest::Language`) |
+| Layout | Automatic (naming the device's own), Desktop, Tablet, Phone (`ShellRequest::Interface`; no Desktop on a touch device), and Phone Shaped while a computer shows the phone layout (`ShellRequest::PhoneFrame`) |
 | Open ... at Launch | The open page's pin (checked when it is pinned) |
 | Command Palette, Settings, Quit Sue | With their shortcuts |
 

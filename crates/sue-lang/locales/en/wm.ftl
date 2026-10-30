@@ -29,6 +29,15 @@ language-system = System ({ $language })
 language-follow-sue = Follow Sue ({ $language })
 language-changed = Sue speaks { $language }
 could-not-change-language = Could not change the language: { $error }
+# The Sue menu's layout submenu: which layout the whole app uses.
+layout-menu = Layout
+layout-automatic = Automatic ({ $layout })
+layout-desktop = Desktop
+layout-tablet = Tablet
+layout-phone = Phone
+layout-phone-shaped = Phone Shaped
+layout-changed = Sue uses the { $layout } layout
+could-not-change-layout = Could not change the layout: { $error }
 
 ## The Hub and the pin
 

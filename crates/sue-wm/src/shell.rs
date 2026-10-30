@@ -42,6 +42,26 @@ use crate::{
 /// launch, empty for the Hub.
 pub const PIN_KEY: &str = "launchpad.pinned";
 
+/// The rice key of the layout the whole app uses: `auto`, `desktop`,
+/// `tablet` or `phone`.
+pub const INTERFACE_KEY: &str = "display.interface";
+
+/// The rice key that keeps the phone layout on a computer to a
+/// phone-wide column.
+pub const PHONE_FRAME_KEY: &str = "display.phone_frame";
+
+/// How wide the phone-shaped column is, in points (a common phone's).
+const PHONE_FRAME_WIDTH: f32 = 412.0;
+
+/// A layout as the Sue menu names it.
+fn layout_name(form_factor: FormFactor) -> String {
+    match form_factor {
+        FormFactor::Desktop => tr!("layout-desktop"),
+        FormFactor::Tablet => tr!("layout-tablet"),
+        FormFactor::Mobile => tr!("layout-phone"),
+    }
+}
+
 /// A hardware profile as people read it, e.g. `Legacy Low Spec`, in the
 /// language in use (as Settings names the choice).
 #[must_use]
@@ -379,6 +399,34 @@ impl Shell {
         self.page_rect
     }
 
+    /// The layout every studio and tool draws: the device's own, or the
+    /// one chosen in the Sue menu's Layout.
+    #[must_use]
+    pub fn form_factor(&self) -> FormFactor {
+        self.form_factor.chosen(&self.config.interface)
+    }
+
+    /// The device's own form factor, as the system detected it.
+    #[must_use]
+    pub fn device_form_factor(&self) -> FormFactor {
+        self.form_factor
+    }
+
+    /// Where the app draws: the whole window, or a phone-wide column in
+    /// its middle when a computer shows the phone layout phone shaped.
+    #[must_use]
+    pub fn frame(&self, window: Rect) -> Rect {
+        let width = PHONE_FRAME_WIDTH.min(window.width());
+        if self.config.phone_frame
+            && !self.form_factor.is_touch()
+            && self.form_factor() == FormFactor::Mobile
+        {
+            Rect::from_center_size(window.center(), vec2(width, window.height()))
+        } else {
+            window
+        }
+    }
+
     /// Where the last frame drew the Sue button.
     #[must_use]
     pub fn sue_button(&self) -> Rect {
@@ -587,7 +635,7 @@ impl Shell {
 
     fn view(&self, now: Instant, dt: f32) -> ShellView {
         ShellView {
-            form_factor: self.form_factor.chosen(&self.config.interface),
+            form_factor: self.form_factor(),
             profile: self.profile,
             now,
             dt,
@@ -733,6 +781,36 @@ impl Shell {
                 );
             }
             Err(error) => self.notify(tr!("could-not-change-language", error = error), true),
+        }
+    }
+
+    /// Sets the layout the whole app uses (`auto`, `desktop`, `tablet` or
+    /// `phone`) as an undoable rice edit; the shell, the Hub and every
+    /// studio and tool take it on the next frame.
+    pub fn set_interface(&mut self, setting: &str, io: &mut ShellIo<'_>) {
+        self.edit_display(INTERFACE_KEY, RiceValue::Text(setting.to_owned()), io);
+    }
+
+    /// Keeps the phone layout on a computer to a phone-wide column, or
+    /// lets it fill the window, as an undoable rice edit.
+    pub fn set_phone_frame(&mut self, on: bool, io: &mut ShellIo<'_>) {
+        self.edit_display(PHONE_FRAME_KEY, RiceValue::Bool(on), io);
+    }
+
+    fn edit_display(&mut self, key: &str, value: RiceValue, io: &mut ShellIo<'_>) {
+        let txn = SetRiceValue::new(key, value);
+        io.typing.flush(io.history);
+        match io.history.apply(io.world, RiceEdit(txn)) {
+            Ok(_) => {
+                // The shell follows at once; the engine reads the rice again
+                // for everything else.
+                if let Ok(config) = WmConfig::from_rice(&io.world.rice) {
+                    self.config = config;
+                }
+                let layout = layout_name(self.form_factor());
+                self.notify(tr!("layout-changed", layout = layout), false);
+            }
+            Err(error) => self.notify(tr!("could-not-change-layout", error = error), true),
         }
     }
 
@@ -949,6 +1027,46 @@ impl Shell {
             })
             .collect();
         items.push(MenuItem::sub(tr!("language-menu"), languages));
+        // Layout: the device's own, or the desktop, tablet or phone
+        // layout for the whole app. Phones and tablets switch only between
+        // their two.
+        let interface = self.config.interface.as_str();
+        let chosen = |value: &str| match value {
+            "desktop" | "tablet" | "phone" => interface == value,
+            _ => !matches!(interface, "desktop" | "tablet" | "phone"),
+        };
+        let mut layouts = vec![sue_item(
+            run,
+            tr!("layout-automatic", layout = layout_name(self.form_factor)),
+            ShellRequest::Interface("auto".to_owned()),
+            chosen("auto"),
+        )];
+        let touch = self.form_factor.is_touch();
+        for (value, form) in [
+            ("desktop", FormFactor::Desktop),
+            ("tablet", FormFactor::Tablet),
+            ("phone", FormFactor::Mobile),
+        ] {
+            if touch && form == FormFactor::Desktop {
+                continue;
+            }
+            layouts.push(sue_item(
+                run,
+                layout_name(form),
+                ShellRequest::Interface(value.to_owned()),
+                chosen(value),
+            ));
+        }
+        if !touch && self.form_factor() == FormFactor::Mobile {
+            layouts.push(MenuItem::Separator);
+            layouts.push(sue_item(
+                run,
+                tr!("layout-phone-shaped"),
+                ShellRequest::PhoneFrame(!self.config.phone_frame),
+                self.config.phone_frame,
+            ));
+        }
+        items.push(MenuItem::sub(tr!("layout-menu"), layouts));
         items.push(MenuItem::Separator);
         if let Some(page) = self.page.clone() {
             let pinned = pinned(&io.world.rice, io.applets).as_ref() == Some(&page);
@@ -1105,6 +1223,8 @@ impl Shell {
             ShellRequest::Hub => self.hub(),
             ShellRequest::Pin(id) => self.pin(id, io),
             ShellRequest::Language(setting) => self.set_language(&setting, io),
+            ShellRequest::Interface(setting) => self.set_interface(&setting, io),
+            ShellRequest::PhoneFrame(on) => self.set_phone_frame(on, io),
             ShellRequest::SueMenu => self.open_sue_menu(io),
             ShellRequest::OpenIn { entity, applet } => {
                 if io.world.arena.get_by_id(entity).is_err() {
@@ -1293,10 +1413,24 @@ impl Shell {
         }
         self.advance();
 
+        let window = root.max_rect();
+        let frame = self.frame(window);
+        if frame != window {
+            // Phone shaped: the window around the column stays empty.
+            let painter = root.painter();
+            painter.rect_filled(window, 0.0, theme.void);
+            painter.rect_filled(window, 0.0, theme.shadow.gamma_multiply(0.5));
+            painter.rect_stroke(
+                frame.expand(0.5),
+                0.0,
+                theme.hairline(),
+                egui::StrokeKind::Outside,
+            );
+        }
         let layout = solve_layout(&LayoutRequest {
-            viewport: root.max_rect(),
+            viewport: frame,
             safe_area: self.safe_area,
-            form_factor: self.form_factor.chosen(&self.config.interface),
+            form_factor: self.form_factor(),
             metrics: self.config.metrics,
         });
         self.page_rect = layout.page;
@@ -1334,7 +1468,7 @@ impl Shell {
         });
         self.status_ui(root, layout.status, io, &theme);
         self.palette_ui(&ctx, io, &theme, now);
-        self.window_ui(&ctx, root.max_rect(), io, &theme, now, dt);
+        self.window_ui(&ctx, frame, io, &theme, now, dt);
 
         self.animating = moving;
         self.scheduler.set_animating(self.animating);
@@ -1542,7 +1676,7 @@ impl Shell {
         root.painter().rect_filled(area, 0.0, theme.void);
         // A page on its way in takes no clicks on the Hub under it.
         let live = self.page.is_none();
-        let touch = self.form_factor.chosen(&self.config.interface) != FormFactor::Desktop;
+        let touch = self.form_factor() != FormFactor::Desktop;
         let narrow = area.width() < 560.0;
         let margin = if narrow { 16.0 } else { 40.0 };
         let gap = if narrow { 12.0 } else { 16.0 };
@@ -2658,6 +2792,166 @@ mod tests {
         assert_eq!(
             ctx.global_style().visuals.widgets.inactive.bg_fill,
             theme.pill
+        );
+    }
+
+    /// A studio that notes the layout it is handed and the room it has.
+    struct Layouts(Arc<Mutex<Vec<(FormFactor, f32)>>>);
+
+    impl SueApplet for Layouts {
+        fn manifest(&self) -> AppletManifest {
+            AppletManifest::new("layouts", "Layouts", AppletRole::Studio, "*")
+        }
+
+        fn page_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+            self.0
+                .lock()
+                .unwrap()
+                .push((cx.view.form_factor, ui.max_rect().width()));
+        }
+    }
+
+    /// Everything a shell draws with, for a few frames at a time.
+    struct Rig {
+        world: World,
+        history: UndoStack<World>,
+        typing: Typing,
+        applets: Applets,
+        catalog: Catalog,
+        transport: Transport,
+        requests: Vec<ShellRequest>,
+        work: WorkList,
+        transfers: crate::Transfers,
+        ctx: egui::Context,
+    }
+
+    impl Rig {
+        fn new(launchpad: &Launchpad) -> Self {
+            let mut rice = RiceSchema::new();
+            crate::register_rice(&mut rice).unwrap();
+            rice.register_all(&launchpad.rice_declarations()).unwrap();
+            Self {
+                world: World {
+                    arena: Arena::new(),
+                    rice,
+                },
+                history: UndoStack::new(),
+                typing: Typing::default(),
+                applets: launchpad.instantiate(),
+                catalog: Catalog::default(),
+                transport: Transport::default(),
+                requests: Vec::new(),
+                work: WorkList::default(),
+                transfers: crate::Transfers::default(),
+                ctx: egui::Context::default(),
+            }
+        }
+
+        fn with<R>(&mut self, work: impl FnOnce(&mut ShellIo<'_>) -> R) -> R {
+            let mut io = ShellIo {
+                world: &mut self.world,
+                history: &mut self.history,
+                typing: &mut self.typing,
+                applets: &mut self.applets,
+                catalog: &self.catalog,
+                textures: &mut NoTextures,
+                audio: None,
+                transport: &mut self.transport,
+                requests: &mut self.requests,
+                work: &self.work,
+                transfers: &mut self.transfers,
+                fps: None,
+            };
+            work(&mut io)
+        }
+
+        fn frames(&mut self, shell: &mut Shell) {
+            let ctx = self.ctx.clone();
+            for _ in 0..3 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0))),
+                    ..egui::RawInput::default()
+                };
+                self.with(|io| {
+                    ctx.run_ui(raw, |ui| shell.ui(ui, io, Instant::now()))
+                        .drop_without_applying_deltas();
+                });
+            }
+        }
+
+        fn pick(&mut self, shell: &mut Shell, path: &[&str]) {
+            self.with(|io| {
+                shell.open_sue_menu(io);
+                assert!(shell.sue_menu_pick(path, io, Instant::now()), "{path:?}");
+            });
+            self.frames(shell);
+        }
+    }
+
+    #[test]
+    fn the_sue_menus_layout_changes_what_every_studio_draws() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mut launchpad = Launchpad::new();
+        let probe = Arc::clone(&seen);
+        launchpad
+            .register(move || Box::new(Layouts(Arc::clone(&probe))))
+            .unwrap();
+        let mut rig = Rig::new(&launchpad);
+        let mut shell = Shell::new(
+            WmConfig::from_rice(&rig.world.rice).unwrap(),
+            Theme::from_rice(&rig.world.rice),
+            HardwareProfile::Balanced,
+            60,
+            FormFactor::Desktop,
+        );
+        shell.open(AppletId::new("layouts").unwrap(), &rig.applets);
+        let last =
+            |seen: &Arc<Mutex<Vec<(FormFactor, f32)>>>| *seen.lock().unwrap().last().unwrap();
+        rig.frames(&mut shell);
+        assert_eq!(last(&seen), (FormFactor::Desktop, 1440.0));
+
+        // A computer offers every layout, Automatic naming its own.
+        rig.with(|io| shell.open_sue_menu(io));
+        assert_eq!(
+            shell.sue_menu_labels(&["Layout"]),
+            ["Automatic (Desktop)", "Desktop", "Tablet", "Phone"]
+        );
+        rig.pick(&mut shell, &["Layout", "Phone"]);
+        assert_eq!(rig.world.rice.get_str(INTERFACE_KEY), Some("phone"));
+        assert_eq!(shell.form_factor(), FormFactor::Mobile);
+        assert_eq!(shell.device_form_factor(), FormFactor::Desktop);
+        assert_eq!(last(&seen), (FormFactor::Mobile, 1440.0));
+
+        // Phone shaped keeps the whole app to a phone-wide column.
+        rig.pick(&mut shell, &["Layout", "Phone Shaped"]);
+        assert_eq!(last(&seen), (FormFactor::Mobile, PHONE_FRAME_WIDTH));
+        assert!(
+            shell.sue_button().left() > 500.0,
+            "{:?}",
+            shell.sue_button()
+        );
+        rig.pick(&mut shell, &["Layout", "Tablet"]);
+        assert_eq!(last(&seen), (FormFactor::Tablet, 1440.0));
+
+        // One undo step each, like any other change.
+        rig.with(|io| shell.undo(io, false));
+        rig.frames(&mut shell);
+        assert_eq!(rig.world.rice.get_str(INTERFACE_KEY), Some("phone"));
+        rig.pick(&mut shell, &["Layout", "Automatic (Desktop)"]);
+        assert_eq!(last(&seen), (FormFactor::Desktop, 1440.0));
+
+        // A phone or tablet switches only between its two.
+        let mut phone = Shell::new(
+            WmConfig::from_rice(&rig.world.rice).unwrap(),
+            Theme::from_rice(&rig.world.rice),
+            HardwareProfile::Balanced,
+            60,
+            FormFactor::Mobile,
+        );
+        rig.with(|io| phone.open_sue_menu(io));
+        assert_eq!(
+            phone.sue_menu_labels(&["Layout"]),
+            ["Automatic (Phone)", "Tablet", "Phone"]
         );
     }
 }

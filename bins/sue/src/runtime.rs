@@ -1469,7 +1469,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::engine::tests::temp_host;
     use egui::{Pos2, vec2};
-    use sue_platform::NoTextures;
+    use sue_platform::{FormFactor, NoTextures};
     use sue_wm::AppletId;
 
     pub(crate) fn runtime(tag: &str) -> (Runtime, PathBuf) {
@@ -5397,6 +5397,60 @@ f 2 3 4
             before + 2,
             "the OpenDocument table came back"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_sue_menus_layout_switches_the_hub_and_sue_paint_and_stays() {
+        let (host, root) = temp_host("layout");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        let mut runtime = Runtime::new(Engine::boot(&host).unwrap()).unwrap();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        assert_eq!(runtime.shell.form_factor(), FormFactor::Desktop);
+        let desktop_top = runtime.shell.page_rect().top();
+        let pick = |runtime: &mut Runtime, layout: &str| {
+            runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
+            let picked = runtime.with_shell(&mut NoTextures, start, |shell, io, now| {
+                shell.sue_menu_pick(&["Layout", layout], io, now)
+            });
+            assert!(picked, "{layout}");
+            frames(runtime, &ctx, size, start, |_| Vec::new());
+        };
+
+        // Phone: the Hub and Sue Paint draw the phone layout, with the
+        // phone's taller bar, in the same window.
+        pick(&mut runtime, "Phone");
+        assert_eq!(runtime.shell.form_factor(), FormFactor::Mobile);
+        assert!(runtime.shell.hub_open());
+        assert!(runtime.shell.page_rect().top() > desktop_top);
+        assert_eq!(runtime.shell.page_rect().width(), size.x);
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        assert_eq!(
+            runtime.shell.page().map(AppletId::as_str),
+            Some(sue_paint::ID)
+        );
+        assert_eq!(runtime.shell.form_factor(), FormFactor::Mobile);
+
+        // Tablet, then back to the desktop the system detects.
+        pick(&mut runtime, "Tablet");
+        assert_eq!(runtime.shell.form_factor(), FormFactor::Tablet);
+        pick(&mut runtime, "Phone");
+        // The rice file keeps it, so it survives a restart.
+        let rice = std::fs::read_to_string(runtime.engine.rice_path()).unwrap();
+        assert!(rice.contains("interface = \"phone\""), "{rice}");
+        let mut again = Runtime::new(Engine::boot(&host).unwrap()).unwrap();
+        frames(&mut again, &ctx, size, start, |_| Vec::new());
+        assert_eq!(again.shell.form_factor(), FormFactor::Mobile);
+        pick(&mut again, "Automatic (Desktop)");
+        assert_eq!(again.shell.form_factor(), FormFactor::Desktop);
+        assert_eq!(again.shell.page_rect().top(), desktop_top);
         let _ = std::fs::remove_dir_all(&root);
     }
 

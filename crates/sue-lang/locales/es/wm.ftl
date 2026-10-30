@@ -26,6 +26,14 @@ language-system = Sistema ({ $language })
 language-follow-sue = Seguir a Sue ({ $language })
 language-changed = Sue habla { $language }
 could-not-change-language = No se pudo cambiar el idioma: { $error }
+layout-menu = Disposición
+layout-automatic = Automática ({ $layout })
+layout-desktop = Escritorio
+layout-tablet = Tableta
+layout-phone = Teléfono
+layout-phone-shaped = Con forma de teléfono
+layout-changed = Sue usa la disposición { $layout }
+could-not-change-layout = No se pudo cambiar la disposición: { $error }
 
 ## El Hub y la chincheta
 
