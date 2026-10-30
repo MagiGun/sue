@@ -13,6 +13,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint's Navigator, Animation Cels and Layer Property look and work
+  like Clip Studio Paint's: wedge sliders for zoom, rotation and opacity,
+  the light table's buttons (reverse its layers, Color mode, lock the cel
+  being drawn, previous and next cel, deregister), and the layer effects
+  as a row of buttons. New filters: Twirl, ZigZag and Crystallize.
 - Sue Paint's palettes look and work like Clip Studio Paint's: tabs show
   an icon and their name, the Sub Tool list shows each brush's own
   stroke, the tool palette has a Brush Size grid of sizes, History lists

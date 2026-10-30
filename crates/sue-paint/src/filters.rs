@@ -112,6 +112,23 @@ pub enum Filter {
         /// 0 to 1.
         amount: f32,
     },
+    /// Twirl: turned round the middle, most at the middle.
+    Twirl {
+        /// Degrees at the middle; negative turns the other way.
+        angle: f32,
+    },
+    /// ZigZag: rings bent back and forth like a stone dropped in water.
+    ZigZag {
+        /// How far, pixels.
+        amplitude: f32,
+        /// How many folds from the middle to the edge.
+        folds: f32,
+    },
+    /// Crystallize: cells of one color each, round scattered points.
+    Crystallize {
+        /// How big a cell is, pixels.
+        size: u32,
+    },
     /// Chromatic Aberration: red and blue pulled apart toward the edges.
     Aberration {
         /// Pixels at the edge.
@@ -282,6 +299,9 @@ impl Filter {
             Self::Polar { .. } => tr!("polar-coordinates"),
             Self::Ripple { .. } => tr!("ripple"),
             Self::Fisheye { .. } => tr!("fisheye"),
+            Self::Twirl { .. } => tr!("twirl"),
+            Self::ZigZag { .. } => tr!("zigzag"),
+            Self::Crystallize { .. } => tr!("crystallize"),
             Self::Aberration { .. } => tr!("chromatic-aberration"),
             Self::Retro { .. } => tr!("retro"),
             Self::PerlinNoise { .. } => tr!("perlin-noise"),
@@ -370,6 +390,43 @@ impl Filter {
                     (x + (y * k).sin() * amplitude, y + (x * k).sin() * amplitude)
                 });
             }
+            Self::Twirl { angle } => {
+                let (cx, cy, r) = (
+                    width as f32 / 2.0,
+                    height as f32 / 2.0,
+                    width.min(height) as f32 / 2.0,
+                );
+                remap(pixels, width, height, |x, y| {
+                    let (dx, dy) = (x - cx, y - cy);
+                    let d = dx.hypot(dy) / r.max(1.0);
+                    if d >= 1.0 {
+                        return (x, y);
+                    }
+                    let (sin, cos) = (angle.to_radians() * (1.0 - d) * (1.0 - d)).sin_cos();
+                    (cx + dx * cos - dy * sin, cy + dx * sin + dy * cos)
+                });
+            }
+            Self::ZigZag { amplitude, folds } => {
+                let (cx, cy, r) = (
+                    width as f32 / 2.0,
+                    height as f32 / 2.0,
+                    width.min(height) as f32 / 2.0,
+                );
+                remap(pixels, width, height, |x, y| {
+                    let (dx, dy) = (x - cx, y - cy);
+                    let d = dx.hypot(dy);
+                    let t = d / r.max(1.0);
+                    if t >= 1.0 || d < 1e-4 {
+                        return (x, y);
+                    }
+                    // A turn back and forth with the distance, fading out.
+                    let turn =
+                        (t * folds * std::f32::consts::TAU).sin() * amplitude / d * (1.0 - t);
+                    let (sin, cos) = turn.sin_cos();
+                    (cx + dx * cos - dy * sin, cy + dx * sin + dy * cos)
+                });
+            }
+            Self::Crystallize { size } => crystallize(pixels, width, height, size.max(2)),
             Self::Pinch { amount } => {
                 let (cx, cy, r) = (
                     width as f32 / 2.0,
@@ -860,6 +917,9 @@ impl Filter {
             | Self::Polar { .. }
             | Self::Ripple { .. }
             | Self::Fisheye { .. }
+            | Self::Twirl { .. }
+            | Self::ZigZag { .. }
+            | Self::Crystallize { .. }
             | Self::Aberration { .. }
             | Self::Retro { .. }
             | Self::PerlinNoise { .. }
@@ -1175,6 +1235,46 @@ fn mosaic(pixels: &mut [u8], width: u32, height: u32, size: u32) {
     }
 }
 
+/// Crystallize: a scattered point in each `size` square, and every pixel
+/// the color of the point nearest it.
+fn crystallize(pixels: &mut [u8], width: u32, height: u32, size: u32) {
+    let (columns, rows) = (width.div_ceil(size), height.div_ceil(size));
+    // The same scatter every time, so a preview matches the result.
+    let hash = |x: u32, y: u32, salt: u32| {
+        let mut h = x.wrapping_mul(0x9e37_79b9) ^ y.wrapping_mul(0x85eb_ca6b) ^ salt;
+        h ^= h >> 15;
+        h = h.wrapping_mul(0x2c1b_3c6d);
+        h ^= h >> 12;
+        (h % 1000) as f32 / 1000.0
+    };
+    let point = |column: u32, row: u32| {
+        (
+            ((column as f32 + hash(column, row, 1)) * size as f32).min(width as f32 - 1.0),
+            ((row as f32 + hash(column, row, 2)) * size as f32).min(height as f32 - 1.0),
+        )
+    };
+    let source = pixels.to_vec();
+    for y in 0..height {
+        for x in 0..width {
+            let (column, row) = (x / size, y / size);
+            let mut best = (f32::MAX, (x as f32, y as f32));
+            for nr in row.saturating_sub(1)..(row + 2).min(rows) {
+                for nc in column.saturating_sub(1)..(column + 2).min(columns) {
+                    let (px, py) = point(nc, nr);
+                    let d = (px - x as f32).powi(2) + (py - y as f32).powi(2);
+                    if d < best.0 {
+                        best = (d, (px, py));
+                    }
+                }
+            }
+            let (px, py) = (best.1.0 as u32, best.1.1 as u32);
+            let from = ((py * width + px) * 4) as usize;
+            let to = ((y * width + x) * 4) as usize;
+            pixels[to..to + 4].copy_from_slice(&source[from..from + 4]);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1231,6 +1331,15 @@ mod tests {
             "bulged"
         );
         assert_ne!(run(Filter::Polar { inverse: false }), dot());
+        assert_ne!(run(Filter::Twirl { angle: 180.0 }), dot());
+        assert_ne!(
+            run(Filter::ZigZag {
+                amplitude: 4.0,
+                folds: 3.0
+            }),
+            dot()
+        );
+        assert_ne!(run(Filter::Crystallize { size: 6 }), dot());
         let aberrated = run(Filter::Aberration { shift: 3.0 });
         assert_ne!(aberrated, dot());
         let retro = run(Filter::Retro { amount: 1.0 });

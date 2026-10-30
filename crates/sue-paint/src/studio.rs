@@ -501,6 +501,13 @@ pub struct SuePaint {
     pub(crate) light_table: bool,
     /// How much the light table's layers show, 0 to 1.
     pub(crate) light_opacity: f32,
+    /// The light table's layers show in one color (Color mode).
+    pub(crate) light_color: bool,
+    /// The cel's own light table shows (Show cel-specific light table).
+    pub(crate) light_cel: bool,
+    /// The cel kept as the one being drawn whatever the frame (Lock
+    /// current animation cel as editing target).
+    pub(crate) cel_lock: Option<sue_core::EntityId>,
     /// Playback starts over at the end.
     pub(crate) looping: bool,
     pub(crate) pressure: Option<f32>,
@@ -630,6 +637,9 @@ impl Default for SuePaint {
             onion: false,
             light_table: true,
             light_opacity: 0.5,
+            light_color: false,
+            light_cel: true,
+            cel_lock: None,
             looping: true,
             pressure: None,
             pen_curve: crate::dialogs::DEFAULT_PEN_PRESSURE
@@ -931,6 +941,9 @@ fn implemented(command: &str) -> bool {
             | "filter.line_width"
             | "filter.wave"
             | "filter.pinch"
+            | "filter.twirl"
+            | "filter.zigzag"
+            | "filter.crystallize"
             | "filter.polar"
             | "filter.ripple"
             | "filter.fisheye"
@@ -952,6 +965,13 @@ fn implemented(command: &str) -> bool {
             | "anim.light_table"
             | "anim.light_table.register"
             | "anim.light_table.clear"
+            | "anim.light_table.reverse"
+            | "anim.light_table.color"
+            | "anim.light_table.cel"
+            | "anim.light_table.deregister"
+            | "anim.cel.lock"
+            | "anim.cel.prev"
+            | "anim.cel.next"
             | "anim.loop"
             | "anim.play"
             | "anim.next"
@@ -3616,6 +3636,9 @@ impl SuePaint {
             "anim.onion" => flag(self.onion),
             "anim.loop" => flag(self.looping),
             "anim.light_table" => flag(self.light_table),
+            "anim.light_table.color" => flag(self.light_color),
+            "anim.light_table.cel" => flag(self.light_cel),
+            "anim.cel.lock" => flag(self.cel_lock.is_some()),
             "view.snap_special" => self
                 .doc()
                 .map_or(ItemState::off(), |doc| flag(doc.ruler_on)),
@@ -4102,6 +4125,15 @@ impl SuePaint {
                 },
             ),
             "filter.fisheye" => self.filter_dialog(cx, Filter::Fisheye { amount: 0.6 }),
+            "filter.twirl" => self.filter_dialog(cx, Filter::Twirl { angle: 180.0 }),
+            "filter.zigzag" => self.filter_dialog(
+                cx,
+                Filter::ZigZag {
+                    amplitude: 10.0,
+                    folds: 5.0,
+                },
+            ),
+            "filter.crystallize" => self.filter_dialog(cx, Filter::Crystallize { size: 20 }),
             "filter.aberration" => self.filter_dialog(cx, Filter::Aberration { shift: 6.0 }),
             "filter.retro" => self.filter_dialog(cx, Filter::Retro { amount: 0.6 }),
             "filter.perlin" => self.filter_dialog(

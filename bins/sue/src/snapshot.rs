@@ -456,6 +456,20 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         );
     }
     shoot(&mut runtime, &mut camera, "11d-sue-paint-timeline")?;
+    // 11d2 and 11d3. The Animation cels and Layer Property tabs, as Clip
+    // Studio Paint's palettes.
+    for (target, name) in [
+        ("tab/layer/3", "11d2-sue-paint-animation-cels"),
+        ("tab/layer/1", "11d3-sue-paint-layer-property"),
+    ] {
+        if let Some(applet) = runtime.applets.get_mut(&paint) {
+            applet.navigate(target);
+        }
+        shoot(&mut runtime, &mut camera, name)?;
+    }
+    if let Some(applet) = runtime.applets.get_mut(&paint) {
+        applet.navigate("tab/layer/0");
+    }
 
     // 12 and 13. Back to the Hub, then into Sue Paint again: the page
     // comes in over the Hub and its palettes slide in.

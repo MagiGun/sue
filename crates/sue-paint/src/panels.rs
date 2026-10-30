@@ -69,12 +69,6 @@ pub(crate) fn icon_button(
     enabled && response.clicked()
 }
 
-/// An icon button placed by the layout. Returns `true` when clicked.
-pub(crate) fn icon_in(ui: &mut Ui, icon: Icon, active: bool, tip: &str, theme: &Theme) -> bool {
-    let (rect, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
-    icon_button(ui, rect, icon, true, active, tip, theme)
-}
-
 /// A palette's tab strip, as Clip Studio Paint draws it: each tab an icon
 /// and its name, the chosen one lit. When the names do not all fit, only
 /// the chosen tab keeps its name and the others show their icon (with the
@@ -159,6 +153,114 @@ fn header(
         Rect::from_min_max(pos2(rect.left(), strip.bottom()), rect.max),
         clicked,
     )
+}
+
+/// Clip Studio Paint's wedge slider: a dark triangle that grows to the
+/// right, lit up to the value, with a thin bar at it. A widget, so its
+/// response says when it changed and when a drag ended.
+pub(crate) struct Wedge<'a> {
+    value: &'a mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    logarithmic: bool,
+    width: f32,
+    theme: &'a Theme,
+}
+
+impl<'a> Wedge<'a> {
+    pub(crate) fn new(
+        value: &'a mut f32,
+        range: std::ops::RangeInclusive<f32>,
+        width: f32,
+        theme: &'a Theme,
+    ) -> Self {
+        Self {
+            value,
+            range,
+            logarithmic: false,
+            width,
+            theme,
+        }
+    }
+
+    pub(crate) fn logarithmic(mut self) -> Self {
+        self.logarithmic = true;
+        self
+    }
+
+    fn to_unit(&self, value: f32) -> f32 {
+        let (low, high) = (*self.range.start(), *self.range.end());
+        let t = if self.logarithmic {
+            (value.max(low).ln() - low.max(1e-3).ln()) / (high.ln() - low.max(1e-3).ln())
+        } else {
+            (value - low) / (high - low)
+        };
+        t.clamp(0.0, 1.0)
+    }
+
+    fn value_at(&self, t: f32) -> f32 {
+        let (low, high) = (*self.range.start(), *self.range.end());
+        if self.logarithmic {
+            (low.max(1e-3).ln() + t * (high.ln() - low.max(1e-3).ln())).exp()
+        } else {
+            low + t * (high - low)
+        }
+    }
+}
+
+impl egui::Widget for Wedge<'_> {
+    fn ui(self, ui: &mut Ui) -> egui::Response {
+        let (rect, mut response) =
+            ui.allocate_exact_size(vec2(self.width.max(24.0), 18.0), Sense::click_and_drag());
+        if let Some(pointer) = response.interact_pointer_pos()
+            && (response.dragged() || response.clicked())
+        {
+            let t = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+            let value = self.value_at(t);
+            if (value - *self.value).abs() > f32::EPSILON {
+                *self.value = value;
+                response.mark_changed();
+            }
+        }
+        let theme = self.theme;
+        let wedge = rect.shrink2(vec2(1.0, 2.0));
+        let t = self.to_unit(*self.value);
+        let x = wedge.left() + t * wedge.width();
+        // The wedge's top edge at `x`: a point at the left, full height at
+        // the right.
+        let top_at = |x: f32| {
+            let u = (x - wedge.left()) / wedge.width();
+            wedge.bottom() - wedge.height() * (0.08 + 0.92 * u)
+        };
+        let painter = ui.painter();
+        let lit = if response.hovered() || response.dragged() {
+            theme.text
+        } else {
+            theme.text.gamma_multiply(0.78)
+        };
+        let dark = theme.void;
+        let polygon = |from: f32, to: f32, color: Color32| {
+            if to - from < 0.5 {
+                return;
+            }
+            painter.add(Shape::convex_polygon(
+                vec![
+                    pos2(from, wedge.bottom()),
+                    pos2(from, top_at(from)),
+                    pos2(to, top_at(to)),
+                    pos2(to, wedge.bottom()),
+                ],
+                color,
+                Stroke::NONE,
+            ));
+        };
+        polygon(wedge.left(), x, lit);
+        polygon(x, wedge.right(), dark);
+        painter.line_segment(
+            [pos2(x, wedge.top()), pos2(x, wedge.bottom())],
+            Stroke::new(1.5, theme.text),
+        );
+        response
+    }
 }
 
 /// A labelled horizontal slider row.
@@ -3175,7 +3277,7 @@ impl SuePaint {
             return;
         }
         let viewport = self.viewport;
-        let controls = 58.0;
+        let controls = 86.0;
         let thumb_area = Rect::from_min_max(body.min, pos2(body.right(), body.bottom() - controls));
         ui.painter().rect_filled(thumb_area, 0.0, theme.void);
         let Some(doc) = self.docs.get_mut(self.active) else {
@@ -3237,80 +3339,127 @@ impl SuePaint {
             let p = ((pointer - thumb.min) / scale).to_pos2();
             doc.view.center_on(viewport, size, p);
         }
-        // Zoom and rotation.
+        // Zoom and rotation, as Clip Studio Paint's Navigator: each a
+        // value, a wedge and its buttons on one row; fit and the flips
+        // below.
+        let row = 22.0;
+        let buttons_width = 3.0 * (row + 2.0);
+        let wedge_width = (body.width() - 62.0 - 8.0 - buttons_width - 4.0).max(24.0);
+        let mut zoom_button = None;
+        let mut turn_button = None;
+        let mut percent = doc.view.zoom * 100.0;
+        let mut rotation = doc.view.rotation;
         let mut inner = child(
             ui,
             Rect::from_min_max(pos2(body.left(), thumb_area.bottom() + 4.0), body.max),
             "navigator-controls",
         );
-        inner.spacing_mut().slider_width = (body.width() - 170.0).max(40.0);
-        let mut percent = doc.view.zoom * 100.0;
+        inner.spacing_mut().item_spacing = vec2(4.0, 4.0);
+        let mut zoomed = false;
+        let mut turned = false;
         inner.horizontal(|ui| {
-            if ui
-                .add(
-                    egui::Slider::new(&mut percent, 1.0..=6400.0)
-                        .logarithmic(true)
-                        .max_decimals(1)
-                        .suffix(" %"),
+            zoomed |= ui
+                .add_sized(
+                    vec2(62.0, row),
+                    egui::DragValue::new(&mut percent)
+                        .range(1.0..=6400.0)
+                        .max_decimals(1),
                 )
-                .changed()
+                .on_hover_text(tr!("zoom"))
+                .changed();
+            zoomed |= ui
+                .add(Wedge::new(&mut percent, 1.0..=6400.0, wedge_width, theme).logarithmic())
+                .on_hover_text(tr!("zoom"))
+                .changed();
+            for (index, (icon, tip)) in [
+                (Icon::ZoomOut, tr!("zoom-out")),
+                (Icon::ZoomIn, tr!("zoom-in")),
+                (Icon::Actual, "100%".to_owned()),
+            ]
+            .into_iter()
+            .enumerate()
             {
-                doc.view
-                    .set_zoom_at(viewport, size, viewport.center(), percent / 100.0);
-            }
-            if icon_in(ui, Icon::ZoomOut, false, &tr!("zoom-out"), theme) {
-                doc.view.zoom_at(viewport, size, viewport.center(), 0.8);
-            }
-            if icon_in(ui, Icon::ZoomIn, false, &tr!("zoom-in"), theme) {
-                doc.view.zoom_at(viewport, size, viewport.center(), 1.25);
-            }
-            if icon_in(ui, Icon::Actual, false, "100%", theme) {
-                doc.view.set_zoom_at(viewport, size, viewport.center(), 1.0);
-            }
-            if icon_in(ui, Icon::Fit, false, &tr!("fit-to-screen-2"), theme) {
-                doc.view.fit(viewport, size);
+                let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(row), Sense::hover());
+                if icon_button(ui, rect, icon, true, false, &tip, theme) {
+                    zoom_button = Some(index);
+                }
             }
         });
-        let mut rotation = doc.view.rotation;
         inner.horizontal(|ui| {
-            if ui
-                .add(
-                    egui::Slider::new(&mut rotation, -180.0..=180.0)
-                        .max_decimals(1)
-                        .suffix(" \u{b0}"),
+            turned |= ui
+                .add_sized(
+                    vec2(62.0, row),
+                    egui::DragValue::new(&mut rotation)
+                        .range(-180.0..=180.0)
+                        .max_decimals(1),
                 )
-                .changed()
+                .on_hover_text(tr!("rotation"))
+                .changed();
+            turned |= ui
+                .add(Wedge::new(
+                    &mut rotation,
+                    -180.0..=180.0,
+                    wedge_width,
+                    theme,
+                ))
+                .on_hover_text(tr!("rotation"))
+                .changed();
+            for (index, (icon, tip)) in [
+                (Icon::RotateLeft, tr!("rotate-left")),
+                (Icon::RotateRight, tr!("rotate-right")),
+                (Icon::Reset, tr!("reset-rotation")),
+            ]
+            .into_iter()
+            .enumerate()
             {
-                doc.view.set_rotation(viewport, size, rotation);
-            }
-            if icon_in(ui, Icon::RotateLeft, false, &tr!("rotate-left"), theme) {
-                doc.view.rotate_by(viewport, size, -15.0);
-            }
-            if icon_in(ui, Icon::RotateRight, false, &tr!("rotate-right"), theme) {
-                doc.view.rotate_by(viewport, size, 15.0);
-            }
-            if icon_in(ui, Icon::Reset, false, &tr!("reset-rotation"), theme) {
-                doc.view.set_rotation(viewport, size, 0.0);
-            }
-            if icon_in(
-                ui,
-                Icon::FlipH,
-                doc.view.flip_h,
-                &tr!("flip-horizontally"),
-                theme,
-            ) {
-                doc.view.flip(viewport, size, true);
-            }
-            if icon_in(
-                ui,
-                Icon::FlipV,
-                doc.view.flip_v,
-                &tr!("flip-vertically"),
-                theme,
-            ) {
-                doc.view.flip(viewport, size, false);
+                let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(row), Sense::hover());
+                if icon_button(ui, rect, icon, true, false, &tip, theme) {
+                    turn_button = Some(index);
+                }
             }
         });
+        let mut view_button = None;
+        inner.horizontal(|ui| {
+            for (index, (icon, tip, active)) in [
+                (Icon::Fit, tr!("fit-to-screen-2"), false),
+                (Icon::FlipH, tr!("flip-horizontally"), doc.view.flip_h),
+                (Icon::FlipV, tr!("flip-vertically"), doc.view.flip_v),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(row), Sense::hover());
+                if icon_button(ui, rect, icon, true, active, &tip, theme) {
+                    view_button = Some(index);
+                }
+            }
+        });
+        let center = viewport.center();
+        if zoomed {
+            doc.view
+                .set_zoom_at(viewport, size, center, percent / 100.0);
+        }
+        if turned {
+            doc.view.set_rotation(viewport, size, rotation);
+        }
+        match zoom_button {
+            Some(0) => doc.view.zoom_at(viewport, size, center, 0.8),
+            Some(1) => doc.view.zoom_at(viewport, size, center, 1.25),
+            Some(_) => doc.view.set_zoom_at(viewport, size, center, 1.0),
+            None => {}
+        }
+        match turn_button {
+            Some(0) => doc.view.rotate_by(viewport, size, -15.0),
+            Some(1) => doc.view.rotate_by(viewport, size, 15.0),
+            Some(_) => doc.view.set_rotation(viewport, size, 0.0),
+            None => {}
+        }
+        match view_button {
+            Some(0) => doc.view.fit(viewport, size),
+            Some(1) => doc.view.flip(viewport, size, true),
+            Some(_) => doc.view.flip(viewport, size, false),
+            None => {}
+        }
     }
 
     #[allow(clippy::too_many_lines, reason = "the layer palette's three tabs")]
@@ -3396,13 +3545,19 @@ impl SuePaint {
             let mut opacity = current
                 .as_ref()
                 .map_or(100.0, |info| info.style.opacity * 100.0);
-            ui.spacing_mut().slider_width = (ui.available_width() - 52.0).max(40.0);
+            let width = (ui.available_width() - 52.0).max(40.0);
             ui.add_enabled_ui(current.is_some(), |ui| {
-                let response = ui.add(
-                    egui::Slider::new(&mut opacity, 0.0..=100.0)
-                        .max_decimals(0)
-                        .suffix(""),
+                let wedge = ui.add(Wedge::new(&mut opacity, 0.0..=100.0, width, theme));
+                let typed = ui.add(
+                    egui::DragValue::new(&mut opacity)
+                        .range(0.0..=100.0)
+                        .max_decimals(0),
                 );
+                let response = if typed.changed() || typed.lost_focus() {
+                    typed
+                } else {
+                    wedge
+                };
                 if let Some(info) = &current {
                     self.live_property(
                         cx,
@@ -3894,11 +4049,19 @@ impl SuePaint {
                 let mut opacity = info.style.opacity * 100.0;
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(tr!("opacity")).color(theme.muted));
-                    let response = ui.add(
-                        egui::Slider::new(&mut opacity, 0.0..=100.0)
+                    let width = (ui.available_width() - 60.0).max(40.0);
+                    let wedge = ui.add(Wedge::new(&mut opacity, 0.0..=100.0, width, theme));
+                    let typed = ui.add(
+                        egui::DragValue::new(&mut opacity)
+                            .range(0.0..=100.0)
                             .max_decimals(0)
                             .suffix(" %"),
                     );
+                    let response = if typed.changed() || typed.lost_focus() {
+                        typed
+                    } else {
+                        wedge
+                    };
                     self.live_property(
                         cx,
                         &response,
@@ -3967,27 +4130,46 @@ impl SuePaint {
             color_of(effects::BORDER_COLOR),
             color_of(effects::COLOR_VALUE),
         );
+        // Effect: a row of buttons, as Clip Studio Paint's Layer Property
+        // has them; those Sue Paint has not got yet stay grey.
         ui.label(small(&tr!("effect")));
         let mut toggle = None;
-        ui.horizontal(|ui| {
-            for (key, name, on) in [
-                (
-                    effects::BORDER,
-                    tr!("border-effect-2"),
-                    effects.border.is_some(),
-                ),
-                (effects::TONE, tr!("tone"), effects.tone.is_some()),
-                (
-                    effects::COLOR,
-                    tr!("layer-color-2"),
-                    effects.color.is_some(),
-                ),
-            ] {
-                if ui.selectable_label(on, name).clicked() {
-                    toggle = Some((key, !on));
-                }
+        let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
+        for (index, (key, icon, name, on)) in [
+            (
+                effects::BORDER,
+                Icon::BorderEffect,
+                tr!("border-effect-2"),
+                Some(effects.border.is_some()),
+            ),
+            ("", Icon::WatercolorEdge, tr!("watercolor-edge"), None),
+            ("", Icon::ExtractLine, tr!("extract-line"), None),
+            (
+                effects::TONE,
+                Icon::Tone,
+                tr!("tone"),
+                Some(effects.tone.is_some()),
+            ),
+            (
+                effects::COLOR,
+                Icon::LayerColor,
+                tr!("layer-color-2"),
+                Some(effects.color.is_some()),
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let rect = Rect::from_min_size(
+                row.min + vec2(index as f32 * 32.0, 0.0),
+                egui::Vec2::splat(30.0),
+            );
+            if icon_button(ui, rect, icon, on.is_some(), on == Some(true), &name, theme)
+                && let Some(on) = on
+            {
+                toggle = Some((key, !on));
             }
-        });
+        }
         if let Some((key, on)) = toggle {
             Self::apply(cx, doc::set(info.id, key, on));
         }
@@ -4215,63 +4397,205 @@ impl SuePaint {
 
     // ----- Timeline -----------------------------------------------------------------------
 
-    /// The Animation Cels tab: the cel tools and the light table of the
-    /// cel being drawn, as Clip Studio Paint's Animation cels palette.
+    /// The Animation Cels tab, as Clip Studio Paint's Animation cels
+    /// palette: its three rows of light table and cel buttons with the
+    /// opacity between them, then the layers on the cel's light table.
     fn cels_tab(&mut self, ui: &mut Ui, body: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
-        let row = Rect::from_min_size(body.min + vec2(6.0, 6.0), vec2(body.width() - 12.0, 22.0));
         let cel = self.editing_cel(&cx.world.arena);
         let has = cel.is_some();
-        let buttons: [(Icon, &str, &str, bool, bool); 5] = [
+        let registered = cel.zip(self.layer()).is_some_and(|(cel, layer)| {
+            crate::anim::light_table(&cx.world.arena, cel).contains(&layer)
+        });
+        let side = 24.0;
+        let at = |row: usize, column: usize| {
+            Rect::from_min_size(
+                body.min
+                    + vec2(
+                        6.0 + column as f32 * (side + 2.0),
+                        6.0 + row as f32 * (side + 4.0),
+                    ),
+                egui::Vec2::splat(side),
+            )
+        };
+        // (row, column, icon, tip, command, enabled, active); a command
+        // of "" is one Sue Paint has not got yet.
+        let buttons = [
             (
-                Icon::Cel,
-                &tr!("new-animation-cel-2"),
-                "anim.cel.new",
-                true,
+                0,
+                0,
+                Icon::Reset,
+                tr!("reset-position-layers-light-table"),
+                "",
+                false,
                 false,
             ),
             (
-                Icon::Edit,
-                &tr!("specify-cels"),
-                "anim.cel.assign",
+                0,
+                1,
+                Icon::Reverse,
+                tr!("reverse-layers-vertically-light-table"),
+                "anim.light_table.reverse",
                 has,
                 false,
             ),
             (
-                Icon::Onion,
-                &tr!("onion-skin"),
-                "anim.onion",
-                true,
-                self.onion,
+                0,
+                2,
+                Icon::OpacityTarget,
+                tr!("switch-opacity-target"),
+                "",
+                false,
+                false,
             ),
             (
-                Icon::Layers,
-                &tr!("enable-light-table-2"),
+                1,
+                0,
+                Icon::LightTable,
+                tr!("enable-light-table-2"),
                 "anim.light_table",
                 true,
                 self.light_table,
             ),
             (
+                1,
+                1,
+                Icon::Lock,
+                tr!("lock-cel-editing-target"),
+                "anim.cel.lock",
+                has || self.cel_lock.is_some(),
+                self.cel_lock.is_some(),
+            ),
+            (
+                1,
+                2,
+                Icon::Prev,
+                tr!("select-previous-cel"),
+                "anim.cel.prev",
+                true,
+                false,
+            ),
+            (
+                1,
+                3,
+                Icon::Next,
+                tr!("select-next-cel"),
+                "anim.cel.next",
+                true,
+                false,
+            ),
+            (
+                1,
+                4,
+                Icon::Cel,
+                tr!("new-animation-cel-2"),
+                "anim.cel.new",
+                true,
+                false,
+            ),
+            (
+                1,
+                6,
+                Icon::Import,
+                tr!("select-and-register-file"),
+                "",
+                false,
+                false,
+            ),
+            (
+                1,
+                7,
                 Icon::Reference,
-                &tr!("register-selected-layer-light-table"),
+                tr!("register-selected-layer-light-table"),
                 "anim.light_table.register",
                 has,
                 false,
             ),
+            (
+                1,
+                8,
+                Icon::Minus,
+                tr!("deregister-selected-light-table"),
+                "anim.light_table.deregister",
+                registered,
+                false,
+            ),
+            (
+                2,
+                0,
+                Icon::Operation,
+                tr!("light-table-tool"),
+                "",
+                false,
+                false,
+            ),
+            (
+                2,
+                1,
+                Icon::Onion,
+                tr!("show-cel-light-table"),
+                "anim.light_table.cel",
+                true,
+                self.light_cel,
+            ),
+            (
+                2,
+                2,
+                Icon::Layers,
+                tr!("show-general-light-table"),
+                "",
+                false,
+                false,
+            ),
         ];
         let mut run = None;
-        for (index, (icon, tip, command, enabled, active)) in buttons.iter().enumerate() {
-            let at = Rect::from_min_size(
-                pos2(row.left() + index as f32 * 26.0, row.top()),
-                vec2(22.0, 22.0),
-            );
-            if icon_button(ui, at, *icon, *enabled, *active, tip, theme) {
+        for (row, column, icon, tip, command, enabled, active) in &buttons {
+            if icon_button(ui, at(*row, *column), *icon, *enabled, *active, tip, theme) {
                 run = Some(*command);
             }
+        }
+        // Opacity and Color mode, on the first row after its buttons.
+        let opacity_rect = Rect::from_min_max(
+            pos2(at(0, 3).left() + 4.0, at(0, 3).top()),
+            pos2(body.right() - side - 12.0, at(0, 3).bottom()),
+        );
+        let mut inner = child(ui, opacity_rect, "cels-opacity");
+        let mut opacity = self.light_opacity * 100.0;
+        let width = (opacity_rect.width() - 50.0).max(30.0);
+        let changed = inner
+            .horizontal(|ui| {
+                let wedge = ui
+                    .add(Wedge::new(&mut opacity, 0.0..=100.0, width, theme))
+                    .on_hover_text(tr!("opacity"));
+                let typed = ui.add(
+                    egui::DragValue::new(&mut opacity)
+                        .range(0.0..=100.0)
+                        .max_decimals(0),
+                );
+                wedge.changed() || typed.changed()
+            })
+            .inner;
+        if changed {
+            self.light_opacity = opacity / 100.0;
+        }
+        let color_rect = Rect::from_min_size(
+            pos2(body.right() - side - 6.0, at(0, 0).top()),
+            egui::Vec2::splat(side),
+        );
+        if icon_button(
+            ui,
+            color_rect,
+            Icon::ColorMode,
+            true,
+            self.light_color,
+            &tr!("color-mode"),
+            theme,
+        ) {
+            run = Some("anim.light_table.color");
         }
         let mut inner = child(
             ui,
             Rect::from_min_max(
-                pos2(body.left() + 8.0, row.bottom() + 8.0),
+                pos2(body.left() + 8.0, at(2, 0).bottom() + 8.0),
                 body.max - vec2(8.0, 8.0),
             ),
             "cels-light-table",
@@ -4293,18 +4617,6 @@ impl SuePaint {
                         .map_or_else(|_| tr!("layer-2"), |entity| entity.name().to_owned())
                 };
                 inner.label(small(&tr!("light-table-of-cel", value = name(cel))));
-                let mut opacity = self.light_opacity * 100.0;
-                if slider_row(
-                    &mut inner,
-                    &tr!("opacity"),
-                    &mut opacity,
-                    0.0..=100.0,
-                    " %",
-                    false,
-                    theme,
-                ) {
-                    self.light_opacity = opacity / 100.0;
-                }
                 let layers = crate::anim::light_table(&cx.world.arena, cel);
                 if layers.is_empty() {
                     inner.label(small(&tr!("pick-layer-trace-then-register-last")));
@@ -4327,7 +4639,7 @@ impl SuePaint {
                 }
             }
         }
-        if let Some(command) = run {
+        if let Some(command) = run.filter(|command| !command.is_empty()) {
             self.run(command, cx);
         }
     }

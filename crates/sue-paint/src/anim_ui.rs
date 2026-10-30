@@ -26,6 +26,10 @@ impl SuePaint {
     /// The cel being drawn: the one the current folder shows at the
     /// current frame.
     pub(crate) fn editing_cel(&self, arena: &sue_core::Arena) -> Option<EntityId> {
+        // A locked cel stays the one being drawn on every frame.
+        if let Some(cel) = self.cel_lock.filter(|cel| arena.get_by_id(*cel).is_ok()) {
+            return Some(cel);
+        }
         let (_, sequence, _) = self.timeline_here(arena)?;
         let doc = self.doc()?;
         anim::folders(&sequence)
@@ -140,7 +144,7 @@ impl SuePaint {
             .map(|picture| anim::Onion::of(&cx.world.arena, picture))
             .unwrap_or_default();
         // The light table of the cel being drawn.
-        let traced = if self.light_table {
+        let traced = if self.light_table && self.light_cel {
             self.editing_cel(&cx.world.arena)
                 .map(|cel| anim::light_table(&cx.world.arena, cel))
                 .unwrap_or_default()
@@ -148,6 +152,7 @@ impl SuePaint {
             Vec::new()
         };
         let opacity = self.light_opacity;
+        let light_color = self.light_color.then_some([0.25, 0.45, 1.0]);
         // The camera folders at the frame shown.
         let (arena, picture) = (&cx.world.arena, self.picture());
         let size = picture
@@ -181,7 +186,7 @@ impl SuePaint {
             );
             view.cameras = cameras_at(doc.frame);
             if !playing {
-                view = view.with_light_table(&traced, opacity);
+                view = view.with_light_table(&traced, opacity, light_color);
             }
             doc.compositor.set_view(Some(view));
         }
@@ -423,6 +428,48 @@ impl SuePaint {
                     cx.notify(tr!("layer-cels-light-table-already"));
                 } else if Self::apply(cx, anim::register(cel, layer)) {
                     self.light_table = true;
+                }
+            }
+            "anim.light_table.reverse" => {
+                if let Some(cel) = self.editing_cel(&cx.world.arena)
+                    && anim::light_table(&cx.world.arena, cel).len() > 1
+                {
+                    Self::apply(cx, anim::reversed(&cx.world.arena, cel));
+                }
+            }
+            "anim.light_table.color" => self.light_color = !self.light_color,
+            "anim.light_table.cel" => self.light_cel = !self.light_cel,
+            "anim.light_table.deregister" => {
+                if let (Some(cel), Some(layer)) = (self.editing_cel(&cx.world.arena), self.layer())
+                    && anim::light_table(&cx.world.arena, cel).contains(&layer)
+                {
+                    Self::apply(cx, anim::deregister(cel, &[layer]));
+                } else {
+                    cx.notify(tr!("pick-registered-layer-to-deregister"));
+                }
+            }
+            "anim.cel.lock" => {
+                self.cel_lock = match self.cel_lock {
+                    Some(_) => None,
+                    None => self.editing_cel(&cx.world.arena),
+                };
+            }
+            "anim.cel.prev" | "anim.cel.next" => {
+                if let Some((_, sequence, _)) = &here
+                    && let Some(doc) = self.doc()
+                    && let Some(track) = sequence.tracks.get(doc.track)
+                {
+                    let keys = anim::keys(track, sequence.rate);
+                    let at = doc.frame;
+                    let to = if command == "anim.cel.prev" {
+                        keys.iter().rev().find(|(key, _)| *key < at)
+                    } else {
+                        keys.iter().find(|(key, _)| *key > at)
+                    };
+                    if let Some((frame, _)) = to {
+                        self.cel_lock = None;
+                        self.go_to_frame(&cx.world.arena, i64::from(*frame));
+                    }
                 }
             }
             "anim.light_table.clear" => {

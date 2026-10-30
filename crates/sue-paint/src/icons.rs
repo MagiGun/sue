@@ -138,6 +138,24 @@ pub enum Icon {
     NewMask,
     /// A mask pressed onto a sheet: apply the mask.
     ApplyMask,
+    /// Arrows up and down past each other: reverse the order.
+    Reverse,
+    /// A sheet over a half shaded one: which layers the opacity sets.
+    OpacityTarget,
+    /// A sheet over a glowing box: the light table.
+    LightTable,
+    /// A disc half filled: one color for all.
+    ColorMode,
+    /// A shape with a ring around it: the border effect.
+    BorderEffect,
+    /// A drop with a darker rim: the watercolor edge.
+    WatercolorEdge,
+    /// A shape traced by its outline: extract line.
+    ExtractLine,
+    /// Dots shrinking across: a tone.
+    Tone,
+    /// A sheet with a color chip: the layer color.
+    LayerColor,
 }
 
 /// Triangles filling the simple polygon `points` (ear clipping), for the
@@ -936,6 +954,74 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             dot(0.5, 0.63, 0.12);
             line(&[(0.5, 0.1), (0.5, 0.3)]);
             filled(&[(0.38, 0.24), (0.62, 0.24), (0.5, 0.36)]);
+        }
+        Icon::Reverse => {
+            line(&[(0.34, 0.84), (0.34, 0.2)]);
+            filled(&[(0.2, 0.3), (0.48, 0.3), (0.34, 0.12)]);
+            line(&[(0.66, 0.16), (0.66, 0.8)]);
+            filled(&[(0.52, 0.7), (0.8, 0.7), (0.66, 0.88)]);
+        }
+        Icon::OpacityTarget => {
+            boxed(
+                Rect::from_min_max(p(0.34, 0.34), p(0.86, 0.86)),
+                side * 0.03,
+            );
+            filled(&[(0.34, 0.34), (0.86, 0.34), (0.34, 0.86)]);
+            boxed(
+                Rect::from_min_max(p(0.14, 0.14), p(0.62, 0.62)),
+                side * 0.03,
+            );
+        }
+        Icon::LightTable => {
+            closed(&[(0.12, 0.62), (0.88, 0.62), (0.88, 0.86), (0.12, 0.86)]);
+            closed(&[(0.26, 0.14), (0.74, 0.14), (0.74, 0.5), (0.26, 0.5)]);
+            for x in [0.3, 0.5, 0.7] {
+                line(&[(x, 0.54), (x, 0.6)]);
+            }
+        }
+        Icon::BorderEffect => {
+            circle(0.5, 0.5, 0.36);
+            dot(0.5, 0.5, 0.22);
+        }
+        Icon::WatercolorEdge => {
+            closed(&[
+                (0.5, 0.12),
+                (0.74, 0.5),
+                (0.74, 0.66),
+                (0.62, 0.84),
+                (0.38, 0.84),
+                (0.26, 0.66),
+                (0.26, 0.5),
+            ]);
+            curve(0.5, 0.64, 0.16, 20.0, 160.0);
+        }
+        Icon::ExtractLine => {
+            dashed_box(0.16, 0.16, 0.84, 0.84);
+            curve(0.5, 0.5, 0.2, 0.0, 360.0);
+        }
+        Icon::Tone => {
+            for row in 0..3 {
+                for column in 0..3 {
+                    let r = 0.1 - 0.025 * column as f32;
+                    dot(0.24 + 0.26 * column as f32, 0.24 + 0.26 * row as f32, r);
+                }
+            }
+        }
+        Icon::LayerColor => {
+            boxed(Rect::from_min_max(p(0.14, 0.14), p(0.7, 0.7)), side * 0.03);
+            painter.rect_filled(
+                Rect::from_min_max(p(0.46, 0.46), p(0.86, 0.86)),
+                side * 0.03,
+                color,
+            );
+        }
+        Icon::ColorMode => {
+            circle(0.5, 0.5, 0.34);
+            painter.add(Shape::convex_polygon(
+                arc(p(0.5, 0.5), 0.34 * side, 90.0, 270.0),
+                color,
+                Stroke::NONE,
+            ));
         }
     }
 }

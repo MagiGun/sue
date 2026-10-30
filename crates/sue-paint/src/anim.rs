@@ -168,6 +168,24 @@ pub fn register(cel: EntityId, layer: EntityId) -> Edit {
     ))
 }
 
+/// The edit that turns `cel`'s light table upside down: its layers in
+/// the reverse order.
+#[must_use]
+pub fn reversed(arena: &Arena, cel: EntityId) -> Edit {
+    let layers = light_table(arena, cel);
+    let off = layers.iter().fold(
+        Edit::new(tr!("reverse-layers-vertically-light-table")),
+        |edit, layer| edit.then(sue_core::txn::Unrelate::new(cel, LIGHT_TABLE, *layer)),
+    );
+    layers.iter().rev().fold(off, |edit, layer| {
+        edit.then(sue_core::txn::Relate::new(sue_core::Relation::new(
+            cel,
+            LIGHT_TABLE,
+            *layer,
+        )))
+    })
+}
+
 /// The edit that takes `layers` off `cel`'s light table.
 #[must_use]
 pub fn deregister(cel: EntityId, layers: &[EntityId]) -> Edit {
@@ -178,16 +196,22 @@ pub fn deregister(cel: EntityId, layers: &[EntityId]) -> Edit {
 }
 
 impl FrameView {
-    /// The same with `layers` (a light table) shown at `opacity` in their
-    /// own colors when the frame hides them.
+    /// The same with `layers` (a light table) shown at `opacity` when the
+    /// frame hides them: in their own colors, or tinted `color` (the light
+    /// table's Color mode).
     #[must_use]
-    pub fn with_light_table(mut self, layers: &[EntityId], opacity: f32) -> Self {
+    pub fn with_light_table(
+        mut self,
+        layers: &[EntityId],
+        opacity: f32,
+        color: Option<[f32; 3]>,
+    ) -> Self {
         for layer in layers {
             if !self.onion.iter().any(|skin| skin.cel == *layer) {
                 self.onion.push(Skin {
                     cel: *layer,
-                    color: [0.0; 3],
-                    tint: 0.0,
+                    color: color.unwrap_or([0.0; 3]),
+                    tint: if color.is_some() { 1.0 } else { 0.0 },
                     opacity,
                 });
             }
@@ -835,7 +859,7 @@ mod tests {
         assert_eq!(full.opacity_at(3), 1.0);
         // A light table shows its layers in their own colors.
         let reference = layer(&mut arena);
-        let traced = view(&sequence, 6, None).with_light_table(&[reference], 0.5);
+        let traced = view(&sequence, 6, None).with_light_table(&[reference], 0.5, None);
         assert_eq!(traced.onion.len(), 1);
         assert_eq!(traced.onion[0].tint, 0.0);
         let mut put = register(cels[3], reference);

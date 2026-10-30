@@ -1173,6 +1173,9 @@ impl SuePaint {
                             | Filter::Pinch { .. }
                             | Filter::Polar { .. }
                             | Filter::Ripple { .. }
+                            | Filter::Twirl { .. }
+                            | Filter::ZigZag { .. }
+                            | Filter::Crystallize { .. }
                             | Filter::Fisheye { .. }
                             | Filter::Aberration { .. }
                             | Filter::Retro { .. }
@@ -2413,6 +2416,16 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
         } => {
             ui.add(egui::Slider::new(amplitude, 0.0..=50.0).text("Amplitude"));
             ui.add(egui::Slider::new(wavelength, 2.0..=400.0).text("Wavelength"));
+        }
+        Filter::Twirl { angle } => {
+            ui.add(egui::Slider::new(angle, -720.0..=720.0).text(tr!("angle")));
+        }
+        Filter::ZigZag { amplitude, folds } => {
+            ui.add(egui::Slider::new(amplitude, 0.0..=100.0).text(tr!("amplitude")));
+            ui.add(egui::Slider::new(folds, 1.0..=20.0).text(tr!("folds")));
+        }
+        Filter::Crystallize { size } => {
+            ui.add(egui::Slider::new(size, 2..=200).text(tr!("cell-size")));
         }
         Filter::Polar { inverse } => {
             ui.radio_value(inverse, false, tr!("rectangular-to-polar"));

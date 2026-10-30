@@ -674,12 +674,15 @@ pub fn menus() -> Vec<Menu> {
                         act(&tr!("polar-coordinates-ellipsis"), "filter.polar"),
                         act(&tr!("ripple-ellipsis"), "filter.ripple"),
                         act(&tr!("fisheye-ellipsis"), "filter.fisheye"),
+                        act(&tr!("twirl-ellipsis"), "filter.twirl"),
+                        act(&tr!("zigzag-ellipsis"), "filter.zigzag"),
                     ],
                 ),
                 sub(
                     &tr!("effect"),
                     vec![
                         act(&tr!("mosaic-ellipsis"), "filter.mosaic"),
+                        act(&tr!("crystallize-ellipsis"), "filter.crystallize"),
                         act(&tr!("add-noise-ellipsis"), "filter.noise"),
                         act(&tr!("line-extraction-ellipsis"), "filter.line_extraction"),
                         act(&tr!("chromatic-aberration-ellipsis"), "filter.aberration"),
