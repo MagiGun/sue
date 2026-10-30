@@ -47,8 +47,11 @@ Nothing is exported, imported or converted between them.
 
 ## How the screen works
 
-Sue's window has three parts: a **bar along the top**, the **page** under it,
-and a thin **status bar** along the bottom. Out of the box Sue is black,
+Sue's window has a **bar along the top** and the **page** under it. A thin
+**status bar** along the bottom is off at first: Settings, Appearance &
+Rice, **Status bar** turns it on. Without it, what the status bar would say
+(a file saved, something that went wrong) shows for a moment as a small
+notice at the bottom of the window. Out of the box Sue is black,
 white and grays only, so your own pictures and words are the only color you
 see (you can color it yourself in Settings).
 

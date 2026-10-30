@@ -1492,7 +1492,11 @@ impl Shell {
                 dt,
             );
         });
-        self.status_ui(root, layout.status, io, &theme);
+        if layout.status.height() >= 1.0 {
+            self.status_ui(root, layout.status, io, &theme);
+        } else {
+            self.notice_ui(&ctx, root.max_rect(), io, &theme);
+        }
         self.palette_ui(&ctx, io, &theme, now);
         self.window_ui(&ctx, frame, io, &theme, now, dt);
 
@@ -2323,6 +2327,67 @@ impl Shell {
         if escape {
             self.close_window();
         }
+    }
+
+    /// Without the status bar, its message shows as a small notice at the
+    /// bottom of the window while it lasts; a saved file's shows the file
+    /// when clicked.
+    fn notice_ui(
+        &mut self,
+        ctx: &egui::Context,
+        screen: Rect,
+        io: &mut ShellIo<'_>,
+        theme: &Theme,
+    ) {
+        let Some((text, error)) = self.message() else {
+            return;
+        };
+        let text = if error {
+            format!("! {text}")
+        } else {
+            text.to_owned()
+        };
+        let path = self.message_path.clone();
+        let font = theme.font(theme.small_size);
+        let galley = ctx.fonts_mut(|fonts| {
+            fonts.layout(text, font, theme.text, (screen.width() - 48.0).max(80.0))
+        });
+        let size = galley.size() + vec2(theme.padding * 2.0, theme.padding);
+        let rect = Rect::from_center_size(
+            pos2(screen.center().x, screen.bottom() - 16.0 - size.y / 2.0),
+            size,
+        );
+        egui::Area::new(Id::unique("sue-notice"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(rect.min)
+            .interactable(path.is_some())
+            .show(ctx, |ui| {
+                let (shown, response) = ui.allocate_exact_size(size, Sense::click());
+                let painter = ui.painter();
+                painter.rect(
+                    shown,
+                    0.0,
+                    theme.panel,
+                    theme.hairline(),
+                    StrokeKind::Inside,
+                );
+                painter.galley(
+                    shown.min + vec2(theme.padding, theme.padding / 2.0),
+                    galley,
+                    theme.text,
+                );
+                if let Some(path) = &path {
+                    let response = response
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text(path.display().to_string());
+                    if response.clicked() {
+                        io.requests.push(ShellRequest::Command(format!(
+                            "reveal-file:{}",
+                            path.display()
+                        )));
+                    }
+                }
+            });
     }
 
     fn status_ui(&mut self, root: &mut Ui, rect: Rect, io: &mut ShellIo<'_>, theme: &Theme) {

@@ -19,6 +19,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The status bar along the bottom is off at first; Settings turns it on.
+  Its messages show as a small notice at the bottom meanwhile.
 - The Hub's pin is a real pushpin, and pointing at it lights up the pin,
   not its whole box.
 - Slider handles are thin rectangles, a little shorter than the circles
@@ -31,6 +33,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Nothing paints or reacts under an open menu, popup, dialog or sheet,
+  most of all on phones and tablets, where taps went through Sue Paint's
+  sheets to the canvas.
 - Pinching to zoom in Sue Paint no longer undoes your work or closes the
   picture: the touch the pinch began with is taken back, nothing else.
 - Pen strokes on phones and tablets no longer end in a big blob: the
