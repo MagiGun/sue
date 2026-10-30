@@ -647,7 +647,8 @@ toolbar's buttons are larger, for fingers.
 Sue Writer works with the rest of Sue. Pictures from Sue Paint go straight
 into your text with the Sue menu's Send To. Open a Word, Markdown, HTML or
 plain text file anywhere in Sue and it comes into Sue Writer, formatting and
-all.
+all; a Word file's tables come in as tables, heading rows and column widths
+kept.
 Everything you do can be undone, and it all saves inside your project.
 
 ---

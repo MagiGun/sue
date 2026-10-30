@@ -607,7 +607,11 @@ impl SueWriter {
                 return;
             }
         };
-        let (text, marks) = match compile::import(&path.to_string_lossy(), &bytes) {
+        let sue_io::publish::Imported {
+            text,
+            marks,
+            entities,
+        } = match compile::import(&path.to_string_lossy(), &bytes) {
             Ok(read) => read,
             Err(error) => {
                 cx.fail(error);
@@ -629,10 +633,19 @@ impl SueWriter {
                 .and_then(Entity::string_buffer)
                 .is_some_and(|text| text.as_str().trim().is_empty())
         });
+        // The tables the text shows come first, in the same step.
+        let spawn = |batch: &mut sue_core::txn::Batch<sue_core::Arena>| {
+            for entity in &entities {
+                batch.push(Box::new(sue_core::txn::SpawnEntity::new(entity.clone())));
+            }
+        };
         if let Some(doc) = target
-            && let Some(batch) =
+            && let Some(step) =
                 project::replace_all(cx.arena(), doc, &text, marks.clone(), &tr!("import"))
         {
+            let mut batch = sue_core::txn::Batch::new(tr!("import"));
+            spawn(&mut batch);
+            batch.push(Box::new(step));
             self.apply(cx, batch);
             let _ = cx.apply(ArenaEdit(project::rename(doc, &name)));
             self.editor.select(doc, 0..0);
@@ -649,7 +662,15 @@ impl SueWriter {
         if let Some((parent, index)) = parent {
             let entity = project::document_entity(&name, text, marks);
             let id = entity.id();
-            let batch = project::add(cx.arena(), parent, index, entity, &tr!("import"));
+            let mut batch = sue_core::txn::Batch::new(tr!("import"));
+            spawn(&mut batch);
+            batch.push(Box::new(project::add(
+                cx.arena(),
+                parent,
+                index,
+                entity,
+                &tr!("import"),
+            )));
             if self.apply(cx, batch) {
                 self.open = Some(id);
                 self.selected = Some(id);

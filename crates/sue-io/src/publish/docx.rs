@@ -625,6 +625,44 @@ fn on(event: &XmlEvent) -> bool {
 /// # Errors
 /// If the file is not a Word document.
 pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
+    read_docx_into(bytes, false).map(|read| (read.text, read.marks))
+}
+
+/// A document read from a file, with the entities its text shows (its
+/// tables), for the caller to add to the arena with it.
+#[derive(Debug)]
+pub struct Imported {
+    /// The text.
+    pub text: String,
+    /// Its formatting; `embed` marks name the entities.
+    pub marks: TextMarks,
+    /// The tables (and other things) the text shows.
+    pub entities: Vec<sue_core::Entity>,
+}
+
+/// Reads a Word document as [`from_docx`] does, its tables as table
+/// entities set in the text (heading rows and column widths kept).
+///
+/// # Errors
+/// If it is not a Word document.
+pub fn read_docx(bytes: &[u8]) -> Result<Imported, String> {
+    read_docx_into(bytes, true)
+}
+
+/// A table being read: where its text began, its rows so far, the row and
+/// cell under way, its heading rows and its column widths.
+#[derive(Default)]
+struct TableRead {
+    start: usize,
+    rows: Vec<Vec<String>>,
+    row: Vec<String>,
+    cell: usize,
+    header_rows: u32,
+    heading: bool,
+    widths: Vec<f32>,
+}
+
+fn read_docx_into(bytes: &[u8], keep_tables: bool) -> Result<Imported, String> {
     let files: HashMap<String, Vec<u8>> = read_zip(bytes)?.into_iter().collect();
     let read = |name: &str| {
         files
@@ -727,7 +765,80 @@ pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
     let mut link: Option<(usize, String)> = None;
     let mut list_num: Option<String> = None;
     let mut list_level = 0;
+    let mut depth = 0_usize;
+    let mut table: Option<TableRead> = None;
+    let mut entities = Vec::new();
     for event in parse(&document) {
+        // Tables: the text of each cell, then the whole table in place of
+        // that text.
+        match &event {
+            XmlEvent::Open { name, empty, .. } if !*empty && name == "w:tbl" => {
+                depth += 1;
+                if depth == 1 && keep_tables {
+                    table = Some(TableRead {
+                        start: text.len(),
+                        ..TableRead::default()
+                    });
+                }
+            }
+            XmlEvent::Open { name, .. } if depth == 1 => {
+                if let Some(read) = &mut table {
+                    match name.as_str() {
+                        "w:gridCol" => read.widths.push(
+                            event
+                                .attr("w:w")
+                                .and_then(|width| width.parse().ok())
+                                .unwrap_or(0.0),
+                        ),
+                        "w:tr" => {
+                            read.row.clear();
+                            read.heading = false;
+                        }
+                        "w:tblHeader" => read.heading = on(&event),
+                        "w:tc" => read.cell = text.len(),
+                        _ => {}
+                    }
+                }
+            }
+            XmlEvent::Close(name) if depth == 1 && name == "w:tc" => {
+                if let Some(read) = &mut table {
+                    let cell = text[read.cell.min(text.len())..]
+                        .trim_end_matches('\n')
+                        .to_owned();
+                    read.row.push(cell);
+                }
+            }
+            XmlEvent::Close(name) if depth == 1 && name == "w:tr" => {
+                if let Some(read) = &mut table {
+                    let row = std::mem::take(&mut read.row);
+                    if read.heading && read.rows.len() == read.header_rows as usize {
+                        read.header_rows += 1;
+                    }
+                    read.rows.push(row);
+                }
+            }
+            XmlEvent::Close(name) if name == "w:tbl" => {
+                if depth == 1
+                    && let Some(read) = table.take()
+                {
+                    let start = read.start.min(text.len());
+                    marks.delete_text(&text, start..text.len());
+                    text.truncate(start);
+                    let entity = sue_model::text_table(&read.rows, read.header_rows, &read.widths);
+                    let at = text.len();
+                    text.push(sue_model::OBJECT);
+                    text.push('\n');
+                    marks.set(
+                        at..at + sue_model::OBJECT.len_utf8(),
+                        kind::EMBED,
+                        Some(Value::Entity(entity.id())),
+                    );
+                    entities.push(entity);
+                }
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
         match &event {
             XmlEvent::Open { name, empty, .. } => match name.as_str() {
                 "w:p" => {
@@ -922,7 +1033,11 @@ pub fn from_docx(bytes: &[u8]) -> Result<(String, TextMarks), String> {
         text.push('\n');
     }
     marks.fit(&text);
-    Ok((text, marks))
+    Ok(Imported {
+        text,
+        marks,
+        entities,
+    })
 }
 
 /// A date as Word writes it (`2026-10-29T00:00:00Z`).
@@ -1123,6 +1238,38 @@ fn table_xml(table: &crate::publish::PublishTable, width: f32) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn word_tables_come_back_as_tables() {
+        let bytes = to_docx(&super::super::tests::with_table());
+        let read = read_docx(&bytes).unwrap();
+        assert_eq!(read.entities.len(), 1);
+        let entity = &read.entities[0];
+        let table = entity.ext::<sue_model::Table>().unwrap();
+        assert_eq!(
+            table.texts(),
+            vec![vec!["Item", "Count & size"], vec!["Bolt <M8>", "40"]]
+        );
+        assert_eq!(
+            entity.property(sue_model::HEADER_ROWS),
+            Some(&Value::Int(1))
+        );
+        let shares = sue_model::column_shares(entity.property(sue_model::WIDTHS), 2);
+        assert!((shares[0] - 0.7).abs() < 0.01, "{shares:?}");
+        assert_eq!(
+            read.text,
+            format!("Parts\n{}\nThe end.\n", sue_model::OBJECT)
+        );
+        assert!(
+            read.marks
+                .marks()
+                .iter()
+                .any(|mark| mark.kind == kind::EMBED && mark.value == Value::Entity(entity.id()))
+        );
+        // Read for its text alone, a table stays words.
+        let (text, _) = from_docx(&bytes).unwrap();
+        assert!(text.contains("Bolt <M8>"));
+    }
+
     #[test]
     fn word_keeps_tracked_changes_with_their_authors() {
         use sue_model::changes::Change;

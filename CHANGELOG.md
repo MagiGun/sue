@@ -13,6 +13,7 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Word files opened in Sue Writer bring their tables as tables.
 - Spelling as you type in Sue Writer: misspelled words are underlined;
   right-click for suggestions, Ignore All or Add to Dictionary, and `F7`
   goes to the next one. English ships with Sue.

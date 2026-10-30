@@ -420,16 +420,7 @@ pub fn new_table(rows: u32, columns: u32, header_rows: u32) -> sue_core::Entity 
 /// A table entity holding `cells`, row by row (short rows padded).
 #[must_use]
 pub fn table_of(cells: &[Vec<String>], header_rows: u32) -> sue_core::Entity {
-    let columns = cells.iter().map(Vec::len).max().unwrap_or(1).max(1) as u32;
-    let mut entity = new_table(cells.len().max(1) as u32, columns, header_rows);
-    if let Some(table) = entity.ext_mut::<Table>() {
-        for (row, texts) in cells.iter().enumerate() {
-            for (column, text) in texts.iter().enumerate() {
-                table.set(row as u32, column as u32, Some(Cell::value(text.as_str())));
-            }
-        }
-    }
-    entity
+    sue_model::text_table(cells, header_rows, &[])
 }
 
 #[cfg(test)]

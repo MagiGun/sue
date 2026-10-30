@@ -5312,6 +5312,24 @@ f 2 3 4
                 assert!(bytes.starts_with(b"PK"));
             }
         }
+        // The Word file opens with its table a table again.
+        let tables = |runtime: &Runtime| {
+            runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .filter(|(_, entity)| entity.class() == sue_model::TEXT_TABLE)
+                .count()
+        };
+        let before = tables(&runtime);
+        let word = runtime.engine.catalog.folders["home"].join("tables.docx");
+        runtime.open_path(&word, &mut NoTextures, start);
+        assert_eq!(
+            tables(&runtime),
+            before + 1,
+            "the Word file's table came back"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

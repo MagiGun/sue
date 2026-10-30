@@ -442,12 +442,12 @@ pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>,
     })
 }
 
-/// A document file read into rich text, by its extension: Word, HTML,
-/// Markdown or plain text.
+/// A document file read into rich text, by its extension: Word (its
+/// tables as table entities), HTML, Markdown or plain text.
 ///
 /// # Errors
 /// If the file cannot be read as that kind.
-pub fn import(name: &str, bytes: &[u8]) -> Result<(String, TextMarks), String> {
+pub fn import(name: &str, bytes: &[u8]) -> Result<sue_io::publish::Imported, String> {
     let ext = std::path::Path::new(name)
         .extension()
         .map(|ext| ext.to_string_lossy().to_ascii_lowercase())
@@ -457,14 +457,19 @@ pub fn import(name: &str, bytes: &[u8]) -> Result<(String, TextMarks), String> {
             .trim_start_matches('\u{FEFF}')
             .replace("\r\n", "\n")
     };
+    let plain = |(text, marks): (String, TextMarks)| sue_io::publish::Imported {
+        text,
+        marks,
+        entities: Vec::new(),
+    };
     match ext.as_str() {
-        "docx" => sue_io::publish::from_docx(bytes),
-        "html" | "htm" | "xhtml" => Ok(sue_io::publish::from_html(&text())),
-        "md" | "markdown" => Ok(sue_io::publish::from_markdown(&text())),
+        "docx" => sue_io::publish::read_docx(bytes),
+        "html" | "htm" | "xhtml" => Ok(plain(sue_io::publish::from_html(&text()))),
+        "md" | "markdown" => Ok(plain(sue_io::publish::from_markdown(&text()))),
         "txt" | "text" | "" | "fountain" => {
             let mut text = text();
             sue_model::ensure_final_newline(&mut text);
-            Ok((text, TextMarks::new()))
+            Ok(plain((text, TextMarks::new())))
         }
         other => Err(tr!("sue-writer-cannot-read-files-yet", other = other)),
     }
@@ -537,7 +542,8 @@ mod tests {
         }
         options.title_page = false;
         assert!(compile(&arena, &options, &look).is_err());
-        let (text, marks) = import("a.md", b"# Hi\n\nthere").unwrap();
+        let sue_io::publish::Imported { text, marks, .. } =
+            import("a.md", b"# Hi\n\nthere").unwrap();
         assert_eq!(text, "Hi\nthere\n");
         assert!(marks.paragraph_value(&text, 0, kind::STYLE).is_some());
     }

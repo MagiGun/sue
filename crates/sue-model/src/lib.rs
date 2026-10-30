@@ -50,7 +50,7 @@ pub use layout::{
 pub use sequence::{Clip, Note, Notes, Sequence, Track};
 pub use table::{
     Axis, Cell, Column, HEADER_ROWS, Reshape, SetCell, TEXT_TABLE, Table, WIDTHS, column_name,
-    column_shares, parse_a1,
+    column_shares, parse_a1, text_table,
 };
 pub use text::{
     CharFormat, Mark, OBJECT, PARAGRAPH_KINDS, TextMarks, char_format, ensure_final_newline,

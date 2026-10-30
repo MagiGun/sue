@@ -305,7 +305,7 @@ of work is by how much people miss each one (the plan at the end).
 | --- | --- | --- | --- |
 | Sue project (.sue) | - | done | |
 | DOCX export | WL | done | Styles, lists, footnotes, links, pictures |
-| DOCX import | WL | partial | Text, styles, lists, footnotes, links; no pictures or tables |
+| DOCX import | WL | partial | Text, styles, lists, footnotes, links, tables; no pictures, comments or changes |
 | ODT export | L | done | |
 | ODT import | L | missing | |
 | RTF export | WL | done | |

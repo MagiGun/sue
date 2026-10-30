@@ -23,7 +23,7 @@ use sue_model::comments::Thread;
 use sue_model::contents::Contents;
 use sue_model::{CharFormat, Running, RunningPiece, TextMarks, mark_kind as kind, running_pieces};
 
-pub use docx::{from_docx, to_docx};
+pub use docx::{Imported, from_docx, read_docx, to_docx};
 pub use epub::to_epub;
 pub use html::{from_html, to_html};
 pub use markdown::{from_markdown, to_markdown};

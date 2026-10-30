@@ -1697,6 +1697,11 @@ print with ruled cells and repeated heading rows; Word (`w:tbl`, a repeated
 `w:tblHeader`), OpenDocument (`table:table` with header rows and column
 widths), HTML and EPUB (`thead` and `tbody`), RTF (`\trowd` rows, `\trhdr`),
 Markdown (pipe tables) and plain text (tab-separated rows) write them.
+`sue-io::publish::read_docx` reads a Word file's top-level `w:tbl` back as
+a table entity (`sue_model::text_table`, with `w:tblHeader` rows and the
+`w:gridCol` widths) set in the text, handing the entities back in
+`Imported` for the importer to spawn in the same step; `from_docx` keeps
+reading tables as words for callers that want text alone.
 
 **Spelling (`sue-type::spell`).** Every studio that sets text checks
 spelling the same way. English ships inside Sue: the public-domain Moby

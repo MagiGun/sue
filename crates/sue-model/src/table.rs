@@ -324,6 +324,32 @@ pub const HEADER_ROWS: &str = "sue.table.header_rows";
 /// property of its entity); equal columns without it.
 pub const WIDTHS: &str = "sue.table.widths";
 
+/// A table entity for running text holding `cells` (row by row, short
+/// rows padded with empty cells), its first `header_rows` rows headings,
+/// with column widths `widths` (any unit, kept as shares) when known.
+#[must_use]
+pub fn text_table(cells: &[Vec<String>], header_rows: u32, widths: &[f32]) -> sue_core::Entity {
+    let columns = cells.iter().map(Vec::len).max().unwrap_or(1).max(1) as u32;
+    let mut table = Table::grid(cells.len().max(1) as u32, columns);
+    for (row, texts) in cells.iter().enumerate() {
+        for (column, text) in texts.iter().enumerate() {
+            table.set(row as u32, column as u32, Some(Cell::value(text.as_str())));
+        }
+    }
+    let mut entity = sue_core::Entity::empty("Table", TEXT_TABLE).with_ext(table);
+    if header_rows > 0 {
+        entity = entity.with_property(HEADER_ROWS, Value::Int(i64::from(header_rows)));
+    }
+    if widths.len() == columns as usize && widths.iter().all(|width| *width > 0.0) {
+        let list = widths
+            .iter()
+            .map(|width| Value::Float(f64::from(*width)))
+            .collect();
+        entity = entity.with_property(WIDTHS, Value::List(list));
+    }
+    entity
+}
+
 /// The shares of a table's width its `columns` take, from its [`WIDTHS`]
 /// property (the others' average where it says nothing), adding up to one.
 #[must_use]
