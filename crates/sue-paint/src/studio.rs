@@ -775,6 +775,9 @@ fn implemented(command: &str) -> bool {
             | "edit.align.bottom"
             | "view.scroll_bar"
             | "layer.new.raster_top"
+            | "file.new_clipboard"
+            | "edit.canvas_height"
+            | "window.brush_grid"
             | "edit.flip_h"
             | "edit.flip_v"
             | "edit.rotate180"
@@ -3756,6 +3759,8 @@ impl SuePaint {
             "window.tile" => flag(self.tiled),
             "view.ruler_bar" => flag(self.ruler_bar),
             "view.scroll_bar" => flag(self.scroll_bars),
+            "file.new_clipboard" => when(self.clipboard.is_some()),
+            "window.brush_grid" => flag(self.panels.sub_tool && self.tool_tab == 2),
             "window.info" => flag(self.dock.has(crate::dock::Palette::Info)),
             "window.auto_actions" => flag(self.dock.has(crate::dock::Palette::AutoAction)),
             "window.item_bank" => flag(self.dock.has(crate::dock::Palette::ItemBank)),
@@ -4124,6 +4129,34 @@ impl SuePaint {
             ),
             "layer.new.raster_top" => {
                 self.run("layer.new", cx);
+            }
+            // A canvas the size of what was copied, with it pasted in.
+            "file.new_clipboard" => {
+                let Some(clip) = self.clipboard.clone() else {
+                    return;
+                };
+                let spec = NewPicture {
+                    name: tr!("illustration"),
+                    width: clip.raster.width(),
+                    height: clip.raster.height(),
+                    dpi: 72.0,
+                    paper: Some(sue_core::Color::srgb8(255, 255, 255)),
+                    timelapse: false,
+                };
+                self.make_picture(cx, &spec);
+                self.clipboard = Some(Clip {
+                    raster: clip.raster.clone(),
+                    origin: [0, 0],
+                });
+                self.paste(cx, &tr!("pasted"));
+                self.clipboard = Some(clip);
+            }
+            // Clip Studio Paint's Change canvas height: the canvas's size,
+            // for a webtoon's length.
+            "edit.canvas_height" => self.run("edit.canvas_size", cx),
+            "window.brush_grid" => {
+                self.panels.sub_tool = true;
+                self.tool_tab = 2;
             }
             align if align.starts_with("edit.align.") => {
                 self.align_layer(&align["edit.align.".len()..], cx);

@@ -13,6 +13,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- More of Sue Paint's menus follow Clip Studio Paint: File, Create New
+  from Clipboard makes a canvas the size of what you copied with it
+  pasted in; Edit, Change canvas height; Convert to lines and tones in
+  the Layer menu; View in Clip Studio's order with Selection Border,
+  Selection Launcher and a Snap submenu; Window, Brush Size; and Clip
+  Studio's names for Add Page (Advanced), Page Reordering, Split Pages,
+  Change project settings, Edit track, Correction, Layer Properties and
+  Auto Action.
 - Sue Paint's menus use Clip Studio Paint's names (Delete, Delete Outside
   Selection, Select All, Save as, Tool Group, Tool Settings, Tool Sliders,
   Information) and gain Edit, Align/Distribute (line the layer's drawing
