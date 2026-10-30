@@ -74,7 +74,9 @@ pub use layout::{LayoutMetrics, LayoutRequest, LayoutSolution, bar_height, solve
 pub use menubar::{ItemState, Menu, MenuBar, MenuItem, context_items};
 pub use palette::{Palette, PaletteOutcome, fuzzy_score};
 pub use scheduler::{Damage, FrameScheduler, FrameTicket, RenderDemand};
-pub use shell::{HubRow, PIN_KEY, Shell, ShellIo, pinned, profile_label};
+pub use shell::{
+    HubRow, INTERFACE_KEY, PHONE_FRAME_KEY, PIN_KEY, Shell, ShellIo, pinned, profile_label,
+};
 pub use spring::{SpringDamper, SpringMode, SpringParams};
 pub use text::{ArenaText, TYPING_PAUSE, Typing};
 pub use theme::{COLOR_KEYS, STUDIO_THEME_CUSTOM, STUDIO_THEME_SUE, Theme};

@@ -567,6 +567,47 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
             .set(key, sue_rice::RiceValue::Text(value.to_owned()));
     }
 
+    // 19f to 19k. The Sue menu's Layout in a computer's window: the phone
+    // layout filling it and phone shaped, the tablet layout, and back.
+    let layout = |runtime: &mut Runtime, camera: &mut Camera2, path: &[&str]| {
+        runtime.request(ShellRequest::SueMenu, &mut camera.painter, camera.now);
+        runtime.with_shell(&mut camera.painter, camera.now, |shell, io, now| {
+            shell.sue_menu_pick(path, io, now)
+        })
+    };
+    runtime.request(ShellRequest::Hub, &mut camera.painter, camera.now);
+    camera.click(runtime.shell.sue_button().center());
+    shoot(&mut runtime, &mut camera, "19f-sue-menu-layout")?;
+    runtime.shell.dismiss_overlays();
+    layout(&mut runtime, &mut camera, &["Layout", "Phone"]);
+    shoot(&mut runtime, &mut camera, "19g-desktop-as-phone-hub")?;
+    runtime.request(
+        ShellRequest::Open(paint.clone()),
+        &mut camera.painter,
+        camera.now,
+    );
+    shoot(&mut runtime, &mut camera, "19h-desktop-as-phone-sue-paint")?;
+    layout(&mut runtime, &mut camera, &["Layout", "Phone Shaped"]);
+    shoot(
+        &mut runtime,
+        &mut camera,
+        "19i-desktop-phone-shaped-sue-paint",
+    )?;
+    layout(&mut runtime, &mut camera, &["Layout", "Tablet"]);
+    shoot(&mut runtime, &mut camera, "19j-desktop-as-tablet-sue-paint")?;
+    layout(
+        &mut runtime,
+        &mut camera,
+        &["Layout", "Automatic (Desktop)"],
+    );
+    runtime.request(ShellRequest::Hub, &mut camera.painter, camera.now);
+    shoot(&mut runtime, &mut camera, "19k-desktop-again-hub")?;
+    let _ = runtime
+        .engine
+        .world
+        .rice
+        .set(sue_wm::PHONE_FRAME_KEY, sue_rice::RiceValue::Bool(false));
+
     // 20 to 23. The touch layouts: the Hub, Sue Paint and Sue Writer on a
     // phone and on a tablet.
     for (interface, size, prefix) in [

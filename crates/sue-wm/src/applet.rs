@@ -278,6 +278,12 @@ pub enum ShellRequest {
     SueMenu,
     /// Set Sue's language: a language tag, or `system` for the system's.
     Language(String),
+    /// Set the layout the whole app uses (`display.interface`): `auto`,
+    /// `desktop`, `tablet` or `phone`.
+    Interface(String),
+    /// Keep the phone layout on a computer to a phone-wide column, or let
+    /// it fill the window.
+    PhoneFrame(bool),
     /// Hand a file to an applet, as if it had picked it.
     SendFile {
         /// Who gets it.
@@ -529,7 +535,8 @@ impl Tick {
 /// What the shell shows right now, for applets to read.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShellView {
-    /// The device class.
+    /// The layout to draw: the device's own, or the one chosen in the Sue
+    /// menu's Layout (`display.interface`).
     pub form_factor: FormFactor,
     /// The active hardware profile.
     pub profile: HardwareProfile,

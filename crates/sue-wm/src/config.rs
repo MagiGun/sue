@@ -94,6 +94,12 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
         )
         .labeled("Interface"),
         declare(
+            "display.phone_frame",
+            toggle(false),
+            "On a computer, draw the phone layout in a phone-wide column in the middle of the window",
+        )
+        .labeled("Phone Shaped"),
+        declare(
             "display.gpu_preference",
             choice("auto", &["auto", "integrated", "discrete"]),
             "GPU that draws the window; auto uses the display's GPU (applies after a restart)",
@@ -340,6 +346,9 @@ pub struct WmConfig {
     pub ui_scale: f32,
     /// `display.interface`: `auto`, `desktop`, `tablet` or `phone`.
     pub interface: String,
+    /// `display.phone_frame`: on a computer, the phone layout keeps to a
+    /// phone-wide column.
+    pub phone_frame: bool,
     /// Global shortcuts.
     pub keymap: Keymap,
     /// `profile.hardware`.
@@ -406,6 +415,7 @@ impl WmConfig {
                 .get_str("display.interface")
                 .unwrap_or("auto")
                 .to_owned(),
+            phone_frame: schema.get_bool("display.phone_frame").unwrap_or(false),
             keymap: Keymap {
                 command_palette: key("keys.command_palette")?,
                 command_palette_alt: key("keys.command_palette_alt")?,

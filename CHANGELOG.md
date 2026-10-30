@@ -13,6 +13,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The Sue menu's **Layout** switches all of Sue, on a computer or in the
+  browser, to the Tablet or Phone layout (the same buttons, bars and sheets
+  as on a tablet or phone) and back, at once. **Phone Shaped** keeps the
+  phone layout to a phone-wide column. Mouse and keyboard keep working,
+  and Sue remembers your choice.
+
 - Sue Paint opens on a start page on the desktop: **Draw** opens your last
   picture or project (or a new canvas), **Projects** shows your pictures
   and Sue Paint projects with thumbnails, sorted into Favorite, Work and

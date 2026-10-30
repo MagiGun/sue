@@ -438,6 +438,7 @@ impl Engine {
                         tr!("interface-and-scale"),
                         params(&[
                             "display.interface",
+                            "display.phone_frame",
                             "display.ui_scale",
                             "input.wheel_line_px",
                         ]),

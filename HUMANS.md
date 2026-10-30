@@ -131,6 +131,13 @@ The Sue button opens the **Sue menu**, for Sue as a whole:
   with no exporting and importing. A picture in Sue Paint goes into the
   Converter or into the text in Sue Writer; a picture in the Image Viewer
   opens in Sue Paint. Studios that come later appear here by themselves;
+- **Language**: the language Sue speaks;
+- **Layout**: Automatic (what your device is), Desktop, Tablet or Phone,
+  for the whole of Sue at once. On a computer, Tablet and Phone show the
+  same buttons, bars and sheets as on a tablet or phone, in your window;
+  **Phone Shaped** keeps the phone layout to a phone-wide column in the
+  middle. Phones and tablets switch between their two layouts. It works in
+  the browser too, and Sue remembers it;
 - **Open ... at Launch**: pin what is open, as the Hub's pin does;
 - the command palette, Settings and Quit Sue.
 
@@ -774,10 +781,14 @@ Everywhere, **two fingers** move, zoom and turn the canvas, a quick
 **two-finger tap undoes** and a **three-finger tap redoes**, as in Clip Studio
 Paint.
 
-**Switching layouts.** Settings, Display, **Interface** chooses Automatic (the
-device decides), Desktop, Tablet or Phone. Sue Paint's Window, Interface menu
-does the same, and on a phone the row at the top of the menus does too. So a
-phone can use the full desktop layout, and a computer can try the touch ones.
+**Switching layouts.** The Sue menu's **Layout** (or Settings, Display,
+**Interface**) chooses Automatic (the device decides), Desktop, Tablet or
+Phone. Sue Paint's Window, Interface menu does the same, and on a phone the
+row at the top of the menus does too. So a phone can use the full desktop
+layout, and a computer can try the touch ones. With a mouse, the wheel
+zooms, `Shift` and the wheel turn the canvas, and the middle button or
+`Space` and a drag move it, just as two fingers do; `Ctrl+Z` and `Ctrl+Y`
+stand in for the two- and three-finger taps.
 
 **Getting Sue.** Each release has a package for every system: for Windows a
 setup program (`-setup.exe`, the easiest), the same installer as an `.msi`
