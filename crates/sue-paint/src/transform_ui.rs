@@ -10,6 +10,7 @@ use sue_core::{EntityId, RasterTile2D};
 use sue_wm::{AppletContext, ArenaEdit, Theme};
 
 use crate::doc;
+use crate::icons::Icon;
 use crate::studio::{Gesture, SuePaint};
 use crate::transform::{self, Quad};
 use crate::view::View;
@@ -62,6 +63,44 @@ impl TransformSession {
         } else {
             let [w, h] = self.piece_size();
             transform::rotated(self.center, w, h, self.scale, self.angle)
+        }
+    }
+
+    /// Mirrors the box: left to right when `horizontal`, else top to
+    /// bottom, across its own middle.
+    pub(crate) fn flip(&mut self, horizontal: bool) {
+        if self.free {
+            let middle = self.corners.iter().fold([0.0, 0.0], |sum, corner| {
+                [sum[0] + corner[0] / 4.0, sum[1] + corner[1] / 4.0]
+            });
+            let axis = usize::from(!horizontal);
+            for corner in &mut self.corners {
+                corner[axis] = 2.0 * middle[axis] - corner[axis];
+            }
+        } else if horizontal {
+            self.scale[0] = -self.scale[0];
+        } else {
+            self.scale[1] = -self.scale[1];
+        }
+    }
+
+    /// Turns the box a quarter, clockwise when `clockwise`.
+    pub(crate) fn quarter_turn(&mut self, clockwise: bool) {
+        let quarter = if clockwise {
+            std::f32::consts::FRAC_PI_2
+        } else {
+            -std::f32::consts::FRAC_PI_2
+        };
+        if self.free {
+            let middle = self.corners.iter().fold([0.0, 0.0], |sum, corner| {
+                [sum[0] + corner[0] / 4.0, sum[1] + corner[1] / 4.0]
+            });
+            for corner in &mut self.corners {
+                let [x, y] = turn([corner[0] - middle[0], corner[1] - middle[1]], quarter);
+                *corner = [middle[0] + x, middle[1] + y];
+            }
+        } else {
+            self.angle += quarter;
         }
     }
 
@@ -469,6 +508,28 @@ impl SuePaint {
             session.scale = [width / 100.0, height / 100.0];
             session.angle = degrees.to_radians();
         }
+        // The Transform launcher, under the box.
+        if self.transform_launcher {
+            let buttons: [crate::launchers::Button; 7] = [
+                (Icon::Reset, tr!("reset"), false),
+                (Icon::FlipH, tr!("flip-horizontal"), false),
+                (Icon::FlipV, tr!("flip-vertical"), false),
+                (Icon::RotateLeft, tr!("rotate-90-degrees-left"), false),
+                (Icon::RotateRight, tr!("rotate-90-degrees-right"), false),
+                (Icon::Cancel, tr!("cancel"), false),
+                (Icon::Confirm, tr!("ok"), false),
+            ];
+            match crate::launchers::bar(ui, viewport, &corners, &buttons, theme) {
+                Some(0) => action = Some(0),
+                Some(1) => session.flip(true),
+                Some(2) => session.flip(false),
+                Some(3) => session.quarter_turn(false),
+                Some(4) => session.quarter_turn(true),
+                Some(5) => action = Some(1),
+                Some(_) => action = Some(2),
+                None => {}
+            }
+        }
         let (enter, escape) = ui.input(|input| {
             (
                 input.key_pressed(Key::Enter),
@@ -554,6 +615,23 @@ mod tests {
         assert!(
             (angle - std::f32::consts::FRAC_PI_2).abs() < 1e-3,
             "{angle}"
+        );
+        // The launcher's flips mirror the box; a quarter turn turns it.
+        let mut flipped = session();
+        flipped.flip(true);
+        let quad = flipped.quad();
+        assert!((quad[0][0] - 30.0).abs() < 1e-3, "the left edge went right");
+        flipped.flip(true);
+        assert_eq!(flipped.scale, [1.0, 1.0]);
+        let mut turned = session();
+        turned.quarter_turn(true);
+        assert!((turned.angle - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        let mut free = session();
+        free.free = true;
+        free.flip(false);
+        assert!(
+            (free.corners[0][1] - 20.0).abs() < 1e-3,
+            "the top went down"
         );
         // Free Transform moves one corner alone.
         let mut free = session();

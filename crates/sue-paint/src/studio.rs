@@ -444,6 +444,16 @@ pub struct SuePaint {
     pub(crate) polyline: Vec<[f32; 2]>,
     /// The Selection Launcher shows under the selection.
     pub(crate) launcher: bool,
+    /// The Transform launcher shows under a transform's box.
+    pub(crate) transform_launcher: bool,
+    /// The Text launcher shows under the current text layer.
+    pub(crate) text_launcher: bool,
+    /// The Object launcher shows under the current layer's drawing with
+    /// the Operation tool.
+    pub(crate) object_launcher: bool,
+    /// Where the Object launcher's layer has its drawing: the layer, its
+    /// revision, and the picture pixels it covers (none when empty).
+    pub(crate) object_bounds: Option<(EntityId, u64, Option<[f32; 4]>)>,
     /// How Export Webtoon cuts and scales the picture.
     pub(crate) webtoon: (u32, u32),
     /// The timeline drives what shows (Enable Timeline).
@@ -617,6 +627,10 @@ impl Default for SuePaint {
             curve_points: Vec::new(),
             polyline: Vec::new(),
             launcher: true,
+            transform_launcher: true,
+            text_launcher: true,
+            object_launcher: true,
+            object_bounds: None,
             webtoon: (1280, 800),
             timeline_on: true,
             audio_mix: None,
@@ -776,6 +790,10 @@ fn implemented(command: &str) -> bool {
             | "view.scroll_bar"
             | "layer.new.raster_top"
             | "file.new_clipboard"
+            | "view.transform_launcher"
+            | "edit.transform.cancel"
+            | "view.text_launcher"
+            | "view.object_launcher"
             | "edit.canvas_height"
             | "window.brush_grid"
             | "edit.flip_h"
@@ -3629,6 +3647,9 @@ impl SuePaint {
                 .doc()
                 .map_or(ItemState::off(), |doc| flag(doc.quick_mask.is_some())),
             "select.launcher" => flag(self.launcher),
+            "view.transform_launcher" => flag(self.transform_launcher),
+            "view.text_launcher" => flag(self.text_launcher),
+            "view.object_launcher" => flag(self.object_launcher),
             "anim.timeline.enable" => flag(self.timeline_on),
             "layer.from_selection" => when(selection && raster),
             "edit.cut"
@@ -3809,6 +3830,10 @@ impl SuePaint {
     /// Runs a command of the menus, the command bar or a shortcut.
     #[allow(clippy::too_many_lines, reason = "one arm per command")]
     pub(crate) fn run(&mut self, command: &str, cx: &mut AppletContext<'_>) {
+        // A tool's command (from a script or Auto Actions) picks the tool.
+        if command.starts_with("tool.") && self.tool_key(command) {
+            return;
+        }
         // Studio Mode's keys T1 to T7 run the commands the rice names.
         if let Some(index) = command
             .strip_prefix("touch.custom.")
@@ -4154,6 +4179,12 @@ impl SuePaint {
             // Clip Studio Paint's Change canvas height: the canvas's size,
             // for a webtoon's length.
             "edit.canvas_height" => self.run("edit.canvas_size", cx),
+            // Puts the layer back as it was before the transform.
+            "edit.transform.cancel" => {
+                if self.transform.is_some() {
+                    self.finish_transform(cx, false);
+                }
+            }
             "window.brush_grid" => {
                 self.panels.sub_tool = true;
                 self.tool_tab = 2;
@@ -5365,6 +5396,9 @@ impl SuePaint {
                 }
             }
             "select.launcher" => self.launcher = !self.launcher,
+            "view.transform_launcher" => self.transform_launcher = !self.transform_launcher,
+            "view.text_launcher" => self.text_launcher = !self.text_launcher,
+            "view.object_launcher" => self.object_launcher = !self.object_launcher,
             "select.from_layer" => {
                 let arena = &cx.world.arena;
                 let Some(info) = self.layer_info(arena) else {

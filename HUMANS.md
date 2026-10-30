@@ -494,6 +494,12 @@ Once a canvas is open:
   click an icon to open one. The arrows at the top of a column fold the
   whole column into that strip. The canvas has scrollbars (View, Scroll
   Bar hides them), with the zoom and turn controls beside the bottom one.
+- **Launchers:** small bars of buttons under what you are working on, as
+  in Clip Studio Paint. Under a transform's box: reset, flip, turn a
+  quarter, cancel and OK. Under a text layer's words: edit, smaller,
+  larger, vertical and centered. Under the layer's drawing with the
+  Operation tool: scale and rotate, flip, its properties and delete. View
+  turns each launcher on or off.
 - **Align a layer:** Edit, Align/Distribute lines the layer's drawing up
   with the canvas's left, right, top or bottom edge, or its middle.
 - **Arrange the palettes your way:** drag the edge of a column to make it

@@ -162,6 +162,10 @@ pub enum Icon {
     ProjectAnimation,
     /// A small arrow down: a list opens.
     Down,
+    /// A cross: cancel.
+    Cancel,
+    /// A tick: confirm.
+    Confirm,
     /// A drop with a darker rim: the watercolor edge.
     WatercolorEdge,
     /// A shape traced by its outline: extract line.
@@ -1043,6 +1047,11 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             filled(&[(0.42, 0.38), (0.62, 0.5), (0.42, 0.62)]);
         }
         Icon::Down => filled(&[(0.2, 0.35), (0.8, 0.35), (0.5, 0.7)]),
+        Icon::Cancel => {
+            line(&[(0.24, 0.24), (0.76, 0.76)]);
+            line(&[(0.76, 0.24), (0.24, 0.76)]);
+        }
+        Icon::Confirm => line(&[(0.2, 0.52), (0.42, 0.74), (0.82, 0.28)]),
         Icon::BorderEffect => {
             circle(0.5, 0.5, 0.36);
             dot(0.5, 0.5, 0.22);

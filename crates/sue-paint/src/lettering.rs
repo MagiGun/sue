@@ -178,7 +178,7 @@ pub(crate) fn retext(
 }
 
 /// Where a text layer's text is.
-fn area_of(entity: &sue_core::Entity) -> Option<[f32; 4]> {
+pub(crate) fn area_of(entity: &sue_core::Entity) -> Option<[f32; 4]> {
     let text = entity.property(BOX).and_then(Value::as_str)?;
     let values: Vec<f32> = text
         .split(',')

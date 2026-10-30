@@ -56,6 +56,7 @@ mod extras;
 pub mod fill;
 pub mod filters;
 mod icons;
+mod launchers;
 mod lettering;
 pub mod manga;
 pub mod materials;

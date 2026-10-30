@@ -13,6 +13,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint has Clip Studio Paint's launchers, each with its switch in
+  the View menu: the Transform launcher under a transform's box (reset,
+  flip, turn a quarter, cancel, OK), the Text launcher under a text
+  layer's words (edit, smaller, larger, vertical, centered) and the Object
+  launcher under the layer's drawing with the Operation tool (scale and
+  rotate, flip, layer properties, delete).
 - More of Sue Paint's menus follow Clip Studio Paint: File, Create New
   from Clipboard makes a canvas the size of what you copied with it
   pasted in; Edit, Change canvas height; Convert to lines and tones in

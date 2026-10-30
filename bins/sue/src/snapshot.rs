@@ -395,6 +395,38 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         applet.navigate("tab/tool/1");
         applet.navigate("tab/layer/0");
     }
+    // 08j and 08k. Clip Studio Paint's launchers: the Object launcher
+    // under the layer's drawing with the Operation tool, and the Transform
+    // launcher under Scale/Rotate's box.
+    for (commands, name) in [
+        (&["tool.operation"][..], "08j-sue-paint-object-launcher"),
+        (
+            &["edit.transform.scale"][..],
+            "08k-sue-paint-transform-launcher",
+        ),
+    ] {
+        for command in commands {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: (*command).to_owned(),
+                },
+                &mut camera.painter,
+                camera.now,
+            );
+        }
+        shoot(&mut runtime, &mut camera, name)?;
+    }
+    for command in ["edit.transform.cancel", "tool.pen"] {
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: paint.clone(),
+                command: command.to_owned(),
+            },
+            &mut camera.painter,
+            camera.now,
+        );
+    }
     runtime.request(ShellRequest::SueMenu, &mut camera.painter, camera.now);
     shoot(&mut runtime, &mut camera, "09-sue-menu-in-paint")?;
     runtime.shell.dismiss_overlays();

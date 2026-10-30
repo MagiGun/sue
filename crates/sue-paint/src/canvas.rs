@@ -110,6 +110,8 @@ impl SuePaint {
         self.overlays(ui, viewport, size, &response, cx, theme);
         self.warp_ui(ui, viewport, size, cx, theme);
         self.selection_launcher(ui, viewport, size, cx, theme);
+        self.text_launcher(ui, viewport, size, cx, theme);
+        self.object_launcher(ui, viewport, size, cx, theme);
         if self.ruler_bar {
             self.ruler_bars(ui, viewport, size, theme);
         }
@@ -1822,10 +1824,10 @@ impl SuePaint {
             (Icon::Reset, &tr!("invert-selected-area"), "select.invert"),
             (Icon::ZoomIn, &tr!("expand-selected-area"), "select.expand"),
             (Icon::ZoomOut, &tr!("shrink-selected-area"), "select.shrink"),
-            (Icon::Clear, &tr!("clear"), "edit.clear"),
+            (Icon::Clear, &tr!("delete"), "edit.clear"),
             (
                 Icon::ClearOutside,
-                &tr!("clear-outside-selection"),
+                &tr!("delete-outside-selection"),
                 "edit.clear_outside",
             ),
             (Icon::FillSelection, &tr!("fill"), "edit.fill"),
