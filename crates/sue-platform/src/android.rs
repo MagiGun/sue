@@ -135,6 +135,23 @@ pub(crate) fn open_url(url: &str) -> Result<(), String> {
     ))
 }
 
+/// Puts `text` on Android's clipboard (`ClipboardManager`), through Sue's
+/// activity.
+pub(crate) fn copy_text(text: &str) -> Result<(), String> {
+    done(call(
+        "copyText",
+        "(Ljava/lang/String;)Ljava/lang/String;",
+        &[Arg::Text(text)],
+    ))
+}
+
+/// The text on Android's clipboard, if there is any.
+pub(crate) fn paste_text() -> Option<String> {
+    call("pasteText", "()Ljava/lang/String;", &[])
+        .ok()
+        .flatten()
+}
+
 /// Hands a downloaded APK to Android's package installer (a
 /// `PackageInstaller` session), which asks the person before it installs.
 pub(crate) fn install_package(path: &Path) -> Result<(), String> {

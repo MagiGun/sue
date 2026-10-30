@@ -21,10 +21,35 @@ pub fn copy_text(text: &str) -> Result<(), String> {
             .and_then(|mut clipboard| clipboard.set_text(text.to_owned()))
             .map_err(|error| error.to_string())
     }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(target_os = "android")]
+    {
+        crate::android::copy_text(text)
+    }
+    #[cfg(target_os = "ios")]
     {
         let _ = text;
         Err("there is no system clipboard to reach here; select the text and copy it".to_owned())
+    }
+}
+
+/// The text on the system clipboard, if there is any: for a Paste button
+/// (keyboard shortcuts paste through egui on their own). `None` in the
+/// browser, which hands the clipboard over only in its own paste event.
+#[must_use]
+pub fn paste_text() -> Option<String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))]
+    {
+        arboard::Clipboard::new()
+            .and_then(|mut clipboard| clipboard.get_text())
+            .ok()
+    }
+    #[cfg(target_os = "android")]
+    {
+        crate::android::paste_text()
+    }
+    #[cfg(any(target_os = "ios", target_arch = "wasm32"))]
+    {
+        None
     }
 }
 

@@ -2,6 +2,9 @@ package com.magigun.sue;
 
 import android.app.NativeActivity;
 import android.app.PendingIntent;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.pm.PackageInstaller;
@@ -27,8 +30,9 @@ import java.util.Locale;
  * (crates/sue-platform/src/android.rs); there are no native methods.
  * The picker answers later: Sue polls takePicked, and copies documents in
  * and out on its own worker threads with copyIn, copyOut, createIn and
- * listIn. It also opens web pages (openUrl) and installs Sue's own
- * updates (installPackage).
+ * listIn. It also opens web pages (openUrl), installs Sue's own
+ * updates (installPackage) and reaches the clipboard (copyText,
+ * pasteText).
  */
 public class SueActivity extends NativeActivity {
     private static final int PICK = 0x5E1;
@@ -258,6 +262,34 @@ public class SueActivity extends NativeActivity {
             }
         }
         return types.isEmpty() ? new String[] {"*/*"} : types.toArray(new String[0]);
+    }
+
+    /** Puts text on the system clipboard: null, or why it failed. */
+    public String copyText(String text) {
+        try {
+            ClipboardManager clipboard =
+                (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            clipboard.setPrimaryClip(ClipData.newPlainText("Sue", text));
+            return null;
+        } catch (Exception error) {
+            return why(error);
+        }
+    }
+
+    /** The text on the system clipboard, or null when there is none. */
+    public String pasteText() {
+        try {
+            ClipboardManager clipboard =
+                (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            ClipData clip = clipboard.getPrimaryClip();
+            if (clip == null || clip.getItemCount() == 0) {
+                return null;
+            }
+            CharSequence text = clip.getItemAt(0).coerceToText(this);
+            return text == null ? null : text.toString();
+        } catch (Exception error) {
+            return null;
+        }
     }
 
     /** Opens a web page in the system's browser: null, or why it failed. */

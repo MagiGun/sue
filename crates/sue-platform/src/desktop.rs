@@ -531,6 +531,14 @@ impl DesktopHost {
                 _ => {}
             }
         }
+        // Android's clipboard is reached through Sue's activity, not
+        // egui-winit.
+        #[cfg(target_os = "android")]
+        for command in &output.platform_output.commands {
+            if let egui::OutputCommand::CopyText(text) = command {
+                let _ = crate::android::copy_text(text);
+            }
+        }
         self.egui
             .handle_platform_output(&self.window, output.platform_output);
         let delay = output
