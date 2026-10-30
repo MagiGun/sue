@@ -30,6 +30,15 @@ app="$work/Sue.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 lipo -create -output "$app/Contents/MacOS/sue" \
   target/aarch64-apple-darwin/release/sue target/x86_64-apple-darwin/release/sue
+cli="$work/sue-cli"
+mkdir -p "$cli"
+lipo -create -output "$cli/sue-cli" \
+  target/aarch64-apple-darwin/release/sue-cli target/x86_64-apple-darwin/release/sue-cli
+# On a CI runner two release builds nearly fill the disk, and the disk
+# image needs room: the build folders go once the programs are out.
+if [ -n "${CI:-}" ]; then
+  rm -rf target/aarch64-apple-darwin target/x86_64-apple-darwin
+fi
 sed "s/@VERSION@/$version/g" packaging/macos/Info.plist > "$app/Contents/Info.plist"
 cp LICENSE "$app/Contents/Resources/LICENSE"
 
@@ -47,10 +56,6 @@ codesign --force --deep --sign "${SUE_SIGN_IDENTITY:--}" "$app"
 hdiutil create -volname Sue -srcfolder "$app" -ov -format UDZO "$out/Sue-$version-macos-universal.dmg"
 
 # The command line program, for a terminal: --self-check, --version.
-cli="$work/sue-cli"
-mkdir -p "$cli"
-lipo -create -output "$cli/sue-cli" \
-  target/aarch64-apple-darwin/release/sue-cli target/x86_64-apple-darwin/release/sue-cli
 codesign --force --sign "${SUE_SIGN_IDENTITY:--}" "$cli/sue-cli"
 cp LICENSE README.md "$cli/"
 ditto -c -k --keepParent "$cli" "$out/Sue-cli-$version-macos-universal.zip"
