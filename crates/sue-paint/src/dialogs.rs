@@ -265,6 +265,16 @@ impl NewDialog {
     }
 }
 
+/// Small pictures for a dialog's gallery, uploaded once.
+#[derive(Clone, Default)]
+pub(crate) struct Thumbs(pub Vec<egui::TextureHandle>);
+
+impl std::fmt::Debug for Thumbs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Thumbs({})", self.0.len())
+    }
+}
+
 /// A filter's dialog: the settings, the layer it previews on and the
 /// layer's pixels from before.
 #[derive(Clone, Debug)]
@@ -277,6 +287,11 @@ pub(crate) struct FilterDialog {
     pub offset: [i64; 2],
     pub shown: Option<Filter>,
     pub preview: bool,
+    /// The quick looks' small previews of this layer, made once.
+    pub thumbs: Thumbs,
+    /// It works on a merged layer made for it (Apply to all): Cancel
+    /// takes that layer away again.
+    pub merged: bool,
 }
 
 impl FilterDialog {
@@ -296,6 +311,8 @@ impl FilterDialog {
             offset,
             shown: None,
             preview: true,
+            thumbs: Thumbs::default(),
+            merged: false,
         }
     }
 
@@ -597,6 +614,19 @@ impl SuePaint {
             });
         let (title, size) = match &dialog {
             Dialog::New(_) => (tr!("new-2"), vec2(500.0, 690.0)),
+            // The gallery keeps one title (and so one window) whatever look
+            // is picked.
+            Dialog::Filter(FilterDialog {
+                filter: Filter::Quick { effect, .. },
+                ..
+            }) => (
+                if *effect {
+                    tr!("quick-effects")
+                } else {
+                    tr!("quick-filters")
+                },
+                vec2(500.0, 400.0),
+            ),
             Dialog::Filter(filter) => (
                 filter.filter.label(),
                 vec2(
@@ -1422,6 +1452,7 @@ impl SuePaint {
                             | Filter::ZigZag { .. }
                             | Filter::Crystallize { .. }
                             | Filter::JpegNoise { .. }
+                            | Filter::Quick { .. }
                             | Filter::Fisheye { .. }
                             | Filter::Aberration { .. }
                             | Filter::Retro { .. }
@@ -1447,6 +1478,10 @@ impl SuePaint {
             (Dialog::Filter(filter), Outcome::Cancel) => {
                 if filter.shown.is_some() {
                     filter.show(cx, &filter.before);
+                }
+                if filter.merged {
+                    // Take back the merged layer made for it.
+                    self.run("edit.undo", cx);
                 }
             }
             (Dialog::Filter(filter), Outcome::Ok) => {
@@ -2781,6 +2816,9 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
             ui.add(egui::Slider::new(amplitude, 0.0..=100.0).text(tr!("amplitude")));
             ui.add(egui::Slider::new(folds, 1.0..=20.0).text(tr!("folds")));
         }
+        Filter::Quick { strength, .. } => {
+            ui.add(egui::Slider::new(strength, 0.0..=1.0).text(tr!("strength")));
+        }
         Filter::LensBlur { radius } => {
             ui.add(egui::Slider::new(radius, 1..=64).text(tr!("radius")));
         }
@@ -2971,6 +3009,9 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
 
 fn filter_ui(ui: &mut Ui, dialog: &mut FilterDialog, theme: &Theme) -> Outcome {
     let mut outcome = Outcome::Open;
+    if let Filter::Quick { .. } = dialog.filter {
+        quick_gallery(ui, dialog, theme);
+    }
     filter_params(ui, &mut dialog.filter, theme);
     ui.checkbox(&mut dialog.preview, tr!("preview"));
     ui.label(
@@ -2994,6 +3035,105 @@ fn filter_ui(ui: &mut Ui, dialog: &mut FilterDialog, theme: &Theme) -> Outcome {
         }
     });
     outcome
+}
+
+/// The Quick Filters' or Quick Effects' gallery: every look as a small
+/// picture of this layer with its name; a click picks it.
+fn quick_gallery(ui: &mut Ui, dialog: &mut FilterDialog, theme: &Theme) {
+    let Filter::Quick {
+        effect,
+        look,
+        strength,
+    } = dialog.filter
+    else {
+        return;
+    };
+    let count = usize::from(crate::quick::LOOKS);
+    if dialog.thumbs.0.len() != count {
+        // The layer, small, once; each look on it.
+        let [width, height] = dialog.size;
+        let scale = (72.0 / width.max(height).max(1) as f32).min(1.0);
+        let (tw, th) = (
+            ((width as f32 * scale) as u32).max(1),
+            ((height as f32 * scale) as u32).max(1),
+        );
+        let mut small = vec![0_u8; (tw * th * 4) as usize];
+        for y in 0..th {
+            for x in 0..tw {
+                let (sx, sy) = (
+                    ((x as f32 + 0.5) / scale) as u32,
+                    ((y as f32 + 0.5) / scale) as u32,
+                );
+                let from = ((sy.min(height - 1) * width + sx.min(width - 1)) * 4) as usize;
+                let to = ((y * tw + x) * 4) as usize;
+                if let Some(pixel) = dialog.before.get(from..from + 4) {
+                    small[to..to + 4].copy_from_slice(pixel);
+                }
+            }
+        }
+        dialog.thumbs.0 = (0..count)
+            .map(|index| {
+                let mut pixels = small.clone();
+                crate::quick::apply(&mut pixels, tw, th, effect, index as u8, 1.0);
+                // Over white, as the layer shows on paper.
+                for pixel in pixels.as_chunks_mut::<4>().0 {
+                    let a = f32::from(pixel[3]) / 255.0;
+                    for value in &mut pixel[..3] {
+                        *value = (f32::from(*value) * a + 255.0 * (1.0 - a)).round() as u8;
+                    }
+                    pixel[3] = 255;
+                }
+                ui.ctx().load_texture(
+                    format!("sue-paint-quick-{effect}-{index}"),
+                    egui::ColorImage::from_rgba_unmultiplied([tw as usize, th as usize], &pixels),
+                    egui::TextureOptions::LINEAR,
+                )
+            })
+            .collect();
+    }
+    let tile = vec2(84.0, 92.0);
+    let columns = ((ui.available_width() / (tile.x + 6.0)) as usize).max(1);
+    egui::Grid::new(("sue-paint-quick", effect))
+        .spacing(vec2(6.0, 6.0))
+        .show(ui, |ui| {
+            for (index, texture) in dialog.thumbs.0.iter().enumerate() {
+                let (rect, response) = ui.allocate_exact_size(tile, Sense::click());
+                let chosen = usize::from(look) == index;
+                if chosen {
+                    ui.painter()
+                        .rect_filled(rect, 4.0, theme.selection.gamma_multiply(0.5));
+                } else if response.hovered() {
+                    ui.painter().rect_filled(rect, 4.0, theme.hover);
+                }
+                let picture = Rect::from_center_size(
+                    pos2(rect.center().x, rect.top() + 38.0),
+                    texture.size_vec2(),
+                );
+                ui.painter().image(
+                    texture.id(),
+                    picture,
+                    Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+                ui.painter().text(
+                    pos2(rect.center().x, rect.bottom() - 10.0),
+                    egui::Align2::CENTER_CENTER,
+                    crate::quick::name(effect, index as u8),
+                    theme.font(theme.small_size),
+                    theme.text,
+                );
+                if response.clicked() {
+                    dialog.filter = Filter::Quick {
+                        effect,
+                        look: index as u8,
+                        strength,
+                    };
+                }
+                if (index + 1) % columns == 0 {
+                    ui.end_row();
+                }
+            }
+        });
 }
 
 #[cfg(test)]

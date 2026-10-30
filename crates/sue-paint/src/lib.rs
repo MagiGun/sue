@@ -69,6 +69,7 @@ mod prefs;
 pub mod print;
 pub mod proof;
 pub mod psd_io;
+pub mod quick;
 pub mod rulers;
 pub mod select;
 pub mod simple;

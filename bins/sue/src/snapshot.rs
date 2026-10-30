@@ -427,6 +427,24 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
             camera.now,
         );
     }
+    // 08l and 08m. Quick Filters and Quick Effects: their galleries.
+    for (command, name) in [
+        ("filter.quick.layer", "08l-sue-paint-quick-filters"),
+        ("filter.effects.layer", "08m-sue-paint-quick-effects"),
+    ] {
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: paint.clone(),
+                command: command.to_owned(),
+            },
+            &mut camera.painter,
+            camera.now,
+        );
+        shoot(&mut runtime, &mut camera, name)?;
+        if let Some(applet) = runtime.applets.get_mut(&paint) {
+            applet.navigate("dialog/close");
+        }
+    }
     runtime.request(ShellRequest::SueMenu, &mut camera.painter, camera.now);
     shoot(&mut runtime, &mut camera, "09-sue-menu-in-paint")?;
     runtime.shell.dismiss_overlays();

@@ -124,6 +124,16 @@ pub enum Filter {
         /// How many folds from the middle to the edge.
         folds: f32,
     },
+    /// Quick Filters and Quick Effects: a one-click look (see
+    /// [`crate::quick`]) at a strength.
+    Quick {
+        /// A Quick Effect (else a Quick Filter).
+        effect: bool,
+        /// Which look.
+        look: u8,
+        /// 0 to 1.
+        strength: f32,
+    },
     /// Lens Blur: each pixel the average of a disc, as an out of focus lens
     /// blurs.
     LensBlur {
@@ -315,6 +325,7 @@ impl Filter {
             Self::ZigZag { .. } => tr!("zigzag"),
             Self::Crystallize { .. } => tr!("crystallize"),
             Self::LensBlur { .. } => tr!("lens-blur"),
+            Self::Quick { effect, look, .. } => crate::quick::name(*effect, *look),
             Self::JpegNoise { .. } => tr!("remove-jpeg-noise"),
             Self::Aberration { .. } => tr!("chromatic-aberration"),
             Self::Retro { .. } => tr!("retro"),
@@ -442,6 +453,11 @@ impl Filter {
             }
             Self::Crystallize { size } => crystallize(pixels, width, height, size.max(2)),
             Self::LensBlur { radius } => lens_blur(pixels, width, height, radius.clamp(1, 64)),
+            Self::Quick {
+                effect,
+                look,
+                strength,
+            } => crate::quick::apply(pixels, width, height, effect, look, strength),
             Self::JpegNoise { strength } => {
                 remove_jpeg_noise(pixels, width, height, strength.clamp(0.0, 1.0));
             }
@@ -939,6 +955,7 @@ impl Filter {
             | Self::ZigZag { .. }
             | Self::Crystallize { .. }
             | Self::LensBlur { .. }
+            | Self::Quick { .. }
             | Self::JpegNoise { .. }
             | Self::Aberration { .. }
             | Self::Retro { .. }

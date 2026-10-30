@@ -981,6 +981,10 @@ fn implemented(command: &str) -> bool {
             | "filter.zigzag"
             | "filter.crystallize"
             | "filter.lens_blur"
+            | "filter.quick.layer"
+            | "filter.quick.all"
+            | "filter.effects.layer"
+            | "filter.effects.all"
             | "filter.jpeg_noise"
             | "filter.polar"
             | "filter.ripple"
@@ -4284,6 +4288,27 @@ impl SuePaint {
             ),
             "filter.crystallize" => self.filter_dialog(cx, Filter::Crystallize { size: 20 }),
             "filter.lens_blur" => self.filter_dialog(cx, Filter::LensBlur { radius: 8 }),
+            "filter.quick.layer"
+            | "filter.quick.all"
+            | "filter.effects.layer"
+            | "filter.effects.all" => {
+                let all = command.ends_with(".all");
+                if all {
+                    // Apply to all: a merged layer of everything shown.
+                    self.run("layer.merge_visible", cx);
+                }
+                self.filter_dialog(
+                    cx,
+                    Filter::Quick {
+                        effect: command.starts_with("filter.effects"),
+                        look: 0,
+                        strength: 1.0,
+                    },
+                );
+                if all && let Some(Dialog::Filter(dialog)) = self.dialog.as_mut() {
+                    dialog.merged = true;
+                }
+            }
             "filter.jpeg_noise" => self.filter_dialog(cx, Filter::JpegNoise { strength: 0.6 }),
             "filter.aberration" => self.filter_dialog(cx, Filter::Aberration { shift: 6.0 }),
             "filter.retro" => self.filter_dialog(cx, Filter::Retro { amount: 0.6 }),

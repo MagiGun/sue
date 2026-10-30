@@ -675,6 +675,27 @@ pub fn menus() -> Vec<Menu> {
             tr!("filter"),
             vec![
                 sub(
+                    &tr!("quick-filters"),
+                    vec![
+                        act(
+                            &tr!("apply-to-current-layer-ellipsis"),
+                            "filter.quick.layer",
+                        ),
+                        act(&tr!("apply-to-all-merged-ellipsis"), "filter.quick.all"),
+                    ],
+                ),
+                sub(
+                    &tr!("quick-effects"),
+                    vec![
+                        act(
+                            &tr!("apply-to-current-layer-ellipsis"),
+                            "filter.effects.layer",
+                        ),
+                        act(&tr!("apply-to-all-merged-ellipsis"), "filter.effects.all"),
+                    ],
+                ),
+                SEP,
+                sub(
                     &tr!("blur"),
                     vec![
                         act(&tr!("blur"), "filter.blur"),

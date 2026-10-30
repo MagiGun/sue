@@ -500,6 +500,12 @@ Once a canvas is open:
   larger, vertical and centered. Under the layer's drawing with the
   Operation tool: scale and rotate, flip, its properties and delete. View
   turns each launcher on or off.
+- **Quick Filters and Quick Effects:** Filter, Quick Filters (colors such
+  as Vivid, Sepia or Night) and Quick Effects (styles such as Glow,
+  Halftone or Pixel art) show every look on a small copy of your layer;
+  click one, set its strength and see it on the canvas. Apply to all
+  works on a merged layer of everything shown, so the layers stay as
+  they were.
 - **Align a layer:** Edit, Align/Distribute lines the layer's drawing up
   with the canvas's left, right, top or bottom edge, or its middle.
 - **Arrange the palettes your way:** drag the edge of a column to make it

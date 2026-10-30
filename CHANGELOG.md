@@ -13,6 +13,13 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Filter, Quick Filters and Quick Effects, as in Clip Studio Paint: a
+  gallery of one-click looks, each shown on your own layer, with a
+  strength. Quick Filters recolor (Vivid, Soft, Warm, Cool, Sepia,
+  Monochrome, Vintage, Fade, High contrast, Night); Quick Effects restyle
+  (Glow, Halftone, Outline, Pencil, Pixel art, Film grain, Vignette,
+  Poster, Watercolor, Emboss). Apply to all works on a merged copy of
+  everything shown, taken away again on Cancel.
 - Sue Paint has Clip Studio Paint's launchers, each with its switch in
   the View menu: the Transform launcher under a transform's box (reset,
   flip, turn a quarter, cancel, OK), the Text launcher under a text
