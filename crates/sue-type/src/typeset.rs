@@ -467,7 +467,8 @@ fn shaped(
         .map(|(face, ..)| face);
     let mut out = Vec::with_capacity(text.len());
     for ch in text.chars() {
-        let ch = if ch == '\t' { ' ' } else { ch };
+        let breaks = ch == sue_model::LINE_BREAK;
+        let ch = if ch == '\t' || breaks { ' ' } else { ch };
         let mut found = faces.faces[face].glyph(ch).map(|glyph| (face, glyph));
         if found.is_none_or(|(_, (id, _))| id == 0)
             && let Some(fallback) = fallback
@@ -478,11 +479,15 @@ fn shaped(
         let Some((face, (id, advance))) = found else {
             continue;
         };
-        let advance = advance * size * if text.starts_with('\t') { 4.0 } else { 1.0 };
+        let advance = if breaks {
+            0.0
+        } else {
+            advance * size * if text.starts_with('\t') { 4.0 } else { 1.0 }
+        };
         out.push(Glyph {
             face,
             id,
-            ch,
+            ch: if breaks { sue_model::LINE_BREAK } else { ch },
             size,
             advance,
             rise,
@@ -543,6 +548,17 @@ fn break_lines(
         });
     };
     for glyph in glyphs {
+        if glyph.ch == sue_model::LINE_BREAK {
+            // A line break: this line ends here, set as a paragraph's last.
+            if line_width + word_width > room(&lines) && !current.is_empty() {
+                finish(std::mem::take(&mut current), false, &mut lines);
+            }
+            current.append(&mut word);
+            finish(std::mem::take(&mut current), true, &mut lines);
+            line_width = 0.0;
+            word_width = 0.0;
+            continue;
+        }
         if glyph.ch == ' ' {
             if line_width + word_width > room(&lines) && !current.is_empty() {
                 finish(std::mem::take(&mut current), false, &mut lines);

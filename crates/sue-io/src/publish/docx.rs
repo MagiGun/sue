@@ -118,6 +118,18 @@ fn run_props(look: &sue_model::CharFormat) -> String {
 /// Text as Word runs' content: tabs as `w:tab`.
 fn run_text(text: &str) -> String {
     let mut out = String::new();
+    for (line, part) in text.split(sue_model::LINE_BREAK).enumerate() {
+        if line > 0 {
+            out.push_str("<w:br/>");
+        }
+        out.push_str(&tab_text(part));
+    }
+    out
+}
+
+/// `text` as Word runs' text, its tabs as `w:tab`.
+fn tab_text(text: &str) -> String {
+    let mut out = String::new();
     for (index, piece) in text.split('\t').enumerate() {
         if index > 0 {
             out.push_str("<w:tab/>");
@@ -923,7 +935,7 @@ fn read_docx_into(bytes: &[u8], keep_tables: bool) -> Result<Imported, String> {
                             para.page_break = true;
                         }
                     } else {
-                        text.push(' ');
+                        text.push(sue_model::LINE_BREAK);
                     }
                 }
                 "w:hyperlink" => {

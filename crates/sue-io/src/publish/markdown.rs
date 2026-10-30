@@ -66,7 +66,9 @@ pub fn to_markdown(book: &Book) -> String {
                 let mut piece = if look.code {
                     format!("`{text}`")
                 } else {
-                    escape(text)
+                    // A line break inside a paragraph: two spaces, then a
+                    // new line.
+                    escape(text).replace(sue_model::LINE_BREAK, "  \n")
                 };
                 if !look.code && !text.trim().is_empty() {
                     let (lead, core, trail) = split_spaces(&piece);

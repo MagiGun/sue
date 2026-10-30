@@ -512,7 +512,7 @@ pub fn read_odt(bytes: &[u8]) -> Result<Imported, String> {
                     text.push_str(&" ".repeat(count.min(1000)));
                 }
                 "text:tab" => text.push('\t'),
-                "text:line-break" => text.push(' '),
+                "text:line-break" => text.push(sue_model::LINE_BREAK),
                 "text:list" if !*empty => {
                     let style = event
                         .attr("text:style-name")

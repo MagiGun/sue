@@ -53,9 +53,9 @@ pub use table::{
     column_shares, parse_a1, text_table,
 };
 pub use text::{
-    CharFormat, Mark, OBJECT, PARAGRAPH_KINDS, TextMarks, char_format, ensure_final_newline,
-    is_paragraph_kind, kind as mark_kind, marks_by_paragraph, paragraph_at, paragraphs, points_of,
-    rgb_of, runs, word_count,
+    CharFormat, LINE_BREAK, Mark, OBJECT, PARAGRAPH_KINDS, TextMarks, char_format,
+    ensure_final_newline, is_paragraph_kind, kind as mark_kind, marks_by_paragraph, paragraph_at,
+    paragraphs, points_of, rgb_of, runs, word_count,
 };
 
 use sue_core::{ComponentRegistry, PropertyDef, PropertySchema, Quantity, ValueType};

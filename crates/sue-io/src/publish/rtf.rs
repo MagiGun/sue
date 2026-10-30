@@ -15,6 +15,7 @@ fn escape(text: &str) -> String {
                 out.push(ch);
             }
             '\t' => out.push_str("\\tab "),
+            sue_model::LINE_BREAK => out.push_str("\\line "),
             ch if ch.is_ascii() => out.push(ch),
             ch => {
                 let mut units = [0_u16; 2];

@@ -222,7 +222,9 @@ pub fn to_odt(book: &Book) -> Vec<u8> {
                     if index > 0 {
                         piece.push_str("<text:tab/>");
                     }
-                    piece.push_str(&escape(part));
+                    piece.push_str(
+                        &escape(part).replace(sue_model::LINE_BREAK, "<text:line-break/>"),
+                    );
                 }
                 if let Some(name) = span_style(look) {
                     piece = format!("<text:span text:style-name=\"{name}\">{piece}</text:span>");

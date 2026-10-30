@@ -583,6 +583,9 @@ table and back. A table that runs onto the next page breaks between rows and
 repeats its heading row at the top. Tables go into every format you compile
 to, PDF and Word included.
 
+`Shift+Enter` starts a new line without starting a new paragraph (for
+addresses and verse); it keeps its place in every format Sue writes.
+
 Format, Text also has **All Capitals** (shown and printed in capitals,
 kept as typed) and **Grow Font** and **Shrink Font** (`Ctrl+]` and `Ctrl+[`,
 along the usual sizes). Insert, Formatting Mark puts in a non-breaking space

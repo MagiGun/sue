@@ -439,7 +439,9 @@ pub fn lay_document(
             });
         } else {
             for (piece, run) in pieces {
-                let mut chunk = text[piece.clone()].to_owned();
+                // A line break ends the row (egui breaks at a newline; one
+                // character for one, so the caret's places stay the same).
+                let mut chunk = text[piece.clone()].replace(sue_model::LINE_BREAK, "\n");
                 if (run.small_caps || run.caps)
                     && chunk.chars().all(|ch| ch.to_uppercase().count() == 1)
                 {

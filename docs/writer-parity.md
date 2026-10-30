@@ -97,7 +97,7 @@ of work is by how much people miss each one (the plan at the end).
 | Page size and margins | WL | done | Project settings, from page presets |
 | Orientation | WL | partial | Through the page size only |
 | Page break | WL | done | |
-| Line break inside a paragraph | WL | missing | |
+| Line break inside a paragraph | WL | done | Shift+Enter |
 | Column break | WL | missing | |
 | Page columns | WL | missing | |
 | Sections with their own columns and protection | WL | missing | |

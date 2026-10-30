@@ -111,6 +111,10 @@ pub fn is_paragraph_kind(kind: &str) -> bool {
     PARAGRAPH_KINDS.contains(&kind)
 }
 
+/// A line break inside a paragraph (Shift+Enter): the line ends, the
+/// paragraph goes on.
+pub const LINE_BREAK: char = '\u{2028}';
+
 /// The character an embedded entity stands on ([`kind::EMBED`]).
 pub const OBJECT: char = '\u{FFFC}';
 

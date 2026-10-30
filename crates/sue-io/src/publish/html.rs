@@ -92,7 +92,7 @@ pub(crate) fn para_html(
         let _ = write!(inner, "<img src=\"{}\" alt=\"\"/>", escape(&src));
     }
     for (text, look) in &para.runs {
-        let mut piece = escape(text);
+        let mut piece = escape(text).replace(sue_model::LINE_BREAK, "<br/>");
         if look.code {
             piece = format!("<code>{piece}</code>");
         }

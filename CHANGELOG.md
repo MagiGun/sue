@@ -13,6 +13,7 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `Shift+Enter` in Sue Writer starts a new line inside a paragraph.
 - Sue Writer opens OpenDocument (`.odt`) files from LibreOffice, with their
   styles, lists, links, footnotes, tables and table of contents.
 - All Capitals, Grow Font and Shrink Font in Sue Writer's Format, Text,

@@ -2488,6 +2488,9 @@ impl Editor {
                 };
                 self.replace_selection(cx, "", None)
             }
+            Key::Enter if shift => {
+                self.replace_selection(cx, &sue_model::LINE_BREAK.to_string(), None)
+            }
             Key::Enter => {
                 // Enter on an empty list item ends the list.
                 if selection.is_empty() && self.in_list() && self.paragraph_empty() {

@@ -1678,6 +1678,12 @@ capitals: shown and printed upper case, kept as typed), `footnote` (the
 note's text, on the words it follows) and `embed` (an entity shown on an
 object replacement character).
 
+A line break inside a paragraph (`Shift+Enter`) is `LINE_BREAK`
+(U+2028): the layout breaks the row there (one character for one, so caret
+places hold), the typesetter ends the line unjustified, and the formats
+write `w:br`, `text:line-break`, `br`, `\line` or a Markdown hard break and
+read the first two back.
+
 **Tables in the text (`sue-model::table`, `sue-type::tables`).** A word
 processor's table is an entity of class `sue.text_table` holding the shared
 `Table`, shown where an `embed` mark names it, on an object character in a

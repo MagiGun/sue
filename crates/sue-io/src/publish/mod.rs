@@ -512,7 +512,7 @@ pub fn to_text(book: &Book) -> String {
                 out.push_str("- ");
             }
             for (text, look) in &para.runs {
-                out.push_str(text);
+                out.push_str(&text.replace(sue_model::LINE_BREAK, "\n"));
                 if let Some(note) = &look.footnote {
                     notes.push(note.clone());
                     out.push_str(&format!("[{}]", notes.len()));
@@ -634,6 +634,19 @@ mod tests {
             },
         );
         book
+    }
+
+    #[test]
+    fn line_breaks_go_out_and_come_back_in_every_format() {
+        let text = format!("Roses are red,{}violets are blue.\n", sue_model::LINE_BREAK);
+        let book = Book::single("Poem", &text, &TextMarks::new());
+        let word = to_docx(&book);
+        assert_eq!(from_docx(&word).unwrap().0, text);
+        assert_eq!(from_odt(&to_odt(&book)).unwrap().0, text);
+        assert!(to_html(&book).contains("red,<br/>violets"));
+        assert!(to_rtf(&book).contains("red,\\line violets"));
+        assert!(to_markdown(&book).contains("red,  \nviolets"));
+        assert!(to_text(&book).contains("red,\nviolets"));
     }
 
     #[test]
