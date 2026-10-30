@@ -11,6 +11,19 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Huge brushes and erasers in Sue Paint keep up: painting with a 2000
+  pixel brush on a large picture with many layers takes about a
+  millisecond a frame, where it used to take a quarter of a second, in
+  the browser too. Zoomed out, the canvas first shows a big stroke at the
+  detail the screen can show and fills in the rest a moment later.
+
+### Fixed
+
+- Sue Paint no longer crashes on a short stroke with post correction
+  ("min > max", seen in the browser).
+
 ## [0.0.4] - 2026-10-29
 
 ### Added

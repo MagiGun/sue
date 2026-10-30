@@ -1430,6 +1430,25 @@ scaled rectangle (center, scale, angle; corners keep the aspect unless
 Shift, edges stretch, inside moves, outside turns); Free Transform moves
 each corner. OK records one `RasterEdit` and moves the selection along.
 
+**Keeping big strokes fast.** A stroke paints row spans of its shape only,
+skips pixels (and whole 64 pixel tiles) it already covers fully, waits until
+a continuous line has moved a twenty-fifth of the brush's width before
+painting again (`Stroke::flush` paints the waiting point when the pen lifts),
+and splits big areas into bands of tile rows on every core
+(`composite::workers`, `SUE_THREADS` to override). It reports the rectangle
+each tile changed (`take_dirty_tiles`). The compositor repaints just those
+(`refresh_rects`), keeping the stacks under and over the painted layer per
+tile while nothing else changes (`Focus`), passing over each layer's empty
+tiles with a bit test (`Occupancy`, found on full composites per revision),
+and, zoomed out, one sample per block a screen pixel spans, with what is off
+screen left for later (`refresh_view`, `view_step`); between strokes
+`refine` brings those tiles to full detail a few a frame. The texture cache
+then uploads only the changed rectangles (`TextureUpload::texture_changed`,
+`Compositor::changed_since`; versions come from one count for every
+compositor). A stroke frame that writes to its layer without changing a
+pixel is accepted as no change (`Compositor::accept`). `brush_speed`,
+`composite_speed` and `paint_frame_speed` are ignored tests that time it.
+
 **Layer folders.** A folder is a `sue.folder` entity in the picture's stack,
 right above its layers, and each layer in it is linked by a
 `sue.paint.member` relation, so layers stay where every edit already finds
