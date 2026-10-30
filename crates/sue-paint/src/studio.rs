@@ -452,6 +452,11 @@ pub struct SuePaint {
     pub(crate) material_kinds: crate::materials::MaterialKinds,
     /// The start page, shown while no canvas is open.
     pub(crate) start: crate::start::StartPage,
+    /// The drawing tool Simple Mode's swap button goes back to from the
+    /// eraser.
+    pub(crate) drawing_tool: crate::tools::Tool,
+    /// The canvas shows without its tabs and status strip (Simple Mode).
+    pub(crate) bare: bool,
     /// The New canvas page's templates, registered at start.
     pub(crate) canvas_templates: crate::templates::CanvasTemplates,
     /// Each recording picture's compositor version at its last timelapse
@@ -582,6 +587,8 @@ impl Default for SuePaint {
             material_kinds: crate::materials::MaterialKinds::builtin(),
             start: crate::start::StartPage::default(),
             canvas_templates: crate::templates::CanvasTemplates::builtin(),
+            drawing_tool: crate::tools::Tool::Pen,
+            bare: false,
             timelapse: HashMap::new(),
             timelapse_export: crate::timelapse::Export::default(),
             transform: None,
@@ -5228,6 +5235,15 @@ impl SuePaint {
             return;
         }
         self.start.full = false;
+        // Simple Mode, unless Studio Mode was chosen.
+        self.bare = form != sue_platform::FormFactor::Desktop && !crate::simple::studio_mode(cx);
+        if self.bare {
+            self.simple_frame(ui, full, cx, &theme);
+            if self.ready {
+                self.dialog_ui(&ctx, cx, &theme);
+            }
+            return;
+        }
         if form == sue_platform::FormFactor::Mobile {
             self.phone_frame(ui, full, cx, &theme);
             if self.ready {
@@ -5573,6 +5589,14 @@ impl SueApplet for SuePaint {
                 "Where Sue Paint keeps its materials and brush tips (empty: its own folder)",
             ),
             RiceDeclaration::new(
+                crate::simple::MODE_KEY,
+                RiceParameter::EnumChoice {
+                    value: "simple".to_owned(),
+                    options: vec!["simple".to_owned(), "studio".to_owned()],
+                },
+                "Sue Paint on phones and tablets: Simple Mode or Studio Mode",
+            ),
+            RiceDeclaration::new(
                 "sue_paint.theme",
                 RiceParameter::EnumChoice {
                     value: "gray".to_owned(),
@@ -5628,6 +5652,14 @@ impl SueApplet for SuePaint {
         let no_canvas = self.docs.is_empty();
         if cx.view.form_factor != sue_platform::FormFactor::Desktop && self.start.shows(no_canvas) {
             self.mobile_header(ui, rect, &theme);
+            return;
+        }
+        if cx.view.form_factor != sue_platform::FormFactor::Desktop
+            && !crate::simple::studio_mode(cx)
+        {
+            if let Some(command) = self.simple_bar(ui, rect, cx, &theme) {
+                self.run(&command, cx);
+            }
             return;
         }
         if cx.view.form_factor == sue_platform::FormFactor::Mobile {
@@ -5918,6 +5950,18 @@ impl SueApplet for SuePaint {
                 true
             }
             start if start.starts_with("start/") => self.start.navigate(start),
+            "sheet/more" => {
+                self.sheet = Some(crate::phone::Sheet::More);
+                true
+            }
+            "sheet/pens" => {
+                self.sheet = Some(crate::phone::Sheet::Pens);
+                true
+            }
+            "sheet/close" => {
+                self.sheet = None;
+                true
+            }
             "dialog/close" => {
                 self.dialog = None;
                 self.menubar.close();

@@ -1596,3 +1596,17 @@ template-a6-color = A6 Color
 template-create-from-movie = Create from movie
 template-square = 1:1
 template-vertical = 9:16
+
+## simple.rs: Simple Mode
+
+simple-more = More
+simple-reference = Reference pictures
+simple-swap = Brush or eraser
+simple-pens = Pens
+simple-brushes = Brushes
+simple-export-image = Export image
+simple-flip-view = Flip horizontal view
+simple-see-references = See reference images
+simple-create-animation = Create animation
+simple-canvas-setting = Canvas setting
+simple-to-studio = Switch to Studio Mode

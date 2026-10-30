@@ -67,6 +67,7 @@ pub mod proof;
 pub mod psd_io;
 pub mod rulers;
 pub mod select;
+pub mod simple;
 mod start;
 pub mod story;
 mod studio;

@@ -25,6 +25,9 @@ follow [Semantic Versioning](https://semver.org/).
   Draw button in a bar along the bottom. The New canvas page offers
   templates for illustrations, webtoons, comics and animations, and
   Continue drawing. Canvases can now be up to 20000 pixels a side.
+- Simple Mode for Sue Paint on phones and tablets: just the canvas, brush
+  size and opacity sliders, and a bar to swap brush and eraser, pick pens
+  and brushes, the color and the layers; "..." holds the rest.
 - Try Sue in your browser at https://magigun.github.io/sue/try/, with
   nothing to install: the Hub, Sue Paint, Sue Writer and the tools, opening
   files from your computer (or dropped on the page), saving them as

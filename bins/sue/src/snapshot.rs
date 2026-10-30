@@ -610,6 +610,19 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         if let Some(applet) = runtime.applets.get_mut(&paint) {
             applet.navigate("start/hide");
         }
+        // Simple Mode: the canvas, then its "..." menu.
+        shoot(&mut runtime, &mut camera, &format!("{prefix}-paint-simple"))?;
+        if let Some(applet) = runtime.applets.get_mut(&paint) {
+            applet.navigate("sheet/more");
+        }
+        shoot(
+            &mut runtime,
+            &mut camera,
+            &format!("{prefix}-paint-simple-more"),
+        )?;
+        if let Some(applet) = runtime.applets.get_mut(&paint) {
+            applet.navigate("sheet/close");
+        }
         runtime.request(
             ShellRequest::OpenIn {
                 entity: novel,

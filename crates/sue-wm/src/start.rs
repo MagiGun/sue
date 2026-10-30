@@ -99,6 +99,8 @@ pub enum Glyph {
     Back,
     /// A strip of film: a movie.
     Film,
+    /// Three dots: more.
+    More,
 }
 
 fn line(painter: &Painter, points: &[Pos2], stroke: Stroke) {
@@ -596,6 +598,11 @@ pub fn glyph(painter: &Painter, rect: Rect, glyph: Glyph, color: Color32) {
             for y in [-0.4, 0.0, 0.4] {
                 painter.circle_filled(at(-0.43, y), 0.05 * s, color);
                 painter.circle_filled(at(0.43, y), 0.05 * s, color);
+            }
+        }
+        Glyph::More => {
+            for x in [-0.45, 0.0, 0.45] {
+                painter.circle_filled(at(x, 0.0), 0.11 * s, color);
             }
         }
         Glyph::All => {
@@ -2070,7 +2077,8 @@ pub fn gap(ui: &mut Ui) {
 mod tests {
     use super::*;
 
-    const EVERY: [Glyph; 39] = [
+    const EVERY: [Glyph; 40] = [
+        Glyph::More,
         Glyph::Back,
         Glyph::Film,
         Glyph::Draw,

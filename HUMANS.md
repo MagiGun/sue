@@ -327,6 +327,15 @@ color comics; an animation from a movie, 1:1 or 9:16). Tap one and draw.
 **Continue drawing** lists your recent work, **Import** brings in a
 picture, and **See list of projects** goes back to Projects.
 
+**Simple Mode** is how Sue Paint draws on a phone or tablet at first: the
+canvas alone, with the back arrow (to the start page), Undo, Redo, your
+reference pictures and **...** along the top. Near the bottom are the brush
+size and opacity sliders with their numbers; the bar under them swaps
+brush and eraser, picks a pen, picks a brush and its settings, opens the
+color and the layers. **...** has Export image, Export timelapse, Flip
+horizontal view, See reference images, Create animation, Canvas setting,
+Preferences, Switch to Studio Mode and Help.
+
 Once a canvas is open:
 
 - **Menus along the top,** right after the Sue button: File, Edit, Story,

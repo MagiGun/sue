@@ -28,6 +28,12 @@ pub(crate) enum Sheet {
     Color,
     /// The animation timeline.
     Timeline,
+    /// The reference pictures (Sub View).
+    Reference,
+    /// Simple Mode's "..." menu.
+    More,
+    /// Simple Mode's pens and brushes.
+    Pens,
 }
 
 /// The tools the bottom bar shows first, the way people reach for them.
@@ -143,7 +149,7 @@ impl SuePaint {
         }
     }
 
-    fn toggle_sheet(&mut self, sheet: Sheet) {
+    pub(crate) fn toggle_sheet(&mut self, sheet: Sheet) {
         self.sheet = if self.sheet == Some(sheet) {
             None
         } else {
@@ -152,7 +158,7 @@ impl SuePaint {
     }
 
     /// A sheet over the bottom of `area`, with a grabber to close it.
-    fn phone_sheet(
+    pub(crate) fn phone_sheet(
         &mut self,
         ui: &mut Ui,
         area: Rect,
@@ -163,7 +169,9 @@ impl SuePaint {
     ) {
         let height = match sheet {
             Sheet::Menu | Sheet::Layers | Sheet::ToolSettings => area.height() * 0.75,
-            Sheet::Tools => (area.height() * 0.5).min(320.0),
+            Sheet::Tools | Sheet::Pens => (area.height() * 0.5).min(320.0),
+            Sheet::More => (area.height() * 0.8).min(520.0),
+            Sheet::Reference => area.height() * 0.6,
             Sheet::Color | Sheet::Timeline => (area.height() * 0.55).min(420.0),
         };
         let rect = Rect::from_min_max(pos2(area.left(), area.bottom() - height), area.max);
@@ -212,10 +220,26 @@ impl SuePaint {
             Sheet::Color => self.color_panel(&mut inner, body, theme),
             Sheet::ToolSettings => self.tool_panel(&mut inner, body, cx, theme),
             Sheet::Timeline => self.timeline_panel(&mut inner, body, cx, theme),
-            Sheet::Tools => {
+            Sheet::Reference => self.sub_view(&mut inner, body, cx, theme),
+            Sheet::More => {
+                egui::ScrollArea::vertical()
+                    .id_salt("sue-paint-simple-more")
+                    .show(&mut inner, |ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        if let Some(command) = self.simple_more(ui, cx, theme) {
+                            *run = Some(command);
+                        }
+                    });
+            }
+            Sheet::Tools | Sheet::Pens => {
                 let columns = ((body.width() - 8.0) / (BUTTON + 8.0)).floor().max(1.0) as usize;
                 let current = self.toolbox.tool();
-                for (index, tool) in Tool::ALL.iter().enumerate() {
+                let tools: &[Tool] = if sheet == Sheet::Pens {
+                    &crate::simple::PENS
+                } else {
+                    &Tool::ALL
+                };
+                for (index, tool) in tools.iter().enumerate() {
                     let (row, column) = (index / columns, index % columns);
                     let at = pos2(
                         body.left() + 4.0 + column as f32 * (BUTTON + 8.0),

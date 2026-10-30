@@ -1630,7 +1630,17 @@ size), how it makes its canvas (`Make::Size` in px or mm at a resolution,
 `Screen` for the device's pixels, `FromImage`, `FromMovie`, `Custom`) and
 its work (`Work::Illustration`, `Comic`, `Animation`, which pick
 `make_picture`, `make_story` or `make_animation`). Adding one is a line in
-`builtin` or a `register` call. Pictures may be up to 20000 pixels a side
+`builtin` or a `register` call.
+
+**Simple Mode** (`simple.rs`). On phones and tablets with
+`sue_paint.touch_mode` = `simple` (the default; `studio` is Studio Mode),
+`simple_bar` puts back, Undo, Redo, the reference pictures and "..." in
+Sue's top bar, and `simple_frame` lays out the canvas bare (`bare`: no tabs
+or status strip), the size and opacity sliders of the current sub tool,
+and a bottom bar (swap with the eraser, the pens as `phone::Sheet::Pens`,
+the sub tools, the color, the layers). Its sheets are the phone's
+(`phone_sheet`), plus `Reference` (the Sub View) and `More`, whose rows run
+Sue Paint's own commands. Pictures may be up to 20000 pixels a side
 (`doc::MAX_SIDE`), for webtoons.
 
 **Camera folders.** A camera folder (Animation, New Animation Layer, Camera
