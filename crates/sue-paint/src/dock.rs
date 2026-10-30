@@ -998,6 +998,10 @@ impl SuePaint {
             if !palette.shown(&panels) {
                 continue;
             }
+            if !ui.ctx().embed_viewports() {
+                self.palette_window(ui, palette, rect, body, cx, theme);
+                continue;
+            }
             let mut open = true;
             let window = egui::Window::new(palette.title())
                 .id(Id::unique(("sue-paint-float", palette.title())))
@@ -1056,6 +1060,74 @@ impl SuePaint {
         }
         let _ = Align2::LEFT_TOP;
         let _ = icons::paint;
+    }
+
+    /// A floating palette in a window of its own, as Clip Studio Paint's:
+    /// it can go anywhere, outside Sue's window too, and be resized. Its
+    /// place is kept relative to Sue's window.
+    fn palette_window(
+        &mut self,
+        ui: &mut Ui,
+        palette: Palette,
+        rect: Rect,
+        body: Rect,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        let ctx = ui.ctx().clone();
+        let main = ctx
+            .input(|input| input.viewport().inner_rect)
+            .map_or(Pos2::ZERO, |inner| inner.min);
+        let builder = egui::ViewportBuilder::default()
+            .with_title(palette.title())
+            .with_position(main + rect.min.to_vec2())
+            .with_inner_size(rect.size())
+            .with_min_inner_size(vec2(palette.fixed_width().unwrap_or(160.0), 100.0))
+            .with_resizable(true);
+        let (closed, redock, now) = ctx.show_viewport_immediate(
+            egui::ViewportId::from_hash_of(("sue-paint-palette", palette.title())),
+            builder,
+            |ui, _| {
+                let area = ui.max_rect();
+                self.draw_palette(ui, palette, area, cx, theme);
+                // Back into a column, from inside its window.
+                let back = Rect::from_min_size(
+                    pos2(area.right() - 22.0, area.bottom() - 22.0),
+                    vec2(18.0, 18.0),
+                );
+                let redock = icon_button(
+                    ui,
+                    back,
+                    Icon::Up,
+                    true,
+                    false,
+                    &tr!("dock-it-again"),
+                    theme,
+                );
+                let (closed, now) = ui.input(|input| {
+                    let viewport = input.viewport();
+                    (viewport.close_requested(), viewport.inner_rect)
+                });
+                (closed, redock, now)
+            },
+        );
+        if let Some(now) = now
+            && let Some(entry) = self
+                .dock
+                .floating
+                .iter_mut()
+                .find(|(found, _)| *found == palette)
+        {
+            entry.1 = now.translate(-main.to_vec2());
+        }
+        if closed || redock {
+            let side = if rect.center().x < body.center().x {
+                Side::Left
+            } else {
+                Side::Right
+            };
+            self.dock.dock(palette, side);
+        }
     }
 }
 

@@ -483,10 +483,14 @@ Once a canvas is open:
   Double-click a name to rename it. The navigator's **Sub View** tab holds
   reference pictures: import them, step through them or pick one from the
   list, zoom and turn the view of one, and click it to pick its colors.
+- **Dialogs are windows:** on a computer, Sue Paint's dialogs (New,
+  Preferences, the filters and the rest) open as windows of their own,
+  which you can move anywhere, outside Sue's window too, and resize.
 - **Arrange the palettes your way:** drag the edge of a column to make it
   wider, or the line between two palettes to share the height differently.
   Each palette's menu (the three lines at its top right) docks it on the
-  other side, floats it in its own window you can move and resize, folds it
+  other side, floats it in a window of its own that you can move anywhere
+  (outside Sue's window too, onto another screen) and resize, folds it
   into an icon in a strip at the far right (click the icon to see it), or
   closes it. In a narrow window, the widest palettes fold into the strip by
   themselves and come back when there is room. Drag the top of the timeline

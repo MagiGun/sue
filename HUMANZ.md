@@ -58,7 +58,11 @@ OS input), `cpal` (audio devices), `rfd` (native dialogs on desktops), `jni`
 browser, `wasm-bindgen`, `web-sys`, `js-sys` and `web-time` are used only by
 `sue-platform`. `egui` itself is a portable, immediate-mode widget library with
 no OS bindings: `sue-wm` builds the whole shell with it, and the platform host
-paints what it produces. `unsafe` code is forbidden workspace-wide
+paints what it produces. On a computer the host gives each of egui's immediate
+viewports (`show_viewport_immediate`) a system window of its own
+(`sue-platform/src/viewports.rs`), so a studio's dialogs and floating
+palettes can leave the main window; in the browser and on phones they are
+drawn inside it, as egui does by itself. `unsafe` code is forbidden workspace-wide
 (`[workspace.lints] rust.unsafe_code = "forbid"`). The `wgpu` window surface is
 created through its safe API, so `sue-platform` keeps the lint too. Native FFI
 is relaxed only in its two small entry crates, each item approved by the

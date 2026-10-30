@@ -225,6 +225,9 @@ pub struct DesktopHost {
     clear: egui::Color32,
     repaint_at: Option<Instant>,
     exit_requested: bool,
+    /// Dialogs and floating palettes in windows of their own.
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+    viewports: crate::viewports::Shared,
     /// A WinTab tablet's pen pressure (see `crate::stylus`): `None` until
     /// the first frame looks for one, then whether there is one.
     #[cfg(target_os = "windows")]
@@ -383,6 +386,12 @@ impl DesktopHost {
             egui
         };
 
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+        let viewports = {
+            let viewports = crate::viewports::Shared::default();
+            crate::viewports::install(&ctx, &viewports);
+            viewports
+        };
         let os = OsFamily::current();
         let paths = PlatformPaths::detect()?;
         let refresh_hz = window
@@ -439,6 +448,8 @@ impl DesktopHost {
             clear: egui::Color32::BLACK,
             repaint_at: None,
             exit_requested: false,
+            #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+            viewports,
             #[cfg(target_os = "windows")]
             tablet: None,
         })
@@ -496,6 +507,14 @@ impl DesktopHost {
             allow(unused_mut)
         )]
         let mut raw = self.egui.take_egui_input(&self.window);
+        // Where the window is, so a dialog's own window opens over it.
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+        egui_winit::update_viewport_info(
+            raw.viewports.entry(egui::ViewportId::ROOT).or_default(),
+            &self.ctx,
+            &self.window,
+            false,
+        );
         #[cfg(target_os = "android")]
         if let Some(safe) = self.android_safe_rect() {
             // Lay everything out between the status and navigation bars.
@@ -547,6 +566,11 @@ impl DesktopHost {
             .map_or(Duration::MAX, |viewport| viewport.repaint_delay);
         // Anything past a day is egui's "never".
         self.repaint_at = (delay < Duration::from_secs(86_400)).then(|| Instant::now() + delay);
+        // The windows of their own first: their textures came first.
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+        self.viewports
+            .borrow_mut()
+            .paint(&self.gpu, &mut self.painter, &ctx, self.clear);
         let Some(surface) = self.surface.as_mut() else {
             // No window to draw into: keep egui's textures in step.
             self.painter.apply_textures(output.textures_delta);
@@ -1018,15 +1042,31 @@ impl<A: DesktopApp> ApplicationHandler<Wake> for Runner<A> {
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        _window_id: WindowId,
+        window_id: WindowId,
         event: OsWindowEvent,
     ) {
+        // Only desktops have windows besides the main one.
+        #[cfg(any(target_arch = "wasm32", target_os = "android", target_os = "ios"))]
+        let _ = window_id;
         if self.exiting || (self.paused && matches!(event, OsWindowEvent::RedrawRequested)) {
             return;
         }
         let Some(host) = self.host.as_mut() else {
             return;
         };
+        // A dialog's or palette's own window: it draws with the main
+        // window's frame.
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+        if window_id != host.window.id() {
+            if host
+                .viewports
+                .borrow_mut()
+                .window_event(&host.gpu, window_id, &event)
+            {
+                host.window.request_redraw();
+            }
+            return;
+        }
         let response = host.egui.on_window_event(&host.window, &event);
         // egui asks to repaint after any event, the redraw itself included;
         // answering that one would draw forever.
@@ -1061,6 +1101,16 @@ impl<A: DesktopApp> ApplicationHandler<Wake> for Runner<A> {
             OsWindowEvent::RedrawRequested => {
                 host.frame(&mut self.app);
                 self.last_frame = Some(Instant::now());
+                // Windows for viewports first shown this frame.
+                #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+                if host.viewports.borrow_mut().open_wanted(
+                    event_loop,
+                    &host.ctx,
+                    &host.gpu,
+                    host.painter.max_texture_side(),
+                ) {
+                    host.window.request_redraw();
+                }
             }
             _ => {}
         }

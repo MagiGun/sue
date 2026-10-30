@@ -13,6 +13,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- On a computer, Sue Paint's dialogs and floating palettes are windows of
+  their own: move them anywhere, outside Sue's window or onto another
+  screen, and resize them. Closing a floating palette's window docks it
+  again.
 - Sue Paint's Timeline looks and works like Clip Studio Paint's: tall
   tracks with the picture each folder shows, every key's cel as a picture,
   alternating second bands, a red current frame, zoom buttons and the

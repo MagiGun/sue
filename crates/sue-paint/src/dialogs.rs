@@ -673,59 +673,64 @@ impl SuePaint {
                 crate::studio::shortcut_table(),
             )
         });
-        egui::Area::new(Id::unique("sue-paint-dialog"))
-            .fade_in(false)
-            .order(Order::Foreground)
-            .fixed_pos(at)
-            .show(ctx, |ui| {
-                widgets::window_frame(theme)
-                    .inner_margin(egui::Margin::same(16))
-                    .show(ui, |ui| {
-                        let inner = size - vec2(32.0, 32.0);
-                        ui.set_min_size(inner);
-                        ui.set_max_size(inner);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(title.as_str())
-                                    .size(theme.ui_size + 1.0)
-                                    .color(theme.text),
-                            );
-                        });
-                        ui.separator();
-                        // A dialog larger than the screen (a phone) scrolls inside
-                        // its frame, so its buttons stay in reach.
-                        egui::ScrollArea::both()
-                            .id_salt("sue-paint-dialog-body")
-                            .auto_shrink([false, true])
-                            .show(ui, |ui| {
-                        match &mut dialog {
-                            Dialog::New(new) => outcome = new_ui(ui, new, theme),
-                            Dialog::Filter(filter) => outcome = filter_ui(ui, filter, theme),
-                            Dialog::Pressure(pressure) => {
-                                outcome = pressure_ui(ui, pressure, theme)
-                            }
-                            Dialog::Pages(pages) => outcome = self.pages_ui(ui, pages, cx, theme),
-                            Dialog::Frame(frame) => outcome = frame_ui(ui, frame, theme),
-                            Dialog::Text(_, lettering) => outcome = text_ui(ui, lettering, theme),
-                            Dialog::Onion(onion) => outcome = onion_ui(ui, onion, theme),
-                            Dialog::SelectBy(kind, amount) => {
-                                ui.horizontal(|ui| {
-                                    label(ui, &if *kind == 2 { tr!("blur-width") } else { tr!("width") }, theme);
-                                    ui.add(egui::Slider::new(amount, 1.0..=100.0).suffix(tr!("px")));
-                                });
-                                ok_cancel(ui, &mut outcome);
-                            }
-                            Dialog::Workspace(name) => {
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("name"), theme);
-                                    ui.text_edit_singleline(name);
-                                });
-                                ok_cancel(ui, &mut outcome);
-                            }
-                            Dialog::Workspaces => {
-                                let mut chosen = None;
-                                let mut gone = None;
-                                egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+        // The dialog's body, in its own window or (in the browser and on
+        // phones) over the studio.
+        let own_window = !ctx.embed_viewports();
+        let mut body = |ui: &mut Ui, inner: egui::Vec2| {
+            ui.set_min_size(inner);
+            ui.set_max_size(inner);
+            if !own_window {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(title.as_str())
+                            .size(theme.ui_size + 1.0)
+                            .color(theme.text),
+                    );
+                });
+                ui.separator();
+            }
+            // A dialog larger than the screen (a phone) scrolls inside
+            // its frame, so its buttons stay in reach.
+            egui::ScrollArea::both()
+                .id_salt("sue-paint-dialog-body")
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    match &mut dialog {
+                        Dialog::New(new) => outcome = new_ui(ui, new, theme),
+                        Dialog::Filter(filter) => outcome = filter_ui(ui, filter, theme),
+                        Dialog::Pressure(pressure) => outcome = pressure_ui(ui, pressure, theme),
+                        Dialog::Pages(pages) => outcome = self.pages_ui(ui, pages, cx, theme),
+                        Dialog::Frame(frame) => outcome = frame_ui(ui, frame, theme),
+                        Dialog::Text(_, lettering) => outcome = text_ui(ui, lettering, theme),
+                        Dialog::Onion(onion) => outcome = onion_ui(ui, onion, theme),
+                        Dialog::SelectBy(kind, amount) => {
+                            ui.horizontal(|ui| {
+                                label(
+                                    ui,
+                                    &if *kind == 2 {
+                                        tr!("blur-width")
+                                    } else {
+                                        tr!("width")
+                                    },
+                                    theme,
+                                );
+                                ui.add(egui::Slider::new(amount, 1.0..=100.0).suffix(tr!("px")));
+                            });
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::Workspace(name) => {
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("name"), theme);
+                                ui.text_edit_singleline(name);
+                            });
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::Workspaces => {
+                            let mut chosen = None;
+                            let mut gone = None;
+                            egui::ScrollArea::vertical()
+                                .max_height(220.0)
+                                .show(ui, |ui| {
                                     for (index, space) in self.workspaces.iter_mut().enumerate() {
                                         ui.horizontal(|ui| {
                                             ui.text_edit_singleline(&mut space.name);
@@ -739,102 +744,131 @@ impl SuePaint {
                                     }
                                     if self.workspaces.is_empty() {
                                         ui.label(
-                                            RichText::new(tr!("no-workspaces-yet-window-workspace-register"))
-                                                .size(theme.small_size)
-                                                .color(theme.muted),
+                                            RichText::new(tr!(
+                                                "no-workspaces-yet-window-workspace-register"
+                                            ))
+                                            .size(theme.small_size)
+                                            .color(theme.muted),
                                         );
                                     }
                                 });
-                                if let Some(index) = chosen {
-                                    self.use_workspace(index);
-                                }
-                                if let Some(index) = gone {
-                                    self.workspaces.remove(index);
-                                }
-                                ui.add_space(8.0);
-                                if ui.button(tr!("close")).clicked() {
-                                    outcome = Outcome::Ok;
-                                }
+                            if let Some(index) = chosen {
+                                self.use_workspace(index);
                             }
-                            Dialog::Print(settings, printing) => {
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("paper"), theme);
-                                    egui::ComboBox::from_id_salt("sue-paint-paper")
-                                        .selected_text(crate::localize(crate::print::PAPERS[settings.paper].0))
-                                        .show_ui(ui, |ui| {
-                                            for (index, (name, ..)) in crate::print::PAPERS.iter().enumerate() {
-                                                ui.selectable_value(&mut settings.paper, index, crate::localize(name));
-                                            }
-                                        });
-                                });
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("orientation"), theme);
-                                    ui.radio_value(&mut settings.orientation, 0, tr!("auto"));
-                                    ui.radio_value(&mut settings.orientation, 1, tr!("portrait"));
-                                    ui.radio_value(&mut settings.orientation, 2, tr!("landscape"));
-                                });
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("size"), theme);
-                                    ui.radio_value(&mut settings.size, 0, tr!("fit-to-page"));
-                                    ui.radio_value(&mut settings.size, 1, tr!("print-size"));
-                                    ui.radio_value(&mut settings.size, 2, tr!("scale"));
-                                });
-                                if settings.size == 2 {
-                                    ui.add(egui::Slider::new(&mut settings.percent, 1.0..=400.0).suffix(" %"));
-                                }
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("margin"), theme);
-                                    ui.add(egui::Slider::new(&mut settings.margin, 0.0..=50.0).suffix(tr!("mm")));
-                                });
-                                ui.checkbox(&mut settings.all_pages, tr!("every-page-of-the-story"));
-                                if *printing {
-                                    ui.label(
-                                        RichText::new(tr!("pages-open-as-pdf-your-viewer"))
-                                            .size(theme.small_size)
-                                            .color(theme.muted),
-                                    );
-                                }
-                                ok_cancel(ui, &mut outcome);
+                            if let Some(index) = gone {
+                                self.workspaces.remove(index);
                             }
-                            Dialog::Preferences(prefs) => match prefs.ui(ui, theme) {
-                                Some(true) => outcome = Outcome::Ok,
-                                Some(false) => outcome = Outcome::Cancel,
-                                None => {}
-                            },
-                            Dialog::Modifiers(chosen) => {
-                                for ((key, name, choices), pick) in MODIFIERS.iter().zip(chosen.iter_mut()) {
-                                    // Each choice reads as Settings names it.
-                                    let choice_text = |choice: &str| {
-                                        sue_lang::text_or(
-                                            "rice",
-                                            &format!("{}.{choice}", key.replace('.', "-")),
-                                            &choice.replace('_', " "),
-                                        )
-                                    };
-                                    ui.horizontal(|ui| {
-                                        label(ui, &crate::localize(name), theme);
-                                        egui::ComboBox::from_id_salt(("sue-paint-modifier", *name))
-                                            .selected_text(choice_text(choices[(*pick).min(choices.len() - 1)]))
-                                            .show_ui(ui, |ui| {
-                                                for (index, choice) in choices.iter().enumerate() {
-                                                    ui.selectable_value(pick, index, choice_text(choice));
-                                                }
-                                            });
+                            ui.add_space(8.0);
+                            if ui.button(tr!("close")).clicked() {
+                                outcome = Outcome::Ok;
+                            }
+                        }
+                        Dialog::Print(settings, printing) => {
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("paper"), theme);
+                                egui::ComboBox::from_id_salt("sue-paint-paper")
+                                    .selected_text(crate::localize(
+                                        crate::print::PAPERS[settings.paper].0,
+                                    ))
+                                    .show_ui(ui, |ui| {
+                                        for (index, (name, ..)) in
+                                            crate::print::PAPERS.iter().enumerate()
+                                        {
+                                            ui.selectable_value(
+                                                &mut settings.paper,
+                                                index,
+                                                crate::localize(name),
+                                            );
+                                        }
                                     });
-                                }
+                            });
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("orientation"), theme);
+                                ui.radio_value(&mut settings.orientation, 0, tr!("auto"));
+                                ui.radio_value(&mut settings.orientation, 1, tr!("portrait"));
+                                ui.radio_value(&mut settings.orientation, 2, tr!("landscape"));
+                            });
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("size"), theme);
+                                ui.radio_value(&mut settings.size, 0, tr!("fit-to-page"));
+                                ui.radio_value(&mut settings.size, 1, tr!("print-size"));
+                                ui.radio_value(&mut settings.size, 2, tr!("scale"));
+                            });
+                            if settings.size == 2 {
+                                ui.add(
+                                    egui::Slider::new(&mut settings.percent, 1.0..=400.0)
+                                        .suffix(" %"),
+                                );
+                            }
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("margin"), theme);
+                                ui.add(
+                                    egui::Slider::new(&mut settings.margin, 0.0..=50.0)
+                                        .suffix(tr!("mm")),
+                                );
+                            });
+                            ui.checkbox(&mut settings.all_pages, tr!("every-page-of-the-story"));
+                            if *printing {
                                 ui.label(
-                                    RichText::new(tr!("space-shift-turns-view-ctrl-alt"))
+                                    RichText::new(tr!("pages-open-as-pdf-your-viewer"))
                                         .size(theme.small_size)
                                         .color(theme.muted),
                                 );
-                                ok_cancel(ui, &mut outcome);
                             }
-                            Dialog::CommandBar(adding) => {
-                                egui::ScrollArea::vertical().max_height(size.y - 150.0).show(ui, |ui| {
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::Preferences(prefs) => match prefs.ui(ui, theme) {
+                            Some(true) => outcome = Outcome::Ok,
+                            Some(false) => outcome = Outcome::Cancel,
+                            None => {}
+                        },
+                        Dialog::Modifiers(chosen) => {
+                            for ((key, name, choices), pick) in
+                                MODIFIERS.iter().zip(chosen.iter_mut())
+                            {
+                                // Each choice reads as Settings names it.
+                                let choice_text = |choice: &str| {
+                                    sue_lang::text_or(
+                                        "rice",
+                                        &format!("{}.{choice}", key.replace('.', "-")),
+                                        &choice.replace('_', " "),
+                                    )
+                                };
+                                ui.horizontal(|ui| {
+                                    label(ui, &crate::localize(name), theme);
+                                    egui::ComboBox::from_id_salt(("sue-paint-modifier", *name))
+                                        .selected_text(choice_text(
+                                            choices[(*pick).min(choices.len() - 1)],
+                                        ))
+                                        .show_ui(ui, |ui| {
+                                            for (index, choice) in choices.iter().enumerate() {
+                                                ui.selectable_value(
+                                                    pick,
+                                                    index,
+                                                    choice_text(choice),
+                                                );
+                                            }
+                                        });
+                                });
+                            }
+                            ui.label(
+                                RichText::new(tr!("space-shift-turns-view-ctrl-alt"))
+                                    .size(theme.small_size)
+                                    .color(theme.muted),
+                            );
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::CommandBar(adding) => {
+                            egui::ScrollArea::vertical()
+                                .max_height(size.y - 150.0)
+                                .show(ui, |ui| {
                                     for group in crate::panels::BAR_GROUPS {
                                         for (_, command, tip) in group.iter() {
                                             let mut shown = !self.bar_hidden.contains(*command);
-                                            if ui.checkbox(&mut shown, crate::localize(tip)).changed() {
+                                            if ui
+                                                .checkbox(&mut shown, crate::localize(tip))
+                                                .changed()
+                                            {
                                                 if shown {
                                                     self.bar_hidden.remove(*command);
                                                 } else {
@@ -847,7 +881,10 @@ impl SuePaint {
                                     let mut gone = None;
                                     for (index, command) in self.bar_extra.iter().enumerate() {
                                         ui.horizontal(|ui| {
-                                            ui.label(crate::menus::label_of(&self.menus, command).unwrap_or(command));
+                                            ui.label(
+                                                crate::menus::label_of(&self.menus, command)
+                                                    .unwrap_or(command),
+                                            );
                                             if ui.small_button(tr!("remove")).clicked() {
                                                 gone = Some(index);
                                             }
@@ -857,339 +894,477 @@ impl SuePaint {
                                         self.bar_extra.remove(index);
                                     }
                                 });
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("add"), theme);
-                                    let picked = crate::menus::label_of(&self.menus, adding).unwrap_or(&tr!("a-menu-command")).to_owned();
-                                    egui::ComboBox::from_id_salt("sue-paint-bar-add")
-                                        .selected_text(picked)
-                                        .height(320.0)
-                                        .show_ui(ui, |ui| {
-                                            for (label, command) in crate::menus::commands(&self.menus) {
-                                                ui.selectable_value(adding, command, label);
-                                            }
-                                        });
-                                    if ui.button(tr!("add-2")).clicked() && !adding.is_empty() && !self.bar_extra.contains(adding) {
-                                        self.bar_extra.push(adding.clone());
-                                    }
-                                });
-                                ui.add_space(6.0);
-                                if ui.button(tr!("close")).clicked() {
-                                    outcome = Outcome::Ok;
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("add"), theme);
+                                let picked = crate::menus::label_of(&self.menus, adding)
+                                    .unwrap_or(&tr!("a-menu-command"))
+                                    .to_owned();
+                                egui::ComboBox::from_id_salt("sue-paint-bar-add")
+                                    .selected_text(picked)
+                                    .height(320.0)
+                                    .show_ui(ui, |ui| {
+                                        for (label, command) in crate::menus::commands(&self.menus)
+                                        {
+                                            ui.selectable_value(adding, command, label);
+                                        }
+                                    });
+                                if ui.button(tr!("add-2")).clicked()
+                                    && !adding.is_empty()
+                                    && !self.bar_extra.contains(adding)
+                                {
+                                    self.bar_extra.push(adding.clone());
                                 }
+                            });
+                            ui.add_space(6.0);
+                            if ui.button(tr!("close")).clicked() {
+                                outcome = Outcome::Ok;
                             }
-                            Dialog::PageSettings(settings) => {
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("size"), theme);
-                                    ui.add(egui::DragValue::new(&mut settings.width).range(1..=10_000).suffix(tr!("px")));
-                                    ui.label("by");
-                                    ui.add(egui::DragValue::new(&mut settings.height).range(1..=10_000).suffix(tr!("px")));
-                                });
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("resolution"), theme);
-                                    ui.add(egui::DragValue::new(&mut settings.dpi).range(1.0..=2400.0).suffix(tr!("dpi")));
-                                });
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("bleed"), theme);
-                                    ui.add(egui::DragValue::new(&mut settings.bleed).range(0.0..=50.0).suffix(tr!("mm")));
-                                });
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("inner-border"), theme);
-                                    ui.add(egui::DragValue::new(&mut settings.inner).range(0.0..=100.0).suffix(tr!("mm")));
-                                });
-                                ui.label(
-                                    RichText::new(tr!("every-page-story-changes-each-keeps"))
-                                        .size(theme.small_size)
-                                        .color(theme.muted),
+                        }
+                        Dialog::PageSettings(settings) => {
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("size"), theme);
+                                ui.add(
+                                    egui::DragValue::new(&mut settings.width)
+                                        .range(1..=10_000)
+                                        .suffix(tr!("px")),
                                 );
-                                ok_cancel(ui, &mut outcome);
-                            }
-                            Dialog::StoryInfo(info) => {
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("title"), theme);
-                                    ui.text_edit_singleline(&mut info.title);
-                                });
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("author"), theme);
-                                    ui.text_edit_singleline(&mut info.author);
-                                });
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("first-page-number"), theme);
-                                    ui.add(egui::DragValue::new(&mut info.first).range(0..=9_999));
-                                });
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("binding"), theme);
-                                    ui.radio_value(&mut info.right_bound, false, tr!("left-left-to-right"));
-                                    ui.radio_value(&mut info.right_bound, true, tr!("right-manga"));
-                                });
-                                ok_cancel(ui, &mut outcome);
-                            }
-                            Dialog::StoryEditor(texts) => {
-                                egui::ScrollArea::vertical().max_height(size.y - 120.0).show(ui, |ui| {
+                                ui.label("by");
+                                ui.add(
+                                    egui::DragValue::new(&mut settings.height)
+                                        .range(1..=10_000)
+                                        .suffix(tr!("px")),
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("resolution"), theme);
+                                ui.add(
+                                    egui::DragValue::new(&mut settings.dpi)
+                                        .range(1.0..=2400.0)
+                                        .suffix(tr!("dpi")),
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("bleed"), theme);
+                                ui.add(
+                                    egui::DragValue::new(&mut settings.bleed)
+                                        .range(0.0..=50.0)
+                                        .suffix(tr!("mm")),
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("inner-border"), theme);
+                                ui.add(
+                                    egui::DragValue::new(&mut settings.inner)
+                                        .range(0.0..=100.0)
+                                        .suffix(tr!("mm")),
+                                );
+                            });
+                            ui.label(
+                                RichText::new(tr!("every-page-story-changes-each-keeps"))
+                                    .size(theme.small_size)
+                                    .color(theme.muted),
+                            );
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::StoryInfo(info) => {
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("title"), theme);
+                                ui.text_edit_singleline(&mut info.title);
+                            });
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("author"), theme);
+                                ui.text_edit_singleline(&mut info.author);
+                            });
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("first-page-number"), theme);
+                                ui.add(egui::DragValue::new(&mut info.first).range(0..=9_999));
+                            });
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("binding"), theme);
+                                ui.radio_value(
+                                    &mut info.right_bound,
+                                    false,
+                                    tr!("left-left-to-right"),
+                                );
+                                ui.radio_value(&mut info.right_bound, true, tr!("right-manga"));
+                            });
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::StoryEditor(texts) => {
+                            egui::ScrollArea::vertical()
+                                .max_height(size.y - 120.0)
+                                .show(ui, |ui| {
                                     let mut last_page = 0;
                                     for (number, _, _, words) in texts.iter_mut() {
                                         if *number != last_page {
                                             last_page = *number;
                                             ui.add_space(4.0);
-                                            ui.label(RichText::new(tr!("page", number = number)).color(theme.text).strong());
+                                            ui.label(
+                                                RichText::new(tr!("page", number = number))
+                                                    .color(theme.text)
+                                                    .strong(),
+                                            );
                                         }
-                                        ui.add(egui::TextEdit::multiline(words).desired_rows(2).desired_width(f32::INFINITY));
+                                        ui.add(
+                                            egui::TextEdit::multiline(words)
+                                                .desired_rows(2)
+                                                .desired_width(f32::INFINITY),
+                                        );
                                     }
                                 });
-                                ok_cancel(ui, &mut outcome);
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::Proof(profile) => {
+                            ui.label(
+                                RichText::new(tr!("how-picture-would-print-shown-while"))
+                                    .size(theme.small_size)
+                                    .color(theme.muted),
+                            );
+                            for (index, (name, ..)) in crate::proof::PROFILES.iter().enumerate() {
+                                ui.radio_value(profile, index, crate::localize(name));
                             }
-                            Dialog::Proof(profile) => {
-                                ui.label(
-                                    RichText::new(tr!("how-picture-would-print-shown-while"))
-                                        .size(theme.small_size)
-                                        .color(theme.muted),
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::CanvasProperties(props) => {
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("name"), theme);
+                                ui.text_edit_singleline(&mut props.name);
+                            });
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("resolution"), theme);
+                                ui.add(
+                                    egui::DragValue::new(&mut props.dpi)
+                                        .range(1.0..=2400.0)
+                                        .suffix(tr!("dpi")),
                                 );
-                                for (index, (name, ..)) in crate::proof::PROFILES.iter().enumerate() {
-                                    ui.radio_value(profile, index, crate::localize(name));
-                                }
-                                ok_cancel(ui, &mut outcome);
+                            });
+                            if props.paper.is_some() {
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(&mut props.paper_shown, tr!("paper-2"));
+                                    ui.color_edit_button_srgb(&mut props.paper_color);
+                                });
                             }
-                            Dialog::CanvasProperties(props) => {
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("name"), theme);
-                                    ui.text_edit_singleline(&mut props.name);
-                                });
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("resolution"), theme);
-                                    ui.add(egui::DragValue::new(&mut props.dpi).range(1.0..=2400.0).suffix(tr!("dpi")));
-                                });
-                                if props.paper.is_some() {
-                                    ui.horizontal(|ui| {
-                                        ui.checkbox(&mut props.paper_shown, tr!("paper-2"));
-                                        ui.color_edit_button_srgb(&mut props.paper_color);
-                                    });
-                                }
-                                ok_cancel(ui, &mut outcome);
-                            }
-                            Dialog::Convert(_, kind, name) => {
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("name"), theme);
-                                    ui.text_edit_singleline(name);
-                                });
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("type"), theme);
-                                    ui.radio_value(kind, 0, tr!("raster-layer"));
-                                    ui.radio_value(kind, 1, tr!("vector-layer"));
-                                });
-                                ui.label(
-                                    RichText::new(tr!("vector-pixels-are-traced-lines-down"))
-                                        .size(theme.small_size)
-                                        .color(theme.muted),
-                                );
-                                ok_cancel(ui, &mut outcome);
-                            }
-                            Dialog::Message(_, paragraphs) => {
-                                egui::ScrollArea::vertical().max_height(size.y - 110.0).show(ui, |ui| {
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::Convert(_, kind, name) => {
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("name"), theme);
+                                ui.text_edit_singleline(name);
+                            });
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("type"), theme);
+                                ui.radio_value(kind, 0, tr!("raster-layer"));
+                                ui.radio_value(kind, 1, tr!("vector-layer"));
+                            });
+                            ui.label(
+                                RichText::new(tr!("vector-pixels-are-traced-lines-down"))
+                                    .size(theme.small_size)
+                                    .color(theme.muted),
+                            );
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::Message(_, paragraphs) => {
+                            egui::ScrollArea::vertical()
+                                .max_height(size.y - 110.0)
+                                .show(ui, |ui| {
                                     for paragraph in paragraphs.iter() {
                                         if paragraph.starts_with("https://") {
                                             ui.hyperlink(paragraph.as_str());
                                         } else if let Some(heading) = paragraph.strip_prefix("# ") {
                                             ui.add_space(6.0);
-                                            ui.label(RichText::new(heading).size(theme.ui_size).color(theme.text).strong());
+                                            ui.label(
+                                                RichText::new(heading)
+                                                    .size(theme.ui_size)
+                                                    .color(theme.text)
+                                                    .strong(),
+                                            );
                                         } else {
-                                            ui.label(RichText::new(paragraph.as_str()).size(theme.small_size + 0.5).color(theme.text));
+                                            ui.label(
+                                                RichText::new(paragraph.as_str())
+                                                    .size(theme.small_size + 0.5)
+                                                    .color(theme.text),
+                                            );
                                         }
                                     }
                                 });
-                                ui.add_space(8.0);
-                                if ui.button(tr!("close")).clicked() {
-                                    outcome = Outcome::Ok;
-                                }
-                            }
-                            Dialog::Gamut(tolerance, all) => {
-                                ui.label(
-                                    RichText::new(tr!("selects-colors-near-drawing-color"))
-                                        .size(theme.small_size)
-                                        .color(theme.muted),
-                                );
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("color-margin"), theme);
-                                    let mut percent = *tolerance * 100.0;
-                                    if ui.add(egui::Slider::new(&mut percent, 0.0..=100.0).suffix(" %")).changed() {
-                                        *tolerance = percent / 100.0;
-                                    }
-                                });
-                                ui.checkbox(all, tr!("refer-to-all-layers"));
-                                ok_cancel(ui, &mut outcome);
-                            }
-                            Dialog::Webtoon(height, width) => {
-                                egui::Grid::new("sue-paint-webtoon").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
-                                    label(ui, &tr!("split-every"), theme);
-                                    ui.add(egui::DragValue::new(height).range(200..=20000).suffix(tr!("px")));
-                                    ui.end_row();
-                                    label(ui, &tr!("output-width"), theme);
-                                    ui.add(egui::DragValue::new(width).range(100..=4000).suffix(tr!("px")));
-                                    ui.end_row();
-                                });
-                                ui.label(
-                                    RichText::new(tr!("tall-canvas-cut-into-numbered-pictures"))
-                                        .size(theme.small_size)
-                                        .color(theme.muted),
-                                );
-                                ok_cancel(ui, &mut outcome);
-                            }
-                            Dialog::Timeline(fps, length) => {
-                                egui::Grid::new("sue-paint-timeline-edit").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
-                                    label(ui, &tr!("frame-rate-2"), theme);
-                                    ui.add(egui::DragValue::new(fps).range(1..=120).suffix(tr!("fps")));
-                                    ui.end_row();
-                                    label(ui, &tr!("playback-time"), theme);
-                                    ui.add(egui::DragValue::new(length).range(1..=100_000).suffix(tr!("frames")));
-                                    ui.end_row();
-                                });
-                                ok_cancel(ui, &mut outcome);
-                            }
-                            Dialog::Shape3D(kind) => {
-                                label(ui, &tr!("shape"), theme);
-                                for (index, name) in crate::three::SHAPES.iter().enumerate() {
-                                    ui.radio_value(kind, index, crate::localize(name));
-                                }
-                                ui.label(
-                                    RichText::new(tr!("file-import-3d-data-brings-models"))
-                                        .size(theme.small_size)
-                                        .color(theme.muted),
-                                );
-                                ok_cancel(ui, &mut outcome);
-                            }
-                            Dialog::Material(name) => {
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("material-name"), theme);
-                                    ui.add(egui::TextEdit::singleline(name).desired_width(200.0));
-                                });
-                                ui.label(
-                                    RichText::new(tr!("current-layer-goes-into-material-palette"))
-                                        .size(theme.small_size)
-                                        .color(theme.muted),
-                                );
-                                ok_cancel(ui, &mut outcome);
-                            }
-                            Dialog::Timelapse(export) => {
-                                egui::Grid::new("sue-paint-timelapse-export")
-                                    .num_columns(2)
-                                    .spacing(vec2(12.0, 8.0))
-                                    .show(ui, |ui| {
-                                        label(ui, &tr!("long-side"), theme);
-                                        egui::ComboBox::from_id_salt("sue-paint-timelapse-side")
-                                            .selected_text(tr!("px-2", side = export.side))
-                                            .show_ui(ui, |ui| {
-                                                for side in [480, 720, 1080, 1280, 1920] {
-                                                    ui.selectable_value(&mut export.side, side, tr!("px-2", side = side));
-                                                }
-                                            });
-                                        ui.end_row();
-                                        label(ui, &tr!("length"), theme);
-                                        let mut fit = export.seconds.is_some();
-                                        ui.vertical(|ui| {
-                                            if ui.radio_value(&mut fit, true, tr!("fit-to-specified-length")).changed()
-                                                || ui.radio_value(&mut fit, false, tr!("export-all-frames")).changed()
-                                            {
-                                                export.seconds = fit.then_some(30.0);
-                                            }
-                                            if let Some(seconds) = export.seconds.as_mut() {
-                                                ui.add(egui::DragValue::new(seconds).range(1.0..=600.0).suffix(" s"));
-                                            }
-                                        });
-                                        ui.end_row();
-                                    });
-                                ui.label(
-                                    RichText::new(tr!("motion-jpeg-avi-video-animated-gif"))
-                                        .size(theme.small_size)
-                                        .color(theme.muted),
-                                );
-                                ok_cancel(ui, &mut outcome);
-                            }
-                            Dialog::Perspective(count) => {
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("type"), theme);
-                                    ui.vertical(|ui| {
-                                        for (points, name) in [
-                                            (1, tr!("n-1-point-perspective")),
-                                            (2, tr!("n-2-point-perspective")),
-                                            (3, tr!("n-3-point-perspective")),
-                                        ] {
-                                            ui.radio_value(count, points, name);
-                                        }
-                                    });
-                                });
-                                ui.label(
-                                    RichText::new(tr!("strokes-run-toward-vanishing-points-while"))
-                                        .size(theme.small_size)
-                                        .color(theme.muted),
-                                );
-                                ok_cancel(ui, &mut outcome);
-                            }
-                            Dialog::Correction(_, filter, ..) => {
-                                filter_params(ui, filter, theme);
-                                ui.label(
-                                    RichText::new(tr!("changes-every-layer-under-one"))
-                                        .size(theme.small_size)
-                                        .color(theme.muted),
-                                );
-                                ok_cancel(ui, &mut outcome);
-                            }
-                            Dialog::Canvas(canvas) => outcome = canvas_ui(ui, canvas, theme),
-                            Dialog::Resolution(resolution) => {
-                                outcome = resolution_ui(ui, resolution, theme)
-                            }
-                            Dialog::Shortcuts => {
-                                egui::ScrollArea::vertical().max_height(size.y - 90.0).show(
-                                    ui,
-                                    |ui| {
-                                        let keys = keys.as_deref().unwrap_or_default();
-                                        sue_wm::shortcuts::grid_ui(
-                                            ui,
-                                            "sue-paint-keys",
-                                            keys,
-                                            theme,
-                                        );
-                                        ui.add_space(12.0);
-                                        ui.label(
-                                            RichText::new(tr!("with-the-pen-and-mouse"))
-                                                .color(theme.text)
-                                                .strong(),
-                                        );
-                                        let gestures: Vec<(String, String)> = GESTURES
-                                            .iter()
-                                            .map(|(what, how)| {
-                                                (crate::localize(what), crate::localize(how))
-                                            })
-                                            .collect();
-                                        sue_wm::shortcuts::grid_ui(
-                                            ui,
-                                            "sue-paint-gestures",
-                                            &gestures,
-                                            theme,
-                                        );
-                                    },
-                                );
-                                ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
-                                    if ui.button(tr!("close")).clicked() {
-                                        outcome = Outcome::Cancel;
-                                    }
-                                    if ui
-                                        .button(tr!("change-shortcuts-ellipsis"))
-                                        .on_hover_text(
-                                            tr!("settings-keymaps-any-number-keys-each"),
-                                        )
-                                        .clicked()
-                                    {
-                                        change_keys = true;
-                                        outcome = Outcome::Cancel;
-                                    }
-                                });
+                            ui.add_space(8.0);
+                            if ui.button(tr!("close")).clicked() {
+                                outcome = Outcome::Ok;
                             }
                         }
+                        Dialog::Gamut(tolerance, all) => {
+                            ui.label(
+                                RichText::new(tr!("selects-colors-near-drawing-color"))
+                                    .size(theme.small_size)
+                                    .color(theme.muted),
+                            );
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("color-margin"), theme);
+                                let mut percent = *tolerance * 100.0;
+                                if ui
+                                    .add(egui::Slider::new(&mut percent, 0.0..=100.0).suffix(" %"))
+                                    .changed()
+                                {
+                                    *tolerance = percent / 100.0;
+                                }
                             });
+                            ui.checkbox(all, tr!("refer-to-all-layers"));
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::Webtoon(height, width) => {
+                            egui::Grid::new("sue-paint-webtoon")
+                                .num_columns(2)
+                                .spacing(vec2(12.0, 8.0))
+                                .show(ui, |ui| {
+                                    label(ui, &tr!("split-every"), theme);
+                                    ui.add(
+                                        egui::DragValue::new(height)
+                                            .range(200..=20000)
+                                            .suffix(tr!("px")),
+                                    );
+                                    ui.end_row();
+                                    label(ui, &tr!("output-width"), theme);
+                                    ui.add(
+                                        egui::DragValue::new(width)
+                                            .range(100..=4000)
+                                            .suffix(tr!("px")),
+                                    );
+                                    ui.end_row();
+                                });
+                            ui.label(
+                                RichText::new(tr!("tall-canvas-cut-into-numbered-pictures"))
+                                    .size(theme.small_size)
+                                    .color(theme.muted),
+                            );
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::Timeline(fps, length) => {
+                            egui::Grid::new("sue-paint-timeline-edit")
+                                .num_columns(2)
+                                .spacing(vec2(12.0, 8.0))
+                                .show(ui, |ui| {
+                                    label(ui, &tr!("frame-rate-2"), theme);
+                                    ui.add(
+                                        egui::DragValue::new(fps).range(1..=120).suffix(tr!("fps")),
+                                    );
+                                    ui.end_row();
+                                    label(ui, &tr!("playback-time"), theme);
+                                    ui.add(
+                                        egui::DragValue::new(length)
+                                            .range(1..=100_000)
+                                            .suffix(tr!("frames")),
+                                    );
+                                    ui.end_row();
+                                });
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::Shape3D(kind) => {
+                            label(ui, &tr!("shape"), theme);
+                            for (index, name) in crate::three::SHAPES.iter().enumerate() {
+                                ui.radio_value(kind, index, crate::localize(name));
+                            }
+                            ui.label(
+                                RichText::new(tr!("file-import-3d-data-brings-models"))
+                                    .size(theme.small_size)
+                                    .color(theme.muted),
+                            );
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::Material(name) => {
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("material-name"), theme);
+                                ui.add(egui::TextEdit::singleline(name).desired_width(200.0));
+                            });
+                            ui.label(
+                                RichText::new(tr!("current-layer-goes-into-material-palette"))
+                                    .size(theme.small_size)
+                                    .color(theme.muted),
+                            );
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::Timelapse(export) => {
+                            egui::Grid::new("sue-paint-timelapse-export")
+                                .num_columns(2)
+                                .spacing(vec2(12.0, 8.0))
+                                .show(ui, |ui| {
+                                    label(ui, &tr!("long-side"), theme);
+                                    egui::ComboBox::from_id_salt("sue-paint-timelapse-side")
+                                        .selected_text(tr!("px-2", side = export.side))
+                                        .show_ui(ui, |ui| {
+                                            for side in [480, 720, 1080, 1280, 1920] {
+                                                ui.selectable_value(
+                                                    &mut export.side,
+                                                    side,
+                                                    tr!("px-2", side = side),
+                                                );
+                                            }
+                                        });
+                                    ui.end_row();
+                                    label(ui, &tr!("length"), theme);
+                                    let mut fit = export.seconds.is_some();
+                                    ui.vertical(|ui| {
+                                        if ui
+                                            .radio_value(
+                                                &mut fit,
+                                                true,
+                                                tr!("fit-to-specified-length"),
+                                            )
+                                            .changed()
+                                            || ui
+                                                .radio_value(
+                                                    &mut fit,
+                                                    false,
+                                                    tr!("export-all-frames"),
+                                                )
+                                                .changed()
+                                        {
+                                            export.seconds = fit.then_some(30.0);
+                                        }
+                                        if let Some(seconds) = export.seconds.as_mut() {
+                                            ui.add(
+                                                egui::DragValue::new(seconds)
+                                                    .range(1.0..=600.0)
+                                                    .suffix(" s"),
+                                            );
+                                        }
+                                    });
+                                    ui.end_row();
+                                });
+                            ui.label(
+                                RichText::new(tr!("motion-jpeg-avi-video-animated-gif"))
+                                    .size(theme.small_size)
+                                    .color(theme.muted),
+                            );
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::Perspective(count) => {
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("type"), theme);
+                                ui.vertical(|ui| {
+                                    for (points, name) in [
+                                        (1, tr!("n-1-point-perspective")),
+                                        (2, tr!("n-2-point-perspective")),
+                                        (3, tr!("n-3-point-perspective")),
+                                    ] {
+                                        ui.radio_value(count, points, name);
+                                    }
+                                });
+                            });
+                            ui.label(
+                                RichText::new(tr!("strokes-run-toward-vanishing-points-while"))
+                                    .size(theme.small_size)
+                                    .color(theme.muted),
+                            );
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::Correction(_, filter, ..) => {
+                            filter_params(ui, filter, theme);
+                            ui.label(
+                                RichText::new(tr!("changes-every-layer-under-one"))
+                                    .size(theme.small_size)
+                                    .color(theme.muted),
+                            );
+                            ok_cancel(ui, &mut outcome);
+                        }
+                        Dialog::Canvas(canvas) => outcome = canvas_ui(ui, canvas, theme),
+                        Dialog::Resolution(resolution) => {
+                            outcome = resolution_ui(ui, resolution, theme)
+                        }
+                        Dialog::Shortcuts => {
+                            egui::ScrollArea::vertical()
+                                .max_height(size.y - 90.0)
+                                .show(ui, |ui| {
+                                    let keys = keys.as_deref().unwrap_or_default();
+                                    sue_wm::shortcuts::grid_ui(ui, "sue-paint-keys", keys, theme);
+                                    ui.add_space(12.0);
+                                    ui.label(
+                                        RichText::new(tr!("with-the-pen-and-mouse"))
+                                            .color(theme.text)
+                                            .strong(),
+                                    );
+                                    let gestures: Vec<(String, String)> = GESTURES
+                                        .iter()
+                                        .map(|(what, how)| {
+                                            (crate::localize(what), crate::localize(how))
+                                        })
+                                        .collect();
+                                    sue_wm::shortcuts::grid_ui(
+                                        ui,
+                                        "sue-paint-gestures",
+                                        &gestures,
+                                        theme,
+                                    );
+                                });
+                            ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
+                                if ui.button(tr!("close")).clicked() {
+                                    outcome = Outcome::Cancel;
+                                }
+                                if ui
+                                    .button(tr!("change-shortcuts-ellipsis"))
+                                    .on_hover_text(tr!("settings-keymaps-any-number-keys-each"))
+                                    .clicked()
+                                {
+                                    change_keys = true;
+                                    outcome = Outcome::Cancel;
+                                }
+                            });
+                        }
+                    }
+                });
+        };
+        let mut closed = false;
+        let mut keys_here = (false, false);
+        if own_window {
+            // A window of its own, as Clip Studio Paint's dialogs: it can
+            // be moved anywhere, outside Sue's window too, and resized.
+            let main = ctx
+                .input(|input| input.viewport().outer_rect)
+                .unwrap_or(screen);
+            let builder = egui::ViewportBuilder::default()
+                .with_title(title.clone())
+                .with_inner_size(size)
+                .with_min_inner_size(vec2(240.0, 120.0))
+                .with_position(main.center() - size / 2.0)
+                .with_resizable(true);
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of(("sue-paint-dialog", title.as_str())),
+                builder,
+                |ui, _| {
+                    let rect = ui.max_rect();
+                    ui.painter().rect_filled(rect, 0.0, theme.panel);
+                    egui::Frame::new()
+                        .inner_margin(egui::Margin::same(16))
+                        .show(ui, |ui| {
+                            let inner = ui.available_size();
+                            body(ui, inner);
+                        });
+                    closed = ui.input(|input| input.viewport().close_requested());
+                    keys_here = ui.input(|input| {
+                        (
+                            input.key_pressed(egui::Key::Escape),
+                            input.key_pressed(egui::Key::Enter),
+                        )
                     });
-            });
+                },
+            );
+        } else {
+            egui::Area::new(Id::unique("sue-paint-dialog"))
+                .fade_in(false)
+                .order(Order::Foreground)
+                .fixed_pos(at)
+                .show(ctx, |ui| {
+                    widgets::window_frame(theme)
+                        .inner_margin(egui::Margin::same(16))
+                        .show(ui, |ui| body(ui, size - vec2(32.0, 32.0)));
+                });
+        }
+        if closed {
+            outcome = Outcome::Cancel;
+        }
         let (escape, enter) = ctx.input(|input| {
             (
-                input.key_pressed(egui::Key::Escape),
-                input.key_pressed(egui::Key::Enter),
+                input.key_pressed(egui::Key::Escape) || keys_here.0,
+                input.key_pressed(egui::Key::Enter) || keys_here.1,
             )
         });
         if change_keys {
