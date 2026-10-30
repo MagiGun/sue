@@ -54,6 +54,9 @@ ignore = [
 # - MPL-2.0 (symphonia's audio decoders, audio_thread_priority): their source
 #   stays available (it is, on crates.io) and changes to their files would
 #   be shared under MPL-2.0.
+# - CDLA-Permissive-2.0 (webpki-roots, Mozilla's root certificates that
+#   Sue's update check trusts): the data may be used and shared freely; a
+#   shared copy carries the agreement's text or a link to it.
 allow = [
     "0BSD",
     "Apache-2.0",
@@ -61,6 +64,7 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "BSL-1.0",
+    "CDLA-Permissive-2.0",
     "IJG",
     "ISC",
     "MIT",

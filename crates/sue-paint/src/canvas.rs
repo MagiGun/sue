@@ -164,22 +164,40 @@ impl SuePaint {
         size: [u32; 2],
         cx: &mut AppletContext<'_>,
     ) {
+        let _ = (viewport, size);
+        let view = self
+            .docs
+            .get(self.active)
+            .map_or((1.0, egui::Vec2::ZERO), |doc| (doc.view.zoom, doc.view.pan));
         match phase {
             TouchPhase::Start => {
                 if self.touches.is_empty() {
-                    self.touch_gesture = Some((time, 1, 0.0));
+                    self.touch_gesture = Some(crate::studio::TouchTap {
+                        began: time,
+                        most: 1,
+                        travel: 0.0,
+                        view,
+                    });
                 }
                 self.touches.retain(|(known, _)| *known != id);
                 self.touches.push((id, pos));
-                if let Some((_, most, _)) = self.touch_gesture.as_mut() {
-                    *most = (*most).max(self.touches.len());
-                }
-                if self.touches.len() == 2 && matches!(self.gesture, Some(Gesture::Stroke { .. })) {
-                    // The first finger was not drawing after all.
-                    self.release(viewport, size, cx);
-                    let _ = cx.undo(false);
+                if let Some(tap) = self.touch_gesture.as_mut() {
+                    tap.most = tap.most.max(self.touches.len());
                 }
                 if self.touches.len() >= 2 {
+                    // A second finger: a pinch or a pan, not a line. What the
+                    // first finger began drawing is taken back as if never
+                    // drawn (nothing to undo, so no undo can take anything
+                    // else).
+                    if let Some(Gesture::Stroke { stroke, offset, .. }) = self.gesture.take()
+                        && let Some(doc) = self.docs.get_mut(self.active)
+                        && let Some(raster) = doc::raster_mut(&mut cx.world.arena, stroke.layer())
+                    {
+                        let layer = stroke.layer();
+                        let rects = shift_rects(&stroke.abandon(raster), offset);
+                        doc.compositor
+                            .refresh_rects(&cx.world.arena, &rects, Some(layer));
+                    }
                     self.gesture = None;
                 }
             }
@@ -187,20 +205,24 @@ impl SuePaint {
                 if let Some((_, at)) = self.touches.iter_mut().find(|(known, _)| *known == id) {
                     let moved = at.distance(pos);
                     *at = pos;
-                    if let Some((_, _, travel)) = self.touch_gesture.as_mut() {
-                        *travel += moved;
+                    if let Some(tap) = self.touch_gesture.as_mut() {
+                        tap.travel += moved;
                     }
                 }
             }
             TouchPhase::End | TouchPhase::Cancel => {
                 self.touches.retain(|(known, _)| *known != id);
+                // A tap: quick, the fingers all but still, and the view
+                // neither zoomed nor moved (that was a pinch).
                 if self.touches.is_empty()
-                    && let Some((began, most, travel)) = self.touch_gesture.take()
+                    && let Some(tap) = self.touch_gesture.take()
                     && phase == TouchPhase::End
-                    && time - began < 0.35
-                    && travel < 24.0
+                    && time - tap.began < 0.3
+                    && tap.travel < 12.0
+                    && (tap.view.0 - view.0).abs() <= tap.view.0 * 0.01
+                    && (tap.view.1 - view.1).length() < 2.0
                 {
-                    match most {
+                    match tap.most {
                         2 => self.run("edit.undo", cx),
                         3 => self.run("edit.redo", cx),
                         _ => {}
@@ -809,7 +831,12 @@ impl SuePaint {
         let frame = dt.clamp(0.001, 0.1);
         let step = frame / moves as f32;
         self.clock = (time - f64::from(frame), step);
-        self.pointer = response.hover_pos();
+        // Under a menu, popup, dialog or sheet the canvas neither paints
+        // nor shows its brush (see sue_wm::cover).
+        let layer = ui.layer_id();
+        let covered = |pos: Pos2| sue_wm::cover::covered(&ctx, layer, pos);
+        self.pointer = response.hover_pos().filter(|pos| !covered(*pos));
+        let mut lifted = false;
         for event in events {
             match event {
                 Event::Touch {
@@ -819,6 +846,11 @@ impl SuePaint {
                     force,
                     ..
                 } => {
+                    // A finger landing on something over the canvas is not
+                    // the canvas's.
+                    if phase == TouchPhase::Start && covered(pos) {
+                        continue;
+                    }
                     self.track_touch(id.0, phase, pos, time, viewport, size, cx);
                     match phase {
                         TouchPhase::Start | TouchPhase::Move => {
@@ -827,7 +859,11 @@ impl SuePaint {
                                 self.pressure = Some(self.pen_curve.eval(force.clamp(0.0, 1.0)));
                             }
                         }
-                        TouchPhase::End | TouchPhase::Cancel => self.pressure = None,
+                        // The pen's release comes after its lift, in the same
+                        // frame, and its last point keeps the pen's last
+                        // pressure, not a full one: the pressure goes once
+                        // this frame's events are handled.
+                        TouchPhase::End | TouchPhase::Cancel => lifted = true,
                     }
                     if force.is_some() {
                         self.pen_seen(cx);
@@ -839,10 +875,13 @@ impl SuePaint {
                     pressed: true,
                     modifiers,
                 } => {
+                    // Two fingers down are a pinch or a pan, never a stroke.
                     if blocked
                         || self.gesture.is_some()
+                        || self.touches.len() >= 2
                         || !viewport.contains(pos)
                         || !response.hovered()
+                        || covered(pos)
                     {
                         continue;
                     }
@@ -874,8 +913,13 @@ impl SuePaint {
                 _ => {}
             }
         }
+        if lifted {
+            self.pressure = None;
+        }
         // Two fingers or more move, zoom and turn the view.
-        let pinch = ctx.input(egui::InputState::multi_touch);
+        let pinch = ctx
+            .input(egui::InputState::multi_touch)
+            .filter(|touch| !covered(touch.center_pos));
         if let Some(touch) = pinch.filter(|_| !blocked)
             && let Some(doc) = self.docs.get_mut(self.active)
         {
@@ -897,9 +941,10 @@ impl SuePaint {
                     input.modifiers.shift,
                 )
             });
-            if let (Some(pointer), Some(doc)) =
-                (response.hover_pos(), self.docs.get_mut(self.active))
-            {
+            if let (Some(pointer), Some(doc)) = (
+                response.hover_pos().filter(|pos| !covered(*pos)),
+                self.docs.get_mut(self.active),
+            ) {
                 if shift && (scroll.x != 0.0 || scroll.y != 0.0) {
                     // Shift and the wheel turn the view.
                     doc.view

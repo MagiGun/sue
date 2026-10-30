@@ -1,13 +1,17 @@
 package com.magigun.sue;
 
 import android.app.NativeActivity;
+import android.app.PendingIntent;
 import android.content.ContentResolver;
 import android.content.Intent;
+import android.content.pm.PackageInstaller;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.webkit.MimeTypeMap;
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -23,10 +27,12 @@ import java.util.Locale;
  * (crates/sue-platform/src/android.rs); there are no native methods.
  * The picker answers later: Sue polls takePicked, and copies documents in
  * and out on its own worker threads with copyIn, copyOut, createIn and
- * listIn.
+ * listIn. It also opens web pages (openUrl) and installs Sue's own
+ * updates (installPackage).
  */
 public class SueActivity extends NativeActivity {
     private static final int PICK = 0x5E1;
+    private static final String INSTALLED = "com.magigun.sue.INSTALLED";
 
     /** The last picker's answer, until taken: null while it is open. */
     private String picked;
@@ -252,5 +258,75 @@ public class SueActivity extends NativeActivity {
             }
         }
         return types.isEmpty() ? new String[] {"*/*"} : types.toArray(new String[0]);
+    }
+
+    /** Opens a web page in the system's browser: null, or why it failed. */
+    public String openUrl(String url) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+            return null;
+        } catch (Exception error) {
+            return why(error);
+        }
+    }
+
+    /**
+     * Hands a downloaded APK (Sue's update) to the package installer, which
+     * asks the person first: null, or why it failed. The installer's answer
+     * comes back to onNewIntent.
+     */
+    public String installPackage(String path) {
+        try {
+            PackageInstaller installer = getPackageManager().getPackageInstaller();
+            PackageInstaller.SessionParams params =
+                new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+            int id = installer.createSession(params);
+            PackageInstaller.Session session = installer.openSession(id);
+            try {
+                File file = new File(path);
+                InputStream in = new FileInputStream(file);
+                OutputStream out = session.openWrite("sue.apk", 0, file.length());
+                try {
+                    byte[] buffer = new byte[64 * 1024];
+                    for (int read; (read = in.read(buffer)) != -1; ) {
+                        out.write(buffer, 0, read);
+                    }
+                    session.fsync(out);
+                } finally {
+                    in.close();
+                    out.close();
+                }
+                Intent intent = new Intent(this, SueActivity.class).setAction(INSTALLED);
+                int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+                if (Build.VERSION.SDK_INT >= 31) {
+                    flags |= PendingIntent.FLAG_MUTABLE;
+                }
+                PendingIntent done = PendingIntent.getActivity(this, id, intent, flags);
+                session.commit(done.getIntentSender());
+            } finally {
+                session.close();
+            }
+            return null;
+        } catch (Exception error) {
+            return why(error);
+        }
+    }
+
+    /** The package installer's answer: it may want the person to confirm. */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (intent == null || !INSTALLED.equals(intent.getAction())) {
+            return;
+        }
+        int status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
+        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+            Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT);
+            if (confirm != null) {
+                startActivity(confirm);
+            }
+        }
     }
 }

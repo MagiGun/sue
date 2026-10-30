@@ -46,6 +46,7 @@ control_radius = 4.0           # [0.0..12.0] Corner rounding of buttons and fiel
 pill_radius = 12.0             # [0.0..24.0] Corner rounding of windows, menus and pill buttons (px)
 pill_height = 34               # [24..64] Height of pill buttons (px)
 bar_height = 28                # [22..64] Height of the top bar with the Sue button and the menus (px; touch layouts make it taller)
+status_bar = false             # Show the thin status bar along the bottom of the window (messages show as a notice without it)
 status_bar_height = 22         # [16..48] Height of the status bar (px)
 settings_sidebar_width = 190   # [140..360] Width of the category list in Settings (px)
 shadow_blur = 18               # [0..48] Blur of the shadow under menus and windows (px)
@@ -92,6 +93,9 @@ volume = 0.8                   # [0.0..1.0] Volume of everything Sue plays
 
 [packages]
 require_signatures = true      # Only accept packages with a valid Ed25519 signature
+
+[updates]
+check_automatically = true     # Look for a newer Sue when it starts, at most once a day
 
 [sue_paint]
 width = 1600                   # [1..10000] Width of new illustrations (px)

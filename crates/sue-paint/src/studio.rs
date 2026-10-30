@@ -36,6 +36,21 @@ use crate::select::{Op, Selection};
 use crate::tools::Toolbox;
 use crate::view::View;
 
+/// Fingers on the canvas since the first came down: whether, when they
+/// lift, it was a tap of two (undo) or three (redo) fingers.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TouchTap {
+    /// When the first finger came down.
+    pub began: f64,
+    /// The most fingers down at once.
+    pub most: usize,
+    /// How far the fingers moved, in points.
+    pub travel: f32,
+    /// The view's zoom and pan when they came down: a pinch or a drag
+    /// changes them, and is no tap.
+    pub view: (f32, egui::Vec2),
+}
+
 /// The applet id.
 pub const ID: &str = "sue-paint";
 
@@ -399,7 +414,7 @@ pub struct SuePaint {
     pub(crate) touches: Vec<(u64, Pos2)>,
     /// A touch gesture in progress: when it began, the most fingers it had
     /// and how far they moved, for two- and three-finger taps.
-    pub(crate) touch_gesture: Option<(f64, usize, f32)>,
+    pub(crate) touch_gesture: Option<TouchTap>,
     pub(crate) hue: f32,
     pub(crate) recent: History,
     pub(crate) docs: Vec<Doc>,
@@ -5845,6 +5860,14 @@ impl SueApplet for SuePaint {
         self.picture()
     }
 
+    /// Clip Studio Paint files come to Sue Paint as they are, wherever
+    /// they are opened (the Sue menu, the start page, a drop, the Hub),
+    /// since only Sue Paint reads their layers.
+    fn opens_file(&self, path: &Path) -> bool {
+        path.extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("clip"))
+    }
+
     fn reserved_keys(&self) -> Vec<sue_rice::Keybind> {
         // Every chord of the studio's shortcuts wins while it is open (Tab
         // hides the palettes, / is the Zoom tool, Ctrl+0 fits the picture).
@@ -5915,7 +5938,7 @@ impl SueApplet for SuePaint {
     }
 
     fn picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
-        if matches!(pick.purpose.as_str(), "open" | "layer")
+        if matches!(pick.purpose.as_str(), "open" | "import" | "layer")
             && cx.view.page.as_ref().map(AppletId::as_str) != Some(ID)
         {
             cx.request(ShellRequest::Open(me_id()));
@@ -5924,7 +5947,9 @@ impl SueApplet for SuePaint {
             return;
         }
         match pick.purpose.as_str() {
-            "open" => self.open_picked(cx, path, false),
+            // "import" is a file opened anywhere in Sue that Sue Paint
+            // takes itself (see `opens_file`).
+            "open" | "import" => self.open_picked(cx, path, false),
             "layer" => self.open_picked(cx, path, true),
             "import-layers" => self.open_picked(cx, path, true),
             "story-text" => self.import_text(cx, path),

@@ -170,7 +170,10 @@ pub(crate) fn pick_open(extensions: &[String], folder: bool) -> Picking {
     input.set_type("file");
     if folder {
         let _ = input.set_attribute("webkitdirectory", "");
-    } else if !extensions.is_empty() {
+    } else if !extensions.is_empty() && !touch_screen() {
+        // Phone browsers grey out files of a type they do not know (a
+        // .clip on iOS), so there the picker shows every file and what is
+        // picked is checked when it opens.
         input.set_accept(&accept(extensions));
     }
     let chosen = input.clone();

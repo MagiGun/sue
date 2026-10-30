@@ -23,9 +23,26 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Writer opens PDF files (their text, paragraphs and headings) and
   Word and LibreOffice templates (`.dotx`, `.ott`).
 - Pages on their side: Sue Writer's Project Settings, Orientation.
+- Sue keeps itself up to date. When it starts it looks for a newer
+  release, at most once a day, and a small window in the corner shows
+  what is new; **Check for Updates** is in the Sue menu and in Settings,
+  and **Check automatically** in Settings turns the daily look off.
+  Updating follows how you installed Sue: on Windows it downloads the new
+  setup program and restarts into it, macOS opens the new disk image, an
+  AppImage replaces itself, Android hands the new APK to its installer,
+  and Linux packages are downloaded with the command that installs them.
+  Downloads run in the background and are checked against the release's
+  checksums.
+- Settings can go back to how Sue comes: a Reset beside any changed
+  setting, Reset This Page, and Reset All Settings.
+- The Image Viewer has Undo and Redo buttons.
 
 ### Changed
 
+- The status bar along the bottom is off at first; Settings turns it on.
+  Its messages show as a small notice at the bottom meanwhile.
+- The Hub's pin is a real pushpin, and pointing at it lights up the pin,
+  not its whole box.
 - Slider handles are thin rectangles, a little shorter than the circles
   they were: `---[]---`.
 - Huge brushes and erasers in Sue Paint keep up: painting with a 2000
@@ -41,7 +58,17 @@ follow [Semantic Versioning](https://semver.org/).
 - The paragraph style box on a phone's toolbar holds its name and arrow
   again (some boxes near the shape of a slider handle were drawn too
   narrow).
-
+- Clip Studio Paint files (`.clip`) open in Sue Paint with their layers
+  however you open them: the Sue menu's Open File, the start page's
+  Open, dropping one on the window, or the Hub. On phones and tablets
+  the browser's file picker no longer greys them out.
+- Nothing paints or reacts under an open menu, popup, dialog or sheet,
+  most of all on phones and tablets, where taps went through Sue Paint's
+  sheets to the canvas.
+- Pinching to zoom in Sue Paint no longer undoes your work or closes the
+  picture: the touch the pinch began with is taken back, nothing else.
+- Pen strokes on phones and tablets no longer end in a big blob: the
+  stroke's last point keeps the pen's last pressure.
 - Pen pressure works with drawing tablets whose driver has Windows Ink
   turned off (WinTab, common with Huion and XP-Pen), and with pens in the
   browser version. Sue Paint starts with a slightly soft pressure curve,

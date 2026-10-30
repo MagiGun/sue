@@ -125,6 +125,26 @@ fn done(result: Result<Option<String>, String>) -> Result<(), String> {
     }
 }
 
+/// Opens a web address in the system's browser, through Sue's activity
+/// (`ACTION_VIEW`).
+pub(crate) fn open_url(url: &str) -> Result<(), String> {
+    done(call(
+        "openUrl",
+        "(Ljava/lang/String;)Ljava/lang/String;",
+        &[Arg::Text(url)],
+    ))
+}
+
+/// Hands a downloaded APK to Android's package installer (a
+/// `PackageInstaller` session), which asks the person before it installs.
+pub(crate) fn install_package(path: &Path) -> Result<(), String> {
+    done(call(
+        "installPackage",
+        "(Ljava/lang/String;)Ljava/lang/String;",
+        &[Arg::Text(&path.to_string_lossy())],
+    ))
+}
+
 const TEXT_TEXT: &str = "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;";
 
 /// Android's documents (the Storage Access Framework), through Sue's

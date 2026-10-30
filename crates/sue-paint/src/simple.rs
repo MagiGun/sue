@@ -154,6 +154,7 @@ impl SuePaint {
             );
             ui.painter()
                 .rect_filled(sliders, 0.0, theme.panel.gamma_multiply(0.85));
+            sue_wm::cover::cover(ui.ctx(), ui.layer_id(), sliders);
             let mut inner = ui.new_child(
                 UiBuilder::new()
                     .max_rect(sliders.shrink2(vec2(10.0, 6.0)))
@@ -197,6 +198,7 @@ impl SuePaint {
         // The bottom bar: swap brush and eraser, pens, brushes, the color
         // and the layers.
         ui.painter().rect_filled(bar, 0.0, theme.panel);
+        sue_wm::cover::cover(ui.ctx(), ui.layer_id(), bar);
         ui.painter()
             .hline(bar.x_range(), bar.top(), theme.hairline());
         let cell = bar.width() / 5.0;

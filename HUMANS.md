@@ -47,8 +47,11 @@ Nothing is exported, imported or converted between them.
 
 ## How the screen works
 
-Sue's window has three parts: a **bar along the top**, the **page** under it,
-and a thin **status bar** along the bottom. Out of the box Sue is black,
+Sue's window has a **bar along the top** and the **page** under it. A thin
+**status bar** along the bottom is off at first: Settings, Appearance &
+Rice, **Status bar** turns it on. Without it, what the status bar would say
+(a file saved, something that went wrong) shows for a moment as a small
+notice at the bottom of the window. Out of the box Sue is black,
 white and grays only, so your own pictures and words are the only color you
 see (you can color it yourself in Settings).
 
@@ -139,7 +142,35 @@ The Sue button opens the **Sue menu**, for Sue as a whole:
   middle. Phones and tablets switch between their two layouts. It works in
   the browser too, and Sue remembers it;
 - **Open ... at Launch**: pin what is open, as the Hub's pin does;
-- the command palette, Settings and Quit Sue.
+- the command palette, **Check for Updates**, Settings and Quit Sue.
+
+### Keeping Sue up to date
+
+When Sue starts it looks for a newer release, at most once a day, without
+getting in your way: if there is one, a small window in the bottom right
+corner says so and shows what is new. **Check for Updates** in the Sue menu
+(or in Settings, under Packages & Updates) looks right away. Turn **Check
+automatically** off in Settings and Sue only looks when you ask.
+
+Updating follows how you installed Sue:
+
+- **Windows**, installed with the setup program, the .msi or winget:
+  **Install and Restart** downloads the new setup program, closes Sue and
+  starts it; it replaces the old version in place. Scoop shows its command
+  (`scoop update sue`) to copy. The portable zip opens the release page.
+- **macOS**: Sue downloads the disk image and opens it; quit Sue and drag
+  the new one into Applications.
+- **Linux**: an AppImage replaces itself and starts again. The .deb, .rpm,
+  Arch package and Flatpak are downloaded to your Downloads folder, with
+  the command that installs them to copy. The tarball opens the release
+  page.
+- **Android**: Sue downloads the new APK and hands it to Android's
+  installer, which asks you first.
+- **iOS** opens the release page, and the **browser** version is always
+  the newest already.
+
+Everything is downloaded in the background while you keep working, and
+checked against the release's list of checksums before it is used.
 
 ### The Image Viewer
 
@@ -148,7 +179,7 @@ fit it or see it at 100%, drag to pan, and step to the project's other
 pictures with the arrow keys. Its menus (File, Image, View, Send) and the
 toolbar under them do the quick fixes (turn, mirror, crop, resize,
 brightness and contrast, saturation and hue, grayscale, invert), each one
-`Ctrl+Z` step; save the picture as any picture type; re-encode it as a
+`Ctrl+Z` step, with **Undo** and **Redo** first on the toolbar; save the picture as any picture type; re-encode it as a
 lossless JPEG XL; show it in its folder; and send it to the Converter, Sue
 Paint or Sue Writer. File, Open Picture opens one with your system's own
 Open window.
@@ -247,7 +278,10 @@ The Sue menu's **Settings** (or `Ctrl+,`) opens Settings as a floating
 window. A list of categories runs down the left (General, Language,
 Appearance & Rice, Display & Graphics, Audio & DSP, Files & Codecs, Studios, Packages & Updates,
 Keymaps, MCP), and the right side shows only that category. Type in "Filter
-settings..." to search all of them.
+settings..." to search all of them. A setting you changed shows **Reset**
+beside it to go back to how Sue comes; **Reset This Page** and **Reset All
+Settings** (click it twice) do the same for a page or for everything, and
+each reset undoes with `Ctrl+Z`.
 
 Settings fits the screen it is on. On a phone it fills the screen: held
 upright, the categories are a list, a tap opens one, and **All settings** at
@@ -266,7 +300,8 @@ machine). **GPU preference** chooses which graphics card draws the window:
 Auto uses the one your screen is plugged into, Integrated the power-saving
 one and Discrete the fast one. Sue shows which card it is drawing on and
 every card it found; the choice takes effect when Sue starts, so press
-**Restart Sue** after changing it. **MCP** (connecting Sue to AI tools) is
+**Restart Sue** after changing it. Packages & Updates shows the version you
+have, **Check automatically** for new releases, and **Check for Updates**. **MCP** (connecting Sue to AI tools) is
 not yet available.
 
 ### Languages
@@ -333,7 +368,9 @@ clipping, and Sue opens it again with everything, vector lines and tones
 included, because the file also carries Sue's own copy of the picture.
 File, Save As can make a Sue project, a Photoshop document or a flat
 picture instead, and Settings (Sue Paint, Save format) makes a Sue project
-what Save writes. Sue Paint also opens `.clip` files from Clip Studio:
+what Save writes. Sue Paint also opens `.clip` files from Clip Studio,
+however they are opened (its own Open, the Sue menu's Open File, a drop on
+the window, the Hub's recent files):
 pixel, text and vector layers come in as the pixels Clip Studio last drew
 for them, and correction, gradient and fill layers as empty layers in their
 places, since Sue cannot redo those effects yet.
@@ -855,7 +892,9 @@ a time; tap above a sheet to put it away.
 
 Everywhere, **two fingers** move, zoom and turn the canvas, a quick
 **two-finger tap undoes** and a **three-finger tap redoes**, as in Clip Studio
-Paint.
+Paint. A pinch never paints and never undoes: if one finger began a line
+before the second came down, that line is taken back, and a tap counts only
+when the fingers stay still and the view does not move.
 
 **Switching layouts.** The Sue menu's **Layout** (or Settings, Display,
 **Interface**) chooses Automatic (the device decides), Desktop, Tablet or

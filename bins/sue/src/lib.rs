@@ -19,6 +19,7 @@ mod settings;
 mod snapshot;
 #[cfg(test)]
 mod style;
+mod update;
 mod util;
 mod viewer;
 

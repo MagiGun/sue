@@ -14,9 +14,17 @@ egui.workspace = true
 egui-wgpu.workspace = true
 egui-winit.workspace = true
 pollster.workspace = true
+semver.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 sys-locale.workspace = true
 wgpu.workspace = true
 winit.workspace = true
+
+# HTTPS for Sue's own updates, everywhere but the browser, which is
+# always the newest.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ureq.workspace = true
 
 # The system clipboard, web links and the Linux display servers, everywhere
 # but iOS, where the clipboard crate would build its Linux (Wayland and X11)

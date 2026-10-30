@@ -17,7 +17,8 @@
 //! stream fed by a lock-free ring), [`list_dir`] and [`write_atomic`], the
 //! system's languages ([`system_languages`]), and
 //! hand-offs to the system browser, file manager and the system's own file
-//! dialogs (on phones and tablets they answer later, see [`poll_picks`]).
+//! dialogs (on phones and tablets they answer later, see [`poll_picks`]),
+//! and Sue's own updates ([`update`]).
 //!
 //! Specification: `HUMANZ.md` §3.1, §3.2 and §3.5.
 
@@ -46,6 +47,7 @@ mod paths;
 mod picks;
 pub mod stylus;
 pub mod time;
+pub mod update;
 #[cfg_attr(
     not(target_arch = "wasm32"),
     allow(

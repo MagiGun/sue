@@ -85,6 +85,8 @@ layout-pill_height = Pill height
     .description = Height of pill buttons (px)
 layout-bar_height = Bar height
     .description = Height of the top bar with the Sue button and the menus (px; touch layouts make it taller)
+layout-status_bar = Status bar
+    .description = Show the thin status bar along the bottom of the window (messages show as a notice without it)
 layout-status_bar_height = Status bar height
     .description = Height of the status bar (px)
 layout-settings_sidebar_width = Settings sidebar width
@@ -171,6 +173,11 @@ audio-volume = Volume
 
 packages-require_signatures = Require signatures
     .description = Only accept packages with a valid Ed25519 signature
+
+## [updates]
+
+updates-check_automatically = Check automatically
+    .description = Look for a newer Sue when it starts, at most once a day
 
 ## [sue_paint]
 

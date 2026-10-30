@@ -50,3 +50,28 @@ discarded = Discarded { $title }
 cannot-discard = Cannot discard { $title }: { $error }
 cannot-remember-the-recent-files = Cannot remember the recent files: { $error }
 opened-2 = Opened { $value }{ $value2 }
+
+## update.rs: Sue's own updates
+
+checking-for-updates = Checking for updates
+update-current-version = This is Sue { $version }.
+sue-is-up-to-date = Sue is up to date
+update-browser-is-newest = The browser always runs the newest Sue.
+update-available = Sue { $version } is out
+update-run-command = Sue updates through its package manager:
+update-install-and-restart = Install and Restart
+update-download-and-install = Download and Install
+update-download = Download
+update-copy-command = Copy Command
+update-command-copied = Copied the command
+update-release-page = Release Page
+update-later = Later
+update-downloading = Downloading Sue { $version }
+update-progress = { $received } of { $total }
+update-hide = Hide
+update-close = Close
+update-quit-sue = Quit Sue
+update-failed = Sue could not update
+update-dmg-opened = The disk image is open: quit Sue, then drag the new Sue into Applications.
+update-installer-opened = The system's installer takes it from here.
+update-package-downloaded = Downloaded to { $path }. Install it with:

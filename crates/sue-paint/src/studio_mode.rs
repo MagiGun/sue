@@ -154,6 +154,7 @@ impl SuePaint {
         let commands = Rect::from_min_max(pos2(full.left(), palettes.bottom()), full.max);
         for band in [palettes, commands] {
             ui.painter().rect_filled(band, 0.0, theme.panel);
+            sue_wm::cover::cover(ui.ctx(), ui.layer_id(), band);
             ui.painter()
                 .hline(band.x_range(), band.top(), theme.hairline());
         }
@@ -253,6 +254,7 @@ impl SuePaint {
     /// opacity on vertical sliders, and the color at the bottom.
     fn tool_column(&mut self, ui: &mut Ui, column: Rect, theme: &Theme) {
         ui.painter().rect_filled(column, 0.0, theme.panel);
+        sue_wm::cover::cover(ui.ctx(), ui.layer_id(), column);
         ui.painter()
             .vline(column.right(), column.y_range(), theme.hairline());
         let x = column.center().x;
@@ -410,6 +412,7 @@ impl SuePaint {
         };
         let tab = Rect::from_min_size(pos2(edge - 22.0, area.center().y - 28.0), vec2(22.0, 56.0));
         ui.painter().rect_filled(tab, 0.0, theme.panel);
+        sue_wm::cover::cover(ui.ctx(), ui.layer_id(), tab);
         ui.painter()
             .rect_stroke(tab, 0.0, theme.hairline(), egui::StrokeKind::Inside);
         page::glyph(
@@ -430,6 +433,7 @@ impl SuePaint {
         }
         let bar = Rect::from_min_max(pos2(edge, area.top()), area.max);
         ui.painter().rect_filled(bar, 0.0, theme.panel);
+        sue_wm::cover::cover(ui.ctx(), ui.layer_id(), bar);
         ui.painter()
             .vline(bar.left(), bar.y_range(), theme.hairline());
         let mut keys: Vec<(String, u8)> = vec![

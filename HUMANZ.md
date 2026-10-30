@@ -671,7 +671,8 @@ the `PlatformHost` trait and the portable services next to it:
 | `list_dir`, `hidden_by_os`, `write_atomic` | Sorted folder listings (the Converter adds a whole folder), without dot files or, on Windows, the legacy junctions (`NetHood`, `PrintHood`, `Cookies`, `SendTo`, `Recent`, `Start Menu`, `Templates`, `Application Data`, `Local Settings`, `My Documents`); crash-safe writes (temporary file, sync, rename) |
 | `copy_text` | The system clipboard (`arboard`; the browser's in the browser) for buttons such as Copy All; text fields copy and paste through `egui-winit` |
 | `EguiPainter`, `TextureUpload` | Paints egui frames with `egui-wgpu` into the window or an offscreen texture; uploads image pixels the caller borrows from the arena straight into GPU textures (rule 5) |
-| `open_url`, `reveal_folder` | The system browser (only `http` and `https`, validated by `web_url`) and file manager |
+| `open_url`, `reveal_folder` | The system browser (only `http` and `https`, validated by `web_url`; on Android through Sue's activity) and file manager |
+| `update::{check_latest, plan, download, run_update, replace_appimage}` | Sue's own updates from GitHub releases (§5.5) |
 | `pick_open_file`, `pick_save_file`, `pick_folder` | The system's own open, save and folder dialogs: every file Sue asks for goes through them. Each answers a `Picking`: `Chosen(path)`, `Cancelled`, `Failed(why)`, or `Waiting` on phones and tablets (below) |
 | `poll_picks`, `deliver_picked_files`, `picks_busy` | The answers of pickers that run beside Sue (`PickNews`), the hand-back of files written to the paths they chose, and whether to keep polling; no-ops on desktops |
 | `shown_place`, `shown_path`, `file_manager` | How to name a path to people: what they chose for a staged path (`ShownPlace`, a name and, where the system says it, a folder), else the path itself; and the file manager `reveal_file` shows files in (`Explorer`, `Finder`), `None` on phones and tablets, which hide "show it" actions |
@@ -2476,6 +2477,49 @@ the live generation:
 `CoreUpdate` packages MAY name a `delta_base`. The payload is then a binary delta
 against that generation's binary, signed like any other payload.
 
+### 5.5 Updating Sue itself from its releases
+
+Until Sue updates itself through `CoreUpdate` packages, it updates from the
+GitHub releases of MagiGun/sue. The OS side lives in
+`sue-platform/src/update.rs`; the window in `bins/sue/src/update.rs`.
+
+- **Checking.** `check_latest` asks
+  `api.github.com/repos/MagiGun/sue/releases/latest` on a thread (`ureq`
+  with rustls, ring and Mozilla's roots from `webpki-roots`, so no system TLS
+  library; not in the browser) and reads the tag, notes, page and files into
+  a `Release`. `is_newer(tag, SUE_VERSION)` compares with `semver` after
+  dropping build metadata, so a development build after a release
+  (`0.0.4+dev.3`) is not offered that release. At startup the runtime checks
+  when `updates.check_automatically` is on and the last automatic check
+  (`<data>/updates/checked.txt`) is a day old; Check for Updates
+  (`app.check_updates`) is in the Sue menu and in Settings.
+- **Choosing.** `Install::detect` tells how this copy was installed: Program
+  Files (setup or .msi, winget's too), a portable folder or Scoop on
+  Windows; `$APPIMAGE`, Flatpak, dpkg, pacman (`sue-bin`) or rpm on Linux;
+  the app on macOS; the APK, iOS, the browser, or a tarball elsewhere.
+  `SUE_UPDATE_AS` overrides it for testing. `plan(release, install, ARCH)`
+  is a pure function naming the file by the release workflow's names:
+  `Run` (the `-windows-<x64|x86|arm64>-setup.exe`, the
+  `-macos-universal.dmg`, the `-android.apk`), `AppImage` (the new
+  `-linux-<arch>.AppImage`), `Package` (the `.deb`, `.rpm`, `.pkg.tar.zst` or
+  `.flatpak` with the command that installs it), `Command`
+  (`scoop update sue`), `Page` (portable zip, tarballs, iOS, or a missing
+  file) or `Current` (the browser). Tests cover every system against
+  v0.0.4's file list.
+- **Downloading.** `download` streams the file on a thread into Sue's cache
+  (beside the running AppImage for an AppImage, the Downloads folder for a
+  package) as a `.part` file, hashing as it goes, and keeps it only when its
+  SHA-256 is the one `SHA256SUMS.txt` lists; a file the sums do not list is
+  refused. Progress is two atomics the window reads between frames, waking
+  every 250 ms while a check or download runs.
+- **Handing over.** `run_update` starts the setup program on Windows (Sue
+  keeps the unsaved work for the Hub and closes; the MSI's MajorUpgrade
+  replaces the old install), opens the disk image on macOS, and on Android
+  writes the APK into a `PackageInstaller` session through `SueActivity`
+  (`REQUEST_INSTALL_PACKAGES`), whose confirmation comes back to
+  `onNewIntent`. `replace_appimage` makes the new AppImage runnable, renames
+  it over the old one and starts it, and Sue closes.
+
 ---
 
 ## 6. Zero-copy offline AI engine (`sue-ai`)
@@ -2624,6 +2668,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §4.3 Settings window: categories, filter, segmented, slider, switch, color and keycap controls, presets, undoable edits, atomic persistence | **Implemented** (the file is read at boot and by Reload from Disk; watching it for outside edits is planned) | `bins/sue/src/settings.rs`, `runtime.rs`, `engine.rs` |
 | §4.4 Rice format marker, migration from formats 1 and 2, tinted colors reset | **Implemented**, with a backup of the old file | `sue-rice/src/migrate.rs`, `bins/sue/src/engine.rs` |
 | §5 Hashes, Ed25519, resolver, generations, atomic pointer | **Implemented** | `sue-pkg` |
+| §5.5 Sue's own updates from GitHub releases | **Implemented**: checked against the real release and run end to end on Windows; macOS, Linux and Android hand-overs are built and unit tested, not yet run on those systems | `sue-platform/src/update.rs`, `bins/sue/src/update.rs` |
 | §5 Package download, binary deltas, WASM plugin loading | Planned (the signature policy is riced and shown; nothing installs packages yet) | n/a |
 | §6 Formats, backends, registry, zero-copy tasks | **Implemented** (reference kernel on `CpuSimd`) | `sue-ai` |
 | §6 GGUF/ONNX inference runtimes | Planned (`sue-ai` selects backends and models; its Settings page returns with the runtimes) | n/a |
