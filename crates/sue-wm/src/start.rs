@@ -101,6 +101,10 @@ pub enum Glyph {
     Film,
     /// Three dots: more.
     More,
+    /// A house: home.
+    Home,
+    /// A circling arrow: load again.
+    Reload,
 }
 
 fn line(painter: &Painter, points: &[Pos2], stroke: Stroke) {
@@ -115,6 +119,54 @@ pub fn glyph(painter: &Painter, rect: Rect, glyph: Glyph, color: Color32) {
     let at = |x: f32, y: f32| pos2(c.x + x * s, c.y + y * s);
     let stroke = Stroke::new((side / 14.0).clamp(1.0, 2.5), color);
     match glyph {
+        Glyph::Reload => {
+            let points: Vec<Pos2> = (0..=20)
+                .map(|step| {
+                    let angle = (-60.0 + 300.0 * step as f32 / 20.0_f32).to_radians();
+                    at(0.5 * angle.cos(), 0.5 * angle.sin())
+                })
+                .collect();
+            let end = points[0];
+            line(painter, &points, stroke);
+            let head = side * 0.18;
+            line(
+                painter,
+                &[
+                    end + vec2(-head * 0.2, -head),
+                    end,
+                    end + vec2(head, -head * 0.1),
+                ],
+                stroke,
+            );
+        }
+        Glyph::Home => {
+            // A roof over a house with a door.
+            line(
+                painter,
+                &[at(-0.7, -0.05), at(0.0, -0.68), at(0.7, -0.05)],
+                stroke,
+            );
+            line(
+                painter,
+                &[
+                    at(-0.5, -0.22),
+                    at(-0.5, 0.62),
+                    at(0.5, 0.62),
+                    at(0.5, -0.22),
+                ],
+                stroke,
+            );
+            line(
+                painter,
+                &[
+                    at(-0.15, 0.62),
+                    at(-0.15, 0.2),
+                    at(0.15, 0.2),
+                    at(0.15, 0.62),
+                ],
+                stroke,
+            );
+        }
         Glyph::Draw => {
             // A pen, nib down to the left.
             line(painter, &[at(-0.55, 0.55), at(-0.35, 0.05)], stroke);

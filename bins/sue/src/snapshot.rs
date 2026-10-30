@@ -349,6 +349,25 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         }
         shoot(&mut runtime, &mut camera, name)?;
     }
+    // 08z. Browse Assets, and a material's page: read from CLIP STUDIO
+    // ASSETS (or its cached copy), so give the site a few seconds.
+    if std::env::var_os("SUE_SNAPSHOT_ONLINE").is_some() {
+        for (target, name) in [
+            ("start/browse", "08y-paint-start-browse"),
+            ("start/browse/2317055", "08z-paint-start-asset"),
+        ] {
+            if let Some(applet) = runtime.applets.get_mut(&paint) {
+                applet.navigate("start/close");
+                applet.navigate(target);
+            }
+            for _ in 0..60 {
+                let output = camera.frame(&mut runtime);
+                camera.painter.apply_textures(output.textures_delta);
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            shoot(&mut runtime, &mut camera, name)?;
+        }
+    }
     if let Some(applet) = runtime.applets.get_mut(&paint) {
         applet.navigate("start/close");
         applet.navigate("start/projects");

@@ -31,6 +31,10 @@ follow [Semantic Versioning](https://semver.org/).
   Lower Layer, Merge visible layers in place (Ctrl+Shift+E), view
   rotations of 90, 180 and 270 degrees, Reset Display, Paper, and Move
   frame.
+- Sue Paint's start page has **Browse Assets**: CLIP STUDIO ASSETS'
+  top materials laid out as Clip Studio's start page does, See more for a
+  whole ranking, and each material's own page. What it read is kept, so
+  it shows the last copy without a connection.
 - File, Preferences in Sue Paint opens its own Preferences, page by page
   as in Clip Studio Paint, instead of Sue's Settings. Options Sue Paint
   does not do yet are shown greyed out.

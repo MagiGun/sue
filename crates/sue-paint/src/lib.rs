@@ -37,6 +37,7 @@ pub(crate) fn localize(text: &str) -> String {
 
 pub mod anim;
 mod anim_ui;
+mod assets;
 pub mod blend;
 pub mod brush;
 pub mod camera;

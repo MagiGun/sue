@@ -355,6 +355,15 @@ the left side:
   kind, Favorite and Recently used, as large or small cards or a list.
   With a canvas open, a click puts a material on it; `+` copies a PNG
   picture in as a material.
+- **Browse Assets** shows CLIP STUDIO ASSETS as Clip Studio's start page
+  does: today's top free and paid materials and the newest, as cards with
+  their picture, kind, author, downloads and price. **See more** shows a
+  whole ranking, a card opens the material's page (its pictures,
+  description and what the set holds), and back, forward and reload sit
+  above. **Download on CLIP STUDIO ASSETS** opens the material on the
+  site, where it downloads with a CLIP STUDIO account. Sue keeps the
+  pages and pictures it read, so without a connection it shows them from
+  last time. On phones and tablets it comes later.
 
 At the top right: **Data Transfers** (two arrows) lists the files Sue
 opened, saved, exported and copied in this run, with **Clear Completed

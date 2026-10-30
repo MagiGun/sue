@@ -470,6 +470,8 @@ pub struct SuePaint {
     pub(crate) material_pick: Option<String>,
     /// Material thumbnails, by a hash of the material.
     pub(crate) material_thumbs: HashMap<u64, Vec<u8>>,
+    /// CLIP STUDIO ASSETS on the start page's Home, fetched and cached.
+    pub(crate) assets: crate::assets::Assets,
     /// The kinds of material, registered at start.
     pub(crate) material_kinds: crate::materials::MaterialKinds,
     /// The start page, shown while no canvas is open.
@@ -614,6 +616,7 @@ impl Default for SuePaint {
             material_kind: 0,
             material_pick: None,
             material_thumbs: HashMap::new(),
+            assets: crate::assets::Assets::default(),
             material_kinds: crate::materials::MaterialKinds::builtin(),
             start: crate::start::StartPage::default(),
             canvas_templates: crate::templates::CanvasTemplates::builtin(),

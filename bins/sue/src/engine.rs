@@ -670,6 +670,7 @@ impl Engine {
             ("home", self.paths.home_dir.clone()),
             ("rice", self.paths.rice_dir()),
             ("paint", self.paths.data_dir.join("paint")),
+            ("cache", self.paths.cache_dir.clone()),
         ] {
             catalog.folders.insert(name.to_owned(), folder);
         }

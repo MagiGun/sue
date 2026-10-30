@@ -91,8 +91,10 @@ impl SuePaint {
         } else {
             let bar = Rect::from_min_max(pos2(rect.left(), rect.bottom() - BAR), rect.max);
             let body = Rect::from_min_max(rect.min, pos2(rect.right(), bar.top()));
+            // Phones show Projects for Browse Assets (it comes to them
+            // later).
             match start.tab {
-                Tab::Projects => {
+                Tab::Browse | Tab::Projects => {
                     self.mobile_projects(&mut child, body, &mut start, &mut acts, cx, theme)
                 }
                 Tab::Materials => {
@@ -117,7 +119,7 @@ impl SuePaint {
                 },
             ];
             let selected = Some(match start.tab {
-                Tab::Projects => 0,
+                Tab::Browse | Tab::Projects => 0,
                 Tab::Materials => 2,
             });
             match page::tab_bar(&mut child, bar, &items, selected, theme) {
