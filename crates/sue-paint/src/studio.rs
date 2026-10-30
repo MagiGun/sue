@@ -343,6 +343,10 @@ pub struct SuePaint {
     /// The `.clip` file each picture was opened from or saved to (Save
     /// writes it again).
     pub(crate) clip_paths: HashMap<EntityId, PathBuf>,
+    /// The part of the active picture on screen, `[x0, y0, x1, y1]`, and
+    /// the picture pixels a side one screen pixel spans there (see
+    /// `composite::view_step`), as of the last frame.
+    pub(crate) on_screen: ([u32; 4], u32),
     /// The pictures opened or saved lately, newest first (File, Open
     /// Recent), from the work Sue remembers.
     pub(crate) recent_files: Vec<PathBuf>,
@@ -539,6 +543,7 @@ impl Default for SuePaint {
             recent: History::default(),
             saved_at: HashMap::new(),
             clip_paths: HashMap::new(),
+            on_screen: ([0, 0, u32::MAX, u32::MAX], 1),
             recent_files: Vec::new(),
             recent_seen: None,
             auto: crate::extras::AutoActions::default(),

@@ -105,6 +105,8 @@ enum Source<'a> {
 }
 
 struct Layer<'a> {
+    /// The layer's entity (none for a thumbnail's stand-in).
+    id: Option<EntityId>,
     source: Source<'a>,
     style: LayerStyle,
     /// Drawn toward this color by this much (onion skin), keeping its
@@ -118,6 +120,71 @@ struct Layer<'a> {
     effects: crate::effects::Effects,
     /// Its border's cover over the rectangle being drawn.
     edge: Option<crate::effects::Edge>,
+    /// Which tiles of the picture it has pixels in, when known for its
+    /// current pixels.
+    occupancy: Option<std::sync::Arc<Occupancy>>,
+}
+
+/// Side of an [`Occupancy`] tile.
+const OCCUPANCY_TILE: u32 = 64;
+
+/// Which 64 pixel tiles of the picture a layer has any pixel in (alpha
+/// above 0), so compositing passes over its empty ones with a bit test.
+#[derive(Debug)]
+struct Occupancy {
+    columns: u32,
+    bits: Vec<u64>,
+}
+
+impl Occupancy {
+    /// The tiles of a picture of `size` that `raster` (8-bit RGBA, placed
+    /// at `offset`) covers with anything.
+    fn of(raster: &RasterTile2D, offset: [i64; 2], size: [u32; 2]) -> Option<Self> {
+        if raster.format() != PixelFormat::Rgba8 {
+            return None;
+        }
+        let bytes = raster.bytes()?;
+        let columns = size[0].div_ceil(OCCUPANCY_TILE);
+        let rows = size[1].div_ceil(OCCUPANCY_TILE);
+        let count = (columns * rows) as usize;
+        let mut bits = vec![0_u64; count.div_ceil(64)];
+        let (width, height) = (i64::from(raster.width()), i64::from(raster.height()));
+        let stride = width as usize * 4;
+        for ly in 0..height {
+            let py = ly + offset[1];
+            if py < 0 || py >= i64::from(size[1]) {
+                continue;
+            }
+            let ty = py as u32 / OCCUPANCY_TILE;
+            let row = &bytes[ly as usize * stride..(ly as usize + 1) * stride];
+            // Picture x from the first column the layer reaches, tile by tile.
+            let mut px = offset[0].max(0);
+            let end = (offset[0] + width).min(i64::from(size[0]));
+            while px < end {
+                let tx = px as u32 / OCCUPANCY_TILE;
+                let tile_end = (i64::from((tx + 1) * OCCUPANCY_TILE)).min(end);
+                let index = (ty * columns + tx) as usize;
+                if bits[index / 64] & (1 << (index % 64)) == 0 {
+                    let from = (px - offset[0]) as usize * 4;
+                    let to = (tile_end - offset[0]) as usize * 4;
+                    if row[from..to].as_chunks::<4>().0.iter().any(|p| p[3] != 0) {
+                        bits[index / 64] |= 1 << (index % 64);
+                    }
+                }
+                px = tile_end;
+            }
+        }
+        Some(Self { columns, bits })
+    }
+
+    /// `true` if the layer has any pixel in the tile of picture pixel
+    /// `(x, y)`.
+    fn has(&self, x: u32, y: u32) -> bool {
+        let index = ((y / OCCUPANCY_TILE) * self.columns + x / OCCUPANCY_TILE) as usize;
+        self.bits
+            .get(index / 64)
+            .is_none_or(|word| word & (1 << (index % 64)) != 0)
+    }
 }
 
 /// Works out the borders of `layers` with a border effect over `rect`.
@@ -145,6 +212,19 @@ fn prepare(layers: &mut [Layer<'_>], rect: [u32; 4]) {
 }
 
 impl Layer<'_> {
+    /// `true` when the layer has nothing at picture pixel `(x, y)`, known
+    /// without reading it: its tile there is empty, and nothing it does
+    /// (a camera, an effect, a border) could show there anyway.
+    fn empty_at(&self, x: u32, y: u32) -> bool {
+        matches!(self.source, Source::Raster { .. })
+            && self.warp.is_none()
+            && self.effects.is_plain()
+            && self
+                .occupancy
+                .as_ref()
+                .is_some_and(|tiles| !tiles.has(x, y))
+    }
+
     /// The layer's straight RGBA at picture pixel `(x, y)`, through its
     /// camera when it has one.
     fn sample(&self, x: u32, y: u32) -> [f32; 4] {
@@ -325,6 +405,7 @@ fn gather_view<'a>(
                 crate::effects::Effects::default()
             };
             Some(Layer {
+                id: Some(entity.id()),
                 source,
                 style,
                 tint,
@@ -332,6 +413,7 @@ fn gather_view<'a>(
                 warp,
                 effects,
                 edge: None,
+                occupancy: None,
             })
         })
         .collect()
@@ -350,9 +432,37 @@ fn mask_at(mask: &RasterTile2D, offset: [i64; 2], x: u32, y: u32) -> f32 {
 
 /// The composited color of one pixel.
 fn pixel(layers: &[Layer<'_>], x: u32, y: u32) -> [f32; 4] {
-    let mut color = [0.0; 4];
-    let mut base_alpha = 1.0;
-    let mut base_visible = true;
+    let mut state = Stack::EMPTY;
+    fold(layers, x, y, &mut state);
+    state.color
+}
+
+/// Where compositing a pixel stands after some layers: the color so far,
+/// and the alpha and visibility of the layer the next clipped ones clip
+/// to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Stack {
+    color: [f32; 4],
+    base_alpha: f32,
+    base_visible: bool,
+}
+
+impl Stack {
+    /// Before any layer.
+    const EMPTY: Self = Self {
+        color: [0.0; 4],
+        base_alpha: 1.0,
+        base_visible: true,
+    };
+}
+
+/// Lays `layers` over `state` at pixel `(x, y)`.
+fn fold(layers: &[Layer<'_>], x: u32, y: u32, state: &mut Stack) {
+    let Stack {
+        mut color,
+        mut base_alpha,
+        mut base_visible,
+    } = *state;
     for layer in layers {
         if let Source::Correction(correction) = &layer.source {
             // Everything below, corrected, by the layer's opacity.
@@ -361,6 +471,15 @@ fn pixel(layers: &[Layer<'_>], x: u32, y: u32) -> [f32; 4] {
                 for channel in 0..3 {
                     color[channel] += (fixed[channel] - color[channel]) * layer.style.opacity;
                 }
+            }
+            continue;
+        }
+        if layer.empty_at(x, y) {
+            // What a clear pixel does: the layers clipped to this one
+            // show nothing over it.
+            if !layer.style.clip {
+                base_visible = layer.style.visible;
+                base_alpha = 0.0;
             }
             continue;
         }
@@ -408,7 +527,11 @@ fn pixel(layers: &[Layer<'_>], x: u32, y: u32) -> [f32; 4] {
         }
         color = layer.style.blend.composite(color, source);
     }
-    color
+    *state = Stack {
+        color,
+        base_alpha,
+        base_visible,
+    };
 }
 
 /// Bytes to 0 to 1, as `f32::from(byte) / 255.0` gives them.
@@ -484,7 +607,7 @@ fn raster_row(raster: &RasterTile2D, offset: [i64; 2], y: u32) -> (&[u8], i64) {
 /// [`pixel`] for plain layers (see [`Layer::plain`]), reading each from
 /// its row: the same steps and the same arithmetic, without looking up the
 /// layer's format, size and mask for every pixel.
-fn pixel_plain(layers: &[Layer<'_>], rows: &[RowSource<'_>], x: u32) -> [f32; 4] {
+fn pixel_plain(layers: &[Layer<'_>], rows: &[RowSource<'_>], x: u32, y: u32) -> [f32; 4] {
     let mut color = [0.0; 4];
     let mut base_alpha = 1.0;
     let mut base_visible = true;
@@ -495,6 +618,15 @@ fn pixel_plain(layers: &[Layer<'_>], rows: &[RowSource<'_>], x: u32) -> [f32; 4]
                 for channel in 0..3 {
                     color[channel] += (fixed[channel] - color[channel]) * layer.style.opacity;
                 }
+            }
+            continue;
+        }
+        if layer.empty_at(x, y) {
+            // What a clear pixel does: the layers clipped to this one
+            // show nothing over it.
+            if !layer.style.clip {
+                base_visible = layer.style.visible;
+                base_alpha = 0.0;
             }
             continue;
         }
@@ -540,6 +672,153 @@ fn pixel_plain(layers: &[Layer<'_>], rows: &[RowSource<'_>], x: u32) -> [f32; 4]
     color
 }
 
+/// The [`Focus`] tiles `wanted`, made on every core: each pixel's stack
+/// under layer `index`, and the layers over it flattened when `flat`.
+#[allow(clippy::type_complexity)]
+fn focus_tiles(
+    layers: &[Layer<'_>],
+    index: usize,
+    flat: bool,
+    wanted: &[(u32, u32)],
+    size: [u32; 2],
+) -> Vec<((u32, u32), Box<[[u8; 6]]>, Option<Box<[[u8; 4]]>>)> {
+    let make = |&(tx, ty): &(u32, u32)| {
+        let area = (FOCUS_TILE * FOCUS_TILE) as usize;
+        let mut below = vec![[0_u8; 6]; area];
+        let mut above = flat.then(|| vec![[0_u8; 4]; area]);
+        for y in ty * FOCUS_TILE..((ty + 1) * FOCUS_TILE).min(size[1]) {
+            for x in tx * FOCUS_TILE..((tx + 1) * FOCUS_TILE).min(size[0]) {
+                let at = ((y % FOCUS_TILE) * FOCUS_TILE + x % FOCUS_TILE) as usize;
+                let mut stack = Stack::EMPTY;
+                fold(&layers[..index], x, y, &mut stack);
+                let [r, g, b, a] = stack.color.map(to_byte);
+                below[at] = [
+                    r,
+                    g,
+                    b,
+                    a,
+                    to_byte(stack.base_alpha),
+                    u8::from(stack.base_visible),
+                ];
+                if let Some(above) = &mut above {
+                    let mut over = Stack::EMPTY;
+                    fold(&layers[index + 1..], x, y, &mut over);
+                    above[at] = over.color.map(to_byte);
+                }
+            }
+        }
+        (
+            (tx, ty),
+            below.into_boxed_slice(),
+            above.map(Vec::into_boxed_slice),
+        )
+    };
+    let threads = if wanted.len() < 4 {
+        1
+    } else {
+        workers().min(wanted.len())
+    };
+    if threads <= 1 {
+        return wanted.iter().map(make).collect();
+    }
+    let per = wanted.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = wanted
+            .chunks(per)
+            .map(|chunk| scope.spawn(move || chunk.iter().map(make).collect::<Vec<_>>()))
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|worker| worker.join().unwrap_or_default())
+            .collect()
+    })
+}
+
+/// The color at `(x, y)` through a [`Focus`]: the kept stack under layer
+/// `index` (`below`, the pixel's tile; its layers when not kept), the layer
+/// itself, then the kept flattened stack over it (`above`; the layers over
+/// it when that is not kept).
+fn focused_color(
+    layers: &[Layer<'_>],
+    below: Option<&[[u8; 6]]>,
+    above: Option<&[[u8; 4]]>,
+    index: usize,
+    x: u32,
+    y: u32,
+) -> [f32; 4] {
+    let unit = |byte: u8| f32::from(byte) / 255.0;
+    let at = ((y % FOCUS_TILE) * FOCUS_TILE + x % FOCUS_TILE) as usize;
+    let mut stack = match below {
+        Some(below) => {
+            let [r, g, b, a, base, shows] = below[at];
+            Stack {
+                color: [unit(r), unit(g), unit(b), unit(a)],
+                base_alpha: unit(base),
+                base_visible: shows != 0,
+            }
+        }
+        None => {
+            let mut stack = Stack::EMPTY;
+            fold(&layers[..index], x, y, &mut stack);
+            stack
+        }
+    };
+    fold(&layers[index..=index], x, y, &mut stack);
+    match above {
+        Some(above) => {
+            let over = above[at].map(unit);
+            sue_model::BlendMode::Normal.composite(stack.color, over)
+        }
+        None => {
+            fold(&layers[index + 1..], x, y, &mut stack);
+            stack.color
+        }
+    }
+}
+
+/// `color` (straight RGBA) as the screen shows it at `(x, y)`: over the
+/// checkerboard, opaque.
+fn shown(color: [f32; 4], x: u32, y: u32) -> [u8; 4] {
+    let under = checker(x, y);
+    let alpha = color[3];
+    let mut out = [255; 4];
+    for (slot, value) in out.iter_mut().zip(color).take(3) {
+        let value = value * alpha + under * (1.0 - alpha);
+        *slot = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+    }
+    out
+}
+
+/// [`composite_span`] through a [`Focus`] (see [`focused_color`]).
+#[allow(clippy::too_many_arguments)]
+fn focused_span(
+    layers: &[Layer<'_>],
+    focus: &Focus,
+    index: usize,
+    flat: bool,
+    y: u32,
+    x0: u32,
+    x1: u32,
+    row: &mut [u8],
+) {
+    let ty = y / FOCUS_TILE;
+    let mut x = x0;
+    while x < x1 {
+        let tx = x / FOCUS_TILE;
+        let end = x1.min((tx + 1) * FOCUS_TILE);
+        let below = focus.below.get(&(tx, ty)).map(AsRef::as_ref);
+        let above = flat
+            .then(|| focus.above.get(&(tx, ty)))
+            .flatten()
+            .map(AsRef::as_ref);
+        for x in x..end {
+            let color = focused_color(layers, below, above, index, x, y);
+            row[x as usize * 4..x as usize * 4 + 4].copy_from_slice(&shown(color, x, y));
+        }
+        x = end;
+    }
+}
+
 /// Composites pixels `x0..x1` of row `y` into `row` (the whole row of the
 /// screen image), over the checkerboard.
 fn composite_span(layers: &[Layer<'_>], y: u32, x0: u32, x1: u32, row: &mut [u8]) {
@@ -552,7 +831,7 @@ fn composite_span(layers: &[Layer<'_>], y: u32, x0: u32, x1: u32, row: &mut [u8]
     let span = &mut row[x0 as usize * 4..x1 as usize * 4];
     for (x, slot) in (x0..x1).zip(span.as_chunks_mut::<4>().0) {
         let color = if plain {
-            pixel_plain(layers, &rows, x)
+            pixel_plain(layers, &rows, x, y)
         } else {
             pixel(layers, x, y)
         };
@@ -564,6 +843,22 @@ fn composite_span(layers: &[Layer<'_>], y: u32, x0: u32, x1: u32, row: &mut [u8]
         }
         slot[3] = 255;
     }
+}
+
+/// How many threads big jobs split into: the cores, or `SUE_THREADS` when
+/// set (1 measures what the browser, which has no threads, goes through).
+#[must_use]
+pub fn workers() -> usize {
+    static COUNT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *COUNT.get_or_init(|| {
+        std::env::var("SUE_THREADS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|count| *count > 0)
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
+            })
+    })
 }
 
 /// Runs `work(y, row)` for each `stride`-byte row of `buffer` (row `y0`
@@ -582,9 +877,7 @@ fn rows(
     let threads = if pixels < 1 << 16 {
         1
     } else {
-        std::thread::available_parallelism()
-            .map_or(1, std::num::NonZero::get)
-            .clamp(1, 32)
+        workers().clamp(1, 32)
     };
     if threads <= 1 || count < 2 {
         for (index, row) in buffer.chunks_mut(stride).enumerate() {
@@ -720,6 +1013,46 @@ fn checker(x: u32, y: u32) -> f32 {
     }
 }
 
+/// Side of a [`Focus`] tile.
+const FOCUS_TILE: u32 = 64;
+/// The most tiles a [`Focus`] keeps (about 70 MB).
+const FOCUS_TILES: usize = 2048;
+
+/// While a stroke paints one layer, everything under it and over it stays
+/// as it is: the stack under the layer is kept per tile, and so is the
+/// stack over it, flattened, when its layers are plain Normal ones. A
+/// pixel of the screen is then three layers' work, not every layer's, as
+/// painting programs do with their layer caches.
+#[derive(Debug)]
+struct Focus {
+    layer: EntityId,
+    /// The picture's signature apart from the layer (and its mask): the
+    /// cache holds while it does.
+    others: Vec<(EntityId, u64)>,
+    /// Per tile, each pixel's [`Stack`] under the layer: color and base
+    /// alpha as bytes, and whether the base shows.
+    below: std::collections::HashMap<(u32, u32), Box<[[u8; 6]]>>,
+    /// Per tile, the stack over the layer flattened (straight RGBA), when
+    /// that stack is plain.
+    above: std::collections::HashMap<(u32, u32), Box<[[u8; 4]]>>,
+}
+
+fn to_byte(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+/// `true` when the layers over the focused one can be flattened ahead:
+/// Normal blends only, no correction, no border, and the first of them
+/// not clipped onto the focused layer.
+fn plain_above(layers: &[Layer<'_>]) -> bool {
+    layers.first().is_none_or(|layer| !layer.style.clip)
+        && layers.iter().all(|layer| {
+            !matches!(layer.source, Source::Correction(_))
+                && layer.style.blend == sue_model::BlendMode::Normal
+                && layer.effects.border.is_none()
+        })
+}
+
 /// The screen image of one picture, kept in step with the arena.
 #[derive(Debug)]
 pub struct Compositor {
@@ -735,6 +1068,43 @@ pub struct Compositor {
     /// The newest version no longer on record: what changed up to it is
     /// unknown.
     forgotten: u64,
+    /// The layer being painted and the stacks around it.
+    focus: Option<Focus>,
+    /// Each layer's [`Occupancy`], for the revision and offset it was
+    /// found at.
+    occupancy: std::collections::HashMap<EntityId, (u64, [i64; 2], std::sync::Arc<Occupancy>)>,
+    /// The 64 pixel tiles shown coarse, or not redrawn at all because they
+    /// were off screen, waiting for full detail (see [`Self::refine`]),
+    /// by (column, row).
+    pending: std::collections::BTreeSet<(u32, u32)>,
+    /// The layer the waiting tiles were painted on.
+    pending_layer: Option<EntityId>,
+}
+
+/// Side of a [`Compositor::refine`] tile.
+const PENDING_TILE: u32 = 64;
+
+/// `rect` cut to `clip`, or `None` when they do not meet.
+fn meet(rect: [u32; 4], clip: [u32; 4]) -> Option<[u32; 4]> {
+    let out = [
+        rect[0].max(clip[0]),
+        rect[1].max(clip[1]),
+        rect[2].min(clip[2]),
+        rect[3].min(clip[3]),
+    ];
+    (out[0] < out[2] && out[1] < out[3]).then_some(out)
+}
+
+/// How many picture pixels a side one sample covers while painting at a
+/// view of `scale` screen pixels per picture pixel: 1 from half size up,
+/// else the largest power of two the screen cannot tell apart (8 at most).
+#[must_use]
+pub fn view_step(scale: f32) -> u32 {
+    let mut step = 1;
+    while step < 8 && (step * 2) as f32 * scale <= 1.0 {
+        step *= 2;
+    }
+    step
 }
 
 /// Versions come from one count for every compositor, so a texture made
@@ -759,6 +1129,10 @@ impl Compositor {
             view: None,
             changes: std::collections::VecDeque::new(),
             forgotten: version,
+            focus: None,
+            occupancy: std::collections::HashMap::new(),
+            pending: std::collections::BTreeSet::new(),
+            pending_layer: None,
         }
     }
 
@@ -768,6 +1142,7 @@ impl Compositor {
         if self.view != view {
             self.view = view;
             self.seen.clear();
+            self.focus = None;
         }
     }
 
@@ -792,6 +1167,118 @@ impl Compositor {
         }
         let at = (y as usize * self.size[0] as usize + x as usize) * 4;
         self.display.get(at..at + 4)?.try_into().ok()
+    }
+
+    /// The [`Focus`] around `painted` in `layers` (with its index and
+    /// whether the stack over it is flattened): the kept one while nothing
+    /// else changed (`signature` is the picture's now), else a new one. The
+    /// tiles in `wanted` it lacks are made.
+    #[allow(clippy::type_complexity)]
+    fn kept_focus(
+        &mut self,
+        arena: &Arena,
+        layers: &[Layer<'_>],
+        painted: Option<EntityId>,
+        signature: &[(EntityId, u64)],
+        wanted: &[(u32, u32)],
+    ) -> Option<(Focus, usize, bool)> {
+        let painted = painted?;
+        let index = layers.iter().position(|layer| layer.id == Some(painted))?;
+        // A border is drawn for a rectangle at a time: no cache.
+        if layers.iter().any(|layer| layer.effects.border.is_some()) {
+            return None;
+        }
+        let mask = crate::doc::mask_of(arena, painted);
+        let others: Vec<(EntityId, u64)> = signature
+            .iter()
+            .filter(|(id, _)| *id != painted && Some(*id) != mask)
+            .copied()
+            .collect();
+        let keep = self.focus.take().filter(|focus| {
+            focus.layer == painted && focus.others == others && focus.below.len() <= FOCUS_TILES
+        });
+        let mut focus = keep.unwrap_or(Focus {
+            layer: painted,
+            others,
+            below: std::collections::HashMap::new(),
+            above: std::collections::HashMap::new(),
+        });
+        let flat = plain_above(&layers[index + 1..]);
+        let missing: Vec<(u32, u32)> = wanted
+            .iter()
+            .copied()
+            .filter(|tile| !focus.below.contains_key(tile))
+            .collect();
+        for (key, below, above) in focus_tiles(layers, index, flat, &missing, self.size) {
+            focus.below.insert(key, below);
+            if let Some(above) = above {
+                focus.above.insert(key, above);
+            }
+        }
+        Some((focus, index, flat))
+    }
+
+    /// Gives `layers` the occupancy kept for their current pixels. With
+    /// `find`, layers without one get it worked out (on every core), as a
+    /// full composite does; a stroke's refresh does not, so the layer being
+    /// painted is read everywhere.
+    fn attach(&mut self, arena: &Arena, layers: &mut [Layer<'_>], find: bool) {
+        let size = self.size;
+        let mut missing = Vec::new();
+        for (index, layer) in layers.iter_mut().enumerate() {
+            let (Some(id), Source::Raster { offset, .. }) = (layer.id, &layer.source) else {
+                continue;
+            };
+            let Ok(entity) = arena.get_by_id(id) else {
+                continue;
+            };
+            let revision = entity.revision();
+            match self.occupancy.get(&id) {
+                Some((seen, at, tiles)) if *seen == revision && at == offset => {
+                    layer.occupancy = Some(tiles.clone());
+                }
+                _ if find => missing.push((index, id, revision, *offset)),
+                _ => {}
+            }
+        }
+        if missing.is_empty() {
+            return;
+        }
+        let rasters: Vec<(&RasterTile2D, [i64; 2])> = missing
+            .iter()
+            .filter_map(|(index, _, _, offset)| match &layers[*index].source {
+                Source::Raster { raster, .. } => Some((*raster, *offset)),
+                _ => None,
+            })
+            .collect();
+        let found: Vec<Option<Occupancy>> = if rasters.len() > 1 && workers() > 1 {
+            std::thread::scope(|scope| {
+                let jobs: Vec<_> = rasters
+                    .iter()
+                    .map(|(raster, offset)| {
+                        scope.spawn(move || Occupancy::of(raster, *offset, size))
+                    })
+                    .collect();
+                jobs.into_iter()
+                    .map(|job| job.join().ok().flatten())
+                    .collect()
+            })
+        } else {
+            rasters
+                .iter()
+                .map(|(raster, offset)| Occupancy::of(raster, *offset, size))
+                .collect()
+        };
+        for ((index, id, revision, offset), tiles) in missing.into_iter().zip(found) {
+            if let Some(tiles) = tiles {
+                let tiles = std::sync::Arc::new(tiles);
+                layers[index].occupancy = Some(tiles.clone());
+                self.occupancy.insert(id, (revision, offset, tiles));
+            }
+        }
+        // Layers that are gone keep nothing.
+        let present: HashSet<EntityId> = layers.iter().filter_map(|layer| layer.id).collect();
+        self.occupancy.retain(|id, _| present.contains(id));
     }
 
     /// The rectangles `[x0, y0, x1, y1]` holding every pixel that changed
@@ -842,7 +1329,234 @@ impl Compositor {
         self.display = vec![0; size[0] as usize * size[1] as usize * 4];
         self.paint(arena, [0, 0, size[0], size[1]]);
         self.seen = seen;
+        self.pending.clear();
+        self.pending_layer = None;
         true
+    }
+
+    /// [`Self::refresh_rects`] for a stroke seen at some zoom: of `rects`
+    /// only what lies in `visible` is composited now, one sample each
+    /// `step` pixels a side (see [`view_step`]), as Krita's instant preview
+    /// does for big brushes. The rest, and every coarse tile, waits for
+    /// [`Self::refine`] to bring it to full detail.
+    pub fn refresh_view(
+        &mut self,
+        arena: &Arena,
+        rects: &[[u32; 4]],
+        painted: Option<EntityId>,
+        visible: [u32; 4],
+        step: u32,
+    ) {
+        if self.size == [0, 0] {
+            self.sync(arena);
+            return;
+        }
+        let step = step.max(1);
+        let whole = [0, 0, self.size[0], self.size[1]];
+        let mut now = Vec::new();
+        for rect in rects {
+            let Some(rect) = meet(*rect, whole) else {
+                continue;
+            };
+            for ty in rect[1] / PENDING_TILE..=(rect[3] - 1) / PENDING_TILE {
+                for tx in rect[0] / PENDING_TILE..=(rect[2] - 1) / PENDING_TILE {
+                    let tile = [
+                        tx * PENDING_TILE,
+                        ty * PENDING_TILE,
+                        (tx + 1) * PENDING_TILE,
+                        (ty + 1) * PENDING_TILE,
+                    ];
+                    let Some(piece) = meet(rect, tile) else {
+                        continue;
+                    };
+                    let seen = meet(piece, visible);
+                    if step > 1 || seen != Some(piece) {
+                        self.pending.insert((tx, ty));
+                        self.pending_layer = painted;
+                    }
+                }
+            }
+            if let Some(seen) = meet(rect, visible) {
+                now.push(seen);
+            }
+        }
+        if step == 1 {
+            if now.is_empty() {
+                self.seen = self.signature(arena);
+            } else {
+                self.refresh_rects(arena, &now, painted);
+            }
+            return;
+        }
+        self.coarse(arena, &now, painted, step);
+    }
+
+    /// Composites `rects` one sample a `step` by `step` block, each block
+    /// filled with its sample.
+    fn coarse(&mut self, arena: &Arena, rects: &[[u32; 4]], painted: Option<EntityId>, step: u32) {
+        let signature = self.signature(arena);
+        if rects.is_empty() {
+            self.seen = signature;
+            return;
+        }
+        let bounds = rects
+            .iter()
+            .fold(rects[0], |[a, b, c, d], [x0, y0, x1, y1]| {
+                [a.min(*x0), b.min(*y0), c.max(*x1), d.max(*y1)]
+            });
+        let mut layers = gather_view(
+            arena,
+            self.picture,
+            RenderOptions::default(),
+            self.view.as_ref(),
+        );
+        prepare(&mut layers, bounds);
+        self.attach(arena, &mut layers, false);
+        let focus = self.kept_focus(arena, &layers, painted, &signature, &[]);
+        // One sample per block, the blocks' rows shared out over the cores.
+        let jobs: Vec<([u32; 4], u32)> = rects
+            .iter()
+            .flat_map(|rect| {
+                let first = rect[1] / step * step;
+                (first..rect[3])
+                    .step_by(step as usize)
+                    .map(move |gy| (*rect, gy))
+            })
+            .collect();
+        let sample_row = |&(rect, gy): &([u32; 4], u32)| -> Vec<[u8; 4]> {
+            let first = rect[0] / step * step;
+            let y = (gy + step / 2).clamp(rect[1], rect[3] - 1);
+            (first..rect[2])
+                .step_by(step as usize)
+                .map(|gx| {
+                    let x = (gx + step / 2).clamp(rect[0], rect[2] - 1);
+                    let color = match &focus {
+                        Some((focus, index, flat)) => {
+                            let tile = (x / FOCUS_TILE, y / FOCUS_TILE);
+                            let below = focus.below.get(&tile).map(AsRef::as_ref);
+                            let above = flat
+                                .then(|| focus.above.get(&tile))
+                                .flatten()
+                                .map(AsRef::as_ref);
+                            focused_color(&layers, below, above, *index, x, y)
+                        }
+                        None => pixel(&layers, x, y),
+                    };
+                    shown(color, x, y)
+                })
+                .collect()
+        };
+        let threads = workers().min(jobs.len()).max(1);
+        let samples: Vec<Vec<[u8; 4]>> = if threads <= 1 {
+            jobs.iter().map(sample_row).collect()
+        } else {
+            let per = jobs.len().div_ceil(threads);
+            std::thread::scope(|scope| {
+                let workers: Vec<_> = jobs
+                    .chunks(per)
+                    .map(|chunk| {
+                        let sample_row = &sample_row;
+                        scope.spawn(move || chunk.iter().map(sample_row).collect::<Vec<_>>())
+                    })
+                    .collect();
+                workers
+                    .into_iter()
+                    .flat_map(|worker| worker.join().unwrap_or_default())
+                    .collect()
+            })
+        };
+        let stride = self.size[0] as usize * 4;
+        for ((rect, gy), row) in jobs.iter().zip(samples) {
+            let first = rect[0] / step * step;
+            for y in (*gy).max(rect[1])..(gy + step).min(rect[3]) {
+                let line = &mut self.display[y as usize * stride..(y as usize + 1) * stride];
+                for (block, color) in row.iter().enumerate() {
+                    let gx = first + block as u32 * step;
+                    for x in gx.max(rect[0])..(gx + step).min(rect[2]) {
+                        line[x as usize * 4..x as usize * 4 + 4].copy_from_slice(color);
+                    }
+                }
+            }
+        }
+        self.focus = focus.map(|(focus, _, _)| focus);
+        self.version = next_version();
+        self.changes.push_back((self.version, rects.to_vec()));
+        if self.changes.len() > 64
+            && let Some((version, _)) = self.changes.pop_front()
+        {
+            self.forgotten = version;
+        }
+        self.seen = signature;
+    }
+
+    /// Brings up to `tiles` of the waiting tiles (the ones in `visible`
+    /// first) to full detail. Returns `true` while some still wait, so the
+    /// caller draws another frame.
+    pub fn refine(&mut self, arena: &Arena, visible: [u32; 4], tiles: usize) -> bool {
+        if self.pending.is_empty() {
+            return false;
+        }
+        let tile_rect = |(tx, ty): (u32, u32)| {
+            [
+                tx * PENDING_TILE,
+                ty * PENDING_TILE,
+                ((tx + 1) * PENDING_TILE).min(self.size[0]),
+                ((ty + 1) * PENDING_TILE).min(self.size[1]),
+            ]
+        };
+        let mut chosen: Vec<(u32, u32)> = self
+            .pending
+            .iter()
+            .copied()
+            .filter(|tile| meet(tile_rect(*tile), visible).is_some())
+            .take(tiles)
+            .collect();
+        if chosen.len() < tiles {
+            let more: Vec<(u32, u32)> = self
+                .pending
+                .iter()
+                .copied()
+                .filter(|tile| !chosen.contains(tile))
+                .take(tiles - chosen.len())
+                .collect();
+            chosen.extend(more);
+        }
+        let rects: Vec<[u32; 4]> = chosen
+            .iter()
+            .map(|tile| tile_rect(*tile))
+            .filter(|rect| rect[0] < rect[2] && rect[1] < rect[3])
+            .collect();
+        for tile in &chosen {
+            self.pending.remove(tile);
+        }
+        let painted = self.pending_layer;
+        if self.pending.is_empty() {
+            self.pending_layer = None;
+        }
+        self.refresh_rects(arena, &rects, painted);
+        !self.pending.is_empty()
+    }
+
+    /// Takes the picture as it is now as seen when the only change since
+    /// the last look is to `painted` (a stroke's layer, written to
+    /// although its pen moved too little to paint): no recomposite for
+    /// that. Any other change is left for [`Self::sync`].
+    pub fn accept(&mut self, arena: &Arena, painted: EntityId) {
+        let signature = self.signature(arena);
+        let mask = crate::doc::mask_of(arena, painted);
+        let only = signature.len() == self.seen.len()
+            && signature.iter().zip(&self.seen).all(|(now, seen)| {
+                now == seen || (now.0 == seen.0 && (now.0 == painted || Some(now.0) == mask))
+            });
+        if only {
+            self.seen = signature;
+        }
+    }
+
+    /// `true` while some tiles wait for full detail.
+    #[must_use]
+    pub fn refining(&self) -> bool {
+        !self.pending.is_empty()
     }
 
     /// Recomposites the rectangle `[x0, y0, x1, y1]` after an edit made in
@@ -864,8 +1578,10 @@ impl Compositor {
 
     /// Recomposites the rectangles `[x0, y0, x1, y1]` after an edit made in
     /// place (the tiles a stroke changed), gathering the layers once, and
-    /// takes the edit as seen.
-    pub fn refresh_rects(&mut self, arena: &Arena, rects: &[[u32; 4]]) {
+    /// takes the edit as seen. `painted` is the layer the edit changed:
+    /// the stacks under and over it are kept for the next refresh (see
+    /// [`Focus`]).
+    pub fn refresh_rects(&mut self, arena: &Arena, rects: &[[u32; 4]], painted: Option<EntityId>) {
         if self.size == [0, 0] {
             self.sync(arena);
             return;
@@ -898,7 +1614,21 @@ impl Compositor {
             self.view.as_ref(),
         );
         prepare(&mut layers, bounds);
+        self.attach(arena, &mut layers, false);
         let stride = width as usize * 4;
+        let signature = self.signature(arena);
+        // The stacks of the tiles this refresh needs.
+        let mut wanted = Vec::new();
+        for [x0, y0, x1, y1] in &rects {
+            for ty in y0 / FOCUS_TILE..=(y1 - 1) / FOCUS_TILE {
+                for tx in x0 / FOCUS_TILE..=(x1 - 1) / FOCUS_TILE {
+                    if !wanted.contains(&(tx, ty)) {
+                        wanted.push((tx, ty));
+                    }
+                }
+            }
+        }
+        let focus = self.kept_focus(arena, &layers, painted, &signature, &wanted);
         // Each row's spans, then the rows painted on every core.
         let mut spans: Vec<Vec<(u32, u32)>> = vec![Vec::new(); (bounds[3] - bounds[1]) as usize];
         for [x0, y0, x1, y1] in &rects {
@@ -913,9 +1643,15 @@ impl Compositor {
         let band = &mut self.display[bounds[1] as usize * stride..bounds[3] as usize * stride];
         rows(band, stride, bounds[1], area, |y, row| {
             for &(x0, x1) in &spans[(y - bounds[1]) as usize] {
-                composite_span(&layers, y, x0, x1, row);
+                match &focus {
+                    Some((focus, index, flat)) => {
+                        focused_span(&layers, focus, *index, *flat, y, x0, x1, row);
+                    }
+                    None => composite_span(&layers, y, x0, x1, row),
+                }
             }
         });
+        self.focus = focus.map(|(focus, _, _)| focus);
         self.version = next_version();
         self.changes.push_back((self.version, rects));
         if self.changes.len() > 64
@@ -923,7 +1659,7 @@ impl Compositor {
         {
             self.forgotten = version;
         }
-        self.seen = self.signature(arena);
+        self.seen = signature;
     }
 
     fn paint(&mut self, arena: &Arena, [x0, y0, x1, y1]: [u32; 4]) {
@@ -934,6 +1670,9 @@ impl Compositor {
             self.view.as_ref(),
         );
         prepare(&mut layers, [x0, y0, x1, y1]);
+        // A whole picture finds what each layer covers; a piece reuses it.
+        let whole = [x0, y0, x1, y1] == [0, 0, self.size[0], self.size[1]];
+        self.attach(arena, &mut layers, whole);
         let stride = self.size[0] as usize * 4;
         let band = &mut self.display[y0 as usize * stride..y1 as usize * stride];
         let area = (x1.saturating_sub(x0) * y1.saturating_sub(y0)) as usize;
@@ -982,6 +1721,7 @@ pub fn thumbnail(arena: &Arena, layer: EntityId, max: [u32; 2]) -> Option<(Vec<u
         LayerKind::Other => return None,
     };
     let layer = Layer {
+        id: None,
         source,
         style: LayerStyle::default(),
         tint: None,
@@ -989,6 +1729,7 @@ pub fn thumbnail(arena: &Arena, layer: EntityId, max: [u32; 2]) -> Option<(Vec<u
         warp: None,
         effects: crate::effects::Effects::default(),
         edge: None,
+        occupancy: None,
     };
     let scale = (max[0] as f32 / size[0].max(1) as f32).min(max[1] as f32 / size[1].max(1) as f32);
     let out = [
@@ -1136,12 +1877,240 @@ mod tests {
             let rows: Vec<RowSource<'_>> = layers.iter().map(|layer| layer.row(y)).collect();
             for x in 0..8 {
                 assert_eq!(
-                    pixel_plain(&layers, &rows, x),
+                    pixel_plain(&layers, &rows, x, y),
                     pixel(&layers, x, y),
                     "{x},{y}"
                 );
             }
         }
+    }
+
+    #[test]
+    fn painting_through_the_layer_cache_shows_what_a_full_composite_does() {
+        let (mut arena, picture, base) = picture();
+        let mut below = Some(base);
+        let mut ids = vec![base];
+        for name in ["Middle", "Top", "Clipped"] {
+            let (mut spawn, id) =
+                doc::add_raster_layer(&arena, picture, below, name.to_owned(), None).unwrap();
+            spawn.apply(&mut arena).unwrap();
+            ids.push(id);
+            below = Some(id);
+        }
+        SetProperty::new(ids[3], picture::CLIP, true)
+            .apply(&mut arena)
+            .unwrap();
+        SetProperty::new(ids[2], picture::OPACITY, 0.7)
+            .apply(&mut arena)
+            .unwrap();
+        for (i, layer) in ids.iter().enumerate() {
+            for x in 0..8 {
+                for y in 0..4 {
+                    if !(x * 3 + y + i as u32).is_multiple_of(4) {
+                        let v = (x * 29 + y * 13 + i as u32 * 61) as u8;
+                        paint(&mut arena, *layer, x, y, [v, 200 - v / 2, 70, 90 + v / 3]);
+                    }
+                }
+            }
+        }
+        // What the screen should show: the full composite over the
+        // checkerboard, give or take a step for the kept bytes.
+        let check = |compositor: &Compositor, arena: &Arena| {
+            let full = render(arena, picture, [0, 0, 8, 4], RenderOptions::default());
+            for y in 0..4 {
+                for x in 0..8 {
+                    let at = ((y * 8 + x) * 4) as usize;
+                    let want = &full[at..at + 4];
+                    let alpha = f32::from(want[3]) / 255.0;
+                    let under = checker(x, y);
+                    let got = compositor.pixel(x, y).unwrap();
+                    for channel in 0..3 {
+                        let shown = (f32::from(want[channel]) / 255.0 * alpha
+                            + under * (1.0 - alpha))
+                            * 255.0;
+                        let diff = (f32::from(got[channel]) - shown.round()).abs();
+                        assert!(
+                            diff <= 2.0,
+                            "{x},{y} channel {channel}: {got:?} vs {want:?}"
+                        );
+                    }
+                }
+            }
+        };
+        // Painting the middle layer (over it a clipped pair: not plain),
+        // the top one (plain over it) and the base.
+        for painted in [ids[1], ids[2], ids[0]] {
+            let mut compositor = Compositor::new(picture);
+            compositor.sync(&arena);
+            for round in 0..3 {
+                paint(&mut arena, painted, round * 2, 1, [10, 250, 10, 255]);
+                compositor.refresh_rects(&arena, &[[0, 0, 8, 4]], Some(painted));
+                assert!(compositor.focus.is_some(), "the stacks are kept");
+                check(&compositor, &arena);
+            }
+            // Anything else changing drops the kept stacks, so the screen
+            // follows it.
+            let other = if painted == ids[0] { ids[1] } else { ids[0] };
+            paint(&mut arena, other, 7, 3, [0, 0, 0, 255]);
+            compositor.refresh_rects(&arena, &[[0, 0, 8, 4]], Some(painted));
+            check(&compositor, &arena);
+        }
+    }
+
+    #[test]
+    fn empty_tiles_are_passed_over_exactly_as_clear_pixels() {
+        let mut arena = Arena::new();
+        let (mut edit, picture) = doc::create(&NewPicture {
+            name: "Tiles".to_owned(),
+            width: 200,
+            height: 150,
+            dpi: 72.0,
+            paper: Some(Color::srgb8(255, 255, 255)),
+            timelapse: false,
+        })
+        .unwrap();
+        edit.apply(&mut arena).unwrap();
+        let base = doc::layers(&arena, picture).last().unwrap().id;
+        let mut ids = vec![base];
+        let mut below = Some(base);
+        for name in ["Empty base", "Clipped", "Corner"] {
+            let (mut spawn, id) =
+                doc::add_raster_layer(&arena, picture, below, name.to_owned(), None).unwrap();
+            spawn.apply(&mut arena).unwrap();
+            ids.push(id);
+            below = Some(id);
+        }
+        // A clipped layer over a base that is empty in most tiles: there it
+        // must show nothing.
+        SetProperty::new(ids[2], picture::CLIP, true)
+            .apply(&mut arena)
+            .unwrap();
+        for x in 0..200 {
+            for y in 0..150 {
+                paint(&mut arena, ids[2], x, y, [200, 30, 30, 255]);
+                if (x + y) % 5 == 0 {
+                    paint(&mut arena, base, x, y, [10, 10, 200, 120]);
+                }
+            }
+        }
+        for x in 70..90 {
+            for y in 70..80 {
+                paint(&mut arena, ids[1], x, y, [0, 200, 0, 255]);
+            }
+        }
+        for x in 150..200 {
+            for y in 0..20 {
+                paint(&mut arena, ids[3], x, y, [0, 0, 0, 90]);
+            }
+        }
+        let mut compositor = Compositor::new(picture);
+        compositor.sync(&arena);
+        assert!(
+            compositor.occupancy.len() >= 4,
+            "the layers' tiles are known"
+        );
+        let full = render(&arena, picture, [0, 0, 200, 150], RenderOptions::default());
+        for y in 0..150 {
+            for x in 0..200 {
+                let at = ((y * 200 + x) * 4) as usize;
+                let want = &full[at..at + 4];
+                let alpha = f32::from(want[3]) / 255.0;
+                let under = checker(x, y);
+                let shown: Vec<u8> = (0..3)
+                    .map(|c| {
+                        ((f32::from(want[c]) / 255.0 * alpha + under * (1.0 - alpha))
+                            .clamp(0.0, 1.0)
+                            * 255.0)
+                            .round() as u8
+                    })
+                    .collect();
+                assert_eq!(&compositor.pixel(x, y).unwrap()[..3], &shown[..], "{x},{y}");
+            }
+        }
+    }
+
+    #[test]
+    fn coarse_and_off_screen_pieces_come_to_full_detail() {
+        let mut arena = Arena::new();
+        let (mut edit, picture) = doc::create(&NewPicture {
+            name: "View".to_owned(),
+            width: 300,
+            height: 200,
+            dpi: 72.0,
+            paper: Some(Color::srgb8(255, 255, 255)),
+            timelapse: false,
+        })
+        .unwrap();
+        edit.apply(&mut arena).unwrap();
+        let layer = doc::layers(&arena, picture).last().unwrap().id;
+        let mut compositor = Compositor::new(picture);
+        compositor.sync(&arena);
+        for x in 10..290 {
+            for y in 20..180 {
+                if (x / 3 + y / 7) % 2 == 0 {
+                    paint(
+                        &mut arena,
+                        layer,
+                        x,
+                        y,
+                        [(x % 256) as u8, (y % 256) as u8, 90, 200],
+                    );
+                }
+            }
+        }
+        // Zoomed out to a quarter, with only the left half on screen.
+        assert_eq!(view_step(0.25), 4);
+        assert_eq!(view_step(0.6), 1);
+        assert_eq!(view_step(0.01), 8);
+        compositor.refresh_view(
+            &arena,
+            &[[0, 0, 300, 200]],
+            Some(layer),
+            [0, 0, 150, 200],
+            4,
+        );
+        assert!(compositor.refining());
+        // Off screen: not drawn yet.
+        assert_eq!(compositor.pixel(250, 100), Some([255, 255, 255, 255]));
+        let mut rounds = 0;
+        while compositor.refine(&arena, [0, 0, 150, 200], 5) {
+            rounds += 1;
+            assert!(rounds < 100);
+        }
+        assert!(!compositor.refining());
+        let full = render(&arena, picture, [0, 0, 300, 200], RenderOptions::default());
+        for y in 0..200 {
+            for x in 0..300 {
+                let at = ((y * 300 + x) * 4) as usize;
+                let want = &full[at..at + 4];
+                let color = [0, 1, 2, 3].map(|c| f32::from(want[c]) / 255.0);
+                let got = compositor.pixel(x, y).unwrap();
+                let expect = shown(color, x, y);
+                for c in 0..3 {
+                    assert!(
+                        got[c].abs_diff(expect[c]) <= 2,
+                        "{x},{y}: {got:?} vs {expect:?}"
+                    );
+                }
+            }
+        }
+        // Writing to the painted layer without changing it is no change;
+        // anything else still is.
+        let before = compositor.display().2;
+        let _ = doc::raster_mut(&mut arena, layer);
+        compositor.accept(&arena, layer);
+        assert!(!compositor.sync(&arena), "nothing to recomposite");
+        assert_eq!(compositor.display().2, before);
+        let (mut spawn, _) =
+            doc::add_raster_layer(&arena, picture, Some(layer), "New".to_owned(), None).unwrap();
+        spawn.apply(&mut arena).unwrap();
+        compositor.accept(&arena, layer);
+        assert!(compositor.sync(&arena), "a new layer is a change");
+        // A full composite drops whatever still waited.
+        compositor.refresh_view(&arena, &[[0, 0, 300, 200]], Some(layer), [0, 0, 10, 10], 8);
+        paint(&mut arena, layer, 0, 0, [0, 0, 0, 255]);
+        compositor.sync(&arena);
+        assert!(!compositor.refining());
     }
 
     #[test]
@@ -1171,7 +2140,7 @@ mod tests {
         paint(&mut arena, layer, 6, 0, [0, 0, 0, 255]);
         paint(&mut arena, layer, 1, 3, [0, 0, 0, 255]);
         let before = compositor.display().2;
-        compositor.refresh_rects(&arena, &[[6, 0, 7, 1], [1, 3, 2, 4]]);
+        compositor.refresh_rects(&arena, &[[6, 0, 7, 1], [1, 3, 2, 4]], None);
         assert_eq!(compositor.pixel(6, 0), Some([0, 0, 0, 255]));
         assert_eq!(compositor.pixel(1, 3), Some([0, 0, 0, 255]));
         assert_eq!(
@@ -1264,14 +2233,26 @@ mod speed {
                 let frames = 60;
                 let start = Instant::now();
                 for frame in 0..frames {
+                    let first = Instant::now();
                     for step in 0..2 {
                         let i = (frame * 2 + step) as f32;
                         let raster = doc::raster_mut(&mut arena, top).unwrap();
                         stroke.to(raster, [900.0 + i * 3.0, 1500.0], 1.0, None);
                     }
+                    let painted = first.elapsed();
                     if tiles {
                         let rects = stroke.take_dirty_tiles();
-                        compositor.refresh_rects(&arena, &rects);
+                        let listed = first.elapsed();
+                        compositor.refresh_rects(&arena, &rects, Some(top));
+                        if frame == 0 {
+                            println!(
+                                "  first frame: brush {:.1} ms, tiles listed {:.1} ms, screen {:.1} ms ({} rects)",
+                                painted.as_secs_f64() * 1000.0,
+                                (listed - painted).as_secs_f64() * 1000.0,
+                                (first.elapsed() - listed).as_secs_f64() * 1000.0,
+                                rects.len()
+                            );
+                        }
                     } else if let Some(rect) = stroke.take_dirty() {
                         compositor.refresh(&arena, rect);
                     }

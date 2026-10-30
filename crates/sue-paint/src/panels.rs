@@ -2887,13 +2887,16 @@ impl SuePaint {
             thumb_area.center(),
             vec2(size[0] as f32, size[1] as f32) * scale,
         );
-        if let Some(texture) = cx.textures.texture(
+        // The canvas's own texture: only what changed goes up.
+        let compositor = &doc.compositor;
+        if let Some(texture) = cx.textures.texture_changed(
             texture_key(doc.picture, 0),
             version,
             size,
             4,
             pixels,
             doc.view.zoom >= 2.0,
+            &|since| compositor.changed_since(since),
         ) {
             ui.painter().image(
                 texture,

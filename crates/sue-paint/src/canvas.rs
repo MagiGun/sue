@@ -531,13 +531,15 @@ impl SuePaint {
                 let mut view = doc.view;
                 view.fit(rect, size);
                 let corners = view.corners(rect, size);
-                if let Some(texture) = cx.textures.texture(
+                let compositor = &doc.compositor;
+                if let Some(texture) = cx.textures.texture_changed(
                     crate::studio::texture_key(doc.picture, 0),
                     version,
                     size,
                     4,
                     pixels,
                     false,
+                    &|since| compositor.changed_since(since),
                 ) {
                     let mut mesh = Mesh::with_texture(texture);
                     for (corner, uv) in corners.iter().zip([
@@ -897,18 +899,40 @@ impl SuePaint {
             };
             ctx.set_cursor_icon(icon);
         }
-        // Show what the stroke painted this frame.
+        if let Some(doc) = self.docs.get(self.active) {
+            self.on_screen = on_screen(&doc.view, viewport, size, ctx.pixels_per_point());
+        }
+        let (visible, step) = self.on_screen;
+        // Show what the stroke painted this frame: only the tiles it
+        // changed, over the kept stacks around its layer, at the detail
+        // the screen shows.
         if let Some(Gesture::Stroke { stroke, offset, .. }) = &mut self.gesture
             && let Some(doc) = self.docs.get_mut(self.active)
         {
-            // Only the tiles the stroke changed this frame.
             let rects = shift_rects(&stroke.take_dirty_tiles(), *offset);
-            if !rects.is_empty() {
-                doc.compositor.refresh_rects(&cx.world.arena, &rects);
+            if rects.is_empty() {
+                // The layer was written to without a pixel changing: that
+                // is no reason to recomposite the picture.
+                doc.compositor.accept(&cx.world.arena, stroke.layer());
+            } else {
+                doc.compositor.refresh_view(
+                    &cx.world.arena,
+                    &rects,
+                    Some(stroke.layer()),
+                    visible,
+                    step,
+                );
             }
         }
         if self.gesture.is_some() {
             ctx.request_repaint();
+        } else if let Some(doc) = self.docs.get_mut(self.active) {
+            // Between strokes, what was shown coarse or was off screen
+            // comes to full detail, a little each frame.
+            let tiles = 32 * crate::composite::workers();
+            if doc.compositor.refine(&cx.world.arena, visible, tiles) {
+                ctx.request_repaint();
+            }
         }
     }
 
@@ -2458,8 +2482,17 @@ impl SuePaint {
                     stroke.end(raster, finish, selection);
                 }
                 let rects = shift_rects(&stroke.take_dirty_tiles(), offset);
-                if !rects.is_empty() {
-                    doc.compositor.refresh_rects(&cx.world.arena, &rects);
+                if rects.is_empty() {
+                    doc.compositor.accept(&cx.world.arena, layer);
+                } else {
+                    let (visible, step) = self.on_screen;
+                    doc.compositor.refresh_view(
+                        &cx.world.arena,
+                        &rects,
+                        Some(layer),
+                        visible,
+                        step,
+                    );
                 }
                 let eraser = stroke.tip().eraser;
                 let kept = drawn.map(|samples| crate::vector::Line::of(&stroke, samples, finish));
@@ -4020,4 +4053,40 @@ fn shift_rects(rects: &[[u32; 4]], offset: [i64; 2]) -> Vec<[u32; 4]> {
             ]
         })
         .collect()
+}
+
+/// The part of a picture of `size` that `view` shows in `viewport`, as
+/// `[x0, y0, x1, y1]` (with a pixel to spare), and how many picture pixels
+/// a side a screen pixel spans there.
+fn on_screen(
+    view: &crate::view::View,
+    viewport: Rect,
+    size: [u32; 2],
+    pixels_per_point: f32,
+) -> ([u32; 4], u32) {
+    let corners = [
+        viewport.left_top(),
+        viewport.right_top(),
+        viewport.right_bottom(),
+        viewport.left_bottom(),
+    ]
+    .map(|corner| view.to_picture(viewport, size, corner));
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for corner in corners {
+        x0 = x0.min(corner.x);
+        y0 = y0.min(corner.y);
+        x1 = x1.max(corner.x);
+        y1 = y1.max(corner.y);
+    }
+    let clamp = |value: f32, max: u32| (value.max(0.0) as u32).min(max);
+    let visible = [
+        clamp(x0 - 1.0, size[0]),
+        clamp(y0 - 1.0, size[1]),
+        clamp(x1 + 2.0, size[0]),
+        clamp(y1 + 2.0, size[1]),
+    ];
+    (
+        visible,
+        crate::composite::view_step(view.zoom * pixels_per_point),
+    )
 }

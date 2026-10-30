@@ -3853,6 +3853,95 @@ f 2 3 4
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Frame times of a huge brush on a big picture through the whole app
+    /// (`cargo test --release -p sue paint_frame_speed -- --ignored
+    /// --nocapture`).
+    #[test]
+    #[ignore = "a benchmark"]
+    fn paint_frame_speed() {
+        let (mut runtime, root) = runtime("paint-speed");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        for (key, value) in [("sue_paint.width", 4000), ("sue_paint.height", 3000)] {
+            let _ = runtime
+                .engine
+                .world
+                .rice
+                .set(key, sue_rice::RiceValue::Int(value));
+        }
+        runtime.request(ShellRequest::Open(paint.clone()), &mut NoTextures, now);
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            let begun = Instant::now();
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+            begun.elapsed().as_secs_f64() * 1000.0
+        };
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        for _ in 0..6 {
+            step(
+                &mut runtime,
+                vec![key(
+                    egui::Key::N,
+                    egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                )],
+            );
+        }
+        // ] makes the brush bigger: from 8 pixels to the largest.
+        for _ in 0..40 {
+            step(
+                &mut runtime,
+                vec![key(egui::Key::CloseBracket, egui::Modifiers::NONE)],
+            );
+        }
+        for _ in 0..5 {
+            step(&mut runtime, Vec::new());
+        }
+        let middle = paint_middle(&runtime);
+        let from = middle - vec2(250.0, 0.0);
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let mut times = Vec::new();
+        times.push(step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(from), press(from, true)],
+        ));
+        let mut at = from;
+        for _ in 0..120 {
+            let a = at + vec2(2.0, 0.3);
+            let b = a + vec2(2.0, -0.3);
+            at = b;
+            times.push(step(
+                &mut runtime,
+                vec![egui::Event::PointerMoved(a), egui::Event::PointerMoved(b)],
+            ));
+        }
+        let lift = step(&mut runtime, vec![press(at, false)]);
+        let after = step(&mut runtime, Vec::new());
+        let mut slowest: Vec<(usize, f64)> = times.iter().copied().enumerate().collect();
+        slowest.sort_by(|a, b| b.1.total_cmp(&a.1));
+        println!("slowest frames: {:?}", &slowest[..5]);
+        let mean = times.iter().sum::<f64>() / times.len() as f64;
+        let worst = times.iter().copied().fold(0.0, f64::max);
+        println!(
+            "4000x3000, 8 layers, brush huge: frame mean {mean:.2} ms, worst {worst:.2} ms, lift {lift:.2} ms, next {after:.2} ms"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn sue_paint_saves_as_a_project_or_any_picture_type() {
         let (mut runtime, root) = runtime("paint-save-as");

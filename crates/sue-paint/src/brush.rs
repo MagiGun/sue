@@ -728,6 +728,17 @@ impl Tip {
         }
     }
 
+    /// How far from the center a disc of `radius` covers pixels fully
+    /// (where [`Self::coverage`] is 1 without working it out), or 0.
+    #[must_use]
+    pub fn inner(&self, radius: f32) -> f32 {
+        if self.hardness >= 0.99 {
+            (radius - self.aa.edge() * 0.5).max(0.0)
+        } else {
+            radius * self.hardness.clamp(0.0, 0.98)
+        }
+    }
+
     /// `true` if the brush stamps dabs that add up (airbrushes, mixing
     /// brushes) rather than painting one continuous line.
     #[must_use]
@@ -785,6 +796,8 @@ struct TileState {
     /// Where its pixels changed since the screen last looked,
     /// `[x0, y0, x1, y1]` in layer pixels.
     fresh: Option<[u32; 4]>,
+    /// How many of its pixels the stroke covers fully.
+    full: u32,
 }
 
 /// How painted coverage turns into pixels.
@@ -1016,11 +1029,7 @@ impl Stroke {
                 // twenty-fifth of its width: a 1500 pixel brush paints
                 // every 30 pixels, not every 3, and looks the same.
                 let radius = self.tip.size * 0.5 * self.width;
-                if !self.tip.dabbed()
-                    && !self.flushing
-                    && self.total.is_none()
-                    && length < radius * 0.04
-                {
+                if !self.tip.dabbed() && !self.flushing && length < radius * 0.04 {
                     self.pending = Some(sample);
                     return;
                 }
@@ -1096,6 +1105,8 @@ impl Stroke {
             self.speed = sample.speed;
             self.to(raster, sample.at, sample.pressure, selection);
         }
+        // The path's last point, however close it came.
+        self.flush(raster, selection);
         self.total = None;
         self.flicked = 0.0;
         self.end_speeds = None;
@@ -1126,6 +1137,7 @@ impl Stroke {
                     bytes[at..at + row].copy_from_slice(&tile.before[line * row..(line + 1) * row]);
                 }
                 tile.mask.fill(0.0);
+                tile.full = 0;
                 tile.fresh = Some([x, y, x + w, y + h]);
                 self.dirty = Some(union(self.dirty, [x, y, x + w, y + h]));
             }
@@ -1239,9 +1251,14 @@ impl Stroke {
                 0.0
             };
             let (cx, cy) = (ax + dx * t, ay + dy * t);
-            let d = ((px - cx) * (px - cx) + (py - cy) * (py - cy)).sqrt();
+            let d2 = (px - cx) * (px - cx) + (py - cy) * (py - cy);
             let mut radius = ra + (rb - ra) * t;
             let mut strength = sa + (sb - sa) * t;
+            let inner = tip.inner(radius);
+            if radius >= 0.7 && d2 < inner * inner {
+                return strength;
+            }
+            let d = d2.sqrt();
             // A line thinner than a pixel keeps its weight as lighter ink,
             // unless it is never to get thinner than a pixel.
             if tip.at_least_one {
@@ -1344,6 +1361,8 @@ impl Stroke {
         let reach = radius + self.tip.aa.edge() + 1.0;
         let tip = self.tip;
         let shaped = shape(tip.shape);
+        // Within this distance a round tip covers fully.
+        let inner = tip.inner(radius);
         // A picture tip fills its square; a round one, its disc.
         let round = shaped.is_none();
         let span = move |py: f32| {
@@ -1366,8 +1385,11 @@ impl Stroke {
                     return shaped.at((px - x) / radius.max(0.5), (py - y) / radius.max(0.5))
                         * strength;
                 }
-                let d = ((px - x) * (px - x) + (py - y) * (py - y)).sqrt();
-                tip.coverage(d, radius) * strength
+                let d2 = (px - x) * (px - x) + (py - y) * (py - y);
+                if d2 < inner * inner {
+                    return strength;
+                }
+                tip.coverage(d2.sqrt(), radius) * strength
             },
         );
     }
@@ -1421,6 +1443,15 @@ impl Stroke {
         }
         let stride = width as usize * 4;
         let (tip, color, alpha_lock) = (self.tip, self.color, self.alpha_lock);
+        // A pixel the stroke covers fully is the paint itself (or nothing,
+        // for an eraser): written straight, without blending.
+        let solid = (!alpha_lock).then(|| {
+            if tip.eraser {
+                None
+            } else {
+                Some(color.map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8))
+            }
+        });
         let Some(bytes) = raster.bytes_mut() else {
             return;
         };
@@ -1446,6 +1477,7 @@ impl Stroke {
                         before,
                         mask: vec![0.0; rect[2] as usize * rect[3] as usize],
                         fresh: None,
+                        full: 0,
                     }
                 });
             }
@@ -1480,9 +1512,14 @@ impl Stroke {
                 }
                 let line = (y - band_y) as usize * stride;
                 for state in tiles.iter_mut() {
-                    let [rx, ry, rw, _] = state.rect;
+                    let [rx, ry, rw, rh] = state.rect;
                     let (sx0, sx1) = (row_x0.max(rx), row_x1.min(rx + rw));
                     if sx0 >= sx1 {
+                        continue;
+                    }
+                    // A tile the stroke covers fully already gets nothing
+                    // more from a pen.
+                    if matches!(mode, Mode::Max) && peak <= 1.0 && state.full == rw * rh {
                         continue;
                     }
                     let local_row = ((y - ry) * rw) as usize;
@@ -1514,11 +1551,23 @@ impl Stroke {
                                 if (*mask - old).abs() < 1e-6 {
                                     continue;
                                 }
+                                if *mask >= 1.0 && old < 1.0 {
+                                    state.full += 1;
+                                }
                                 let before = &state.before[local * 4..local * 4 + 4];
-                                paint_pixel(before, *mask, color, tip.eraser, alpha_lock)
+                                match solid {
+                                    Some(paint) if *mask >= 1.0 => match paint {
+                                        Some([r, g, b]) => [r, g, b, 255],
+                                        None => [before[0], before[1], before[2], 0],
+                                    },
+                                    _ => paint_pixel(before, *mask, color, tip.eraser, alpha_lock),
+                                }
                             }
                             Mode::Direct(rgb) => {
                                 *mask = old + (1.0 - old) * cover;
+                                if *mask >= 1.0 && old < 1.0 {
+                                    state.full += 1;
+                                }
                                 let now = [band[at], band[at + 1], band[at + 2], band[at + 3]];
                                 paint_pixel(&now, cover, rgb, tip.eraser, alpha_lock)
                             }
@@ -1537,9 +1586,7 @@ impl Stroke {
         let threads = if area < 1 << 17 || bands.len() < 2 {
             1
         } else {
-            std::thread::available_parallelism()
-                .map_or(1, std::num::NonZero::get)
-                .min(bands.len())
+            crate::composite::workers().min(bands.len())
         };
         if threads <= 1 {
             for (band_y, band, mut tiles) in bands {
@@ -2289,6 +2336,43 @@ mod tests {
         tap.to(&mut dot, [10.3, 10.0], 1.0, None);
         tap.end(&mut dot, Finish::default(), None);
         assert!(alpha(&dot, 10, 10) > 0);
+    }
+
+    #[test]
+    fn the_shortcuts_paint_what_the_full_arithmetic_does() {
+        // Inside the inner radius coverage is exactly full.
+        for hardness in [0.0, 0.3, 0.9, 1.0] {
+            for aa in AntiAlias::ALL {
+                let tip = Tip {
+                    hardness,
+                    aa,
+                    ..Tip::default()
+                };
+                for radius in [0.7, 3.0, 40.0, 900.0] {
+                    let inner = tip.inner(radius);
+                    for step in 0..20 {
+                        let d = inner * step as f32 / 20.0;
+                        if d >= inner {
+                            continue;
+                        }
+                        assert!(
+                            (tip.coverage(d, radius) - 1.0).abs() < 1e-6,
+                            "{hardness} {aa:?} r {radius} d {d}"
+                        );
+                    }
+                }
+            }
+        }
+        // A full pixel written straight is what blending gives.
+        for color in [[0.0, 0.0, 0.0], [1.0, 0.5, 0.25], [0.2, 0.9, 1.0]] {
+            for before in [[0, 0, 0, 0], [200, 10, 90, 128], [255, 255, 255, 255]] {
+                let blended = paint_pixel(&before, 1.0, color, false, false);
+                let straight = color.map(|v| (v * 255.0_f32).round() as u8);
+                assert_eq!(blended, [straight[0], straight[1], straight[2], 255]);
+                let erased = paint_pixel(&before, 1.0, color, true, false);
+                assert_eq!(erased, [before[0], before[1], before[2], 0]);
+            }
+        }
     }
 
     #[test]
