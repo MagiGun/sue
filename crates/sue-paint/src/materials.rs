@@ -131,11 +131,11 @@ pub fn library(folder: Option<&Path>) -> Vec<Material> {
         })
         .collect();
     if let Some(dir) = folder.map(|folder| folder.join("materials"))
-        && let Ok(entries) = std::fs::read_dir(dir)
+        && let Ok(entries) = sue_platform::list_dir(&dir, true)
     {
         let mut files: Vec<PathBuf> = entries
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
+            .into_iter()
+            .map(|entry| entry.path)
             .filter(|path| {
                 path.extension()
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))

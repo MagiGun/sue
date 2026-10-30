@@ -419,6 +419,15 @@ pub fn random_seed() -> u64 {
     (half() << 32) ^ half() ^ (js_sys::Date::now() as u64)
 }
 
+/// The processor cores the browser reports (`navigator.hardwareConcurrency`),
+/// at least one.
+pub(crate) fn logical_cores() -> usize {
+    web_sys::window()
+        .map(|window| window.navigator().hardware_concurrency())
+        .filter(|cores| cores.is_finite() && *cores >= 1.0)
+        .map_or(1, |cores| cores as usize)
+}
+
 /// `true` when touch is how the page is used (a phone or tablet), not
 /// only something the screen also takes.
 pub(crate) fn touch_screen() -> bool {

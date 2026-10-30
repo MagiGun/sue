@@ -307,15 +307,7 @@ impl Convert {
         {
             return;
         }
-        let head: Vec<u8> = std::fs::File::open(path)
-            .ok()
-            .map(|file| {
-                use std::io::Read;
-                let mut head = Vec::new();
-                let _ = file.take(4096).read_to_end(&mut head);
-                head
-            })
-            .unwrap_or_default();
+        let head: Vec<u8> = sue_platform::fs::read_head(path, 4096).unwrap_or_default();
         self.inputs.push(Input {
             source: Source::File(path.to_path_buf()),
             name: file_name(path),

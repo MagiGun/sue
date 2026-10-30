@@ -268,10 +268,10 @@ impl SuePaint {
         // The brush tips made from pictures.
         if let Some(entries) = folder
             .as_ref()
-            .and_then(|folder| std::fs::read_dir(folder.join("tips")).ok())
+            .and_then(|folder| sue_platform::list_dir(&folder.join("tips"), true).ok())
         {
-            for entry in entries.flatten() {
-                let path = entry.path();
+            for entry in entries {
+                let path = entry.path;
                 let name = path
                     .file_stem()
                     .map(|stem| stem.to_string_lossy().into_owned())

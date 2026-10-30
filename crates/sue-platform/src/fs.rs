@@ -260,6 +260,30 @@ pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     }
 }
 
+/// At most the first `limit` bytes of the file at `path`, such as the
+/// head that tells its format.
+///
+/// # Errors
+/// As [`read`].
+pub fn read_head(path: impl AsRef<Path>, limit: usize) -> io::Result<Vec<u8>> {
+    let path = path.as_ref();
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut bytes = crate::web::store::with(|vfs| vfs.read(path))?;
+        bytes.truncate(limit);
+        Ok(bytes)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::io::Read;
+        let mut head = Vec::new();
+        fs::File::open(path)?
+            .take(u64::try_from(limit).unwrap_or(u64::MAX))
+            .read_to_end(&mut head)?;
+        Ok(head)
+    }
+}
+
 /// The text of the UTF-8 file at `path`.
 ///
 /// # Errors

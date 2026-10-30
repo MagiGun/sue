@@ -102,6 +102,21 @@ pub fn random_seed() -> u64 {
     }
 }
 
+/// This run's process id; in the browser, which has none, a number
+/// drawn once per page so two tabs still tell their work apart.
+#[must_use]
+pub fn process_id() -> u32 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        static ID: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+        *ID.get_or_init(|| (web::random_seed() >> 32) as u32)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::process::id()
+    }
+}
+
 /// `false` where Sue cannot start threads of its own (the browser, as a
 /// static page without wasm threads): work meant for a worker runs where
 /// it is asked for.

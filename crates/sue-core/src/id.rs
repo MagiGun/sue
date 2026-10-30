@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn seeded_ids_stay_unique_valid_uuids() {
         let before: BTreeSet<EntityId> = (0..1_000).map(|_| EntityId::new()).collect();
-        seed_entity_ids(0x5EED_0F_5E55_1015);
+        seed_entity_ids(0x5EED_0F5E_5510_15AA);
         let after: BTreeSet<EntityId> = (0..1_000).map(|_| EntityId::new()).collect();
         assert_eq!(before.len() + after.len(), 2_000);
         assert!(before.is_disjoint(&after));

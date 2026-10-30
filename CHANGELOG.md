@@ -13,6 +13,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Try Sue in your browser at https://magigun.github.io/sue/try/, with
+  nothing to install: the Hub, Sue Paint, Sue Writer and the tools, opening
+  files from your computer (or dropped on the page), saving them as
+  downloads, and settings and unsaved work kept in the browser.
 - Footnotes in Sue Writer's PDFs print at the foot of their page, and
   endnotes (Insert, Endnote) gather at the end; Word and OpenDocument keep
   both.

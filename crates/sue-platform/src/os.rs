@@ -162,10 +162,14 @@ pub fn reveal_file(path: &Path) -> io::Result<()> {
 
 /// The name of the file manager [`reveal_file`] shows files in, for
 /// words such as "Show it in Explorer"; `None` where Sue cannot show a
-/// file in one (phones and tablets).
+/// file in one (phones, tablets and the browser).
 #[must_use]
 pub fn file_manager() -> Option<&'static str> {
-    if cfg!(any(target_os = "android", target_os = "ios")) {
+    if cfg!(any(
+        target_os = "android",
+        target_os = "ios",
+        target_arch = "wasm32"
+    )) {
         None
     } else if cfg!(target_os = "windows") {
         Some("Explorer")
@@ -205,7 +209,19 @@ pub fn shown_place(path: &Path) -> Option<ShownPlace> {
     {
         crate::picks::native_shown(path)
     }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    // In the browser a picked or saved file is known by its name alone:
+    // the folder it came from or went to stays the browser's secret.
+    #[cfg(target_arch = "wasm32")]
+    {
+        path.starts_with(crate::web::page::PICKED)
+            .then(|| path.file_name())
+            .flatten()
+            .map(|name| ShownPlace {
+                name: name.to_string_lossy().into_owned(),
+                folder: None,
+            })
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))]
     {
         let _ = path;
         None

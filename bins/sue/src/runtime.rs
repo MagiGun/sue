@@ -256,12 +256,13 @@ impl Runtime {
             return self;
         }
         let dir = self.engine.paths.data_dir.join("work");
-        let first = !dir.join("recent.txt").exists();
+        let first = !sue_platform::fs::exists(dir.join("recent.txt"));
         self.work = WorkList::open(dir);
         // Sue Paint kept its own recent files before Sue did.
         if first
-            && let Ok(text) =
-                std::fs::read_to_string(self.engine.paths.data_dir.join("paint").join("recent.txt"))
+            && let Ok(text) = sue_platform::fs::read_to_string(
+                self.engine.paths.data_dir.join("paint").join("recent.txt"),
+            )
         {
             let paint = AppletId::new(sue_paint::ID).ok();
             let now = unix_now();
@@ -722,7 +723,7 @@ impl Runtime {
             self.shell.notify(tr!("that-unsaved-work-is-gone"), true);
             return;
         };
-        let file = std::fs::read(&kept.file)
+        let file = sue_platform::fs::read(&kept.file)
             .map_err(|error| error.to_string())
             .and_then(|bytes| SueFile::from_bytes(&bytes).map_err(|error| error.to_string()));
         let file = match file {

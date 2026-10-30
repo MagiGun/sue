@@ -247,8 +247,13 @@ impl HardwareCapabilities {
     /// the core count. Everything else is reported as unknown.
     #[must_use]
     pub fn probe_portable() -> Self {
+        // std knows no core count in the browser; the page does.
+        #[cfg(target_arch = "wasm32")]
+        let logical_cores = crate::web::page::logical_cores();
+        #[cfg(not(target_arch = "wasm32"))]
+        let logical_cores = std::thread::available_parallelism().map_or(1, usize::from);
         Self {
-            logical_cores: std::thread::available_parallelism().map_or(1, usize::from),
+            logical_cores,
             display_refresh_hz: Self::DEFAULT_REFRESH_HZ,
             graphics_api: GraphicsApi::None,
             gpu_tier: GpuTier::Unknown,

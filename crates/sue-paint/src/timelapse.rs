@@ -25,12 +25,12 @@ pub fn folder(base: &Path, picture: EntityId) -> PathBuf {
 /// The frames kept in `dir`, in order.
 #[must_use]
 pub fn frames(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
+    let Ok(entries) = sue_platform::list_dir(dir, true) else {
         return Vec::new();
     };
     let mut out: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
+        .into_iter()
+        .map(|entry| entry.path)
         .filter(|path| path.extension().is_some_and(|ext| ext == "jpg"))
         .collect();
     out.sort();
