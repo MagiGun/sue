@@ -5287,7 +5287,7 @@ f 2 3 4
         command(&mut runtime, "table.column_right");
         assert_eq!(table_of(&runtime).size(), (2, 3));
         // The table goes out in a web page and a Word file.
-        for (format, needle) in [("html", "<td>"), ("docx", "")] {
+        for (format, needle) in [("html", "<td>"), ("docx", ""), ("odt", "")] {
             let home = runtime.engine.catalog.folders["home"].clone();
             std::fs::create_dir_all(&home).unwrap();
             let path = home.join(format!("tables.{format}"));
@@ -5329,6 +5329,14 @@ f 2 3 4
             tables(&runtime),
             before + 1,
             "the Word file's table came back"
+        );
+        // So does an OpenDocument file's.
+        let odt = runtime.engine.catalog.folders["home"].join("tables.odt");
+        runtime.open_path(&odt, &mut NoTextures, start);
+        assert_eq!(
+            tables(&runtime),
+            before + 2,
+            "the OpenDocument table came back"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

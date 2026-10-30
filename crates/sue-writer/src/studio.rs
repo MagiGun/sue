@@ -1059,7 +1059,9 @@ impl SueWriter {
             "binder.new_folder" => self.add_item(cx, true),
             "file.open" | "file.import" => {
                 let pick = FilePick::open(Some(me()), "import", &tr!("import-a-document"))
-                    .extensions(&["docx", "md", "markdown", "txt", "html", "htm", "fountain"])
+                    .extensions(&[
+                        "docx", "odt", "md", "markdown", "txt", "html", "htm", "fountain",
+                    ])
                     .starting_in(Self::export_dir(cx));
                 cx.request(ShellRequest::PickFile(pick));
             }
@@ -2187,6 +2189,7 @@ impl SueApplet for SueWriter {
                 matches!(
                     ext.as_str(),
                     "docx"
+                        | "odt"
                         | "fountain"
                         | "md"
                         | "markdown"

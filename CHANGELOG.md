@@ -13,6 +13,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Writer opens OpenDocument (`.odt`) files from LibreOffice, with their
+  styles, lists, links, footnotes, tables and table of contents.
 - All Capitals, Grow Font and Shrink Font in Sue Writer's Format, Text,
   and Insert, Formatting Mark for non-breaking spaces and hyphens.
 - Word files opened in Sue Writer bring their tables as tables.

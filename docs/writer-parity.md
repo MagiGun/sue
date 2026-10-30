@@ -307,7 +307,7 @@ of work is by how much people miss each one (the plan at the end).
 | DOCX export | WL | done | Styles, lists, footnotes, links, pictures |
 | DOCX import | WL | partial | Text, styles, lists, footnotes, links, tables; no pictures, comments or changes |
 | ODT export | L | done | |
-| ODT import | L | missing | |
+| ODT import | L | done | Styles, lists, links, footnotes, tables, contents; no pictures or comments yet |
 | RTF export | WL | done | |
 | RTF import | WL | missing | |
 | PDF export | WL | done | Typeset with the project's fonts |

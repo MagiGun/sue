@@ -651,10 +651,11 @@ page when you open it and closes when you pick a scene. **On a tablet** the
 toolbar's buttons are larger, for fingers.
 
 Sue Writer works with the rest of Sue. Pictures from Sue Paint go straight
-into your text with the Sue menu's Send To. Open a Word, Markdown, HTML or
-plain text file anywhere in Sue and it comes into Sue Writer, formatting and
-all; a Word file's tables come in as tables, heading rows and column widths
-kept.
+into your text with the Sue menu's Send To. Open a Word, OpenDocument
+(LibreOffice), Markdown, HTML or plain text file anywhere in Sue and it comes
+into Sue Writer, formatting and all; tables come in as tables, heading rows
+and column widths kept, and an OpenDocument table of contents comes in as
+one.
 Everything you do can be undone, and it all saves inside your project.
 
 ---

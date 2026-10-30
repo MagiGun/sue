@@ -442,8 +442,9 @@ pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>,
     })
 }
 
-/// A document file read into rich text, by its extension: Word (its
-/// tables as table entities), HTML, Markdown or plain text.
+/// A document file read into rich text, by its extension: Word or
+/// OpenDocument (their tables as table entities), HTML, Markdown or plain
+/// text.
 ///
 /// # Errors
 /// If the file cannot be read as that kind.
@@ -464,6 +465,7 @@ pub fn import(name: &str, bytes: &[u8]) -> Result<sue_io::publish::Imported, Str
     };
     match ext.as_str() {
         "docx" => sue_io::publish::read_docx(bytes),
+        "odt" => sue_io::publish::read_odt(bytes),
         "html" | "htm" | "xhtml" => Ok(plain(sue_io::publish::from_html(&text()))),
         "md" | "markdown" => Ok(plain(sue_io::publish::from_markdown(&text()))),
         "txt" | "text" | "" | "fountain" => {

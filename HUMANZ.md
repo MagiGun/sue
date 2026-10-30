@@ -1702,7 +1702,13 @@ Markdown (pipe tables) and plain text (tab-separated rows) write them.
 a table entity (`sue_model::text_table`, with `w:tblHeader` rows and the
 `w:gridCol` widths) set in the text, handing the entities back in
 `Imported` for the importer to spawn in the same step; `from_docx` keeps
-reading tables as words for callers that want text alone.
+reading tables as words for callers that want text alone. `read_odt` reads
+OpenDocument text the same way: named and automatic styles (with their
+parents) for headings, alignment, page breaks and character formatting,
+nested lists numbered or bulleted by their list styles, links, footnotes,
+tables with their header rows and column widths, and a table of contents
+as a contents entity; frames and annotations are left out. The registry
+reads OpenDocument now too.
 
 **Spelling (`sue-type::spell`).** Every studio that sets text checks
 spelling the same way. English ships inside Sue: the public-domain Moby

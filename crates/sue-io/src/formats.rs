@@ -1114,7 +1114,7 @@ impl PublishFormat {
                     "application/vnd.oasis.opendocument.text",
                 ),
                 write: p::to_odt,
-                read: None,
+                read: Some(p::from_odt),
             },
             Self {
                 info: info("epub", "EPUB e-book", &["epub"], "application/epub+zip"),
