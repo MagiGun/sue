@@ -11,6 +11,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-10-30
+
 ### Added
 
 - 3D layers in Sue Paint take Clip Studio Paint's camera presets (Front,
@@ -28,10 +30,11 @@ follow [Semantic Versioning](https://semver.org/).
   Walk, Run, Sit, Arms up, Think), Flip pose and Reset pose. Figures draw
   shaded, as line art or both, and Convert to Lines and Tones turns them
   into line art and tone to draw over.
-- Draft translations into French, German, Arabic, Italian, Brazilian
-  Portuguese and Simplified Chinese, and Sue Writer in Spanish and
-  Japanese, each waiting for a native speaker's review. Pick one in
-  Settings, Language.
+- Translations into French, German, Spanish, Japanese, Arabic, Italian,
+  Brazilian Portuguese and Simplified Chinese, covering Sue Paint and
+  Settings with Clip Studio Paint's own words for its menus and tools,
+  each waiting for a native speaker's review. Pick one in Settings,
+  Language.
 - `docs/paint-parity.md`: every Clip Studio Paint feature with where Sue
   Paint stands on it, for people and agents choosing what to build next.
 
@@ -473,7 +476,8 @@ The first release.
 - Packages for Windows, macOS, Linux, Android and iOS, under the Sayn
   License.
 
-[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.5...HEAD
+[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.6...HEAD
+[0.0.6]: https://github.com/MagiGun/sue/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/MagiGun/sue/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/MagiGun/sue/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/MagiGun/sue/compare/v0.0.2...v0.0.3
