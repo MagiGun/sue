@@ -334,15 +334,28 @@ fn tall_slider(
                 );
             }
         }
-        // Solid black at the top, clear at the bottom.
+        // Solid black at the top, clear at the bottom, faded as Clip
+        // Studio fades it: evenly to the eye, so it stays dark to about
+        // halfway. The screen blends in linear light, so each step's
+        // alpha is the one that darkens as much as the opacity does on
+        // screen.
         let mut mesh = Mesh::default();
-        let (top, bottom) = (Color32::BLACK, Color32::TRANSPARENT);
-        mesh.colored_vertex(track.left_top(), top);
-        mesh.colored_vertex(track.right_top(), top);
-        mesh.colored_vertex(track.right_bottom(), bottom);
-        mesh.colored_vertex(track.left_bottom(), bottom);
-        mesh.add_triangle(0, 1, 2);
-        mesh.add_triangle(0, 2, 3);
+        let steps = 48;
+        for step in 0..=steps {
+            let t = step as f32 / steps as f32;
+            let opacity = 1.0 - t;
+            let alpha = 1.0
+                - egui::ecolor::linear_f32_from_gamma_u8(((1.0 - opacity) * 255.0).round() as u8);
+            let color = Color32::from_black_alpha((alpha * 255.0).round() as u8);
+            let y = track.top() + t * track.height();
+            mesh.colored_vertex(pos2(track.left(), y), color);
+            mesh.colored_vertex(pos2(track.right(), y), color);
+            if step > 0 {
+                let at = step * 2;
+                mesh.add_triangle(at - 2, at - 1, at + 1);
+                mesh.add_triangle(at - 2, at + 1, at);
+            }
+        }
         painter.add(Shape::mesh(mesh));
     } else {
         // Dark above the knob, lit from the bottom up to it.
