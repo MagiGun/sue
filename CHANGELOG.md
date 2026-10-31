@@ -31,6 +31,11 @@ follow [Semantic Versioning](https://semver.org/).
   easy to reach with a thumb, and menus have taller rows without keyboard
   shortcuts.
 - On phones the update window is a sheet across the bottom of the screen.
+- Sue Paint's side palettes fold and close as in Clip Studio Paint, on
+  both sides: the single arrow at the top folds the side's palette columns
+  into icons (the tools stay) and opens them again, and the double arrow
+  closes the whole side to a thin bar whose arrows bring it back. Both
+  are kept with the workspace.
 - Sue Paint's Tool Sliders look like Clip Studio Paint's: the size and
   opacity in round badges, the size slider lit from the bottom up to its
   knob, and the opacity slider solid black at the top fading to clear.

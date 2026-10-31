@@ -211,7 +211,23 @@ pub(crate) struct Dock {
     pub menu: Option<Palette>,
     /// The timeline's height.
     pub timeline: f32,
+    /// Each side's palette columns folded into icons (Clip Studio Paint's
+    /// single arrow), left then right. The tools stay.
+    pub folded: [bool; 2],
+    /// Each side closed whole, palettes and icons (Clip Studio Paint's
+    /// double arrow), left then right.
+    pub hidden: [bool; 2],
     drag: Option<Drag>,
+}
+
+impl Side {
+    /// Its place in [`Dock::folded`] and [`Dock::hidden`].
+    pub(crate) fn index(self) -> usize {
+        match self {
+            Side::Left => 0,
+            Side::Right => 1,
+        }
+    }
 }
 
 impl Default for Dock {
@@ -242,6 +258,8 @@ impl Default for Dock {
             popped: None,
             menu: None,
             timeline: 160.0,
+            folded: [false; 2],
+            hidden: [false; 2],
             drag: None,
         }
     }
@@ -250,9 +268,12 @@ impl Default for Dock {
 /// The width of the icon strip.
 pub(crate) const STRIP: f32 = 34.0;
 
-/// The bar at the top of every column, with Clip Studio Paint's arrows
-/// that fold the column into the strip.
+/// The bar at the top of every column and strip, with Clip Studio Paint's
+/// arrows: one folds the side's columns into icons, two close the side.
 pub(crate) const COLUMN_BAR: f32 = 12.0;
+
+/// How wide a closed side's bar is, with its arrows to open it again.
+pub(crate) const HANDLE: f32 = 14.0;
 
 /// The canvas never gets narrower than this while columns can collapse.
 const MIN_CANVAS: f32 = 300.0;
@@ -269,11 +290,17 @@ pub(crate) struct Laid {
     pub splits: Vec<(Side, usize, Palette, Palette, Rect, f32)>,
     /// Columns' inner edges people can drag: side, column, rect.
     pub edges: Vec<(Side, usize, Rect)>,
-    /// The icon strip, when it shows.
+    /// The icon strip at the right, when it shows.
     pub strip: Option<Rect>,
-    /// Palettes in the strip: the collapsed ones, then those the window
-    /// had no room for.
+    /// Palettes in the right strip: the collapsed ones, the right side's
+    /// folded columns, then those the window had no room for.
     pub icons: Vec<Palette>,
+    /// The icon strip at the left, while the left columns are folded.
+    pub left_strip: Option<Rect>,
+    /// Palettes in the left strip.
+    pub left_icons: Vec<Palette>,
+    /// Closed sides' bars.
+    pub handles: Vec<(Side, Rect)>,
     /// What is left for the canvas and the timeline.
     pub center: Rect,
 }
@@ -334,6 +361,15 @@ impl Dock {
             out.push(format!("icon {}", palette.title()));
         }
         out.push(format!("timeline {}", self.timeline));
+        for side in [Side::Left, Side::Right] {
+            let name = if side == Side::Left { "left" } else { "right" };
+            if self.folded[side.index()] {
+                out.push(format!("fold {name}"));
+            }
+            if self.hidden[side.index()] {
+                out.push(format!("hide {name}"));
+            }
+        }
         out
     }
 
@@ -396,6 +432,14 @@ impl Dock {
                 (Some("timeline"), Some(height), None) => {
                     if let Ok(height) = height.parse() {
                         dock.timeline = height;
+                    }
+                }
+                (Some(what @ ("fold" | "hide")), Some(side @ ("left" | "right")), None) => {
+                    let at = usize::from(side == "right");
+                    if what == "fold" {
+                        dock.folded[at] = true;
+                    } else {
+                        dock.hidden[at] = true;
                     }
                 }
                 _ => {}
@@ -524,21 +568,48 @@ impl Dock {
                 })
                 .unwrap_or(column.width)
         };
-        // Columns that show anything, and their widths.
+        let tools = |column: &Column| {
+            column
+                .palettes
+                .iter()
+                .any(|(palette, _)| *palette == Palette::Tools)
+        };
+        // Columns that show anything, and their widths. A closed side shows
+        // nothing; a folded side keeps its tools and folds the rest into
+        // icons.
         let mut sides: Vec<(Side, usize, f32, bool)> = Vec::new();
+        let mut left_icons: Vec<Palette> = Vec::new();
+        let mut folded_right: Vec<Palette> = Vec::new();
         for (side, columns) in [(Side::Left, &self.left), (Side::Right, &self.right)] {
+            if self.hidden[side.index()] {
+                continue;
+            }
             for (index, column) in columns.iter().enumerate() {
-                if !visible(column).is_empty() {
+                if visible(column).is_empty() {
+                    continue;
+                }
+                if self.folded[side.index()] && !tools(column) {
+                    let into = if side == Side::Left {
+                        &mut left_icons
+                    } else {
+                        &mut folded_right
+                    };
+                    into.extend(visible(column).iter().map(|(palette, _)| *palette));
+                } else {
                     sides.push((side, index, width_of(column), true));
                 }
             }
         }
-        let mut icons: Vec<Palette> = self
-            .iconized
-            .iter()
-            .copied()
-            .filter(|palette| shown(*palette))
-            .collect();
+        let mut icons: Vec<Palette> = if self.hidden[1] {
+            Vec::new()
+        } else {
+            self.iconized
+                .iter()
+                .copied()
+                .filter(|palette| shown(*palette))
+                .collect()
+        };
+        icons.extend(folded_right);
         // Too narrow: the widest columns collapse to icons (never the tools).
         loop {
             let used: f32 = sides
@@ -546,7 +617,8 @@ impl Dock {
                 .filter(|(_, _, _, open)| *open)
                 .map(|(_, _, width, _)| width)
                 .sum();
-            let strip = if icons.is_empty() { 0.0 } else { STRIP };
+            let strip = if icons.is_empty() { 0.0 } else { STRIP }
+                + if left_icons.is_empty() { 0.0 } else { STRIP };
             if used + strip + MIN_CANVAS <= body.width() {
                 break;
             }
@@ -581,8 +653,20 @@ impl Dock {
                 .collect()
         };
         let (left, right) = (open(Side::Left), open(Side::Right));
-        let left_total: f32 = left.iter().map(|(_, width)| width).sum();
-        let strip_width = if icons.is_empty() { 0.0 } else { STRIP };
+        // A folded side keeps its strip, even empty, for its arrows.
+        let strip_width = if icons.is_empty() && !(self.folded[1] && !self.hidden[1]) {
+            0.0
+        } else {
+            STRIP
+        };
+        let left_strip_width = if self.folded[0] && !self.hidden[0] {
+            STRIP
+        } else {
+            0.0
+        };
+        let left_handle = if self.hidden[0] { HANDLE } else { 0.0 };
+        let right_handle = if self.hidden[1] { HANDLE } else { 0.0 };
+        let left_total: f32 = left.iter().map(|(_, width)| width).sum::<f32>() + left_strip_width;
         let right_total: f32 = right.iter().map(|(_, width)| width).sum::<f32>() + strip_width;
         let mut laid = Laid {
             docked: Vec::new(),
@@ -591,8 +675,23 @@ impl Dock {
             edges: Vec::new(),
             strip: None,
             icons,
+            left_strip: None,
+            left_icons,
+            handles: Vec::new(),
             center: body,
         };
+        if self.hidden[0] {
+            laid.handles.push((
+                Side::Left,
+                Rect::from_min_max(body.min, pos2(body.left() + HANDLE, body.bottom())),
+            ));
+        }
+        if self.hidden[1] {
+            laid.handles.push((
+                Side::Right,
+                Rect::from_min_max(pos2(body.right() - HANDLE, body.top()), body.max),
+            ));
+        }
         let place_column = |laid: &mut Laid, side: Side, index: usize, rect: Rect| {
             let column = match side {
                 Side::Left => &self.left[index],
@@ -648,14 +747,21 @@ impl Dock {
                 ));
             }
         };
-        let mut x = body.left() - hide * left_total;
+        let mut x = body.left() + left_handle - hide * left_total;
+        if left_strip_width > 0.0 {
+            laid.left_strip = Some(Rect::from_min_max(
+                pos2(x, body.top()),
+                pos2(x + STRIP, body.bottom()),
+            ));
+            x += STRIP;
+        }
         for (index, width) in &left {
             let rect = Rect::from_min_max(pos2(x, body.top()), pos2(x + width, body.bottom()));
             place_column(&mut laid, Side::Left, *index, rect);
             x = rect.right();
         }
         let center_left = x;
-        let mut x = body.right() + hide * right_total;
+        let mut x = body.right() - right_handle + hide * right_total;
         if strip_width > 0.0 {
             laid.strip = Some(Rect::from_min_max(
                 pos2(x - STRIP, body.top()),
@@ -681,6 +787,44 @@ impl Dock {
             Side::Right => self.right.get_mut(index),
         }
     }
+}
+
+/// One or two small arrows in `rect` pointing right (`point` 1) or left
+/// (-1), as Clip Studio Paint's palette arrows. `true` when clicked.
+fn arrows(
+    ui: &mut Ui,
+    rect: Rect,
+    count: usize,
+    point: f32,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    tip: &str,
+    theme: &Theme,
+) -> bool {
+    let response = ui
+        .interact(rect, Id::unique(id), Sense::click())
+        .on_hover_text(tip);
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, theme.hover);
+    }
+    let color = if response.hovered() {
+        theme.text
+    } else {
+        theme.muted
+    };
+    let c = rect.center();
+    let offsets: &[f32] = if count == 2 { &[-2.0, 2.0] } else { &[0.0] };
+    for offset in offsets {
+        let x = c.x + offset;
+        ui.painter().add(egui::Shape::line(
+            vec![
+                pos2(x - 1.5 * point, c.y - 3.0),
+                pos2(x + 1.5 * point, c.y),
+                pos2(x - 1.5 * point, c.y + 3.0),
+            ],
+            Stroke::new(1.0, color),
+        ));
+    }
+    response.clicked()
 }
 
 impl SuePaint {
@@ -830,68 +974,10 @@ impl SuePaint {
         let panels = self.panels;
         let shown = move |palette: Palette| palette.shown(&panels);
         let laid = self.dock.layout(body, &shown, self.hide);
-        let mut fold = None;
-        for (side, index, rect) in &laid.columns {
+        for (_, _, rect) in &laid.columns {
             ui.painter().rect_filled(*rect, 0.0, theme.panel);
-            // The column's bar, its arrows pointing out to fold it away.
             let bar = Rect::from_min_size(rect.min, vec2(rect.width(), COLUMN_BAR));
             ui.painter().rect_filled(bar, 0.0, theme.void);
-            let arrows = Rect::from_min_size(
-                match side {
-                    Side::Left => bar.min,
-                    Side::Right => pos2(bar.right() - 16.0, bar.top()),
-                },
-                vec2(16.0, COLUMN_BAR),
-            );
-            let response = ui
-                .interact(
-                    arrows,
-                    Id::unique(("sue-paint-fold-column", *side == Side::Left, *index)),
-                    Sense::click(),
-                )
-                .on_hover_text(tr!("fold-column-into-icons"));
-            let color = if response.hovered() {
-                theme.text
-            } else {
-                theme.muted
-            };
-            let point = if *side == Side::Left { -1.0 } else { 1.0 };
-            for step in [0.0, 4.0] {
-                let x = arrows.center().x + (step - 2.0) * point;
-                ui.painter().add(egui::Shape::line(
-                    vec![
-                        pos2(x - 1.5 * point, arrows.center().y - 3.0),
-                        pos2(x + 1.5 * point, arrows.center().y),
-                        pos2(x - 1.5 * point, arrows.center().y + 3.0),
-                    ],
-                    Stroke::new(1.0, color),
-                ));
-            }
-            if response.clicked() {
-                fold = Some((*side, *index));
-            }
-        }
-        if let Some((side, index)) = fold {
-            let column = match side {
-                Side::Left => self.dock.left.get(index),
-                Side::Right => self.dock.right.get(index),
-            };
-            let palettes: Vec<Palette> = column
-                .map(|column| {
-                    column
-                        .palettes
-                        .iter()
-                        .map(|(palette, _)| *palette)
-                        .collect()
-                })
-                .unwrap_or_default();
-            // The tools stay, as Clip Studio Paint keeps its tool strip.
-            for palette in palettes
-                .into_iter()
-                .filter(|palette| *palette != Palette::Tools)
-            {
-                self.dock.iconize(palette);
-            }
         }
         for (palette, rect) in &laid.docked {
             self.draw_palette(ui, *palette, *rect, cx, theme);
@@ -912,8 +998,12 @@ impl SuePaint {
             self.splitters(ui, &laid, theme);
         }
         if let Some(strip) = laid.strip {
-            self.strip_ui(ui, strip, &laid.icons, cx, theme);
+            self.strip_ui(ui, strip, Side::Right, &laid.icons, cx, theme);
         }
+        if let Some(strip) = laid.left_strip {
+            self.strip_ui(ui, strip, Side::Left, &laid.left_icons, cx, theme);
+        }
+        self.side_arrows(ui, &laid, theme);
         if self.ready {
             self.floating_ui(ui, body, cx, theme);
         }
@@ -1067,21 +1157,116 @@ impl SuePaint {
         }
     }
 
-    /// The icon strip at the far right, and the collapsed palette it shows.
+    /// Clip Studio Paint's arrows at the top of each side: one folds the
+    /// side's palette columns into icons and opens them again, two close
+    /// the whole side; a closed side leaves a thin bar whose arrows open it.
+    fn side_arrows(&mut self, ui: &mut Ui, laid: &Laid, theme: &Theme) {
+        for (side, handle) in &laid.handles {
+            ui.painter().rect_filled(*handle, 0.0, theme.panel);
+            let edge = match side {
+                Side::Left => handle.right(),
+                Side::Right => handle.left(),
+            };
+            ui.painter().vline(edge, handle.y_range(), theme.hairline());
+            let top = Rect::from_min_size(handle.min, vec2(handle.width(), COLUMN_BAR + 4.0));
+            // Pointing in: the side comes back.
+            let point = if *side == Side::Left { 1.0 } else { -1.0 };
+            let id = ("sue-paint-open-side", *side == Side::Left);
+            if arrows(ui, top, 2, point, id, &tr!("show-palettes"), theme) {
+                self.dock.hidden[side.index()] = false;
+            }
+        }
+        for side in [Side::Left, Side::Right] {
+            if self.dock.hidden[side.index()] {
+                continue;
+            }
+            // The arrows sit at the outer end of the outermost bar: the
+            // strip's, or the outermost column's.
+            let strip = match side {
+                Side::Left => laid.left_strip,
+                Side::Right => laid.strip,
+            };
+            let outermost = laid
+                .columns
+                .iter()
+                .filter(|(found, _, _)| *found == side)
+                .map(|(_, _, rect)| *rect)
+                .reduce(|a, b| match side {
+                    Side::Left if b.left() < a.left() => b,
+                    Side::Right if b.right() > a.right() => b,
+                    _ => a,
+                });
+            let Some(host) = strip.or(outermost) else {
+                continue;
+            };
+            let bar = Rect::from_min_size(host.min, vec2(host.width(), COLUMN_BAR));
+            let out = if side == Side::Left { -1.0 } else { 1.0 };
+            let (close_at, fold_at) = match side {
+                Side::Left => (bar.left(), bar.left() + 16.0),
+                Side::Right => (bar.right() - 16.0, bar.right() - 32.0),
+            };
+            let close = Rect::from_min_size(pos2(close_at, bar.top()), vec2(16.0, COLUMN_BAR));
+            let close_id = ("sue-paint-close-side", side == Side::Left);
+            if arrows(ui, close, 2, out, close_id, &tr!("hide-palettes"), theme) {
+                self.dock.hidden[side.index()] = true;
+                self.dock.popped = None;
+            }
+            let columns = match side {
+                Side::Left => &self.dock.left,
+                Side::Right => &self.dock.right,
+            };
+            let foldable = columns.iter().any(|column| {
+                !column
+                    .palettes
+                    .iter()
+                    .any(|(palette, _)| *palette == Palette::Tools)
+            });
+            if !foldable {
+                continue;
+            }
+            let folded = self.dock.folded[side.index()];
+            let fold = Rect::from_min_size(pos2(fold_at, bar.top()), vec2(16.0, COLUMN_BAR));
+            let (point, tip) = if folded {
+                (-out, tr!("open-palettes"))
+            } else {
+                (out, tr!("fold-column-into-icons"))
+            };
+            let fold_id = ("sue-paint-fold-side", side == Side::Left);
+            if arrows(ui, fold, 1, point, fold_id, &tip, theme) {
+                self.dock.folded[side.index()] = !folded;
+                self.dock.popped = None;
+            }
+        }
+    }
+
+    /// An icon strip (the right one, or the left one while the left side
+    /// is folded), and the collapsed palette it shows.
     fn strip_ui(
         &mut self,
         ui: &mut Ui,
         strip: Rect,
+        side: Side,
         icons_shown: &[Palette],
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
         ui.painter().rect_filled(strip, 0.0, theme.panel);
-        ui.painter()
-            .vline(strip.left(), strip.y_range(), theme.hairline());
+        ui.painter().rect_filled(
+            Rect::from_min_size(strip.min, vec2(strip.width(), COLUMN_BAR)),
+            0.0,
+            theme.void,
+        );
+        let edge = match side {
+            Side::Left => strip.right(),
+            Side::Right => strip.left(),
+        };
+        ui.painter().vline(edge, strip.y_range(), theme.hairline());
         for (index, palette) in icons_shown.iter().enumerate() {
             let rect = Rect::from_min_size(
-                pos2(strip.left() + 4.0, strip.top() + 6.0 + index as f32 * 32.0),
+                pos2(
+                    strip.left() + 4.0,
+                    strip.top() + COLUMN_BAR + 6.0 + index as f32 * 32.0,
+                ),
                 vec2(26.0, 26.0),
             );
             let open = self.dock.popped == Some(*palette);
@@ -1110,7 +1295,10 @@ impl SuePaint {
             Some(width) => vec2(width + 8.0, (strip.height() * 0.7).max(240.0)),
             None => vec2(280.0, (strip.height() * 0.7).clamp(220.0, 560.0)),
         };
-        let at = pos2(strip.left() - size.x - 4.0, strip.top() + 4.0);
+        let at = match side {
+            Side::Left => pos2(strip.right() + 4.0, strip.top() + 4.0),
+            Side::Right => pos2(strip.left() - size.x - 4.0, strip.top() + 4.0),
+        };
         let area = egui::Area::new(Id::unique(("sue-paint-popped", palette.title())))
             .order(Order::Foreground)
             .fade_in(false)
@@ -1362,6 +1550,37 @@ mod tests {
             laid.docked.iter().any(|(p, _)| *p == Palette::Tools),
             "the tools stay"
         );
+    }
+
+    #[test]
+    fn sides_fold_into_icons_and_close_and_come_back() {
+        let body = Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 900.0));
+        let mut dock = Dock::default();
+        let open = dock.layout(body, &all, 0.0);
+        // The right side folded: its palettes are icons in its strip.
+        dock.folded[1] = true;
+        let laid = dock.layout(body, &all, 0.0);
+        assert!(laid.icons.contains(&Palette::Navigator));
+        assert!(!laid.docked.iter().any(|(p, _)| *p == Palette::Layer));
+        assert_eq!(laid.center.right(), 1600.0 - STRIP, "only the strip");
+        // The left side folded: the tools stay, the rest goes to a strip.
+        dock.folded[0] = true;
+        let laid = dock.layout(body, &all, 0.0);
+        assert!(laid.docked.iter().any(|(p, _)| *p == Palette::Tools));
+        assert!(laid.left_icons.contains(&Palette::SubTool));
+        assert!(laid.left_strip.is_some());
+        // Both closed: only their bars.
+        dock.hidden = [true; 2];
+        let laid = dock.layout(body, &all, 0.0);
+        assert!(laid.docked.is_empty() && laid.strip.is_none());
+        assert_eq!(laid.handles.len(), 2);
+        assert_eq!(laid.center.width(), 1600.0 - 2.0 * HANDLE);
+        // Kept with the layout, and opened again as they were.
+        let back = Dock::from_lines(&dock.to_lines()).unwrap();
+        assert_eq!((back.folded, back.hidden), ([true; 2], [true; 2]));
+        dock.hidden = [false; 2];
+        dock.folded = [false; 2];
+        assert_eq!(dock.layout(body, &all, 0.0), open);
     }
 
     #[test]

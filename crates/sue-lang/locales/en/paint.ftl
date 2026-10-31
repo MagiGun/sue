@@ -2168,3 +2168,6 @@ cm = {" "}cm
 paint-window-title = { $name }{ $unsaved } ({ $width } x { $height }px { $dpi }dpi { $zoom }%{ $profile }) - Sue Paint
 paint-window-title-profile = { " " }: CMYK:{ $profile }
 paint-window-title-empty = Sue Paint
+show-palettes = Show palettes
+hide-palettes = Hide palettes
+open-palettes = Open the palettes
