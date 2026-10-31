@@ -79,18 +79,34 @@ layout-pill_radius = 药丸圆角
     .description = 窗口、菜单和药丸按钮的圆角半径 (px)
 layout-pill_height = 药丸高度
     .description = 药丸按钮的高度 (px)
-layout-touch_target = 触摸目标高度
-    .description = 触摸控件的最小高度 (px)
-layout-sidebar_width = 侧边栏宽度
-    .description = 默认侧边栏宽度 (px)
-layout-panel_header_height = 面板标题栏高度
-    .description = 面板顶部标题栏高度 (px)
-layout-shadow_radius = 阴影柔化半径
-    .description = 浮动面板下方阴影的柔化半径 (px)
 layout-status_bar = 状态栏
     .description = 在窗口底部显示窄状态栏（隐藏时消息将以通知形式弹出）
 
 ## [colors]
+colors-void = 纯黑底色
+    .description = 页面背景
+colors-panel = 面板
+    .description = 侧边栏和面板
+colors-pill = 药丸控件
+    .description = 菜单、对话框和浮动表面
+colors-hover = 悬停
+    .description = 鼠标悬停控件
+colors-active = 激活
+    .description = 按下及选中的控件
+colors-border = 边框
+    .description = 细边框线
+colors-border_active = 激活边框
+    .description = 悬停框及聚焦控件的边框
+colors-text = 文本
+    .description = 主要文本和激活图标
+colors-muted = 次要文本
+    .description = 次要文本
+colors-selection = 选中高亮
+    .description = 文本选中高亮底色
+colors-selection_text = 选中文本
+    .description = 选中区域内部文本
+colors-shadow = 阴影
+    .description = 浮动表面下方的阴影
 
 ## [typography]
 
@@ -115,17 +131,8 @@ audio-buffer_frames = 音频缓冲区帧数
     .description = 每次送往声卡的采样帧数（0 使用声卡默认值）
 audio-sample_rate = 音频采样率
     .description = 声音引擎内部采样率（Hz；0 遵循声卡默认值）
-audio-channels = 声道数
-    .description = 声音引擎使用的声道数（0 遵循声卡默认值）
-audio-exclusive = 独占音频模式
-    .description = 独占音频设备以降低延迟（Windows WASAPI）
-audio-master_volume = 主音量
-    .description = Sue 的全局主输出音量 (%)
-
 ## [packages]
-
 ## [updates]
-
 updates-check_automatically = 自动检查更新
     .description = 启动 Sue 时检查是否有新版本（最多每天一次）
 

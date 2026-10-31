@@ -79,18 +79,34 @@ layout-pill_radius = Raio dos botoes em capsula
     .description = Arredondamento dos cantos de janelas, menus e botoes em capsula (px)
 layout-pill_height = Altura dos botoes em capsula
     .description = Altura dos botoes em capsula (px)
-layout-touch_target = Altura do alvo de toque
-    .description = Altura minima dos controles de toque (px)
-layout-sidebar_width = Largura da barra lateral
-    .description = Largura padrao da barra lateral (px)
-layout-panel_header_height = Altura do cabecalho do painel
-    .description = Altura da barra superior do painel (px)
-layout-shadow_radius = Raio da sombra
-    .description = Raio de suavizacao da sombra sob superficies flutuantes (px)
 layout-status_bar = Barra de status
     .description = Exibe a barra de status fina na parte inferior da janela (sem ela as mensagens surgem como aviso)
 
 ## [colors]
+colors-void = Vazio
+    .description = Fundo da pagina
+colors-panel = Painel
+    .description = Barras e paineis
+colors-pill = Capsula
+    .description = Menus, caixas e superficies flutuantes
+colors-hover = Ao passar o mouse
+    .description = Controles sob o cursor
+colors-active = Ativo
+    .description = Controles pressionados e escolhidos
+colors-border = Borda
+    .description = Bordas finas
+colors-border_active = Borda ativa
+    .description = Bordas de caixas apontadas e controles com foco
+colors-text = Texto
+    .description = Texto principal e icones ativos
+colors-muted = Atenuado
+    .description = Texto secundario
+colors-selection = Selecao
+    .description = Realce de selecao de texto
+colors-selection_text = Texto selecionado
+    .description = Texto dentro de uma selecao
+colors-shadow = Sombra
+    .description = Sombra sob superficies flutuantes
 
 ## [typography]
 
@@ -115,17 +131,8 @@ audio-buffer_frames = Quadros do buffer de audio
     .description = Amostras enviadas a placa de som por vez (0 usa o padrao da placa)
 audio-sample_rate = Taxa de amostragem de audio
     .description = Taxa interna de processamento de som (Hz; 0 segue a placa)
-audio-channels = Canais de audio
-    .description = Quantos canais o motor de audio processa (0 segue a placa)
-audio-exclusive = Modo de audio exclusivo
-    .description = Assumir controle exclusivo do dispositivo de audio para menor latencia (Windows WASAPI)
-audio-master_volume = Volume principal
-    .description = Volume geral de saida do Sue (%)
-
 ## [packages]
-
 ## [updates]
-
 updates-check_automatically = Verificar automaticamente
     .description = Procurar uma versao mais recente do Sue ao iniciar, no maximo uma vez ao dia
 

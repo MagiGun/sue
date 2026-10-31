@@ -79,18 +79,34 @@ layout-pill_radius = نصف قطر الأزرار البيضاوية
     .description = تدوير زوايا النوافذ والقوائم والأزرار البيضاوية (بكسل)
 layout-pill_height = ارتفاع الزر البيضاوي
     .description = ارتفاع الأزرار البيضاوية (بكسل)
-layout-touch_target = ارتفاع هدف اللمس
-    .description = الحد الأدنى لارتفاع عناصر التحكم باللمس (بكسل)
-layout-sidebar_width = عرض الشريط الجانبي
-    .description = العرض الافتراضي للشريط الجانبي (بكسل)
-layout-panel_header_height = ارتفاع رأس اللوحة
-    .description = ارتفاع الشريط أعلى اللوحة (بكسل)
-layout-shadow_radius = نصف قطر تدرج الظل
-    .description = نصف قطر تنعيم الظل أسفل اللوحات العائمة (بكسل)
 layout-status_bar = شريط الحالة
     .description = إظهار شريط الحالة الرفيع أسفل النافذة (بدونه تظهر الرسائل كتنبيهات)
 
 ## [colors]
+colors-void = فراغ
+    .description = خلفية الصفحة
+colors-panel = لوحة
+    .description = الأشرطة واللوحات
+colors-pill = عنصر بيضاوي
+    .description = القوائم والمربعات والأسطح العائمة
+colors-hover = عند التمرير
+    .description = عناصر التحكم تحت المؤشر
+colors-active = نشط
+    .description = عناصر التحكم المضغوطة والمختارة
+colors-border = حد
+    .description = الحدود الرفيعة
+colors-border_active = حد نشط
+    .description = حدود المربعات الممرر عليها وعناصر التحكم المفعلة
+colors-text = نص
+    .description = النص الأساسي والأيقونات النشطة
+colors-muted = خافت
+    .description = النص الثانوي
+colors-selection = تحديد
+    .description = تمييز تحديد النص
+colors-selection_text = نص التحديد
+    .description = النص داخل التحديد
+colors-shadow = ظل
+    .description = الظل أسفل الأسطح العائمة
 
 ## [typography]
 
@@ -115,17 +131,8 @@ audio-buffer_frames = إطارات مخزن الصوت
     .description = العينات المرسلة لبطاقة الصوت في كل دفعة (0 للافتراضي)
 audio-sample_rate = معدل عينة الصوت
     .description = المعدل الداخلي لمعالجة الصوت (هرتز؛ 0 للافتراضي)
-audio-channels = قنوات الصوت
-    .description = عدد القنوات التي يعالجها محرك الصوت (0 للافتراضي)
-audio-exclusive = وضع الصوت الحصري
-    .description = الاستحواذ الحصري على جهاز الصوت لتقليل التأخير (Windows WASAPI)
-audio-master_volume = الصوت الرئيسي
-    .description = حجم إخراج الصوت الإجمالي لـ Sue (%)
-
 ## [packages]
-
 ## [updates]
-
 updates-check_automatically = تحقق تلقائياً
     .description = البحث عن إصدار أحدث من Sue عند البدء (مرة واحدة يومياً كحد أقصى)
 

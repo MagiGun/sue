@@ -79,18 +79,34 @@ layout-pill_radius = Raggio pillole
     .description = Arrotondamento degli angoli di finestre, menu e pulsanti a pillola (px)
 layout-pill_height = Altezza pillole
     .description = Altezza dei pulsanti a pillola (px)
-layout-touch_target = Altezza bersaglio tocco
-    .description = Altezza minima dei controlli touch (px)
-layout-sidebar_width = Larghezza barra laterale
-    .description = Larghezza predefinita della barra laterale (px)
-layout-panel_header_height = Altezza intestazione pannello
-    .description = Altezza dell'intestazione sopra un pannello (px)
-layout-shadow_radius = Raggio sfumatura ombra
-    .description = Raggio di sfocatura delle ombre sotto i pannelli mobili (px)
 layout-status_bar = Barra di stato
     .description = Mostra la barra di stato sottile in fondo alla finestra (senza di essa i messaggi appaiono come avvisi)
 
 ## [colors]
+colors-void = Vuoto
+    .description = Sfondo della pagina
+colors-panel = Pannello
+    .description = Barre e pannelli
+colors-pill = Pillola
+    .description = Menu, riquadri e superfici mobili
+colors-hover = Al passaggio
+    .description = Controlli sotto il puntatore
+colors-active = Attivo
+    .description = Controlli premuti e scelti
+colors-border = Bordo
+    .description = Bordi sottili
+colors-border_active = Bordo attivo
+    .description = Bordi dei riquadri evidenziati e controlli con focus
+colors-text = Testo
+    .description = Testo principale e icone attive
+colors-muted = Attenuato
+    .description = Testo secondario
+colors-selection = Selezione
+    .description = Evidenziazione della selezione di testo
+colors-selection_text = Testo selezionato
+    .description = Testo all'interno di una selezione
+colors-shadow = Ombra
+    .description = Ombra sotto le superfici mobili
 
 ## [typography]
 
@@ -115,17 +131,8 @@ audio-buffer_frames = Fotogrammi buffer audio
     .description = Campioni inviati alla scheda audio a ogni passaggio (0 per l'impostazione predefinita della scheda)
 audio-sample_rate = Frequenza di campionamento
     .description = Frequenza interna dell'elaborazione audio (Hz; 0 per l'impostazione predefinita)
-audio-channels = Canali audio
-    .description = Quanti canali elabora il motore audio (0 per l'impostazione predefinita)
-audio-exclusive = Modalita audio esclusiva
-    .description = Prendi il controllo esclusivo del dispositivo audio per ridurre la latenza (Windows WASAPI)
-audio-master_volume = Volume principale
-    .description = Volume di uscita generale di Sue (%)
-
 ## [packages]
-
 ## [updates]
-
 updates-check_automatically = Controlla automaticamente
     .description = Cerca una versione piu recente di Sue all'avvio, al massimo una volta al giorno
 
