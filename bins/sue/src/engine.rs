@@ -941,7 +941,27 @@ pub(crate) mod tests {
         }
     }
 
+    /// Tests that boot an engine share process-wide state (the language,
+    /// the installed fonts, the job pool), and run together they starve
+    /// each other for many minutes; each takes its turn instead, from
+    /// [`temp_host`] until its thread ends.
+    static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    thread_local! {
+        static HELD: std::cell::RefCell<Option<std::sync::MutexGuard<'static, ()>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
     pub(crate) fn temp_host(tag: &str) -> (HeadlessHost, PathBuf) {
+        HELD.with(|held| {
+            let mut held = held.borrow_mut();
+            if held.is_none() {
+                *held = Some(
+                    TURN.lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner),
+                );
+            }
+        });
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_nanos());
