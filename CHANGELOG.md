@@ -11,6 +11,31 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Release Notes in the update window opens the whole of what is new,
+  inside Sue, on phones and computers.
+
+### Changed
+
+- On phones the Hub lists studios and tools as rows across the screen,
+  easy to reach with a thumb, and menus have taller rows without keyboard
+  shortcuts.
+- On phones the update window is a sheet across the bottom of the screen.
+
+### Fixed
+
+- Sue on Android can check for updates and download them: it could not
+  reach the internet at all. The update installs from inside Sue, asking
+  once to be allowed to install apps, and says plainly when it could not.
+- Android updates install over the version you have instead of failing
+  with "conflicting package": every release is now signed with the same
+  key. Versions up to 0.0.6 were signed differently, so going from one of
+  them takes uninstalling Sue once.
+- The small launcher buttons in Sue Paint (under a selection, a
+  transform, text and a layer's drawing) work: a click on one used to
+  start a new selection or stroke under it and close the launcher.
+
 ## [0.0.6] - 2026-10-30
 
 ### Added

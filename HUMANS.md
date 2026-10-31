@@ -164,13 +164,18 @@ Updating follows how you installed Sue:
   Arch package and Flatpak are downloaded to your Downloads folder, with
   the command that installs them to copy. The tarball opens the release
   page.
-- **Android**: Sue downloads the new APK and hands it to Android's
-  installer, which asks you first.
+- **Android**: **Download and Install** fetches the new APK inside Sue and
+  hands it to Android's installer, which asks you first and puts the new
+  version over the old one, keeping your work. The first time, Android
+  asks whether Sue may install apps: turn it on and come back, and the
+  update goes on by itself.
 - **iOS** opens the release page, and the **browser** version is always
   the newest already.
 
 Everything is downloaded in the background while you keep working, and
 checked against the release's list of checksums before it is used.
+**Release Notes** opens everything that is new in the release inside Sue,
+on a phone as on a computer.
 
 ### The Image Viewer
 
