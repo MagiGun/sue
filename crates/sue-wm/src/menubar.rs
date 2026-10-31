@@ -340,6 +340,9 @@ impl MenuBar {
         theme: &Theme,
     ) -> (Rect, Option<(usize, Rect)>, Option<String>) {
         let font = theme.font(theme.ui_size);
+        // For a finger: taller rows, and no keyboard shortcuts to read.
+        let touch = crate::widgets::is_touch(ctx);
+        let row_height = if touch { 44.0 } else { ROW };
         let width = ctx.fonts_mut(|fonts| {
             items
                 .iter()
@@ -349,7 +352,7 @@ impl MenuBar {
                         .size()
                         .x;
                     let right = match item {
-                        MenuItem::Action { shortcut, .. } if !shortcut.is_empty() => {
+                        MenuItem::Action { shortcut, .. } if !shortcut.is_empty() && !touch => {
                             fonts
                                 .layout_no_wrap(shortcut.clone(), font.clone(), theme.text)
                                 .size()
@@ -369,7 +372,7 @@ impl MenuBar {
                 if matches!(item, MenuItem::Separator) {
                     GAP
                 } else {
-                    ROW
+                    row_height
                 }
             })
             .sum::<f32>()
@@ -418,9 +421,11 @@ impl MenuBar {
                         y += GAP;
                         continue;
                     }
-                    let row =
-                        Rect::from_min_size(pos2(area.left() + 4.0, y), vec2(width - 8.0, ROW));
-                    y += ROW;
+                    let row = Rect::from_min_size(
+                        pos2(area.left() + 4.0, y),
+                        vec2(width - 8.0, row_height),
+                    );
+                    y += row_height;
                     let item_state = match item {
                         MenuItem::Action { command, .. } => state(command),
                         MenuItem::Sub { .. } => {
@@ -474,7 +479,7 @@ impl MenuBar {
                         MenuItem::Action {
                             command, shortcut, ..
                         } => {
-                            if !shortcut.is_empty() {
+                            if !shortcut.is_empty() && !touch {
                                 painter.text(
                                     row.right_center() - vec2(10.0, 0.0),
                                     Align2::RIGHT_CENTER,

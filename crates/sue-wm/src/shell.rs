@@ -1412,6 +1412,7 @@ impl Shell {
     pub fn ui(&mut self, root: &mut Ui, io: &mut ShellIo<'_>, now: Instant) {
         let _language = sue_lang::scope(&crate::sue_language(&io.world.rice));
         let ctx = root.ctx().clone();
+        crate::widgets::set_touch(&ctx, self.form_factor() != FormFactor::Desktop);
         crate::cover::begin_frame(&ctx);
         self.cover_scripts(&ctx, io);
         // Real wall-clock time, clamped; after a sleep, one nominal frame.
@@ -1740,11 +1741,10 @@ impl Shell {
         let narrow = area.width() < 560.0;
         let margin = if narrow { 16.0 } else { 40.0 };
         let gap = if narrow { 12.0 } else { 16.0 };
+        // On a phone each studio and tool is a row across the screen, its
+        // icon at the left: easy to reach with a thumb and quick to scan.
         let size = if narrow {
-            vec2(
-                ((area.width() - margin * 2.0 - gap) / 2.0).max(132.0),
-                184.0,
-            )
+            vec2(area.width() - margin * 2.0, 96.0)
         } else {
             vec2(256.0, 176.0)
         };
@@ -2176,10 +2176,19 @@ impl Shell {
         let sense = if live { Sense::click() } else { Sense::hover() };
         let (rect, response) = ui.allocate_exact_size(size, sense);
         let side = if touch { 44.0 } else { 30.0 };
-        let pin = Rect::from_min_size(
-            rect.right_bottom() - vec2(side + 8.0, side + 8.0),
-            Vec2::splat(side),
-        );
+        // A row (on a phone): icon, then name and summary, pin at the end.
+        let row = size.y < 120.0;
+        let pin = if row {
+            Rect::from_center_size(
+                pos2(rect.right() - side / 2.0 - 10.0, rect.center().y),
+                Vec2::splat(side),
+            )
+        } else {
+            Rect::from_min_size(
+                rect.right_bottom() - vec2(side + 8.0, side + 8.0),
+                Vec2::splat(side),
+            )
+        };
         // The pin is checked after the box, so it wins the click over it.
         let pin_response = ui
             .interact(pin, ui.scope_id().with(("sue-hub-pin", name)), sense)
@@ -2206,15 +2215,32 @@ impl Shell {
             ),
             StrokeKind::Inside,
         );
+        let (icon_at, icon_align, name_at, summary_at, summary_width) = if row {
+            (
+                pos2(rect.left() + 20.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                rect.left_top() + vec2(76.0, 14.0),
+                rect.left_top() + vec2(76.0, 42.0),
+                rect.width() - 76.0 - side - 20.0,
+            )
+        } else {
+            (
+                rect.left_top() + vec2(18.0, 16.0),
+                Align2::LEFT_TOP,
+                rect.left_top() + vec2(18.0, 76.0),
+                rect.left_top() + vec2(18.0, 102.0),
+                rect.width() - 36.0 - side,
+            )
+        };
         painter.text(
-            rect.left_top() + vec2(18.0, 16.0),
-            Align2::LEFT_TOP,
+            icon_at,
+            icon_align,
             icon,
-            theme.font(theme.heading_size * 1.8),
+            theme.font(theme.heading_size * if row { 1.5 } else { 1.8 }),
             theme.text,
         );
         painter.text(
-            rect.left_top() + vec2(18.0, 76.0),
+            name_at,
             Align2::LEFT_TOP,
             name,
             theme.font(theme.ui_size * 1.2),
@@ -2224,13 +2250,11 @@ impl Shell {
             summary.to_owned(),
             theme.font(theme.small_size),
             theme.muted,
-            rect.width() - 36.0 - side,
+            summary_width,
         );
-        painter.with_clip_rect(rect.shrink(1.0)).galley(
-            rect.left_top() + vec2(18.0, 102.0),
-            galley,
-            theme.muted,
-        );
+        painter
+            .with_clip_rect(rect.shrink(1.0))
+            .galley(summary_at, galley, theme.muted);
         // The pin: a square button, sharp like its box.
         if pin_response.hovered() && live {
             painter.rect_filled(pin, 0.0, theme.active);

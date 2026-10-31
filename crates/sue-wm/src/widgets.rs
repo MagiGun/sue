@@ -40,6 +40,19 @@ pub fn window_frame(theme: &Theme) -> Frame {
         .inner_margin(margin(0.0))
 }
 
+/// Notes for this frame whether Sue is laid out for touch (a phone or a
+/// tablet), so shared widgets size themselves for a finger.
+pub fn set_touch(ctx: &egui::Context, touch: bool) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::NULL.with("sue-touch"), touch));
+}
+
+/// `true` when Sue is laid out for touch this frame (see [`set_touch`]).
+#[must_use]
+pub fn is_touch(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp(egui::Id::NULL.with("sue-touch")))
+        .unwrap_or(false)
+}
+
 /// A compact text button for pills. A chosen one shows the active fill and
 /// a white hairline.
 pub fn pill_button(ui: &mut Ui, text: &str, chosen: bool, theme: &Theme) -> Response {
