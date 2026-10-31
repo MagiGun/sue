@@ -40,6 +40,207 @@ pub fn window_frame(theme: &Theme) -> Frame {
         .inner_margin(margin(0.0))
 }
 
+/// Notes whether Sue draws its windows' frames itself this frame (see
+/// `sue_platform::own_frames`), so every window of its own adds
+/// [`title_bar`] and [`resize_edges`].
+pub fn set_own_frames(ctx: &egui::Context, own: bool) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::NULL.with("sue-own-frames"), own));
+}
+
+/// `true` when Sue draws its windows' frames itself (see [`set_own_frames`]).
+#[must_use]
+pub fn own_frames(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp(egui::Id::NULL.with("sue-own-frames")))
+        .unwrap_or(false)
+}
+
+/// How tall Sue's own title bars are.
+pub const TITLE_BAR: f32 = 28.0;
+
+/// A window's own title bar across `rect`, as Clip Studio Paint draws
+/// them: the title in the middle, minimize, maximize and close at the
+/// right. Dragging it moves the window, a double click maximizes it. Acts
+/// on the window it is drawn in. `true` when close was pressed (the caller
+/// decides what closing means).
+pub fn title_bar(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    title: &str,
+    maximize: bool,
+    theme: &Theme,
+) -> bool {
+    use egui::{Sense, Stroke, ViewportCommand, pos2, vec2};
+    let ctx = ui.ctx().clone();
+    let painter = ui.painter().clone();
+    painter.rect_filled(rect, 0.0, theme.void);
+    painter.hline(rect.x_range(), rect.bottom() - 0.5, theme.hairline());
+    let button = 40.0;
+    let count = if maximize { 3.0 } else { 2.0 };
+    let buttons_left = rect.right() - button * count;
+    let grip = egui::Rect::from_min_max(rect.min, pos2(buttons_left, rect.bottom()));
+    let response = ui.interact(
+        grip,
+        ui.scope_id().with("sue-title-bar"),
+        Sense::click_and_drag(),
+    );
+    let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
+    if response.double_clicked() && maximize {
+        ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized));
+    } else if response.drag_started() {
+        ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+    }
+    // The title, in the middle of the whole bar, cut short to fit.
+    let room = (buttons_left - rect.left() - 16.0).max(40.0);
+    let galley = painter.layout(
+        title.to_owned(),
+        theme.font(theme.small_size + 0.5),
+        theme.muted,
+        room,
+    );
+    let width = galley.size().x.min(room);
+    let x = (rect.center().x - width / 2.0)
+        .min(buttons_left - 8.0 - width)
+        .max(rect.left() + 8.0);
+    painter.with_clip_rect(grip).galley(
+        pos2(x, rect.center().y - galley.size().y / 2.0),
+        galley,
+        theme.muted,
+    );
+    let mut close = false;
+    let kinds: &[u8] = if maximize { &[0, 1, 2] } else { &[0, 2] };
+    for (index, kind) in kinds.iter().enumerate() {
+        let at = egui::Rect::from_min_size(
+            pos2(buttons_left + index as f32 * button, rect.top()),
+            vec2(button, rect.height()),
+        );
+        let hit = ui.interact(
+            at,
+            ui.scope_id().with(("sue-title-button", kind)),
+            Sense::click(),
+        );
+        if hit.hovered() {
+            painter.rect_filled(at, 0.0, theme.hover);
+        }
+        let color = if hit.hovered() {
+            theme.text
+        } else {
+            theme.muted
+        };
+        let stroke = Stroke::new(1.0, color);
+        let c = at.center();
+        match kind {
+            0 => {
+                painter.hline((c.x - 5.0)..=(c.x + 5.0), c.y, stroke);
+            }
+            1 if maximized => {
+                painter.rect_stroke(
+                    egui::Rect::from_center_size(c + vec2(-1.5, 1.5), vec2(8.0, 8.0)),
+                    0.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+                painter.line(
+                    vec![
+                        c + vec2(-2.5, -2.5),
+                        c + vec2(4.5, -2.5),
+                        c + vec2(4.5, 4.5),
+                    ],
+                    stroke,
+                );
+            }
+            1 => {
+                painter.rect_stroke(
+                    egui::Rect::from_center_size(c, vec2(10.0, 10.0)),
+                    0.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+            }
+            _ => {
+                painter.line_segment([c + vec2(-5.0, -5.0), c + vec2(5.0, 5.0)], stroke);
+                painter.line_segment([c + vec2(5.0, -5.0), c + vec2(-5.0, 5.0)], stroke);
+            }
+        }
+        if hit.clicked() {
+            match kind {
+                0 => ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
+                1 => ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized)),
+                _ => close = true,
+            }
+        }
+    }
+    close
+}
+
+/// The edges and corners of a window Sue frames itself, around `rect`:
+/// dragging one resizes the window, as with the system's frame.
+pub fn resize_edges(ui: &mut Ui, rect: egui::Rect) {
+    use egui::viewport::ResizeDirection as Way;
+    use egui::{CursorIcon, Sense, ViewportCommand, pos2};
+    let ctx = ui.ctx().clone();
+    if ctx.input(|input| input.viewport().maximized.unwrap_or(false)) {
+        return;
+    }
+    let edge = 5.0;
+    let corner = 12.0;
+    let (l, r, t, b) = (rect.left(), rect.right(), rect.top(), rect.bottom());
+    let zones = [
+        (
+            egui::Rect::from_min_max(pos2(l, t), pos2(l + corner, t + corner)),
+            Way::NorthWest,
+            CursorIcon::ResizeNorthWest,
+        ),
+        (
+            egui::Rect::from_min_max(pos2(r - corner, t), pos2(r, t + corner)),
+            Way::NorthEast,
+            CursorIcon::ResizeNorthEast,
+        ),
+        (
+            egui::Rect::from_min_max(pos2(l, b - corner), pos2(l + corner, b)),
+            Way::SouthWest,
+            CursorIcon::ResizeSouthWest,
+        ),
+        (
+            egui::Rect::from_min_max(pos2(r - corner, b - corner), pos2(r, b)),
+            Way::SouthEast,
+            CursorIcon::ResizeSouthEast,
+        ),
+        (
+            egui::Rect::from_min_max(pos2(l, t), pos2(r, t + edge)),
+            Way::North,
+            CursorIcon::ResizeNorth,
+        ),
+        (
+            egui::Rect::from_min_max(pos2(l, b - edge), pos2(r, b)),
+            Way::South,
+            CursorIcon::ResizeSouth,
+        ),
+        (
+            egui::Rect::from_min_max(pos2(l, t), pos2(l + edge, b)),
+            Way::West,
+            CursorIcon::ResizeWest,
+        ),
+        (
+            egui::Rect::from_min_max(pos2(r - edge, t), pos2(r, b)),
+            Way::East,
+            CursorIcon::ResizeEast,
+        ),
+    ];
+    for (index, (zone, way, cursor)) in zones.into_iter().enumerate() {
+        let response = ui.interact(
+            zone,
+            ui.scope_id().with(("sue-resize-edge", index)),
+            Sense::drag(),
+        );
+        if response.hovered() || response.dragged() {
+            ctx.set_cursor_icon(cursor);
+        }
+        if response.drag_started() {
+            ctx.send_viewport_cmd(ViewportCommand::BeginResize(way));
+        }
+    }
+}
+
 /// Notes for this frame whether Sue is laid out for touch (a phone or a
 /// tablet), so shared widgets size themselves for a finger.
 pub fn set_touch(ctx: &egui::Context, touch: bool) {

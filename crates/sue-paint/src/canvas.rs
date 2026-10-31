@@ -654,6 +654,10 @@ impl SuePaint {
                 .get_by_id(doc.picture)
                 .map_or_else(|_| tr!("picture"), |entity| entity.name().to_owned());
             let (_, _, version) = doc.compositor.display();
+            // A picture never saved is clean as it first showed.
+            if version > 0 {
+                self.clean.entry(doc.picture).or_insert(version);
+            }
             let modified = self
                 .clean
                 .get(&doc.picture)

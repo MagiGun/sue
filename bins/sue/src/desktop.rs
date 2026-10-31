@@ -36,7 +36,8 @@ impl DesktopApp for DesktopShell {
         sue_lang::set_system(&sue_platform::system_languages());
         let engine = Engine::boot_with(&*host, options)?;
         sue_lang::set_language(&engine.config.language);
-        let runtime = Runtime::new(engine)?.interactive(true);
+        let mut runtime = Runtime::new(engine)?.interactive(true);
+        runtime.shell.set_own_frame(sue_platform::own_frames());
         host.set_clear_color(runtime.theme().void);
         self.runtime = Some(runtime);
         Ok(())
@@ -99,6 +100,7 @@ pub fn run() -> Result<(), String> {
             gpu: gpu_preference(),
             icon: sue_wm::brand::pixels(sue_wm::brand::APP_ICON, 256),
             app_id: sue_wm::brand::APP_ID.to_owned(),
+            decorations: !sue_platform::own_frames(),
         },
     )
     .map_err(|error| error.to_string())

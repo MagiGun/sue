@@ -70,7 +70,8 @@ backbone; section 8 maps every feature area onto it).
    `bins/sue/src/runtime.rs`) for user-facing flows where you can drive them.
 9. **House style.** Docs, interface text and comments use no em dashes, en
    dashes or middle dots (a test scans for them, translations included). The
-   window title is exactly `Sue`. The default look is monochrome. Text
+   window title is `Sue`, or what an open studio has open in the form its
+   model program uses (Sue Paint's ends `- Sue Paint`). The default look is monochrome. Text
    people read comes from the language database (`tr!`), never a string
    literal in the code.
 10. **Docs move with the code.** Update `HUMANZ.md` for how a feature is

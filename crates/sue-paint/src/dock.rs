@@ -1224,17 +1224,32 @@ impl SuePaint {
         let main = ctx
             .input(|input| input.viewport().inner_rect)
             .map_or(Pos2::ZERO, |inner| inner.min);
+        let own_frame = sue_wm::widgets::own_frames(&ctx);
+        let bar = if own_frame {
+            sue_wm::widgets::TITLE_BAR
+        } else {
+            0.0
+        };
         let builder = egui::ViewportBuilder::default()
             .with_title(palette.title())
             .with_position(main + rect.min.to_vec2())
-            .with_inner_size(rect.size())
-            .with_min_inner_size(vec2(palette.fixed_width().unwrap_or(160.0), 100.0))
-            .with_resizable(true);
+            .with_inner_size(rect.size() + vec2(0.0, bar))
+            .with_min_inner_size(vec2(palette.fixed_width().unwrap_or(160.0), 100.0 + bar))
+            .with_resizable(true)
+            .with_decorations(!own_frame);
         let (closed, redock, now) = ctx.show_viewport_immediate(
             egui::ViewportId::from_hash_of(("sue-paint-palette", palette.title())),
             builder,
             |ui, _| {
-                let area = ui.max_rect();
+                let whole = ui.max_rect();
+                let mut area = whole;
+                let mut shut = false;
+                if own_frame {
+                    // Sue's own title bar, as Clip Studio Paint's.
+                    let top = Rect::from_min_size(whole.min, vec2(whole.width(), bar));
+                    shut = sue_wm::widgets::title_bar(ui, top, &palette.title(), false, theme);
+                    area.min.y = top.bottom();
+                }
                 self.draw_palette(ui, palette, area, cx, theme);
                 // Back into a column, from inside its window.
                 let back = Rect::from_min_size(
@@ -1250,11 +1265,14 @@ impl SuePaint {
                     &tr!("dock-it-again"),
                     theme,
                 );
+                if own_frame {
+                    sue_wm::widgets::resize_edges(ui, whole);
+                }
                 let (closed, now) = ui.input(|input| {
                     let viewport = input.viewport();
                     (viewport.close_requested(), viewport.inner_rect)
                 });
-                (closed, redock, now)
+                (closed || shut, redock, now)
             },
         );
         if let Some(now) = now

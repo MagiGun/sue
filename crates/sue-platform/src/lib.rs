@@ -109,6 +109,21 @@ pub fn random_seed() -> u64 {
     }
 }
 
+/// `true` where Sue draws its windows' frames itself (the title bar with
+/// the title in the middle, its buttons, and the edges to resize), as Clip
+/// Studio Paint does: Windows, Linux and the BSDs. macOS keeps its own
+/// frame and its colored buttons; phones and the browser have none.
+#[must_use]
+pub fn own_frames() -> bool {
+    cfg!(any(
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    ))
+}
+
 /// This run's process id; in the browser, which has none, a number
 /// drawn once per page so two tabs still tell their work apart.
 #[must_use]

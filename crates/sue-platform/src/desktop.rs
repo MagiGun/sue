@@ -65,6 +65,9 @@ pub struct DesktopOptions {
     /// which names the icon the window, the taskbar and the switcher show.
     /// Empty leaves it to the system.
     pub app_id: String,
+    /// The system draws the window's frame; when `false` Sue draws its own
+    /// (see [`crate::own_frames`]).
+    pub decorations: bool,
 }
 
 /// The icon from the pixels the options give.
@@ -329,7 +332,8 @@ impl DesktopHost {
         #[cfg(not(target_arch = "wasm32"))]
         let attributes = attributes
             .with_inner_size(LogicalSize::new(options.width, options.height))
-            .with_min_inner_size(LogicalSize::new(360.0, 480.0));
+            .with_min_inner_size(LogicalSize::new(360.0, 480.0))
+            .with_decorations(options.decorations);
         let window = Arc::new(
             event_loop
                 .create_window(system_attributes(attributes, options))
@@ -560,6 +564,18 @@ impl DesktopHost {
         }
         self.egui
             .handle_platform_output(&self.window, output.platform_output);
+        // What Sue asks of the main window: its title, and, with Sue's own
+        // frame, moving, resizing, minimizing and maximizing it.
+        if let Some(root) = output.viewport_output.get(&egui::ViewportId::ROOT) {
+            let mut info = egui::ViewportInfo::default();
+            egui_winit::process_viewport_commands(
+                &ctx,
+                &mut info,
+                root.commands.iter().cloned(),
+                &self.window,
+                &mut Vec::new(),
+            );
+        }
         let delay = output
             .viewport_output
             .get(&egui::ViewportId::ROOT)

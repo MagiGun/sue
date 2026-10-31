@@ -819,6 +819,15 @@ pub trait SueApplet: Send {
         let _ = (pick, path, cx);
     }
 
+    /// The window's title while this applet fills the page: what is open
+    /// in it, as the program it models shows it (Sue Paint's is Clip Studio
+    /// Paint's: the file, its size and resolution, the zoom and the color
+    /// profile, then the studio's name). `None` keeps the title `Sue`.
+    fn window_title(&self, arena: &sue_core::Arena) -> Option<String> {
+        let _ = arena;
+        None
+    }
+
     /// What the Sue menu offers from this applet for `focus` (the entity
     /// the open studio or tool works on). `current` is `true` when this
     /// applet fills the page.

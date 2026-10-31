@@ -15,6 +15,15 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Release Notes in the update window opens the whole of what is new,
   inside Sue, on phones and computers.
+- On Windows and Linux, Sue draws its own window frame, as Clip Studio
+  Paint does: a dark title bar with the title in the middle and minimize,
+  maximize and close at the right, on the main window and on every dialog
+  and floating palette. Drag it to move the window, double-click it to
+  maximize, and drag any edge to resize.
+- Sue Paint's window title says what is open, as Clip Studio Paint's
+  does: `Illustration* (1600 x 1200px 72dpi 42.4%) - Sue Paint`, with a
+  `*` while it has changes not saved and the print profile while View,
+  Color Profile, Preview is on.
 
 ### Changed
 

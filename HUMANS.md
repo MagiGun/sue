@@ -177,6 +177,17 @@ checked against the release's list of checksums before it is used.
 **Release Notes** opens everything that is new in the release inside Sue,
 on a phone as on a computer.
 
+### Sue's windows
+
+On Windows and Linux, Sue draws its windows' frames itself: a dark title
+bar with the title in the middle and minimize, maximize and close at the
+right, on the main window and on every dialog and floating palette. Drag
+the bar to move a window, double-click it to maximize, and drag an edge
+or corner to resize. In Sue Paint the title tells what is open, as in
+Clip Studio Paint: the picture's name (with `*` while it has changes not
+saved), its size, resolution and zoom, and the print profile while View,
+Color Profile, Preview is on. macOS keeps its own frame.
+
 ### The Image Viewer
 
 The **Image Viewer** fills its page with one picture: zoom with the wheel,

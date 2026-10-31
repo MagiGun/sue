@@ -205,4 +205,6 @@ cargo run -p sue -- --self-check
 
 - Docs, interface text and comments use no em dashes, en dashes or middle dots.
   A test (`bins/sue/src/style.rs`) scans the repository. The window title is
-  exactly `Sue`.
+  `Sue`, or, while a studio has something open, what its model program
+  shows there (Sue Paint's: `Illustration* (1600 x 1200px 72dpi 65.3%) -
+  Sue Paint`).

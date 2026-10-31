@@ -6689,6 +6689,47 @@ impl SueApplet for SuePaint {
         self.bound.chords(shortcut_table())
     }
 
+    fn window_title(&self, arena: &sue_core::Arena) -> Option<String> {
+        let Some(doc) = self.docs.get(self.active) else {
+            return Some(tr!("paint-window-title-empty"));
+        };
+        let picture = arena.get_by_id(doc.picture).ok()?;
+        let [width, height] = sue_model::picture::size(picture)?;
+        let dpi = picture
+            .property(sue_model::picture::DPI)
+            .and_then(Value::as_f64)
+            .unwrap_or(72.0);
+        let (_, _, version) = doc.compositor.display();
+        let unsaved = self
+            .clean
+            .get(&doc.picture)
+            .is_some_and(|clean| *clean != version);
+        // Clip Studio names the color profile in use; Sue Paint's one is
+        // View, Color Profile, Preview (the picture as printed).
+        let profile = if self.proof_on {
+            tr!(
+                "paint-window-title-profile",
+                profile = crate::localize(
+                    crate::proof::PROFILES
+                        [self.proof_profile.min(crate::proof::PROFILES.len() - 1)]
+                    .0
+                )
+            )
+        } else {
+            String::new()
+        };
+        Some(tr!(
+            "paint-window-title",
+            name = picture.name(),
+            unsaved = if unsaved { "*" } else { "" },
+            width = width.to_string(),
+            height = height.to_string(),
+            dpi = format!("{dpi:.0}"),
+            zoom = format!("{:.1}", doc.view.zoom * 100.0),
+            profile = profile
+        ))
+    }
+
     fn sue_actions(&self, focus: Option<&Entity>, current: bool) -> Vec<sue_wm::SueAction> {
         let me = || AppletId::new(ID).expect("a valid id");
         if current {

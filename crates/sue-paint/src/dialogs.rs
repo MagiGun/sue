@@ -1618,25 +1618,38 @@ impl SuePaint {
             let main = ctx
                 .input(|input| input.viewport().outer_rect)
                 .unwrap_or(screen);
+            let own_frame = widgets::own_frames(ctx);
+            let bar = if own_frame { widgets::TITLE_BAR } else { 0.0 };
             let builder = egui::ViewportBuilder::default()
                 .with_title(title.clone())
-                .with_inner_size(size)
-                .with_min_inner_size(vec2(240.0, 120.0))
+                .with_inner_size(size + vec2(0.0, bar))
+                .with_min_inner_size(vec2(240.0, 120.0 + bar))
                 .with_position(main.center() - size / 2.0)
-                .with_resizable(true);
+                .with_resizable(true)
+                .with_decorations(!own_frame);
             ctx.show_viewport_immediate(
                 egui::ViewportId::from_hash_of(("sue-paint-dialog", title.as_str())),
                 builder,
                 |ui, _| {
                     let rect = ui.max_rect();
                     ui.painter().rect_filled(rect, 0.0, theme.panel);
+                    let mut shut = false;
+                    if own_frame {
+                        // Sue's own title bar, as Clip Studio Paint's.
+                        let top = Rect::from_min_size(rect.min, vec2(rect.width(), bar));
+                        shut = widgets::title_bar(ui, top, &title, false, theme);
+                        ui.add_space(bar);
+                    }
                     egui::Frame::new()
                         .inner_margin(egui::Margin::same(16))
                         .show(ui, |ui| {
                             let inner = ui.available_size();
                             body(ui, inner);
                         });
-                    closed = ui.input(|input| input.viewport().close_requested());
+                    if own_frame {
+                        widgets::resize_edges(ui, rect);
+                    }
+                    closed = shut || ui.input(|input| input.viewport().close_requested());
                     keys_here = ui.input(|input| {
                         (
                             input.key_pressed(egui::Key::Escape),

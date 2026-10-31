@@ -262,6 +262,11 @@ pub struct Shell {
     window_rect: Rect,
     /// Where the last frame drew the Hub's boxes and their pins.
     hub_boxes: Vec<(AppletId, Rect, Rect)>,
+    /// The window's title as last sent.
+    window_title: String,
+    /// Sue draws the main window's frame itself (see
+    /// `sue_platform::own_frames`).
+    own_frame: bool,
     /// Where the last frame drew the rows (and buttons) of the Hub's lists.
     hub_rows: Vec<(HubRow, Rect)>,
     /// The kept work whose Discard was clicked once and asks again.
@@ -396,6 +401,8 @@ impl Shell {
             sue_button: Rect::NOTHING,
             window_rect: Rect::NOTHING,
             hub_boxes: Vec::new(),
+            window_title: "Sue".to_owned(),
+            own_frame: false,
             hub_rows: Vec::new(),
             discard_armed: None,
             booted: false,
@@ -451,6 +458,12 @@ impl Shell {
     #[must_use]
     pub fn device_form_factor(&self) -> FormFactor {
         self.form_factor
+    }
+
+    /// Draws the main window's frame (and those of Sue's windows of their
+    /// own) itself, the system's frame being off.
+    pub fn set_own_frame(&mut self, own: bool) {
+        self.own_frame = own;
     }
 
     /// Where the app draws: the whole window, or a phone-wide column in
@@ -1413,6 +1426,18 @@ impl Shell {
         let _language = sue_lang::scope(&crate::sue_language(&io.world.rice));
         let ctx = root.ctx().clone();
         crate::widgets::set_touch(&ctx, self.form_factor() != FormFactor::Desktop);
+        crate::widgets::set_own_frames(&ctx, self.own_frame);
+        // The window's title: `Sue`, or what the open studio has open.
+        let title = self
+            .page
+            .as_ref()
+            .and_then(|page| io.applets.get(page))
+            .and_then(|applet| applet.window_title(&io.world.arena))
+            .unwrap_or_else(|| "Sue".to_owned());
+        if title != self.window_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.window_title = title;
+        }
         crate::cover::begin_frame(&ctx);
         self.cover_scripts(&ctx, io);
         // Real wall-clock time, clamped; after a sleep, one nominal frame.
@@ -1469,7 +1494,19 @@ impl Shell {
         }
         self.advance();
 
-        let window = root.max_rect();
+        let mut window = root.max_rect();
+        if self.own_frame {
+            // Sue's own title bar, as Clip Studio Paint's: the title in the
+            // middle, the window's buttons at the right.
+            let bar =
+                Rect::from_min_size(window.min, vec2(window.width(), crate::widgets::TITLE_BAR));
+            let title = self.window_title.clone();
+            if crate::widgets::title_bar(root, bar, &title, true, &theme) {
+                io.requests
+                    .push(ShellRequest::Command("app.quit".to_owned()));
+            }
+            window.min.y = bar.bottom();
+        }
         let frame = self.frame(window);
         if frame != window {
             // Phone shaped: the window around the column stays empty.
@@ -1529,6 +1566,9 @@ impl Shell {
         }
         self.palette_ui(&ctx, io, &theme, now);
         self.window_ui(&ctx, frame, io, &theme, now, dt);
+        if self.own_frame {
+            crate::widgets::resize_edges(root, root.max_rect());
+        }
 
         self.animating = moving;
         self.scheduler.set_animating(self.animating);

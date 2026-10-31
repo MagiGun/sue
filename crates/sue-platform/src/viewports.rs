@@ -103,6 +103,21 @@ pub(crate) fn install(ctx: &egui::Context, shared: &Shared) {
             child
                 .state
                 .handle_platform_output(&child.window, output.platform_output);
+            // Its own title bar moves, resizes, minimizes and maximizes it.
+            if let Some(own) = output.viewport_output.get(&id) {
+                let mut info = egui::ViewportInfo::default();
+                egui_winit::process_viewport_commands(
+                    ctx,
+                    &mut info,
+                    own.commands.iter().cloned(),
+                    &child.window,
+                    &mut Vec::new(),
+                );
+                if info.events.contains(&egui::ViewportEvent::Close) {
+                    child.close = true;
+                    ctx.request_repaint_of(id);
+                }
+            }
         }
         viewports.drawn.push(Drawn {
             id,

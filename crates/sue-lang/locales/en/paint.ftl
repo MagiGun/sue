@@ -2165,3 +2165,6 @@ body-shape = Body shape
 head-to-body-ratio = Head to body ratio
 reset-body-shape = Reset body shape
 cm = {" "}cm
+paint-window-title = { $name }{ $unsaved } ({ $width } x { $height }px { $dpi }dpi { $zoom }%{ $profile }) - Sue Paint
+paint-window-title-profile = { " " }: CMYK:{ $profile }
+paint-window-title-empty = Sue Paint
