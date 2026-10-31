@@ -46,3 +46,12 @@ insert-table-of-contents = Insertar índice
 new-comment = Comentario nuevo
 regular-expression-not-valid = Esa expresión regular no es válida
 regular-expression-too-large = Esa expresión regular es demasiado grande
+
+add-to-dictionary = Añadir al diccionario
+copy = Copiar
+cut = Cortar
+delete = Eliminar
+ignore-all = Ignorar todo
+no-suggestions = Sin sugerencias
+paste = Pegar
+select-all = Seleccionar todo

@@ -83,3 +83,8 @@ image-viewer-re-encode-as-jpeg-ellipsis = 画像ビューアー: JPEG XL で再�
 image-viewer-rotate-right = 画像ビューアー: 右に回転
 image-viewer-crop = 画像ビューアー: 切り抜き
 cannot-write-2 = { $value } を書き込めません: { $error }
+
+redo = やり直し
+redo-ctrl-y = やり直す (Ctrl+Y)
+undo = 元に戻す
+undo-ctrl-z = 最後の変更を元に戻す (Ctrl+Z)

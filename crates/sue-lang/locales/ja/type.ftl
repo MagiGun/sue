@@ -46,3 +46,12 @@ insert-table-of-contents = 目次を挿入
 new-comment = 新しいコメント
 regular-expression-not-valid = その正規表現は無効です
 regular-expression-too-large = その正規表現は大きすぎます
+
+add-to-dictionary = 辞書に追加
+copy = コピー
+cut = 切り取り
+delete = 削除
+ignore-all = すべて無視
+no-suggestions = 候補がありません
+paste = 貼り付け
+select-all = すべて選択
