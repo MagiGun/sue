@@ -287,13 +287,18 @@ fn tall_slider(
     salt: &str,
     theme: &Theme,
 ) -> Option<f32> {
-    let width = if fading { 6.0 } else { 4.0 };
-    let track = Rect::from_center_size(
+    // On whole screen pixels, so the checkerboard stays crisp.
+    let pixel = 1.0 / ui.ctx().pixels_per_point();
+    let snap = |value: f32| (value / pixel).round() * pixel;
+    let cell = snap(3.0).max(pixel);
+    let width = if fading { cell * 2.0 } else { snap(4.0) };
+    let height = snap((lane.height() - label - 18.0).max(20.0));
+    let track = Rect::from_min_size(
         pos2(
-            lane.center().x,
-            (lane.top() + label + 8.0 + lane.bottom() - 10.0) / 2.0,
+            snap(lane.center().x - width / 2.0),
+            snap(lane.top() + label + 8.0),
         ),
-        vec2(width, (lane.height() - label - 18.0).max(20.0)),
+        vec2(width, height),
     );
     let response = ui.interact(
         track.expand2(vec2(10.0, 8.0)),
@@ -306,7 +311,6 @@ fn tall_slider(
     let lit = Color32::from_gray(176);
     if fading {
         // Clear shows as a checkerboard.
-        let cell = width / 2.0;
         let rows = (track.height() / cell).ceil() as usize;
         for row in 0..rows {
             for column in 0..2 {
@@ -3722,8 +3726,9 @@ impl SuePaint {
         // a gray disc as Clip Studio Paint shows it.
         let (low, high) = (0.5_f32.ln(), 1000.0_f32.ln());
         let disc = pos2(lanes[0].center().x, lanes[0].top() + label / 2.0);
+        ui.painter().circle_filled(disc, 13.0, theme.void);
         ui.painter()
-            .circle_filled(disc, 13.0, Color32::from_gray(54));
+            .circle_stroke(disc, 13.0, Stroke::new(1.0, theme.border));
         ui.painter().text(
             disc,
             Align2::CENTER_CENTER,
