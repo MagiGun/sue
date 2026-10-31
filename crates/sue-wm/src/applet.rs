@@ -819,6 +819,20 @@ pub trait SueApplet: Send {
         let _ = (pick, path, cx);
     }
 
+    /// Work open in this applet with changes not saved, as (key, name)
+    /// pairs: Sue asks about each before it quits, as Clip Studio Paint
+    /// does ("Illustration has been changed. Do you want to save it?").
+    fn unsaved(&self, arena: &sue_core::Arena) -> Vec<(String, String)> {
+        let _ = arena;
+        Vec::new()
+    }
+
+    /// Saves the work `key` from [`Self::unsaved`]; it may ask where, with
+    /// the system's dialog, and stays unsaved if that is cancelled.
+    fn save_unsaved(&mut self, key: &str, cx: &mut AppletContext<'_>) {
+        let _ = (key, cx);
+    }
+
     /// The window's title while this applet fills the page: what is open
     /// in it, as the program it models shows it (Sue Paint's is Clip Studio
     /// Paint's: the file, its size and resolution, the zoom and the color

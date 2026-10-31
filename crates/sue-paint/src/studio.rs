@@ -6689,6 +6689,34 @@ impl SueApplet for SuePaint {
         self.bound.chords(shortcut_table())
     }
 
+    fn unsaved(&self, arena: &sue_core::Arena) -> Vec<(String, String)> {
+        self.docs
+            .iter()
+            .filter(|doc| {
+                let (_, _, version) = doc.compositor.display();
+                self.clean
+                    .get(&doc.picture)
+                    .is_some_and(|clean| *clean != version)
+            })
+            .filter_map(|doc| {
+                let name = arena.get_by_id(doc.picture).ok()?.name().to_owned();
+                Some((doc.picture.to_string(), name))
+            })
+            .collect()
+    }
+
+    fn save_unsaved(&mut self, key: &str, cx: &mut AppletContext<'_>) {
+        // That picture to the front, then File, Save as for its tab.
+        if let Some(index) = self
+            .docs
+            .iter()
+            .position(|doc| doc.picture.to_string() == key)
+        {
+            self.active = index;
+        }
+        self.run("file.save", cx);
+    }
+
     fn window_title(&self, arena: &sue_core::Arena) -> Option<String> {
         let Some(doc) = self.docs.get(self.active) else {
             return Some(tr!("paint-window-title-empty"));

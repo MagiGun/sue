@@ -27,6 +27,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Quitting asks about each picture with changes not saved, as Clip
+  Studio Paint does: "Illustration has been changed. Do you want to save
+  it?" with Save, Do Not Save and Cancel. "Quit Sue?" is no longer asked
+  unless you turn it on (Settings, Confirm on exit).
+- Under Sue Paint's color wheel the main and sub colors are the same
+  overlapping circles as in the tool strip, with the transparent pill.
 - On phones the Hub lists studios and tools as rows across the screen,
   easy to reach with a thumb, and menus have taller rows without keyboard
   shortcuts.

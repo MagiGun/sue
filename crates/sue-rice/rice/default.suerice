@@ -2,7 +2,7 @@
 # "A jack of all trades is a master of none,
 #  but oftentimes better than a master of one."
 #
-# sue-rice format 5
+# sue-rice format 6
 #
 # Every key below is a live control in Settings. Metadata lives in the
 # trailing comment:   [min..max]  slider       {a|b|c}  choice
@@ -10,7 +10,7 @@
 # Text after the metadata becomes the description shown in Settings.
 
 [general]
-confirm_on_exit = true         # Ask before closing the window
+confirm_on_exit = false        # Ask before closing the window
 language = "system"            # @text Sue's language, which every studio and tool follows unless set apart (system follows the system's language)
 autosave_seconds = 60          # [0..3600] Keep unsaved work this often, so the Hub can bring it back (s; 0 turns autosave off)
 

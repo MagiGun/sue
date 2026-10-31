@@ -134,3 +134,7 @@ label-work = Work
 transfer-import = Import
 transfer-export = Export
 transfer-copy = Copy
+unsaved-save-it = { $name } has been changed. Do you want to save it?
+do-not-save = Do Not Save
+save = Save
+cancel = Cancel

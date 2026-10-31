@@ -622,23 +622,36 @@ impl Runtime {
         redraw
     }
 
-    /// Asks before closing when the rice says so. Returns `true` to close.
+    /// Closing: each piece of work not saved is asked about first (the
+    /// shell's Save, Do Not Save, Cancel), then "Quit Sue?" when the rice
+    /// asks for it. Returns `true` to close now.
     pub fn close_requested(&mut self) -> bool {
         if self.quit {
             return true;
         }
+        if !self.interactive {
+            return self.quit_checked();
+        }
+        self.shell.begin_quit();
+        false
+    }
+
+    /// Every piece of work not saved has been asked about: "Quit Sue?"
+    /// when the rice asks for it, else quit. Returns `true` when closing.
+    fn quit_checked(&mut self) -> bool {
         if self
             .engine
             .world
             .rice
             .get_bool("general.confirm_on_exit")
-            .unwrap_or(true)
+            .unwrap_or(false)
         {
             self.confirm_quit = true;
             self.shell.touch();
             return false;
         }
         self.shutdown();
+        self.quit = true;
         true
     }
 
@@ -973,6 +986,9 @@ impl Runtime {
                 if self.close_requested() {
                     self.quit = true;
                 }
+            }
+            "app.quit.checked" => {
+                self.quit_checked();
             }
             "rice.reload" => self.reload_rice(),
             "app.check_updates" => {

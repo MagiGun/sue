@@ -9,8 +9,8 @@
 use crate::{DEFAULT_RICE, RiceError, RiceSchema, RiceValue};
 
 /// The format of [`DEFAULT_RICE`], declared in its header as
-/// `# sue-rice format 5`.
-pub const RICE_FORMAT: u32 = 5;
+/// `# sue-rice format 6`.
+pub const RICE_FORMAT: u32 = 6;
 
 const MARKER: &str = "# sue-rice format ";
 
@@ -20,6 +20,7 @@ const HISTORY: &[(u32, &str)] = &[
     (2, include_str!("../rice/history/v2.suerice")),
     (3, include_str!("../rice/history/v3.suerice")),
     (4, include_str!("../rice/history/v4.suerice")),
+    (5, include_str!("../rice/history/v5.suerice")),
 ];
 
 /// Keys that moved, as (old path, new path, old values that mean "no
@@ -129,6 +130,7 @@ mod tests {
     const V2: &str = include_str!("../rice/history/v2.suerice");
     const V3: &str = include_str!("../rice/history/v3.suerice");
     const V4: &str = include_str!("../rice/history/v4.suerice");
+    const V5: &str = include_str!("../rice/history/v5.suerice");
 
     #[test]
     fn the_shipped_default_is_current() {
@@ -137,7 +139,23 @@ mod tests {
         assert_eq!(format_of(V2), 2);
         assert_eq!(format_of(V3), 3);
         assert_eq!(format_of(V4), 4);
+        assert_eq!(format_of(V5), 5);
         assert_eq!(migrate(DEFAULT_RICE).unwrap(), None);
+    }
+
+    #[test]
+    fn quit_sue_is_no_longer_asked_unless_someone_chose_it() {
+        // Format 6 stops asking "Quit Sue?" (work not saved is still asked
+        // about); a format 5 file that never changed it follows.
+        let migration = migrate(V5).unwrap().unwrap();
+        assert_eq!(migration.from, 5);
+        assert_eq!(migration.text, DEFAULT_RICE.replace("\r\n", "\n"));
+        let schema = RiceSchema::parse(&migration.text).unwrap();
+        assert_eq!(schema.get_bool("general.confirm_on_exit"), Some(false));
+        // Someone who had turned it off keeps it off, by the same rule.
+        let off = V5.replace("confirm_on_exit = true ", "confirm_on_exit = false");
+        let schema = RiceSchema::parse(&migrate(&off).unwrap().unwrap().text).unwrap();
+        assert_eq!(schema.get_bool("general.confirm_on_exit"), Some(false));
     }
 
     #[test]

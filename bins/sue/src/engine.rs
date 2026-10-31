@@ -103,7 +103,7 @@ pub fn shell_declarations() -> Vec<RiceDeclaration> {
     vec![
         declare(
             "general.confirm_on_exit",
-            toggle(true),
+            toggle(false),
             "Ask before closing the window",
         ),
         declare(
