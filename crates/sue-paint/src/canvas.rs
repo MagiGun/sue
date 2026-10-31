@@ -866,7 +866,11 @@ impl SuePaint {
         // Under a menu, popup, dialog or sheet the canvas neither paints
         // nor shows its brush (see sue_wm::cover).
         let layer = ui.layer_id();
-        let covered = |pos: Pos2| sue_wm::cover::covered(&ctx, layer, pos);
+        let launchers = crate::launchers::take(&ctx);
+        let covered = |pos: Pos2| {
+            sue_wm::cover::covered(&ctx, layer, pos)
+                || launchers.iter().any(|bar| bar.expand(2.0).contains(pos))
+        };
         self.pointer = response.hover_pos().filter(|pos| !covered(*pos));
         let mut lifted = false;
         for event in events {
@@ -1866,6 +1870,7 @@ impl SuePaint {
                 + (viewport.right() - 4.0 - bar.right()).min(0.0),
             (viewport.bottom() - 4.0 - bar.bottom()).min(0.0),
         ));
+        crate::launchers::note(ui.ctx(), bar);
         ui.painter()
             .rect_filled(bar, theme.control_radius, theme.panel);
         ui.painter().rect_stroke(

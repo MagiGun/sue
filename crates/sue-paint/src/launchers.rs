@@ -12,6 +12,27 @@ use crate::panels::icon_button;
 use crate::studio::SuePaint;
 use crate::tools::Tool;
 
+/// Where this frame's launchers are, for the canvas: a press there is the
+/// launcher's, not the start of a stroke, a selection or a pose (which
+/// would hide the launcher before its button saw the click).
+fn zones() -> egui::Id {
+    egui::Id::NULL.with("sue-paint-launcher-zones")
+}
+
+/// Notes a launcher drawn at `rect` this frame.
+pub(crate) fn note(ctx: &egui::Context, rect: Rect) {
+    ctx.data_mut(|data| {
+        data.get_temp_mut_or_default::<Vec<Rect>>(zones())
+            .push(rect);
+    });
+}
+
+/// The launchers drawn last frame, taken (each frame notes its own).
+pub(crate) fn take(ctx: &egui::Context) -> Vec<Rect> {
+    ctx.data_mut(|data| data.remove_temp::<Vec<Rect>>(zones()))
+        .unwrap_or_default()
+}
+
 /// A launcher button: its icon, hint and whether it is on.
 pub(crate) type Button = (Icon, String, bool);
 
@@ -36,6 +57,7 @@ pub(crate) fn bar(
             + (viewport.right() - 4.0 - bar.right()).min(0.0),
         (viewport.bottom() - 4.0 - bar.bottom()).min(0.0),
     ));
+    note(ui.ctx(), bar);
     ui.painter()
         .rect_filled(bar, theme.control_radius, theme.panel);
     ui.painter().rect_stroke(
