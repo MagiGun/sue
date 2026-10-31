@@ -162,6 +162,15 @@ pub(crate) fn install_package(path: &Path) -> Result<(), String> {
     ))
 }
 
+/// The package installer's last answer about an update, once: `""` when it
+/// was cancelled, `"conflict"` when another key signed the installed Sue,
+/// else why it failed; `None` while there is none.
+pub(crate) fn install_answer() -> Option<String> {
+    call("takeInstallAnswer", "()Ljava/lang/String;", &[])
+        .ok()
+        .flatten()
+}
+
 const TEXT_TEXT: &str = "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;";
 
 /// Android's documents (the Storage Access Framework), through Sue's

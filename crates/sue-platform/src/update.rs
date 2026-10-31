@@ -555,6 +555,37 @@ pub fn run_update(path: &Path) -> io::Result<()> {
     }
 }
 
+/// What the system's package installer said about an update handed to it
+/// with [`run_update`] (Android's tells Sue; the others do not).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Installed {
+    /// The person cancelled it, or would not let Sue install apps.
+    Cancelled,
+    /// The Sue already installed was signed with another key, so Android
+    /// will not put this one over it.
+    Conflict,
+    /// It failed, and why.
+    Failed(String),
+}
+
+/// The package installer's answer about the last update handed to it, once
+/// it has one (Android only; `None` elsewhere and while it is still busy).
+#[must_use]
+pub fn installed() -> Option<Installed> {
+    #[cfg(target_os = "android")]
+    {
+        crate::android::install_answer().map(|answer| match answer.as_str() {
+            "" => Installed::Cancelled,
+            "conflict" => Installed::Conflict,
+            _ => Installed::Failed(answer),
+        })
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        None
+    }
+}
+
 /// Puts a downloaded AppImage (`new`, beside the old one) in place of the
 /// running one at `path` and starts it.
 ///

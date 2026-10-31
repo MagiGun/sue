@@ -420,6 +420,7 @@ impl Runtime {
                     self.shutdown();
                     self.quit = true;
                 }
+                update::Action::CheckAgain => self.updater.check(false),
             }
         }
         self.next_update_poll = self.updater.busy().then(|| now + update::POLL);

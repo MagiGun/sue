@@ -12,6 +12,7 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.DocumentsContract;
+import android.provider.Settings;
 import android.provider.OpenableColumns;
 import android.webkit.MimeTypeMap;
 import java.io.File;
@@ -310,6 +311,27 @@ public class SueActivity extends NativeActivity {
      * comes back to onNewIntent.
      */
     public String installPackage(String path) {
+        // Android asks once whether Sue may install apps: until it may, the
+        // person is taken to that switch, and the update installs as soon
+        // as they come back with it on.
+        if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+            synchronized (this) {
+                waitingInstall = path;
+                installAnswer = null;
+            }
+            try {
+                Intent allow = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + getPackageName()));
+                allow.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(allow);
+                return null;
+            } catch (Exception error) {
+                return why(error);
+            }
+        }
+        synchronized (this) {
+            installAnswer = null;
+        }
         try {
             PackageInstaller installer = getPackageManager().getPackageInstaller();
             PackageInstaller.SessionParams params =
@@ -346,6 +368,49 @@ public class SueActivity extends NativeActivity {
         }
     }
 
+    /** An update waiting for the person to let Sue install apps. */
+    private String waitingInstall;
+    /**
+     * The package installer's last answer, until taken: null while there
+     * is none, "" when the person cancelled, "conflict" when the installed
+     * Sue was signed with another key, else why it failed.
+     */
+    private String installAnswer;
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        String path;
+        synchronized (this) {
+            path = waitingInstall;
+        }
+        if (path == null || Build.VERSION.SDK_INT < 26) {
+            return;
+        }
+        synchronized (this) {
+            waitingInstall = null;
+        }
+        if (getPackageManager().canRequestPackageInstalls()) {
+            String why = installPackage(path);
+            if (why != null) {
+                synchronized (this) {
+                    installAnswer = why;
+                }
+            }
+        } else {
+            synchronized (this) {
+                installAnswer = "";
+            }
+        }
+    }
+
+    /** The package installer's last answer, once (see installAnswer). */
+    public synchronized String takeInstallAnswer() {
+        String text = installAnswer;
+        installAnswer = null;
+        return text;
+    }
+
     /** The package installer's answer: it may want the person to confirm. */
     @Override
     protected void onNewIntent(Intent intent) {
@@ -357,8 +422,26 @@ public class SueActivity extends NativeActivity {
         if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
             Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT);
             if (confirm != null) {
+                confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 startActivity(confirm);
             }
+            return;
+        }
+        if (status == PackageInstaller.STATUS_SUCCESS) {
+            return;
+        }
+        String answer;
+        if (status == PackageInstaller.STATUS_FAILURE_ABORTED) {
+            answer = "";
+        } else if (status == PackageInstaller.STATUS_FAILURE_CONFLICT
+                || status == PackageInstaller.STATUS_FAILURE_INCOMPATIBLE) {
+            answer = "conflict";
+        } else {
+            String message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
+            answer = message == null || message.isEmpty() ? "status " + status : message;
+        }
+        synchronized (this) {
+            installAnswer = answer;
         }
     }
 }

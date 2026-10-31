@@ -32,6 +32,16 @@ pub enum Action {
     Copy(String),
     /// Close Sue (the update takes over).
     Quit,
+    /// Check for updates again.
+    CheckAgain,
+}
+
+/// What was pressed in the window this frame.
+#[derive(Default)]
+struct Press {
+    download: bool,
+    again: bool,
+    read: Option<Release>,
 }
 
 enum State {
@@ -40,7 +50,8 @@ enum State {
         job: Job<Result<Release, String>>,
         quiet: bool,
     },
-    UpToDate,
+    /// The latest release is this one (kept for its notes, when known).
+    UpToDate(Option<Release>),
     Available {
         release: Release,
         plan: Plan,
@@ -56,6 +67,9 @@ enum State {
         release: Release,
         note: String,
         command: Option<String>,
+        /// The download, to hand over again (Android, after the person
+        /// cancelled or had to let Sue install apps first).
+        again: Option<PathBuf>,
     },
     Failed {
         release: Option<Release>,
@@ -67,6 +81,8 @@ enum State {
 pub struct Updater {
     state: State,
     shown: bool,
+    /// The release whose whole notes are open, over everything.
+    reading: Option<Release>,
     install: Install,
     /// When the last automatic check ran (seconds since 1970).
     stamp: PathBuf,
@@ -84,6 +100,7 @@ impl Updater {
         Self {
             state: State::Idle,
             shown: false,
+            reading: None,
             install: Install::detect(),
             stamp: paths.data_dir.join("updates").join("checked.txt"),
             downloads: paths.cache_dir.join("updates"),
@@ -126,7 +143,7 @@ impl Updater {
             return;
         }
         if self.install == Install::Browser {
-            self.state = State::UpToDate;
+            self.state = State::UpToDate(None);
             self.shown = !quiet;
             return;
         }
@@ -144,7 +161,7 @@ impl Updater {
         matches!(
             self.state,
             State::Checking { .. } | State::Downloading { .. }
-        )
+        ) || (self.install == Install::Android && matches!(self.state, State::Handed { .. }))
     }
 
     /// Reads a running check or download.
@@ -159,7 +176,7 @@ impl Updater {
                         self.shown = true;
                         State::Available { release, plan }
                     }
-                    Ok(_) => State::UpToDate,
+                    Ok(release) => State::UpToDate(Some(release)),
                     Err(error) => {
                         if quiet {
                             eprintln!("sue: could not check for updates: {error}");
@@ -191,8 +208,60 @@ impl Updater {
                     }
                 }
             }
+            // Android's installer tells how it went.
+            State::Handed { .. } => {
+                let answer = update::installed()?;
+                let State::Handed { release, again, .. } =
+                    std::mem::replace(&mut self.state, State::Idle)
+                else {
+                    return None;
+                };
+                self.shown = true;
+                self.state = match answer {
+                    update::Installed::Cancelled => State::Handed {
+                        release,
+                        note: tr!("update-android-cancelled"),
+                        command: None,
+                        again,
+                    },
+                    update::Installed::Conflict => State::Failed {
+                        release: Some(release),
+                        error: tr!("update-android-conflict"),
+                    },
+                    update::Installed::Failed(error) => State::Failed {
+                        release: Some(release),
+                        error,
+                    },
+                };
+                None
+            }
             _ => None,
         }
+    }
+
+    /// Hands the downloaded update to the system again.
+    fn hand_again(&mut self) {
+        let State::Handed {
+            release,
+            again: Some(path),
+            ..
+        } = &self.state
+        else {
+            return;
+        };
+        let (release, path) = (release.clone(), path.clone());
+        self.state = match update::run_update(&path) {
+            Ok(()) => State::Handed {
+                release,
+                note: tr!("update-installer-opened"),
+                command: None,
+                again: Some(path),
+            },
+            Err(error) => State::Failed {
+                release: Some(release),
+                error: error.to_string(),
+            },
+        };
     }
 
     /// Hands a checked download to the system.
@@ -220,10 +289,12 @@ impl Updater {
                 Some(Action::Quit)
             }
             Ok(Some((note, command))) => {
+                let again = (self.install == Install::Android).then(|| path.to_path_buf());
                 self.state = State::Handed {
                     release,
                     note,
                     command,
+                    again,
                 };
                 self.shown = true;
                 None
@@ -268,30 +339,61 @@ impl Updater {
 
     /// Draws the window in the corner, when it shows.
     pub fn ui(&mut self, ctx: &egui::Context, theme: &Theme) -> Option<Action> {
-        if !self.shown {
-            return None;
-        }
         let mut action = None;
+        if let Some(release) = &self.reading {
+            let mut close = false;
+            read_notes(ctx, theme, release, &mut close, &mut action);
+            if close {
+                self.reading = None;
+            }
+        }
+        if !self.shown {
+            return action;
+        }
         let mut close = false;
-        let mut download = false;
+        let mut press = Press::default();
         let screen = ctx.content_rect();
-        let width = (screen.width() - 32.0).clamp(200.0, 380.0);
+        // On a phone a sheet across the bottom, on a computer a window in
+        // the corner.
+        let phone = screen.width() < 560.0;
+        let width = if phone {
+            screen.width() - 24.0
+        } else {
+            (screen.width() - 32.0).clamp(200.0, 380.0) + 32.0
+        };
+        let (pivot, at) = if phone {
+            (
+                Align2::CENTER_BOTTOM,
+                screen.center_bottom() - vec2(0.0, 24.0),
+            )
+        } else {
+            (
+                Align2::RIGHT_BOTTOM,
+                screen.right_bottom() - vec2(16.0, 48.0),
+            )
+        };
         egui::Area::new(Id::unique("sue-update"))
             .order(Order::Foreground)
-            .pivot(Align2::RIGHT_BOTTOM)
-            .fixed_pos(screen.right_bottom() - vec2(16.0, 48.0))
+            .pivot(pivot)
+            .fixed_pos(at)
             .show(ctx, |ui| {
                 widgets::window_frame(theme).show(ui, |ui| {
                     egui::Frame::new()
                         .inner_margin(egui::Margin::same(16))
                         .show(ui, |ui| {
-                            ui.set_width(width);
-                            self.body(ui, theme, &mut action, &mut close, &mut download);
+                            ui.set_width(width - 32.0);
+                            self.body(ui, theme, &mut action, &mut close, &mut press);
                         });
                 });
             });
-        if download {
+        if press.download {
             self.start_download();
+        }
+        if press.again {
+            self.hand_again();
+        }
+        if let Some(release) = press.read {
+            self.reading = Some(release);
         }
         if close {
             self.shown = false;
@@ -308,8 +410,16 @@ impl Updater {
         theme: &Theme,
         action: &mut Option<Action>,
         close: &mut bool,
-        download: &mut bool,
+        press: &mut Press,
     ) {
+        // Release Notes: the whole notes, read in Sue.
+        let read = |ui: &mut egui::Ui, release: &Release, press: &mut Press| {
+            if !release.notes.trim().is_empty()
+                && widgets::pill_button(ui, &tr!("update-release-notes"), false, theme).clicked()
+            {
+                press.read = Some(release.clone());
+            }
+        };
         let heading = |ui: &mut egui::Ui, text: String| {
             ui.label(
                 RichText::new(text)
@@ -336,7 +446,7 @@ impl Updater {
                     *close = true;
                 }
             }
-            State::UpToDate => {
+            State::UpToDate(release) => {
                 heading(ui, tr!("sue-is-up-to-date"));
                 muted(
                     ui,
@@ -347,9 +457,14 @@ impl Updater {
                     },
                 );
                 ui.add_space(theme.padding);
-                if widgets::pill_button(ui, &tr!("update-close"), false, theme).clicked() {
-                    *close = true;
-                }
+                ui.horizontal_wrapped(|ui| {
+                    if let Some(release) = release {
+                        read(ui, release, press);
+                    }
+                    if widgets::pill_button(ui, &tr!("update-close"), false, theme).clicked() {
+                        *close = true;
+                    }
+                });
             }
             State::Available { release, plan } => {
                 heading(ui, tr!("update-available", version = release.version()));
@@ -373,17 +488,19 @@ impl Updater {
                     if let Some(label) = primary
                         && widgets::pill_button(ui, &label, true, theme).clicked()
                     {
-                        *download = true;
+                        press.download = true;
                     }
+                    read(ui, release, press);
                     if let Plan::Command(command) = plan
                         && widgets::pill_button(ui, &tr!("update-copy-command"), true, theme)
                             .clicked()
                     {
                         *action = Some(Action::Copy(command.clone()));
                     }
-                    let open_page = matches!(plan, Plan::Page);
-                    if widgets::pill_button(ui, &tr!("update-release-page"), open_page, theme)
-                        .clicked()
+                    // Where Sue updates in place, the page is not needed.
+                    if matches!(plan, Plan::Page | Plan::Current)
+                        && widgets::pill_button(ui, &tr!("update-release-page"), true, theme)
+                            .clicked()
                     {
                         *action = Some(Action::OpenUrl(release.page.clone()));
                     }
@@ -419,6 +536,7 @@ impl Updater {
                 release,
                 note,
                 command,
+                again,
             } => {
                 heading(ui, tr!("update-available", version = release.version()));
                 muted(ui, note.clone());
@@ -427,12 +545,18 @@ impl Updater {
                 }
                 ui.add_space(theme.padding);
                 ui.horizontal_wrapped(|ui| {
+                    if again.is_some()
+                        && widgets::pill_button(ui, &tr!("update-install"), true, theme).clicked()
+                    {
+                        press.again = true;
+                    }
                     if let Some(command) = command
                         && widgets::pill_button(ui, &tr!("update-copy-command"), true, theme)
                             .clicked()
                     {
                         *action = Some(Action::Copy(command.clone()));
                     }
+                    read(ui, release, press);
                     if self.install == Install::MacApp
                         && widgets::pill_button(ui, &tr!("update-quit-sue"), true, theme).clicked()
                     {
@@ -448,7 +572,13 @@ impl Updater {
                 muted(ui, error.clone());
                 ui.add_space(theme.padding);
                 ui.horizontal_wrapped(|ui| {
-                    if widgets::pill_button(ui, &tr!("update-release-page"), true, theme).clicked()
+                    if widgets::pill_button(ui, &tr!("update-try-again"), true, theme).clicked() {
+                        *action = Some(Action::CheckAgain);
+                    }
+                    if let Some(release) = release {
+                        read(ui, release, press);
+                    }
+                    if widgets::pill_button(ui, &tr!("update-release-page"), false, theme).clicked()
                     {
                         *action = Some(Action::OpenUrl(page(release.as_ref())));
                     }
@@ -471,9 +601,143 @@ fn notes(ui: &mut egui::Ui, theme: &Theme, release: &Release) {
     ScrollArea::vertical()
         .max_height(220.0)
         .auto_shrink([false, true])
-        .show(ui, |ui| {
-            ui.label(RichText::new(text).size(theme.small_size).color(theme.text));
+        .show(ui, |ui| markdown(ui, theme, text));
+}
+
+/// A release's whole notes over everything, as a page: the width of a
+/// phone, or a column in the middle of a computer's window.
+fn read_notes(
+    ctx: &egui::Context,
+    theme: &Theme,
+    release: &Release,
+    close: &mut bool,
+    action: &mut Option<Action>,
+) {
+    let screen = ctx.content_rect();
+    let phone = screen.width() < 560.0;
+    let size = if phone {
+        screen.size() - vec2(16.0, 48.0)
+    } else {
+        vec2(
+            (screen.width() - 64.0).min(720.0),
+            (screen.height() - 96.0).max(200.0),
+        )
+    };
+    egui::Area::new(Id::unique("sue-release-notes"))
+        .order(Order::Foreground)
+        .pivot(Align2::CENTER_CENTER)
+        .fixed_pos(screen.center())
+        .show(ctx, |ui| {
+            widgets::window_frame(theme).show(ui, |ui| {
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::same(16))
+                    .show(ui, |ui| {
+                        ui.set_width(size.x - 32.0);
+                        ui.set_height(size.y - 32.0);
+                        ui.label(
+                            RichText::new(tr!("update-notes-title", version = release.version()))
+                                .size(theme.heading_size)
+                                .color(theme.text),
+                        );
+                        ui.add_space(theme.padding * 0.5);
+                        let bottom = theme.pill_height + theme.padding * 2.0;
+                        ScrollArea::vertical()
+                            .max_height(ui.available_height() - bottom)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| markdown(ui, theme, &release.notes));
+                        ui.add_space(theme.padding);
+                        ui.horizontal_wrapped(|ui| {
+                            if widgets::pill_button(ui, &tr!("update-close"), true, theme).clicked()
+                            {
+                                *close = true;
+                            }
+                            if widgets::pill_button(ui, &tr!("update-release-page"), false, theme)
+                                .clicked()
+                            {
+                                *action = Some(Action::OpenUrl(release.page.clone()));
+                            }
+                        });
+                    });
+            });
         });
+}
+
+/// Release notes as GitHub writes them, read plainly: headings, lists,
+/// paragraphs and code, with the marks of bold, code and links taken off.
+fn markdown(ui: &mut egui::Ui, theme: &Theme, text: &str) {
+    let mut code = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            code = !code;
+            continue;
+        }
+        if code {
+            ui.label(RichText::new(line).monospace().color(theme.text));
+            continue;
+        }
+        if trimmed.is_empty() {
+            ui.add_space(theme.padding * 0.5);
+            continue;
+        }
+        let hashes = trimmed.chars().take_while(|c| *c == '#').count();
+        if hashes > 0 && trimmed[hashes..].starts_with(' ') {
+            let size = if hashes <= 2 {
+                theme.heading_size
+            } else {
+                theme.ui_size * 1.1
+            };
+            ui.add_space(theme.padding * 0.5);
+            ui.label(
+                RichText::new(plain(trimmed[hashes..].trim()))
+                    .size(size)
+                    .color(theme.text),
+            );
+            continue;
+        }
+        let item = ["- ", "* ", "+ "]
+            .iter()
+            .find_map(|mark| trimmed.strip_prefix(mark));
+        if let Some(rest) = item {
+            let indent = (line.len() - line.trim_start().len()) as f32 * 6.0;
+            ui.horizontal_top(|ui| {
+                ui.add_space(indent);
+                let (dot, _) = ui.allocate_exact_size(
+                    vec2(theme.ui_size * 0.9, theme.ui_size * 1.3),
+                    Sense::hover(),
+                );
+                ui.painter().circle_filled(dot.center(), 2.5, theme.muted);
+                ui.add(egui::Label::new(RichText::new(plain(rest)).color(theme.text)).wrap());
+            });
+        } else {
+            ui.add(egui::Label::new(RichText::new(plain(trimmed)).color(theme.text)).wrap());
+        }
+    }
+}
+
+/// `text` without Markdown's inline marks: `**bold**`, `code` and
+/// `[links](to)` read as their words.
+fn plain(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('[') {
+        let after = &rest[start + 1..];
+        let link = after.find("](").and_then(|middle| {
+            after[middle + 2..]
+                .find(')')
+                .map(|end| (middle, middle + 2 + end))
+        });
+        if let Some((middle, end)) = link {
+            out.push_str(&rest[..start]);
+            out.push_str(&after[..middle]);
+            rest = &after[end + 1..];
+        } else {
+            out.push_str(&rest[..=start]);
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out.replace("**", "").replace('`', "")
 }
 
 /// A thin bar filled as far as the download got.
@@ -492,4 +756,18 @@ fn progress(ui: &mut egui::Ui, theme: &Theme, received: u64, total: u64) {
 /// How Sue names itself to GitHub.
 fn user_agent() -> String {
     format!("Sue/{SUE_VERSION}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notes_read_without_their_marks() {
+        assert_eq!(
+            plain("**Updates itself.** See [the page](https://example.com) and `sue`."),
+            "Updates itself. See the page and sue."
+        );
+        assert_eq!(plain("a [b] c"), "a [b] c");
+    }
 }
