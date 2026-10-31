@@ -642,14 +642,17 @@ Once a canvas is open:
   bend it at its joint (Shift twists it) and drag anywhere else to turn
   the camera; the joints show as dots, the one you are posing lit. Tool
   Settings has pose presets, Flip pose, Reset pose and the picked joint's
-  Bend, Twist and Swing. Convert to Lines and Tones makes line art from
+  Bend, Twist and Swing, and the body shape: Height and Head to body
+  ratio. Convert to Lines and Tones makes line art from
   the pose to draw over; Convert to Vector Lines and Tones makes those
   lines strokes you can reshape with the vector tools.
 - **3D layers:** Layer, New Layer, 3D Layer puts a cube, sphere, cylinder,
-  cone or plane on the canvas, and File, Import, 3D Data brings in an OBJ
+  cone, plane, prism or pyramid on the canvas, and File, Import, 3D Data brings in an OBJ
   model. With the Object tool (O), drag to turn the camera, Shift and drag
-  to move it, Ctrl and drag to come nearer; Tool Property sets the camera,
-  light and whether it draws shaded, as line art or both. Layer, Convert to
+  to move it, Ctrl and drag to come nearer; Tool Property sets the camera
+  (or picks Front, Back, Left, Right, Top or Bottom), the light, its
+  intensity, ambient light and cast shadows, whether it draws shaded, as
+  line art or both, and the lines' color and opacity. Layer, Convert to
   Lines and Tones makes clean line art and tone from it to draw over.
 - **New:** File, New is laid out as Clip Studio Paint's, with its six
   projects: Illustration, Webtoon, Comic, Printing of fanzine (A5 pages),

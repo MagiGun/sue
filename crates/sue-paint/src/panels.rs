@@ -1362,6 +1362,12 @@ impl SuePaint {
         {
             self.finish_pose(cx, layer, &base, &before);
         }
+        if let Some((layer, body)) = self.pending_body.take()
+            && let Some(edit) =
+                crate::figure::set_body(&cx.world.arena, layer, &body, &tr!("body-shape"))
+        {
+            Self::apply(cx, edit);
+        }
         if std::mem::take(&mut self.view3d_release)
             && let Some((layer, base, before)) = self.view3d_before.take()
         {
@@ -2521,6 +2527,19 @@ impl SuePaint {
             5.0..=120.0,
             &tr!("deg"),
         );
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr!("camera-view")).color(theme.muted));
+            egui::ComboBox::from_id_salt(("sue-paint-3d-camera", layer))
+                .selected_text(tr!("choose-a-view"))
+                .show_ui(ui, |ui| {
+                    for (index, (name, _, _)) in crate::three::CAMERAS.iter().enumerate() {
+                        if ui.selectable_label(false, crate::localize(name)).clicked() {
+                            view = view.preset(index);
+                            released = true;
+                        }
+                    }
+                });
+        });
         released |= slider(
             ui,
             &tr!("light"),
@@ -2528,6 +2547,17 @@ impl SuePaint {
             -180.0..=180.0,
             &tr!("deg"),
         );
+        released |= slider(
+            ui,
+            &tr!("light-intensity"),
+            &mut view.intensity,
+            0.0..=2.0,
+            "",
+        );
+        released |= slider(ui, &tr!("ambient-light"), &mut view.ambient, 0.0..=1.0, "");
+        released |= ui
+            .checkbox(&mut view.shadows, tr!("cast-shadows"))
+            .changed();
         ui.horizontal(|ui| {
             ui.label(RichText::new(tr!("draw-as")).color(theme.muted));
             egui::ComboBox::from_id_salt(("sue-paint-3d-style", layer))
@@ -2560,6 +2590,17 @@ impl SuePaint {
                 5.0..=170.0,
                 &tr!("deg"),
             );
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(tr!("line-color")).color(theme.muted));
+                released |= ui.color_edit_button_srgb(&mut view.line_color).changed();
+            });
+            released |= slider(
+                ui,
+                &tr!("line-opacity"),
+                &mut view.line_opacity,
+                0.0..=1.0,
+                "",
+            );
         }
         ui.label(
             RichText::new(tr!("drag-canvas-turn-camera-shift-moves"))
@@ -2569,6 +2610,7 @@ impl SuePaint {
         if let Some(model) = crate::figure::of_layer(arena, layer)
             && let Ok(model) = arena.get_by_id(model)
         {
+            self.figure_body(ui, layer, crate::figure::Body::of(model), theme);
             self.figure_properties(ui, layer, &crate::figure::Pose::of(model), arena, theme);
         }
         if view != now {
@@ -2587,6 +2629,54 @@ impl SuePaint {
         }
         if released {
             self.view3d_release = true;
+        }
+    }
+
+    /// A drawing figure's body shape, as Clip Studio Paint's: its height and
+    /// head to body ratio, kept as one step when let go.
+    fn figure_body(
+        &mut self,
+        ui: &mut Ui,
+        layer: sue_core::EntityId,
+        now: crate::figure::Body,
+        theme: &Theme,
+    ) {
+        use crate::figure::Body;
+        ui.separator();
+        ui.label(RichText::new(tr!("body-shape")).color(theme.text));
+        let mut body = self
+            .body_drag
+            .filter(|(id, _)| *id == layer)
+            .map_or(now, |(_, body)| body);
+        let mut released = false;
+        let mut dragging = false;
+        for (name, value, range, suffix) in [
+            (tr!("height-2"), &mut body.height, Body::HEIGHTS, tr!("cm")),
+            (
+                tr!("head-to-body-ratio"),
+                &mut body.heads,
+                Body::RATIOS,
+                String::new(),
+            ),
+        ] {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(name).color(theme.muted));
+                let response = ui.add(egui::Slider::new(value, range).suffix(suffix));
+                dragging |= response.dragged();
+                released |= response.drag_stopped() || (response.changed() && !response.dragged());
+            });
+        }
+        if ui.button(tr!("reset-body-shape")).clicked() {
+            body = Body::default();
+            released = true;
+        }
+        if released {
+            self.body_drag = None;
+            if body != now {
+                self.pending_body = Some((layer, body));
+            }
+        } else if dragging {
+            self.body_drag = Some((layer, body));
         }
     }
 

@@ -13,6 +13,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- 3D layers in Sue Paint take Clip Studio Paint's camera presets (Front,
+  Back, Left, Right, Top, Bottom), the light's intensity, ambient light
+  and cast shadows, a line color and opacity, and two more shapes, prism
+  and pyramid. Drawing figures take a body shape: Height and Head to body
+  ratio, from a child or chibi to a tall adult.
 - Layer, Convert to Vector Lines and Tones: a 3D layer (a shape, a model
   or a posed drawing figure) becomes its tone and a vector layer of
   editable strokes along its outline and folds.

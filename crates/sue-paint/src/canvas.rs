@@ -3109,8 +3109,13 @@ impl SuePaint {
         p: Pos2,
         size: [u32; 2],
     ) -> Option<usize> {
-        let model = crate::figure::of_layer(arena, layer)?;
-        let pose = crate::figure::Pose::of(arena.get_by_id(model).ok()?);
+        let model = arena
+            .get_by_id(crate::figure::of_layer(arena, layer)?)
+            .ok()?;
+        let (pose, body) = (
+            crate::figure::Pose::of(model),
+            crate::figure::Body::of(model),
+        );
         let view = crate::three::View3D::of(arena.get_by_id(layer).ok()?);
         let raster = doc::raster(arena, layer)?;
         let lens = crate::three::Camera::new(
@@ -3124,7 +3129,7 @@ impl SuePaint {
         let local = [p.x - offset[0] as f32, p.y - offset[1] as f32];
         let zoom = self.doc().map_or(1.0, |doc| doc.view.zoom).max(0.01);
         let reach = (16.0 / zoom).max(size[0].min(size[1]) as f32 * 0.004);
-        crate::figure::bones(&pose)
+        crate::figure::bones(&pose, &body)
             .iter()
             .enumerate()
             .filter_map(|(joint, (start, end))| {
@@ -3887,6 +3892,7 @@ impl SuePaint {
             // The figure's skeleton: its bones faint, its joints as dots,
             // the one being posed lit.
             let pose = crate::figure::Pose::of(model);
+            let body = crate::figure::Body::of(model);
             let lens = crate::three::Camera::new(
                 &crate::three::View3D::of(entity),
                 [raster.width(), raster.height()],
@@ -3901,7 +3907,7 @@ impl SuePaint {
                     .map(|[x, y]| screen([x + offset[0] as f32, y + offset[1] as f32]))
             };
             let chosen = self.figure_joint;
-            for (joint, (start, end)) in crate::figure::bones(&pose).iter().enumerate() {
+            for (joint, (start, end)) in crate::figure::bones(&pose, &body).iter().enumerate() {
                 let (Some(a), Some(b)) = (place(*start), place(*end)) else {
                     continue;
                 };

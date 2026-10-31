@@ -39,12 +39,35 @@ pub const CREASE: &str = "view3d.crease";
 pub const PAN_X: &str = "view3d.pan_x";
 /// See [`PAN_X`].
 pub const PAN_Y: &str = "view3d.pan_y";
+/// How strong the light is, 0 to 2 (`Float`).
+pub const INTENSITY: &str = "view3d.intensity";
+/// How much light reaches the parts the light does not, 0 to 1 (`Float`).
+pub const AMBIENT: &str = "view3d.ambient";
+/// Whether the model casts shadows on itself (`Bool`).
+pub const SHADOWS: &str = "view3d.shadows";
+/// The lines' color, `0xRRGGBB` (`Int`).
+pub const LINE_COLOR: &str = "view3d.line_color";
+/// The lines' opacity, 0 to 1 (`Float`).
+pub const LINE_OPACITY: &str = "view3d.line_opacity";
 
 /// What people read for the styles, in order.
 pub const STYLES: [&str; 3] = ["Shaded", "Line art", "Shaded with lines"];
 
 /// Sue Paint's own shapes.
-pub const SHAPES: [&str; 5] = ["Cube", "Sphere", "Cylinder", "Cone", "Plane"];
+pub const SHAPES: [&str; 7] = [
+    "Cube", "Sphere", "Cylinder", "Cone", "Plane", "Prism", "Pyramid",
+];
+
+/// Clip Studio Paint's camera presets, in its order: where the camera
+/// looks from, as a turn round and a height in degrees.
+pub const CAMERAS: [(&str, f32, f32); 6] = [
+    ("Front", 0.0, 0.0),
+    ("Back", 180.0, 0.0),
+    ("Left", -90.0, 0.0),
+    ("Right", 90.0, 0.0),
+    ("Top", 0.0, 89.0),
+    ("Bottom", 0.0, -89.0),
+];
 
 /// How a 3D layer looks at its model.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -67,6 +90,16 @@ pub struct View3D {
     pub crease: f32,
     /// The camera moved across and down.
     pub pan: [f32; 2],
+    /// How strong the light is.
+    pub intensity: f32,
+    /// How much light the unlit parts get.
+    pub ambient: f32,
+    /// The model casts shadows on itself.
+    pub shadows: bool,
+    /// The lines' color.
+    pub line_color: [u8; 3],
+    /// The lines' opacity.
+    pub line_opacity: f32,
 }
 
 impl Default for View3D {
@@ -81,6 +114,11 @@ impl Default for View3D {
             line_width: 2.0,
             crease: 40.0,
             pan: [0.0; 2],
+            intensity: 1.0,
+            ambient: 0.25,
+            shadows: false,
+            line_color: [0; 3],
+            line_opacity: 1.0,
         }
     }
 }
@@ -109,6 +147,32 @@ impl View3D {
             line_width: number(LINE_WIDTH, still.line_width).max(0.0),
             crease: number(CREASE, still.crease).clamp(1.0, 179.0),
             pan: [number(PAN_X, 0.0), number(PAN_Y, 0.0)],
+            intensity: number(INTENSITY, still.intensity).clamp(0.0, 2.0),
+            ambient: number(AMBIENT, still.ambient).clamp(0.0, 1.0),
+            shadows: entity
+                .property(SHADOWS)
+                .and_then(Value::as_bool)
+                .unwrap_or(still.shadows),
+            line_color: entity
+                .property(LINE_COLOR)
+                .and_then(Value::as_i64)
+                .map_or(still.line_color, |rgb| {
+                    [(rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8]
+                }),
+            line_opacity: number(LINE_OPACITY, still.line_opacity).clamp(0.0, 1.0),
+        }
+    }
+
+    /// The view from Clip Studio Paint's camera preset `index` in
+    /// [`CAMERAS`], centered again, the rest kept.
+    #[must_use]
+    pub fn preset(self, index: usize) -> Self {
+        let (_, yaw, pitch) = CAMERAS[index.min(CAMERAS.len() - 1)];
+        Self {
+            yaw,
+            pitch,
+            pan: [0.0; 2],
+            ..self
         }
     }
 
@@ -126,6 +190,17 @@ impl View3D {
             SetProperty::new(layer, CREASE, f64::from(self.crease)),
             SetProperty::new(layer, PAN_X, f64::from(self.pan[0])),
             SetProperty::new(layer, PAN_Y, f64::from(self.pan[1])),
+            SetProperty::new(layer, INTENSITY, f64::from(self.intensity)),
+            SetProperty::new(layer, AMBIENT, f64::from(self.ambient)),
+            SetProperty::new(layer, SHADOWS, self.shadows),
+            SetProperty::new(
+                layer,
+                LINE_COLOR,
+                i64::from(self.line_color[0]) << 16
+                    | i64::from(self.line_color[1]) << 8
+                    | i64::from(self.line_color[2]),
+            ),
+            SetProperty::new(layer, LINE_OPACITY, f64::from(self.line_opacity)),
         ]
     }
 }
@@ -177,10 +252,15 @@ pub fn shape(kind: usize) -> Geometry {
                 }
             }
         }
-        2 | 3 => {
-            // A cylinder (or a cone) of 32 sides with its caps.
-            let sides = 32;
-            let top = if kind == 3 { 0.0 } else { 1.0 };
+        2 | 3 | 5 | 6 => {
+            // A cylinder (or a cone) of 32 sides with its caps; a prism of
+            // 3 sides, a pyramid of 4.
+            let sides = match kind {
+                5 => 3,
+                6 => 4,
+                _ => 32,
+            };
+            let top = if kind == 3 || kind == 6 { 0.0 } else { 1.0 };
             for i in 0..sides {
                 let (c0, s0) = round(sides, i);
                 let (c1, s1) = round(sides, i + 1);
@@ -202,7 +282,7 @@ pub fn shape(kind: usize) -> Geometry {
                 })
                 .collect();
             face(&mut geometry, &bottom);
-            if kind == 2 {
+            if top > 0.0 {
                 let cap: Vec<[f64; 3]> = (0..sides)
                     .map(|i| {
                         let (c, s) = round(sides, i);
@@ -453,6 +533,7 @@ pub fn render_framed(
     let light = normalized([light_angle.sin(), 0.8, light_angle.cos()]);
     let camera = |p: [f32; 3]| lens.see(p);
     let project = |c: [f32; 3]| lens.screen(c);
+    let shadow = view.shadows.then(|| ShadowMap::new(mesh, &lens, light));
     for triangle in mesh.indices().as_chunks::<3>().0 {
         let [(a_world, a), (b_world, b), (c_world, c)] =
             [0, 1, 2].map(|k| camera(positions[triangle[k] as usize]));
@@ -465,7 +546,7 @@ pub fn render_framed(
         if dot(normal, toward) < 0.0 {
             normal = [-normal[0], -normal[1], -normal[2]];
         }
-        let lit = 0.25 + 0.75 * dot(normal, light).max(0.0);
+        let facing = dot(normal, light).max(0.0);
         let [pa, pb, pc] = [project(a), project(b), project(c)];
         let area = (pb[0] - pa[0]) * (pc[1] - pa[1]) - (pb[1] - pa[1]) * (pc[0] - pa[0]);
         if area.abs() < 1e-6 {
@@ -490,14 +571,123 @@ pub fn render_framed(
                 let depth = 1.0 / inverse;
                 let at = y * w + x;
                 if depth < buffers.depth[at] {
+                    let sunlit = shadow.as_ref().map_or(1.0, |shadow| {
+                        let world = [0, 1, 2].map(|axis| {
+                            (wa / pa[2] * a_world[axis]
+                                + wb / pb[2] * b_world[axis]
+                                + wc / pc[2] * c_world[axis])
+                                * depth
+                        });
+                        shadow.lit(world)
+                    });
                     buffers.depth[at] = depth;
                     buffers.normal[at] = normal;
-                    buffers.light[at] = lit;
+                    buffers.light[at] = (view.ambient
+                        + (1.0 - view.ambient) * view.intensity * facing * sunlit)
+                        .clamp(0.0, 1.0);
                 }
             }
         }
     }
     buffers
+}
+
+/// The model as the light sees it, straight down its rays: the nearest
+/// surface to the light across a grid, so a point further along a ray is
+/// in shadow.
+struct ShadowMap {
+    across: [f32; 3],
+    up: [f32; 3],
+    toward: [f32; 3],
+    min: [f32; 2],
+    cell: f32,
+    nearest: Vec<f32>,
+    bias: f32,
+}
+
+impl ShadowMap {
+    const SIZE: usize = 512;
+
+    fn new(mesh: &MeshBuffer3D, lens: &Camera, toward: [f32; 3]) -> Self {
+        let mut across = cross(toward, [0.0, 1.0, 0.0]);
+        if dot(across, across) < 1e-6 {
+            across = [1.0, 0.0, 0.0];
+        }
+        let across = normalized(across);
+        let up = cross(across, toward);
+        let worlds: Vec<[f32; 3]> = mesh.positions().iter().map(|p| lens.see(*p).0).collect();
+        let flat = |p: [f32; 3]| [dot(p, across), dot(p, up), dot(p, toward)];
+        let (mut min, mut max) = ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]);
+        let (mut near, mut far) = (f32::NEG_INFINITY, f32::INFINITY);
+        for p in &worlds {
+            let q = flat(*p);
+            for axis in 0..2 {
+                min[axis] = min[axis].min(q[axis]);
+                max[axis] = max[axis].max(q[axis]);
+            }
+            near = near.max(q[2]);
+            far = far.min(q[2]);
+        }
+        let cell = ((max[0] - min[0]).max(max[1] - min[1]) / (Self::SIZE - 1) as f32).max(1e-6);
+        let mut map = Self {
+            across,
+            up,
+            toward,
+            min,
+            cell,
+            nearest: vec![f32::NEG_INFINITY; Self::SIZE * Self::SIZE],
+            bias: (near - far).max(1e-3) * 0.01 + cell * 1.5,
+        };
+        let n = Self::SIZE as f32;
+        for triangle in mesh.indices().as_chunks::<3>().0 {
+            let [a, b, c] = [0, 1, 2].map(|k| {
+                let q = flat(worlds[triangle[k] as usize]);
+                [(q[0] - min[0]) / cell, (q[1] - min[1]) / cell, q[2]]
+            });
+            let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+            if area.abs() < 1e-9 {
+                continue;
+            }
+            let x0 = a[0].min(b[0]).min(c[0]).floor().clamp(0.0, n) as usize;
+            let x1 = (a[0].max(b[0]).max(c[0]).ceil() + 1.0).clamp(0.0, n) as usize;
+            let y0 = a[1].min(b[1]).min(c[1]).floor().clamp(0.0, n) as usize;
+            let y1 = (a[1].max(b[1]).max(c[1]).ceil() + 1.0).clamp(0.0, n) as usize;
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let (px, py) = (x as f32, y as f32);
+                    let wa = ((b[0] - px) * (c[1] - py) - (b[1] - py) * (c[0] - px)) / area;
+                    let wb = ((c[0] - px) * (a[1] - py) - (c[1] - py) * (a[0] - px)) / area;
+                    let wc = 1.0 - wa - wb;
+                    if wa < -1e-4 || wb < -1e-4 || wc < -1e-4 {
+                        continue;
+                    }
+                    let height = wa * a[2] + wb * b[2] + wc * c[2];
+                    let at = y * Self::SIZE + x;
+                    map.nearest[at] = map.nearest[at].max(height);
+                }
+            }
+        }
+        map
+    }
+
+    /// 1 where the light reaches world point `p`, 0 in shadow, softened
+    /// over the four nearest cells.
+    fn lit(&self, p: [f32; 3]) -> f32 {
+        let x = (dot(p, self.across) - self.min[0]) / self.cell;
+        let y = (dot(p, self.up) - self.min[1]) / self.cell;
+        let height = dot(p, self.toward);
+        let mut light = 0.0;
+        for (dx, dy) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+            let (cx, cy) = ((x + dx - 0.5).round(), (y + dy - 0.5).round());
+            let inside = cx >= 0.0 && cy >= 0.0 && cx < Self::SIZE as f32 && cy < Self::SIZE as f32;
+            let blocked =
+                inside && self.nearest[cy as usize * Self::SIZE + cx as usize] > height + self.bias;
+            if !blocked {
+                light += 0.25;
+            }
+        }
+        light
+    }
 }
 
 /// How much line covers each pixel: where the model's outline is, where the
@@ -563,18 +753,20 @@ pub fn lines(buffers: &Buffers, width: f32, crease: f32) -> Vec<f32> {
 pub fn draw(buffers: &Buffers, view: &View3D) -> Option<RasterTile2D> {
     let [w, h] = buffers.size;
     let line = (view.style > 0).then(|| lines(buffers, view.line_width, view.crease));
+    let color = view.line_color.map(|c| f32::from(c) / 255.0);
     let mut pixels = Vec::with_capacity((w * h * 4) as usize);
     for at in 0..(w * h) as usize {
-        let ink = line.as_ref().map_or(0.0, |line| line[at]);
-        let (gray, alpha) = if view.style != 1 && buffers.covered(at) {
-            (buffers.light[at] * (1.0 - ink), 1.0)
+        let ink = line.as_ref().map_or(0.0, |line| line[at]) * view.line_opacity;
+        let (rgb, alpha) = if view.style != 1 && buffers.covered(at) {
+            let gray = buffers.light[at];
+            (color.map(|c| gray + (c - gray) * ink), 1.0)
         } else {
-            (0.0, ink)
+            (color, ink)
         };
         pixels.extend_from_slice(&[
-            (gray * 255.0).round() as u8,
-            (gray * 255.0).round() as u8,
-            (gray * 255.0).round() as u8,
+            (rgb[0] * 255.0).round() as u8,
+            (rgb[1] * 255.0).round() as u8,
+            (rgb[2] * 255.0).round() as u8,
             (alpha * 255.0).round() as u8,
         ]);
     }
@@ -592,8 +784,9 @@ pub fn buffers_of(
     let model = arena.get_by_id(model_of(arena, layer)?).ok()?;
     if crate::figure::is_figure(model) {
         let pose = crate::figure::Pose::of(model);
+        let body = crate::figure::Body::of(model);
         return Some(render_framed(
-            &crate::figure::mesh(&pose),
+            &crate::figure::mesh(&pose, &body),
             view,
             size,
             Some(crate::figure::FRAME),
@@ -634,7 +827,7 @@ pub fn new_layer(
     let buffers = if figure {
         let pose = crate::figure::Pose::of(&model);
         render_framed(
-            &crate::figure::mesh(&pose),
+            &crate::figure::mesh(&pose, &crate::figure::Body::of(&model)),
             &view,
             size,
             Some(crate::figure::FRAME),
@@ -754,6 +947,111 @@ mod tests {
         for (kind, name) in SHAPES.iter().enumerate() {
             assert!(!shape(kind).to_mesh().indices().is_empty(), "{name}");
         }
+    }
+
+    #[test]
+    fn shadows_fall_and_lines_take_their_color() {
+        // A cube standing on a wide floor, lit from above.
+        let mut geometry = shape(0);
+        let floor: Vec<u32> = [
+            [-4.0, -1.0, -4.0],
+            [-4.0, -1.0, 4.0],
+            [4.0, -1.0, 4.0],
+            [4.0, -1.0, -4.0],
+        ]
+        .iter()
+        .map(|point| geometry.add_point(*point))
+        .collect();
+        geometry.add_prim(PrimKind::Polygon, &floor).unwrap();
+        let mesh = geometry.to_mesh();
+        let view = View3D {
+            pitch: 40.0,
+            distance: 3.0,
+            light: 180.0,
+            style: 0,
+            ..View3D::default()
+        };
+        let size = [160, 120];
+        let mean = |buffers: &Buffers| {
+            let lit: Vec<f32> = (0..buffers.light.len())
+                .filter(|at| buffers.covered(*at))
+                .map(|at| buffers.light[at])
+                .collect();
+            lit.iter().sum::<f32>() / lit.len() as f32
+        };
+        let open = render_buffers(&mesh, &view, size);
+        let shaded = render_buffers(
+            &mesh,
+            &View3D {
+                shadows: true,
+                ..view
+            },
+            size,
+        );
+        assert_eq!(covered(&open), covered(&shaded), "the same model");
+        assert!(mean(&shaded) < mean(&open) - 0.005, "a shadow fell");
+        let ambient = render_buffers(
+            &mesh,
+            &View3D {
+                ambient: 1.0,
+                ..view
+            },
+            size,
+        );
+        assert!(
+            ambient
+                .light
+                .iter()
+                .all(|light| *light == 0.0 || *light == 1.0)
+        );
+        // Red lines at half opacity.
+        let drawn = draw(
+            &open,
+            &View3D {
+                style: 1,
+                line_color: [255, 0, 0],
+                line_opacity: 0.5,
+                ..view
+            },
+        )
+        .unwrap();
+        let bytes = drawn.bytes().unwrap();
+        let inked: Vec<&[u8]> = bytes.chunks(4).filter(|pixel| pixel[3] > 0).collect();
+        assert!(!inked.is_empty());
+        assert!(
+            inked
+                .iter()
+                .all(|pixel| pixel[0] == 255 && pixel[1] == 0 && pixel[3] <= 128)
+        );
+    }
+
+    #[test]
+    fn camera_presets_look_from_each_side() {
+        let view = View3D {
+            pan: [0.3, 0.2],
+            ..View3D::default()
+        };
+        let front = view.preset(0);
+        assert_eq!((front.yaw, front.pitch, front.pan), (0.0, 0.0, [0.0; 2]));
+        assert_eq!(view.preset(1).yaw, 180.0);
+        assert_eq!(view.preset(4).pitch, 89.0);
+        assert_eq!(view.preset(5).pitch, -89.0);
+        assert_eq!(view.preset(3).distance, view.distance, "the rest kept");
+        // Every view is a property, and comes back.
+        let mut arena = Arena::new();
+        let layer = Entity::empty("3D", CLASS);
+        let id = layer.id();
+        arena.insert_keep_id(layer).unwrap();
+        let look = View3D {
+            shadows: true,
+            line_color: [10, 20, 30],
+            intensity: 1.5,
+            ..front
+        };
+        for mut set in look.edits(id) {
+            sue_core::ReversibleTransaction::apply(&mut set, &mut arena).unwrap();
+        }
+        assert_eq!(View3D::of(arena.get_by_id(id).unwrap()), look);
     }
 
     #[test]

@@ -9,6 +9,10 @@
 //! z (swing to the side) axes. The 3D layer that shows it draws the posed
 //! body with Sue Paint's renderer, so line art, shading and Convert to
 //! Lines and Tones work on figures as on any model.
+//!
+//! Its body shape is two more properties, as Clip Studio Paint's: its
+//! [`HEIGHT`] and its [`HEADS`] (head to body ratio, how many heads tall
+//! it stands).
 
 use sue_core::txn::{ReplaceComponent, SetProperty};
 use sue_core::{Arena, Entity, EntityId, MeshBuffer3D, Value};
@@ -20,10 +24,15 @@ use crate::doc::Edit;
 pub const CLASS: &str = "sue.paint.figure";
 /// The pose, as text (see [`Pose::to_text`]).
 pub const POSE: &str = "figure.pose";
+/// How tall the figure is, in centimeters (`Float`).
+pub const HEIGHT: &str = "figure.height";
+/// Its head to body ratio: how many heads tall it is (`Float`).
+pub const HEADS: &str = "figure.heads";
 
 /// One joint: its name, the joint it hangs from, where it sits on that
 /// joint's bone at rest, its own bone, and the body part's half widths
 /// across (x) and through (z) at each end of the bone.
+#[derive(Clone, Copy, Debug)]
 pub struct Joint {
     /// What people read.
     pub name: &'static str,
@@ -223,6 +232,83 @@ pub const JOINTS: [Joint; 17] = [
 /// changes how large it shows.
 pub const FRAME: ([f32; 3], f32) = ([0.0, 0.95, 0.0], 2.1);
 
+/// The figure's body shape: how tall, and how many heads tall.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Body {
+    /// Centimeters.
+    pub height: f32,
+    /// Head to body ratio.
+    pub heads: f32,
+}
+
+impl Body {
+    /// The height [`JOINTS`] are made for, in centimeters.
+    pub const HEIGHT: f32 = 170.0;
+    /// The head to body ratio [`JOINTS`] are made for.
+    pub const HEADS: f32 = 7.5;
+    /// The heights people may choose, in centimeters.
+    pub const HEIGHTS: std::ops::RangeInclusive<f32> = 50.0..=250.0;
+    /// The ratios people may choose.
+    pub const RATIOS: std::ops::RangeInclusive<f32> = 2.0..=10.0;
+
+    /// The body shape of figure model `entity`.
+    #[must_use]
+    pub fn of(entity: &Entity) -> Self {
+        let number = |key: &str, or: f32, range: std::ops::RangeInclusive<f32>| {
+            entity
+                .property(key)
+                .and_then(Value::as_f64)
+                .map_or(or, |value| {
+                    (value as f32).clamp(*range.start(), *range.end())
+                })
+        };
+        Self {
+            height: number(HEIGHT, Self::HEIGHT, Self::HEIGHTS),
+            heads: number(HEADS, Self::HEADS, Self::RATIOS),
+        }
+    }
+
+    /// The joints shaped for this body: the head grown or shrunk to its
+    /// ratio and the rest lengthened or shortened to keep the height, then
+    /// all scaled to the height. Lengths (up and down) change; shoulders and
+    /// hips keep their width, so a short ratio reads as a child or a
+    /// chibi, not a thin adult.
+    #[must_use]
+    pub fn joints(&self) -> [Joint; 17] {
+        let scale = self.height / Self::HEIGHT;
+        let head = Self::HEADS / self.heads;
+        let rest = (1.0 - 1.0 / self.heads) / (1.0 - 1.0 / Self::HEADS);
+        let mut joints = JOINTS;
+        for (at, joint) in joints.iter_mut().enumerate() {
+            if at == HEAD {
+                joint.bone = joint.bone.map(|value| value * head * scale);
+                joint.start = joint.start.map(|value| value * head * scale);
+                joint.end = joint.end.map(|value| value * head * scale);
+                joint.offset = joint.offset.map(|value| value * rest * scale);
+            } else {
+                let long = |v: [f32; 3]| [v[0] * scale, v[1] * rest * scale, v[2] * scale];
+                joint.bone = long(joint.bone);
+                joint.offset = long(joint.offset);
+                joint.start = joint.start.map(|value| value * scale);
+                joint.end = joint.end.map(|value| value * scale);
+            }
+        }
+        joints
+    }
+}
+
+impl Default for Body {
+    fn default() -> Self {
+        Self {
+            height: Self::HEIGHT,
+            heads: Self::HEADS,
+        }
+    }
+}
+
+/// The head, in [`JOINTS`].
+const HEAD: usize = 4;
+
 /// How every joint is turned, in degrees about its x, y and z.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Pose(pub Vec<[f32; 3]>);
@@ -394,9 +480,9 @@ fn add(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
 
 /// Where every joint is and how it is turned, for `pose`.
 #[must_use]
-pub fn solve(pose: &Pose) -> Vec<([f32; 3], Mat3)> {
+pub fn solve(pose: &Pose, body: &Body) -> Vec<([f32; 3], Mat3)> {
     let mut placed: Vec<([f32; 3], Mat3)> = Vec::with_capacity(JOINTS.len());
-    for (at, joint) in JOINTS.iter().enumerate() {
+    for (at, joint) in body.joints().iter().enumerate() {
         let turn = euler(pose.0.get(at).copied().unwrap_or([0.0; 3]));
         let (position, rotation) = match joint.parent {
             Some(parent) => {
@@ -412,21 +498,21 @@ pub fn solve(pose: &Pose) -> Vec<([f32; 3], Mat3)> {
 
 /// Each joint's bone, start and end, for `pose`.
 #[must_use]
-pub fn bones(pose: &Pose) -> Vec<([f32; 3], [f32; 3])> {
-    solve(pose)
+pub fn bones(pose: &Pose, body: &Body) -> Vec<([f32; 3], [f32; 3])> {
+    solve(pose, body)
         .iter()
-        .zip(JOINTS.iter())
+        .zip(body.joints().iter())
         .map(|((start, frame), joint)| (*start, add(*start, apply(frame, joint.bone))))
         .collect()
 }
 
 /// The posed body as one shape: a rounded solid along every bone.
 #[must_use]
-pub fn geometry(pose: &Pose) -> Geometry {
+pub fn geometry(pose: &Pose, body: &Body) -> Geometry {
     let mut geometry = Geometry::new();
-    let placed = solve(pose);
+    let placed = solve(pose, body);
     let around = 12;
-    for ((start, frame), joint) in placed.iter().zip(JOINTS.iter()) {
+    for ((start, frame), joint) in placed.iter().zip(body.joints().iter()) {
         let length = joint
             .bone
             .iter()
@@ -496,8 +582,8 @@ pub fn geometry(pose: &Pose) -> Geometry {
 
 /// The posed body as triangles, for the renderer.
 #[must_use]
-pub fn mesh(pose: &Pose) -> MeshBuffer3D {
-    geometry(pose).to_mesh()
+pub fn mesh(pose: &Pose, body: &Body) -> MeshBuffer3D {
+    geometry(pose, body).to_mesh()
 }
 
 /// A new figure model, standing.
@@ -531,7 +617,8 @@ pub fn set_pose(arena: &Arena, layer: EntityId, pose: &Pose, label: &str) -> Opt
     let raster = crate::doc::raster(arena, layer)?;
     let size = [raster.width(), raster.height()];
     let view = crate::three::View3D::of(arena.get_by_id(layer).ok()?);
-    let buffers = crate::three::render_framed(&mesh(pose), &view, size, Some(FRAME));
+    let body = Body::of(arena.get_by_id(model).ok()?);
+    let buffers = crate::three::render_framed(&mesh(pose, &body), &view, size, Some(FRAME));
     let drawn = crate::three::draw(&buffers, &view)?;
     Some(
         Edit::new(label)
@@ -540,9 +627,69 @@ pub fn set_pose(arena: &Arena, layer: EntityId, pose: &Pose, label: &str) -> Opt
     )
 }
 
+/// The edit that shapes the figure of 3D layer `layer` as `body` and draws
+/// the layer again, as one step named `label`.
+#[must_use]
+pub fn set_body(arena: &Arena, layer: EntityId, body: &Body, label: &str) -> Option<Edit> {
+    let model = of_layer(arena, layer)?;
+    let raster = crate::doc::raster(arena, layer)?;
+    let size = [raster.width(), raster.height()];
+    let view = crate::three::View3D::of(arena.get_by_id(layer).ok()?);
+    let pose = Pose::of(arena.get_by_id(model).ok()?);
+    let buffers = crate::three::render_framed(&mesh(&pose, body), &view, size, Some(FRAME));
+    let drawn = crate::three::draw(&buffers, &view)?;
+    Some(
+        Edit::new(label)
+            .then(SetProperty::new(model, HEIGHT, f64::from(body.height)))
+            .then(SetProperty::new(model, HEADS, f64::from(body.heads)))
+            .then(ReplaceComponent::new(layer, drawn, label)),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_body_takes_its_height_and_head_ratio() {
+        let rest = Pose::rest();
+        let top = |body: &Body| {
+            bones(&rest, body)
+                .iter()
+                .flat_map(|(a, b)| [a[1], b[1]])
+                .fold(f32::MIN, f32::max)
+        };
+        let head = |body: &Body| {
+            let (a, b) = bones(&rest, body)[HEAD];
+            b[1] - a[1]
+        };
+        let still = Body::default();
+        let tall = Body {
+            height: 204.0,
+            ..still
+        };
+        assert!((top(&tall) / top(&still) - 1.2).abs() < 0.01, "taller");
+        let chibi = Body {
+            heads: 3.0,
+            ..still
+        };
+        assert!(
+            (head(&chibi) / head(&still) - 2.5).abs() < 0.01,
+            "a bigger head"
+        );
+        assert!((top(&chibi) - top(&still)).abs() < 0.08, "about as tall");
+        // Kept as properties, and clamped.
+        let model = new_model("Figure")
+            .with_property(HEIGHT, Value::from(180.0))
+            .with_property(HEADS, Value::from(99.0));
+        assert_eq!(
+            Body::of(&model),
+            Body {
+                height: 180.0,
+                heads: 10.0
+            }
+        );
+    }
 
     #[test]
     fn a_pose_round_trips_as_text_and_flips_back() {
@@ -558,10 +705,10 @@ mod tests {
     #[test]
     fn turning_a_joint_moves_what_hangs_from_it_only() {
         let rest = Pose::rest();
-        let before = bones(&rest);
+        let before = bones(&rest, &Body::default());
         let mut raised = rest.clone();
         raised.0[5] = [0.0, 0.0, 90.0];
-        let after = bones(&raised);
+        let after = bones(&raised, &Body::default());
         // The left hand rises to shoulder height and out to the left.
         let hand = after[7].1;
         assert!(hand[0] > 0.6, "out to the left: {hand:?}");
@@ -575,16 +722,23 @@ mod tests {
         // Bending the knee forward sends the foot back.
         let mut knee = rest;
         knee.0[12] = [90.0, 0.0, 0.0];
-        assert!(bones(&knee)[13].0[2] < -0.3, "the foot goes behind");
+        assert!(
+            bones(&knee, &Body::default())[13].0[2] < -0.3,
+            "the foot goes behind"
+        );
     }
 
     #[test]
     fn the_body_is_a_closed_shape_about_two_tall() {
-        let geometry = geometry(&Pose::default());
+        let geometry = geometry(&Pose::default(), &Body::default());
         let (min, max) = geometry.bounds().unwrap();
         let height = max[1] - min[1];
         assert!((1.7..2.1).contains(&height), "about two tall: {height}");
         assert!(min[1] > -0.1, "standing on the ground");
-        assert!(!mesh(&Pose::default()).indices().is_empty());
+        assert!(
+            !mesh(&Pose::default(), &Body::default())
+                .indices()
+                .is_empty()
+        );
     }
 }
