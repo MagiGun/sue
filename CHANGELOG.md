@@ -22,6 +22,9 @@ follow [Semantic Versioning](https://semver.org/).
   easy to reach with a thumb, and menus have taller rows without keyboard
   shortcuts.
 - On phones the update window is a sheet across the bottom of the screen.
+- Sue Paint's Tool Sliders look like Clip Studio Paint's: the size and
+  opacity in round badges, the size slider lit from the bottom up to its
+  knob, and the opacity slider solid black at the top fading to clear.
 
 ### Fixed
 

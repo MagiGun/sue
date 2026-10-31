@@ -273,9 +273,11 @@ impl egui::Widget for Wedge<'_> {
     }
 }
 
-/// A tall slider down `lane` below its `label` space: a thin track with a
-/// round knob, the top being 1. `fading` draws the track as a fade, for
-/// opacity. The new place while it is dragged.
+/// A tall slider down `lane` below its `label` space, as Clip Studio
+/// Paint's Tool Sliders draw them, the top being 1. The size slider is a
+/// thin dark line, lit from the bottom up to its knob; `fading` (opacity)
+/// is a wider line of solid black at the top fading to clear at the bottom,
+/// over a checkerboard. The new place while it is dragged.
 fn tall_slider(
     ui: &mut Ui,
     lane: Rect,
@@ -285,12 +287,13 @@ fn tall_slider(
     salt: &str,
     theme: &Theme,
 ) -> Option<f32> {
+    let width = if fading { 6.0 } else { 4.0 };
     let track = Rect::from_center_size(
         pos2(
             lane.center().x,
             (lane.top() + label + 8.0 + lane.bottom() - 10.0) / 2.0,
         ),
-        vec2(4.0, (lane.height() - label - 18.0).max(20.0)),
+        vec2(width, (lane.height() - label - 18.0).max(20.0)),
     );
     let response = ui.interact(
         track.expand2(vec2(10.0, 8.0)),
@@ -298,10 +301,38 @@ fn tall_slider(
         Sense::click_and_drag(),
     );
     let painter = ui.painter();
+    let y = track.bottom() - at.clamp(0.0, 1.0) * track.height();
+    // Clip Studio's own grays, the same in light and dark looks.
+    let lit = Color32::from_gray(176);
     if fading {
-        // Light at the top, fading to nothing at the bottom.
+        // Clear shows as a checkerboard.
+        let cell = width / 2.0;
+        let rows = (track.height() / cell).ceil() as usize;
+        for row in 0..rows {
+            for column in 0..2 {
+                let light = (row + column) % 2 == 0;
+                let top = track.top() + row as f32 * cell;
+                let square = Rect::from_min_max(
+                    pos2(track.left() + column as f32 * cell, top),
+                    pos2(
+                        track.left() + (column + 1) as f32 * cell,
+                        (top + cell).min(track.bottom()),
+                    ),
+                );
+                painter.rect_filled(
+                    square,
+                    0.0,
+                    if light {
+                        Color32::WHITE
+                    } else {
+                        Color32::from_gray(204)
+                    },
+                );
+            }
+        }
+        // Solid black at the top, clear at the bottom.
         let mut mesh = Mesh::default();
-        let (top, bottom) = (theme.text, theme.void);
+        let (top, bottom) = (Color32::BLACK, Color32::TRANSPARENT);
         mesh.colored_vertex(track.left_top(), top);
         mesh.colored_vertex(track.right_top(), top);
         mesh.colored_vertex(track.right_bottom(), bottom);
@@ -310,12 +341,16 @@ fn tall_slider(
         mesh.add_triangle(0, 2, 3);
         painter.add(Shape::mesh(mesh));
     } else {
+        // Dark above the knob, lit from the bottom up to it.
         painter.rect_filled(track, 2.0, theme.void);
+        painter.rect_filled(
+            Rect::from_min_max(pos2(track.left(), y), track.right_bottom()),
+            2.0,
+            lit,
+        );
     }
-    let y = track.bottom() - at.clamp(0.0, 1.0) * track.height();
     let knob = pos2(track.center().x, y);
-    painter.circle_filled(knob, 7.0, theme.text);
-    painter.circle_stroke(knob, 7.0, Stroke::new(1.0, theme.border));
+    painter.circle_filled(knob, 7.5, lit);
     let pointer = response
         .interact_pointer_pos()
         .filter(|_| response.dragged() || response.clicked())?;
@@ -3683,28 +3718,32 @@ impl SuePaint {
             Rect::from_min_max(body.min, pos2(body.left() + half, body.bottom())),
             Rect::from_min_max(pos2(body.left() + half, body.top()), body.max),
         ];
-        // Size, from small at the bottom to large at the top.
+        // Size, from small at the bottom to large at the top, its value in
+        // a gray disc as Clip Studio Paint shows it.
         let (low, high) = (0.5_f32.ln(), 1000.0_f32.ln());
+        let disc = pos2(lanes[0].center().x, lanes[0].top() + label / 2.0);
+        ui.painter()
+            .circle_filled(disc, 13.0, Color32::from_gray(54));
         ui.painter().text(
-            pos2(lanes[0].center().x, lanes[0].top() + label / 2.0),
+            disc,
             Align2::CENTER_CENTER,
             format!("{:.1}\npx", tip.size),
-            theme.font(theme.small_size),
-            theme.text,
+            theme.font(theme.small_size - 1.0),
+            Color32::WHITE,
         );
         let at = (tip.size.max(0.5).ln() - low) / (high - low);
         if let Some(t) = tall_slider(ui, lanes[0], label, at, false, "sue-paint-tool-size", theme) {
             tip.size = (low + t * (high - low)).exp();
         }
-        // Opacity, its value in a dark disc as Clip Studio Paint shows it.
+        // Opacity, its value in a black disc as Clip Studio Paint shows it.
         let disc = pos2(lanes[1].center().x, lanes[1].top() + label / 2.0);
-        ui.painter().circle_filled(disc, 12.0, theme.void);
+        ui.painter().circle_filled(disc, 13.0, Color32::BLACK);
         ui.painter().text(
             disc,
             Align2::CENTER_CENTER,
             format!("{:.0}\n%", tip.opacity * 100.0),
             theme.font(theme.small_size - 1.0),
-            theme.text,
+            Color32::WHITE,
         );
         if let Some(t) = tall_slider(
             ui,
