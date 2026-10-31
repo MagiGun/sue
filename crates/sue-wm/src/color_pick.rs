@@ -72,23 +72,29 @@ fn opaque([r, g, b]: [u8; 3]) -> Color32 {
 
 /// A checkerboard under translucent colors.
 fn checker(ui: &Ui, rect: Rect) {
-    let cell = 6.0;
-    let painter = ui.painter().with_clip_rect(rect);
-    painter.rect_filled(rect, 0.0, Color32::from_gray(200));
-    let (columns, rows) = (
-        (rect.width() / cell).ceil() as usize,
-        (rect.height() / cell).ceil() as usize,
+    checker_fill(ui.painter(), rect, 0.0, 6.0);
+}
+
+/// What clear looks like: a checkerboard of `cell`-point squares filling
+/// `rect`, its corners rounded by `radius` (a pill when it is half the
+/// height). Every transparent swatch and opacity track in Sue draws it, so
+/// clear looks the same everywhere.
+pub fn checker_fill(painter: &egui::Painter, rect: Rect, radius: f32, cell: f32) {
+    let ctx = painter.ctx();
+    let id = Id::NULL.with("sue-checker-texture");
+    let texture = ctx.data(|data| data.get_temp::<egui::TextureHandle>(id));
+    let texture = texture.unwrap_or_else(|| {
+        let (light, dark) = (Color32::WHITE, Color32::from_gray(204));
+        let image = egui::ColorImage::new([2, 2], vec![light, dark, dark, light]);
+        let handle = ctx.load_texture("sue-checker", image, egui::TextureOptions::NEAREST_REPEAT);
+        ctx.data_mut(|data| data.insert_temp(id, handle.clone()));
+        handle
+    });
+    let uv = Rect::from_min_size(pos2(0.0, 0.0), rect.size() / (cell.max(0.5) * 2.0));
+    painter.add(
+        egui::epaint::RectShape::filled(rect, radius, Color32::WHITE)
+            .with_texture(texture.id(), uv),
     );
-    for row in 0..rows {
-        for column in (row % 2..columns).step_by(2) {
-            let min = rect.min + vec2(column as f32 * cell, row as f32 * cell);
-            painter.rect_filled(
-                Rect::from_min_size(min, vec2(cell, cell)),
-                0.0,
-                Color32::from_gray(150),
-            );
-        }
-    }
 }
 
 /// A hue ring around a saturation and value square, `side` points across,

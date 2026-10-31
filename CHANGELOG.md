@@ -36,6 +36,9 @@ follow [Semantic Versioning](https://semver.org/).
   into icons (the tools stay) and opens them again, and the double arrow
   closes the whole side to a thin bar whose arrows bring it back. Both
   are kept with the workspace.
+- Sue Paint's color wheel is Sue's own, the one every color control
+  shares, and its transparent color is a rounded checkered pill as in
+  Clip Studio Paint. Clear looks the same checkerboard everywhere.
 - Sue Paint's Tool Sliders look like Clip Studio Paint's: the size and
   opacity in round badges, the size slider lit from the bottom up to its
   knob, and the opacity slider solid black at the top fading to clear.

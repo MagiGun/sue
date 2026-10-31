@@ -310,30 +310,8 @@ fn tall_slider(
     // Clip Studio's own grays, the same in light and dark looks.
     let lit = Color32::from_gray(176);
     if fading {
-        // Clear shows as a checkerboard.
-        let rows = (track.height() / cell).ceil() as usize;
-        for row in 0..rows {
-            for column in 0..2 {
-                let light = (row + column) % 2 == 0;
-                let top = track.top() + row as f32 * cell;
-                let square = Rect::from_min_max(
-                    pos2(track.left() + column as f32 * cell, top),
-                    pos2(
-                        track.left() + (column + 1) as f32 * cell,
-                        (top + cell).min(track.bottom()),
-                    ),
-                );
-                painter.rect_filled(
-                    square,
-                    0.0,
-                    if light {
-                        Color32::WHITE
-                    } else {
-                        Color32::from_gray(204)
-                    },
-                );
-            }
-        }
+        // Clear shows as Sue's checkerboard.
+        sue_wm::checker_fill(painter, track, 0.0, cell);
         // Solid black at the top, clear at the bottom, faded as Clip
         // Studio fades it: evenly to the eye, so it stays dark to about
         // halfway. The screen blends in linear light, so each step's
@@ -1054,29 +1032,10 @@ impl SuePaint {
                 Sense::click(),
             )
             .on_hover_text(tr!("transparent-color"));
-        let cell = 7.0;
-        for row in 0..2 {
-            for column in 0..5 {
-                let light = (row + column) % 2 == 0;
-                let square = Rect::from_min_size(
-                    clear.min + vec2(column as f32 * cell, row as f32 * cell),
-                    egui::Vec2::splat(cell),
-                )
-                .intersect(clear);
-                ui.painter().rect_filled(
-                    square,
-                    0.0,
-                    if light {
-                        Color32::from_gray(230)
-                    } else {
-                        Color32::from_gray(150)
-                    },
-                );
-            }
-        }
+        sue_wm::checker_fill(ui.painter(), clear, clear.height() / 2.0, 3.5);
         ui.painter().rect_stroke(
             clear,
-            1.0,
+            clear.height() / 2.0,
             Stroke::new(
                 if self.transparent { 2.0 } else { 1.0 },
                 if self.transparent {
@@ -1148,19 +1107,10 @@ impl SuePaint {
             Sense::click(),
         );
         let painter = ui.painter();
-        for (index, cell) in [
-            Rect::from_min_size(clear.min, vec2(5.0, 5.0)),
-            Rect::from_min_size(clear.min + vec2(5.0, 5.0), vec2(5.0, 5.0)),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let _ = index;
-            painter.rect_filled(cell, 0.0, Color32::from_gray(200));
-        }
+        sue_wm::checker_fill(painter, clear, 3.0, 2.5);
         painter.rect_stroke(
             clear,
-            0.0,
+            3.0,
             Stroke::new(
                 if self.transparent { 2.0 } else { 1.0 },
                 if self.transparent {
@@ -3167,106 +3117,17 @@ impl SuePaint {
             pos2(body.center().x - side / 2.0, body.top()),
             vec2(side, side),
         );
-        let center = area.center();
-        let outer = side / 2.0;
-        let inner_radius = outer * 0.8;
-        let rgb = self.drawing_color();
-        let mut hsv = Hsv::from_rgb(color::unit(rgb));
-        if hsv.s <= 0.0 || hsv.v <= 0.0 {
-            hsv.h = self.hue;
-        }
-        // The hue ring.
-        let mut ring = Mesh::default();
-        let steps = 96;
-        for step in 0..=steps {
-            let t = step as f32 / steps as f32;
-            let angle = t * std::f32::consts::TAU;
-            let direction = vec2(angle.cos(), angle.sin());
-            let [r, g, b] = color::bytes(
-                Hsv {
-                    h: t * 360.0,
-                    s: 1.0,
-                    v: 1.0,
-                }
-                .to_rgb(),
-            );
-            let shade = Color32::from_rgb(r, g, b);
-            ring.colored_vertex(center + direction * inner_radius, shade);
-            ring.colored_vertex(center + direction * outer, shade);
-            if step > 0 {
-                let base = (step * 2) as u32;
-                ring.add_triangle(base - 2, base - 1, base);
-                ring.add_triangle(base - 1, base + 1, base);
+        // Sue's own color wheel, the one every color control shares.
+        let [r, g, b] = self.drawing_color();
+        let mut rgba = [r, g, b, 255];
+        let mut wheel = ui.new_child(egui::UiBuilder::new().max_rect(area));
+        let pick = sue_wm::color_wheel(&mut wheel, Id::unique("sue-paint-wheel"), &mut rgba, side);
+        if pick.changed {
+            let [h, s, _] = sue_wm::hsv_of([rgba[0], rgba[1], rgba[2]]);
+            if s > 0.0 {
+                self.hue = h;
             }
-        }
-        ui.painter().add(Shape::mesh(ring));
-        // The saturation and value square.
-        let half = inner_radius * 0.68;
-        let square = Rect::from_center_size(center, vec2(half * 2.0, half * 2.0));
-        let mut mesh = Mesh::default();
-        let cells = 32;
-        for row in 0..=cells {
-            for column in 0..=cells {
-                let (s, v) = (
-                    column as f32 / cells as f32,
-                    1.0 - row as f32 / cells as f32,
-                );
-                let [r, g, b] = color::bytes(Hsv { h: hsv.h, s, v }.to_rgb());
-                mesh.colored_vertex(
-                    pos2(
-                        square.left() + s * square.width(),
-                        square.top() + (1.0 - v) * square.height(),
-                    ),
-                    Color32::from_rgb(r, g, b),
-                );
-                if row > 0 && column > 0 {
-                    let at = (row * (cells + 1) + column) as u32;
-                    let up = at - (cells + 1) as u32;
-                    mesh.add_triangle(up - 1, up, at);
-                    mesh.add_triangle(up - 1, at, at - 1);
-                }
-            }
-        }
-        ui.painter().add(Shape::mesh(mesh));
-        // Markers.
-        let angle = hsv.h.to_radians();
-        let ring_mark = center + vec2(angle.cos(), angle.sin()) * (inner_radius + outer) / 2.0;
-        ui.painter().circle_stroke(
-            ring_mark,
-            (outer - inner_radius) / 2.0,
-            Stroke::new(1.5, Color32::WHITE),
-        );
-        let mark = pos2(
-            square.left() + hsv.s * square.width(),
-            square.top() + (1.0 - hsv.v) * square.height(),
-        );
-        ui.painter()
-            .circle_stroke(mark, 4.5, Stroke::new(1.5, Color32::WHITE));
-        ui.painter()
-            .circle_stroke(mark, 5.5, Stroke::new(1.0, Color32::BLACK));
-        // Dragging.
-        let response = ui.interact(area, Id::unique("sue-paint-wheel"), Sense::click_and_drag());
-        if let Some(pointer) = response.interact_pointer_pos()
-            && (response.dragged() || response.clicked() || response.drag_started())
-        {
-            let press = ui
-                .input(|input| input.pointer.press_origin())
-                .unwrap_or(pointer);
-            let on_ring = (press - center).length() > inner_radius * 0.95;
-            let mut next = hsv;
-            if on_ring {
-                let offset = pointer - center;
-                next.h = offset.y.atan2(offset.x).to_degrees().rem_euclid(360.0);
-                self.hue = next.h;
-            } else {
-                next.s = ((pointer.x - square.left()) / square.width()).clamp(0.0, 1.0);
-                next.v = 1.0 - ((pointer.y - square.top()) / square.height()).clamp(0.0, 1.0);
-            }
-            let hue = self.hue;
-            self.set_drawing_color(color::bytes(next.to_rgb()));
-            if on_ring || next.s <= 0.0 {
-                self.hue = if on_ring { next.h } else { hue };
-            }
+            self.set_drawing_color([rgba[0], rgba[1], rgba[2]]);
         }
         // Chips and numbers below.
         let row = Rect::from_min_max(pos2(body.left(), area.bottom() + 6.0), body.max);
