@@ -952,17 +952,27 @@ impl SuePaint {
                 }
             }
         }
-        // The main and sub colors as overlapping circles, the sub behind.
-        let (main_at, sub_at) = (
-            pos2(strip.left() + 17.0, strip.bottom() - 68.0),
-            pos2(strip.left() + 29.0, strip.bottom() - 56.0),
-        );
+        self.color_circles(ui, pos2(strip.left() + 17.0, strip.bottom() - 68.0), theme);
+    }
+
+    /// The main and sub colors as Clip Studio Paint shows them, in the tool
+    /// strip and under the color wheel alike: overlapping circles with the
+    /// main one at `main_at` and the sub behind it, the swap arrow, and the
+    /// transparent color as a checkered pill below. A click picks which
+    /// one brushes use.
+    fn color_circles(&mut self, ui: &mut Ui, main_at: Pos2, theme: &Theme) {
+        let sub_at = main_at + vec2(12.0, 12.0);
         let radius = 12.0;
         let disc = |ui: &mut Ui, at: Pos2, rgb: [u8; 3], chosen: bool, tip: &str| {
             let rect = Rect::from_center_size(at, egui::Vec2::splat(radius * 2.0));
             let response = ui.interact(
                 rect,
-                Id::unique(("sue-paint-strip-color", tip)),
+                Id::unique((
+                    "sue-paint-color-circle",
+                    tip,
+                    main_at.x as i32,
+                    main_at.y as i32,
+                )),
                 Sense::click(),
             );
             let [r, g, b] = rgb;
@@ -1004,10 +1014,7 @@ impl SuePaint {
             self.transparent = false;
             self.hex = color::hex(self.main);
         }
-        let swap = Rect::from_min_size(
-            pos2(strip.left() + 30.0, main_at.y - 22.0),
-            vec2(14.0, 14.0),
-        );
+        let swap = Rect::from_min_size(pos2(main_at.x + 13.0, main_at.y - 22.0), vec2(14.0, 14.0));
         if icon_button(
             ui,
             swap,
@@ -1021,14 +1028,11 @@ impl SuePaint {
             self.hex = color::hex(self.drawing_color());
         }
         // The transparent color: a checker; brushes erase with it on.
-        let clear = Rect::from_min_size(
-            pos2(strip.left() + 7.0, strip.bottom() - 30.0),
-            vec2(32.0, 14.0),
-        );
+        let clear = Rect::from_min_size(main_at + vec2(-10.0, 38.0), vec2(32.0, 14.0));
         let response = ui
             .interact(
                 clear,
-                Id::unique("sue-paint-strip-transparent"),
+                Id::unique(("sue-paint-transparent", main_at.x as i32, main_at.y as i32)),
                 Sense::click(),
             )
             .on_hover_text(tr!("transparent-color"));
@@ -1047,84 +1051,6 @@ impl SuePaint {
             StrokeKind::Outside,
         );
         if response.clicked() {
-            self.transparent = !self.transparent;
-        }
-    }
-
-    /// The main and sub color chips; a click picks which one brushes use.
-    fn color_chips(&mut self, ui: &mut Ui, main: Rect, sub: Rect, theme: &Theme) {
-        let chip = |ui: &mut Ui, rect: Rect, rgb: [u8; 3], chosen: bool, tip: &str| {
-            let response = ui.interact(
-                rect,
-                Id::unique(("sue-paint-chip", tip, rect.min.x as i32, rect.min.y as i32)),
-                Sense::click(),
-            );
-            let [r, g, b] = rgb;
-            ui.painter()
-                .rect_filled(rect, 2.0, Color32::from_rgb(r, g, b));
-            ui.painter().rect_stroke(
-                rect,
-                2.0,
-                Stroke::new(
-                    if chosen { 2.0 } else { 1.0 },
-                    if chosen {
-                        theme.border_active
-                    } else {
-                        theme.border
-                    },
-                ),
-                StrokeKind::Outside,
-            );
-            response.on_hover_text(tip).clicked()
-        };
-        if chip(
-            ui,
-            sub,
-            self.sub,
-            self.sub_active && !self.transparent,
-            &tr!("sub-color"),
-        ) {
-            self.sub_active = true;
-            self.transparent = false;
-            self.hex = color::hex(self.sub);
-        }
-        if chip(
-            ui,
-            main,
-            self.main,
-            !self.sub_active && !self.transparent,
-            &tr!("main-color"),
-        ) {
-            self.sub_active = false;
-            self.transparent = false;
-            self.hex = color::hex(self.main);
-        }
-        // The transparent color: brushes erase with it (C switches).
-        let clear = Rect::from_min_size(sub.right_bottom() + vec2(4.0, -10.0), vec2(10.0, 10.0));
-        let response = ui.interact(
-            clear,
-            Id::unique(("sue-paint-transparent", clear.min.x as i32)),
-            Sense::click(),
-        );
-        let painter = ui.painter();
-        sue_wm::checker_fill(painter, clear, 3.0, 2.5);
-        painter.rect_stroke(
-            clear,
-            3.0,
-            Stroke::new(
-                if self.transparent { 2.0 } else { 1.0 },
-                if self.transparent {
-                    theme.border_active
-                } else {
-                    theme.border
-                },
-            ),
-            StrokeKind::Outside,
-        );
-        if response
-            .on_hover_text(tr!("transparent-color-brushes-erase-c"))
-            .clicked()
-        {
             self.transparent = !self.transparent;
         }
     }
@@ -3112,7 +3038,8 @@ impl SuePaint {
     }
 
     fn color_wheel(&mut self, ui: &mut Ui, body: Rect, theme: &Theme) {
-        let side = (body.width()).min(body.height() - 34.0).max(60.0);
+        // Room under the wheel for the color circles and the pill.
+        let side = (body.width()).min(body.height() - 70.0).max(60.0);
         let area = Rect::from_min_size(
             pos2(body.center().x - side / 2.0, body.top()),
             vec2(side, side),
@@ -3131,9 +3058,7 @@ impl SuePaint {
         }
         // Chips and numbers below.
         let row = Rect::from_min_max(pos2(body.left(), area.bottom() + 6.0), body.max);
-        let main = Rect::from_min_size(row.min, vec2(20.0, 20.0));
-        let sub = Rect::from_min_size(row.min + vec2(12.0, 8.0), vec2(20.0, 20.0));
-        self.color_chips(ui, main, sub, theme);
+        self.color_circles(ui, row.min + vec2(14.0, 13.0), theme);
         // Red, green and blue, each behind a chip of its own, as Clip
         // Studio Paint shows them under its wheel.
         let rgb = self.drawing_color();
@@ -3142,9 +3067,9 @@ impl SuePaint {
             Color32::from_rgb(40, 160, 60),
             Color32::from_rgb(40, 70, 200),
         ];
-        let step = ((body.right() - row.left() - 48.0) / 3.0).clamp(28.0, 44.0);
+        let step = ((body.right() - row.left() - 56.0) / 3.0).clamp(28.0, 44.0);
         for (index, (value, chip)) in rgb.iter().zip(chips).enumerate() {
-            let x = row.left() + 46.0 + index as f32 * step;
+            let x = row.left() + 54.0 + index as f32 * step;
             let mark = Rect::from_center_size(pos2(x + 3.0, row.top() + 14.0), vec2(6.0, 6.0));
             ui.painter().rect_filled(mark, 1.0, chip);
             ui.painter().text(
