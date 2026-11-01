@@ -2203,3 +2203,15 @@ brushes-added-from = { $count ->
     [one] One brush added from { $file }
    *[other] { $count } brushes added from { $file }
 }
+name-round-watercolor-brush = Round watercolor brush
+name-flat-watercolor-brush = Flat watercolor brush
+name-oil-paint = Oil paint
+name-thick-oil-paint = Thick oil paint
+name-wet-wash = Wet wash
+name-brush-pen = Brush pen
+name-dry-ink = Dry ink
+name-watery-ink = Watery ink
+name-pointillism = Pointillism
+name-spray = Spray
+name-droplet = Droplet
+name-kneaded-eraser = Kneaded eraser

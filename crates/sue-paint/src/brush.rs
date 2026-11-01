@@ -1522,9 +1522,11 @@ impl Stroke {
         start = start.max(0.0);
         end = end.max(0.0);
         if tip.taper_by_speed {
+            // A slow stroke keeps its size from the first point; only a
+            // quick one thins at its ends, more the quicker it is.
             let (first, last) = self.speeds();
-            start *= 0.3 + 1.4 * first;
-            end *= 0.3 + 1.4 * last;
+            start *= 1.7 * first;
+            end *= 1.7 * last;
         }
         if tip.taper_mode == TaperMode::Fade {
             // Fade: gone by the ending length, however long the stroke.

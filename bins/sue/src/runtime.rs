@@ -2046,11 +2046,12 @@ pub(crate) mod tests {
         let across = |runtime: &Runtime| (590..610).map(|y| alpha(runtime, 900, y)).max();
         assert!(across(&runtime) > Some(200), "the stroke crossed x = 900");
         assert_eq!(alpha(&runtime, 900, 700), 0, "and stayed thin");
-        // Pressure 0.6 of an 8 px G-pen: about 5 px wide, not 8.
+        // Pressure 0.6 of a 10 px G-pen (Clip Studio's size): about 6 px
+        // wide, not 10.
         let wide = (580..620)
             .filter(|y| alpha(&runtime, 900, *y) > 128)
             .count();
-        assert!((3..=6).contains(&wide), "{wide} px wide");
+        assert!((4..=8).contains(&wide), "{wide} px wide");
         // The G-pen tapers into its end instead of leaving a blob.
         let ink = |x: u32| {
             (580..620)

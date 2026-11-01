@@ -169,6 +169,18 @@ impl Tool {
             tip
         };
         let plain = |name: &str, mode: u8| SubTool::new(self, name, mode, Tip::default());
+        // A tip as Clip Studio Paint's defaults start: its medium
+        // anti-aliasing, full opacity, hardness and density.
+        let csp = |size: f32, change: fn(&mut Tip)| {
+            let mut tip = Tip {
+                size,
+                aa: AntiAlias::Medium,
+                ..Tip::default()
+            };
+            change(&mut tip);
+            tip
+        };
+
         match self {
             Self::Zoom => vec![plain(&tr!("zoom-in-2"), 0), plain(&tr!("zoom-out-2"), 1)],
             Self::Hand => vec![plain(&tr!("hand"), 0), plain(&tr!("rotate"), 1)],
@@ -200,105 +212,108 @@ impl Tool {
                 plain(&tr!("obtain-display-color-2"), 0),
                 plain(&tr!("obtain-layer-color-2"), 1),
             ],
-            // Clip Studio Paint's Pen tool: its sub tools in its order. Pen
-            // pressure thins them; none tapers on its own, so a mouse draws
-            // them at full size from the first point.
+            // Clip Studio Paint's Pen tool: its sub tools in its order, with
+            // its default settings (size, opacity, hardness, density,
+            // anti-aliasing, stabilization, and starting and ending by
+            // speed, so a slow line keeps its size from the first point).
             Self::Pen => vec![
-                SubTool::new(self, "G-pen", 0, tip(8.0, |_| {}))
-                    .stabilization(6)
-                    .correction(2)
+                SubTool::new(self, "G-pen", 0, csp(10.0, tapered))
+                    .stabilization(10)
                     .flick(),
                 SubTool::new(
                     self,
                     "Real G-Pen",
                     0,
-                    tip(8.0, |t| {
+                    csp(10.0, |t| {
                         t.size_by.pressure_min = 0.05;
                         t.grain = 0.08;
-                        t.aa = AntiAlias::Medium;
                     }),
                 )
-                .stabilization(6)
-                .correction(1),
+                .stabilization(10),
                 SubTool::new(
                     self,
                     "Mapping pen",
                     0,
-                    tip(4.0, |t| t.size_by.pressure_min = 0.05),
+                    csp(10.0, |t| {
+                        tapered(t);
+                        t.size_by.pressure_min = 0.05;
+                    }),
                 )
-                .stabilization(8)
-                .correction(3)
+                .stabilization(10)
                 .flick(),
                 SubTool::new(
                     self,
                     "Turnip pen",
                     0,
-                    tip(14.0, |t| {
+                    csp(8.0, |t| {
+                        tapered(t);
                         t.size_by.pressure_min = 0.3;
-                        t.aa = AntiAlias::Medium;
                     }),
                 )
-                .stabilization(4)
-                .correction(1)
+                .stabilization(10)
                 .flick(),
                 SubTool::new(
                     self,
                     "Textured pen",
                     0,
-                    tip(10.0, |t| {
+                    csp(12.0, |t| {
+                        t.hardness = 0.6;
+                        t.aa = AntiAlias::Weak;
                         t.size_by.pressure_min = 0.2;
                         t.grain = 0.35;
                     }),
                 )
-                .stabilization(4),
+                .stabilization(10),
                 SubTool::new(
                     self,
                     "Rough pen",
                     0,
-                    tip(10.0, |t| {
+                    // 1.2 mm in Clip Studio, at 350 dpi.
+                    csp(17.0, |t| {
+                        t.aa = AntiAlias::Weak;
                         t.size_by.pressure_min = 0.2;
                         t.grain = 0.6;
-                        t.hardness = 0.8;
                     }),
                 )
-                .stabilization(3),
+                .stabilization(10),
                 SubTool::new(
                     self,
                     "Calligraphy",
                     0,
-                    tip(16.0, |t| {
+                    csp(50.0, |t| {
+                        tapered(t);
+                        t.aa = AntiAlias::Weak;
                         t.size_by.pressure_min = 0.15;
                         t.size_by.velocity = true;
                         t.size_by.velocity_min = 0.4;
-                        t.aa = AntiAlias::Strong;
                     }),
                 )
-                .stabilization(6),
+                .stabilization(10),
                 SubTool::new(
                     self,
                     "Milli pen",
                     0,
-                    tip(2.0, |t| t.size_by.pressure = false),
+                    csp(10.0, |t| {
+                        tapered(t);
+                        t.size_by.pressure = false;
+                    }),
                 )
-                .stabilization(6)
-                .correction(1),
+                .stabilization(10),
                 SubTool::new(
                     self,
                     "Felt pen",
                     0,
-                    tip(8.0, |t| {
+                    csp(20.0, |t| {
+                        t.aa = AntiAlias::Weak;
                         t.size_by.pressure = false;
-                        t.opacity = 0.9;
-                        t.hardness = 0.8;
-                        t.aa = AntiAlias::Strong;
                     }),
                 )
-                .stabilization(4),
+                .stabilization(10),
                 SubTool::new(
                     self,
                     "Dot pen",
                     0,
-                    tip(1.0, |t| {
+                    csp(1.0, |t| {
                         t.size_by.pressure = false;
                         t.aa = AntiAlias::None;
                         t.at_least_one = true;
@@ -308,147 +323,239 @@ impl Tool {
                     self,
                     "Flat marker",
                     0,
-                    tip(12.0, |t| {
+                    csp(50.0, |t| {
+                        t.hardness = 0.7;
+                        t.aa = AntiAlias::Weak;
                         t.size_by.pressure = false;
-                        t.opacity = 0.85;
-                        t.aa = AntiAlias::Strong;
                     }),
                 )
-                .stabilization(3),
+                .stabilization(10),
             ],
-            // Clip Studio Paint's Sketch tool (once the Pencil tool).
+            // Clip Studio Paint's Sketch tool (once the Pencil tool), with
+            // its default settings; its paper textures are Sue's grain.
             Self::Pencil => vec![
                 SubTool::new(
                     self,
                     "Pencil",
                     0,
-                    tip(6.0, |t| {
+                    csp(10.0, |t| {
+                        t.opacity = 0.9;
+                        t.flow = 0.85;
+                        t.aa = AntiAlias::Weak;
                         t.grain = 0.45;
-                        t.hardness = 0.85;
                         t.size_by.pressure_min = 0.4;
                         t.opacity_by.pressure = true;
                     }),
                 )
-                .stabilization(3),
+                .stabilization(10),
                 SubTool::new(
                     self,
                     "Mechanical pencil",
                     0,
-                    tip(3.0, |t| {
+                    csp(5.0, |t| {
+                        tapered(t);
+                        t.flow = 0.85;
+                        t.aa = AntiAlias::Weak;
                         t.grain = 0.3;
-                        t.size_by.pressure = false;
                         t.opacity_by.pressure = true;
                     }),
                 )
-                .stabilization(3),
+                .stabilization(10),
                 SubTool::new(
                     self,
                     "Charcoal",
                     0,
-                    tip(20.0, |t| {
+                    csp(20.0, |t| {
+                        t.aa = AntiAlias::Weak;
                         t.grain = 0.8;
-                        t.hardness = 0.5;
                         t.size_by.pressure_min = 0.5;
                         t.opacity_by.pressure = true;
                     }),
                 )
-                .stabilization(2),
+                .stabilization(10),
                 SubTool::new(
                     self,
                     "Crayon",
                     0,
-                    tip(14.0, |t| {
+                    csp(30.0, |t| {
+                        tapered(t);
+                        t.flow = 0.8;
+                        t.aa = AntiAlias::Weak;
                         t.grain = 0.65;
-                        t.hardness = 0.75;
+                        t.mix = 0.8;
                         t.size_by.pressure_min = 0.6;
                         t.opacity_by.pressure = true;
                     }),
                 )
-                .stabilization(2),
+                .stabilization(10),
                 SubTool::new(
                     self,
                     "Pastel",
                     0,
-                    tip(24.0, |t| {
+                    csp(40.0, |t| {
+                        tapered(t);
+                        t.hardness = 0.01;
+                        t.flow = 0.5;
+                        t.aa = AntiAlias::None;
                         t.grain = 0.5;
-                        t.hardness = 0.4;
+                        t.mix = 0.7;
                         t.size_by.pressure_min = 0.6;
                         t.opacity_by.pressure = true;
                     }),
                 )
-                .stabilization(2),
+                .stabilization(10),
                 SubTool::new(
                     self,
                     "Chalk",
                     0,
-                    tip(22.0, |t| {
+                    csp(30.0, |t| {
+                        t.hardness = 0.81;
+                        t.aa = AntiAlias::Weak;
                         t.grain = 0.75;
-                        t.hardness = 0.6;
+                        t.mix = 0.7;
                         t.size_by.pressure_min = 0.7;
                         t.opacity_by.pressure = true;
                     }),
                 )
-                .stabilization(2),
+                .stabilization(10),
             ],
+            // Clip Studio Paint's Brush tool: its watercolor, thick paint
+            // and ink brushes, with their default settings.
             Self::Brush => vec![
                 SubTool::new(
                     self,
-                    "Watercolor",
+                    "Round watercolor brush",
                     0,
-                    tip(40.0, |t| {
+                    csp(80.0, |t| {
                         t.hardness = 0.3;
+                        t.flow = 0.6;
                         t.build_up = true;
-                        t.flow = 0.15;
-                        t.opacity = 0.8;
-                        t.mix = 0.35;
+                        t.mix = 0.3;
+                        t.aa = AntiAlias::Weak;
                     }),
                 )
-                .stabilization(4),
+                .stabilization(2),
                 SubTool::new(
                     self,
-                    "Opaque Watercolor",
+                    "Flat watercolor brush",
                     0,
-                    tip(30.0, |t| {
-                        t.hardness = 0.7;
+                    csp(100.0, |t| {
+                        t.hardness = 0.6;
+                        t.flow = 0.6;
                         t.build_up = true;
-                        t.flow = 0.4;
-                        t.mix = 0.5;
+                        t.mix = 0.25;
+                        t.aa = AntiAlias::Weak;
                     }),
                 )
-                .stabilization(4),
+                .stabilization(10),
                 SubTool::new(
                     self,
                     "Gouache",
                     0,
-                    tip(30.0, |t| {
+                    csp(80.0, |t| {
+                        t.flow = 0.75;
+                        t.mix = 0.8;
+                        t.aa = AntiAlias::None;
                         t.size_by.pressure_min = 0.6;
-                        t.aa = AntiAlias::Medium;
-                        t.flow = 0.9;
-                        t.mix = 0.2;
                     }),
                 )
-                .stabilization(4),
+                .stabilization(2),
                 SubTool::new(
                     self,
-                    "Ink Brush",
+                    "Oil paint",
                     0,
-                    tip(20.0, |t| {
-                        t.size_by.pressure_min = 0.02;
-                        t.aa = AntiAlias::Medium;
-                        t.taper_start = 20.0;
-                        t.taper_end = 40.0;
+                    csp(80.0, |t| {
+                        t.mix = 0.61;
+                        t.aa = AntiAlias::Weak;
+                        t.grain = 0.12;
+                        t.size_by.pressure_min = 0.6;
                     }),
                 )
-                .stabilization(6)
-                .correction(2)
+                .stabilization(2),
+                SubTool::new(
+                    self,
+                    "Thick oil paint",
+                    0,
+                    csp(60.0, |t| {
+                        t.flow = 0.85;
+                        t.mix = 0.85;
+                        t.aa = AntiAlias::Weak;
+                        t.grain = 0.3;
+                        t.size_by.pressure_min = 0.6;
+                    }),
+                )
+                .stabilization(2),
+                SubTool::new(
+                    self,
+                    "Wet wash",
+                    0,
+                    csp(30.0, |t| {
+                        t.hardness = 0.4;
+                        t.build_up = true;
+                        t.flow = 0.5;
+                        t.mix = 0.7;
+                        t.aa = AntiAlias::None;
+                    }),
+                )
+                .stabilization(10),
+                SubTool::new(
+                    self,
+                    "Brush pen",
+                    0,
+                    csp(70.0, |t| {
+                        tapered(t);
+                        t.size_by.pressure_min = 0.02;
+                    }),
+                )
+                .stabilization(10)
                 .flick(),
+                SubTool::new(
+                    self,
+                    "Dry ink",
+                    0,
+                    csp(60.0, |t| {
+                        t.aa = AntiAlias::Strong;
+                        t.grain = 0.5;
+                        t.size_by.pressure_min = 0.1;
+                    }),
+                )
+                .stabilization(10),
+                SubTool::new(
+                    self,
+                    "Watery ink",
+                    0,
+                    csp(100.0, |t| {
+                        t.hardness = 0.5;
+                        t.aa = AntiAlias::Strong;
+                        t.grain = 0.35;
+                        t.opacity_by.pressure = true;
+                    }),
+                )
+                .stabilization(10),
+                SubTool::new(
+                    self,
+                    "Pointillism",
+                    0,
+                    csp(80.0, |t| {
+                        t.mix = 0.5;
+                        t.aa = AntiAlias::Weak;
+                        t.spacing = 1.2;
+                        t.scatter = 0.6;
+                        t.size_jitter = 0.6;
+                        t.shape = crate::decoration::shape("Dot");
+                        t.size_by.pressure = false;
+                    }),
+                )
+                .stabilization(6),
             ],
+            // Clip Studio Paint's Airbrush tool, with its defaults; its spray
+            // particles are scattered dots.
             Self::Airbrush => vec![
                 SubTool::new(
                     self,
                     "Soft",
                     0,
-                    tip(80.0, |t| {
+                    csp(150.0, |t| {
                         t.hardness = 0.0;
                         t.build_up = true;
                         t.flow = 0.06;
@@ -458,60 +565,68 @@ impl Tool {
                 ),
                 SubTool::new(
                     self,
-                    "Strong",
+                    "Spray",
                     0,
-                    tip(60.0, |t| {
-                        t.hardness = 0.3;
+                    // Clip Studio's spray is 200 wide: 6 pixel drops
+                    // scattered over it.
+                    csp(6.0, |t| {
                         t.build_up = true;
-                        t.flow = 0.2;
+                        t.spacing = 0.08;
+                        t.scatter = 16.0;
+                        t.size_jitter = 0.8;
+                        t.shape = crate::decoration::shape("Dot");
                         t.size_by.pressure = false;
+                        t.opacity_by.pressure = true;
                     }),
                 ),
                 SubTool::new(
                     self,
-                    "Fine",
+                    "Droplet",
                     0,
-                    tip(24.0, |t| {
-                        t.hardness = 0.2;
-                        t.build_up = true;
-                        t.flow = 0.15;
+                    csp(30.0, |t| {
+                        t.spacing = 2.0;
+                        t.scatter = 3.0;
+                        t.size_jitter = 0.85;
+                        t.shape = crate::decoration::shape("Dot");
+                        t.size_by.pressure = false;
                     }),
                 ),
             ],
+            // Clip Studio Paint's Eraser tool, with its defaults.
             Self::Eraser => vec![
                 SubTool::new(
                     self,
                     "Hard",
                     0,
-                    tip(20.0, |t| {
+                    csp(30.0, |t| {
                         t.eraser = true;
                         t.size_by.pressure = false;
                     }),
                 )
-                .stabilization(2),
+                .stabilization(10),
                 SubTool::new(
                     self,
                     "Soft",
                     0,
-                    tip(60.0, |t| {
+                    csp(50.0, |t| {
                         t.eraser = true;
-                        t.hardness = 0.2;
+                        t.hardness = 0.01;
                         t.build_up = true;
                         t.flow = 0.3;
                         t.size_by.pressure = false;
                     }),
                 )
-                .stabilization(2),
+                .stabilization(10),
                 SubTool::new(
                     self,
                     "Rough",
                     0,
-                    tip(30.0, |t| {
+                    csp(100.0, |t| {
                         t.eraser = true;
                         t.grain = 0.6;
                     }),
                 )
-                .stabilization(2),
+                .stabilization(10),
                 // Clip Studio Paint's Vector eraser: up to intersection.
                 SubTool {
                     kind: 1,
@@ -519,13 +634,29 @@ impl Tool {
                         self,
                         "Vector",
                         0,
-                        tip(10.0, |t| {
+                        csp(3.0, |t| {
                             t.eraser = true;
+                            t.aa = AntiAlias::None;
                             t.size_by.pressure = false;
                         }),
                     )
-                    .stabilization(2)
+                    .stabilization(10)
                 },
+                SubTool::new(
+                    self,
+                    "Kneaded eraser",
+                    0,
+                    csp(50.0, |t| {
+                        t.eraser = true;
+                        t.opacity = 0.9;
+                        t.flow = 0.75;
+                        t.build_up = true;
+                        t.grain = 0.5;
+                        t.aa = AntiAlias::Weak;
+                        t.opacity_by.pressure = true;
+                    }),
+                )
+                .stabilization(2),
             ],
             Self::Fill => vec![
                 plain(&tr!("refer-only-editing-layer"), 0).tolerance(0.1),
@@ -759,6 +890,14 @@ impl Tool {
             }
         }
     }
+}
+
+/// Clip Studio Paint's Starting and ending: 20 pixels each way, by speed,
+/// so only a quick stroke thins at its ends.
+fn tapered(tip: &mut Tip) {
+    tip.taper_start = 20.0;
+    tip.taper_end = 20.0;
+    tip.taper_by_speed = true;
 }
 
 /// A ready-made setting of a tool.
@@ -1109,7 +1248,7 @@ mod tests {
         assert_eq!(toolbox.current().name, "Gouache");
         toolbox.current_mut().tip.size = 99.0;
         toolbox.pick_sub(Tool::Brush, 0);
-        assert_eq!(toolbox.current().tip.size, 40.0);
+        assert_eq!(toolbox.current().tip.size, 80.0, "Round watercolor brush");
         toolbox.pick_sub(Tool::Brush, 2);
         assert_eq!(toolbox.current().tip.size, 99.0);
         toolbox.pick_sub(Tool::Brush, 99);

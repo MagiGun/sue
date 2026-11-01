@@ -40,6 +40,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint's pens, pencils, brushes, airbrushes and erasers start as
+  Clip Studio Paint's do: the same sizes, opacity, hardness, density,
+  anti-aliasing, color mixing and stabilization, and its Starting and
+  ending by speed, so a quick line tapers and a slow one keeps its size
+  from the first point. The Brush tool has Clip Studio's brushes (Round
+  and Flat watercolor brush, Gouache, Oil paint, Thick oil paint, Wet
+  wash, Brush pen, Dry ink, Watery ink, Pointillism), the Airbrush its
+  Spray and Droplet, and the Eraser its Kneaded eraser.
 - Quitting asks about each picture with changes not saved, as Clip
   Studio Paint does: "Illustration has been changed. Do you want to save
   it?" with Save, Do Not Save and Cancel. "Quit Sue?" is no longer asked
@@ -64,6 +72,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Pinch vector line bends a line drawn quickly, whose points lie far
+  apart, instead of leaving it as it was.
 - A dot no longer appears at the start or end of pen strokes: a pen
   bouncing on the tablet as it lands or lifts touched it for a few
   thousandths of a second, which Sue Paint took for a tap. A real tap

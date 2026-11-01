@@ -383,6 +383,19 @@ pub fn split(lines: &mut Vec<Line>, line: usize, along: f32) -> bool {
 #[must_use]
 pub fn pinch(base: &Line, along: f32, by: [f32; 2], range: f32, level: u32, fixed: bool) -> Line {
     let mut line = base.clone();
+    // A line drawn quickly keeps few points, far apart: put points along it
+    // close enough that the stretch in range bends smoothly.
+    let step = (range / 6.0).max(1.0);
+    let arcs = vector::arcs(&base.samples);
+    if arcs.windows(2).any(|pair| pair[1] - pair[0] > step) {
+        let total = arcs.last().copied().unwrap_or(0.0);
+        let count = (total / step).ceil() as usize;
+        line.samples = (0..=count)
+            .map(|k| vector::at_arc(&base.samples, &arcs, (k as f32 * step).min(total)))
+            .collect();
+        line.marks.clear();
+    }
+    let base = line.clone();
     let arcs = vector::arcs(&base.samples);
     let total = arcs.last().copied().unwrap_or(0.0);
     let hold = along.min(total - along).max(1.0);
