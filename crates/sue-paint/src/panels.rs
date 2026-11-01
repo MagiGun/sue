@@ -1763,6 +1763,8 @@ impl SuePaint {
                 if tip.shape != 0 {
                     // Clip Studio Paint's Direction and Spray: how each
                     // shape turns and how far it falls from the line.
+                    ui.checkbox(&mut tip.ribbon, small(&tr!("lay-as-a-ribbon")))
+                        .on_hover_text(tr!("the-shape-bends-along-the-whole-stroke"));
                     ui.checkbox(&mut tip.follow, small(&tr!("turn-along-the-line")));
                     slider_row(
                         ui,

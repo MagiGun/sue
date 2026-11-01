@@ -20,7 +20,7 @@ const SIDE: u32 = 64;
 type Inside = fn(f32, f32) -> bool;
 
 /// Every decoration shape: its name and its inside.
-const SHAPES: [(&str, Inside); 11] = [
+const SHAPES: [(&str, Inside); 16] = [
     ("Star", star),
     ("Heart", heart),
     ("Sparkle", sparkle),
@@ -32,6 +32,11 @@ const SHAPES: [(&str, Inside); 11] = [
     ("Scallop", scallop),
     ("Stitch", stitch),
     ("Dot", dot),
+    ("Rope", rope),
+    ("Rickrack", rickrack),
+    ("Film strip", film_strip),
+    ("Checkered band", checkered_band),
+    ("Stitched ribbon", stitched_ribbon),
 ];
 
 /// A shape's coverage of each sample: the share of 4 by 4 points inside.
@@ -187,6 +192,36 @@ fn dot(u: f32, v: f32) -> bool {
     u.hypot(v) < 0.92
 }
 
+// Ribbons: one repeat of a band, laid end to end along the stroke.
+
+fn rope(u: f32, v: f32) -> bool {
+    // Strands twisting across the band, a gap between each.
+    v.abs() < 0.8 && ((u - v * 0.55) * 1.5 + 4.0).rem_euclid(1.0) < 0.72
+}
+
+fn rickrack(u: f32, v: f32) -> bool {
+    // A zigzag braid: a ridge down and up once in each repeat.
+    let ridge = (u.abs() * 2.0 - 1.0) * 0.55;
+    (v - ridge).abs() < 0.2
+}
+
+fn film_strip(u: f32, v: f32) -> bool {
+    let band = v.abs() < 0.95;
+    let hole = v.abs() > 0.7 && v.abs() < 0.88 && u.abs() < 0.3;
+    let frame = v.abs() < 0.55 && u.abs() < 0.86;
+    band && !hole && !frame
+}
+
+fn checkered_band(u: f32, v: f32) -> bool {
+    v.abs() < 0.9 && ((u > 0.0) != (v > 0.0))
+}
+
+fn stitched_ribbon(u: f32, v: f32) -> bool {
+    let rails = (0.72..0.9).contains(&v.abs());
+    let stitch = v.abs() < 0.1 && u.abs() < 0.5;
+    rails || stitch
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,7 +248,7 @@ mod tests {
     /// Every Decoration sub tool painting a wave on a sheet, in rows.
     fn sampler() -> (Vec<u8>, u32, u32) {
         use crate::brush::{Finish, Stroke};
-        let (width, height) = (720_u32, 70 * 12);
+        let (width, height) = (720_u32, 70 * 18);
         let mut raster =
             sue_core::RasterTile2D::new(width, height, sue_core::PixelFormat::Rgba8).unwrap();
         for (row, sub) in crate::tools::Tool::Decoration
@@ -237,7 +272,7 @@ mod tests {
     #[test]
     fn each_decoration_paints_along_its_stroke() {
         let (bytes, width, _) = sampler();
-        for row in 0..12_u32 {
+        for row in 0..18_u32 {
             let inked = (row * 70..row * 70 + 70)
                 .flat_map(|y| (0..width).map(move |x| (y * width + x) as usize * 4 + 3))
                 .filter(|at| bytes[*at] > 0)

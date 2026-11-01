@@ -718,6 +718,43 @@ impl Tool {
                         11,
                         deco("Stitch", 22.0, 1.25, |t| t.follow = true),
                     ),
+                    // Ribbons: one band bent along the whole stroke.
+                    SubTool::new(
+                        self,
+                        "Rope",
+                        12,
+                        deco("Rope", 24.0, 1.0, |t| t.ribbon = true),
+                    ),
+                    SubTool::new(
+                        self,
+                        "Rickrack",
+                        13,
+                        deco("Rickrack", 24.0, 1.0, |t| t.ribbon = true),
+                    ),
+                    SubTool::new(
+                        self,
+                        "Film strip",
+                        14,
+                        deco("Film strip", 40.0, 0.8, |t| t.ribbon = true),
+                    ),
+                    SubTool::new(
+                        self,
+                        "Checkered band",
+                        15,
+                        deco("Checkered band", 20.0, 1.0, |t| t.ribbon = true),
+                    ),
+                    SubTool::new(
+                        self,
+                        "Stitched ribbon",
+                        16,
+                        deco("Stitched ribbon", 26.0, 1.0, |t| t.ribbon = true),
+                    ),
+                    SubTool::new(
+                        self,
+                        "Lace ribbon",
+                        17,
+                        deco("Scallop", 26.0, 1.0, |t| t.ribbon = true),
+                    ),
                 ]
             }
         }

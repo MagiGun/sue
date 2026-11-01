@@ -365,6 +365,10 @@ pub struct Tip {
     pub size_jitter: f32,
     /// How far a dab may turn, at random, 0 (none) to 1 (all the way).
     pub turn_jitter: f32,
+    /// The shape is laid along the stroke as a ribbon (Clip Studio Paint's
+    /// ribbon decorations): stretched round every bend, one shape every
+    /// `spacing` of the brush's size, instead of stamped in dabs.
+    pub ribbon: bool,
 }
 
 /// A brush tip's shape made from a picture: how much each spot of a
@@ -537,6 +541,7 @@ impl Tip {
             ("scatter".to_owned(), self.scatter.to_string()),
             ("size_jitter".to_owned(), self.size_jitter.to_string()),
             ("turn_jitter".to_owned(), self.turn_jitter.to_string()),
+            ("ribbon".to_owned(), flag(self.ribbon)),
             ("jitter.tip".to_owned(), flag(self.jitter.tip)),
             ("jitter.hue".to_owned(), self.jitter.hue.to_string()),
             (
@@ -649,6 +654,7 @@ impl Tip {
         number("scatter", &mut tip.scatter);
         number("size_jitter", &mut tip.size_jitter);
         number("turn_jitter", &mut tip.turn_jitter);
+        flag("ribbon", &mut tip.ribbon);
         flag("jitter.tip", &mut tip.jitter.tip);
         number("jitter.hue", &mut tip.jitter.hue);
         number("jitter.saturation", &mut tip.jitter.saturation);
@@ -708,6 +714,7 @@ impl Default for Tip {
             scatter: 0.0,
             size_jitter: 0.0,
             turn_jitter: 0.0,
+            ribbon: false,
         }
     }
 }
@@ -1148,7 +1155,11 @@ impl Stroke {
                     let (a, b) = (through(copy, last), through(copy, sample));
                     if self.tip.dabbed() {
                         self.since_dab = since;
-                        self.dabs(raster, a, b, start, length, selection);
+                        if self.tip.ribbon && self.tip.shape != 0 {
+                            self.ribbon(raster, a, b, start, length, selection);
+                        } else {
+                            self.dabs(raster, a, b, start, length, selection);
+                        }
                         if index == 0 {
                             after = self.since_dab;
                         }
@@ -1518,6 +1529,67 @@ impl Stroke {
         // A capsule that widens or strengthens along its length does not
         // hold the disc at its end, so only an even one vouches for it.
         (ra == rb && sa == sb).then_some((rb, sb))
+    }
+
+    /// Lays the tip's shape along the segment from `a` (arc length `start`)
+    /// to `b` as a ribbon: across the line the shape's height, along it
+    /// one shape every `spacing` of the brush's size, so it bends with the
+    /// stroke instead of being stamped.
+    fn ribbon(
+        &mut self,
+        raster: &mut RasterTile2D,
+        a: Sample,
+        b: Sample,
+        start: f32,
+        length: f32,
+        selection: Option<&Selection>,
+    ) {
+        let Some(shaped) = shape(self.tip.shape) else {
+            return;
+        };
+        let (radius, strength) =
+            self.tip
+                .dab_at(a.pressure.max(b.pressure), a.speed.max(b.speed), 1.0);
+        let radius = (radius * a.width.max(b.width)).max(0.5);
+        let strength = (strength * a.alpha.max(b.alpha)).min(1.0);
+        let tile = (radius * 2.0 * self.tip.spacing).max(1.0);
+        let ([ax, ay], [bx, by]) = (a.at, b.at);
+        let (dx, dy) = (bx - ax, by - ay);
+        let squared = dx * dx + dy * dy;
+        let run = squared.sqrt().max(1e-6);
+        let reach = radius + self.tip.aa.edge() + 1.0;
+        let rect = [
+            ax.min(bx) - reach,
+            ay.min(by) - reach,
+            ax.max(bx) + reach,
+            ay.max(by) + reach,
+        ];
+        let span = move |py: f32| capsule_span(a.at, b.at, reach, py);
+        self.apply(
+            raster,
+            rect,
+            selection,
+            Mode::Max,
+            strength,
+            span,
+            move |px, py| {
+                // Only beside this piece of the stroke, not round its ends:
+                // the pieces before and after lay their own part, and caps
+                // laid over them would smear the pattern.
+                if squared <= 0.0 {
+                    return 0.0;
+                }
+                let t = ((px - ax) * dx + (py - ay) * dy) / squared;
+                if !(0.0..=1.0).contains(&t) {
+                    return 0.0;
+                }
+                // Across the line (its left is up the shape) and along it.
+                let across = ((px - ax) * -dy + (py - ay) * dx) / run;
+                let along = start + t * length;
+                let u = (along / tile).rem_euclid(1.0) * 2.0 - 1.0;
+                shaped.at(u, across / radius) * strength
+            },
+        );
     }
 
     /// Stamps dabs every `spacing` from `a` (arc length `start`) to `b`.
@@ -2670,6 +2742,33 @@ mod tests {
         assert!(alpha(&raster, 32, 32) > 200, "the middle is inked");
         assert!(alpha(&raster, 32, 26) > 100, "out to the brush's size");
         assert_eq!(alpha(&raster, 32, 12), 0, "and no further");
+    }
+
+    #[test]
+    fn a_ribbon_lies_along_the_stroke_round_its_bend() {
+        let mut raster = layer(120, 120);
+        let tip = Tip {
+            size: 20.0,
+            spacing: 1.0,
+            shape: crate::decoration::shape("Rope"),
+            ribbon: true,
+            ..Tip::default()
+        };
+        let mut stroke = Stroke::new(EntityId::new(), tip, [0.0, 0.0, 0.0], false);
+        // Across, then down: an L.
+        for point in [[10.0, 20.0], [100.0, 20.0], [100.0, 110.0]] {
+            stroke.to(&mut raster, point, 1.0, None);
+        }
+        stroke.end(&mut raster, Finish::default(), None);
+        let band = |x0: u32, x1: u32, y0: u32, y1: u32| {
+            (y0..y1)
+                .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+                .filter(|(x, y)| alpha(&raster, *x, *y) > 0)
+                .count()
+        };
+        assert!(band(20, 90, 10, 31) > 300, "along the first leg");
+        assert!(band(90, 111, 30, 100) > 300, "along the second, turned");
+        assert_eq!(band(20, 80, 40, 110), 0, "nothing off the line");
     }
 
     #[test]
