@@ -79,6 +79,65 @@ pub struct Line {
     pub marks: Vec<u8>,
 }
 
+/// `lines` as the shapes of an SVG drawing (File, Special Export, Export
+/// vectors): each line an outline filled in its color, as wide as its
+/// brush made it at each sample, so pressure and tapers come along.
+#[must_use]
+pub fn svg_shapes(lines: &[Line], offset: [f32; 2]) -> Vec<sue_io::svg::SvgShape> {
+    lines
+        .iter()
+        .filter(|line| !line.tip.eraser && line.samples.len() >= 2)
+        .map(|line| {
+            let count = line.samples.len();
+            let half: Vec<f32> = line
+                .samples
+                .iter()
+                .enumerate()
+                .map(|(index, sample)| {
+                    let size = line.tip.size
+                        * line.tip.size_by.factor(sample.pressure, sample.speed, 1.0)
+                        * sample.width;
+                    // The ends come to their tapers' points.
+                    let along = index as f32 / (count - 1) as f32;
+                    let ends = if line.tip.taper_start > 0.0 || line.tip.taper_end > 0.0 {
+                        (along.min(1.0 - along) * 8.0).clamp(0.15, 1.0)
+                    } else {
+                        1.0
+                    };
+                    (size * ends / 2.0).max(0.25)
+                })
+                .collect();
+            let at = |index: usize| {
+                let p = line.samples[index].at;
+                [p[0] + offset[0], p[1] + offset[1]]
+            };
+            let normal = |index: usize| {
+                let (a, b) = (at(index.saturating_sub(1)), at((index + 1).min(count - 1)));
+                let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                let length = dx.hypot(dy).max(1e-6);
+                [-dy / length, dx / length]
+            };
+            let mut outline = Vec::with_capacity(count * 2);
+            for (index, half) in half.iter().enumerate() {
+                let (p, n) = (at(index), normal(index));
+                outline.push([p[0] + n[0] * half, p[1] + n[1] * half]);
+            }
+            for (index, half) in half.iter().enumerate().rev() {
+                let (p, n) = (at(index), normal(index));
+                outline.push([p[0] - n[0] * half, p[1] - n[1] * half]);
+            }
+            let rgb = line.colors[0].map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8);
+            sue_io::svg::SvgShape {
+                points: outline,
+                closed: true,
+                stroke: None,
+                fill: Some(rgb),
+                width: 0.0,
+            }
+        })
+        .collect()
+}
+
 /// A sample that is a control point (Correct Line).
 pub const CONTROL: u8 = 1;
 /// A control point that is a corner.
@@ -909,6 +968,40 @@ mod tests {
             copies: vec![SAME],
             marks: Vec::new(),
         }
+    }
+
+    #[test]
+    fn vector_lines_export_as_outlines_as_wide_as_drawn() {
+        let mut thick = line([10.0, 20.0], [90.0, 20.0]);
+        thick.tip.size = 10.0;
+        thick.colors[0] = [1.0, 0.0, 0.0];
+        let mut eraser = line([0.0, 0.0], [5.0, 5.0]);
+        eraser.tip.eraser = true;
+        let shapes = svg_shapes(&[thick, eraser], [100.0, 0.0]);
+        assert_eq!(shapes.len(), 1, "erasing lines leave nothing to draw");
+        let shape = &shapes[0];
+        assert!(shape.closed && shape.fill == Some([255, 0, 0]));
+        let ys: Vec<f32> = shape.points.iter().map(|p| p[1]).collect();
+        let (low, high) = (
+            ys.iter().copied().fold(f32::MAX, f32::min),
+            ys.iter().copied().fold(f32::MIN, f32::max),
+        );
+        assert!(
+            (high - low - 10.0).abs() < 0.5,
+            "as wide as the brush: {}",
+            high - low
+        );
+        assert!(
+            shape.points.iter().all(|p| p[0] >= 110.0 - 1e-3),
+            "moved by the offset"
+        );
+        // And it reads back from the SVG it writes.
+        let text = sue_io::svg::write_svg(&sue_io::svg::SvgDrawing {
+            width: 200.0,
+            height: 50.0,
+            shapes: shapes.clone(),
+        });
+        assert_eq!(sue_io::svg::parse_svg(&text).unwrap().shapes.len(), 1);
     }
 
     #[test]

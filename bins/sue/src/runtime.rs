@@ -3454,6 +3454,86 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_corrects_every_picked_layer_as_one_step() {
+        let (mut runtime, root) = runtime("paint-picked");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let command = |runtime: &mut Runtime, name: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: name.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.focus())
+            .unwrap();
+        // Two layers filled with the drawing color (black).
+        command(&mut runtime, "edit.fill");
+        command(&mut runtime, "layer.new");
+        command(&mut runtime, "edit.fill");
+        step(&mut runtime, Vec::new());
+        let shades = |runtime: &Runtime| -> Vec<u8> {
+            let arena = &runtime.engine.world.arena;
+            sue_paint::doc::layers(arena, picture)
+                .into_iter()
+                .filter(|info| info.kind == sue_model::picture::LayerKind::Raster)
+                .filter_map(|info| sue_paint::doc::raster(arena, info.id))
+                .filter_map(|raster| raster.bytes().map(|bytes| bytes[0]))
+                .collect()
+        };
+        assert_eq!(shades(&runtime), vec![0, 0]);
+        // Select all layers, then Invert: both turn white, in one step.
+        command(&mut runtime, "layer.select_all");
+        let depth = runtime.engine.history.depth();
+        command(&mut runtime, "filter.invert");
+        step(&mut runtime, Vec::new());
+        assert_eq!(shades(&runtime), vec![255, 255]);
+        assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        assert_eq!(shades(&runtime), vec![0, 0], "both undone");
+        // Picked no more: only the current layer changes.
+        command(&mut runtime, "layer.select_none");
+        command(&mut runtime, "filter.invert");
+        step(&mut runtime, Vec::new());
+        assert_eq!(
+            shades(&runtime)
+                .iter()
+                .filter(|shade| **shade == 255)
+                .count(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_smart_shape_straightens_a_held_stroke() {
         let (mut runtime, root) = runtime("paint-smart");
         let ctx = egui::Context::default();

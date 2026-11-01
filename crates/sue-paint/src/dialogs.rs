@@ -600,6 +600,92 @@ impl FilterDialog {
     }
 }
 
+impl SuePaint {
+    /// Keeps `filter`'s result on its layer and, for a tonal correction,
+    /// on every layer picked with it (Clip Studio Paint 5.0), as one step.
+    pub(crate) fn keep_filter(&mut self, cx: &mut AppletContext<'_>, filter: &FilterDialog) {
+        let after = filter.result(filter.filter);
+        filter.show(cx, &after);
+        let label = filter.filter.label();
+        let mut edit = crate::doc::Edit::new(label.clone());
+        let mut changed = false;
+        if let Some(patch) = doc::diff_patch(&filter.before, &after, filter.size[0], filter.size[1])
+        {
+            edit = edit.then(sue_core::txn::RasterEdit::new(
+                filter.layer,
+                label.clone(),
+                vec![patch],
+            ));
+            changed = true;
+        }
+        if filter.filter.to_text().is_some() && !filter.merged {
+            for (layer, patch) in self.correct_picked(cx, filter) {
+                edit = edit.then(sue_core::txn::RasterEdit::new(
+                    layer,
+                    label.clone(),
+                    vec![patch],
+                ));
+                changed = true;
+            }
+        }
+        if changed {
+            cx.record(ArenaEdit(edit));
+        }
+    }
+
+    /// Runs `dialog`'s filter on the other unlocked raster layers picked
+    /// with the current one, in place; answers each changed layer with
+    /// its patch, to record.
+    fn correct_picked(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        dialog: &FilterDialog,
+    ) -> Vec<(sue_core::EntityId, sue_core::txn::RasterPatch)> {
+        let (Some(picture), Some(picked)) =
+            (self.picture(), self.doc().map(|doc| doc.picked.clone()))
+        else {
+            return Vec::new();
+        };
+        let infos = doc::layers(&cx.world.arena, picture);
+        let mut out = Vec::new();
+        for layer in picked.into_iter().filter(|layer| *layer != dialog.layer) {
+            let Some(info) = infos.iter().find(|info| {
+                info.id == layer
+                    && info.kind == sue_model::picture::LayerKind::Raster
+                    && !info.locked
+                    && !doc::is_folder(&cx.world.arena, info.id)
+            }) else {
+                continue;
+            };
+            let Some(raster) = doc::raster_mut(&mut cx.world.arena, layer) else {
+                continue;
+            };
+            let (width, height) = (raster.width(), raster.height());
+            let Some(bytes) = raster.bytes_mut() else {
+                continue;
+            };
+            let before = bytes.to_vec();
+            dialog.filter.apply(
+                bytes,
+                width,
+                height,
+                dialog.selection.as_ref(),
+                info.style.offset,
+            );
+            if let Some(patch) = doc::diff_patch(&before, bytes, width, height) {
+                out.push((layer, patch));
+            }
+        }
+        if !out.is_empty()
+            && let Some(doc) = self.doc_mut()
+        {
+            doc.compositor
+                .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+        }
+        out
+    }
+}
+
 /// The setting that holds the pen pressure curve every tool uses.
 pub(crate) const PEN_PRESSURE: &str = "sue_paint.pen_pressure";
 
@@ -1804,19 +1890,7 @@ impl SuePaint {
                     self.run("edit.undo", cx);
                 }
             }
-            (Dialog::Filter(filter), Outcome::Ok) => {
-                let after = filter.result(filter.filter);
-                filter.show(cx, &after);
-                if let Some(patch) =
-                    doc::diff_patch(&filter.before, &after, filter.size[0], filter.size[1])
-                {
-                    cx.record(ArenaEdit(sue_core::txn::RasterEdit::new(
-                        filter.layer,
-                        filter.filter.label(),
-                        vec![patch],
-                    )));
-                }
-            }
+            (Dialog::Filter(filter), Outcome::Ok) => self.keep_filter(cx, &filter),
             (Dialog::Frame(frame), Outcome::Ok) => self.add_frame_layer(cx, frame),
             (Dialog::Text(layer, lettering), Outcome::Ok) => self.put_text(cx, layer, &lettering),
             (Dialog::Perspective(count), Outcome::Ok) => self.make_perspective(cx, count),

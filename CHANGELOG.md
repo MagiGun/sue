@@ -21,6 +21,10 @@ follow [Semantic Versioning](https://semver.org/).
   you drag, and Speed Lines along the way you drag, each on an effect line
   layer that stays editable: the Object tool moves their ends, and Tool
   Property changes how many lines, their width, their scatter and color.
+- File, Special Export, Export vectors saves vector layers as SVG.
+- Tonal corrections change every picked layer at once, as in Clip Studio
+  Paint 5.0, and Layer, Change Selected Layer has Select All Layers and
+  Deselect Layers.
 - Smart Shape, as in Clip Studio Paint 5.0: hold the pen still at the end
   of a stroke and it becomes a clean line, arc, ellipse or polygon.
 - File, Export Animation, Animated sticker (APNG).

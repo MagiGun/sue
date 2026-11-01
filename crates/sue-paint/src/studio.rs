@@ -883,6 +883,8 @@ fn implemented(command: &str) -> bool {
             | "layer.properties"
             | "layer.select_above"
             | "layer.select_below"
+            | "layer.select_all"
+            | "layer.select_none"
             | "layer.order.front"
             | "layer.order.up"
             | "layer.order.down"
@@ -1015,6 +1017,7 @@ fn implemented(command: &str) -> bool {
             | "select.launcher"
             | "edit.material.paste"
             | "file.export.webtoon"
+            | "file.export.vectors"
             | "file.export.cels"
             | "anim.first"
             | "anim.last"
@@ -1709,6 +1712,44 @@ impl SuePaint {
 
     /// Writes the picture to numbered files next to `path`, scaled to the
     /// webtoon width and cut every webtoon height, top to bottom.
+    /// Writes the lines of the picture's visible vector layers to `path`
+    /// as an SVG drawing, bottom layer first.
+    fn export_vectors(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let arena = &cx.world.arena;
+        let Some([width, height]) = arena.get_by_id(picture).ok().and_then(picture::size) else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        let mut shapes = Vec::new();
+        for info in doc::layers(arena, picture) {
+            if !info.style.visible || !crate::vector::is_vector(arena, info.id) {
+                continue;
+            }
+            let lines = crate::vector::lines(&crate::vector::geometry(arena, info.id));
+            let offset = info.style.offset.map(|value| value as f32);
+            shapes.extend(crate::vector::svg_shapes(&lines, offset));
+        }
+        if shapes.is_empty() {
+            cx.notify(tr!("no-vector-lines-to-export"));
+            return;
+        }
+        let count = shapes.len();
+        let text = sue_io::svg::write_svg(&sue_io::svg::SvgDrawing {
+            width: width as f32,
+            height: height as f32,
+            shapes,
+        });
+        match write_atomic(path, text.as_bytes()) {
+            Ok(()) => cx.saved(path, tr!("vector-lines-count", count = count)),
+            Err(error) => cx.fail(tr!("cannot-export", error = error.to_string())),
+        }
+    }
+
     fn export_webtoon(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
         let Some(picture) = self.picture() else {
             return;
@@ -2609,6 +2650,23 @@ impl SuePaint {
 
     /// Runs a filter on the current layer at once.
     fn filter_now(&mut self, cx: &mut AppletContext<'_>, filter: Filter) {
+        // A tonal correction with other layers picked reaches them all, as
+        // one step.
+        if filter.to_text().is_some()
+            && self.doc().is_some_and(|doc| !doc.picked.is_empty())
+            && let Ok(info) = self.paintable(&cx.world.arena)
+            && let Some(raster) = doc::raster(&cx.world.arena, info.id)
+        {
+            let dialog = FilterDialog::new(
+                filter,
+                info.id,
+                raster,
+                self.doc().and_then(|doc| doc.selection.clone()),
+                info.style.offset,
+            );
+            self.keep_filter(cx, &dialog);
+            return;
+        }
         let selection = self.doc().and_then(|doc| doc.selection.clone());
         let offset = self
             .layer_info(&cx.world.arena)
@@ -5091,6 +5149,28 @@ impl SuePaint {
                 self.ask_export_book(cx, command == "file.export.epub")
             }
 
+            "file.export.vectors" => {
+                // Clip Studio Paint's Export vectors: the vector layers'
+                // lines as an SVG drawing.
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                let name = cx
+                    .world
+                    .arena
+                    .get_by_id(picture)
+                    .map_or_else(|_| tr!("picture"), |entity| entity.name().to_owned());
+                cx.request(ShellRequest::PickFile(
+                    FilePick::save(
+                        Some(me_id()),
+                        "vectors",
+                        &tr!("export-vectors"),
+                        &format!("{name}.svg"),
+                    )
+                    .types(vec![sue_wm::FileType::new(&tr!("svg-drawing"), &["svg"])])
+                    .starting_in(self.last_dir.clone()),
+                ));
+            }
             "file.export.webtoon" => {
                 if self.picture().is_some() {
                     self.dialog = Some(Dialog::Webtoon(self.webtoon.0, self.webtoon.1));
@@ -5268,6 +5348,27 @@ impl SuePaint {
             "window.history" => {
                 self.panels.layer = true;
                 self.layer_tab = 2;
+            }
+            // Clip Studio Paint's Select all layers: every layer picked
+            // with the current one (for merging or correcting them all).
+            "layer.select_all" | "layer.select_none" => {
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                let current = self.layer();
+                let stack = if command == "layer.select_all" {
+                    doc::layers(&cx.world.arena, picture)
+                } else {
+                    Vec::new()
+                };
+                let all: Vec<EntityId> = stack
+                    .into_iter()
+                    .map(|info| info.id)
+                    .filter(|id| Some(*id) != current)
+                    .collect();
+                if let Some(doc) = self.doc_mut() {
+                    doc.picked = all;
+                }
             }
             "layer.select_above" | "layer.select_below" => {
                 let Some(picture) = self.picture() else {
@@ -6966,6 +7067,7 @@ impl SueApplet for SuePaint {
             "anim-gif" => self.export_animation(cx, path, true),
             "anim-movie" => self.export_movie(cx, path),
             "webtoon" => self.export_webtoon(cx, path),
+            "vectors" => self.export_vectors(cx, path),
             "anim-cels" => self.export_cels(cx, path),
             "timelapse" => self.export_timelapse(cx, path),
             "anim-sequence" => self.export_animation(cx, path, false),

@@ -1781,6 +1781,13 @@ down and right to left and fills glyph outlines (read with ttf-parser from
 the shared font library) with an accumulation rasterizer after font-rs.
 Clicked inside a balloon, the Text tool centers the words in it.
 
+**Vectors out and corrections on many layers.** `sue_io::svg::write_svg`
+writes an `SvgDrawing` that `parse_svg` reads back; `vector::svg_shapes`
+turns each vector line into an outline as wide as its brush made it.
+`keep_filter` keeps a filter's result as one `Batch` of `RasterEdit`s,
+reaching every layer in the document's `picked` list when the filter is a
+tonal correction (one `Filter::to_text` can keep).
+
 **Smart Shape.** While a stroke's pen rests (`smart::HOLD_SECONDS` within
 `smart::HOLD_REACH` screen points), `smart::recognize` reads the stroke's
 samples and answers a line, arc (a circle through its ends and middle),

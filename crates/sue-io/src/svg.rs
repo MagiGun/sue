@@ -5,6 +5,9 @@
 //! through every `transform` and the `viewBox`.
 //!
 //! Text, gradients, patterns, masks and clips are left out.
+//!
+//! [`write_svg`] goes the other way: a drawing's shapes as an SVG file,
+//! which [`parse_svg`] reads back as the same shapes.
 
 /// One shape of the drawing.
 #[derive(Clone, Debug, PartialEq)]
@@ -696,6 +699,53 @@ fn arc(
         .collect()
 }
 
+/// `drawing` as SVG text: each shape a `path`, filled and stroked as it
+/// is, in drawing order.
+#[must_use]
+pub fn write_svg(drawing: &SvgDrawing) -> String {
+    let color = |[r, g, b]: [u8; 3]| format!("#{r:02x}{g:02x}{b:02x}");
+    let number = |value: f32| {
+        let text = format!("{:.2}", value);
+        let text = text.trim_end_matches('0').trim_end_matches('.');
+        if text == "-0" {
+            "0".to_owned()
+        } else {
+            text.to_owned()
+        }
+    };
+    let mut out = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\">\n",
+        w = number(drawing.width),
+        h = number(drawing.height),
+    );
+    for shape in &drawing.shapes {
+        let Some((first, rest)) = shape.points.split_first() else {
+            continue;
+        };
+        let mut path = format!("M{} {}", number(first[0]), number(first[1]));
+        for point in rest {
+            path.push_str(&format!(" L{} {}", number(point[0]), number(point[1])));
+        }
+        if shape.closed {
+            path.push_str(" Z");
+        }
+        let fill = shape.fill.map_or_else(|| "none".to_owned(), color);
+        let stroke = shape.stroke.map_or_else(
+            String::new,
+            |rgb| {
+                format!(
+                    " stroke=\"{}\" stroke-width=\"{}\" stroke-linecap=\"round\" stroke-linejoin=\"round\"",
+                    color(rgb),
+                    number(shape.width)
+                )
+            },
+        );
+        out.push_str(&format!("  <path d=\"{path}\" fill=\"{fill}\"{stroke}/>\n"));
+    }
+    out.push_str("</svg>\n");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -751,5 +801,39 @@ mod tests {
         let both = map(parse_transform("translate(5 5) scale(2)"), [1.0, 1.0]);
         assert!(close(both, [7.0, 7.0]));
         assert!(parse_svg("<html></html>").is_err());
+    }
+
+    #[test]
+    fn written_drawings_read_back_as_the_same_shapes() {
+        let drawing = SvgDrawing {
+            width: 200.0,
+            height: 100.0,
+            shapes: vec![
+                SvgShape {
+                    points: vec![[10.0, 10.0], [50.5, 20.25], [90.0, 80.0]],
+                    closed: true,
+                    stroke: None,
+                    fill: Some([200, 30, 40]),
+                    width: 1.0,
+                },
+                SvgShape {
+                    points: vec![[0.0, 0.0], [100.0, 50.0]],
+                    closed: false,
+                    stroke: Some([0, 0, 0]),
+                    fill: None,
+                    width: 3.0,
+                },
+            ],
+        };
+        let text = write_svg(&drawing);
+        let back = parse_svg(&text).unwrap();
+        assert_eq!((back.width, back.height), (200.0, 100.0));
+        assert_eq!(back.shapes.len(), 2);
+        assert_eq!(back.shapes[0].fill, Some([200, 30, 40]));
+        assert_eq!(back.shapes[0].stroke, None);
+        assert!(back.shapes[0].closed);
+        assert_eq!(back.shapes[1].stroke, Some([0, 0, 0]));
+        assert_eq!(back.shapes[1].width, 3.0);
+        assert!(back.shapes[0].points.contains(&[50.5, 20.25]));
     }
 }

@@ -212,7 +212,10 @@ pub fn menus() -> Vec<Menu> {
                 ),
                 sub(
                     &tr!("special-export"),
-                    vec![act(&tr!("export-webtoon-ellipsis"), "file.export.webtoon")],
+                    vec![
+                        act(&tr!("export-webtoon-ellipsis"), "file.export.webtoon"),
+                        act(&tr!("export-vectors-ellipsis"), "file.export.vectors"),
+                    ],
                 ),
                 SEP,
                 sub(
@@ -556,6 +559,8 @@ pub fn menus() -> Vec<Menu> {
                     vec![
                         act(&tr!("select-layer-above"), "layer.select_above").key("Alt+]"),
                         act(&tr!("select-layer-below"), "layer.select_below").key("Alt+["),
+                        act(&tr!("select-all-layers"), "layer.select_all"),
+                        act(&tr!("deselect-layers"), "layer.select_none"),
                     ],
                 ),
                 sub(

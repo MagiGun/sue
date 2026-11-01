@@ -30,11 +30,11 @@ rows are at the end.
 | Area | done | partial | missing | percent |
 | --- | --- | --- | --- | --- |
 | File: new, open and save | 10 | 1 | 5 | 66 |
-| File: export | 11 | 1 | 6 | 64 |
+| File: export | 12 | 1 | 5 | 69 |
 | File: import, batch and scanning | 3 | 4 | 8 | 33 |
 | Edit: undo, clipboard and fills | 8 | 5 | 0 | 81 |
 | Edit: transform and canvas size | 8 | 6 | 0 | 79 |
-| Tonal correction and color | 10 | 1 | 1 | 88 |
+| Tonal correction and color | 11 | 1 | 0 | 96 |
 | Filters | 20 | 0 | 0 | 100 |
 | Layers | 17 | 5 | 0 | 89 |
 | Selection | 9 | 0 | 0 | 100 |
@@ -54,7 +54,7 @@ rows are at the end.
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 9 | 3 | 2 | 75 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 237 | 56 | 43 | 79 |
+| **All of Sue Paint** | 239 | 56 | 41 | 79 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -142,7 +142,7 @@ The order of work is the plan at the end.
 | Batch export of pages (EX) | File > Export multiple pages > Batch export | partial | Export All Pages saves every page; Clip Studio's dialog sets format and layer comps per page |
 | Export fanzine printing data (EX) | File > Export multiple pages | missing | |
 | Export webtoon | File > Special Export > Export webtoon | done | Numbered pictures at the height and width you choose |
-| Export vectors | File > Special Export | missing | |
+| Export vectors | File > Special Export | done | Visible vector layers as SVG, each line an outline as wide as drawn |
 | Export layer comp (EX) | File > Special Export | missing | Layer comps themselves are missing too |
 | Record timelapse | File > Timelapse > Record timelapse | done | A picture of the canvas after every change |
 | Export timelapse (video or GIF) | File > Timelapse > Export timelapse | done | Fitted to a length you choose; Clip Studio's presets run to 300 seconds |
@@ -218,7 +218,7 @@ The order of work is the plan at the end.
 | Binarization | Edit > Tonal Correction | done | |
 | Gradient Map | Edit > Tonal Correction | done | |
 | Correction layers for all of the above | Layer > New Correction Layer | done | Hide or fade one to weaken it; double-click to change it |
-| Tonal correction across several layers at once (5.0) | Edit > Tonal Correction | missing | |
+| Tonal correction across several layers at once (5.0) | Edit > Tonal Correction | done | Every layer picked with the current one, one undo step; Layer, Select All Layers |
 | Color profile preview | View > Color Profile | partial | Commands exist; verify the preview settings |
 
 ## Filters

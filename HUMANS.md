@@ -625,6 +625,9 @@ Once a canvas is open:
   into them where you clicked.
 - **Tone Curve, Levels, Color Balance, Gradient Map** (Edit, Tonal
   Correction): shape the curve by dragging its points, with a live preview.
+  With other layers picked too (Ctrl+click in the Layer palette, or Layer,
+  Change Selected Layer, Select All Layers), a tonal correction changes
+  them all at once, as one step to undo.
 - **Correction layers** (Layer, New Correction Layer): the same corrections
   as a layer that changes everything under it while leaving those layers
   alone. Hide it or lower its opacity to weaken it, and double-click it to
@@ -726,7 +729,9 @@ Once a canvas is open:
 - **Reference layers** (Layer, Layer Settings, Set as Reference Layer): the
   fill and auto select can look only at them, so you fill on one layer
   between the lines of another. **Rasterize** turns a vector layer into an
-  ordinary one.
+  ordinary one, and File, Special Export, **Export vectors** saves the
+  lines of the visible vector layers as an SVG drawing, as wide as you drew
+  them.
 - **Selections:** the Selection tool also has **Polyline**, **Selection
   pen** and **Erase selection** (paint what to select or leave out). The
   Select menu grows, shrinks and softens a selection, selects by color,
