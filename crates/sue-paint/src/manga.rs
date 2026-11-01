@@ -6,8 +6,9 @@
 //! panels in [`PANELS`] and draws them: clear inside, the border inked along
 //! each panel's edge, the gutters between panels in the paper's color, so
 //! the layers under it show only inside the panels. A balloon layer
-//! ([`BALLOON`]) keeps its ellipses and tails in [`SHAPES`] and draws them as
-//! one white shape with one outline. Both draw again from their shapes after
+//! ([`BALLOON`]) keeps its balloons (ellipse, rounded, cloud, flash or drawn
+//! by hand) and tails in [`SHAPES`] and draws them as one white shape with
+//! one outline. Both draw again from their shapes after
 //! every edit, so edits stay sharp.
 
 use crate::brush::{Dynamics, Stroke as BrushStroke, Tip};
@@ -114,6 +115,26 @@ pub fn signed_distance(polygon: &[[f32; 2]], p: [f32; 2]) -> f32 {
         out = out.max((p[0] - a[0]) * nx + (p[1] - a[1]) * ny);
     }
     out
+}
+
+/// How far `p` is outside any simple polygon, convex or not (negative
+/// inside): the distance to its nearest edge, signed by the even-odd rule.
+fn polygon_distance(polygon: &[[f32; 2]], p: [f32; 2]) -> f32 {
+    if polygon.len() < 3 {
+        return f32::INFINITY;
+    }
+    let mut nearest = f32::INFINITY;
+    let mut inside = false;
+    for (a, b) in polygon.iter().zip(polygon.iter().cycle().skip(1)) {
+        let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
+        let (wx, wy) = (p[0] - a[0], p[1] - a[1]);
+        let t = ((wx * ex + wy * ey) / (ex * ex + ey * ey).max(1e-12)).clamp(0.0, 1.0);
+        nearest = nearest.min((wx - ex * t).hypot(wy - ey * t));
+        if (a[1] > p[1]) != (b[1] > p[1]) && p[0] < a[0] + ex * (p[1] - a[1]) / ey {
+            inside = !inside;
+        }
+    }
+    if inside { -nearest } else { nearest }
 }
 
 /// A convex polygon cut to where `dot(normal, p) >= offset`.
@@ -248,48 +269,126 @@ pub fn decode_panels(text: &str) -> Vec<Panel> {
 // ----- Balloons -----------------------------------------------------------------
 
 /// A part of a balloon layer.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Shape {
     /// An ellipse balloon in its box `[x0, y0, x1, y1]`.
     Ellipse([f32; 4]),
     /// A tail: a triangle from a balloon to its point.
     Tail([[f32; 2]; 3]),
+    /// A rounded rectangle balloon in its box.
+    Rounded([f32; 4]),
+    /// A cloud (thought) balloon in its box: puffs around an ellipse.
+    Cloud([f32; 4]),
+    /// A flash (shout) balloon in its box: spikes around an ellipse.
+    Flash([f32; 4]),
+    /// A balloon drawn by hand: its outline, closed.
+    Drawn(Vec<[f32; 2]>),
+}
+
+/// Distance from `p` to the ellipse in `rect` (negative inside).
+fn ellipse_distance([x0, y0, x1, y1]: [f32; 4], p: [f32; 2]) -> f32 {
+    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+    let (rx, ry) = (((x1 - x0) / 2.0).max(0.5), ((y1 - y0) / 2.0).max(0.5));
+    let (dx, dy) = (p[0] - cx, p[1] - cy);
+    let k = ((dx / rx).powi(2) + (dy / ry).powi(2)).sqrt();
+    if k < 1e-6 {
+        return -rx.min(ry);
+    }
+    // The distance to the rim, from the gradient of k.
+    let gradient = ((dx / (rx * rx)).powi(2) + (dy / (ry * ry)).powi(2)).sqrt() / k;
+    (k - 1.0) / gradient.max(1e-6)
+}
+
+/// The puffs of a cloud balloon in `rect`: circles `[x, y, r]` along an
+/// ellipse a little inside it, so they reach its edge.
+fn puffs([x0, y0, x1, y1]: [f32; 4]) -> Vec<[f32; 3]> {
+    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+    let (w, h) = ((x1 - x0).max(1.0), (y1 - y0).max(1.0));
+    let r = (w.min(h) * 0.16).max(3.0);
+    let (rx, ry) = ((w / 2.0 - r).max(1.0), (h / 2.0 - r).max(1.0));
+    // About one puff per 1.5 radii of rim.
+    let rim = std::f32::consts::PI * (1.5 * (rx + ry) - (rx * ry).sqrt());
+    let count = ((rim / (r * 1.5)).round() as usize).clamp(6, 64);
+    (0..count)
+        .map(|index| {
+            let angle = index as f32 / count as f32 * std::f32::consts::TAU;
+            // Every other puff a little smaller, as drawn by hand.
+            let size = if index % 2 == 0 { 1.0 } else { 0.82 };
+            [cx + rx * angle.cos(), cy + ry * angle.sin(), r * size]
+        })
+        .collect()
+}
+
+/// The outline of a flash balloon in `rect`: spikes from an ellipse out
+/// to the box, uneven as Clip Studio Paint's.
+fn spikes([x0, y0, x1, y1]: [f32; 4]) -> Vec<[f32; 2]> {
+    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+    let (rx, ry) = (((x1 - x0) / 2.0).max(1.0), ((y1 - y0) / 2.0).max(1.0));
+    let count = (((rx + ry) / 9.0).round() as u32).clamp(12, 48);
+    let mut points = Vec::new();
+    for index in 0..count {
+        let angle = |part: f32| (index as f32 + part) / count as f32 * std::f32::consts::TAU;
+        let reach = 0.82 + 0.18 * chance(count, index, 7);
+        let a = angle(0.0);
+        points.push([cx + rx * reach * a.cos(), cy + ry * reach * a.sin()]);
+        let b = angle(0.5);
+        points.push([cx + rx * 0.66 * b.cos(), cy + ry * 0.66 * b.sin()]);
+    }
+    points
 }
 
 impl Shape {
     /// How far `p` is outside the shape (negative inside).
     fn distance(&self, p: [f32; 2]) -> f32 {
-        match *self {
-            Self::Ellipse([x0, y0, x1, y1]) => {
+        match self {
+            Self::Ellipse(rect) => ellipse_distance(*rect, p),
+            Self::Tail(points) => signed_distance(points, p),
+            Self::Rounded([x0, y0, x1, y1]) => {
                 let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
-                let (rx, ry) = (((x1 - x0) / 2.0).max(0.5), ((y1 - y0) / 2.0).max(0.5));
-                let (dx, dy) = (p[0] - cx, p[1] - cy);
-                let k = ((dx / rx).powi(2) + (dy / ry).powi(2)).sqrt();
-                if k < 1e-6 {
-                    return -rx.min(ry);
-                }
-                // The distance to the rim, from the gradient of k.
-                let gradient = ((dx / (rx * rx)).powi(2) + (dy / (ry * ry)).powi(2)).sqrt() / k;
-                (k - 1.0) / gradient.max(1e-6)
+                let (hw, hh) = ((x1 - x0) / 2.0, (y1 - y0) / 2.0);
+                let r = (hw.min(hh) * 0.45).max(0.0);
+                let (qx, qy) = ((p[0] - cx).abs() - hw + r, (p[1] - cy).abs() - hh + r);
+                qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - r
             }
-            Self::Tail(points) => signed_distance(&points, p),
+            Self::Cloud(rect) => {
+                let puffs = puffs(*rect);
+                let r = puffs.first().map_or(0.0, |puff| puff[2]);
+                let [x0, y0, x1, y1] = *rect;
+                let body = ellipse_distance([x0 + r, y0 + r, x1 - r, y1 - r], p);
+                puffs
+                    .iter()
+                    .map(|[x, y, r]| (p[0] - x).hypot(p[1] - y) - r)
+                    .fold(body, f32::min)
+            }
+            Self::Flash(rect) => polygon_distance(&spikes(*rect), p),
+            Self::Drawn(points) => polygon_distance(points, p),
+        }
+    }
+
+    /// The box a balloon's words go in, `[x0, y0, x1, y1]`; `None` for a
+    /// tail.
+    #[must_use]
+    pub fn balloon(&self) -> Option<[f32; 4]> {
+        match self {
+            Self::Tail(_) => None,
+            _ => Some(self.bounds()),
         }
     }
 
     /// Its box, `[x0, y0, x1, y1]`.
     fn bounds(&self) -> [f32; 4] {
-        match *self {
-            Self::Ellipse(rect) => rect,
-            Self::Tail(points) => {
-                let xs = points.map(|p| p[0]);
-                let ys = points.map(|p| p[1]);
-                [
-                    xs.iter().copied().fold(f32::MAX, f32::min),
-                    ys.iter().copied().fold(f32::MAX, f32::min),
-                    xs.iter().copied().fold(f32::MIN, f32::max),
-                    ys.iter().copied().fold(f32::MIN, f32::max),
-                ]
+        let around = |points: &[[f32; 2]]| {
+            points.iter().fold(
+                [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+                |[x0, y0, x1, y1], p| [x0.min(p[0]), y0.min(p[1]), x1.max(p[0]), y1.max(p[1])],
+            )
+        };
+        match self {
+            Self::Ellipse(rect) | Self::Rounded(rect) | Self::Cloud(rect) | Self::Flash(rect) => {
+                *rect
             }
+            Self::Tail(points) => around(points),
+            Self::Drawn(points) => around(points),
         }
     }
 }
@@ -306,6 +405,38 @@ pub fn tail(from: [f32; 2], to: [f32; 2], width: f32) -> Shape {
         [from[0] - nx, from[1] - ny],
         to,
     ])
+}
+
+/// A thought balloon's tail: bubbles growing smaller from the balloon in
+/// `rect` toward `to`.
+#[must_use]
+pub fn bubbles(rect: [f32; 4], to: [f32; 2]) -> Vec<Shape> {
+    let [x0, y0, x1, y1] = rect;
+    let middle = [(x0 + x1) / 2.0, (y0 + y1) / 2.0];
+    // From where the line to the point leaves the balloon.
+    let (dx, dy) = (to[0] - middle[0], to[1] - middle[1]);
+    let mut t = 0.0;
+    while t < 1.0 && ellipse_distance(rect, [middle[0] + dx * t, middle[1] + dy * t]) < 0.0 {
+        t += 0.01;
+    }
+    let start = [middle[0] + dx * t, middle[1] + dy * t];
+    let size = ((x1 - x0).min(y1 - y0) * 0.16).max(4.0);
+    let length = (to[0] - start[0]).hypot(to[1] - start[1]);
+    if length < size {
+        return Vec::new();
+    }
+    let count = 3;
+    (0..count)
+        .map(|index| {
+            let along = (index as f32 + 0.6) / count as f32;
+            let r = size * (1.0 - 0.28 * index as f32) / 2.0;
+            let c = [
+                start[0] + (to[0] - start[0]) * along,
+                start[1] + (to[1] - start[1]) * along,
+            ];
+            Shape::Ellipse([c[0] - r, c[1] - r * 0.8, c[0] + r, c[1] + r * 0.8])
+        })
+        .collect()
 }
 
 /// Balloons drawn into RGBA8 pixels: every shape filled white as one, and
@@ -344,7 +475,9 @@ pub fn render_balloons(shapes: &[Shape], width: u32, height: u32, line: f32) -> 
     out
 }
 
-/// Balloon shapes as text: `e:x0,y0,x1,y1` and `t:x,y,x,y,x,y`, apart by `;`.
+/// Balloon shapes as text, apart by `;`: `e:x0,y0,x1,y1` (ellipse),
+/// `r:`, `c:` and `f:` (rounded, cloud and flash, by their boxes),
+/// `t:x,y,x,y,x,y` (a tail) and `d:x,y,...` (drawn by hand).
 #[must_use]
 pub fn encode_shapes(shapes: &[Shape]) -> String {
     let numbers = |values: &[f32]| {
@@ -359,6 +492,10 @@ pub fn encode_shapes(shapes: &[Shape]) -> String {
         .map(|shape| match shape {
             Shape::Ellipse(rect) => format!("e:{}", numbers(rect)),
             Shape::Tail(points) => format!("t:{}", numbers(&points.concat())),
+            Shape::Rounded(rect) => format!("r:{}", numbers(rect)),
+            Shape::Cloud(rect) => format!("c:{}", numbers(rect)),
+            Shape::Flash(rect) => format!("f:{}", numbers(rect)),
+            Shape::Drawn(points) => format!("d:{}", numbers(&points.concat())),
         })
         .collect::<Vec<_>>()
         .join(";")
@@ -378,6 +515,12 @@ pub fn decode_shapes(text: &str) -> Vec<Shape> {
                 ("e", &[x0, y0, x1, y1]) => Some(Shape::Ellipse([x0, y0, x1, y1])),
                 ("t", &[ax, ay, bx, by, cx, cy]) => {
                     Some(Shape::Tail([[ax, ay], [bx, by], [cx, cy]]))
+                }
+                ("r", &[x0, y0, x1, y1]) => Some(Shape::Rounded([x0, y0, x1, y1])),
+                ("c", &[x0, y0, x1, y1]) => Some(Shape::Cloud([x0, y0, x1, y1])),
+                ("f", &[x0, y0, x1, y1]) => Some(Shape::Flash([x0, y0, x1, y1])),
+                ("d", values) if values.len() >= 6 && values.len() % 2 == 0 => {
+                    Some(Shape::Drawn(values.as_chunks::<2>().0.to_vec()))
                 }
                 _ => None,
             }
@@ -469,6 +612,47 @@ pub fn focus_lines(
             let to = [center[0] + dx * reach, center[1] + dy * reach];
             let thick = line * (0.5 + chance(seed, index, 3));
             ink_line(raster, from, to, thick, rgb, |t| 1.0 - t);
+        }
+    });
+}
+
+/// Saturated lines as Clip Studio Paint's tool draws them: `count` lines
+/// from beyond the picture's edges in toward the ellipse in `rect`,
+/// stopping at its rim a little in or out, `line` pixels at their base and
+/// tapering to a point.
+#[allow(clippy::too_many_arguments, reason = "a tool's settings")]
+pub fn saturated_lines(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    rect: [f32; 4],
+    count: u32,
+    line: f32,
+    seed: u32,
+    rgb: [u8; 3],
+) {
+    let [x0, y0, x1, y1] = rect;
+    let center = [(x0 + x1) / 2.0, (y0 + y1) / 2.0];
+    let (rx, ry) = (((x1 - x0) / 2.0).max(1.0), ((y1 - y0) / 2.0).max(1.0));
+    let far = (width as f32).hypot(height as f32) + rx.max(ry);
+    with_raster(pixels, width, height, |raster| {
+        for index in 0..count {
+            let angle = (index as f32 + (chance(seed, index, 1) - 0.5) * 0.9) / count.max(1) as f32
+                * std::f32::consts::TAU;
+            let (dx, dy) = (angle.cos(), angle.sin());
+            // Where the ray meets the ellipse, then a little either side.
+            let rim = 1.0 / ((dx / rx).powi(2) + (dy / ry).powi(2)).sqrt();
+            let reach = rim * (0.92 + 0.35 * chance(seed, index, 2));
+            let from = [center[0] + dx * far, center[1] + dy * far];
+            let to = [center[0] + dx * reach, center[1] + dy * reach];
+            let thick = line * (0.5 + chance(seed, index, 3));
+            // Full width most of the way in, coming to a point near the
+            // rim (Clip Studio Paint's In of about a third).
+            let length = (far - reach).max(1.0);
+            let taper = (rim * 1.2 / length).clamp(0.1, 0.6);
+            ink_line(raster, from, to, thick, rgb, |t| {
+                ((1.0 - t) / taper).min(1.0)
+            });
         }
     });
 }
@@ -650,5 +834,71 @@ mod tests {
             .sum::<f32>()
             / (width * height) as f32;
         assert!((covered - 0.3).abs() < 0.06, "about 30% covered: {covered}");
+    }
+
+    #[test]
+    fn every_balloon_shape_fills_white_outlines_and_keeps_in_text() {
+        let (w, h) = (900_u32, 600_u32);
+        let rect = |x: f32, y: f32| [x, y, x + 240.0, y + 150.0];
+        let mut shapes = vec![
+            Shape::Ellipse(rect(20.0, 20.0)),
+            Shape::Rounded(rect(320.0, 20.0)),
+            Shape::Cloud(rect(620.0, 20.0)),
+            Shape::Flash(rect(20.0, 250.0)),
+            Shape::Drawn(vec![
+                [340.0, 260.0],
+                [560.0, 250.0],
+                [450.0, 330.0],
+                [540.0, 380.0],
+                [360.0, 400.0],
+            ]),
+        ];
+        let thought = bubbles(rect(620.0, 20.0), [760.0, 300.0]);
+        assert_eq!(thought.len(), 3, "three bubbles");
+        shapes.extend(thought);
+        let pixels = render_balloons(&shapes, w, h, 3.0);
+        let at = |x: u32, y: u32| {
+            let index = ((y * w + x) * 4) as usize;
+            [pixels[index], pixels[index + 3]]
+        };
+        for shape in &shapes[..4] {
+            let [x0, y0, x1, y1] = shape.balloon().unwrap();
+            let middle = at(((x0 + x1) / 2.0) as u32, ((y0 + y1) / 2.0) as u32);
+            assert_eq!(middle, [255, 255], "white inside {shape:?}");
+        }
+        // The rounded balloon's corner is cut off; the box's middle edge is
+        // outlined.
+        assert_eq!(at(322, 22)[1], 0, "a round corner");
+        assert_eq!(at(440, 18), [0, 255], "an outline just outside");
+        // A flash balloon's spikes leave gaps; a drawn balloon may bend in.
+        assert!(shapes[3].distance([22.0, 252.0]) > 0.0);
+        assert!(
+            shapes[4].distance([520.0, 320.0]) > 0.0,
+            "the notch is outside"
+        );
+        assert!(shapes[4].distance([400.0, 350.0]) < 0.0);
+        // Every shape comes back from its text (to the whole pixel).
+        let kept = decode_shapes(&encode_shapes(&shapes));
+        assert_eq!(kept.len(), shapes.len());
+        assert_eq!(kept[..5], shapes[..5]);
+        assert_eq!(decode_shapes(&encode_shapes(&kept)), kept);
+        // Saturated lines leave the ellipse clear and ink the corners.
+        let mut lines = vec![0; (w * h * 4) as usize];
+        saturated_lines(
+            &mut lines,
+            w,
+            h,
+            [300.0, 200.0, 600.0, 400.0],
+            120,
+            4.0,
+            7,
+            [0, 0, 0],
+        );
+        let alpha = |x: u32, y: u32| lines[((y * w + x) * 4 + 3) as usize];
+        assert_eq!(alpha(450, 300), 0, "a clear middle");
+        let inked = (0..w)
+            .filter(|x| alpha(*x, 2) > 128 || alpha(*x, h - 3) > 128)
+            .count();
+        assert!(inked > 60, "lines reach the edges: {inked}");
     }
 }

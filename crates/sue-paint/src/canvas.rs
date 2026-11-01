@@ -1409,7 +1409,28 @@ impl SuePaint {
                     }
                 }
             }
+            Tool::Balloon if sub.mode == crate::comic::BALLOON_PEN => {
+                self.gesture = Some(Gesture::Outline {
+                    sub: Box::new(sub),
+                    points: vec![[p.x, p.y]],
+                });
+            }
             Tool::Frame | Tool::Balloon => {
+                self.gesture = Some(Gesture::Shape {
+                    tool,
+                    sub: Box::new(sub),
+                    op,
+                    from: p,
+                    to: p,
+                });
+            }
+            // Effect lines make a layer of their own.
+            Tool::Figure
+                if matches!(
+                    sub.mode,
+                    crate::comic::SATURATED_LINES | crate::comic::SPEED_LINES
+                ) =>
+            {
                 self.gesture = Some(Gesture::Shape {
                     tool,
                     sub: Box::new(sub),
@@ -2552,7 +2573,7 @@ impl SuePaint {
                     points.push([p.x, p.y]);
                 }
             }
-            Gesture::Lasso { points, .. } => {
+            Gesture::Lasso { points, .. } | Gesture::Outline { points, .. } => {
                 if points.last().is_none_or(|last| {
                     (last[0] - p.x).hypot(last[1] - p.y) > 1.5 / doc.view.zoom.max(0.01)
                 }) {
@@ -2787,6 +2808,14 @@ impl SuePaint {
                     }
                     doc.set_selection(Some(selection));
                 }
+                Tool::Figure
+                    if matches!(
+                        sub.mode,
+                        crate::comic::SATURATED_LINES | crate::comic::SPEED_LINES
+                    ) =>
+                {
+                    self.effect_lines(from, to, &sub, cx);
+                }
                 Tool::Figure => self.figure(from, to, &sub, size, cx),
                 Tool::Gradient => self.gradient(from, to, &sub, cx),
                 Tool::Frame => self.frame_drag(from, to, &sub, cx),
@@ -2984,6 +3013,7 @@ impl SuePaint {
                     );
                 }
             }
+            Gesture::Outline { sub, points } => self.balloon_drawn(points, &sub, cx),
             Gesture::Lasso { op, points } => {
                 if let Some(doc) = self.docs.get_mut(self.active) {
                     let mut selection = doc
@@ -3790,8 +3820,11 @@ impl SuePaint {
                         painter.circle_stroke(screen([to.x, to.y]), 4.0, outline);
                     }
                     Tool::Figure | Tool::Frame | Tool::Balloon | Tool::Ruler
-                        if (tool == &Tool::Figure && sub.mode == 0)
-                            || sub.mode == 1
+                        if (tool == &Tool::Figure
+                            && matches!(sub.mode, 0 | crate::comic::SPEED_LINES))
+                            || (tool != &Tool::Figure && sub.mode == 1)
+                            || (tool == &Tool::Balloon
+                                && sub.mode == crate::comic::THOUGHT_TAIL)
                             || tool == &Tool::Ruler =>
                     {
                         painter.line_segment(
@@ -3800,8 +3833,15 @@ impl SuePaint {
                         );
                     }
                     _ if (tool == &Tool::Select && sub.mode == 1)
-                        || (tool == &Tool::Figure && matches!(sub.mode, 2 | 4))
-                        || (tool == &Tool::Balloon && sub.mode == 0) =>
+                        || (tool == &Tool::Figure
+                            && matches!(sub.mode, 2 | 4 | crate::comic::SATURATED_LINES))
+                        || (tool == &Tool::Balloon
+                            && matches!(
+                                sub.mode,
+                                crate::comic::ELLIPSE_BALLOON
+                                    | crate::comic::CLOUD_BALLOON
+                                    | crate::comic::FLASH_BALLOON
+                            )) =>
                     {
                         let points = ellipse_points(*from, *to).into_iter().map(screen).collect();
                         painter.add(Shape::closed_line(points, outline));
@@ -3818,7 +3858,7 @@ impl SuePaint {
                     }
                 }
             }
-            Some(Gesture::Lasso { points, .. }) => {
+            Some(Gesture::Lasso { points, .. } | Gesture::Outline { points, .. }) => {
                 let path = points.iter().copied().map(screen).collect::<Vec<_>>();
                 painter.add(Shape::line(path, Stroke::new(1.0, theme.border_active)));
             }

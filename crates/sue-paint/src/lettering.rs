@@ -8,7 +8,7 @@ use sue_core::txn::{ReplaceComponent, SetProperty};
 use sue_core::{Color, EntityId, PixelFormat, RasterTile2D, Value};
 use sue_wm::AppletContext;
 
-use crate::manga::{self, Shape};
+use crate::manga;
 use crate::studio::SuePaint;
 
 /// The class of a text layer.
@@ -238,13 +238,10 @@ impl SuePaint {
                     let shapes = manga::decode_shapes(
                         entity.property(manga::SHAPES).and_then(Value::as_str)?,
                     );
-                    shapes.into_iter().find_map(|shape| match shape {
-                        Shape::Ellipse([x0, y0, x1, y1])
-                            if (x0..x1).contains(&p.x) && (y0..y1).contains(&p.y) =>
-                        {
-                            Some([(x0 + x1) / 2.0, (y0 + y1) / 2.0, (y1 - y0).min(x1 - x0)])
-                        }
-                        _ => None,
+                    shapes.into_iter().find_map(|shape| {
+                        let [x0, y0, x1, y1] = shape.balloon()?;
+                        ((x0..x1).contains(&p.x) && (y0..y1).contains(&p.y))
+                            .then(|| [(x0 + x1) / 2.0, (y0 + y1) / 2.0, (y1 - y0).min(x1 - x0)])
                     })
                 })
         });

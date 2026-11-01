@@ -677,6 +677,10 @@ impl Tool {
                     SubTool::new(self, "Ellipse", 2, line),
                     SubTool::new(self, "Filled Rectangle", 3, line),
                     SubTool::new(self, "Filled Ellipse", 4, line),
+                    // Clip Studio Paint's Saturated line and Speed line,
+                    // each on a layer of its own.
+                    SubTool::new(self, "Saturated Line", crate::comic::SATURATED_LINES, line),
+                    SubTool::new(self, "Speed Line", crate::comic::SPEED_LINES, line),
                 ]
             }
             Self::Frame => vec![
@@ -687,9 +691,18 @@ impl Tool {
                 let outline = tip(3.0, |t| {
                     t.size_by.pressure = false;
                 });
+                // Clip Studio Paint's Balloon sub tools.
+                use crate::comic::{
+                    BALLOON_PEN, CLOUD_BALLOON, FLASH_BALLOON, ROUNDED_BALLOON, THOUGHT_TAIL,
+                };
                 vec![
                     SubTool::new(self, "Ellipse Balloon", 0, outline),
+                    SubTool::new(self, "Rounded Rectangle Balloon", ROUNDED_BALLOON, outline),
+                    SubTool::new(self, "Cloud Balloon", CLOUD_BALLOON, outline),
+                    SubTool::new(self, "Flash Balloon", FLASH_BALLOON, outline),
+                    SubTool::new(self, "Balloon Pen", BALLOON_PEN, outline),
                     SubTool::new(self, "Balloon Tail", 1, outline),
+                    SubTool::new(self, "Thought Balloon Tail", THOUGHT_TAIL, outline),
                 ]
             }
             // Clip Studio Paint's Create ruler group, in its order.

@@ -1779,7 +1779,17 @@ placement, centering and vertical setting and draws them again after every
 edit with `sue_type::raster::draw_text`, which lays lines across or columns
 down and right to left and fills glyph outlines (read with ttf-parser from
 the shared font library) with an accumulation rasterizer after font-rs.
-Clicked inside a balloon, the Text tool centers the words in it. Words are
+Clicked inside a balloon, the Text tool centers the words in it.
+
+**Balloon shapes and effect lines.** A balloon layer's `manga::Shape`s are
+ellipses, rounded rectangles, clouds (puffs round an inner ellipse),
+flashes (uneven spikes) and outlines drawn with the Balloon pen, plus
+tails; a thought balloon tail is three shrinking ellipses. Each shape is a
+signed distance (a general even-odd polygon distance for spikes and drawn
+outlines), so all of them fill white as one and share one outline. The
+Figure tool's Saturated line and Speed line draw with Sue's pen onto a new
+layer: saturated lines stop at the ellipse dragged, full width until near
+their point. Words are
 typed on the canvas (`lettering::Typing`): a hidden egui text box takes the
 keys (so the studio's shortcuts and the global undo stay away), the words
 are drawn into a texture over the canvas as they change, and

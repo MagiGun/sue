@@ -13,6 +13,13 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint's Balloon tool has Clip Studio Paint's balloons: rounded
+  rectangle, cloud (thought) and flash (shout) balloons, the Balloon pen
+  for a balloon in any outline, and the thought balloon tail's bubbles.
+  The Text tool centers words in any of them.
+- Sue Paint's Figure tool draws Saturated Lines around the clear middle
+  you drag, and Speed Lines along the way you drag, each on a new layer.
+
 - Add from downloads in Sue Paint's Tool Group brings in brushes you
   downloaded: Clip Studio Paint sub tools (.sut), Photoshop brushes
   (.abr), GIMP brushes (.gbr, .gih) and pictures. Their size, opacity,

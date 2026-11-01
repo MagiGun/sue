@@ -641,9 +641,14 @@ Once a canvas is open:
 - **Panels, balloons and effects:** Layer, New Layer, Frame Border Folder
   lays out panels with gutters; what you draw on layers under it shows only
   inside the panels. The Frame Border tool draws more panels, or divides one
-  when you drag a line across it. The Balloon tool draws speech balloons and
-  their tails as one outlined shape. Filter, Render has focus lines, speed
-  lines and screentone, and Layer, New Layer, Tone makes a layer of tone.
+  when you drag a line across it. The Balloon tool's sub tools, as in Clip
+  Studio Paint, draw ellipse, rounded rectangle, cloud (thought) and flash
+  (shout) balloons, balloons in any outline with the Balloon pen, tails,
+  and a thought balloon's trail of bubbles; touching balloons and tails
+  join into one outlined shape. The Figure tool's Saturated Line (drag the
+  clear middle) and Speed Line (drag the direction) each draw on a new
+  layer. Filter, Render has focus lines, speed lines and screentone, and
+  Layer, New Layer, Tone makes a layer of tone.
 - **Animation:** File, New, Animation (or New Animation Cel on any picture)
   starts a timeline. The Timeline palette, laid out as Clip Studio Paint's,
   makes folders and cels, plays and stops (with loop), steps frame by frame

@@ -2459,9 +2459,82 @@ pub(crate) mod tests {
                 .len()
         };
         assert_eq!(shapes(&runtime), 1);
+        let kinds = |runtime: &Runtime| {
+            sue_paint::manga::decode_shapes(&text_of(runtime, balloon, sue_paint::manga::SHAPES))
+        };
+        // Clip Studio Paint's Balloon sub tools in turn: rounded, cloud and
+        // flash balloons, then a tail and a thought balloon's bubbles.
+        let mut at = middle + vec2(-260.0, -200.0);
+        for _ in 0..3 {
+            step(&mut runtime, vec![key(egui::Key::Period, plain)]);
+            drag(&mut step, &mut runtime, at, at + vec2(80.0, 50.0));
+            at += vec2(110.0, 0.0);
+        }
+        let made = kinds(&runtime);
+        assert!(matches!(
+            made.as_slice(),
+            [
+                sue_paint::manga::Shape::Ellipse(_),
+                sue_paint::manga::Shape::Rounded(_),
+                sue_paint::manga::Shape::Cloud(_),
+                sue_paint::manga::Shape::Flash(_),
+            ]
+        ));
+        // The Balloon pen: a balloon in the outline drawn round.
+        step(&mut runtime, vec![key(egui::Key::Period, plain)]);
+        let round = middle + vec2(200.0, 150.0);
+        step(
+            &mut runtime,
+            vec![
+                egui::Event::PointerMoved(round + vec2(60.0, 0.0)),
+                press(round + vec2(60.0, 0.0), true),
+            ],
+        );
+        for part in 1..=24 {
+            let angle = part as f32 / 24.0 * std::f32::consts::TAU;
+            step(
+                &mut runtime,
+                vec![egui::Event::PointerMoved(
+                    round + vec2(angle.cos() * 60.0, angle.sin() * 40.0),
+                )],
+            );
+        }
+        step(&mut runtime, vec![press(round + vec2(60.0, 0.0), false)]);
+        assert!(matches!(
+            kinds(&runtime).last(),
+            Some(sue_paint::manga::Shape::Drawn(points)) if points.len() > 10
+        ));
+        // The tail.
         step(&mut runtime, vec![key(egui::Key::Period, plain)]);
         drag(&mut step, &mut runtime, middle, middle + vec2(70.0, 60.0));
-        assert_eq!(shapes(&runtime), 2, "a tail");
+        assert_eq!(shapes(&runtime), 6, "a tail");
+        assert!(matches!(
+            kinds(&runtime).last(),
+            Some(sue_paint::manga::Shape::Tail(_))
+        ));
+        step(&mut runtime, vec![key(egui::Key::Period, plain)]);
+        let depth = runtime.engine.history.depth();
+        drag(&mut step, &mut runtime, middle, middle + vec2(-90.0, 90.0));
+        assert_eq!(shapes(&runtime), 9, "three bubbles");
+        assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
+
+        // The Figure tool's Saturated line: a layer of lines of its own.
+        step(&mut runtime, vec![key(egui::Key::U, plain)]);
+        for _ in 0..5 {
+            step(&mut runtime, vec![key(egui::Key::Period, plain)]);
+        }
+        let count = sue_paint::doc::layers(&runtime.engine.world.arena, picture).len();
+        drag(
+            &mut step,
+            &mut runtime,
+            middle - vec2(40.0, 30.0),
+            middle + vec2(40.0, 30.0),
+        );
+        assert_eq!(
+            sue_paint::doc::layers(&runtime.engine.world.arena, picture).len(),
+            count + 1,
+            "saturated lines on a new layer"
+        );
 
         // Focus lines on a new layer, applied as one step.
         command(&mut runtime, "layer.new");

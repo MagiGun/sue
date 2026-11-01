@@ -307,7 +307,8 @@ The order of work is the plan at the end.
 | Frame Border Folder with gutters (EX) | Layer > New Layer > Frame Border | done | What you draw under it shows only inside the panels |
 | Frame Border tool: draw and divide panels | Tool | done | Drag a line across a panel to divide it |
 | Balloon tool | Tool | done | Balloons and their tails as one outlined shape |
-| Balloon sub tool set (rounded, ellipse, curve, tails) | Tool | partial | One general balloon; breadth to grow |
+| Balloon sub tool set (rounded, ellipse, curve, tails) | Tool | partial | Ellipse, rounded rectangle, cloud, flash, Balloon pen, tail and thought balloon tail; curve and polyline balloons to come |
+| Saturated line and Speed line tools | Figure tool | done | Each on a new layer; drag the clear middle or the direction |
 | Tone layers and the Layer Property tone | Layer > New Layer > Tone | done | Halftone dots at the frequency and angle you choose |
 | Webtoon canvas and Export Webtoon | File > New, Special Export | done | |
 | Manga binding on the right or left | File > New > Comic | done | |

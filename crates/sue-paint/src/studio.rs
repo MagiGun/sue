@@ -279,6 +279,11 @@ pub(crate) enum Gesture {
     },
     /// A lasso selection.
     Lasso { op: Op, points: Vec<[f32; 2]> },
+    /// A balloon drawn by hand (the Balloon pen).
+    Outline {
+        sub: Box<crate::tools::SubTool>,
+        points: Vec<[f32; 2]>,
+    },
     /// Moving a layer.
     Move {
         layer: EntityId,
