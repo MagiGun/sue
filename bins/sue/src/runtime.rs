@@ -2425,6 +2425,59 @@ pub(crate) mod tests {
                 .len()
         };
         assert_eq!(panels(&runtime), 5);
+        let click =
+            |step: &mut dyn FnMut(&mut Runtime, Vec<egui::Event>), runtime: &mut Runtime, at| {
+                step(
+                    runtime,
+                    vec![egui::Event::PointerMoved(at), press(at, true)],
+                );
+                step(runtime, vec![press(at, false)]);
+            };
+        // The polyline frame: corners clicked out, Enter closes the panel.
+        step(&mut runtime, vec![key(egui::Key::U, plain)]);
+        step(&mut runtime, vec![key(egui::Key::U, plain)]);
+        step(&mut runtime, vec![key(egui::Key::Period, plain)]);
+        let corners = [
+            middle + vec2(-120.0, 60.0),
+            middle + vec2(-20.0, 50.0),
+            middle + vec2(-30.0, 140.0),
+            middle + vec2(-130.0, 130.0),
+        ];
+        for corner in corners {
+            click(&mut step, &mut runtime, corner);
+        }
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        assert_eq!(panels(&runtime), 6, "a polyline panel");
+        // The Object tool drags one of its corners, as one step.
+        let corner_of = |runtime: &Runtime| {
+            sue_paint::manga::decode_panels(&text_of(runtime, frame, sue_paint::manga::PANELS))
+                .last()
+                .map(|panel| panel[1])
+                .unwrap()
+        };
+        let was = corner_of(&runtime);
+        step(&mut runtime, vec![key(egui::Key::O, plain)]);
+        let depth = runtime.engine.history.depth();
+        drag(
+            &mut step,
+            &mut runtime,
+            corners[1],
+            corners[1] + vec2(30.0, 0.0),
+        );
+        let moved = corner_of(&runtime);
+        assert!(
+            moved[0] > was[0] && (moved[1] - was[1]).abs() < 0.5,
+            "{was:?} {moved:?}"
+        );
+        assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
+        for _ in 0..2 {
+            step(
+                &mut runtime,
+                vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+            );
+        }
+        assert_eq!(panels(&runtime), 5, "undone");
         // The Frame Border tool's division cuts the middle panel in two.
         step(&mut runtime, vec![key(egui::Key::U, plain)]);
         step(&mut runtime, vec![key(egui::Key::U, plain)]);
@@ -2480,6 +2533,39 @@ pub(crate) mod tests {
                 sue_paint::manga::Shape::Flash(_),
             ]
         ));
+        // The curve balloon: corners clicked out, a smooth outline through
+        // them; the polyline balloon: straight between them, closed by
+        // clicking the first corner again.
+        step(&mut runtime, vec![key(egui::Key::Period, plain)]);
+        let curve = middle + vec2(-150.0, 60.0);
+        for corner in [
+            vec2(0.0, 0.0),
+            vec2(80.0, -10.0),
+            vec2(90.0, 50.0),
+            vec2(-10.0, 60.0),
+        ] {
+            click(&mut step, &mut runtime, curve + corner);
+        }
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        assert!(matches!(
+            kinds(&runtime).last(),
+            Some(sue_paint::manga::Shape::Drawn(points)) if points.len() == 40
+        ));
+        step(&mut runtime, vec![key(egui::Key::Period, plain)]);
+        let poly = middle + vec2(0.0, 100.0);
+        for corner in [
+            vec2(0.0, 0.0),
+            vec2(90.0, 0.0),
+            vec2(45.0, 70.0),
+            vec2(0.0, 0.0),
+        ] {
+            click(&mut step, &mut runtime, poly + corner);
+        }
+        assert!(matches!(
+            kinds(&runtime).last(),
+            Some(sue_paint::manga::Shape::Drawn(points)) if points.len() == 3
+        ));
         // The Balloon pen: a balloon in the outline drawn round.
         step(&mut runtime, vec![key(egui::Key::Period, plain)]);
         let round = middle + vec2(200.0, 150.0);
@@ -2507,7 +2593,7 @@ pub(crate) mod tests {
         // The tail.
         step(&mut runtime, vec![key(egui::Key::Period, plain)]);
         drag(&mut step, &mut runtime, middle, middle + vec2(70.0, 60.0));
-        assert_eq!(shapes(&runtime), 6, "a tail");
+        assert_eq!(shapes(&runtime), 8, "a tail");
         assert!(matches!(
             kinds(&runtime).last(),
             Some(sue_paint::manga::Shape::Tail(_))
@@ -2515,7 +2601,7 @@ pub(crate) mod tests {
         step(&mut runtime, vec![key(egui::Key::Period, plain)]);
         let depth = runtime.engine.history.depth();
         drag(&mut step, &mut runtime, middle, middle + vec2(-90.0, 90.0));
-        assert_eq!(shapes(&runtime), 9, "three bubbles");
+        assert_eq!(shapes(&runtime), 11, "three bubbles");
         assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
 
         // The Figure tool's Saturated line: a layer of lines of its own.
@@ -2535,6 +2621,27 @@ pub(crate) mod tests {
             count + 1,
             "saturated lines on a new layer"
         );
+        // The Object tool moves them, as one undo step.
+        let effect = layer_of(&runtime, sue_paint::manga::EFFECT).expect("an effect line layer");
+        let spec = |runtime: &Runtime| {
+            sue_paint::manga::EffectLines::decode(&text_of(
+                runtime,
+                effect,
+                sue_paint::manga::EFFECT_SPEC,
+            ))
+            .expect("effect lines")
+        };
+        let before = spec(&runtime);
+        step(&mut runtime, vec![key(egui::Key::O, plain)]);
+        let depth = runtime.engine.history.depth();
+        drag(&mut step, &mut runtime, middle, middle + vec2(50.0, 20.0));
+        let after = spec(&runtime);
+        assert!(
+            after.a[0] > before.a[0] && after.b[0] > before.b[0],
+            "moved"
+        );
+        assert_eq!(after.count, before.count);
+        assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
 
         // Focus lines on a new layer, applied as one step.
         command(&mut runtime, "layer.new");

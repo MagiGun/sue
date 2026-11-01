@@ -279,6 +279,8 @@ pub(crate) enum Gesture {
     },
     /// A lasso selection.
     Lasso { op: Op, points: Vec<[f32; 2]> },
+    /// The Object tool moving a panel or effect lines.
+    Comic(Box<crate::comic::ComicEdit>),
     /// A balloon drawn by hand (the Balloon pen).
     Outline {
         sub: Box<crate::tools::SubTool>,
@@ -457,8 +459,13 @@ pub struct SuePaint {
     pub(crate) picked_lines: Option<(EntityId, Vec<usize>)>,
     /// The points of a curve ruler being placed (picture pixels).
     pub(crate) curve_points: Vec<[f32; 2]>,
-    /// The corners of a polyline selection being clicked out.
+    /// The corners of a polyline selection, balloon or frame being
+    /// clicked out.
     pub(crate) polyline: Vec<[f32; 2]>,
+    /// The tool and sub tool mode clicking out `polyline`.
+    pub(crate) polyline_for: Option<(crate::tools::Tool, u8)>,
+    /// Effect line settings changed in Tool Property, to draw again.
+    pub(crate) pending_effect: Option<(EntityId, crate::manga::EffectLines)>,
     /// The Selection Launcher shows under the selection.
     pub(crate) launcher: bool,
     /// The Transform launcher shows under a transform's box.
@@ -657,6 +664,8 @@ impl Default for SuePaint {
             picked_lines: None,
             curve_points: Vec::new(),
             polyline: Vec::new(),
+            polyline_for: None,
+            pending_effect: None,
             launcher: true,
             transform_launcher: true,
             text_launcher: true,

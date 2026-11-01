@@ -683,8 +683,10 @@ impl Tool {
                     SubTool::new(self, "Speed Line", crate::comic::SPEED_LINES, line),
                 ]
             }
+            // Clip Studio Paint's order: rectangle, polyline, then cut.
             Self::Frame => vec![
                 plain(&tr!("rectangle-frame"), 0),
+                plain(&tr!("polyline-frame"), crate::comic::POLYLINE_FRAME),
                 plain(&tr!("frame-border-division"), 1),
             ],
             Self::Balloon => {
@@ -693,13 +695,16 @@ impl Tool {
                 });
                 // Clip Studio Paint's Balloon sub tools.
                 use crate::comic::{
-                    BALLOON_PEN, CLOUD_BALLOON, FLASH_BALLOON, ROUNDED_BALLOON, THOUGHT_TAIL,
+                    BALLOON_PEN, CLOUD_BALLOON, CURVE_BALLOON, FLASH_BALLOON, POLYLINE_BALLOON,
+                    ROUNDED_BALLOON, THOUGHT_TAIL,
                 };
                 vec![
                     SubTool::new(self, "Ellipse Balloon", 0, outline),
                     SubTool::new(self, "Rounded Rectangle Balloon", ROUNDED_BALLOON, outline),
                     SubTool::new(self, "Cloud Balloon", CLOUD_BALLOON, outline),
                     SubTool::new(self, "Flash Balloon", FLASH_BALLOON, outline),
+                    SubTool::new(self, "Curve Balloon", CURVE_BALLOON, outline),
+                    SubTool::new(self, "Polyline Balloon", POLYLINE_BALLOON, outline),
                     SubTool::new(self, "Balloon Pen", BALLOON_PEN, outline),
                     SubTool::new(self, "Balloon Tail", 1, outline),
                     SubTool::new(self, "Thought Balloon Tail", THOUGHT_TAIL, outline),

@@ -25,6 +25,114 @@ pub(crate) const FLASH_BALLOON: u8 = 4;
 pub(crate) const BALLOON_PEN: u8 = 5;
 pub(crate) const THOUGHT_TAIL: u8 = 6;
 pub(crate) const ELLIPSE_BALLOON: u8 = 0;
+pub(crate) const CURVE_BALLOON: u8 = 7;
+pub(crate) const POLYLINE_BALLOON: u8 = 8;
+/// The Frame Border tool's polyline frame (0 is the rectangle, 1 the
+/// division).
+pub(crate) const POLYLINE_FRAME: u8 = 2;
+
+/// Whether `tool` in `mode` lays corners one click at a time (closed by
+/// clicking the first or last corner again, or Enter).
+pub(crate) fn clicks_corners(tool: crate::tools::Tool, mode: u8) -> bool {
+    use crate::tools::Tool;
+    match tool {
+        Tool::Balloon => matches!(mode, CURVE_BALLOON | POLYLINE_BALLOON),
+        Tool::Frame => mode == POLYLINE_FRAME,
+        Tool::Select => mode == 3,
+        _ => false,
+    }
+}
+
+/// An Object tool drag on a frame border or effect line layer.
+#[derive(Clone, Debug)]
+pub(crate) enum ComicEdit {
+    /// A panel moved, or one of its corners.
+    Panel {
+        layer: EntityId,
+        base: Vec<Panel>,
+        now: Vec<Panel>,
+        panel: usize,
+        corner: Option<usize>,
+        start: [f32; 2],
+    },
+    /// Effect lines' ends moved: `handle` 0 or 1 one end, 2 both.
+    Effect {
+        layer: EntityId,
+        base: manga::EffectLines,
+        now: manga::EffectLines,
+        handle: u8,
+        start: [f32; 2],
+    },
+}
+
+impl ComicEdit {
+    /// The pointer is at `p` (picture pixels).
+    pub(crate) fn to(&mut self, p: Pos2) {
+        match self {
+            Self::Panel {
+                base,
+                now,
+                panel,
+                corner,
+                start,
+                ..
+            } => {
+                let by = [p.x - start[0], p.y - start[1]];
+                let mut moved = base.clone();
+                if let Some(points) = moved.get_mut(*panel) {
+                    for (index, point) in points.iter_mut().enumerate() {
+                        if corner.is_none_or(|corner| corner == index) {
+                            *point = [point[0] + by[0], point[1] + by[1]];
+                        }
+                    }
+                }
+                *now = moved;
+            }
+            Self::Effect {
+                base,
+                now,
+                handle,
+                start,
+                ..
+            } => {
+                let by = [p.x - start[0], p.y - start[1]];
+                let shift = |q: [f32; 2]| [q[0] + by[0], q[1] + by[1]];
+                *now = *base;
+                if *handle != 1 {
+                    now.a = shift(base.a);
+                }
+                if *handle != 0 {
+                    now.b = shift(base.b);
+                }
+            }
+        }
+    }
+
+    /// What to outline on the canvas while dragging (closed shapes).
+    pub(crate) fn outlines(&self) -> Vec<Vec<[f32; 2]>> {
+        match self {
+            Self::Panel { now, panel, .. } => now.get(*panel).cloned().into_iter().collect(),
+            Self::Effect { now, .. } => vec![effect_outline(now)],
+        }
+    }
+}
+
+/// Effect lines' handles as drawn: the clear ellipse of saturated lines,
+/// or the arrow of speed lines.
+pub(crate) fn effect_outline(lines: &manga::EffectLines) -> Vec<[f32; 2]> {
+    let (a, b) = (lines.a, lines.b);
+    if lines.speed {
+        return vec![a, b];
+    }
+    let (cx, cy) = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0);
+    let (rx, ry) = ((b[0] - a[0]).abs() / 2.0, (b[1] - a[1]).abs() / 2.0);
+    (0..48)
+        .map(|index| {
+            let angle = index as f32 / 48.0 * std::f32::consts::TAU;
+            [cx + rx * angle.cos(), cy + ry * angle.sin()]
+        })
+        .collect()
+}
 /// The Figure tool's effect lines, by mode.
 pub(crate) const SATURATED_LINES: u8 = 5;
 pub(crate) const SPEED_LINES: u8 = 6;
@@ -262,39 +370,7 @@ impl SuePaint {
         if (b[0] - a[0]).abs() < 4.0 || (b[1] - a[1]).abs() < 4.0 {
             return;
         }
-        let panel = manga::rectangle(a, b);
-        match existing {
-            Some(layer) => {
-                let Some((mut panels, border, _)) = Self::frame_of(&cx.world.arena, layer) else {
-                    return;
-                };
-                panels.push(panel);
-                let pixels = manga::render_frames(&panels, width, height, border, paper);
-                self.redraw_layer(
-                    cx,
-                    layer,
-                    &tr!("rectangle-frame"),
-                    manga::PANELS,
-                    manga::encode_panels(&panels),
-                    pixels,
-                );
-            }
-            None => {
-                let panels = vec![panel];
-                let pixels = manga::render_frames(&panels, width, height, 6.0, paper);
-                self.spawn_drawn_layer(
-                    cx,
-                    &tr!("frame"),
-                    manga::FRAME,
-                    pixels,
-                    vec![
-                        (manga::PANELS, Value::from(manga::encode_panels(&panels))),
-                        (manga::BORDER, Value::from(6.0)),
-                        (manga::GUTTER, Value::from(20.0)),
-                    ],
-                );
-            }
-        }
+        self.add_panel(cx, manga::rectangle(a, b), &tr!("rectangle-frame"));
     }
 
     /// A Balloon tool drag: a new balloon of the sub tool's shape, or a
@@ -446,25 +522,237 @@ impl SuePaint {
         if (b[0] - a[0]).hypot(b[1] - a[1]) < 4.0 {
             return;
         }
-        let rgb = self.drawing_color();
-        let line = sub.tip.size.max(0.5);
-        let seed = (a[0].to_bits() ^ b[1].to_bits().rotate_left(7)) | 1;
-        let mut pixels = vec![0; (width * height * 4) as usize];
-        let name = if sub.mode == SATURATED_LINES {
-            let rect = [
-                a[0].min(b[0]),
-                a[1].min(b[1]),
-                a[0].max(b[0]),
-                a[1].max(b[1]),
-            ];
-            manga::saturated_lines(&mut pixels, width, height, rect, 120, line, seed, rgb);
-            tr!("focus-lines")
-        } else {
-            let angle = (b[1] - a[1]).atan2(b[0] - a[0]).to_degrees();
-            manga::speed_lines(&mut pixels, width, height, 90, angle, line, 0.6, seed, rgb);
-            tr!("speed-lines")
+        let speed = sub.mode == SPEED_LINES;
+        let lines = manga::EffectLines {
+            speed,
+            a,
+            b,
+            count: if speed { 90 } else { 120 },
+            line: sub.tip.size.max(0.5),
+            seed: (a[0].to_bits() ^ b[1].to_bits().rotate_left(7)) | 1,
+            rgb: self.drawing_color(),
         };
-        self.spawn_drawn_layer(cx, &name, sue_model::class::LAYER, pixels, Vec::new());
+        let name = if speed {
+            tr!("speed-lines")
+        } else {
+            tr!("focus-lines")
+        };
+        // An effect line layer: the Object tool moves its ends later, and
+        // Tool Property changes its lines.
+        self.spawn_drawn_layer(
+            cx,
+            &name,
+            manga::EFFECT,
+            lines.draw(width, height),
+            vec![(manga::EFFECT_SPEC, Value::from(lines.encode()))],
+        );
+    }
+
+    /// Closes the corners clicked out with a corner-laying sub tool: a
+    /// polyline or curve balloon, a polyline frame, or a polyline
+    /// selection (combined as `op`).
+    pub(crate) fn finish_corners(&mut self, op: crate::select::Op, cx: &mut AppletContext<'_>) {
+        let points = std::mem::take(&mut self.polyline);
+        let owner = self.polyline_for.take();
+        if points.len() < 3 {
+            return;
+        }
+        let sub = self.toolbox.current().clone();
+        match owner {
+            Some((crate::tools::Tool::Balloon, mode)) => {
+                let outline = if mode == CURVE_BALLOON {
+                    manga::smooth_closed(&points, 10)
+                } else {
+                    points
+                };
+                self.add_balloon_shapes(cx, vec![Shape::Drawn(outline)], &sub, &tr!("balloon"));
+            }
+            Some((crate::tools::Tool::Frame, _)) => {
+                self.add_panel(cx, points, &tr!("polyline-frame"));
+            }
+            _ => {
+                self.polyline = points;
+                self.finish_polyline(op);
+            }
+        }
+    }
+
+    /// Adds `panel` to the frame border layer (a new one when there is
+    /// none) as one undo step called `label`.
+    fn add_panel(&mut self, cx: &mut AppletContext<'_>, panel: Panel, label: &str) {
+        let Some((_, [width, height], paper)) = self.page(&cx.world.arena) else {
+            return;
+        };
+        match self.layer_of_class(&cx.world.arena, manga::FRAME) {
+            Some(layer) => {
+                let Some((mut panels, border, _)) = Self::frame_of(&cx.world.arena, layer) else {
+                    return;
+                };
+                panels.push(panel);
+                let pixels = manga::render_frames(&panels, width, height, border, paper);
+                self.redraw_layer(
+                    cx,
+                    layer,
+                    label,
+                    manga::PANELS,
+                    manga::encode_panels(&panels),
+                    pixels,
+                );
+            }
+            None => {
+                let panels = vec![panel];
+                let pixels = manga::render_frames(&panels, width, height, 6.0, paper);
+                self.spawn_drawn_layer(
+                    cx,
+                    &tr!("frame"),
+                    manga::FRAME,
+                    pixels,
+                    vec![
+                        (manga::PANELS, Value::from(manga::encode_panels(&panels))),
+                        (manga::BORDER, Value::from(6.0)),
+                        (manga::GUTTER, Value::from(20.0)),
+                    ],
+                );
+            }
+        }
+    }
+
+    /// Whether the current layer is one the Object tool edits as comic
+    /// parts (a frame border or effect line layer).
+    pub(crate) fn on_comic_layer(&self, arena: &sue_core::Arena) -> bool {
+        self.layer()
+            .and_then(|layer| arena.get_by_id(layer).ok())
+            .is_some_and(|entity| matches!(entity.class(), manga::FRAME | manga::EFFECT))
+    }
+
+    /// The Object tool pressed at `p` on a frame border or effect line
+    /// layer: a panel's corner or the panel under it to move, or effect
+    /// lines' ends. `reach` is how near a handle counts (picture pixels).
+    pub(crate) fn comic_object_at(
+        &self,
+        p: Pos2,
+        reach: f32,
+        arena: &sue_core::Arena,
+    ) -> Option<crate::studio::Gesture> {
+        let layer = self.layer()?;
+        let entity = arena.get_by_id(layer).ok()?;
+        let at = [p.x, p.y];
+        let near = |q: [f32; 2]| (q[0] - at[0]).hypot(q[1] - at[1]) <= reach;
+        let edit = if entity.class() == manga::FRAME {
+            let (panels, _, _) = Self::frame_of(arena, layer)?;
+            // A corner first, then the panel the press is inside.
+            let (panel, corner) = panels
+                .iter()
+                .enumerate()
+                .find_map(|(panel, points)| {
+                    points
+                        .iter()
+                        .position(|q| near(*q))
+                        .map(|corner| (panel, Some(corner)))
+                })
+                .or_else(|| {
+                    panels
+                        .iter()
+                        .position(|points| manga::signed_distance(points, at) <= 0.0)
+                        .map(|panel| (panel, None))
+                })?;
+            ComicEdit::Panel {
+                layer,
+                now: panels.clone(),
+                base: panels,
+                panel,
+                corner,
+                start: at,
+            }
+        } else {
+            let lines = Self::effect_of(arena, layer)?;
+            let handle = if near(lines.a) {
+                0
+            } else if near(lines.b) {
+                1
+            } else {
+                2
+            };
+            ComicEdit::Effect {
+                layer,
+                base: lines,
+                now: lines,
+                handle,
+                start: at,
+            }
+        };
+        Some(crate::studio::Gesture::Comic(Box::new(edit)))
+    }
+
+    /// The Object tool let go: the moved panel or effect lines kept as one
+    /// undo step.
+    pub(crate) fn finish_comic_edit(&mut self, edit: ComicEdit, cx: &mut AppletContext<'_>) {
+        let Some((_, [width, height], paper)) = self.page(&cx.world.arena) else {
+            return;
+        };
+        match edit {
+            ComicEdit::Panel {
+                layer, base, now, ..
+            } => {
+                if now == base {
+                    return;
+                }
+                let Some((_, border, _)) = Self::frame_of(&cx.world.arena, layer) else {
+                    return;
+                };
+                let pixels = manga::render_frames(&now, width, height, border, paper);
+                self.redraw_layer(
+                    cx,
+                    layer,
+                    &tr!("edit-frame"),
+                    manga::PANELS,
+                    manga::encode_panels(&now),
+                    pixels,
+                );
+            }
+            ComicEdit::Effect {
+                layer, base, now, ..
+            } => {
+                if now != base {
+                    self.redraw_effect(cx, layer, &now);
+                }
+            }
+        }
+    }
+
+    /// An effect line layer's settings.
+    pub(crate) fn effect_of(
+        arena: &sue_core::Arena,
+        layer: EntityId,
+    ) -> Option<manga::EffectLines> {
+        arena
+            .get_by_id(layer)
+            .ok()
+            .filter(|entity| entity.class() == manga::EFFECT)?
+            .property(manga::EFFECT_SPEC)
+            .and_then(Value::as_str)
+            .and_then(manga::EffectLines::decode)
+    }
+
+    /// Draws effect line layer `layer` again as `lines`, as one undo step.
+    pub(crate) fn redraw_effect(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        layer: EntityId,
+        lines: &manga::EffectLines,
+    ) {
+        let Some((_, [width, height], _)) = self.page(&cx.world.arena) else {
+            return;
+        };
+        let pixels = lines.draw(width, height);
+        self.redraw_layer(
+            cx,
+            layer,
+            &tr!("edit-effect-lines"),
+            manga::EFFECT_SPEC,
+            lines.encode(),
+            pixels,
+        );
     }
 
     /// Layer, New Layer, Balloon: an empty balloon layer on top.

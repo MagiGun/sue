@@ -18,7 +18,12 @@ follow [Semantic Versioning](https://semver.org/).
   for a balloon in any outline, and the thought balloon tail's bubbles.
   The Text tool centers words in any of them.
 - Sue Paint's Figure tool draws Saturated Lines around the clear middle
-  you drag, and Speed Lines along the way you drag, each on a new layer.
+  you drag, and Speed Lines along the way you drag, each on an effect line
+  layer that stays editable: the Object tool moves their ends, and Tool
+  Property changes how many lines, their width, their scatter and color.
+- Curve and polyline balloons and the Polyline frame, clicked out corner
+  by corner as in Clip Studio Paint, and the Object tool drags a panel's
+  corners or the whole panel.
 
 - Add from downloads in Sue Paint's Tool Group brings in brushes you
   downloaded: Clip Studio Paint sub tools (.sut), Photoshop brushes

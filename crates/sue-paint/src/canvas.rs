@@ -123,10 +123,14 @@ impl SuePaint {
                     input.key_pressed(Key::Escape),
                 )
             });
+            // The corners belong to the sub tool that started them.
+            let owner = self.polyline_for.unwrap_or((Tool::Select, 3));
+            let now = (self.toolbox.tool(), self.toolbox.current().mode);
             if enter && self.polyline.len() >= 3 {
-                self.finish_polyline(self.select_op);
-            } else if escape || self.toolbox.tool() != Tool::Select {
+                self.finish_corners(self.select_op, cx);
+            } else if escape || now != owner {
                 self.polyline.clear();
+                self.polyline_for = None;
             }
         }
         if !self.curve_points.is_empty() {
@@ -1415,7 +1419,7 @@ impl SuePaint {
                     points: vec![[p.x, p.y]],
                 });
             }
-            Tool::Frame | Tool::Balloon => {
+            Tool::Frame | Tool::Balloon if !crate::comic::clicks_corners(tool, sub.mode) => {
                 self.gesture = Some(Gesture::Shape {
                     tool,
                     sub: Box::new(sub),
@@ -1452,17 +1456,25 @@ impl SuePaint {
                     to: p,
                 });
             }
-            Tool::Select if sub.mode == 3 => {
-                // Polyline: each click a corner; the first one again (or
-                // Enter) closes it.
-                let near_first = self.polyline.first().is_some_and(|first| {
-                    doc.view
-                        .to_screen(viewport, size, pos2(first[0], first[1]))
-                        .distance(pos)
-                        <= 8.0
-                });
-                if near_first && self.polyline.len() >= 3 {
-                    self.finish_polyline(op);
+            tool if crate::comic::clicks_corners(tool, sub.mode) => {
+                // Polyline selections, balloons and frames, and curve
+                // balloons: each click a corner; the first or last one
+                // again (a double-click), or Enter, closes it.
+                let near = |q: Option<&[f32; 2]>| {
+                    q.is_some_and(|q| {
+                        doc.view
+                            .to_screen(viewport, size, pos2(q[0], q[1]))
+                            .distance(pos)
+                            <= 8.0
+                    })
+                };
+                let close = near(self.polyline.first()) || near(self.polyline.last());
+                if self.polyline_for != Some((tool, sub.mode)) {
+                    self.polyline.clear();
+                    self.polyline_for = Some((tool, sub.mode));
+                }
+                if close && self.polyline.len() >= 3 {
+                    self.finish_corners(op, cx);
                 } else {
                     self.polyline.push([p.x, p.y]);
                 }
@@ -1529,6 +1541,12 @@ impl SuePaint {
                 });
             }
             Tool::Operation if sub.mode == 1 => self.pick_layer_at(&cx.world.arena, p),
+            // Frame borders and effect lines: their panels, corners and
+            // ends move.
+            Tool::Operation if self.on_comic_layer(&cx.world.arena) => {
+                let reach = 10.0 / doc.view.zoom.max(0.01);
+                self.gesture = self.comic_object_at(p, reach, &cx.world.arena);
+            }
             Tool::Operation
                 if self
                     .layer()
@@ -1832,7 +1850,7 @@ impl SuePaint {
     }
 
     /// Closes the polyline selection clicked out so far, combined as `op`.
-    fn finish_polyline(&mut self, op: Op) {
+    pub(crate) fn finish_polyline(&mut self, op: Op) {
         let points = std::mem::take(&mut self.polyline);
         let Some(doc) = self.docs.get_mut(self.active) else {
             return;
@@ -2573,6 +2591,7 @@ impl SuePaint {
                     points.push([p.x, p.y]);
                 }
             }
+            Gesture::Comic(edit) => edit.to(p),
             Gesture::Lasso { points, .. } | Gesture::Outline { points, .. } => {
                 if points.last().is_none_or(|last| {
                     (last[0] - p.x).hypot(last[1] - p.y) > 1.5 / doc.view.zoom.max(0.01)
@@ -3014,6 +3033,7 @@ impl SuePaint {
                 }
             }
             Gesture::Outline { sub, points } => self.balloon_drawn(points, &sub, cx),
+            Gesture::Comic(edit) => self.finish_comic_edit(*edit, cx),
             Gesture::Lasso { op, points } => {
                 if let Some(doc) = self.docs.get_mut(self.active) {
                     let mut selection = doc
@@ -3862,7 +3882,64 @@ impl SuePaint {
                 let path = points.iter().copied().map(screen).collect::<Vec<_>>();
                 painter.add(Shape::line(path, Stroke::new(1.0, theme.border_active)));
             }
+            Some(Gesture::Comic(edit)) => {
+                for outline in edit.outlines() {
+                    let path = outline.into_iter().map(screen).collect::<Vec<_>>();
+                    painter.add(Shape::closed_line(
+                        path,
+                        Stroke::new(1.5, theme.border_active),
+                    ));
+                }
+            }
             _ => {}
+        }
+        // Corners being clicked out, and the line on to the pointer; a
+        // curve balloon shows its curve.
+        if !self.polyline.is_empty() {
+            let mut points = self.polyline.clone();
+            if let Some(hover) = response.hover_pos() {
+                let at = view.to_picture(viewport, size, hover);
+                points.push([at.x, at.y]);
+            }
+            let curve = self.polyline_for == Some((Tool::Balloon, crate::comic::CURVE_BALLOON))
+                && points.len() >= 3;
+            let stroke = Stroke::new(1.0, theme.border_active);
+            if curve {
+                let path = crate::manga::smooth_closed(&points, 10)
+                    .into_iter()
+                    .map(screen)
+                    .collect();
+                painter.add(Shape::closed_line(path, stroke));
+            } else {
+                painter.add(Shape::line(
+                    points.iter().copied().map(screen).collect(),
+                    stroke,
+                ));
+            }
+            for corner in &self.polyline {
+                painter.circle_stroke(screen(*corner), 3.5, stroke);
+            }
+        }
+        // The Object tool on effect lines: their handles.
+        if self.toolbox.tool() == Tool::Operation
+            && self.gesture.is_none()
+            && let Some(lines) = doc
+                .layer
+                .and_then(|layer| Self::effect_of(&cx.world.arena, layer))
+        {
+            let stroke = Stroke::new(1.0, theme.border_active);
+            let outline = crate::comic::effect_outline(&lines)
+                .into_iter()
+                .map(screen)
+                .collect();
+            painter.add(if lines.speed {
+                Shape::line(outline, stroke)
+            } else {
+                Shape::closed_line(outline, stroke)
+            });
+            for end in [lines.a, lines.b] {
+                painter.circle_filled(screen(end), 4.0, theme.border_active);
+            }
         }
         if doc.show_rulers {
             let turns = self

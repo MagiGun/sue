@@ -1787,9 +1787,17 @@ flashes (uneven spikes) and outlines drawn with the Balloon pen, plus
 tails; a thought balloon tail is three shrinking ellipses. Each shape is a
 signed distance (a general even-odd polygon distance for spikes and drawn
 outlines), so all of them fill white as one and share one outline. The
-Figure tool's Saturated line and Speed line draw with Sue's pen onto a new
-layer: saturated lines stop at the ellipse dragged, full width until near
-their point. Words are
+Figure tool's Saturated line and Speed line draw with Sue's pen onto an
+effect line layer (`sue.paint.effect`) that keeps its `manga::EffectLines`
+as text in `effect.spec` and draws again from it after every edit:
+saturated lines stop at the ellipse dragged, full width until near their
+point. Curve and polyline balloons and the polyline frame lay corners one
+click at a time in the studio's `polyline` (with `polyline_for` naming the
+sub tool), the curve through them a closed Catmull-Rom spline. Under the
+Object tool a frame border or effect line layer is edited by
+`comic::ComicEdit`, outlined while dragged and kept as one step on
+release. Frames now take any simple polygon: their distance is the
+even-odd one. Words are
 typed on the canvas (`lettering::Typing`): a hidden egui text box takes the
 keys (so the studio's shortcuts and the global undo stay away), the words
 are drawn into a texture over the canvas as they change, and

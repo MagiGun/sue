@@ -28,6 +28,11 @@ pub const BALLOON: &str = "sue.paint.balloon";
 pub const SHAPES: &str = "balloon.shapes";
 /// A balloon layer's outline width in pixels (`Float`).
 pub const LINE: &str = "balloon.line";
+/// The class of an effect line layer (saturated or speed lines that stay
+/// editable).
+pub const EFFECT: &str = "sue.paint.effect";
+/// An effect line layer's settings (`Text`, see [`EffectLines::encode`]).
+pub const EFFECT_SPEC: &str = "effect.spec";
 
 /// A panel: a convex polygon in picture pixels.
 pub type Panel = Vec<[f32; 2]>;
@@ -203,7 +208,7 @@ pub fn render_frames(
         for y in clamp(y0 - reach, height)..clamp(y1 + reach + 1.0, height) {
             for x in clamp(x0 - reach, width)..clamp(x1 + reach + 1.0, width) {
                 let index = (y * width + x) as usize;
-                let d = signed_distance(panel, [x as f32 + 0.5, y as f32 + 0.5]);
+                let d = polygon_distance(panel, [x as f32 + 0.5, y as f32 + 0.5]);
                 if d < distance[index] {
                     distance[index] = d;
                 }
@@ -616,6 +621,139 @@ pub fn focus_lines(
     });
 }
 
+/// Effect lines that stay editable (Clip Studio Paint's saturated and
+/// speed line layers): what they are, where, and how many.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EffectLines {
+    /// Speed lines along `a` to `b`; else saturated lines round the
+    /// ellipse in the box from `a` to `b`.
+    pub speed: bool,
+    /// One end or corner.
+    pub a: [f32; 2],
+    /// The other.
+    pub b: [f32; 2],
+    /// How many lines.
+    pub count: u32,
+    /// Their width at the base, in pixels.
+    pub line: f32,
+    /// Which of the many ways to scatter them.
+    pub seed: u32,
+    /// Their ink, sRGB.
+    pub rgb: [u8; 3],
+}
+
+impl EffectLines {
+    /// The lines drawn on a clear `width` by `height` layer.
+    #[must_use]
+    pub fn draw(&self, width: u32, height: u32) -> Vec<u8> {
+        let mut pixels = vec![0; (width * height * 4) as usize];
+        let (a, b) = (self.a, self.b);
+        if self.speed {
+            let angle = (b[1] - a[1]).atan2(b[0] - a[0]).to_degrees();
+            speed_lines(
+                &mut pixels,
+                width,
+                height,
+                self.count,
+                angle,
+                self.line,
+                0.6,
+                self.seed,
+                self.rgb,
+            );
+        } else {
+            let rect = [
+                a[0].min(b[0]),
+                a[1].min(b[1]),
+                a[0].max(b[0]),
+                a[1].max(b[1]),
+            ];
+            saturated_lines(
+                &mut pixels,
+                width,
+                height,
+                rect,
+                self.count,
+                self.line,
+                self.seed,
+                self.rgb,
+            );
+        }
+        pixels
+    }
+
+    /// As text: `kind;ax,ay,bx,by;count;line;seed;r,g,b`, the kind `s`
+    /// (saturated) or `v` (speed).
+    #[must_use]
+    pub fn encode(&self) -> String {
+        let [r, g, b] = self.rgb;
+        format!(
+            "{};{},{},{},{};{};{};{};{r},{g},{b}",
+            if self.speed { "v" } else { "s" },
+            self.a[0],
+            self.a[1],
+            self.b[0],
+            self.b[1],
+            self.count,
+            self.line,
+            self.seed,
+        )
+    }
+
+    /// Read back from [`EffectLines::encode`].
+    #[must_use]
+    pub fn decode(text: &str) -> Option<Self> {
+        let parts: Vec<&str> = text.split(';').collect();
+        let [kind, at, count, line, seed, rgb] = parts.as_slice() else {
+            return None;
+        };
+        let numbers = |text: &str| -> Vec<f32> {
+            text.split(',')
+                .filter_map(|value| value.parse().ok())
+                .collect()
+        };
+        let (&[ax, ay, bx, by], &[r, g, b]) = (numbers(at).as_slice(), numbers(rgb).as_slice())
+        else {
+            return None;
+        };
+        Some(Self {
+            speed: *kind == "v",
+            a: [ax, ay],
+            b: [bx, by],
+            count: count.parse().ok()?,
+            line: line.parse().ok()?,
+            seed: seed.parse().ok()?,
+            rgb: [r, g, b].map(|value| value.clamp(0.0, 255.0) as u8),
+        })
+    }
+}
+
+/// A closed curve through `points` (Catmull-Rom), `steps` points between
+/// each two: the Curve balloon's outline.
+#[must_use]
+pub fn smooth_closed(points: &[[f32; 2]], steps: usize) -> Vec<[f32; 2]> {
+    let n = points.len();
+    if n < 3 {
+        return points.to_vec();
+    }
+    let mut out = Vec::with_capacity(n * steps);
+    for index in 0..n {
+        let [p0, p1, p2, p3] = [n - 1, 0, 1, 2].map(|k| points[(index + k) % n]);
+        for step in 0..steps {
+            let t = step as f32 / steps as f32;
+            let (t2, t3) = (t * t, t * t * t);
+            let at = |c: usize| {
+                0.5 * (2.0 * p1[c]
+                    + (p2[c] - p0[c]) * t
+                    + (2.0 * p0[c] - 5.0 * p1[c] + 4.0 * p2[c] - p3[c]) * t2
+                    + (3.0 * p1[c] - p0[c] - 3.0 * p2[c] + p3[c]) * t3)
+            };
+            out.push([at(0), at(1)]);
+        }
+    }
+    out
+}
+
 /// Saturated lines as Clip Studio Paint's tool draws them: `count` lines
 /// from beyond the picture's edges in toward the ellipse in `rect`,
 /// stopping at its rim a little in or out, `line` pixels at their base and
@@ -900,5 +1038,33 @@ mod tests {
             .filter(|x| alpha(*x, 2) > 128 || alpha(*x, h - 3) > 128)
             .count();
         assert!(inked > 60, "lines reach the edges: {inked}");
+    }
+
+    #[test]
+    fn effect_lines_keep_their_settings_and_curves_pass_their_corners() {
+        let lines = EffectLines {
+            speed: false,
+            a: [10.5, 20.0],
+            b: [300.0, 200.25],
+            count: 77,
+            line: 3.5,
+            seed: 12_345,
+            rgb: [10, 20, 30],
+        };
+        assert_eq!(EffectLines::decode(&lines.encode()), Some(lines));
+        let speed = EffectLines {
+            speed: true,
+            ..lines
+        };
+        assert_eq!(EffectLines::decode(&speed.encode()), Some(speed));
+        assert_eq!(EffectLines::decode("s;1,2;3"), None);
+        let drawn = lines.draw(320, 240);
+        assert!(drawn.as_chunks::<4>().0.iter().any(|pixel| pixel[3] > 200));
+        let corners = [[0.0, 0.0], [100.0, 0.0], [100.0, 80.0], [0.0, 80.0]];
+        let curve = smooth_closed(&corners, 10);
+        assert_eq!(curve.len(), 40);
+        for (index, corner) in corners.iter().enumerate() {
+            assert_eq!(curve[index * 10], *corner, "through every corner");
+        }
     }
 }
