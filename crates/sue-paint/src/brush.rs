@@ -2611,7 +2611,7 @@ mod tests {
         let tip = flat_pen(16.0);
         // Down and up in a few thousandths of a second: a bounce.
         let mut raster = layer(64, 64);
-        let mut stroke = Stroke::new(EntityId::new(), tip.clone(), [0.0, 0.0, 0.0], false);
+        let mut stroke = Stroke::new(EntityId::new(), tip, [0.0, 0.0, 0.0], false);
         stroke.to(&mut raster, [32.0, 32.0], 0.6, None);
         stroke.set_held(0.008);
         stroke.end(&mut raster, Finish::default(), None);
