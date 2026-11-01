@@ -1781,6 +1781,13 @@ down and right to left and fills glyph outlines (read with ttf-parser from
 the shared font library) with an accumulation rasterizer after font-rs.
 Clicked inside a balloon, the Text tool centers the words in it.
 
+**Folios and text layout.** A story's folio (`story.folio`, its size,
+place and `story.first_number`) is drawn by `story::draw_folio` onto every
+exported page and shown on the canvas; `story.start` pairs the first page
+with the second in `story::spreads_from`. `sue_type::raster` lays text out
+once (`lay_out`) for both drawing and carets, with letter spacing
+(`tracking`), line spacing (`leading`) and `Justify`.
+
 **Balloon shapes and effect lines.** A balloon layer's `manga::Shape`s are
 ellipses, rounded rectangles, clouds (puffs round an inner ellipse),
 flashes (uneven spikes) and outlines drawn with the Balloon pen, plus

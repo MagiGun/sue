@@ -807,6 +807,10 @@ pub(crate) struct StoryInfo {
     pub author: String,
     pub first: i64,
     pub right_bound: bool,
+    /// The first page faces the second (Clip Studio Paint's start page).
+    pub paired: bool,
+    /// The page numbers.
+    pub folio: crate::story::Folio,
 }
 
 /// What each modifier can do: its rice key, label and choices.
@@ -935,7 +939,7 @@ impl SuePaint {
             Dialog::CanvasProperties(_) => (tr!("canvas-properties"), vec2(380.0, 230.0)),
             Dialog::Proof(_) => (tr!("color-profile-preview-settings"), vec2(400.0, 230.0)),
             Dialog::PageSettings(_) => (tr!("change-page-settings"), vec2(380.0, 270.0)),
-            Dialog::StoryInfo(_) => (tr!("change-story-information"), vec2(380.0, 240.0)),
+            Dialog::StoryInfo(_) => (tr!("change-story-information"), vec2(420.0, 360.0)),
             Dialog::StoryEditor(_) => (tr!("story-editor"), vec2(520.0, 520.0)),
             Dialog::Convert(..) => (tr!("convert-layer"), vec2(360.0, 190.0)),
             Dialog::Correction(_, filter, ..) => (
@@ -1285,6 +1289,37 @@ impl SuePaint {
                                     tr!("left-left-to-right"),
                                 );
                                 ui.radio_value(&mut info.right_bound, true, tr!("right-manga"));
+                            });
+                            ui.horizontal(|ui| {
+                                label(ui, &tr!("first-page-place"), theme);
+                                ui.radio_value(&mut info.paired, false, tr!("start-page-alone"));
+                                ui.radio_value(&mut info.paired, true, tr!("start-page-paired"));
+                            });
+                            ui.separator();
+                            // Clip Studio Paint's folio: page numbers on the pages.
+                            ui.checkbox(&mut info.folio.show, tr!("show-folio"));
+                            ui.add_enabled_ui(info.folio.show, |ui| {
+                                ui.horizontal(|ui| {
+                                    label(ui, &tr!("size-2"), theme);
+                                    ui.add(
+                                        egui::DragValue::new(&mut info.folio.size)
+                                            .range(4.0..=72.0)
+                                            .suffix(" pt"),
+                                    );
+                                });
+                                ui.horizontal(|ui| {
+                                    label(ui, &tr!("folio-position"), theme);
+                                    ui.radio_value(
+                                        &mut info.folio.center,
+                                        false,
+                                        tr!("folio-outside"),
+                                    );
+                                    ui.radio_value(
+                                        &mut info.folio.center,
+                                        true,
+                                        tr!("folio-center"),
+                                    );
+                                });
                             });
                             ok_cancel(ui, &mut outcome);
                         }
@@ -1737,6 +1772,9 @@ impl SuePaint {
                             | Filter::SmartSmooth { .. }
                             | Filter::Fisheye { .. }
                             | Filter::Aberration { .. }
+                            | Filter::Glow { .. }
+                            | Filter::DropShadow { .. }
+                            | Filter::Inflate { .. }
                             | Filter::Retro { .. }
                             | Filter::PerlinNoise { .. }
                             | Filter::Unsharp { .. }
@@ -1885,6 +1923,30 @@ impl SuePaint {
                         info.story,
                         crate::story::BINDING,
                         if info.right_bound { "right" } else { "left" },
+                    ))
+                    .then(sue_core::txn::SetProperty::new(
+                        info.story,
+                        crate::story::START,
+                        if info.paired { "paired" } else { "alone" },
+                    ))
+                    .then(sue_core::txn::SetProperty::new(
+                        info.story,
+                        crate::story::FOLIO,
+                        info.folio.show,
+                    ))
+                    .then(sue_core::txn::SetProperty::new(
+                        info.story,
+                        crate::story::FOLIO_SIZE,
+                        f64::from(info.folio.size),
+                    ))
+                    .then(sue_core::txn::SetProperty::new(
+                        info.story,
+                        crate::story::FOLIO_PLACE,
+                        if info.folio.center {
+                            "center"
+                        } else {
+                            "outside"
+                        },
                     ));
                 if !info.title.trim().is_empty() {
                     edit = edit.then(sue_core::txn::Rename::new(info.story, info.title.trim()));
@@ -3121,6 +3183,38 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
         }
         Filter::Aberration { shift } => {
             ui.add(egui::Slider::new(shift, 0.0..=40.0).text("Shift"));
+        }
+        Filter::Glow {
+            radius,
+            strength,
+            rgb,
+        } => {
+            ui.add(egui::Slider::new(radius, 1.0..=200.0).text(tr!("glow-size")));
+            ui.add(egui::Slider::new(strength, 0.0..=2.0).text(tr!("glow-strength")));
+            ui.horizontal(|ui| {
+                ui.color_edit_button_srgb(rgb);
+                ui.label(tr!("color"));
+            });
+        }
+        Filter::DropShadow {
+            dx,
+            dy,
+            blur,
+            opacity,
+            rgb,
+        } => {
+            ui.add(egui::Slider::new(dx, -200.0..=200.0).text(tr!("shadow-across")));
+            ui.add(egui::Slider::new(dy, -200.0..=200.0).text(tr!("shadow-down")));
+            ui.add(egui::Slider::new(blur, 0.0..=100.0).text(tr!("shadow-softness")));
+            ui.add(egui::Slider::new(opacity, 0.0..=1.0).text(tr!("opacity")));
+            ui.horizontal(|ui| {
+                ui.color_edit_button_srgb(rgb);
+                ui.label(tr!("color"));
+            });
+        }
+        Filter::Inflate { size, depth } => {
+            ui.add(egui::Slider::new(size, 1.0..=100.0).text(tr!("inflate-size")));
+            ui.add(egui::Slider::new(depth, 0.0..=1.0).text(tr!("inflate-depth")));
         }
         Filter::PerlinNoise { scale, contrast } => {
             ui.add(egui::Slider::new(scale, 2.0..=500.0).text("Scale"));

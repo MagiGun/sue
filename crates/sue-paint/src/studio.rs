@@ -1043,6 +1043,9 @@ fn implemented(command: &str) -> bool {
             | "filter.ripple"
             | "filter.fisheye"
             | "filter.aberration"
+            | "filter.glow"
+            | "filter.inflate"
+            | "filter.drop_shadow"
             | "filter.retro"
             | "filter.perlin"
             | "filter.clouds"
@@ -4616,6 +4619,34 @@ impl SuePaint {
             }
             "filter.jpeg_noise" => self.filter_dialog(cx, Filter::JpegNoise { strength: 0.6 }),
             "filter.aberration" => self.filter_dialog(cx, Filter::Aberration { shift: 6.0 }),
+            "filter.glow" => {
+                let rgb = self.drawing_color();
+                self.filter_dialog(
+                    cx,
+                    Filter::Glow {
+                        radius: 16.0,
+                        strength: 1.0,
+                        rgb,
+                    },
+                );
+            }
+            "filter.drop_shadow" => self.filter_dialog(
+                cx,
+                Filter::DropShadow {
+                    dx: 10.0,
+                    dy: 10.0,
+                    blur: 8.0,
+                    opacity: 0.6,
+                    rgb: [0, 0, 0],
+                },
+            ),
+            "filter.inflate" => self.filter_dialog(
+                cx,
+                Filter::Inflate {
+                    size: 12.0,
+                    depth: 0.6,
+                },
+            ),
             "filter.retro" => self.filter_dialog(cx, Filter::Retro { amount: 0.6 }),
             "filter.perlin" => self.filter_dialog(
                 cx,

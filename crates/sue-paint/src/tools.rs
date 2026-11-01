@@ -975,6 +975,12 @@ pub struct SubTool {
     pub whole: bool,
     /// The Text tool's font family (empty: Sue's own).
     pub font: String,
+    /// The Text tool's letter spacing, in ems.
+    pub tracking: f32,
+    /// The Text tool's line spacing, times the font's own (0: its own).
+    pub leading: f32,
+    /// The Text tool's justification: 0 start, 1 middle, 2 end.
+    pub justify: u8,
 }
 
 impl SubTool {
@@ -1001,6 +1007,9 @@ impl SubTool {
             amount: 0.0,
             whole: false,
             font: String::new(),
+            tracking: 0.0,
+            leading: 0.0,
+            justify: 0,
         }
     }
 

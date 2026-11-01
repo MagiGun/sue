@@ -615,7 +615,8 @@ Once a canvas is open:
   Paint, with a caret that follows the words; Enter starts a new line and
   Esc, Ctrl and Enter, or another tool keeps them as one step. Tool
   Property sets the font (any font on your computer), size, across or in
-  vertical columns, and centered, also for words being typed. Click inside
+  vertical columns, centered, letter spacing, line spacing and how lines
+  line up (start, middle or end), also for words being typed. Click inside
   a balloon and the words sit in its middle. Click the words again to type
   into them where you clicked.
 - **Tone Curve, Levels, Color Balance, Gradient Map** (Edit, Tonal

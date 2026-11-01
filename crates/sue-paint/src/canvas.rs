@@ -393,6 +393,18 @@ impl SuePaint {
             return;
         };
         let arena = &cx.world.arena;
+        // The folio, as it will print.
+        if let Some((text, at, points)) = crate::story::folio_for(arena, doc.picture) {
+            let view = doc.view;
+            let at = view.to_screen(viewport, size, pos2(at[0], at[1]));
+            ui.painter().with_clip_rect(viewport).text(
+                at,
+                egui::Align2::CENTER_CENTER,
+                text,
+                egui::FontId::proportional((points * view.zoom).max(4.0)),
+                Color32::BLACK,
+            );
+        }
         if crate::story::story_of(arena, doc.picture).is_none()
             || !(self.crop_frame || self.bleed || self.page_image)
         {

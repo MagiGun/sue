@@ -27,6 +27,12 @@ pub struct TextSpec<'a> {
     pub center: bool,
     /// In columns, top to bottom and right to left.
     pub vertical: bool,
+    /// Extra room between letters, in ems (0 for the font's own).
+    pub tracking: f32,
+    /// Line spacing, times the font's own (0 or 1 for the font's own).
+    pub leading: f32,
+    /// How the lines line up with each other.
+    pub justify: Justify,
 }
 
 /// Edges of a glyph in pixels, as lines.
@@ -259,6 +265,136 @@ fn glyph(
     Some([x0, y0, x1, y1])
 }
 
+/// How lines line up with each other: their starts, middles or ends
+/// (tops, middles or bottoms in columns).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Justify {
+    /// Lines start together (left, or top in columns).
+    #[default]
+    Start,
+    /// Lines are centered on each other.
+    Middle,
+    /// Lines end together (right, or bottom in columns).
+    End,
+}
+
+/// One line laid out: each glyph's origin on the baseline, and the caret
+/// places before each character and after the last (`[top, bottom]`).
+struct LaidLine {
+    glyphs: Vec<(char, [f32; 2])>,
+    slots: Vec<[[f32; 2]; 2]>,
+}
+
+/// The font and its sizes for `spec`.
+struct Metrics<'a> {
+    face: Face<'a>,
+    scale: f32,
+    ascender: f32,
+    descender: f32,
+    line_height: f32,
+}
+
+impl Metrics<'_> {
+    fn advance(&self, ch: char, size: f32) -> f32 {
+        self.face
+            .glyph_index(ch)
+            .and_then(|id| self.face.glyph_hor_advance(id))
+            .map_or(size * 0.5, |units| f32::from(units) * self.scale)
+    }
+}
+
+/// Lays `spec` out as [`draw_text`] draws it.
+fn lay_out(spec: &TextSpec<'_>, metrics: &Metrics<'_>) -> Vec<LaidLine> {
+    let lines: Vec<&str> = spec.text.split('\n').collect();
+    let leading = if spec.leading > 0.0 {
+        spec.leading
+    } else {
+        1.0
+    };
+    let tracking = spec.tracking * spec.size;
+    let mut out = Vec::with_capacity(lines.len());
+    if spec.vertical {
+        // Columns right to left, each character in an em square.
+        let column = spec.size * 1.2 * leading;
+        let step = spec.size * 1.05 + tracking;
+        let tall = |line: &str| line.chars().count() as f32 * step;
+        let longest = lines.iter().map(|line| tall(line)).fold(0.0, f32::max);
+        let (right, top) = if spec.center {
+            (
+                spec.at[0] + column * lines.len() as f32 / 2.0,
+                spec.at[1] - longest / 2.0,
+            )
+        } else {
+            (spec.at[0], spec.at[1])
+        };
+        for (index, line) in lines.iter().enumerate() {
+            let middle = right - (index as f32 + 0.5) * column;
+            let start = top
+                + match spec.justify {
+                    Justify::Start => 0.0,
+                    Justify::Middle => (longest - tall(line)) / 2.0,
+                    Justify::End => longest - tall(line),
+                };
+            let mut laid = LaidLine {
+                glyphs: Vec::new(),
+                slots: Vec::new(),
+            };
+            for (row, ch) in line.chars().enumerate() {
+                let y = start + row as f32 * step;
+                laid.slots
+                    .push([[middle + column * 0.45, y], [middle - column * 0.45, y]]);
+                let baseline = y + (spec.size * 1.05 + metrics.ascender + metrics.descender) / 2.0;
+                laid.glyphs.push((
+                    ch,
+                    [middle - metrics.advance(ch, spec.size) / 2.0, baseline],
+                ));
+            }
+            let y = start + line.chars().count() as f32 * step;
+            laid.slots
+                .push([[middle + column * 0.45, y], [middle - column * 0.45, y]]);
+            out.push(laid);
+        }
+    } else {
+        let line_height = metrics.line_height * leading;
+        let wide = |line: &str| -> f32 {
+            line.chars()
+                .map(|ch| metrics.advance(ch, spec.size) + tracking)
+                .sum::<f32>()
+                - if line.is_empty() { 0.0 } else { tracking }
+        };
+        let widest = lines.iter().map(|line| wide(line)).fold(0.0, f32::max);
+        let total = line_height * lines.len() as f32;
+        let (left, top) = if spec.center {
+            (spec.at[0] - widest / 2.0, spec.at[1] - total / 2.0)
+        } else {
+            (spec.at[0], spec.at[1])
+        };
+        for (index, line) in lines.iter().enumerate() {
+            let mut x = left
+                + match spec.justify {
+                    Justify::Start => 0.0,
+                    Justify::Middle => (widest - wide(line)) / 2.0,
+                    Justify::End => widest - wide(line),
+                };
+            let y = top + index as f32 * line_height;
+            let baseline = y + metrics.ascender;
+            let mut laid = LaidLine {
+                glyphs: Vec::new(),
+                slots: Vec::new(),
+            };
+            for ch in line.chars() {
+                laid.slots.push([[x, y], [x, y + line_height]]);
+                laid.glyphs.push((ch, [x, baseline]));
+                x += metrics.advance(ch, spec.size) + tracking;
+            }
+            let end = if line.is_empty() { x } else { x - tracking };
+            laid.slots.push([[end, y], [end, y + line_height]]);
+            out.push(laid);
+        }
+    }
+    out
+}
+
 /// Draws `spec` over `pixels` (RGBA8, `width` by `height`). Returns the box
 /// the text covers, `[x0, y0, x1, y1]`, or `None` when nothing drew (no
 /// font, no glyphs).
@@ -270,74 +406,44 @@ pub fn draw_text(
 ) -> Option<[f32; 4]> {
     let (bytes, index) = sue_wm::fonts::face_bytes(spec.font, false, false)
         .or_else(|| sue_wm::fonts::face_bytes("", false, false))?;
-    let face = Face::parse(&bytes, index).ok()?;
-    let scale = spec.size / f32::from(face.units_per_em().max(1));
-    let ascender = f32::from(face.ascender()) * scale;
-    let descender = f32::from(face.descender()) * scale;
-    let line_height = (ascender - descender + f32::from(face.line_gap()) * scale).max(spec.size);
-    let advance = |ch: char| {
-        face.glyph_index(ch)
-            .and_then(|id| face.glyph_hor_advance(id))
-            .map_or(spec.size * 0.5, |units| f32::from(units) * scale)
-    };
-    let lines: Vec<&str> = spec.text.split('\n').collect();
+    let metrics = metrics(Face::parse(&bytes, index).ok()?, spec.size);
     let mut covered: Option<[f32; 4]> = None;
-    let mut put = |ch: char, origin: [f32; 2], pixels: &mut [u8]| {
-        if let Some(id) = face.glyph_index(ch)
-            && let Some([a, b, c, d]) =
-                glyph(&face, id, origin, scale, pixels, width, height, spec.rgb)
-        {
-            covered = Some(covered.map_or([a, b, c, d], |[x0, y0, x1, y1]| {
-                [x0.min(a), y0.min(b), x1.max(c), y1.max(d)]
-            }));
-        }
-    };
-    if spec.vertical {
-        // Columns right to left, each character in an em square.
-        let column = spec.size * 1.2;
-        let step = spec.size * 1.05;
-        let longest = lines
-            .iter()
-            .map(|line| line.chars().count())
-            .max()
-            .unwrap_or(0) as f32;
-        let (right, top) = if spec.center {
-            (
-                spec.at[0] + column * lines.len() as f32 / 2.0,
-                spec.at[1] - step * longest / 2.0,
-            )
-        } else {
-            (spec.at[0], spec.at[1])
-        };
-        for (index, line) in lines.iter().enumerate() {
-            let middle = right - (index as f32 + 0.5) * column;
-            for (row, ch) in line.chars().enumerate() {
-                let baseline = top + row as f32 * step + (step + ascender + descender) / 2.0;
-                put(ch, [middle - advance(ch) / 2.0, baseline], pixels);
-            }
-        }
-    } else {
-        let total = line_height * lines.len() as f32;
-        let top = if spec.center {
-            spec.at[1] - total / 2.0
-        } else {
-            spec.at[1]
-        };
-        for (index, line) in lines.iter().enumerate() {
-            let wide: f32 = line.chars().map(advance).sum();
-            let mut x = if spec.center {
-                spec.at[0] - wide / 2.0
-            } else {
-                spec.at[0]
-            };
-            let baseline = top + index as f32 * line_height + ascender;
-            for ch in line.chars() {
-                put(ch, [x, baseline], pixels);
-                x += advance(ch);
+    for line in lay_out(spec, &metrics) {
+        for (ch, origin) in line.glyphs {
+            if let Some(id) = metrics.face.glyph_index(ch)
+                && let Some([a, b, c, d]) = glyph(
+                    &metrics.face,
+                    id,
+                    origin,
+                    metrics.scale,
+                    pixels,
+                    width,
+                    height,
+                    spec.rgb,
+                )
+            {
+                covered = Some(covered.map_or([a, b, c, d], |[x0, y0, x1, y1]| {
+                    [x0.min(a), y0.min(b), x1.max(c), y1.max(d)]
+                }));
             }
         }
     }
     covered
+}
+
+/// The sizes of `face` at `size` pixels to the em.
+fn metrics(face: Face<'_>, size: f32) -> Metrics<'_> {
+    let scale = size / f32::from(face.units_per_em().max(1));
+    let ascender = f32::from(face.ascender()) * scale;
+    let descender = f32::from(face.descender()) * scale;
+    let line_height = (ascender - descender + f32::from(face.line_gap()) * scale).max(size);
+    Metrics {
+        face,
+        scale,
+        ascender,
+        descender,
+        line_height,
+    }
 }
 
 /// Where a caret stands before the character at `index` (counted in
@@ -365,77 +471,13 @@ pub fn caret_slots(spec: &TextSpec<'_>) -> Vec<CaretSlot> {
     let Ok(face) = Face::parse(&bytes, index) else {
         return Vec::new();
     };
-    let scale = spec.size / f32::from(face.units_per_em().max(1));
-    let ascender = f32::from(face.ascender()) * scale;
-    let descender = f32::from(face.descender()) * scale;
-    let line_height = (ascender - descender + f32::from(face.line_gap()) * scale).max(spec.size);
-    let advance = |ch: char| {
-        face.glyph_index(ch)
-            .and_then(|id| face.glyph_hor_advance(id))
-            .map_or(spec.size * 0.5, |units| f32::from(units) * scale)
-    };
-    let lines: Vec<&str> = spec.text.split('\n').collect();
-    let mut slots = Vec::new();
-    let mut index = 0;
-    if spec.vertical {
-        let column = spec.size * 1.2;
-        let step = spec.size * 1.05;
-        let longest = lines
-            .iter()
-            .map(|line| line.chars().count())
-            .max()
-            .unwrap_or(0) as f32;
-        let (right, top) = if spec.center {
-            (
-                spec.at[0] + column * lines.len() as f32 / 2.0,
-                spec.at[1] - step * longest / 2.0,
-            )
-        } else {
-            (spec.at[0], spec.at[1])
-        };
-        for (number, line) in lines.iter().enumerate() {
-            let middle = right - (number as f32 + 0.5) * column;
-            for row in 0..=line.chars().count() {
-                let y = top + row as f32 * step;
-                slots.push(CaretSlot {
-                    index,
-                    top: [middle + column * 0.45, y],
-                    bottom: [middle - column * 0.45, y],
-                });
-                index += 1;
-            }
-        }
-    } else {
-        let total = line_height * lines.len() as f32;
-        let top = if spec.center {
-            spec.at[1] - total / 2.0
-        } else {
-            spec.at[1]
-        };
-        for (number, line) in lines.iter().enumerate() {
-            let wide: f32 = line.chars().map(advance).sum();
-            let mut x = if spec.center {
-                spec.at[0] - wide / 2.0
-            } else {
-                spec.at[0]
-            };
-            let y = top + number as f32 * line_height;
-            let mut chars = line.chars();
-            loop {
-                slots.push(CaretSlot {
-                    index,
-                    top: [x, y],
-                    bottom: [x, y + line_height],
-                });
-                index += 1;
-                let Some(ch) = chars.next() else {
-                    break;
-                };
-                x += advance(ch);
-            }
-        }
-    }
-    slots
+    let metrics = metrics(face, spec.size);
+    lay_out(spec, &metrics)
+        .into_iter()
+        .flat_map(|line| line.slots)
+        .enumerate()
+        .map(|(index, [top, bottom])| CaretSlot { index, top, bottom })
+        .collect()
 }
 
 #[cfg(test)]
@@ -451,6 +493,9 @@ mod tests {
             at: [10.0, 10.0],
             center: false,
             vertical,
+            tracking: 0.0,
+            leading: 0.0,
+            justify: Justify::Start,
         }
     }
 
@@ -525,5 +570,49 @@ yo", false,
         assert!(slots.iter().enumerate().all(|(n, slot)| slot.index == n));
         let down = caret_slots(&spec("ab", true));
         assert!(down[1].top[1] > down[0].top[1], "columns go down");
+    }
+
+    #[test]
+    fn spacing_and_justification_move_letters_and_lines() {
+        let plain = spec(
+            "ab
+abcd", false,
+        );
+        let slots = caret_slots(&plain);
+        let wider = caret_slots(&TextSpec {
+            tracking: 0.5,
+            ..plain
+        });
+        // Letters further apart: "b" starts 16 pixels later.
+        assert!((wider[1].top[0] - slots[1].top[0] - 16.0).abs() < 0.01);
+        let taller = caret_slots(&TextSpec {
+            leading: 2.0,
+            ..plain
+        });
+        assert!(taller[3].top[1] - plain.at[1] > (slots[3].top[1] - plain.at[1]) * 1.9);
+        // Ends together: the short line moves right, the long one stays.
+        let right = caret_slots(&TextSpec {
+            justify: Justify::End,
+            ..plain
+        });
+        assert!(right[0].top[0] > slots[0].top[0]);
+        assert_eq!(right[3].top[0], slots[3].top[0]);
+        assert!(
+            (right[2].top[0] - right[7].top[0]).abs() < 0.01,
+            "the ends line up"
+        );
+        let mut pixels = vec![0; 200 * 200 * 4];
+        assert!(
+            draw_text(
+                &mut pixels,
+                200,
+                200,
+                &TextSpec {
+                    tracking: 0.5,
+                    ..plain
+                }
+            )
+            .is_some()
+        );
     }
 }

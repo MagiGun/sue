@@ -2368,6 +2368,35 @@ impl SuePaint {
                     ui.radio_value(&mut sub.kind, 1, small(&tr!("pref-vertical")));
                 });
                 ui.checkbox(&mut sub.whole, small(&tr!("centered")));
+                // Clip Studio Paint's letter spacing, line spacing and
+                // justification.
+                slider_row(
+                    ui,
+                    &tr!("letter-spacing"),
+                    &mut sub.tracking,
+                    -0.3..=1.5,
+                    &tr!("em"),
+                    false,
+                    theme,
+                );
+                let mut leading = if sub.leading > 0.0 { sub.leading } else { 1.0 };
+                if slider_row(
+                    ui,
+                    &tr!("line-spacing"),
+                    &mut leading,
+                    0.5..=3.0,
+                    "x",
+                    false,
+                    theme,
+                ) {
+                    sub.leading = leading;
+                }
+                ui.horizontal(|ui| {
+                    ui.label(small(&tr!("justify")));
+                    ui.radio_value(&mut sub.justify, 0, small(&tr!("justify-start")));
+                    ui.radio_value(&mut sub.justify, 1, small(&tr!("justify-middle")));
+                    ui.radio_value(&mut sub.justify, 2, small(&tr!("justify-end")));
+                });
             }
             _ => {
                 ui.label(small(&tr!("tool-arrives-later-sue-paint")));

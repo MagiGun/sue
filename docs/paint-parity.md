@@ -35,15 +35,15 @@ rows are at the end.
 | Edit: undo, clipboard and fills | 8 | 5 | 0 | 81 |
 | Edit: transform and canvas size | 8 | 6 | 0 | 79 |
 | Tonal correction and color | 10 | 1 | 1 | 88 |
-| Filters | 19 | 0 | 1 | 95 |
+| Filters | 20 | 0 | 0 | 100 |
 | Layers | 17 | 5 | 0 | 89 |
 | Selection | 9 | 0 | 0 | 100 |
 | Rulers and symmetry | 7 | 1 | 0 | 94 |
-| Comics: frames, balloons and webtoons | 7 | 1 | 0 | 94 |
-| Story: multi-page works (EX) | 4 | 5 | 4 | 50 |
+| Comics: frames, balloons and webtoons | 11 | 0 | 0 | 100 |
+| Story: multi-page works (EX) | 6 | 5 | 2 | 65 |
 | Animation | 12 | 1 | 1 | 89 |
-| Tools and drawing | 26 | 7 | 3 | 82 |
-| Text | 5 | 3 | 2 | 65 |
+| Tools and drawing | 28 | 6 | 2 | 86 |
+| Text | 6 | 2 | 2 | 70 |
 | Vector | 6 | 2 | 0 | 88 |
 | 3D | 5 | 0 | 8 | 38 |
 | Colors | 9 | 0 | 1 | 90 |
@@ -54,7 +54,7 @@ rows are at the end.
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 9 | 2 | 3 | 71 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 225 | 58 | 50 | 76 |
+| **All of Sue Paint** | 235 | 55 | 46 | 78 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -239,7 +239,7 @@ The order of work is the plan at the end.
 | Line Extraction | Filter > Effect > Line extraction | done | A picture into clean black lines |
 | Chromatic Aberration | Filter > Effect | done | |
 | Retro | Filter > Effect | done | |
-| Glow, Inflate, Drop shadow (5.1) | Filter > Effect | missing | Quick Effects already has a look like Glow |
+| Glow, Inflate, Drop shadow (5.1) | Filter > Effect | done | Each with a live preview and its own settings |
 | Focus Lines, Speed Lines | Filter > Render | done | |
 | Screentone | Filter > Render > Screentone | done | |
 | Perlin Noise, Clouds | Filter > Render | done | |
@@ -329,8 +329,8 @@ The order of work is the plan at the end.
 | Story Editor (text of the whole work) | Story > Story Editor | partial | Command exists; verify |
 | Batch Import Text | Story > Batch import text | partial | Command exists; verify |
 | Open, Duplicate, Export Page, Export All Pages | Story > Page Management | done | |
-| Change binding point and start page | Page Manager | missing | |
-| Folio and page numbers | Page Manager | missing | |
+| Change binding point and start page | Page Manager | done | The first page alone or facing page 2, also in Change Story Information |
+| Folio and page numbers | Change Story Information | done | Size, outer corner or center, from the first page number; on the canvas and in every export |
 | Sort page file names | Page Manager | missing | |
 | Group work and Teamwork (EX) | Story, Page Manager | missing | |
 
@@ -404,7 +404,7 @@ The order of work is the plan at the end.
 | Edit the words again | Text tool | done | Click the words |
 | Words sit in a balloon's middle | Text tool | done | Click inside the balloon |
 | Mixed fonts and sizes in one text layer | Text tool | partial | To verify |
-| Letter spacing, line spacing, justification | Text tool | partial | To verify |
+| Letter spacing, line spacing, justification | Text tool | done | Tool Property, also for words being typed; kept on the text layer |
 | Font list with previews and recent fonts | Tool Settings | partial | To verify |
 | Text along a curve or inside a shape | Text tool | missing | |
 | Character palette (special glyphs) | Palette | missing | |

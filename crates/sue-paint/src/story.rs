@@ -26,6 +26,16 @@ pub const SPREAD: &str = "page.spread";
 pub const AUTHOR: &str = "story.author";
 /// The number the first page has (`Int`).
 pub const FIRST_NUMBER: &str = "story.first_number";
+/// Pages show their folio, their page number (`Bool`).
+pub const FOLIO: &str = "story.folio";
+/// The folio's size in points (`Float`).
+pub const FOLIO_SIZE: &str = "story.folio_size";
+/// Where the folio sits: `outside` (the page's outer bottom corner) or
+/// `center` (the middle of its bottom) (`Text`).
+pub const FOLIO_PLACE: &str = "story.folio_place";
+/// How the first page starts: `alone` (facing nothing) or `paired` (on
+/// the bound side, facing the second page) (`Text`).
+pub const START: &str = "story.start";
 
 type Edit = Batch<sue_core::Arena>;
 
@@ -66,16 +76,26 @@ pub fn bound_right(arena: &Arena, story: EntityId) -> bool {
 /// the left of a right-bound one.
 #[must_use]
 pub fn spreads(count: usize, right_bound: bool) -> Vec<[Option<usize>; 2]> {
+    spreads_from(count, right_bound, false)
+}
+
+/// [`spreads`], the first page `paired` with the second when the book
+/// starts on the other side (Clip Studio Paint's start page).
+#[must_use]
+pub fn spreads_from(count: usize, right_bound: bool, paired: bool) -> Vec<[Option<usize>; 2]> {
     let mut out = Vec::new();
     if count == 0 {
         return out;
     }
-    out.push(if right_bound {
-        [Some(0), None]
-    } else {
-        [None, Some(0)]
-    });
-    let mut index = 1;
+    let mut index = 0;
+    if !paired {
+        out.push(if right_bound {
+            [Some(0), None]
+        } else {
+            [None, Some(0)]
+        });
+        index = 1;
+    }
     while index < count {
         let (first, second) = (Some(index), (index + 1 < count).then_some(index + 1));
         // The earlier page of a spread sits on the bound side.
@@ -87,6 +107,117 @@ pub fn spreads(count: usize, right_bound: bool) -> Vec<[Option<usize>; 2]> {
         index += 2;
     }
     out
+}
+
+/// `true` if `story`'s first page is paired with its second.
+#[must_use]
+pub fn starts_paired(arena: &Arena, story: EntityId) -> bool {
+    arena
+        .get_by_id(story)
+        .ok()
+        .and_then(|entity| entity.property(START))
+        .and_then(Value::as_str)
+        == Some("paired")
+}
+
+/// How a story numbers its pages (Clip Studio Paint's folio).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Folio {
+    /// The numbers show.
+    pub show: bool,
+    /// Their size in points.
+    pub size: f32,
+    /// In the middle of the bottom; else at its outer corner.
+    pub center: bool,
+    /// The first page's number.
+    pub first: i64,
+}
+
+impl Folio {
+    /// `story`'s folio settings.
+    #[must_use]
+    pub fn of(arena: &Arena, story: EntityId) -> Self {
+        let entity = arena.get_by_id(story).ok();
+        let property = |key| entity.and_then(|entity| entity.property(key));
+        Self {
+            show: property(FOLIO).and_then(Value::as_bool).unwrap_or(false),
+            size: property(FOLIO_SIZE).and_then(Value::as_f64).unwrap_or(9.0) as f32,
+            center: property(FOLIO_PLACE).and_then(Value::as_str) == Some("center"),
+            first: property(FIRST_NUMBER).and_then(Value::as_i64).unwrap_or(1),
+        }
+    }
+}
+
+/// A page's folio: what it says, where its middle goes (picture pixels)
+/// and its size in pixels. `None` when the page is in no story or its
+/// story shows no folio.
+#[must_use]
+pub fn folio_for(arena: &Arena, page: EntityId) -> Option<(String, [f32; 2], f32)> {
+    let story = story_of(arena, page)?;
+    let folio = Folio::of(arena, story);
+    if !folio.show {
+        return None;
+    }
+    let pages = pages(arena, story);
+    let index = pages.iter().position(|id| *id == page)?;
+    let entity = arena.get_by_id(page).ok()?;
+    let [w, h] = picture::size(entity)?.map(|side| side as f32);
+    let number = |key| entity.property(key).and_then(Value::as_f64);
+    let dpi = number(picture::DPI).unwrap_or(72.0) as f32;
+    let mm = dpi / 25.4;
+    let bleed = number(PAGE_BLEED).map_or(3.0 * mm, |value| value as f32 * mm);
+    let inner = number(PAGE_INNER).map_or(10.0 * mm, |value| value as f32 * mm);
+    let size = folio.size * dpi / 72.0;
+    // In the margin under the inner border, inside the finished page.
+    let margin = if inner > size * 1.5 {
+        inner / 2.0
+    } else {
+        size
+    };
+    let y = h - bleed - margin;
+    let on_left = spreads_from(
+        pages.len(),
+        bound_right(arena, story),
+        starts_paired(arena, story),
+    )
+    .iter()
+    .any(|pair| pair[0] == Some(index));
+    let x = if folio.center {
+        w / 2.0
+    } else if on_left {
+        bleed + margin + size
+    } else {
+        w - bleed - margin - size
+    };
+    let text = (folio.first + index as i64).to_string();
+    Some((text, [x, y], size))
+}
+
+/// Draws `page`'s folio, if it shows one, onto its flattened pixels.
+pub fn draw_folio(arena: &Arena, page: EntityId, flat: &mut sue_core::RasterTile2D) {
+    let Some((text, at, size)) = folio_for(arena, page) else {
+        return;
+    };
+    let (width, height) = (flat.width(), flat.height());
+    if let Some(bytes) = flat.bytes_mut() {
+        sue_type::raster::draw_text(
+            bytes,
+            width,
+            height,
+            &sue_type::raster::TextSpec {
+                text: &text,
+                font: "",
+                size,
+                rgb: [0, 0, 0],
+                at,
+                center: true,
+                vertical: false,
+                tracking: 0.0,
+                leading: 0.0,
+                justify: sue_type::raster::Justify::Middle,
+            },
+        );
+    }
 }
 
 /// The order key that puts a page at `index` among `story`'s pages,
@@ -637,5 +768,57 @@ mod tests {
             vec![[Some(0), None], [Some(2), Some(1)], [None, Some(3)]]
         );
         assert!(spreads(0, true).is_empty());
+        // Starting paired: page 1 faces page 2.
+        assert_eq!(
+            spreads_from(3, false, true),
+            vec![[Some(0), Some(1)], [Some(2), None]]
+        );
+        assert_eq!(spreads_from(2, true, true), vec![[Some(1), Some(0)]]);
+    }
+
+    #[test]
+    fn folios_number_pages_on_their_outer_corners() {
+        let mut arena = Arena::new();
+        let book = NewPicture {
+            width: 400,
+            height: 600,
+            ..NewPicture::default()
+        };
+        let (mut edit, story, ids) = create(&book, 2, "Book", false).unwrap();
+        edit.apply(&mut arena).unwrap();
+        let (picture, second) = (ids[0], ids[1]);
+        assert_eq!(folio_for(&arena, picture), None, "off unless asked for");
+        let story_entity = arena.get_by_id_mut(story).unwrap();
+        story_entity.properties_mut().set(FOLIO, Value::from(true));
+        story_entity
+            .properties_mut()
+            .set(FIRST_NUMBER, Value::from(5_i64));
+        story_entity
+            .properties_mut()
+            .set(FOLIO_SIZE, Value::from(30.0));
+        let (one, at_one, _) = folio_for(&arena, picture).unwrap();
+        let (two, at_two, _) = folio_for(&arena, second).unwrap();
+        assert_eq!((one.as_str(), two.as_str()), ("5", "6"));
+        // A left-bound book: page 1 alone on the right, page 2 on the left.
+        assert!(at_one[0] > at_two[0]);
+        let entity = arena.get_by_id(picture).unwrap();
+        let [w, h] = picture::size(entity).unwrap();
+        let mut flat = sue_core::RasterTile2D::from_bytes(
+            w,
+            h,
+            sue_core::PixelFormat::Rgba8,
+            vec![255; (w * h * 4) as usize],
+        )
+        .unwrap();
+        draw_folio(&arena, picture, &mut flat);
+        let dark = flat
+            .bytes()
+            .unwrap()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel[0] < 100)
+            .count();
+        assert!(dark > 10, "the number is drawn: {dark}");
     }
 }

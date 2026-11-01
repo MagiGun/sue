@@ -162,6 +162,38 @@ pub enum Filter {
         /// Pixels at the edge.
         shift: f32,
     },
+    /// Glow (Clip Studio Paint 5.1): soft light of `rgb` round what is
+    /// drawn.
+    Glow {
+        /// How far it spreads, pixels.
+        radius: f32,
+        /// How bright, 0 to 2.
+        strength: f32,
+        /// Its color.
+        rgb: [u8; 3],
+    },
+    /// Drop Shadow (Clip Studio Paint 5.1): a soft shadow of `rgb` under
+    /// what is drawn, `dx`, `dy` away.
+    DropShadow {
+        /// Across, pixels.
+        dx: f32,
+        /// Down, pixels.
+        dy: f32,
+        /// How soft, pixels.
+        blur: f32,
+        /// How dark, 0 to 1.
+        opacity: f32,
+        /// Its color.
+        rgb: [u8; 3],
+    },
+    /// Inflate (Clip Studio Paint 5.1): what is drawn swells as if
+    /// puffed up, lit from the top left.
+    Inflate {
+        /// How round, pixels.
+        size: f32,
+        /// How strong the light and shade, 0 to 1.
+        depth: f32,
+    },
     /// Retro: faded, warm, darker toward the edges, with grain.
     Retro {
         /// 0 to 1.
@@ -335,6 +367,9 @@ impl Filter {
             Self::Quick { effect, look, .. } => crate::quick::name(*effect, *look),
             Self::JpegNoise { .. } => tr!("remove-jpeg-noise"),
             Self::Aberration { .. } => tr!("chromatic-aberration"),
+            Self::Glow { .. } => tr!("glow"),
+            Self::DropShadow { .. } => tr!("drop-shadow"),
+            Self::Inflate { .. } => tr!("inflate"),
             Self::Retro { .. } => tr!("retro"),
             Self::PerlinNoise { .. } => tr!("perlin-noise"),
             Self::Clouds { .. } => tr!("clouds"),
@@ -530,6 +565,82 @@ impl Filter {
                     let scale = 1.0 - amount.clamp(0.0, 1.0) * 0.5 * (1.0 - d * d).max(0.0);
                     (cx + dx * scale * r, cy + dy * scale * r)
                 });
+            }
+            Self::Glow {
+                radius,
+                strength,
+                rgb,
+            } => {
+                let soft = blurred_values(&alphas(pixels), width, height, radius.max(0.5));
+                for (pixel, glow) in pixels.as_chunks_mut::<4>().0.iter_mut().zip(soft) {
+                    // The light spreads round the drawing and brightens it
+                    // a little too.
+                    let light = (glow * strength * 1.8).clamp(0.0, 1.0);
+                    under(pixel, rgb, light);
+                    for (channel, value) in pixel.iter_mut().take(3).zip(rgb) {
+                        let (a, b) = (f32::from(*channel) / 255.0, f32::from(value) / 255.0);
+                        let screen = 1.0 - (1.0 - a) * (1.0 - b * light * 0.1);
+                        *channel = (screen * 255.0).round() as u8;
+                    }
+                }
+            }
+            Self::DropShadow {
+                dx,
+                dy,
+                blur: soft,
+                opacity,
+                rgb,
+            } => {
+                let alpha = alphas(pixels);
+                // The drawing's shape moved, then softened.
+                let mut moved = vec![0.0; alpha.len()];
+                for y in 0..height {
+                    for x in 0..width {
+                        let (sx, sy) = (x as f32 - dx, y as f32 - dy);
+                        if sx < 0.0 || sy < 0.0 || sx >= width as f32 || sy >= height as f32 {
+                            continue;
+                        }
+                        moved[(y * width + x) as usize] =
+                            alpha[(sy as u32 * width + sx as u32) as usize];
+                    }
+                }
+                let shadow = if soft > 0.25 {
+                    blurred_values(&moved, width, height, soft)
+                } else {
+                    moved
+                };
+                for (pixel, shade) in pixels.as_chunks_mut::<4>().0.iter_mut().zip(shadow) {
+                    under(pixel, rgb, (shade * opacity).clamp(0.0, 1.0));
+                }
+            }
+            Self::Inflate { size, depth } => {
+                // The shape's height: its alpha softened, so it rises from
+                // the edge to a plateau.
+                let height_map = blurred_values(&alphas(pixels), width, height, size.max(0.5));
+                let at = |x: u32, y: u32| height_map[(y * width + x) as usize];
+                let gain = depth.clamp(0.0, 1.0) * size.max(0.5) * 0.55;
+                for y in 0..height {
+                    for x in 0..width {
+                        let index = ((y * width + x) * 4) as usize;
+                        if pixels[index + 3] == 0 {
+                            continue;
+                        }
+                        let gx = at((x + 1).min(width - 1), y) - at(x.saturating_sub(1), y);
+                        let gy = at(x, (y + 1).min(height - 1)) - at(x, y.saturating_sub(1));
+                        // Lit from the top left: slopes facing it lighten.
+                        let shade =
+                            ((gx + gy) * std::f32::consts::FRAC_1_SQRT_2 * gain).clamp(-0.8, 0.8);
+                        for channel in &mut pixels[index..index + 3] {
+                            let value = f32::from(*channel);
+                            let lit = if shade > 0.0 {
+                                value + (255.0 - value) * shade
+                            } else {
+                                value * (1.0 + shade)
+                            };
+                            *channel = lit.round().clamp(0.0, 255.0) as u8;
+                        }
+                    }
+                }
             }
             Self::Aberration { shift } => {
                 let source = pixels.to_vec();
@@ -967,6 +1078,9 @@ impl Filter {
             | Self::Quick { .. }
             | Self::JpegNoise { .. }
             | Self::Aberration { .. }
+            | Self::Glow { .. }
+            | Self::DropShadow { .. }
+            | Self::Inflate { .. }
             | Self::Retro { .. }
             | Self::PerlinNoise { .. }
             | Self::Clouds { .. }
@@ -1133,6 +1247,30 @@ fn luma_over_white(pixels: &[u8]) -> Vec<f32> {
 }
 
 /// `values` (one a pixel) blurred by `radius`, through [`blur`].
+/// Every pixel's alpha, 0 to 1.
+fn alphas(pixels: &[u8]) -> Vec<f32> {
+    pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| f32::from(pixel[3]) / 255.0)
+        .collect()
+}
+
+/// `rgb` at `alpha` laid under `pixel` (straight alpha).
+fn under(pixel: &mut [u8; 4], rgb: [u8; 3], alpha: f32) {
+    let top = f32::from(pixel[3]) / 255.0;
+    let out = top + alpha * (1.0 - top);
+    if out <= 0.0 {
+        return;
+    }
+    for (channel, value) in pixel.iter_mut().take(3).zip(rgb) {
+        let mixed = f32::from(*channel) * top + f32::from(value) * alpha * (1.0 - top);
+        *channel = (mixed / out).round().clamp(0.0, 255.0) as u8;
+    }
+    pixel[3] = (out * 255.0).round() as u8;
+}
+
 fn blurred_values(values: &[f32], width: u32, height: u32, radius: f32) -> Vec<f32> {
     let mut gray: Vec<u8> = values
         .iter()
@@ -1885,5 +2023,63 @@ mod tests {
         Filter::Invert.apply(&mut pixels, 8, 8, Some(&selection), [0, 0]);
         assert_ne!(&pixels[..4], &before[..4]);
         assert_eq!(&pixels[6 * 4..7 * 4], &before[6 * 4..7 * 4]);
+    }
+
+    #[test]
+    fn glow_shadow_and_inflate_work_round_what_is_drawn() {
+        let (w, h) = (60_u32, 60_u32);
+        // A gray square on clear.
+        let square = || {
+            let mut pixels = vec![0_u8; (w * h * 4) as usize];
+            for y in 20..40 {
+                for x in 20..40 {
+                    pixels[((y * w + x) * 4) as usize..][..4]
+                        .copy_from_slice(&[128, 128, 128, 255]);
+                }
+            }
+            pixels
+        };
+        let at = |pixels: &[u8], x: u32, y: u32| {
+            let index = ((y * w + x) * 4) as usize;
+            [
+                pixels[index],
+                pixels[index + 1],
+                pixels[index + 2],
+                pixels[index + 3],
+            ]
+        };
+        let run = |filter: Filter| {
+            let mut pixels = square();
+            filter.apply(&mut pixels, w, h, None, [0, 0]);
+            pixels
+        };
+        // Glow: red light just outside, nothing far away.
+        let glowing = run(Filter::Glow {
+            radius: 6.0,
+            strength: 1.0,
+            rgb: [255, 0, 0],
+        });
+        let near = at(&glowing, 17, 30);
+        assert!(near[3] > 20 && near[0] == 255 && near[1] == 0, "{near:?}");
+        assert_eq!(at(&glowing, 2, 2)[3], 0);
+        // Drop shadow: dark below and right, clear above and left.
+        let shadowed = run(Filter::DropShadow {
+            dx: 8.0,
+            dy: 8.0,
+            blur: 0.0,
+            opacity: 1.0,
+            rgb: [0, 0, 0],
+        });
+        assert_eq!(at(&shadowed, 44, 44), [0, 0, 0, 255]);
+        assert_eq!(at(&shadowed, 18, 18)[3], 0);
+        assert_eq!(at(&shadowed, 30, 30), [128, 128, 128, 255], "drawn over it");
+        // Inflate: lit at the top left edge, shaded at the bottom right.
+        let puffed = run(Filter::Inflate {
+            size: 6.0,
+            depth: 1.0,
+        });
+        assert!(at(&puffed, 21, 21)[0] > 140, "{:?}", at(&puffed, 21, 21));
+        assert!(at(&puffed, 38, 38)[0] < 116, "{:?}", at(&puffed, 38, 38));
+        assert_eq!(at(&puffed, 2, 2)[3], 0);
     }
 }

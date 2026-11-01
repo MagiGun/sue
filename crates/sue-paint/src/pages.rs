@@ -171,10 +171,14 @@ impl SuePaint {
                 let arena = &cx.world.arena;
                 let right_bound = story::bound_right(arena, story);
                 // The page it faces in the spread.
-                let partner = story::spreads(pages.len(), right_bound)
-                    .into_iter()
-                    .find(|pair| pair.contains(&Some(index)))
-                    .and_then(|pair| pair.into_iter().flatten().find(|other| *other != index));
+                let partner = story::spreads_from(
+                    pages.len(),
+                    right_bound,
+                    story::starts_paired(arena, story),
+                )
+                .into_iter()
+                .find(|pair| pair.contains(&Some(index)))
+                .and_then(|pair| pair.into_iter().flatten().find(|other| *other != index));
                 let Some(partner) = partner else {
                     cx.fail(tr!("page-faces-no-other-page-add"));
                     return true;
@@ -270,6 +274,8 @@ impl SuePaint {
                             .and_then(sue_core::Value::as_i64)
                             .unwrap_or(1),
                         right_bound: story::bound_right(&cx.world.arena, story),
+                        paired: story::starts_paired(&cx.world.arena, story),
+                        folio: story::Folio::of(&cx.world.arena, story),
                     },
                 ));
             }
@@ -479,7 +485,11 @@ impl SuePaint {
         };
         let pages: Vec<sue_core::RasterTile2D> = ids
             .iter()
-            .filter_map(|page| crate::composite::flatten(arena, *page, options))
+            .filter_map(|page| {
+                let mut flat = crate::composite::flatten(arena, *page, options)?;
+                crate::story::draw_folio(arena, *page, &mut flat);
+                Some(flat)
+            })
             .collect();
         let named = story.unwrap_or(picture);
         let entity = arena.get_by_id(named).ok();
@@ -549,9 +559,10 @@ impl SuePaint {
         };
         let mut written = 0;
         for (index, page) in pages.iter().enumerate() {
-            let Some(flat) = composite::flatten(&cx.world.arena, *page, options) else {
+            let Some(mut flat) = composite::flatten(&cx.world.arena, *page, options) else {
                 continue;
             };
+            story::draw_folio(&cx.world.arena, *page, &mut flat);
             let target = dir.join(format!("{stem}-{:03}.{extension}", index + 1));
             match sue_io::encode_as(&flat, &extension, quality, effort)
                 .and_then(|bytes| write_atomic(&target, &bytes).map_err(|error| error.to_string()))
@@ -589,6 +600,9 @@ impl SuePaint {
         let right = story
             .as_ref()
             .is_some_and(|(story, _, _)| story::bound_right(&cx.world.arena, *story));
+        let paired = story
+            .as_ref()
+            .is_some_and(|(story, _, _)| story::starts_paired(&cx.world.arena, *story));
         let mut command: Option<&'static str> = None;
         ui.horizontal(|ui| {
             ui.label(RichText::new(tr!("binding-2")).color(theme.muted));
@@ -602,6 +616,17 @@ impl SuePaint {
                 } else {
                     cx.notify(tr!("add-page-first-then-picture-becomes"));
                 }
+            }
+            // The start page: alone, or facing the second page.
+            ui.label(RichText::new(tr!("first-page-place")).color(theme.muted));
+            let mut start = paired;
+            ui.selectable_value(&mut start, false, tr!("start-page-alone"));
+            ui.selectable_value(&mut start, true, tr!("start-page-paired"));
+            if start != paired
+                && let Some((story, _, _)) = &story
+            {
+                let edit = doc::set(*story, story::START, if start { "paired" } else { "alone" });
+                Self::apply(cx, edit);
             }
             ui.separator();
             for (label, name) in [
@@ -635,7 +660,7 @@ impl SuePaint {
         egui::ScrollArea::vertical()
             .max_height(ui.available_height() - 40.0)
             .show(ui, |ui| {
-                let spreads = story::spreads(pages.len(), right);
+                let spreads = story::spreads_from(pages.len(), right, paired);
                 let page_size = vec2(110.0, 150.0);
                 let spread_size = vec2(page_size.x * 2.0, page_size.y + 18.0);
                 let gap = vec2(28.0, 18.0);

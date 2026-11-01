@@ -21,6 +21,12 @@ follow [Semantic Versioning](https://semver.org/).
   you drag, and Speed Lines along the way you drag, each on an effect line
   layer that stays editable: the Object tool moves their ends, and Tool
   Property changes how many lines, their width, their scatter and color.
+- Folios: Story, Change Story Information numbers the pages, at their
+  outer corners or centered, on the canvas and in every export, and the
+  first page can start alone or facing page 2 (also in the Page Manager).
+- Filter, Effect has Glow, Inflate and Drop Shadow, as in Clip Studio
+  Paint 5.1.
+- The Text tool sets letter spacing, line spacing and justification.
 - Curve and polyline balloons and the Polyline frame, clicked out corner
   by corner as in Clip Studio Paint, and the Object tool drags a panel's
   corners or the whole panel.

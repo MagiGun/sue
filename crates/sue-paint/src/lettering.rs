@@ -10,6 +10,7 @@ use sue_wm::AppletContext;
 
 use crate::manga;
 use crate::studio::SuePaint;
+use sue_type::raster::Justify;
 
 /// The class of a text layer.
 pub const TEXT: &str = "sue.paint.text";
@@ -21,6 +22,12 @@ const AT_X: &str = "text.x";
 const AT_Y: &str = "text.y";
 const CENTER: &str = "text.center";
 const VERTICAL: &str = "text.vertical";
+/// Extra room between letters, in ems (`Float`).
+const TRACKING: &str = "text.tracking";
+/// Line spacing, times the font's own (`Float`).
+const LEADING: &str = "text.leading";
+/// How lines line up: `start`, `middle` or `end` (`Text`).
+const JUSTIFY: &str = "text.justify";
 /// Where the drawn text is (`Text`, `x0,y0,x1,y1`), for clicking on it.
 const BOX: &str = "text.box";
 
@@ -36,6 +43,12 @@ pub(crate) struct Lettering {
     pub at: [f32; 2],
     pub center: bool,
     pub vertical: bool,
+    /// Extra room between letters, in ems.
+    pub tracking: f32,
+    /// Line spacing, times the font's own (0 for the font's own).
+    pub leading: f32,
+    /// How the lines line up with each other.
+    pub justify: Justify,
 }
 
 impl Lettering {
@@ -49,6 +62,25 @@ impl Lettering {
             at,
             center: false,
             vertical: false,
+            tracking: 0.0,
+            leading: 0.0,
+            justify: Justify::Start,
+        }
+    }
+
+    /// The words as `sue_type` lays them out.
+    pub(crate) fn spec(&self) -> sue_type::raster::TextSpec<'_> {
+        sue_type::raster::TextSpec {
+            text: &self.content,
+            font: &self.font,
+            size: self.size,
+            rgb: self.rgb,
+            at: self.at,
+            center: self.center,
+            vertical: self.vertical,
+            tracking: self.tracking,
+            leading: self.leading,
+            justify: self.justify,
         }
     }
 
@@ -88,6 +120,16 @@ impl Lettering {
             at: [number(AT_X, 0.0), number(AT_Y, 0.0)],
             center: flag(CENTER),
             vertical: flag(VERTICAL),
+            tracking: number(TRACKING, 0.0),
+            leading: number(LEADING, 0.0),
+            // Centered words from before justification had centered lines.
+            justify: match entity.property(JUSTIFY).and_then(Value::as_str) {
+                Some("middle") => Justify::Middle,
+                Some("end") => Justify::End,
+                Some(_) => Justify::Start,
+                None if flag(CENTER) => Justify::Middle,
+                None => Justify::Start,
+            },
         })
     }
 
@@ -95,20 +137,7 @@ impl Lettering {
     /// text is.
     fn draw(&self, width: u32, height: u32) -> (Vec<u8>, Option<[f32; 4]>) {
         let mut pixels = vec![0; (width * height * 4) as usize];
-        let covered = sue_type::raster::draw_text(
-            &mut pixels,
-            width,
-            height,
-            &sue_type::raster::TextSpec {
-                text: &self.content,
-                font: &self.font,
-                size: self.size,
-                rgb: self.rgb,
-                at: self.at,
-                center: self.center,
-                vertical: self.vertical,
-            },
-        );
+        let covered = sue_type::raster::draw_text(&mut pixels, width, height, &self.spec());
         (pixels, covered)
     }
 
@@ -126,6 +155,16 @@ impl Lettering {
             (AT_Y, Value::from(f64::from(self.at[1]))),
             (CENTER, Value::from(self.center)),
             (VERTICAL, Value::from(self.vertical)),
+            (TRACKING, Value::from(f64::from(self.tracking))),
+            (LEADING, Value::from(f64::from(self.leading))),
+            (
+                JUSTIFY,
+                Value::from(match self.justify {
+                    Justify::Start => "start",
+                    Justify::Middle => "middle",
+                    Justify::End => "end",
+                }),
+            ),
             (BOX, Value::from(area)),
         ]
     }
@@ -220,14 +259,9 @@ impl SuePaint {
             self.begin_typing(cx, Some(layer), lettering, Some(p));
             return;
         }
-        let (font, size, vertical, center, rgb) = self.text_look();
-        let mut lettering = Lettering {
-            font,
-            size,
-            vertical,
-            center,
-            ..Lettering::new([p.x, p.y], rgb)
-        };
+        let look = self.text_look();
+        let mut lettering = Lettering::new([p.x, p.y], look.rgb);
+        look.put(&mut lettering);
         // Inside a balloon: centered in it.
         let balloon = self.picture().and_then(|picture| {
             crate::doc::layers(arena, picture)
@@ -248,6 +282,7 @@ impl SuePaint {
         if let Some([x, y, room]) = balloon {
             lettering.at = [x, y];
             lettering.center = true;
+            lettering.justify = Justify::Middle;
             lettering.size = (room / 5.0).clamp(12.0, 96.0);
         }
         self.begin_typing(cx, None, lettering, None);
@@ -327,21 +362,36 @@ pub(crate) struct Typing {
     settings: Look,
 }
 
-/// How the Text tool letters: font, size, columns, centered, ink.
-type Look = (String, f32, bool, bool, [u8; 3]);
+/// How the Text tool letters: everything but the words and where.
+#[derive(Clone, Debug, PartialEq)]
+struct Look {
+    font: String,
+    size: f32,
+    vertical: bool,
+    center: bool,
+    rgb: [u8; 3],
+    tracking: f32,
+    leading: f32,
+    justify: Justify,
+}
+
+impl Look {
+    /// `lettering` lettered this way.
+    fn put(&self, lettering: &mut Lettering) {
+        lettering.font.clone_from(&self.font);
+        lettering.size = self.size;
+        lettering.vertical = self.vertical;
+        lettering.center = self.center;
+        lettering.rgb = self.rgb;
+        lettering.tracking = self.tracking;
+        lettering.leading = self.leading;
+        lettering.justify = self.justify;
+    }
+}
 
 impl Typing {
     fn spec(&self) -> sue_type::raster::TextSpec<'_> {
-        let lettering = &self.lettering;
-        sue_type::raster::TextSpec {
-            text: &lettering.content,
-            font: &lettering.font,
-            size: lettering.size,
-            rgb: lettering.rgb,
-            at: lettering.at,
-            center: lettering.center,
-            vertical: lettering.vertical,
-        }
+        self.lettering.spec()
     }
 
     /// The picture area the words take, with room for letters that lean
@@ -417,6 +467,9 @@ impl SuePaint {
             sub.tip.size = lettering.size;
             sub.kind = u8::from(lettering.vertical);
             sub.whole = lettering.center;
+            sub.tracking = lettering.tracking;
+            sub.leading = lettering.leading;
+            sub.justify = lettering.justify as u8;
         }
         let settings = self.text_look();
         let mut typing = Typing {
@@ -480,13 +533,20 @@ impl SuePaint {
     /// How the Text tool letters now (the ink is the drawing color).
     fn text_look(&self) -> Look {
         let sub = self.toolbox.current();
-        (
-            sub.font.clone(),
-            sub.tip.size,
-            sub.kind == 1,
-            sub.whole,
-            self.drawing_color(),
-        )
+        Look {
+            font: sub.font.clone(),
+            size: sub.tip.size,
+            vertical: sub.kind == 1,
+            center: sub.whole,
+            rgb: self.drawing_color(),
+            tracking: sub.tracking,
+            leading: sub.leading,
+            justify: match sub.justify {
+                1 => Justify::Middle,
+                2 => Justify::End,
+                _ => Justify::Start,
+            },
+        }
     }
 
     fn refresh_all(&mut self, cx: &AppletContext<'_>) {
@@ -538,14 +598,7 @@ impl SuePaint {
         // A setting changed in Tool Property or a new color changes the
         // words being typed.
         if look != typing.settings {
-            let lettering = &mut typing.lettering;
-            (
-                lettering.font,
-                lettering.size,
-                lettering.vertical,
-                lettering.center,
-                lettering.rgb,
-            ) = look.clone();
+            look.put(&mut typing.lettering);
             typing.settings = look;
         }
         let screen = |[x, y]: [f32; 2]| view.to_screen(viewport, size, pos2(x, y));
@@ -721,6 +774,9 @@ mod tests {
             at: [12.0, 34.0],
             center: true,
             vertical: true,
+            tracking: 0.25,
+            leading: 1.5,
+            justify: Justify::End,
         };
         let (pixels, covered) = lettering.draw(200, 200);
         assert!(covered.is_some());
