@@ -30,7 +30,7 @@ rows are at the end.
 | Area | done | partial | missing | percent |
 | --- | --- | --- | --- | --- |
 | File: new, open and save | 10 | 1 | 5 | 66 |
-| File: export | 12 | 1 | 5 | 69 |
+| File: export | 13 | 1 | 4 | 75 |
 | File: import, batch and scanning | 3 | 4 | 8 | 33 |
 | Edit: undo, clipboard and fills | 8 | 5 | 0 | 81 |
 | Edit: transform and canvas size | 8 | 6 | 0 | 79 |
@@ -54,7 +54,7 @@ rows are at the end.
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 9 | 3 | 2 | 75 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 239 | 56 | 41 | 79 |
+| **All of Sue Paint** | 240 | 56 | 40 | 80 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -143,7 +143,7 @@ The order of work is the plan at the end.
 | Export fanzine printing data (EX) | File > Export multiple pages | missing | |
 | Export webtoon | File > Special Export > Export webtoon | done | Numbered pictures at the height and width you choose |
 | Export vectors | File > Special Export | done | Visible vector layers as SVG, each line an outline as wide as drawn |
-| Export layer comp (EX) | File > Special Export | missing | Layer comps themselves are missing too |
+| Export layer comp (EX) | File > Special Export | done | Layer, Layer Comps keeps named sets of visibility, opacity and blend; each exports as its own picture |
 | Record timelapse | File > Timelapse > Record timelapse | done | A picture of the canvas after every change |
 | Export timelapse (video or GIF) | File > Timelapse > Export timelapse | done | Fitted to a length you choose; Clip Studio's presets run to 300 seconds |
 

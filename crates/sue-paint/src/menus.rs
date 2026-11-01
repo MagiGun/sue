@@ -215,6 +215,10 @@ pub fn menus() -> Vec<Menu> {
                     vec![
                         act(&tr!("export-webtoon-ellipsis"), "file.export.webtoon"),
                         act(&tr!("export-vectors-ellipsis"), "file.export.vectors"),
+                        act(
+                            &tr!("export-layer-comps-ellipsis"),
+                            "file.export.layer_comps",
+                        ),
                     ],
                 ),
                 SEP,
@@ -553,6 +557,7 @@ pub fn menus() -> Vec<Menu> {
                     ],
                 ),
                 act(&tr!("layer-property"), "layer.properties"),
+                act(&tr!("layer-comps-ellipsis"), "layer.comps"),
                 SEP,
                 sub(
                     &tr!("change-selected-layer"),

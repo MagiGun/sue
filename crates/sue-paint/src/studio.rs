@@ -1018,6 +1018,8 @@ fn implemented(command: &str) -> bool {
             | "edit.material.paste"
             | "file.export.webtoon"
             | "file.export.vectors"
+            | "file.export.layer_comps"
+            | "layer.comps"
             | "file.export.cels"
             | "anim.first"
             | "anim.last"
@@ -1712,6 +1714,74 @@ impl SuePaint {
 
     /// Writes the picture to numbered files next to `path`, scaled to the
     /// webtoon width and cut every webtoon height, top to bottom.
+    /// Writes each layer comp of the picture as its own picture beside
+    /// `path`, named `Name-Comp.png` (by `path`'s extension): the comp is
+    /// shown, flattened and put back, so nothing changes.
+    fn export_comps(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        use sue_core::ReversibleTransaction;
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        let extension = path.extension().map_or_else(
+            || "png".to_owned(),
+            |ext| ext.to_string_lossy().to_ascii_lowercase(),
+        );
+        let stem = path.file_stem().map_or_else(
+            || tr!("picture"),
+            |stem| stem.to_string_lossy().into_owned(),
+        );
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let quality = cx
+            .rice()
+            .get_i64("io.jpeg_quality")
+            .and_then(|value| u8::try_from(value).ok())
+            .unwrap_or(90);
+        let effort = cx
+            .rice()
+            .get_i64("io.jxl_effort")
+            .and_then(|value| u8::try_from(value).ok())
+            .unwrap_or(7);
+        let options = RenderOptions {
+            paper: true,
+            drafts: false,
+        };
+        let mut written = 0;
+        for comp in crate::comps::read(&cx.world.arena, picture) {
+            let mut shown = crate::comps::apply(&cx.world.arena, picture, &comp, &comp.name);
+            if shown.apply(&mut cx.world.arena).is_err() {
+                continue;
+            }
+            let flat = composite::flatten(&cx.world.arena, picture, options);
+            let _ = shown.revert(&mut cx.world.arena);
+            let Some(flat) = flat else {
+                continue;
+            };
+            let safe: String = comp
+                .name
+                .chars()
+                .map(|ch| if r#"\/:*?"<>|"#.contains(ch) { '_' } else { ch })
+                .collect();
+            let target = dir.join(format!("{stem}-{safe}.{extension}"));
+            match sue_io::encode_as(&flat, &extension, quality, effort)
+                .and_then(|bytes| write_atomic(&target, &bytes).map_err(|error| error.to_string()))
+            {
+                Ok(()) => written += 1,
+                Err(error) => {
+                    cx.fail(tr!("cannot-export", error = error));
+                    return;
+                }
+            }
+        }
+        cx.notify(tr!(
+            "exported-pages-to",
+            dir = dir.display(),
+            written = written
+        ));
+    }
+
     /// Writes the lines of the picture's visible vector layers to `path`
     /// as an SVG drawing, bottom layer first.
     fn export_vectors(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
@@ -5149,6 +5219,41 @@ impl SuePaint {
                 self.ask_export_book(cx, command == "file.export.epub")
             }
 
+            "layer.comps" => {
+                if self.picture().is_some() {
+                    self.dialog = Some(Dialog::Comps(crate::dialogs::CompsDialog::default()));
+                }
+            }
+            "file.export.layer_comps" => {
+                // Clip Studio Paint's Export layer comp: each comp a picture.
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                if crate::comps::read(&cx.world.arena, picture).is_empty() {
+                    cx.notify(tr!("no-layer-comps-yet"));
+                    return;
+                }
+                let name = cx
+                    .world
+                    .arena
+                    .get_by_id(picture)
+                    .map_or_else(|_| tr!("picture"), |entity| entity.name().to_owned());
+                cx.request(ShellRequest::PickFile(
+                    FilePick::save(
+                        Some(me_id()),
+                        "layer-comps",
+                        &tr!("export-layer-comps"),
+                        &format!("{name}.png"),
+                    )
+                    .types(
+                        sue_io::PICTURE_SAVE_TYPES
+                            .iter()
+                            .map(|(what, extensions)| sue_wm::FileType::new(what, extensions))
+                            .collect(),
+                    )
+                    .starting_in(self.last_dir.clone()),
+                ));
+            }
             "file.export.vectors" => {
                 // Clip Studio Paint's Export vectors: the vector layers'
                 // lines as an SVG drawing.
@@ -7068,6 +7173,7 @@ impl SueApplet for SuePaint {
             "anim-movie" => self.export_movie(cx, path),
             "webtoon" => self.export_webtoon(cx, path),
             "vectors" => self.export_vectors(cx, path),
+            "layer-comps" => self.export_comps(cx, path),
             "anim-cels" => self.export_cels(cx, path),
             "timelapse" => self.export_timelapse(cx, path),
             "anim-sequence" => self.export_animation(cx, path, false),

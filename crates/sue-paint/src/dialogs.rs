@@ -601,6 +601,121 @@ impl FilterDialog {
 }
 
 impl SuePaint {
+    /// Layer Comps: the picture's comps to choose, show, update, rename,
+    /// delete or export, and a new one from how the layers show now. Every
+    /// change is one undo step.
+    fn comps_ui(
+        &mut self,
+        ui: &mut Ui,
+        dialog: &mut CompsDialog,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) -> Outcome {
+        let mut outcome = Outcome::Open;
+        let Some(picture) = self.picture() else {
+            return Outcome::Cancel;
+        };
+        let mut comps = crate::comps::read(&cx.world.arena, picture);
+        dialog.chosen = dialog.chosen.min(comps.len().saturating_sub(1));
+        egui::ScrollArea::vertical()
+            .max_height(170.0)
+            .show(ui, |ui| {
+                if comps.is_empty() {
+                    ui.label(
+                        RichText::new(tr!("no-layer-comps-yet"))
+                            .size(theme.small_size)
+                            .color(theme.muted),
+                    );
+                }
+                for (index, comp) in comps.iter().enumerate() {
+                    let response = ui.selectable_label(dialog.chosen == index, &comp.name);
+                    if response.clicked() {
+                        dialog.chosen = index;
+                        dialog.name.clone_from(&comp.name);
+                    }
+                    // A double-click shows it.
+                    if response.double_clicked() {
+                        let edit = crate::comps::apply(&cx.world.arena, picture, comp, &comp.name);
+                        Self::apply(cx, edit);
+                        self.refresh_comp(cx);
+                    }
+                }
+            });
+        ui.separator();
+        ui.horizontal(|ui| {
+            label(ui, &tr!("name"), theme);
+            ui.text_edit_singleline(&mut dialog.name);
+        });
+        let name = if dialog.name.trim().is_empty() {
+            tr!("layer-comp-number", number = comps.len() + 1)
+        } else {
+            dialog.name.trim().to_owned()
+        };
+        let chosen = comps.get(dialog.chosen).cloned();
+        let mut store = None;
+        ui.horizontal_wrapped(|ui| {
+            if ui.button(tr!("new-layer-comp")).clicked() {
+                comps.push(crate::comps::capture(&cx.world.arena, picture, &name));
+                dialog.chosen = comps.len() - 1;
+                store = Some(tr!("new-layer-comp"));
+            }
+            ui.add_enabled_ui(chosen.is_some(), |ui| {
+                if ui.button(tr!("show-layer-comp")).clicked()
+                    && let Some(comp) = &chosen
+                {
+                    let edit = crate::comps::apply(&cx.world.arena, picture, comp, &comp.name);
+                    Self::apply(cx, edit);
+                    self.refresh_comp(cx);
+                }
+                if ui.button(tr!("update-layer-comp")).clicked()
+                    && let Some(comp) = comps.get_mut(dialog.chosen)
+                {
+                    *comp = crate::comps::capture(&cx.world.arena, picture, &comp.name);
+                    store = Some(tr!("update-layer-comp"));
+                }
+                if ui.button(tr!("rename")).clicked()
+                    && let Some(comp) = comps.get_mut(dialog.chosen)
+                {
+                    comp.name.clone_from(&name);
+                    store = Some(tr!("rename"));
+                }
+                if ui.button(tr!("delete")).clicked() && dialog.chosen < comps.len() {
+                    comps.remove(dialog.chosen);
+                    store = Some(tr!("delete-layer-comp"));
+                }
+            });
+        });
+        if let Some(label) = store {
+            Self::apply(cx, crate::comps::store(picture, &comps, &label));
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    !comps.is_empty(),
+                    egui::Button::new(tr!("export-layer-comps-ellipsis")),
+                )
+                .clicked()
+            {
+                self.run("file.export.layer_comps", cx);
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(tr!("close")).clicked() {
+                    outcome = Outcome::Cancel;
+                }
+            });
+        });
+        outcome
+    }
+
+    /// Shows the layers as the comp just applied set them.
+    fn refresh_comp(&mut self, cx: &AppletContext<'_>) {
+        if let Some(doc) = self.doc_mut() {
+            doc.compositor
+                .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+        }
+    }
+
     /// Keeps `filter`'s result on its layer and, for a tonal correction,
     /// on every layer picked with it (Clip Studio Paint 5.0), as one step.
     pub(crate) fn keep_filter(&mut self, cx: &mut AppletContext<'_>, filter: &FilterDialog) {
@@ -792,6 +907,13 @@ pub(crate) struct PagesDialog {
     pub chosen: usize,
 }
 
+/// The Layer Comps dialog: the comp chosen and the name being typed.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct CompsDialog {
+    pub chosen: usize,
+    pub name: String,
+}
+
 /// An open dialog.
 #[derive(Clone, Debug)]
 #[allow(clippy::large_enum_variant, reason = "one dialog is open at a time")]
@@ -803,6 +925,8 @@ pub(crate) enum Dialog {
     Shortcuts,
     Pressure(PressureDialog),
     Pages(PagesDialog),
+    /// Layer Comps (Clip Studio Paint EX).
+    Comps(CompsDialog),
     Frame(crate::comic::FrameSpec),
     Canvas(CanvasDialog),
     Resolution(ResolutionDialog),
@@ -992,6 +1116,7 @@ impl SuePaint {
             ),
             Dialog::Shortcuts => (tr!("keyboard-shortcuts"), vec2(470.0, 560.0)),
             Dialog::Pages(_) => (tr!("page-manager"), vec2(820.0, 620.0)),
+            Dialog::Comps(_) => (tr!("layer-comps"), vec2(420.0, 380.0)),
             Dialog::Frame(_) => (tr!("new-frame-border-folder"), vec2(420.0, 330.0)),
             Dialog::Canvas(_) => (tr!("change-canvas-size"), vec2(380.0, 300.0)),
             Dialog::Resolution(_) => (tr!("change-image-resolution"), vec2(380.0, 250.0)),
@@ -1088,6 +1213,7 @@ impl SuePaint {
                         Dialog::Filter(filter) => outcome = filter_ui(ui, filter, theme),
                         Dialog::Pressure(pressure) => outcome = pressure_ui(ui, pressure, theme),
                         Dialog::Pages(pages) => outcome = self.pages_ui(ui, pages, cx, theme),
+                        Dialog::Comps(comps) => outcome = self.comps_ui(ui, comps, cx, theme),
                         Dialog::Frame(frame) => outcome = frame_ui(ui, frame, theme),
                         Dialog::Text(_, lettering) => outcome = text_ui(ui, lettering, theme),
                         Dialog::Onion(onion) => outcome = onion_ui(ui, onion, theme),
@@ -1810,7 +1936,11 @@ impl SuePaint {
             && !ctx.text_edit_focused()
             && !matches!(
                 dialog,
-                Dialog::Shortcuts | Dialog::Pressure(_) | Dialog::Pages(_) | Dialog::Text(..)
+                Dialog::Shortcuts
+                    | Dialog::Pressure(_)
+                    | Dialog::Pages(_)
+                    | Dialog::Comps(_)
+                    | Dialog::Text(..)
             )
         {
             outcome = Outcome::Ok;
@@ -2234,6 +2364,7 @@ impl SuePaint {
                 | Dialog::Shortcuts
                 | Dialog::Pressure(_)
                 | Dialog::Pages(_)
+                | Dialog::Comps(_)
                 | Dialog::Frame(_)
                 | Dialog::Canvas(_)
                 | Dialog::Resolution(_)

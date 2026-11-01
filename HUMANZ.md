@@ -1781,6 +1781,12 @@ down and right to left and fills glyph outlines (read with ttf-parser from
 the shared font library) with an accumulation rasterizer after font-rs.
 Clicked inside a balloon, the Text tool centers the words in it.
 
+**Layer comps.** A picture keeps its comps as text in
+`picture.layer_comps` (`comps::encode`): each comp names its layers by
+`EntityId` with their visibility, opacity and blend. Showing one is one
+`Batch` of `SetProperty` (`comps::apply`); exporting applies it, flattens
+and reverts it, so the document is left as it was.
+
 **Vectors out and corrections on many layers.** `sue_io::svg::write_svg`
 writes an `SvgDrawing` that `parse_svg` reads back; `vector::svg_shapes`
 turns each vector line into an outline as wide as its brush made it.

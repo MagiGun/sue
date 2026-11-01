@@ -726,6 +726,12 @@ Once a canvas is open:
 - **More color palettes:** **Intermediate Color** blends four colors you set
   at its corners, and **Approximate Color** shows the shades near your
   color, as in Clip Studio Paint.
+- **Layer comps** (Layer, Layer Comps): set your layers as you want them
+  (which show, how strongly, how they blend), then New Layer Comp keeps
+  that as a named version, such as day and night or with and without the
+  background. Choose one and Show to see it again (or double-click it);
+  Update, Rename and Delete it; File, Special Export, Export layer comps
+  saves each as its own picture.
 - **Reference layers** (Layer, Layer Settings, Set as Reference Layer): the
   fill and auto select can look only at them, so you fill on one layer
   between the lines of another. **Rasterize** turns a vector layer into an

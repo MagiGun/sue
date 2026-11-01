@@ -21,6 +21,9 @@ follow [Semantic Versioning](https://semver.org/).
   you drag, and Speed Lines along the way you drag, each on an effect line
   layer that stays editable: the Object tool moves their ends, and Tool
   Property changes how many lines, their width, their scatter and color.
+- Layer comps, as in Clip Studio Paint EX: named versions of which
+  layers show, how strongly and how they blend, shown again in one step
+  and exported each as its own picture.
 - File, Special Export, Export vectors saves vector layers as SVG.
 - Tonal corrections change every picked layer at once, as in Clip Studio
   Paint 5.0, and Layer, Change Selected Layer has Select All Layers and

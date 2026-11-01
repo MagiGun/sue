@@ -3454,6 +3454,92 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_exports_each_layer_comp_as_its_own_picture() {
+        let (mut runtime, root) = runtime("paint-comps");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let command = |runtime: &mut Runtime, name: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: name.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.focus())
+            .unwrap();
+        // A black layer over the paper, and two comps: with it and without.
+        command(&mut runtime, "edit.fill");
+        step(&mut runtime, Vec::new());
+        let ink = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+            .into_iter()
+            .rfind(|info| info.kind == sue_model::picture::LayerKind::Raster)
+            .unwrap()
+            .id;
+        runtime
+            .engine
+            .world
+            .arena
+            .get_by_id_mut(picture)
+            .unwrap()
+            .properties_mut()
+            .set(
+                "picture.layer_comps",
+                format!(
+                    "Ink	{ink},1,1,normal
+Paper	{ink},0,1,normal"
+                ),
+            );
+        command(&mut runtime, "file.export.layer_comps");
+        let out = root.join("comps").join("Cover.png");
+        std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+        let _ = runtime.answer_pick(&out, &mut NoTextures, start);
+        step(&mut runtime, Vec::new());
+        let read = |name: &str| {
+            let bytes = std::fs::read(out.with_file_name(name)).expect(name);
+            sue_io::decode_png(&bytes).unwrap().tile.bytes().unwrap()[..3].to_vec()
+        };
+        assert_eq!(read("Cover-Ink.png"), vec![0, 0, 0], "the ink shows");
+        assert_eq!(
+            read("Cover-Paper.png"),
+            vec![255, 255, 255],
+            "the paper only"
+        );
+        // Exporting changed nothing on the canvas.
+        let style = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+            .into_iter()
+            .find(|info| info.id == ink)
+            .unwrap()
+            .style;
+        assert!(style.visible);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_corrects_every_picked_layer_as_one_step() {
         let (mut runtime, root) = runtime("paint-picked");
         let ctx = egui::Context::default();
