@@ -1640,6 +1640,9 @@ impl SuePaint {
         let sub = self.toolbox.current_mut();
         match tool {
             tool if tool.paints() => {
+                // Clip Studio Paint 5.0's Smart Shape.
+                ui.checkbox(&mut sub.smart_shape, small(&tr!("smart-shape")))
+                    .on_hover_text(tr!("smart-shape-hint"));
                 if tool == Tool::Eraser {
                     // How it erases lines on vector layers.
                     ui.horizontal(|ui| {

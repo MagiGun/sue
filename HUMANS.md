@@ -611,6 +611,10 @@ Once a canvas is open:
   level to move it. Your line picks the direction it starts in, and stays
   exactly on it. Delete Ruler takes them away, Show Ruler hides them, and
   they are saved with the picture.
+- **Smart Shape:** hold the pen still for a moment at the end of a stroke
+  and it becomes the clean shape you meant: a straight line, an arc, an
+  ellipse or circle, or a polygon such as a rectangle or triangle. Lift the
+  pen to keep it. Each pen and brush has it on or off in Tool Property.
 - **Text** (T): click and type right on the canvas, as in Clip Studio
   Paint, with a caret that follows the words; Enter starts a new line and
   Esc, Ctrl and Enter, or another tool keeps them as one step. Tool
@@ -666,8 +670,8 @@ Once a canvas is open:
   get. The **light table** (Animation, Light Table, or the Animation Cels
   palette) shows other layers under the cel you are drawing, to trace
   from: pick the layer, then Register Selected Layer.
-  File, Export Animation saves an animated GIF, a movie or every frame as a
-  picture.
+  File, Export Animation saves an animated GIF, an animated sticker
+  (APNG), a movie or every frame as a picture.
 - **Brushes you downloaded:** Add from downloads at the bottom of the
   Tool Group opens a file you downloaded and makes its brushes sub tools
   of the tool out: Clip Studio Paint sub tools (.sut), Photoshop brushes

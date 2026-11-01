@@ -2257,3 +2257,7 @@ justify = Justify:
 justify-start = Start
 justify-middle = Middle
 justify-end = End
+animated-png = Animated PNG
+animated-sticker-apng-ellipsis = Animated sticker (APNG)...
+smart-shape = Smart Shape
+smart-shape-hint = Hold the pen still at the end of a stroke and it becomes a clean line, arc, ellipse or polygon.

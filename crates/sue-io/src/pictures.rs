@@ -250,6 +250,112 @@ pub fn encode_picture(tile: &RasterTile2D, format: PictureFormat) -> Result<Vec<
     Ok(out.into_inner())
 }
 
+/// An animated PNG (APNG, Clip Studio Paint's animated sticker) of
+/// `frames` (same-size RGBA8 tiles), `delay_ms` apart, looping forever.
+/// Each frame is a whole PNG image; viewers that know no APNG show the
+/// first.
+///
+/// # Errors
+/// If there are no frames, they differ in size, or a frame does not encode.
+pub fn encode_apng(frames: &[RasterTile2D], delay_ms: u32) -> Result<Vec<u8>, String> {
+    use image::ImageEncoder;
+    use image::codecs::png::PngEncoder;
+    let first = frames.first().ok_or("an animation needs frames")?;
+    let (width, height) = (first.width(), first.height());
+    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut sequence = 0_u32;
+    let delay = u16::try_from(delay_ms.max(1)).unwrap_or(u16::MAX);
+    for (index, tile) in frames.iter().enumerate() {
+        if tile.width() != width || tile.height() != height || tile.format() != PixelFormat::Rgba8 {
+            return Err("every frame must be the same size of RGBA pixels".to_owned());
+        }
+        let pixels = tile.bytes().ok_or("a frame has no pixels")?;
+        let mut png = Vec::new();
+        PngEncoder::new(&mut png)
+            .write_image(pixels, width, height, image::ExtendedColorType::Rgba8)
+            .map_err(|error| error.to_string())?;
+        let chunks = png_chunks(&png)?;
+        if index == 0 {
+            let header = chunks
+                .iter()
+                .find(|(kind, _)| kind == b"IHDR")
+                .ok_or("a PNG without a header")?;
+            put_chunk(&mut out, b"IHDR", &header.1);
+            let mut control = Vec::new();
+            control.extend((frames.len() as u32).to_be_bytes());
+            control.extend(0_u32.to_be_bytes());
+            put_chunk(&mut out, b"acTL", &control);
+        }
+        let mut control = Vec::new();
+        control.extend(sequence.to_be_bytes());
+        control.extend(width.to_be_bytes());
+        control.extend(height.to_be_bytes());
+        control.extend(0_u32.to_be_bytes());
+        control.extend(0_u32.to_be_bytes());
+        control.extend(delay.to_be_bytes());
+        control.extend(1000_u16.to_be_bytes());
+        // Each frame replaces the last whole.
+        control.extend([0, 0]);
+        put_chunk(&mut out, b"fcTL", &control);
+        sequence += 1;
+        for (kind, data) in chunks.iter().filter(|(kind, _)| kind == b"IDAT") {
+            if index == 0 {
+                put_chunk(&mut out, kind, data);
+            } else {
+                let mut frame = sequence.to_be_bytes().to_vec();
+                frame.extend(data);
+                put_chunk(&mut out, b"fdAT", &frame);
+                sequence += 1;
+            }
+        }
+    }
+    put_chunk(&mut out, b"IEND", &[]);
+    Ok(out)
+}
+
+/// A PNG chunk: its kind and data.
+type Chunk = ([u8; 4], Vec<u8>);
+
+/// A PNG's chunks.
+fn png_chunks(png: &[u8]) -> Result<Vec<Chunk>, String> {
+    let mut chunks = Vec::new();
+    let mut at = 8;
+    while at + 12 <= png.len() {
+        let length = u32::from_be_bytes([png[at], png[at + 1], png[at + 2], png[at + 3]]) as usize;
+        let kind = [png[at + 4], png[at + 5], png[at + 6], png[at + 7]];
+        let data = png
+            .get(at + 8..at + 8 + length)
+            .ok_or("a PNG chunk runs past the end")?;
+        chunks.push((kind, data.to_vec()));
+        at += 12 + length;
+    }
+    Ok(chunks)
+}
+
+/// Appends a PNG chunk with its length and CRC.
+fn put_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+    out.extend((data.len() as u32).to_be_bytes());
+    out.extend(kind);
+    out.extend(data);
+    out.extend(crc32(kind, data).to_be_bytes());
+}
+
+/// The CRC-32 PNG chunks carry, over the kind and the data.
+fn crc32(kind: &[u8], data: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFF_u32;
+    for byte in kind.iter().chain(data) {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
 /// An animated GIF of `frames` (RGBA8, all the same size), each shown
 /// `delay_ms` milliseconds, looping forever.
 ///
@@ -386,5 +492,37 @@ mod tests {
         let error = encode_picture(&big, PictureFormat::Ico).unwrap_err();
         assert!(error.contains("256"));
         assert!(decode_picture(b"not a picture", None).is_err());
+    }
+
+    #[test]
+    fn apng_holds_every_frame_and_reads_back_as_its_first() {
+        let frame = |shade: u8| {
+            RasterTile2D::from_bytes(4, 3, PixelFormat::Rgba8, vec![shade; 48]).unwrap()
+        };
+        let frames = [frame(10), frame(120), frame(250)];
+        let bytes = encode_apng(&frames, 125).unwrap();
+        let chunks = png_chunks(&bytes).unwrap();
+        let count = |kind: &[u8; 4]| chunks.iter().filter(|(k, _)| k == kind).count();
+        assert_eq!(count(b"acTL"), 1);
+        assert_eq!(count(b"fcTL"), 3);
+        assert!(count(b"fdAT") >= 2);
+        let actl = &chunks.iter().find(|(k, _)| k == b"acTL").unwrap().1;
+        assert_eq!(&actl[..4], &3_u32.to_be_bytes());
+        // Every chunk's CRC checks, so other programs read it.
+        let mut at = 8;
+        while at < bytes.len() {
+            let length = u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+            let stored =
+                u32::from_be_bytes(bytes[at + 8 + length..at + 12 + length].try_into().unwrap());
+            assert_eq!(
+                stored,
+                crc32(&bytes[at + 4..at + 8], &bytes[at + 8..at + 8 + length])
+            );
+            at += 12 + length;
+        }
+        // A plain PNG reader sees the first frame.
+        let first = crate::decode_png(&bytes).unwrap().tile;
+        assert_eq!(first.bytes().unwrap()[0], 10);
+        assert!(encode_apng(&[], 100).is_err());
     }
 }

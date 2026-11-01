@@ -530,7 +530,10 @@ impl SuePaint {
                 ));
             }
             "anim.last" => self.go_to_frame(&cx.world.arena, -1),
-            "file.export.gif" | "file.export.sequence" | "file.export.movie" => {
+            "file.export.gif"
+            | "file.export.apng"
+            | "file.export.sequence"
+            | "file.export.movie" => {
                 self.ask_export_animation(cx, command);
             }
             _ => return false,
@@ -554,6 +557,13 @@ impl SuePaint {
                 "anim-gif",
                 vec![FileType::new(&tr!("animated-gif"), &["gif"])],
                 format!("{name}.gif"),
+            )
+        } else if command == "file.export.apng" {
+            // Clip Studio Paint's animated sticker.
+            (
+                "anim-gif",
+                vec![FileType::new(&tr!("animated-png"), &["png", "apng"])],
+                format!("{name}.png"),
             )
         } else if command == "file.export.movie" {
             (
@@ -642,7 +652,8 @@ impl SuePaint {
         Some((frames, anim::fps(&sequence)))
     }
 
-    /// Writes the animation to `path`: one GIF, or `Name-0001.png` and on.
+    /// Writes the animation to `path`: one GIF or animated PNG (by its
+    /// extension), or `Name-0001.png` and on.
     pub(crate) fn export_animation(&mut self, cx: &mut AppletContext<'_>, path: &Path, gif: bool) {
         let Some((frames, fps)) = self.render_frames(&cx.world.arena) else {
             return;
@@ -652,7 +663,15 @@ impl SuePaint {
         }
         if gif {
             let delay = (1000.0 / fps.max(1.0)).round() as u32;
-            match sue_io::encode_gif_animation(&frames, delay).and_then(|bytes| {
+            let apng = path.extension().is_some_and(|ext| {
+                ext.eq_ignore_ascii_case("png") || ext.eq_ignore_ascii_case("apng")
+            });
+            let encoded = if apng {
+                sue_io::encode_apng(&frames, delay)
+            } else {
+                sue_io::encode_gif_animation(&frames, delay)
+            };
+            match encoded.and_then(|bytes| {
                 write_atomic(path, &bytes)
                     .map_err(|error| error.to_string())
                     .map(|()| bytes.len())

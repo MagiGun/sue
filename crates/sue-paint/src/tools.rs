@@ -981,6 +981,9 @@ pub struct SubTool {
     pub leading: f32,
     /// The Text tool's justification: 0 start, 1 middle, 2 end.
     pub justify: u8,
+    /// Holding the pen still at a stroke's end makes it a clean shape
+    /// (Smart Shape).
+    pub smart_shape: bool,
 }
 
 impl SubTool {
@@ -1010,6 +1013,7 @@ impl SubTool {
             tracking: 0.0,
             leading: 0.0,
             justify: 0,
+            smart_shape: true,
         }
     }
 

@@ -1466,6 +1466,34 @@ impl Stroke {
         }
     }
 
+    /// Draws the stroke again along `path` instead of where the pen went
+    /// (Smart Shape), at the stroke's mean pressure; still one stroke to
+    /// undo.
+    pub fn reshape(
+        &mut self,
+        raster: &mut RasterTile2D,
+        path: &[[f32; 2]],
+        selection: Option<&Selection>,
+    ) {
+        let pressure = self
+            .samples
+            .iter()
+            .map(|sample| sample.pressure)
+            .sum::<f32>()
+            / self.samples.len().max(1) as f32;
+        let pressure = if self.samples.is_empty() {
+            1.0
+        } else {
+            pressure
+        };
+        self.pending = None;
+        self.restart(raster);
+        for point in path {
+            self.to(raster, *point, pressure, selection);
+        }
+        self.flush(raster, selection);
+    }
+
     /// Takes the stroke back as if it was never drawn (a second finger came
     /// down: it was a pinch, not a line): the pixels from before it go back
     /// and nothing is left to undo. Answers the rectangles that changed.
@@ -2899,6 +2927,25 @@ mod tests {
         let alpha = |x: u32, y: u32| raster.bytes().unwrap()[((y * 40 + x) * 4 + 3) as usize];
         assert!(alpha(20, 14) > 100, "the plus reaches up");
         assert!(alpha(14, 14) < 30, "but not into the corner");
+    }
+
+    #[test]
+    fn a_reshaped_stroke_lies_along_its_new_path_only() {
+        let mut raster = layer(120, 120);
+        let mut stroke = Stroke::new(EntityId::new(), flat_pen(6.0), [0.0, 0.0, 0.0], false);
+        // A wavy line, drawn.
+        for step in 0..=50 {
+            let x = 10.0 + step as f32 * 2.0;
+            stroke.to(&mut raster, [x, 60.0 + (x / 8.0).sin() * 20.0], 1.0, None);
+        }
+        assert!(alpha(&raster, 63, 79) > 100, "the wave dips");
+        // Straightened: only the straight line is left.
+        let path: Vec<[f32; 2]> = (0..=100).map(|step| [10.0 + step as f32, 60.0]).collect();
+        stroke.reshape(&mut raster, &path, None);
+        stroke.end(&mut raster, Finish::default(), None);
+        assert_eq!(alpha(&raster, 63, 79), 0, "the wave is gone");
+        assert!(alpha(&raster, 60, 60) > 200, "the line is drawn");
+        assert!(stroke.samples().len() > 50, "the stroke is the new path");
     }
 
     #[test]

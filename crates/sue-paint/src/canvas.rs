@@ -1034,6 +1034,7 @@ impl SuePaint {
         if let Some(doc) = self.docs.get(self.active) {
             self.on_screen = on_screen(&doc.view, viewport, size, ctx.pixels_per_point());
         }
+        self.smart_shape(&ctx, viewport, size, cx);
         let (visible, step) = self.on_screen;
         // Show what the stroke painted this frame: only the tiles it
         // changed, over the kept stacks around its layer, at the detail
@@ -1329,6 +1330,8 @@ impl SuePaint {
                         && cx.rice().get_bool("sue_paint.shift_line").unwrap_or(true),
                     snap,
                     vector,
+                    rest: None,
+                    shaped: !sub.smart_shape,
                 });
             }
             Tool::Text => self.text_at(p, cx),
@@ -1858,6 +1861,78 @@ impl SuePaint {
         if let Some(doc) = self.docs.get_mut(self.active) {
             doc.compositor
                 .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+        }
+    }
+
+    /// Smart Shape: while a stroke's pen rests in one place long enough,
+    /// the stroke becomes the clean shape it was meant to be.
+    fn smart_shape(
+        &mut self,
+        ctx: &egui::Context,
+        viewport: Rect,
+        size: [u32; 2],
+        cx: &mut AppletContext<'_>,
+    ) {
+        let (now, pointer, down) = ctx.input(|input| {
+            (
+                input.time,
+                input.pointer.latest_pos(),
+                input.pointer.primary_down(),
+            )
+        });
+        let Some(Gesture::Stroke {
+            stroke,
+            line,
+            snap,
+            rest,
+            shaped,
+            shifted,
+            vector,
+            ..
+        }) = self.gesture.as_mut()
+        else {
+            return;
+        };
+        let (Some(pointer), true, false) = (pointer, down, *line || *shaped || snap.is_some())
+        else {
+            return;
+        };
+        let Some(doc) = self.docs.get(self.active) else {
+            return;
+        };
+        match rest {
+            Some((since, at)) if at.distance(pointer) <= crate::smart::HOLD_REACH => {
+                let waited = now - *since;
+                if waited < crate::smart::HOLD_SECONDS {
+                    ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+                        crate::smart::HOLD_SECONDS - waited,
+                    ));
+                    return;
+                }
+            }
+            _ => {
+                *rest = Some((now, pointer));
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+                    crate::smart::HOLD_SECONDS,
+                ));
+                return;
+            }
+        }
+        // Rested long enough: the shape, if the stroke makes one.
+        let points: Vec<[f32; 2]> = stroke.samples().iter().map(|sample| sample.at).collect();
+        let step = (stroke.tip().size * 0.25).clamp(0.75, 4.0);
+        let Some(path) = crate::smart::recognize(&points, step) else {
+            // No shape fits (yet): the stroke carries on as drawn.
+            *rest = Some((now, pointer));
+            return;
+        };
+        *shaped = true;
+        let selection = (!*vector)
+            .then(|| shifted.as_ref().or(doc.selection.as_ref()))
+            .flatten();
+        let _ = (viewport, size);
+        if let Some(raster) = doc::raster_mut(&mut cx.world.arena, stroke.layer()) {
+            stroke.reshape(raster, &path, selection);
         }
     }
 
@@ -2526,6 +2601,8 @@ impl SuePaint {
                 line,
                 snap,
                 vector,
+                rest,
+                shaped,
                 ..
             } => {
                 let mut local = [p.x - offset[0] as f32, p.y - offset[1] as f32];
@@ -2538,8 +2615,9 @@ impl SuePaint {
                     }
                 }
                 *raw = local;
-                if *line {
-                    // A straight line waits for the release.
+                if *line || (*shaped && rest.is_some()) {
+                    // A straight line waits for the release; a stroke that
+                    // became its shape stays it.
                     return;
                 }
                 trail.push((time, local));
@@ -2700,10 +2778,15 @@ impl SuePaint {
                 line,
                 snap,
                 vector,
+                rest,
+                shaped,
             } => {
                 let Some(doc) = self.docs.get_mut(self.active) else {
                     return;
                 };
+                // A stroke that became its shape (Smart Shape) ends as it is.
+                let smart = shaped && rest.is_some();
+                let line = line || smart;
                 // A line along a ruler stays exactly on it.
                 let snapped = snap.as_ref().is_some_and(crate::rulers::Snap::chosen);
                 let (correction, flick) = if line || snapped {
@@ -2736,7 +2819,9 @@ impl SuePaint {
                     .map_or(pressure, |sample| sample.pressure);
                 let mut drawn = None;
                 if let Some(raster) = doc::raster_mut(&mut cx.world.arena, layer) {
-                    if line {
+                    if smart {
+                        // The shape is drawn already.
+                    } else if line {
                         stroke.to(raster, raw, last, selection);
                     } else {
                         for point in stabilizer.catch_up(raw) {

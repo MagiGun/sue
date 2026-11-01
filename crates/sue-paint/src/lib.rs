@@ -75,6 +75,7 @@ pub mod quick;
 pub mod rulers;
 pub mod select;
 pub mod simple;
+mod smart;
 mod start;
 pub mod story;
 mod studio;

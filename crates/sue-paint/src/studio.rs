@@ -155,6 +155,10 @@ pub(crate) enum Gesture {
         snap: Option<crate::rulers::Snap>,
         /// On a vector layer: the stroke is kept as a line too.
         vector: bool,
+        /// Smart Shape: where and since when the pen has rested, and
+        /// whether the stroke already became its shape.
+        rest: Option<(f64, Pos2)>,
+        shaped: bool,
     },
     /// The eraser on a vector layer: its pixels and lines from before, the
     /// lines now, and where the eraser last was (layer pixels).
@@ -1075,6 +1079,7 @@ fn implemented(command: &str) -> bool {
             | "anim.next"
             | "anim.prev"
             | "file.export.gif"
+            | "file.export.apng"
             | "file.export.sequence"
             | "file.export.bmp"
             | "file.export.tif"
@@ -4142,6 +4147,7 @@ impl SuePaint {
         }
         if (command.starts_with("anim.")
             || command.starts_with("file.export.gif")
+            || command == "file.export.apng"
             || command == "file.export.sequence"
             || command == "file.export.movie"
             || command == "file.export.cels")

@@ -30,7 +30,7 @@ rows are at the end.
 | Area | done | partial | missing | percent |
 | --- | --- | --- | --- | --- |
 | File: new, open and save | 10 | 1 | 5 | 66 |
-| File: export | 10 | 1 | 7 | 58 |
+| File: export | 11 | 1 | 6 | 64 |
 | File: import, batch and scanning | 3 | 4 | 8 | 33 |
 | Edit: undo, clipboard and fills | 8 | 5 | 0 | 81 |
 | Edit: transform and canvas size | 8 | 6 | 0 | 79 |
@@ -42,7 +42,7 @@ rows are at the end.
 | Comics: frames, balloons and webtoons | 11 | 0 | 0 | 100 |
 | Story: multi-page works (EX) | 6 | 5 | 2 | 65 |
 | Animation | 12 | 1 | 1 | 89 |
-| Tools and drawing | 28 | 6 | 2 | 86 |
+| Tools and drawing | 29 | 6 | 1 | 89 |
 | Text | 6 | 2 | 2 | 70 |
 | Vector | 6 | 2 | 0 | 88 |
 | 3D | 5 | 0 | 8 | 38 |
@@ -52,9 +52,9 @@ rows are at the end.
 | Materials and assets | 6 | 3 | 2 | 68 |
 | Print | 0 | 2 | 2 | 25 |
 | Preferences and settings | 5 | 2 | 1 | 75 |
-| File formats | 9 | 2 | 3 | 71 |
+| File formats | 9 | 3 | 2 | 75 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 235 | 55 | 46 | 78 |
+| **All of Sue Paint** | 237 | 56 | 43 | 79 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -132,7 +132,7 @@ The order of work is the plan at the end.
 | Export animation: image sequence | File > Export animation > Image sequence | done | |
 | Export animation: Animated GIF | File > Export animation > Animated GIf | done | |
 | Export animation: movie | File > Export animation > Movie | done | Verify the sound track rides along |
-| Export animation: Animated sticker (APNG) | File > Export animation | missing | |
+| Export animation: Animated sticker (APNG) | File > Export animation | done | Loops forever; other viewers show the first frame |
 | Export animation: Animated WebP | File > Export animation | missing | |
 | Export animation: OpenToonz Scene File | File > Export animation | missing | |
 | Export animation: Exposure sheet | File > Export animation | missing | |
@@ -369,7 +369,7 @@ The order of work is the plan at the end.
 | Auto Select (magic wand) | Tool | done | Looks at reference layers only when set |
 | Gradient tool | Tool | partial | Gradient layers exist; verify the tool's dials |
 | Figure tool (rectangle, ellipse, polygon, polyline) | Tool | partial | Shapes exist; verify strokes, fills and polylines |
-| Smart Shape (5.0) | Drawing with any tool | missing | Hold a stroke to snap it to a clean line, curve or figure |
+| Smart Shape (5.0) | Drawing with any tool | done | Hold the pen still: a line, arc, ellipse, circle or polygon; on or off per sub tool |
 | Text tool | Tool | done | |
 | Ruler tools | Tool | done | |
 | Frame Border tool | Tool | done | |
@@ -547,7 +547,7 @@ The order of work is the plan at the end.
 | QOI, GIF (flat) | Save, Export | done | |
 | PDF, EPUB (EX) | Export multiple pages | done | |
 | Animated GIF, MP4 | Export animation | done | |
-| APNG, Animated WebP | Export animation | missing | |
+| APNG, Animated WebP | Export animation | partial | APNG done; Animated WebP to come |
 | OpenToonz scene | Export animation | missing | |
 | OBJ (3D import) | File > Import > 3D Data | done | |
 | FBX (5.1) | File > Import | missing | |

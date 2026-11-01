@@ -1781,6 +1781,15 @@ down and right to left and fills glyph outlines (read with ttf-parser from
 the shared font library) with an accumulation rasterizer after font-rs.
 Clicked inside a balloon, the Text tool centers the words in it.
 
+**Smart Shape.** While a stroke's pen rests (`smart::HOLD_SECONDS` within
+`smart::HOLD_REACH` screen points), `smart::recognize` reads the stroke's
+samples and answers a line, arc (a circle through its ends and middle),
+ellipse or polygon (Ramer-Douglas-Peucker corners that every sample lies
+near), densely; `Stroke::reshape` puts the pixels from before back and
+draws the shape, so it is still one stroke to undo. APNG export
+(`sue_io::encode_apng`) writes each frame's PNG data as `IDAT` or `fdAT`
+chunks behind `acTL` and `fcTL`.
+
 **Folios and text layout.** A story's folio (`story.folio`, its size,
 place and `story.first_number`) is drawn by `story::draw_folio` onto every
 exported page and shown on the canvas; `story.start` pairs the first page

@@ -3454,6 +3454,107 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_smart_shape_straightens_a_held_stroke() {
+        let (mut runtime, root) = runtime("paint-smart");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.focus())
+            .unwrap();
+        // How tall the ink on the drawing layer is, in pixels.
+        let ink_height = |runtime: &Runtime| {
+            let arena = &runtime.engine.world.arena;
+            let layer = sue_paint::doc::layers(arena, picture)
+                .into_iter()
+                .rfind(|info| info.kind == sue_model::picture::LayerKind::Raster)
+                .unwrap()
+                .id;
+            let raster = sue_paint::doc::raster(arena, layer).unwrap();
+            let width = raster.width() as usize;
+            let rows: Vec<usize> = raster
+                .bytes()
+                .unwrap()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .enumerate()
+                .filter(|(_, pixel)| pixel[3] > 128)
+                .map(|(index, _)| index / width)
+                .collect();
+            rows.iter()
+                .max()
+                .zip(rows.iter().min())
+                .map_or(0, |(a, b)| a - b)
+        };
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: plain,
+        };
+        // A wavy stroke across the canvas with the pen, held still at its
+        // end or not.
+        step(&mut runtime, vec![key(egui::Key::P, plain)]);
+        let middle = paint_middle(&runtime);
+        let draw = |step: &mut dyn FnMut(&mut Runtime, Vec<egui::Event>),
+                    runtime: &mut Runtime,
+                    hold: bool| {
+            let from = middle - vec2(150.0, 0.0);
+            step(
+                runtime,
+                vec![egui::Event::PointerMoved(from), press(from, true)],
+            );
+            let mut at = from;
+            for part in 1..=60 {
+                let x = part as f32 * 5.0;
+                at = from + vec2(x, (x / 20.0).sin() * 6.0);
+                step(runtime, vec![egui::Event::PointerMoved(at)]);
+            }
+            if hold {
+                for _ in 0..60 {
+                    step(runtime, Vec::new());
+                }
+            }
+            step(runtime, vec![press(at, false)]);
+            step(runtime, Vec::new());
+        };
+        draw(&mut step, &mut runtime, false);
+        let wavy = ink_height(&runtime);
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        assert_eq!(ink_height(&runtime), 0, "undone");
+        let depth = runtime.engine.history.depth();
+        draw(&mut step, &mut runtime, true);
+        let straight = ink_height(&runtime);
+        assert!(straight + 4 < wavy, "straightened: {straight} from {wavy}");
+        assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_types_text_on_the_canvas_as_one_step() {
         let (mut runtime, root) = runtime("paint-typing");
         let ctx = egui::Context::default();

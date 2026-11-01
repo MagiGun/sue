@@ -196,6 +196,7 @@ pub fn menus() -> Vec<Menu> {
                     &tr!("export-animation"),
                     vec![
                         act(&tr!("animated-gif-ellipsis"), "file.export.gif"),
+                        act(&tr!("animated-sticker-apng-ellipsis"), "file.export.apng"),
                         act(&tr!("movie-ellipsis"), "file.export.movie"),
                         act(&tr!("image-sequence-ellipsis"), "file.export.sequence"),
                         act(&tr!("animation-cels-ellipsis"), "file.export.cels"),

@@ -51,8 +51,8 @@ pub use jxl::{
     JxlError, JxlImageInfo, JxlPipeline, JxlProbe, NativeJxlPipeline, ProgressiveTarget, probe_jxl,
 };
 pub use pictures::{
-    PICTURE_SAVE_TYPES, PictureFormat, decode_picture, encode_as, encode_gif_animation,
-    encode_picture,
+    PICTURE_SAVE_TYPES, PictureFormat, decode_picture, encode_apng, encode_as,
+    encode_gif_animation, encode_picture,
 };
 pub use raster::{
     DecodedRaster, RasterInfo, decode_jpeg, decode_png, encode_jpeg, encode_png, encode_png_rgba,
