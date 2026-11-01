@@ -30,8 +30,8 @@ rows are at the end.
 | Area | done | partial | missing | percent |
 | --- | --- | --- | --- | --- |
 | File: new, open and save | 10 | 1 | 5 | 66 |
-| File: export | 13 | 1 | 4 | 75 |
-| File: import, batch and scanning | 4 | 4 | 7 | 40 |
+| File: export | 15 | 1 | 2 | 86 |
+| File: import, batch and scanning | 5 | 4 | 6 | 47 |
 | Edit: undo, clipboard and fills | 8 | 5 | 0 | 81 |
 | Edit: transform and canvas size | 8 | 6 | 0 | 79 |
 | Tonal correction and color | 11 | 1 | 0 | 96 |
@@ -41,20 +41,20 @@ rows are at the end.
 | Rulers and symmetry | 7 | 1 | 0 | 94 |
 | Comics: frames, balloons and webtoons | 11 | 0 | 0 | 100 |
 | Story: multi-page works (EX) | 6 | 5 | 2 | 65 |
-| Animation | 12 | 1 | 1 | 89 |
+| Animation | 13 | 1 | 0 | 96 |
 | Tools and drawing | 29 | 6 | 1 | 89 |
-| Text | 6 | 2 | 2 | 70 |
+| Text | 6 | 3 | 1 | 75 |
 | Vector | 6 | 2 | 0 | 88 |
-| 3D | 5 | 0 | 8 | 38 |
+| 3D | 6 | 1 | 6 | 50 |
 | Colors | 9 | 0 | 1 | 90 |
 | View and navigation | 9 | 3 | 0 | 88 |
 | Window, palettes and workspaces | 14 | 3 | 1 | 86 |
 | Materials and assets | 6 | 3 | 2 | 68 |
 | Print | 0 | 2 | 2 | 25 |
 | Preferences and settings | 5 | 2 | 1 | 75 |
-| File formats | 9 | 3 | 2 | 75 |
+| File formats | 10 | 2 | 2 | 79 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 241 | 56 | 39 | 80 |
+| **All of Sue Paint** | 247 | 57 | 32 | 82 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -133,9 +133,9 @@ The order of work is the plan at the end.
 | Export animation: Animated GIF | File > Export animation > Animated GIf | done | |
 | Export animation: movie | File > Export animation > Movie | done | Verify the sound track rides along |
 | Export animation: Animated sticker (APNG) | File > Export animation | done | Loops forever; other viewers show the first frame |
-| Export animation: Animated WebP | File > Export animation | missing | |
+| Export animation: Animated WebP | File > Export animation | done | Lossless frames, looping |
 | Export animation: OpenToonz Scene File | File > Export animation | missing | |
-| Export animation: Exposure sheet | File > Export animation | missing | |
+| Export animation: Exposure sheet | File > Export animation | done | As CSV: frames down, folders across |
 | Export animation cels | File > Export animation > Export animation cels | done | Every cel as its own picture |
 | Export multiple pages: PDF (EX) | File > Export multiple pages > .pdf | done | A book of every page, manga read right to left |
 | Export multiple pages: EPUB (EX) | File > Export multiple pages > Export EPUB data | done | |
@@ -164,7 +164,7 @@ The order of work is the plan at the end.
 | Create file object | File > Import > Create file object | missing | Another file embedded as an object layer |
 | Batch import (EX) | File > Import > Batch import | done | Every picture in a folder, by name, one a page |
 | Scan, Continuous Scan, Select Scan Device | File > Import > Scan | missing | A scanner talks through `sue-platform` |
-| Exposure sheet import | File > Import > Exposure sheet | missing | |
+| Exposure sheet import | File > Import > Exposure sheet | done | CSV, cels found by layer name |
 | Batch process (EX) | File > Batch process | missing | Run commands on many pages or files at once |
 
 ## Edit: undo, clipboard and fills
@@ -350,7 +350,7 @@ The order of work is the plan at the end.
 | Timeline palette as Clip Studio's | Palette | done | Cels as pictures, every other second lighter, the current frame a red bar |
 | Animation Cels palette | Palette | done | |
 | Sound on the timeline | Animation, File > Import > Audio | done | Plays along, drag to move, right-click to mute or delete |
-| Exposure sheet (EX) | Animation | missing | |
+| Exposure sheet (EX) | Animation | done | Animation > Timeline > Exposure Sheet: cels, blanks and holds, set by clicking |
 | Camera track depth (easing curves between keys) | Timeline palette | partial | Keys glide; easing to verify |
 
 ## Tools and drawing
@@ -406,7 +406,7 @@ The order of work is the plan at the end.
 | Mixed fonts and sizes in one text layer | Text tool | partial | To verify |
 | Letter spacing, line spacing, justification | Text tool | done | Tool Property, also for words being typed; kept on the text layer |
 | Font list with previews and recent fonts | Tool Settings | partial | To verify |
-| Text along a curve or inside a shape | Text tool | missing | |
+| Text along a curve or inside a shape | Text tool | partial | Text on Curve done; text that wraps inside a shape to come |
 | Character palette (special glyphs) | Palette | missing | |
 
 ## Vector
@@ -431,12 +431,12 @@ The order of work is the plan at the end.
 | Camera: drag to turn, Shift to move, Ctrl to come nearer | Object tool | done | |
 | Light and shading settings | Tool Settings | done | Shaded, line art or both |
 | Convert 3D to Lines and Tones (EX) | Layer > Convert to Lines and Tones | done | Clean line art and tone to draw over |
-| Drawing figures with poses and pose materials | Materials, 3D | missing | |
+| Drawing figures with poses and pose materials | Materials, 3D | partial | Seven preset poses on the drawing figure; no pose material library yet |
 | 3D head models (5.1) | 3D | missing | |
 | 3D hand models and Hand Scanner posing (5.0) | 3D, Materials | missing | |
 | Painting directly on 3D (5.0, 5.1) | 3D | missing | |
 | VRM import and photorealistic rendering | File > Import | missing | |
-| Height-based fog, Follow camera light (5.0, 5.1) | 3D settings | missing | |
+| Height-based fog, Follow camera light (5.0, 5.1) | 3D settings | done | In the 3D layer's Tool Property |
 | Batch texture export (EX) | File > Export | missing | |
 | FBX import (5.1) | File > Import | missing | |
 
@@ -547,7 +547,7 @@ The order of work is the plan at the end.
 | QOI, GIF (flat) | Save, Export | done | |
 | PDF, EPUB (EX) | Export multiple pages | done | |
 | Animated GIF, MP4 | Export animation | done | |
-| APNG, Animated WebP | Export animation | partial | APNG done; Animated WebP to come |
+| APNG, Animated WebP | Export animation | done | |
 | OpenToonz scene | Export animation | missing | |
 | OBJ (3D import) | File > Import > 3D Data | done | |
 | FBX (5.1) | File > Import | missing | |

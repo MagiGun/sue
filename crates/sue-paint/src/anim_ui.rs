@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, pos2, vec2};
+use egui::{Align2, Color32, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 use sue_core::EntityId;
 use sue_core::txn::{Rename, SetProperty};
 use sue_model::Sequence;
@@ -497,6 +497,42 @@ impl SuePaint {
             "anim.next" => self.go_to_frame(&cx.world.arena, i64::from(frame) + 1),
             "anim.prev" => self.go_to_frame(&cx.world.arena, i64::from(frame) - 1),
             "anim.first" => self.go_to_frame(&cx.world.arena, 0),
+            "file.export.exposure_sheet" | "file.import.exposure_sheet" => {
+                let Some((picture, _, _)) = &here else {
+                    cx.fail(tr!("make-timeline-first-animation-timeline-new"));
+                    return true;
+                };
+                let name = cx
+                    .world
+                    .arena
+                    .get_by_id(*picture)
+                    .map_or_else(|_| tr!("animation"), |entity| entity.name().to_owned());
+                let types = vec![FileType::new(&tr!("exposure-sheet-csv"), &["csv"])];
+                let pick = if command == "file.export.exposure_sheet" {
+                    FilePick::save(
+                        Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
+                        "exposure-sheet-out",
+                        &tr!("exposure-sheet"),
+                        &format!("{name}.csv"),
+                    )
+                } else {
+                    FilePick::open(
+                        Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
+                        "exposure-sheet-in",
+                        &tr!("exposure-sheet"),
+                    )
+                };
+                cx.request(ShellRequest::PickFile(
+                    pick.types(types).starting_in(self.last_dir.clone()),
+                ));
+            }
+            "anim.exposure_sheet" => {
+                if here.is_some() {
+                    self.dialog = Some(crate::dialogs::Dialog::Exposure);
+                } else {
+                    cx.fail(tr!("make-timeline-first-animation-timeline-new"));
+                }
+            }
             "anim.timeline.edit" => {
                 if let Some((_, sequence, length)) = &here {
                     self.dialog = Some(crate::dialogs::Dialog::Timeline(
@@ -532,6 +568,7 @@ impl SuePaint {
             "anim.last" => self.go_to_frame(&cx.world.arena, -1),
             "file.export.gif"
             | "file.export.apng"
+            | "file.export.webp_animation"
             | "file.export.sequence"
             | "file.export.movie" => {
                 self.ask_export_animation(cx, command);
@@ -557,6 +594,12 @@ impl SuePaint {
                 "anim-gif",
                 vec![FileType::new(&tr!("animated-gif"), &["gif"])],
                 format!("{name}.gif"),
+            )
+        } else if command == "file.export.webp_animation" {
+            (
+                "anim-gif",
+                vec![FileType::new(&tr!("animated-webp"), &["webp"])],
+                format!("{name}.webp"),
             )
         } else if command == "file.export.apng" {
             // Clip Studio Paint's animated sticker.
@@ -666,7 +709,12 @@ impl SuePaint {
             let apng = path.extension().is_some_and(|ext| {
                 ext.eq_ignore_ascii_case("png") || ext.eq_ignore_ascii_case("apng")
             });
-            let encoded = if apng {
+            let webp = path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("webp"));
+            let encoded = if webp {
+                sue_io::encode_webp_animation(&frames, delay)
+            } else if apng {
                 sue_io::encode_apng(&frames, delay)
             } else {
                 sue_io::encode_gif_animation(&frames, delay)
@@ -1339,5 +1387,170 @@ impl SuePaint {
                 self.go_to_frame(&cx.world.arena, i64::from(at));
             }
         }
+    }
+
+    /// The exposure sheet (Clip Studio Paint EX's timesheet): a row for
+    /// each frame and a column for each animation folder, each cell what
+    /// that folder shows from that frame: a cel, a blank (x), or a hold
+    /// (|). A cell's menu sets it; a frame's number goes to that frame.
+    pub(crate) fn exposure_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        cx: &mut AppletContext<'_>,
+        theme: &sue_wm::Theme,
+    ) -> crate::dialogs::Outcome {
+        use crate::dialogs::Outcome;
+        let mut outcome = Outcome::Open;
+        let Some((picture, sequence, length)) = self.timeline_here(&cx.world.arena) else {
+            return Outcome::Cancel;
+        };
+        let folders = anim::folders(&sequence);
+        let names: Vec<(EntityId, String)> = doc::layers(&cx.world.arena, picture)
+            .into_iter()
+            .rev()
+            .filter(|info| info.kind == sue_model::picture::LayerKind::Raster)
+            .filter_map(|info| {
+                let entity = cx.world.arena.get_by_id(info.id).ok()?;
+                Some((info.id, entity.name().to_owned()))
+            })
+            .collect();
+        let name_of = |cel: EntityId| {
+            names
+                .iter()
+                .find(|(id, _)| *id == cel)
+                .map_or_else(|| "?".to_owned(), |(_, name)| name.clone())
+        };
+        let columns: Vec<Vec<Option<Option<EntityId>>>> = folders
+            .iter()
+            .map(|track| anim::sheet(&sequence.tracks[*track], sequence.rate, length))
+            .collect();
+        let now = self.doc().map_or(0, |doc| doc.frame);
+        // What a cell's menu asked for: its folder, frame and new content
+        // (`None` holds, `Some(None)` is blank).
+        let mut wanted: Option<(usize, u32, Option<Option<EntityId>>)> = None;
+        let mut go = None;
+        egui::ScrollArea::both()
+            .max_height(ui.available_height() - 40.0)
+            .show(ui, |ui| {
+                egui::Grid::new("sue-paint-exposure-sheet")
+                    .striped(true)
+                    .spacing(egui::vec2(10.0, 2.0))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(tr!("frame")).color(theme.muted));
+                        for track in &folders {
+                            ui.label(RichText::new(&sequence.tracks[*track].name).strong());
+                        }
+                        ui.end_row();
+                        for frame in 0..length {
+                            let number = RichText::new((frame + 1).to_string());
+                            let number = if frame == now {
+                                number.color(theme.border_active).strong()
+                            } else {
+                                number.color(theme.muted)
+                            };
+                            if ui.add(egui::Button::new(number).frame(false)).clicked() {
+                                go = Some(frame);
+                            }
+                            for (column, track) in columns.iter().zip(&folders) {
+                                let text = match column[frame as usize] {
+                                    Some(Some(cel)) => name_of(cel),
+                                    Some(None) => "x".to_owned(),
+                                    None => "|".to_owned(),
+                                };
+                                ui.menu_button(text, |ui| {
+                                    for (id, name) in &names {
+                                        if ui.button(name).clicked() {
+                                            wanted = Some((*track, frame, Some(Some(*id))));
+                                            ui.close();
+                                        }
+                                    }
+                                    ui.separator();
+                                    if ui.button(tr!("blank-cel")).clicked() {
+                                        wanted = Some((*track, frame, Some(None)));
+                                        ui.close();
+                                    }
+                                    if ui.button(tr!("hold-previous")).clicked() {
+                                        wanted = Some((*track, frame, None));
+                                        ui.close();
+                                    }
+                                });
+                            }
+                            ui.end_row();
+                        }
+                    });
+            });
+        if let Some((track, frame, content)) = wanted {
+            let changed = match content {
+                Some(cel) => anim::assign(&sequence, track, frame, cel, picture, length),
+                None => anim::unassign(&sequence, track, frame, length),
+            };
+            Self::apply(cx, anim::set(picture, changed, &tr!("exposure-sheet")));
+            self.go_to_frame(&cx.world.arena, i64::from(frame));
+        }
+        if let Some(frame) = go {
+            self.go_to_frame(&cx.world.arena, i64::from(frame));
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button(tr!("close")).clicked() {
+                outcome = Outcome::Cancel;
+            }
+        });
+        outcome
+    }
+
+    /// Writes the exposure sheet to `path` as CSV.
+    pub(crate) fn export_exposure_sheet(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let Some((_, sequence, length)) = self.timeline_here(&cx.world.arena) else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        let arena = &cx.world.arena;
+        let text = anim::sheet_csv(&sequence, length, |cel| {
+            arena
+                .get_by_id(cel)
+                .map_or_else(|_| "?".to_owned(), |entity| entity.name().to_owned())
+        });
+        match write_atomic(path, text.as_bytes()) {
+            Ok(()) => cx.saved(path, tr!("frames-count", count = length)),
+            Err(error) => cx.fail(tr!("cannot-export", error = error.to_string())),
+        }
+    }
+
+    /// Reads an exposure sheet's CSV from `path` onto the timeline, cels
+    /// found by their layer names, as one undo step.
+    pub(crate) fn import_exposure_sheet(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let Some((picture, sequence, length)) = self.timeline_here(&cx.world.arena) else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        let text = match sue_platform::fs::read(path) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(error) => {
+                cx.fail(error.to_string());
+                return;
+            }
+        };
+        let arena = &cx.world.arena;
+        let layers = doc::layers(arena, picture);
+        let (read, new_length) = anim::from_sheet_csv(&sequence, length, &text, picture, |name| {
+            layers.iter().map(|info| info.id).find(|id| {
+                arena
+                    .get_by_id(*id)
+                    .is_ok_and(|entity| entity.name() == name)
+            })
+        });
+        let mut edit = anim::set(picture, read, &tr!("exposure-sheet"));
+        if new_length != length {
+            edit = edit.then(SetProperty::new(
+                picture,
+                anim::LENGTH,
+                i64::from(new_length),
+            ));
+        }
+        Self::apply(cx, edit);
     }
 }

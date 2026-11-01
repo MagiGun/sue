@@ -1781,6 +1781,17 @@ down and right to left and fills glyph outlines (read with ttf-parser from
 the shared font library) with an accumulation rasterizer after font-rs.
 Clicked inside a balloon, the Text tool centers the words in it.
 
+**Exposure sheet, curved text, fog.** `anim::sheet` reads a folder's
+keys as cels, blanks and holds a frame each; `sheet_csv` and
+`from_sheet_csv` write and read it, cels named by their layers.
+`sue_type::raster` lays text along `TextSpec::path` (`lay_out_on_path`),
+each line on its own offset curve and each glyph turned by its outline's
+`turn`. The 3D renderer turns the light with the camera's yaw when
+`view3d.follow_light` is on and keeps a fog amount per pixel from its
+height (`view3d.fog`, `view3d.fog_height`), which `draw` whitens toward.
+`sue_io::encode_webp_animation` wraps each frame's lossless `VP8L` in
+`ANMF` chunks behind `VP8X` and `ANIM`.
+
 **Layer comps.** A picture keeps its comps as text in
 `picture.layer_comps` (`comps::encode`): each comp names its layers by
 `EntityId` with their visibility, opacity and blend. Showing one is one

@@ -998,6 +998,9 @@ fn implemented(command: &str) -> bool {
             | "anim.layer.folder"
             | "anim.cel.new"
             | "anim.cel.assign"
+            | "anim.exposure_sheet"
+            | "file.export.exposure_sheet"
+            | "file.import.exposure_sheet"
             | "anim.key.add"
             | "anim.key.delete"
             | "anim.frame.insert"
@@ -1085,6 +1088,7 @@ fn implemented(command: &str) -> bool {
             | "anim.prev"
             | "file.export.gif"
             | "file.export.apng"
+            | "file.export.webp_animation"
             | "file.export.sequence"
             | "file.export.bmp"
             | "file.export.tif"
@@ -4310,6 +4314,9 @@ impl SuePaint {
         if (command.starts_with("anim.")
             || command.starts_with("file.export.gif")
             || command == "file.export.apng"
+            || command == "file.export.webp_animation"
+            || command == "file.export.exposure_sheet"
+            || command == "file.import.exposure_sheet"
             || command == "file.export.sequence"
             || command == "file.export.movie"
             || command == "file.export.cels")
@@ -7222,6 +7229,8 @@ impl SueApplet for SuePaint {
             "webtoon" => self.export_webtoon(cx, path),
             "vectors" => self.export_vectors(cx, path),
             "layer-comps" => self.export_comps(cx, path),
+            "exposure-sheet-out" => self.export_exposure_sheet(cx, path),
+            "exposure-sheet-in" => self.import_exposure_sheet(cx, path),
             "anim-cels" => self.export_cels(cx, path),
             "timelapse" => self.export_timelapse(cx, path),
             "anim-sequence" => self.export_animation(cx, path, false),

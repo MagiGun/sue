@@ -172,6 +172,10 @@ pub fn menus() -> Vec<Menu> {
                             "file.import.layers",
                         ),
                         act(&tr!("batch-import-ellipsis"), "file.import.batch"),
+                        act(
+                            &tr!("exposure-sheet-ellipsis"),
+                            "file.import.exposure_sheet",
+                        ),
                         act(&tr!("pattern-from-image-ellipsis"), "file.import.pattern"),
                         act(&tr!("vector-ellipsis"), "file.import.vector"),
                         act(&tr!("audio-ellipsis"), "file.import.audio"),
@@ -198,6 +202,11 @@ pub fn menus() -> Vec<Menu> {
                     vec![
                         act(&tr!("animated-gif-ellipsis"), "file.export.gif"),
                         act(&tr!("animated-sticker-apng-ellipsis"), "file.export.apng"),
+                        act(&tr!("animated-webp-ellipsis"), "file.export.webp_animation"),
+                        act(
+                            &tr!("exposure-sheet-ellipsis"),
+                            "file.export.exposure_sheet",
+                        ),
                         act(&tr!("movie-ellipsis"), "file.export.movie"),
                         act(&tr!("image-sequence-ellipsis"), "file.export.sequence"),
                         act(&tr!("animation-cels-ellipsis"), "file.export.cels"),
@@ -389,6 +398,7 @@ pub fn menus() -> Vec<Menu> {
                     vec![
                         act(&tr!("new-timeline-ellipsis"), "anim.timeline.new"),
                         act(&tr!("edit-timeline-ellipsis"), "anim.timeline.edit"),
+                        act(&tr!("exposure-sheet-ellipsis"), "anim.exposure_sheet"),
                         act(&tr!("enable-timeline"), "anim.timeline.enable"),
                     ],
                 ),

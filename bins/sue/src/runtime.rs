@@ -3454,6 +3454,84 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_exposure_sheet_goes_out_and_back_as_csv() {
+        let (mut runtime, root) = runtime("paint-xsheet");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let command = |runtime: &mut Runtime, name: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: name.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        // Cel 1 on frame 1, cel 2 on frame 3.
+        for name in [
+            "anim.timeline.new",
+            "anim.cel.new",
+            "anim.next",
+            "anim.next",
+            "anim.cel.new",
+        ] {
+            command(&mut runtime, name);
+        }
+        let sheet = root.join("sheet.csv");
+        command(&mut runtime, "file.export.exposure_sheet");
+        let _ = runtime.answer_pick(&sheet, &mut NoTextures, start);
+        step(&mut runtime, Vec::new());
+        let text = std::fs::read_to_string(&sheet).expect("written");
+        let rows: Vec<&str> = text.lines().collect();
+        assert!(rows[0].starts_with("Frame,"), "{text}");
+        assert_eq!(rows.len(), 25, "a header and 24 frames");
+        assert_eq!((rows[1], rows[2], rows[3]), ("1,1", "2,", "3,2"));
+        // Swapped in the file and read back: cel 2 first, then cel 1.
+        let swapped = text
+            .replacen(
+                "1,1
+", "1,2
+", 1,
+            )
+            .replacen(
+                "3,2
+", "3,1
+", 1,
+            );
+        std::fs::write(&sheet, swapped).unwrap();
+        command(&mut runtime, "file.import.exposure_sheet");
+        let _ = runtime.answer_pick(&sheet, &mut NoTextures, start);
+        step(&mut runtime, Vec::new());
+        command(&mut runtime, "file.export.exposure_sheet");
+        let again = root.join("again.csv");
+        let _ = runtime.answer_pick(&again, &mut NoTextures, start);
+        let text = std::fs::read_to_string(&again).expect("written again");
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!((rows[1], rows[3]), ("1,2", "3,1"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_batch_imports_a_folder_one_picture_a_page() {
         let (mut runtime, root) = runtime("paint-batch-import");
         let ctx = egui::Context::default();
@@ -3861,14 +3939,7 @@ Paper	{ink},0,1,normal"
         assert!(texts(&runtime).is_empty(), "kept only when the typing ends");
         step(&mut runtime, vec![key(egui::Key::Escape, plain)]);
         step(&mut runtime, Vec::new());
-        assert_eq!(
-            texts(&runtime),
-            vec![
-                "Hi
-Bo"
-                .to_owned()
-            ]
-        );
+        assert_eq!(texts(&runtime), vec!["Hi\nBo".to_owned()]);
         // One undo takes the words away.
         step(
             &mut runtime,
@@ -3876,6 +3947,41 @@ Bo"
         );
         step(&mut runtime, Vec::new());
         assert!(texts(&runtime).is_empty());
+        // Text on Curve: a curve drawn, then typed along it.
+        step(&mut runtime, vec![key(egui::Key::Period, plain)]);
+        let from = middle + vec2(-120.0, 80.0);
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(from), button(from, true)],
+        );
+        for part in 1..=20 {
+            let x = part as f32 * 12.0;
+            step(
+                &mut runtime,
+                vec![egui::Event::PointerMoved(
+                    from + vec2(x, -(x / 240.0 * std::f32::consts::PI).sin() * 60.0),
+                )],
+            );
+        }
+        step(&mut runtime, vec![button(from + vec2(240.0, 0.0), false)]);
+        step(&mut runtime, Vec::new());
+        step(&mut runtime, vec![egui::Event::Text("Curve".to_owned())]);
+        step(&mut runtime, vec![key(egui::Key::Escape, plain)]);
+        step(&mut runtime, Vec::new());
+        assert_eq!(texts(&runtime), vec!["Curve".to_owned()]);
+        let arena = &runtime.engine.world.arena;
+        let points = sue_paint::doc::layers(arena, picture)
+            .into_iter()
+            .filter_map(|info| arena.get_by_id(info.id).ok())
+            .find_map(|entity| {
+                entity
+                    .property("text.path")
+                    .and_then(sue_core::Value::as_str)
+                    .filter(|path| !path.is_empty())
+                    .map(|path| path.split(';').count())
+            })
+            .unwrap_or(0);
+        assert!(points > 10, "the words keep their curve: {points} points");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -683,6 +683,136 @@ pub fn import_frames(
     Ok((edit, track))
 }
 
+/// What a folder shows at each frame, as an exposure sheet writes it:
+/// the cel a key starts (`Some(Some(cel))`), a blank key (`Some(None)`),
+/// or `None` where the frame holds what came before.
+#[must_use]
+pub fn sheet(track: &Track, rate: Rate, length: u32) -> Vec<Option<Option<EntityId>>> {
+    let mut out = vec![None; length as usize];
+    for (frame, cel) in keys(track, rate) {
+        if let Some(slot) = out.get_mut(frame as usize) {
+            *slot = Some(cel);
+        }
+    }
+    out
+}
+
+/// The exposure sheet as CSV: a header of `Frame` and the folders' names,
+/// then a row a frame with each folder's cel name where a key starts, `x`
+/// for a blank key and nothing where the frame holds.
+#[must_use]
+pub fn sheet_csv(sequence: &Sequence, length: u32, name: impl Fn(EntityId) -> String) -> String {
+    let quote = |text: &str| {
+        if text.contains([',', '"', '\n']) {
+            format!("\"{}\"", text.replace('"', "\"\""))
+        } else {
+            text.to_owned()
+        }
+    };
+    let folders = folders(sequence);
+    let columns: Vec<Vec<Option<Option<EntityId>>>> = folders
+        .iter()
+        .map(|track| sheet(&sequence.tracks[*track], sequence.rate, length))
+        .collect();
+    let mut out = String::from("Frame");
+    for track in &folders {
+        out.push(',');
+        out.push_str(&quote(&sequence.tracks[*track].name));
+    }
+    out.push('\n');
+    for frame in 0..length as usize {
+        out.push_str(&(frame + 1).to_string());
+        for column in &columns {
+            out.push(',');
+            match column[frame] {
+                Some(Some(cel)) => out.push_str(&quote(&name(cel))),
+                Some(None) => out.push('x'),
+                None => {}
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// `sequence` with its folders' keys read from an exposure sheet's CSV
+/// (as [`sheet_csv`] writes it): each folder named in the header takes the
+/// keys of its column, a cel found by its name through `cel`, `x` a blank;
+/// folders the sheet does not name keep theirs. Answers the timeline and
+/// its length (the sheet's rows, if more).
+#[must_use]
+pub fn from_sheet_csv(
+    sequence: &Sequence,
+    length: u32,
+    text: &str,
+    blank_source: EntityId,
+    cel: impl Fn(&str) -> Option<EntityId>,
+) -> (Sequence, u32) {
+    let rows: Vec<Vec<String>> = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(csv_fields)
+        .collect();
+    let Some((header, rows)) = rows.split_first() else {
+        return (sequence.clone(), length);
+    };
+    let length = length.max(rows.len() as u32);
+    let mut out = sequence.clone();
+    for (column, name) in header.iter().enumerate().skip(1) {
+        let Some(track) = folders(&out)
+            .into_iter()
+            .find(|track| out.tracks[*track].name == *name)
+        else {
+            continue;
+        };
+        // The folder's keys, all from the sheet.
+        for (frame, _) in keys(&out.tracks[track], out.rate) {
+            out = unassign(&out, track, frame, length);
+        }
+        for (frame, row) in rows.iter().enumerate() {
+            let value = row.get(column).map_or("", |value| value.trim());
+            if value.is_empty() {
+                continue;
+            }
+            let shown = if value.eq_ignore_ascii_case("x") {
+                None
+            } else {
+                match cel(value) {
+                    Some(found) => Some(found),
+                    None => continue,
+                }
+            };
+            out = assign(&out, track, frame as u32, shown, blank_source, length);
+        }
+    }
+    (out, length)
+}
+
+/// One CSV line's fields, quotes taken off.
+fn csv_fields(line: &str) -> Vec<String> {
+    let mut fields = vec![String::new()];
+    let mut quoted = false;
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if quoted && chars.peek() == Some(&'"') => {
+                chars.next();
+                if let Some(field) = fields.last_mut() {
+                    field.push('"');
+                }
+            }
+            '"' => quoted = !quoted,
+            ',' if !quoted => fields.push(String::new()),
+            _ => {
+                if let Some(field) = fields.last_mut() {
+                    field.push(ch);
+                }
+            }
+        }
+    }
+    fields
+}
+
 /// The edit that sets `picture`'s timeline to `sequence`.
 #[must_use]
 pub fn set(picture: EntityId, sequence: Sequence, label: &str) -> Edit {
@@ -693,6 +823,61 @@ pub fn set(picture: EntityId, sequence: Sequence, label: &str) -> Edit {
 mod tests {
     use super::*;
     use sue_core::{Entity, ReversibleTransaction};
+
+    #[test]
+    fn the_exposure_sheet_shows_keys_holds_and_blanks() {
+        let picture = EntityId::new();
+        let (a, b) = (EntityId::new(), EntityId::new());
+        let mut sequence = Sequence::new(Rate::new(12, 1), MIX_RATE);
+        sequence = with_folder(&sequence, "A");
+        let track = folders(&sequence)[0];
+        sequence = assign(&sequence, track, 0, Some(a), picture, 6);
+        sequence = assign(&sequence, track, 2, None, picture, 6);
+        sequence = assign(&sequence, track, 4, Some(b), picture, 6);
+        let column = sheet(&sequence.tracks[track], sequence.rate, 6);
+        assert_eq!(
+            column,
+            vec![Some(Some(a)), None, Some(None), None, Some(Some(b)), None]
+        );
+    }
+
+    #[test]
+    fn exposure_sheets_write_and_read_as_csv() {
+        let picture = EntityId::new();
+        let (a, b) = (EntityId::new(), EntityId::new());
+        let mut sequence = Sequence::new(Rate::new(12, 1), MIX_RATE);
+        sequence = with_folder(&sequence, "Body, front");
+        let track = folders(&sequence)[0];
+        sequence = assign(&sequence, track, 0, Some(a), picture, 5);
+        sequence = assign(&sequence, track, 2, None, picture, 5);
+        sequence = assign(&sequence, track, 3, Some(b), picture, 5);
+        let name = |cel: EntityId| {
+            if cel == a {
+                "1".to_owned()
+            } else {
+                "2".to_owned()
+            }
+        };
+        let text = sheet_csv(&sequence, 5, name);
+        assert_eq!(text, "Frame,\"Body, front\"\n1,1\n2,\n3,x\n4,2\n5,\n");
+        // Read back onto an empty folder: the same keys.
+        let mut empty = Sequence::new(Rate::new(12, 1), MIX_RATE);
+        empty = with_folder(&empty, "Body, front");
+        let find = |name: &str| match name {
+            "1" => Some(a),
+            "2" => Some(b),
+            _ => None,
+        };
+        let (read, length) = from_sheet_csv(&empty, 5, &text, picture, find);
+        assert_eq!(length, 5);
+        assert_eq!(
+            sheet(&read.tracks[track], read.rate, 5),
+            sheet(&sequence.tracks[track], sequence.rate, 5)
+        );
+        // A longer sheet makes the timeline longer.
+        let (_, longer) = from_sheet_csv(&empty, 2, &text, picture, find);
+        assert_eq!(longer, 5);
+    }
 
     #[test]
     fn a_movie_comes_in_as_cels_one_frame_each() {

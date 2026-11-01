@@ -927,6 +927,8 @@ pub(crate) enum Dialog {
     Pages(PagesDialog),
     /// Layer Comps (Clip Studio Paint EX).
     Comps(CompsDialog),
+    /// The exposure sheet (Clip Studio Paint EX).
+    Exposure,
     Frame(crate::comic::FrameSpec),
     Canvas(CanvasDialog),
     Resolution(ResolutionDialog),
@@ -1117,6 +1119,7 @@ impl SuePaint {
             Dialog::Shortcuts => (tr!("keyboard-shortcuts"), vec2(470.0, 560.0)),
             Dialog::Pages(_) => (tr!("page-manager"), vec2(820.0, 620.0)),
             Dialog::Comps(_) => (tr!("layer-comps"), vec2(420.0, 300.0)),
+            Dialog::Exposure => (tr!("exposure-sheet"), vec2(520.0, 560.0)),
             Dialog::Frame(_) => (tr!("new-frame-border-folder"), vec2(420.0, 330.0)),
             Dialog::Canvas(_) => (tr!("change-canvas-size"), vec2(380.0, 300.0)),
             Dialog::Resolution(_) => (tr!("change-image-resolution"), vec2(380.0, 250.0)),
@@ -1214,6 +1217,7 @@ impl SuePaint {
                         Dialog::Pressure(pressure) => outcome = pressure_ui(ui, pressure, theme),
                         Dialog::Pages(pages) => outcome = self.pages_ui(ui, pages, cx, theme),
                         Dialog::Comps(comps) => outcome = self.comps_ui(ui, comps, cx, theme),
+                        Dialog::Exposure => outcome = self.exposure_ui(ui, cx, theme),
                         Dialog::Frame(frame) => outcome = frame_ui(ui, frame, theme),
                         Dialog::Text(_, lettering) => outcome = text_ui(ui, lettering, theme),
                         Dialog::Onion(onion) => outcome = onion_ui(ui, onion, theme),
@@ -1940,6 +1944,7 @@ impl SuePaint {
                     | Dialog::Pressure(_)
                     | Dialog::Pages(_)
                     | Dialog::Comps(_)
+                    | Dialog::Exposure
                     | Dialog::Text(..)
             )
         {
@@ -2365,6 +2370,7 @@ impl SuePaint {
                 | Dialog::Pressure(_)
                 | Dialog::Pages(_)
                 | Dialog::Comps(_)
+                | Dialog::Exposure
                 | Dialog::Frame(_)
                 | Dialog::Canvas(_)
                 | Dialog::Resolution(_)

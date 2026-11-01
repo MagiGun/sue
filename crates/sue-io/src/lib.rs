@@ -52,7 +52,7 @@ pub use jxl::{
 };
 pub use pictures::{
     PICTURE_SAVE_TYPES, PictureFormat, decode_picture, encode_apng, encode_as,
-    encode_gif_animation, encode_picture,
+    encode_gif_animation, encode_picture, encode_webp_animation,
 };
 pub use raster::{
     DecodedRaster, RasterInfo, decode_jpeg, decode_png, encode_jpeg, encode_png, encode_png_rgba,

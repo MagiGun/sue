@@ -1334,6 +1334,14 @@ impl SuePaint {
                     shaped: !sub.smart_shape,
                 });
             }
+            // Text on Curve: the curve is drawn first, then typed along.
+            Tool::Text if sub.mode == 1 && !self.typing_holds(p) => {
+                self.finish_typing(cx);
+                self.gesture = Some(Gesture::Outline {
+                    sub: Box::new(sub),
+                    points: vec![[p.x, p.y]],
+                });
+            }
             Tool::Text => self.text_at(p, cx),
             Tool::Blend => {
                 let info = match self.paintable(&cx.world.arena) {
@@ -3128,6 +3136,9 @@ impl SuePaint {
                         crate::rulers::edit(picture, key, after, &tr!("move-ruler")),
                     );
                 }
+            }
+            Gesture::Outline { sub, points } if sub.tool == Tool::Text => {
+                self.text_on_curve(&points, cx);
             }
             Gesture::Outline { sub, points } => self.balloon_drawn(points, &sub, cx),
             Gesture::Comic(edit) => self.finish_comic_edit(*edit, cx),

@@ -316,6 +316,86 @@ pub fn encode_apng(frames: &[RasterTile2D], delay_ms: u32) -> Result<Vec<u8>, St
 /// A PNG chunk: its kind and data.
 type Chunk = ([u8; 4], Vec<u8>);
 
+/// An animated WebP of `frames` (same-size RGBA8 tiles), `delay_ms`
+/// apart, looping forever, each frame lossless.
+///
+/// # Errors
+/// If there are no frames, they differ in size, or a frame does not encode.
+pub fn encode_webp_animation(frames: &[RasterTile2D], delay_ms: u32) -> Result<Vec<u8>, String> {
+    use image::ImageEncoder;
+    use image::codecs::webp::WebPEncoder;
+    let first = frames.first().ok_or("an animation needs frames")?;
+    let (width, height) = (first.width(), first.height());
+    let three = |value: u32| {
+        let bytes = value.to_le_bytes();
+        [bytes[0], bytes[1], bytes[2]]
+    };
+    let mut body = b"WEBP".to_vec();
+    // The canvas: animated, with alpha.
+    let mut header = vec![0b0001_0010, 0, 0, 0];
+    header.extend(three(width - 1));
+    header.extend(three(height - 1));
+    riff_chunk(&mut body, b"VP8X", &header);
+    // A clear background, looping forever.
+    riff_chunk(&mut body, b"ANIM", &[0, 0, 0, 0, 0, 0]);
+    for tile in frames {
+        if tile.width() != width || tile.height() != height || tile.format() != PixelFormat::Rgba8 {
+            return Err("every frame must be the same size of RGBA pixels".to_owned());
+        }
+        let pixels = tile.bytes().ok_or("a frame has no pixels")?;
+        let mut still = Vec::new();
+        WebPEncoder::new_lossless(&mut still)
+            .write_image(pixels, width, height, image::ExtendedColorType::Rgba8)
+            .map_err(|error| error.to_string())?;
+        // The still picture's VP8L chunk, as it is, inside the frame.
+        let bitstream = riff_chunks(still.get(12..).ok_or("a WebP too short")?)
+            .into_iter()
+            .find(|(kind, _)| kind == b"VP8L")
+            .ok_or("a WebP frame without its picture")?;
+        let mut frame = Vec::new();
+        frame.extend(three(0));
+        frame.extend(three(0));
+        frame.extend(three(width - 1));
+        frame.extend(three(height - 1));
+        frame.extend(three(delay_ms.clamp(1, 0xFF_FFFF)));
+        // No blending, so each frame replaces the last whole.
+        frame.push(0b0000_0010);
+        riff_chunk(&mut frame, b"VP8L", &bitstream.1);
+        riff_chunk(&mut body, b"ANMF", &frame);
+    }
+    let mut out = b"RIFF".to_vec();
+    out.extend((body.len() as u32).to_le_bytes());
+    out.extend(body);
+    Ok(out)
+}
+
+/// Appends a RIFF chunk, padded to an even length.
+fn riff_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+    out.extend(kind);
+    out.extend((data.len() as u32).to_le_bytes());
+    out.extend(data);
+    if data.len() % 2 == 1 {
+        out.push(0);
+    }
+}
+
+/// The RIFF chunks in `data`: kind and contents.
+fn riff_chunks(data: &[u8]) -> Vec<Chunk> {
+    let mut chunks = Vec::new();
+    let mut at = 0;
+    while at + 8 <= data.len() {
+        let kind = [data[at], data[at + 1], data[at + 2], data[at + 3]];
+        let length =
+            u32::from_le_bytes([data[at + 4], data[at + 5], data[at + 6], data[at + 7]]) as usize;
+        let Some(contents) = data.get(at + 8..at + 8 + length) else {
+            break;
+        };
+        chunks.push((kind, contents.to_vec()));
+        at += 8 + length + length % 2;
+    }
+    chunks
+}
+
 /// A PNG's chunks.
 fn png_chunks(png: &[u8]) -> Result<Vec<Chunk>, String> {
     let mut chunks = Vec::new();
@@ -492,6 +572,25 @@ mod tests {
         let error = encode_picture(&big, PictureFormat::Ico).unwrap_err();
         assert!(error.contains("256"));
         assert!(decode_picture(b"not a picture", None).is_err());
+    }
+
+    #[test]
+    fn animated_webp_holds_every_frame_and_its_timing() {
+        use image::AnimationDecoder;
+        let frame = |shade: u8| {
+            RasterTile2D::from_bytes(5, 3, PixelFormat::Rgba8, vec![shade; 60]).unwrap()
+        };
+        let frames = [frame(10), frame(120), frame(250)];
+        let bytes = encode_webp_animation(&frames, 80).unwrap();
+        let decoder =
+            image::codecs::webp::WebPDecoder::new(std::io::Cursor::new(bytes.as_slice())).unwrap();
+        let back: Vec<image::Frame> = decoder.into_frames().collect_frames().unwrap();
+        assert_eq!(back.len(), 3);
+        for (decoded, shade) in back.iter().zip([10_u8, 120, 250]) {
+            assert_eq!(decoded.buffer().get_pixel(0, 0).0, [shade; 4]);
+            assert_eq!(decoded.delay().numer_denom_ms(), (80, 1));
+        }
+        assert!(encode_webp_animation(&[], 80).is_err());
     }
 
     #[test]

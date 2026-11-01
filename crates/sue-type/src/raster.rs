@@ -33,6 +33,9 @@ pub struct TextSpec<'a> {
     pub leading: f32,
     /// How the lines line up with each other.
     pub justify: Justify,
+    /// A curve the words follow, their baseline on it (empty: straight).
+    /// Lines after the first follow it further down.
+    pub path: &'a [[f32; 2]],
 }
 
 /// Edges of a glyph in pixels, as lines.
@@ -42,13 +45,17 @@ struct Outline {
     last: [f32; 2],
     origin: [f32; 2],
     scale: f32,
+    /// The glyph's turn: the cosine and sine of its angle.
+    turn: [f32; 2],
 }
 
 impl Outline {
     fn point(&self, x: f32, y: f32) -> [f32; 2] {
+        let (lx, ly) = (x * self.scale, -y * self.scale);
+        let [c, s] = self.turn;
         [
-            self.origin[0] + x * self.scale,
-            self.origin[1] - y * self.scale,
+            self.origin[0] + lx * c - ly * s,
+            self.origin[1] + lx * s + ly * c,
         ]
     }
 
@@ -220,7 +227,7 @@ fn blend(
 fn glyph(
     face: &Face<'_>,
     id: ttf_parser::GlyphId,
-    origin: [f32; 2],
+    (origin, turn): ([f32; 2], [f32; 2]),
     scale: f32,
     pixels: &mut [u8],
     width: u32,
@@ -233,6 +240,7 @@ fn glyph(
         last: origin,
         origin,
         scale,
+        turn,
     };
     face.outline_glyph(id, &mut outline)?;
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
@@ -278,11 +286,120 @@ pub enum Justify {
     End,
 }
 
-/// One line laid out: each glyph's origin on the baseline, and the caret
-/// places before each character and after the last (`[top, bottom]`).
+/// One line laid out: each glyph's origin on the baseline and its turn
+/// (cosine and sine), and the caret places before each character and
+/// after the last (`[top, bottom]`).
 struct LaidLine {
-    glyphs: Vec<(char, [f32; 2])>,
+    glyphs: Vec<(char, [f32; 2], [f32; 2])>,
     slots: Vec<[[f32; 2]; 2]>,
+}
+
+/// Where along `path` arc length `s` is, and which way the path goes
+/// there; before its start and past its end it carries on straight.
+fn along(path: &[[f32; 2]], lengths: &[f32], s: f32) -> ([f32; 2], [f32; 2]) {
+    let last = path.len() - 1;
+    let index = lengths
+        .iter()
+        .position(|length| *length >= s)
+        .unwrap_or(last)
+        .clamp(1, last);
+    let (a, b) = (path[index - 1], path[index]);
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let length = dx.hypot(dy).max(1e-6);
+    let tangent = [dx / length, dy / length];
+    let t = s - lengths[index - 1];
+    ([a[0] + tangent[0] * t, a[1] + tangent[1] * t], tangent)
+}
+
+/// [`lay_out`] along `spec.path`: each line's baseline on the curve (later
+/// lines further down), each glyph turned with it.
+fn lay_out_on_path(spec: &TextSpec<'_>, metrics: &Metrics<'_>) -> Vec<LaidLine> {
+    let path = spec.path;
+    let leading = if spec.leading > 0.0 {
+        spec.leading
+    } else {
+        1.0
+    };
+    let line_height = metrics.line_height * leading;
+    let tracking = spec.tracking * spec.size;
+    // Which way is down from the curve at each of its points.
+    let normals: Vec<[f32; 2]> = (0..path.len())
+        .map(|index| {
+            let (a, b) = (
+                path[index.saturating_sub(1)],
+                path[(index + 1).min(path.len() - 1)],
+            );
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let length = dx.hypot(dy).max(1e-6);
+            [-dy / length, dx / length]
+        })
+        .collect();
+    spec.text
+        .split('\n')
+        .enumerate()
+        .map(|(number, line)| {
+            // Each line follows its own curve, the first one moved down,
+            // so lines inside a bend do not crowd.
+            let below = number as f32 * line_height;
+            let curve: Vec<[f32; 2]> = path
+                .iter()
+                .zip(&normals)
+                .map(|(p, n)| [p[0] + n[0] * below, p[1] + n[1] * below])
+                .collect();
+            let mut lengths = vec![0.0_f32];
+            for pair in curve.windows(2) {
+                let step = (pair[1][0] - pair[0][0]).hypot(pair[1][1] - pair[0][1]);
+                lengths.push(lengths[lengths.len() - 1] + step);
+            }
+            let total = lengths[lengths.len() - 1];
+            let wide: f32 = line
+                .chars()
+                .map(|ch| metrics.advance(ch, spec.size) + tracking)
+                .sum::<f32>()
+                - if line.is_empty() { 0.0 } else { tracking };
+            let mut s = match spec.justify {
+                Justify::Start => 0.0,
+                Justify::Middle => (total - wide) / 2.0,
+                Justify::End => total - wide,
+            };
+            let slot = |s: f32| {
+                let (base, tangent) = along(&curve, &lengths, s);
+                let normal = [-tangent[1], tangent[0]];
+                [
+                    [
+                        base[0] - normal[0] * metrics.ascender,
+                        base[1] - normal[1] * metrics.ascender,
+                    ],
+                    [
+                        base[0] - normal[0] * metrics.descender,
+                        base[1] - normal[1] * metrics.descender,
+                    ],
+                ]
+            };
+            let mut laid = LaidLine {
+                glyphs: Vec::new(),
+                slots: Vec::new(),
+            };
+            for ch in line.chars() {
+                let advance = metrics.advance(ch, spec.size);
+                laid.slots.push(slot(s));
+                // Turned about its middle, so it sits on the curve there.
+                let (middle, tangent) = along(&curve, &lengths, s + advance / 2.0);
+                laid.glyphs.push((
+                    ch,
+                    [
+                        middle[0] - tangent[0] * advance / 2.0,
+                        middle[1] - tangent[1] * advance / 2.0,
+                    ],
+                    tangent,
+                ));
+                s += advance + tracking;
+            }
+            let end = if line.is_empty() { s } else { s - tracking };
+            laid.slots.push(slot(end));
+            laid
+        })
+        .collect()
 }
 
 /// The font and its sizes for `spec`.
@@ -305,6 +422,9 @@ impl Metrics<'_> {
 
 /// Lays `spec` out as [`draw_text`] draws it.
 fn lay_out(spec: &TextSpec<'_>, metrics: &Metrics<'_>) -> Vec<LaidLine> {
+    if spec.path.len() >= 2 && !spec.vertical {
+        return lay_out_on_path(spec, metrics);
+    }
     let lines: Vec<&str> = spec.text.split('\n').collect();
     let leading = if spec.leading > 0.0 {
         spec.leading
@@ -347,6 +467,7 @@ fn lay_out(spec: &TextSpec<'_>, metrics: &Metrics<'_>) -> Vec<LaidLine> {
                 laid.glyphs.push((
                     ch,
                     [middle - metrics.advance(ch, spec.size) / 2.0, baseline],
+                    [1.0, 0.0],
                 ));
             }
             let y = start + line.chars().count() as f32 * step;
@@ -384,7 +505,7 @@ fn lay_out(spec: &TextSpec<'_>, metrics: &Metrics<'_>) -> Vec<LaidLine> {
             };
             for ch in line.chars() {
                 laid.slots.push([[x, y], [x, y + line_height]]);
-                laid.glyphs.push((ch, [x, baseline]));
+                laid.glyphs.push((ch, [x, baseline], [1.0, 0.0]));
                 x += metrics.advance(ch, spec.size) + tracking;
             }
             let end = if line.is_empty() { x } else { x - tracking };
@@ -409,12 +530,12 @@ pub fn draw_text(
     let metrics = metrics(Face::parse(&bytes, index).ok()?, spec.size);
     let mut covered: Option<[f32; 4]> = None;
     for line in lay_out(spec, &metrics) {
-        for (ch, origin) in line.glyphs {
+        for (ch, origin, turn) in line.glyphs {
             if let Some(id) = metrics.face.glyph_index(ch)
                 && let Some([a, b, c, d]) = glyph(
                     &metrics.face,
                     id,
-                    origin,
+                    (origin, turn),
                     metrics.scale,
                     pixels,
                     width,
@@ -496,6 +617,7 @@ mod tests {
             tracking: 0.0,
             leading: 0.0,
             justify: Justify::Start,
+            path: &[],
         }
     }
 
@@ -614,5 +736,39 @@ abcd", false,
             )
             .is_some()
         );
+    }
+
+    #[test]
+    fn words_follow_a_curve_turned_with_it() {
+        // Down the page: the words go down, so their carets lie across.
+        let down = [[50.0, 10.0], [50.0, 190.0]];
+        let on_path = TextSpec {
+            path: &down,
+            ..spec("Hey", false)
+        };
+        let slots = caret_slots(&on_path);
+        assert_eq!(slots.len(), 4);
+        assert!(slots[1].top[1] > slots[0].top[1], "along the path");
+        assert!(
+            (slots[1].top[0] - slots[1].bottom[0]).abs() > 20.0,
+            "turned across it"
+        );
+        let mut pixels = vec![0; 200 * 200 * 4];
+        let [x0, y0, x1, y1] = draw_text(&mut pixels, 200, 200, &on_path).expect("drawn");
+        assert!(y1 - y0 > x1 - x0, "the line runs down the page");
+        // An arc: the middle letter sits on the arc's top.
+        let arc: Vec<[f32; 2]> = (0..=40)
+            .map(|step| {
+                let angle = std::f32::consts::PI * (1.0 + step as f32 / 40.0);
+                [100.0 + 80.0 * angle.cos(), 150.0 + 80.0 * angle.sin()]
+            })
+            .collect();
+        let centered = TextSpec {
+            path: &arc,
+            justify: Justify::Middle,
+            ..spec("abc", false)
+        };
+        let middle = caret_slots(&centered)[1];
+        assert!(middle.bottom[1] < 90.0, "up on the arc: {middle:?}");
     }
 }

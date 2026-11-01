@@ -49,6 +49,15 @@ pub const SHADOWS: &str = "view3d.shadows";
 pub const LINE_COLOR: &str = "view3d.line_color";
 /// The lines' opacity, 0 to 1 (`Float`).
 pub const LINE_OPACITY: &str = "view3d.line_opacity";
+/// The light turns with the camera, as if carried on it (`Bool`, Clip
+/// Studio Paint 5.0's Follow camera).
+pub const FOLLOW_LIGHT: &str = "view3d.follow_light";
+/// How thick the fog is at the model's foot, 0 (none) to 1 (`Float`,
+/// Clip Studio Paint 5.1's height-based fog).
+pub const FOG: &str = "view3d.fog";
+/// How high the fog reaches, 0 (the model's foot) to 1 (its top)
+/// (`Float`).
+pub const FOG_HEIGHT: &str = "view3d.fog_height";
 
 /// What people read for the styles, in order.
 pub const STYLES: [&str; 3] = ["Shaded", "Line art", "Shaded with lines"];
@@ -100,6 +109,12 @@ pub struct View3D {
     pub line_color: [u8; 3],
     /// The lines' opacity.
     pub line_opacity: f32,
+    /// The light turns with the camera.
+    pub follow_light: bool,
+    /// The fog's thickness at the foot, 0 to 1.
+    pub fog: f32,
+    /// How high the fog reaches, 0 to 1 of the model's height.
+    pub fog_height: f32,
 }
 
 impl Default for View3D {
@@ -119,6 +134,9 @@ impl Default for View3D {
             shadows: false,
             line_color: [0; 3],
             line_opacity: 1.0,
+            follow_light: false,
+            fog: 0.0,
+            fog_height: 0.5,
         }
     }
 }
@@ -160,6 +178,12 @@ impl View3D {
                     [(rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8]
                 }),
             line_opacity: number(LINE_OPACITY, still.line_opacity).clamp(0.0, 1.0),
+            follow_light: entity
+                .property(FOLLOW_LIGHT)
+                .and_then(Value::as_bool)
+                .unwrap_or(still.follow_light),
+            fog: number(FOG, still.fog).clamp(0.0, 1.0),
+            fog_height: number(FOG_HEIGHT, still.fog_height).clamp(0.0, 1.0),
         }
     }
 
@@ -201,6 +225,9 @@ impl View3D {
                     | i64::from(self.line_color[2]),
             ),
             SetProperty::new(layer, LINE_OPACITY, f64::from(self.line_opacity)),
+            SetProperty::new(layer, FOLLOW_LIGHT, self.follow_light),
+            SetProperty::new(layer, FOG, f64::from(self.fog)),
+            SetProperty::new(layer, FOG_HEIGHT, f64::from(self.fog_height)),
         ]
     }
 }
@@ -385,6 +412,8 @@ pub struct Buffers {
     pub normal: Vec<[f32; 3]>,
     /// How lit it is, 0 to 1.
     pub light: Vec<f32>,
+    /// How much fog is in front of it, 0 to 1.
+    pub fog: Vec<f32>,
 }
 
 impl Buffers {
@@ -519,6 +548,7 @@ pub fn render_framed(
         depth: vec![f32::INFINITY; w * h],
         normal: vec![[0.0; 3]; w * h],
         light: vec![0.0; w * h],
+        fog: vec![0.0; w * h],
     };
     let positions = mesh.positions();
     if positions.is_empty() || w == 0 || h == 0 {
@@ -529,8 +559,24 @@ pub fn render_framed(
         None => Camera::fitting(mesh, view, size),
     };
     let eye = lens.eye;
-    let light_angle = view.light.to_radians();
+    // Carried on the camera, the light keeps its place on the screen as
+    // the camera goes round.
+    let light_angle = (view.light + if view.follow_light { view.yaw } else { 0.0 }).to_radians();
     let light = normalized([light_angle.sin(), 0.8, light_angle.cos()]);
+    // Height-based fog: thickest at the model's foot, gone at its height.
+    let (low, high) = positions
+        .iter()
+        .map(|p| lens.see(*p).0[1])
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(low, high), y| {
+            (low.min(y), high.max(y))
+        });
+    let fog_top = low + (high - low) * view.fog_height;
+    let fog_at = |y: f32| {
+        if view.fog <= 0.0 || fog_top <= low {
+            return 0.0;
+        }
+        (view.fog * ((fog_top - y) / (fog_top - low)).clamp(0.0, 1.0)).clamp(0.0, 1.0)
+    };
     let camera = |p: [f32; 3]| lens.see(p);
     let project = |c: [f32; 3]| lens.screen(c);
     let shadow = view.shadows.then(|| ShadowMap::new(mesh, &lens, light));
@@ -571,15 +617,14 @@ pub fn render_framed(
                 let depth = 1.0 / inverse;
                 let at = y * w + x;
                 if depth < buffers.depth[at] {
-                    let sunlit = shadow.as_ref().map_or(1.0, |shadow| {
-                        let world = [0, 1, 2].map(|axis| {
-                            (wa / pa[2] * a_world[axis]
-                                + wb / pb[2] * b_world[axis]
-                                + wc / pc[2] * c_world[axis])
-                                * depth
-                        });
-                        shadow.lit(world)
+                    let world = [0, 1, 2].map(|axis| {
+                        (wa / pa[2] * a_world[axis]
+                            + wb / pb[2] * b_world[axis]
+                            + wc / pc[2] * c_world[axis])
+                            * depth
                     });
+                    let sunlit = shadow.as_ref().map_or(1.0, |shadow| shadow.lit(world));
+                    buffers.fog[at] = fog_at(world[1]);
                     buffers.depth[at] = depth;
                     buffers.normal[at] = normal;
                     buffers.light[at] = (view.ambient
@@ -756,9 +801,11 @@ pub fn draw(buffers: &Buffers, view: &View3D) -> Option<RasterTile2D> {
     let color = view.line_color.map(|c| f32::from(c) / 255.0);
     let mut pixels = Vec::with_capacity((w * h * 4) as usize);
     for at in 0..(w * h) as usize {
-        let ink = line.as_ref().map_or(0.0, |line| line[at]) * view.line_opacity;
+        // Fog whitens what is behind it, lines too.
+        let fog = buffers.fog.get(at).copied().unwrap_or(0.0);
+        let ink = line.as_ref().map_or(0.0, |line| line[at]) * view.line_opacity * (1.0 - fog);
         let (rgb, alpha) = if view.style != 1 && buffers.covered(at) {
-            let gray = buffers.light[at];
+            let gray = buffers.light[at] + (1.0 - buffers.light[at]) * fog;
             (color.map(|c| gray + (c - gray) * ink), 1.0)
         } else {
             (color, ink)
@@ -1023,6 +1070,67 @@ mod tests {
                 .iter()
                 .all(|pixel| pixel[0] == 255 && pixel[1] == 0 && pixel[3] <= 128)
         );
+    }
+
+    #[test]
+    fn the_light_can_follow_the_camera_and_fog_rises_from_the_foot() {
+        let size = [120, 90];
+        let ball = shape(1).to_mesh();
+        // Where the brightest light falls on the screen, across.
+        let bright_x = |view: &View3D| {
+            let buffers = render_buffers(&ball, view, size);
+            let (index, _) = buffers
+                .light
+                .iter()
+                .enumerate()
+                .filter(|(at, _)| buffers.covered(*at))
+                .fold(
+                    (0, -1.0),
+                    |best, (at, light)| {
+                        if *light > best.1 { (at, *light) } else { best }
+                    },
+                );
+            (index % 120) as i64
+        };
+        let still = View3D {
+            follow_light: false,
+            ..View3D::default()
+        };
+        let turned = |view: View3D| View3D {
+            yaw: view.yaw + 90.0,
+            ..view
+        };
+        // Fixed: the lit side moves on the screen as the camera goes round.
+        assert!((bright_x(&still) - bright_x(&turned(still))).abs() > 15);
+        // Following: it stays where it was.
+        let carried = View3D {
+            follow_light: true,
+            ..still
+        };
+        assert!((bright_x(&carried) - bright_x(&turned(carried))).abs() <= 3);
+        // Fog: thick at the foot, none at the top, and it whitens there.
+        let foggy = View3D {
+            fog: 1.0,
+            fog_height: 0.6,
+            style: 0,
+            ..View3D::default()
+        };
+        let buffers = render_buffers(&ball, &foggy, size);
+        let rows: Vec<usize> = (0..120 * 90).filter(|at| buffers.covered(*at)).collect();
+        let (top, bottom) = (rows[0], rows[rows.len() - 1]);
+        assert!(
+            buffers.fog[bottom] > 0.5,
+            "the foot: {}",
+            buffers.fog[bottom]
+        );
+        assert!(buffers.fog[top] < 0.05, "the top: {}", buffers.fog[top]);
+        let drawn = draw(&buffers, &foggy).unwrap();
+        let clear = draw(
+            &render_buffers(&ball, &View3D { fog: 0.0, ..foggy }, size),
+            &foggy,
+        )
+        .unwrap();
+        assert!(drawn.bytes().unwrap()[bottom * 4] > clear.bytes().unwrap()[bottom * 4]);
     }
 
     #[test]

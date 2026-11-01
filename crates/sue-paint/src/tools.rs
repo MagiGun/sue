@@ -723,16 +723,18 @@ impl Tool {
                     ..plain(&tr!("symmetrical-ruler"), 0)
                 },
             ],
-            // Clip Studio Paint's Text: 48 pixel words, across.
-            Self::Text => vec![SubTool::new(
-                self,
-                &tr!("text"),
-                0,
-                Tip {
+            // Clip Studio Paint's Text: 48 pixel words, across; and words
+            // along a curve drawn first.
+            Self::Text => {
+                let words = Tip {
                     size: 48.0,
                     ..Tip::default()
-                },
-            )],
+                };
+                vec![
+                    SubTool::new(self, &tr!("text"), 0, words),
+                    SubTool::new(self, "Text on Curve", 1, words),
+                ]
+            }
             Self::Blend => {
                 let soft = tip(60.0, |t| {
                     t.opacity = 0.6;

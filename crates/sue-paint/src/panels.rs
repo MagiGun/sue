@@ -2692,6 +2692,15 @@ impl SuePaint {
             "",
         );
         released |= slider(ui, &tr!("ambient-light"), &mut view.ambient, 0.0..=1.0, "");
+        // Clip Studio Paint 5.0 and 5.1: the light carried on the camera,
+        // and fog rising from the foot.
+        released |= ui
+            .checkbox(&mut view.follow_light, tr!("light-follows-camera"))
+            .changed();
+        released |= slider(ui, &tr!("fog"), &mut view.fog, 0.0..=1.0, "");
+        if view.fog > 0.0 {
+            released |= slider(ui, &tr!("fog-height"), &mut view.fog_height, 0.0..=1.0, "");
+        }
         released |= ui
             .checkbox(&mut view.shadows, tr!("cast-shadows"))
             .changed();

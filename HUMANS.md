@@ -611,6 +611,9 @@ Once a canvas is open:
   level to move it. Your line picks the direction it starts in, and stays
   exactly on it. Delete Ruler takes them away, Show Ruler hides them, and
   they are saved with the picture.
+- **Text on Curve** (the Text tool's second sub tool): draw a curve, then
+  type, and the words follow it, each letter turned with it; more lines
+  follow it further down.
 - **Smart Shape:** hold the pen still for a moment at the end of a stroke
   and it becomes the clean shape you meant: a straight line, an arc, an
   ellipse or circle, or a polygon such as a rectangle or triangle. Lift the
@@ -678,7 +681,12 @@ Once a canvas is open:
   palette) shows other layers under the cel you are drawing, to trace
   from: pick the layer, then Register Selected Layer.
   File, Export Animation saves an animated GIF, an animated sticker
-  (APNG), a movie or every frame as a picture.
+  (APNG), an animated WebP, a movie or every frame as a picture.
+  Animation, Timeline, **Exposure Sheet** shows the timing as a table, a
+  row a frame and a column a folder: a cel's name where it starts, x for
+  a blank, | where the one before holds; click a cell to change it. File,
+  Export Animation, Exposure Sheet saves it as a CSV file to send or edit,
+  and File, Import, Exposure Sheet reads one back.
 - **Brushes you downloaded:** Add from downloads at the bottom of the
   Tool Group opens a file you downloaded and makes its brushes sub tools
   of the tool out: Clip Studio Paint sub tools (.sut), Photoshop brushes
@@ -706,8 +714,9 @@ Once a canvas is open:
   model. With the Object tool (O), drag to turn the camera, Shift and drag
   to move it, Ctrl and drag to come nearer; Tool Property sets the camera
   (or picks Front, Back, Left, Right, Top or Bottom), the light, its
-  intensity, ambient light and cast shadows, whether it draws shaded, as
-  line art or both, and the lines' color and opacity. Layer, Convert to
+  intensity, ambient light and cast shadows, the light following the
+  camera, fog rising from the foot, whether it draws shaded, as line art
+  or both, and the lines' color and opacity. Layer, Convert to
   Lines and Tones makes clean line art and tone from it to draw over.
 - **New:** File, New is laid out as Clip Studio Paint's, with its six
   projects: Illustration, Webtoon, Comic, Printing of fanzine (A5 pages),

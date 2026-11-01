@@ -28,6 +28,8 @@ const TRACKING: &str = "text.tracking";
 const LEADING: &str = "text.leading";
 /// How lines line up: `start`, `middle` or `end` (`Text`).
 const JUSTIFY: &str = "text.justify";
+/// The curve the words follow, `x,y;x,y;...` (`Text`; none when empty).
+const PATH: &str = "text.path";
 /// Where the drawn text is (`Text`, `x0,y0,x1,y1`), for clicking on it.
 const BOX: &str = "text.box";
 
@@ -49,6 +51,8 @@ pub(crate) struct Lettering {
     pub leading: f32,
     /// How the lines line up with each other.
     pub justify: Justify,
+    /// A curve the words follow (empty: straight lines).
+    pub path: Vec<[f32; 2]>,
 }
 
 impl Lettering {
@@ -65,6 +69,7 @@ impl Lettering {
             tracking: 0.0,
             leading: 0.0,
             justify: Justify::Start,
+            path: Vec::new(),
         }
     }
 
@@ -81,6 +86,7 @@ impl Lettering {
             tracking: self.tracking,
             leading: self.leading,
             justify: self.justify,
+            path: &self.path,
         }
     }
 
@@ -130,6 +136,13 @@ impl Lettering {
                 None if flag(CENTER) => Justify::Middle,
                 None => Justify::Start,
             },
+            path: text(PATH)
+                .split(';')
+                .filter_map(|point| {
+                    let (x, y) = point.split_once(',')?;
+                    Some([x.trim().parse().ok()?, y.trim().parse().ok()?])
+                })
+                .collect(),
         })
     }
 
@@ -157,6 +170,16 @@ impl Lettering {
             (VERTICAL, Value::from(self.vertical)),
             (TRACKING, Value::from(f64::from(self.tracking))),
             (LEADING, Value::from(f64::from(self.leading))),
+            (
+                PATH,
+                Value::from(
+                    self.path
+                        .iter()
+                        .map(|[x, y]| format!("{x},{y}"))
+                        .collect::<Vec<_>>()
+                        .join(";"),
+                ),
+            ),
             (
                 JUSTIFY,
                 Value::from(match self.justify {
@@ -285,6 +308,50 @@ impl SuePaint {
             lettering.justify = Justify::Middle;
             lettering.size = (room / 5.0).clamp(12.0, 96.0);
         }
+        self.begin_typing(cx, None, lettering, None);
+    }
+
+    /// Whether `p` (picture pixels) is on the words being typed.
+    pub(crate) fn typing_holds(&self, p: Pos2) -> bool {
+        self.typing.as_ref().is_some_and(|typing| typing.holds(p))
+    }
+
+    /// The Text tool's Text on Curve: the curve drawn, smoothed, becomes
+    /// the line new words are typed along.
+    pub(crate) fn text_on_curve(&mut self, points: &[[f32; 2]], cx: &mut AppletContext<'_>) {
+        // A few pixels apart, then each point the mean of its neighbors.
+        let mut spaced: Vec<[f32; 2]> = Vec::new();
+        for point in points {
+            if spaced
+                .last()
+                .is_none_or(|last| (last[0] - point[0]).hypot(last[1] - point[1]) >= 4.0)
+            {
+                spaced.push(*point);
+            }
+        }
+        if spaced.len() < 2 {
+            return;
+        }
+        let count = spaced.len();
+        let path: Vec<[f32; 2]> = (0..count)
+            .map(|index| {
+                if index == 0 || index == count - 1 {
+                    return spaced[index];
+                }
+                let (a, b, c) = (spaced[index - 1], spaced[index], spaced[index + 1]);
+                [
+                    (a[0] + b[0] * 2.0 + c[0]) / 4.0,
+                    (a[1] + b[1] * 2.0 + c[1]) / 4.0,
+                ]
+            })
+            .collect();
+        self.finish_typing(cx);
+        let look = self.text_look();
+        let mut lettering = Lettering::new(path[0], look.rgb);
+        look.put(&mut lettering);
+        lettering.center = false;
+        lettering.vertical = false;
+        lettering.path = path;
         self.begin_typing(cx, None, lettering, None);
     }
 
@@ -777,6 +844,7 @@ mod tests {
             tracking: 0.25,
             leading: 1.5,
             justify: Justify::End,
+            path: vec![[1.0, 2.0], [30.5, 40.0]],
         };
         let (pixels, covered) = lettering.draw(200, 200);
         assert!(covered.is_some());

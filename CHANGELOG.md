@@ -21,6 +21,13 @@ follow [Semantic Versioning](https://semver.org/).
   you drag, and Speed Lines along the way you drag, each on an effect line
   layer that stays editable: the Object tool moves their ends, and Tool
   Property changes how many lines, their width, their scatter and color.
+- Animation, Timeline, Exposure Sheet: the timing as a table to read and
+  change, saved and read back as CSV (File, Export Animation and File,
+  Import).
+- File, Export Animation, Animated WebP.
+- The Text tool's Text on Curve: draw a curve, then type along it.
+- 3D layers can carry their light with the camera and have fog rising
+  from the foot, as in Clip Studio Paint 5.0 and 5.1.
 - File, Import, Batch import brings every picture in a folder in, one a
   page, in name order.
 - The Object tool's Tool Property says what it does on each kind of
