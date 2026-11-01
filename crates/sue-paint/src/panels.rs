@@ -2401,6 +2401,10 @@ impl SuePaint {
                     ui.radio_value(&mut sub.justify, 2, small(&tr!("justify-end")));
                 });
             }
+            // The Object tool: what it does on the layer in hand.
+            Tool::Operation => {
+                ui.label(small(&tr!("object-tool-hint")));
+            }
             _ => {
                 ui.label(small(&tr!("tool-arrives-later-sue-paint")));
             }

@@ -1092,6 +1092,7 @@ fn implemented(command: &str) -> bool {
             | "file.export.psd"
             | "file.export.psb"
             | "file.import.layers"
+            | "file.import.batch"
             | "file.import.vector"
             | "file.import.movie"
             | "file.import.pattern"
@@ -3222,6 +3223,39 @@ impl SuePaint {
     }
 
     /// Opens the picture file at `path` as a new canvas, or as a new layer.
+    /// Batch import: each picture in `dir`, by name, as a layer on a page
+    /// of its own, the first on the page open now and the rest on new
+    /// pages after it.
+    fn batch_import(&mut self, cx: &mut AppletContext<'_>, dir: &Path) {
+        if self.picture().is_none() {
+            cx.notify(tr!("open-a-page-first"));
+            return;
+        }
+        let mut files: Vec<PathBuf> = sue_platform::fs::list_dir(dir, false)
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .filter(|entry| !entry.is_dir && opens(&entry.path))
+                    .map(|entry| entry.path)
+                    .collect()
+            })
+            .unwrap_or_default();
+        files.sort_by_key(|path| path.file_name().map(|name| name.to_ascii_lowercase()));
+        if files.is_empty() {
+            cx.notify(tr!("no-pictures-in-folder"));
+            return;
+        }
+        let count = files.len();
+        for (index, file) in files.iter().enumerate() {
+            if index > 0 {
+                self.run("story.add", cx);
+            }
+            self.open_picked(cx, file, true);
+        }
+        self.last_dir = Some(dir.to_path_buf());
+        cx.notify(tr!("batch-imported", count = count));
+    }
+
     pub(crate) fn open_picked(&mut self, cx: &mut AppletContext<'_>, path: &Path, as_layer: bool) {
         if let Some(dir) = path.parent() {
             self.last_dir = Some(dir.to_path_buf());
@@ -4426,6 +4460,19 @@ impl SuePaint {
             "file.export.tga" => self.export(cx, "tga"),
             "file.export.psd" => self.export_psd(cx, false),
             "file.export.psb" => self.export_psd(cx, true),
+            // Clip Studio Paint EX's Batch import: every picture in a folder,
+            // one a page.
+            "file.import.batch" => {
+                let start = self
+                    .last_dir
+                    .clone()
+                    .or_else(|| cx.catalog.folders.get("home").cloned());
+                cx.request(ShellRequest::PickFile(
+                    FilePick::open(Some(me_id()), "batch-import", &tr!("batch-import"))
+                        .folder()
+                        .starting_in(start),
+                ));
+            }
             "file.import.layers" => {
                 let start = self
                     .last_dir
@@ -7154,6 +7201,7 @@ impl SueApplet for SuePaint {
             "open" | "import" => self.open_picked(cx, path, false),
             "layer" => self.open_picked(cx, path, true),
             "import-layers" => self.open_picked(cx, path, true),
+            "batch-import" => self.batch_import(cx, path),
             "story-text" => self.import_text(cx, path),
             "brush-import" => self.import_brushes(cx, path),
             "batch" => self.export_canvases(cx, path),

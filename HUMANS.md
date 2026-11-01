@@ -645,7 +645,11 @@ Once a canvas is open:
   right for manga or on the left. The Story menu adds, inserts, duplicates
   and deletes pages and steps through them, and the **Page Manager** shows
   them side by side as spreads: click one to choose it, double-click to open
-  it, move it earlier or later. Export All Pages saves every page.
+  it, move it earlier or later. Export All Pages saves every page. File,
+  Import, **Batch import** brings every picture in a folder in, one a page
+  in name order, such as a stack of scans. Story, Change Story Information
+  numbers the pages (the folio), at their outer corners or centered, and
+  sets whether page 1 starts alone or facing page 2.
 - **Panels, balloons and effects:** Layer, New Layer, Frame Border Folder
   lays out panels with gutters; what you draw on layers under it shows only
   inside the panels. The Frame Border tool draws more panels, or divides one

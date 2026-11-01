@@ -3454,6 +3454,80 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_batch_imports_a_folder_one_picture_a_page() {
+        let (mut runtime, root) = runtime("paint-batch-import");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        // Three pictures, and a text file that is no picture.
+        let folder = root.join("scans");
+        std::fs::create_dir_all(&folder).unwrap();
+        for (name, shade) in [("b.png", 20_u8), ("a.png", 10), ("c.png", 30)] {
+            let tile = sue_core::RasterTile2D::from_bytes(
+                8,
+                8,
+                sue_core::PixelFormat::Rgba8,
+                [shade, shade, shade, 255].repeat(64),
+            )
+            .unwrap();
+            std::fs::write(folder.join(name), sue_io::encode_png(&tile).unwrap()).unwrap();
+        }
+        std::fs::write(folder.join("notes.txt"), "not a picture").unwrap();
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: paint.clone(),
+                command: "file.import.batch".to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+        let _ = runtime.answer_pick(&folder, &mut NoTextures, start);
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.focus())
+            .unwrap();
+        let arena = &runtime.engine.world.arena;
+        let story = sue_paint::story::story_of(arena, picture).expect("a story");
+        let pages = sue_paint::story::pages(arena, story);
+        assert_eq!(pages.len(), 3, "one page a picture");
+        // Each page has its picture as a layer, in name order.
+        let names: Vec<Vec<String>> = pages
+            .iter()
+            .map(|page| {
+                sue_paint::doc::layers(arena, *page)
+                    .into_iter()
+                    .filter_map(|info| arena.get_by_id(info.id).ok())
+                    .map(|entity| entity.name().to_owned())
+                    .collect()
+            })
+            .collect();
+        for (page, name) in names.iter().zip(["a", "b", "c"]) {
+            assert!(page.iter().any(|layer| layer.starts_with(name)), "{page:?}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_exports_each_layer_comp_as_its_own_picture() {
         let (mut runtime, root) = runtime("paint-comps");
         let ctx = egui::Context::default();

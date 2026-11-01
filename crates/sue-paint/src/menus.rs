@@ -171,6 +171,7 @@ pub fn menus() -> Vec<Menu> {
                             &tr!("image-as-separate-layers-ellipsis"),
                             "file.import.layers",
                         ),
+                        act(&tr!("batch-import-ellipsis"), "file.import.batch"),
                         act(&tr!("pattern-from-image-ellipsis"), "file.import.pattern"),
                         act(&tr!("vector-ellipsis"), "file.import.vector"),
                         act(&tr!("audio-ellipsis"), "file.import.audio"),

@@ -21,6 +21,10 @@ follow [Semantic Versioning](https://semver.org/).
   you drag, and Speed Lines along the way you drag, each on an effect line
   layer that stays editable: the Object tool moves their ends, and Tool
   Property changes how many lines, their width, their scatter and color.
+- File, Import, Batch import brings every picture in a folder in, one a
+  page, in name order.
+- The Object tool's Tool Property says what it does on each kind of
+  layer instead of that it arrives later.
 - Layer comps, as in Clip Studio Paint EX: named versions of which
   layers show, how strongly and how they blend, shown again in one step
   and exported each as its own picture.

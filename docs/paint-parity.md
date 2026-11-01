@@ -31,7 +31,7 @@ rows are at the end.
 | --- | --- | --- | --- | --- |
 | File: new, open and save | 10 | 1 | 5 | 66 |
 | File: export | 13 | 1 | 4 | 75 |
-| File: import, batch and scanning | 3 | 4 | 8 | 33 |
+| File: import, batch and scanning | 4 | 4 | 7 | 40 |
 | Edit: undo, clipboard and fills | 8 | 5 | 0 | 81 |
 | Edit: transform and canvas size | 8 | 6 | 0 | 79 |
 | Tonal correction and color | 11 | 1 | 0 | 96 |
@@ -54,7 +54,7 @@ rows are at the end.
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 9 | 3 | 2 | 75 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 240 | 56 | 40 | 80 |
+| **All of Sue Paint** | 241 | 56 | 39 | 80 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -162,7 +162,7 @@ The order of work is the plan at the end.
 | 3D pose from Posemaniacs | File > Import > 3D pose | missing | |
 | Pose Scanner (image to pose) | File > Import > Pose Scanner | missing | |
 | Create file object | File > Import > Create file object | missing | Another file embedded as an object layer |
-| Batch import (EX) | File > Import > Batch import | missing | |
+| Batch import (EX) | File > Import > Batch import | done | Every picture in a folder, by name, one a page |
 | Scan, Continuous Scan, Select Scan Device | File > Import > Scan | missing | A scanner talks through `sue-platform` |
 | Exposure sheet import | File > Import > Exposure sheet | missing | |
 | Batch process (EX) | File > Batch process | missing | Run commands on many pages or files at once |

@@ -1116,7 +1116,7 @@ impl SuePaint {
             ),
             Dialog::Shortcuts => (tr!("keyboard-shortcuts"), vec2(470.0, 560.0)),
             Dialog::Pages(_) => (tr!("page-manager"), vec2(820.0, 620.0)),
-            Dialog::Comps(_) => (tr!("layer-comps"), vec2(420.0, 380.0)),
+            Dialog::Comps(_) => (tr!("layer-comps"), vec2(420.0, 300.0)),
             Dialog::Frame(_) => (tr!("new-frame-border-folder"), vec2(420.0, 330.0)),
             Dialog::Canvas(_) => (tr!("change-canvas-size"), vec2(380.0, 300.0)),
             Dialog::Resolution(_) => (tr!("change-image-resolution"), vec2(380.0, 250.0)),
