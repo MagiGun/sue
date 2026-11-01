@@ -13,6 +13,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Add from downloads in Sue Paint's Tool Group brings in brushes you
+  downloaded: Clip Studio Paint sub tools (.sut), Photoshop brushes
+  (.abr), GIMP brushes (.gbr, .gih) and pictures. Their size, opacity,
+  spacing, spray, ribbon and turn come along, colored tips keep their
+  colors, and tips of several pictures take them in turn.
+- Ribbon decorations: Rope, Rickrack, Film strip, Checkered band,
+  Stitched ribbon and Lace ribbon bend along the whole stroke, and any
+  brush with a shape can be laid as a ribbon.
 - Sue Paint's Decoration tool, as in Clip Studio Paint: Stars, Hearts,
   Sparkles, Snow, Flowers and Bubbles scatter about the stroke; Leaves,
   Chain, Lace, Stitches, Dotted line and Dashed line run along it and

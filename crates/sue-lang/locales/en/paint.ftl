@@ -2196,3 +2196,10 @@ name-film-strip = Film strip
 name-checkered-band = Checkered band
 name-stitched-ribbon = Stitched ribbon
 name-lace-ribbon = Lace ribbon
+brushes-from-clip-studio-photoshop-gimp = Brushes you downloaded: Clip Studio Paint (.sut), Photoshop (.abr), GIMP (.gbr, .gih) or a picture
+add-brushes-from-downloads = Add brushes from downloads
+no-brush-in-file = { $file } has no brush Sue Paint can use
+brushes-added-from = { $count ->
+    [one] One brush added from { $file }
+   *[other] { $count } brushes added from { $file }
+}

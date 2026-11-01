@@ -74,6 +74,7 @@ pub fn shape(name: &str) -> u32 {
                     name: (*name).to_owned(),
                     side: SIDE,
                     cover: coverage(*inside),
+                    colors: None,
                 });
                 (*name, id)
             })
@@ -82,6 +83,58 @@ pub fn shape(name: &str) -> u32 {
     ids.iter()
         .find(|(known, _)| *known == name)
         .map_or(0, |(_, id)| *id)
+}
+
+/// The brush tip for a brush read from a downloaded file (see
+/// [`sue_io::brushes`]): its pictures registered as brush tip shapes (and
+/// kept as pictures in `folder`, so they come back next time) and its
+/// settings in Sue's terms. `None` when none of its pictures can be used.
+#[must_use]
+pub fn imported_tip(
+    brush: &sue_io::brushes::ImportedBrush,
+    folder: Option<&std::path::Path>,
+) -> Option<crate::brush::Tip> {
+    let count = brush.tips.len();
+    let (mut first, mut largest) = (0, 0);
+    for (index, (width, height, pixels)) in brush.tips.iter().enumerate() {
+        let name = if count > 1 {
+            format!("{} #{}", brush.name, index + 1)
+        } else {
+            brush.name.clone()
+        };
+        let Some(shape) = TipShape::from_rgba(&name, pixels, *width, *height) else {
+            continue;
+        };
+        if let Some(folder) = folder
+            && let Ok(png) = sue_io::encode_png_rgba(*width, *height, pixels)
+        {
+            let safe: String = name
+                .chars()
+                .map(|c| if r#"\/:*?"<>|"#.contains(c) { '_' } else { c })
+                .collect();
+            let _ = sue_platform::fs::create_dir_all(folder)
+                .and_then(|()| sue_platform::fs::write(folder.join(format!("{safe}.png")), png));
+        }
+        let id = register_shape(shape);
+        if first == 0 {
+            first = id;
+        }
+        largest = largest.max(*width.max(height));
+    }
+    (first != 0).then(|| crate::brush::Tip {
+        size: brush.size.unwrap_or(largest as f32).clamp(1.0, 2000.0),
+        opacity: brush.opacity.unwrap_or(1.0).clamp(0.0, 1.0),
+        hardness: brush.hardness.unwrap_or(1.0).clamp(0.0, 1.0),
+        spacing: brush.spacing.unwrap_or(0.25),
+        shape: first,
+        shape_count: count.max(1) as u32,
+        angle: brush.angle.unwrap_or(0.0),
+        follow: brush.follow,
+        scatter: brush.scatter.unwrap_or(0.0),
+        ribbon: brush.ribbon,
+        keep_colors: brush.keep_colors,
+        ..crate::brush::Tip::default()
+    })
 }
 
 /// `true` if `(u, v)` is inside the polygon of `points`.
@@ -267,6 +320,65 @@ mod tests {
             stroke.end(&mut raster, Finish::default(), None);
         }
         (raster.bytes().unwrap().to_vec(), width, height)
+    }
+
+    /// Every brush in the files of `SUE_BRUSH_SAMPLES` painting a wave, in
+    /// rows, written to `SUE_BRUSH_SHEET` (downloaded brushes are not kept
+    /// in the repository).
+    #[test]
+    fn downloaded_brushes_paint() {
+        use crate::brush::{Finish, Stroke};
+        let (Ok(folder), Ok(sheet)) = (
+            std::env::var("SUE_BRUSH_SAMPLES"),
+            std::env::var("SUE_BRUSH_SHEET"),
+        ) else {
+            return;
+        };
+        let mut tips = Vec::new();
+        let mut entries: Vec<_> = std::fs::read_dir(folder).unwrap().flatten().collect();
+        entries.sort_by_key(std::fs::DirEntry::path);
+        for entry in entries {
+            let name = entry.path().to_string_lossy().into_owned();
+            let bytes = std::fs::read(entry.path()).unwrap();
+            for brush in sue_io::brushes::read(&name, &bytes).unwrap_or_default() {
+                if let Some(tip) = imported_tip(&brush, None) {
+                    tips.push((brush.name, tip));
+                }
+            }
+        }
+        assert!(!tips.is_empty());
+        let (width, row) = (900_u32, 90_u32);
+        let height = row * tips.len() as u32;
+        let mut raster =
+            sue_core::RasterTile2D::new(width, height, sue_core::PixelFormat::Rgba8).unwrap();
+        for (index, (_, tip)) in tips.iter().enumerate() {
+            // Each at a size that fits its row, as people would set it.
+            let tip = crate::brush::Tip {
+                size: tip.size.min(60.0),
+                ..*tip
+            };
+            let mut stroke = Stroke::new(sue_core::EntityId::new(), tip, [0.1, 0.1, 0.5], false);
+            let y = row as f32 * (index as f32 + 0.5);
+            for step in 0..=160 {
+                let x = 60.0 + step as f32 * 5.0;
+                let wave = (step as f32 / 160.0 * TAU).sin() * 16.0;
+                stroke.to(&mut raster, [x, y + wave], 1.0, None);
+            }
+            stroke.end(&mut raster, Finish::default(), None);
+        }
+        let mut white = raster.bytes().unwrap().to_vec();
+        for pixel in white.chunks_mut(4) {
+            let a = u16::from(pixel[3]);
+            for channel in &mut pixel[..3] {
+                *channel = (255 - a + u16::from(*channel) * a / 255) as u8;
+            }
+            pixel[3] = 255;
+        }
+        let png = sue_io::encode_png_rgba(width, height, &white).unwrap();
+        std::fs::write(sheet, png).unwrap();
+        for (name, _) in &tips {
+            println!("{name}");
+        }
     }
 
     #[test]

@@ -653,6 +653,13 @@ Once a canvas is open:
   from: pick the layer, then Register Selected Layer.
   File, Export Animation saves an animated GIF, a movie or every frame as a
   picture.
+- **Brushes you downloaded:** Add from downloads at the bottom of the
+  Tool Group opens a file you downloaded and makes its brushes sub tools
+  of the tool out: Clip Studio Paint sub tools (.sut), Photoshop brushes
+  (.abr), GIMP brushes (.gbr, .gih) or a picture. Size, opacity, spacing,
+  spray, ribbon and turn come along; colored tips keep their colors, and
+  a brush of several pictures uses them in turn. They are kept for next
+  time.
 - **Decorations:** the Decoration tool lays shapes instead of a line.
   Stars, Hearts, Sparkles, Snow, Flowers and Bubbles scatter about the
   stroke at random sizes and turns; Leaves, Chain, Lace, Stitches, Dotted

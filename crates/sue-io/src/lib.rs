@@ -18,6 +18,7 @@
 //! Specification: `HUMANZ.md` §2.
 
 mod audio;
+pub mod brushes;
 mod bytemap;
 pub mod clip;
 mod formats;

@@ -358,7 +358,7 @@ The order of work is the plan at the end.
 | Sketch tools: Pencil, Mechanical pencil, Charcoal, Crayon, Pastel, Chalk | Tool > Sketch | done | Clip Studio's six sketch tools |
 | Brush tools with color mixing | Tools | done | Watercolor and gouache pick up and drag the color underneath |
 | Airbrush | Tools | done | A soft sub tool |
-| Decoration tool | Tool | partial | Twelve sub tools on Sue's brush (stars, hearts, sparkles, snow, flowers, leaves, bubbles, chain, lace, stitches, dotted and dashed lines): shapes scattered about the stroke or turning along it, with Turn along the line, Angle, Scatter, Size jitter and Turn jitter in Tool Settings. Missing: Clip Studio's ribbon brushes (a texture stretched along the stroke) and its downloadable decoration materials |
+| Decoration tool | Tool | done | Eighteen sub tools on Sue's brush: scattered shapes (stars, hearts, sparkles, snow, flowers, bubbles), shapes along the line (leaves, chain, lace, stitches, dotted and dashed lines) and ribbons bent along the stroke (rope, rickrack, film strip, checkered band, stitched ribbon, lace ribbon). Tool Settings has Lay as a ribbon, Turn along the line, Angle, Scatter, Size jitter and Turn jitter. Downloaded decorations come in with Add from downloads |
 | Tool palette in Clip Studio Paint 4's order, with the main and sub colors and the transparent color beneath | Tool palette | done | Move holds hand, zoom and move layer; Comic holds frame border and balloon |
 | Eraser with Vector modes | Tool | done | Only where it touches, up to where lines cross, or whole lines |
 | Blend: Blur, Finger Tip, Liquify | Tool | done | Liquify has its own slot in Clip Studio's order; it pushes, swells, pinches and twirls |
@@ -375,7 +375,7 @@ The order of work is the plan at the end.
 | Object tool (Operation) | Tool | done | Vector lines, 3D layers and camera folders in one tool |
 | Correct Line and Control Point tools | Tool | done | Reshape, pinch, smooth, join, thicken, redraw, give pen pressure |
 | Sub tool library breadth | Tools | partial | Clip Studio's eleven pens and six sketch tools are there; breadth grows next |
-| Tool Group palette: each brush's own stroke preview, Add from downloads and the Downloads folder | Tool Group palette | partial | The button does nothing yet, so no sub tools arrive from downloads |
+| Tool Group palette: each brush's own stroke preview, Add from downloads and the Downloads folder | Tool Group palette | done | Add from downloads imports Clip Studio sub tools (.sut), Photoshop (.abr), GIMP (.gbr, .gih) and pictures as sub tools, their tips kept in the materials location; tried on real downloaded files |
 | A tap with the pen leaves a dot the size of the brush | Drawing | done | Pens no longer start thin with a mouse either |
 | Tool Settings: size, opacity, hardness, smoothing, pressure | Palette | done | Changes stick to the sub tool |
 | Dynamics by pen pressure, speed and chance, along curves | Tool Settings | done | Each with a minimum you choose |

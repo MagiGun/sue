@@ -1220,18 +1220,32 @@ impl SuePaint {
                         }
                         None => {}
                     }
-                    // Clip Studio Paint's Add from downloads: sub tools from
-                    // CLIP STUDIO ASSETS, not in Sue Paint yet.
+                    // Clip Studio Paint's Add from downloads: brushes people
+                    // downloaded (Clip Studio's .sut, Photoshop's .abr,
+                    // GIMP's .gbr and .gih, or a picture) become sub tools.
                     ui.add_space(6.0);
                     ui.vertical_centered(|ui| {
-                        let _ = ui.add(
-                            egui::Button::new(
-                                RichText::new(format!("+  {}", tr!("add-from-downloads")))
-                                    .size(theme.small_size + 0.5)
-                                    .color(theme.text),
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new(format!("+  {}", tr!("add-from-downloads")))
+                                        .size(theme.small_size + 0.5)
+                                        .color(theme.text),
+                                )
+                                .frame(false),
                             )
-                            .frame(false),
-                        );
+                            .on_hover_text(tr!("brushes-from-clip-studio-photoshop-gimp"))
+                            .clicked()
+                        {
+                            cx.request(ShellRequest::PickFile(
+                                sue_wm::FilePick::open(
+                                    Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
+                                    "brush-import",
+                                    &tr!("add-brushes-from-downloads"),
+                                )
+                                .extensions(&["sut", "abr", "gbr", "gih", "png"]),
+                            ));
+                        }
                     });
                 });
             return;

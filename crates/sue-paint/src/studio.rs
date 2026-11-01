@@ -3413,6 +3413,53 @@ impl SuePaint {
         cx.notify(tr!("new-brush-sub-tool", name = name));
     }
 
+    /// Add from downloads: the brushes in a file people downloaded (Clip
+    /// Studio Paint's `.sut`, Photoshop's `.abr`, GIMP's `.gbr` and `.gih`,
+    /// or a picture) become sub tools of the tool out (the Brush tool when
+    /// it does not paint). Their tips are kept with the other brush tips in
+    /// the materials location, so they come back next time.
+    pub(crate) fn import_brushes(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let file = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let brushes = match sue_platform::fs::read(path)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| sue_io::brushes::read(&file, &bytes))
+        {
+            Ok(brushes) => brushes,
+            Err(error) => {
+                cx.fail(error);
+                return;
+            }
+        };
+        let tool = self.toolbox.tool();
+        let tool = if tool.paints() && tool != crate::tools::Tool::Eraser {
+            tool
+        } else {
+            crate::tools::Tool::Brush
+        };
+        let folder = crate::materials::location(cx).map(|folder| folder.join("tips"));
+        let mut added = 0;
+        for brush in brushes {
+            let Some(tip) = crate::decoration::imported_tip(&brush, folder.as_deref()) else {
+                continue;
+            };
+            self.toolbox
+                .add_sub(crate::tools::SubTool::new(tool, &brush.name, 0, tip));
+            added += 1;
+        }
+        if added == 0 {
+            cx.fail(tr!("no-brush-in-file", file = file.as_str()));
+        } else {
+            cx.notify(tr!(
+                "brushes-added-from",
+                count = added,
+                file = file.as_str()
+            ));
+        }
+    }
+
     /// File, Print: the pages (every page of a story, or the canvas) laid
     /// on paper as Print Settings says, written as a PDF and opened in the
     /// system's viewer to print.
@@ -6837,6 +6884,7 @@ impl SueApplet for SuePaint {
             "layer" => self.open_picked(cx, path, true),
             "import-layers" => self.open_picked(cx, path, true),
             "story-text" => self.import_text(cx, path),
+            "brush-import" => self.import_brushes(cx, path),
             "batch" => self.export_canvases(cx, path),
             "import-vector" | "import-movie" | "import-pattern" => {
                 self.import_file(cx, pick.purpose.as_str(), path)

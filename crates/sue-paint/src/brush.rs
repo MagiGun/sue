@@ -369,6 +369,13 @@ pub struct Tip {
     /// ribbon decorations): stretched round every bend, one shape every
     /// `spacing` of the brush's size, instead of stamped in dabs.
     pub ribbon: bool,
+    /// A picture tip with colors paints them instead of the brush's color
+    /// (Clip Studio Paint's colored brush tips).
+    pub keep_colors: bool,
+    /// How many pictures the tip has: the shapes numbered from `shape` on,
+    /// one picked at random for each dab (more than 1 for a brush tip of
+    /// several pictures).
+    pub shape_count: u32,
 }
 
 /// A brush tip's shape made from a picture: how much each spot of a
@@ -381,6 +388,10 @@ pub struct TipShape {
     pub side: u32,
     /// `side * side` coverages, row by row.
     pub cover: Vec<f32>,
+    /// Its own colors, straight sRGB 0 to 1, `side * side` row by row,
+    /// for a picture with colors (a flower, a jewel); `None` for a shape
+    /// that paints in the brush's color.
+    pub colors: Option<Vec<[f32; 3]>>,
 }
 
 impl TipShape {
@@ -413,10 +424,20 @@ impl TipShape {
             (longest - height) as f32 / 2.0,
         );
         let mut cover = vec![0.0; (side * side) as usize];
+        // A picture on clear with colors in it keeps them (gray ones paint
+        // in the brush's color).
+        let colored = clear
+            && pixels.chunks(4).any(|pixel| {
+                pixel[3] > 32
+                    && pixel[..3].iter().max().unwrap_or(&0) - pixel[..3].iter().min().unwrap_or(&0)
+                        > 24
+            });
+        let mut colors = colored.then(|| vec![[0.0_f32; 3]; (side * side) as usize]);
         for y in 0..side {
             for x in 0..side {
                 // The average over the square each sample stands for.
                 let (x0, y0) = (x as f32 * scale - left, y as f32 * scale - top);
+                let mut tint = [0.0_f32; 4];
                 let (mut sum, mut count) = (0.0, 0.0);
                 let steps = scale.ceil().max(1.0) as u32;
                 for sy in 0..steps {
@@ -426,18 +447,41 @@ impl TipShape {
                         count += 1.0;
                         if px >= 0.0 && py >= 0.0 && (px as u32) < width && (py as u32) < height {
                             let at = ((py as u32 * width + px as u32) * 4) as usize;
-                            sum += value(&pixels[at..at + 4]);
+                            let pixel = &pixels[at..at + 4];
+                            sum += value(pixel);
+                            let alpha = f32::from(pixel[3]) / 255.0;
+                            for channel in 0..3 {
+                                tint[channel] += f32::from(pixel[channel]) / 255.0 * alpha;
+                            }
+                            tint[3] += alpha;
                         }
                     }
                 }
                 cover[(y * side + x) as usize] = sum / count;
+                if let Some(colors) = colors.as_mut() {
+                    let weight = tint[3].max(1e-6);
+                    colors[(y * side + x) as usize] =
+                        [tint[0] / weight, tint[1] / weight, tint[2] / weight];
+                }
             }
         }
         Some(Self {
             name: name.to_owned(),
             side,
             cover,
+            colors,
         })
+    }
+
+    /// Its own color at `(u, v)`, each -1 to 1 across the tip (the nearest
+    /// sample), or `None` for a shape without colors.
+    #[must_use]
+    pub fn color_at(&self, u: f32, v: f32) -> Option<[f32; 3]> {
+        let colors = self.colors.as_ref()?;
+        let side = self.side as f32;
+        let x = ((u + 1.0) * 0.5 * side).clamp(0.0, side - 1.0) as usize;
+        let y = ((v + 1.0) * 0.5 * side).clamp(0.0, side - 1.0) as usize;
+        colors.get(y * self.side as usize + x).copied()
     }
 
     /// Its coverage at `(u, v)`, each -1 to 1 across the tip, bilinear.
@@ -542,6 +586,8 @@ impl Tip {
             ("size_jitter".to_owned(), self.size_jitter.to_string()),
             ("turn_jitter".to_owned(), self.turn_jitter.to_string()),
             ("ribbon".to_owned(), flag(self.ribbon)),
+            ("keep_colors".to_owned(), flag(self.keep_colors)),
+            ("shape_count".to_owned(), self.shape_count.to_string()),
             ("jitter.tip".to_owned(), flag(self.jitter.tip)),
             ("jitter.hue".to_owned(), self.jitter.hue.to_string()),
             (
@@ -655,6 +701,13 @@ impl Tip {
         number("size_jitter", &mut tip.size_jitter);
         number("turn_jitter", &mut tip.turn_jitter);
         flag("ribbon", &mut tip.ribbon);
+        flag("keep_colors", &mut tip.keep_colors);
+        if let Some(count) = values
+            .get("shape_count")
+            .and_then(|value| value.parse().ok())
+        {
+            tip.shape_count = count;
+        }
         flag("jitter.tip", &mut tip.jitter.tip);
         number("jitter.hue", &mut tip.jitter.hue);
         number("jitter.saturation", &mut tip.jitter.saturation);
@@ -715,6 +768,8 @@ impl Default for Tip {
             size_jitter: 0.0,
             turn_jitter: 0.0,
             ribbon: false,
+            keep_colors: false,
+            shape_count: 1,
         }
     }
 }
@@ -881,6 +936,69 @@ enum Mode {
     /// Each dab is laid straight over the pixels in its own color (mixing
     /// brushes, whose color changes along the stroke).
     Direct([f32; 3]),
+    /// Each pixel takes the color of the picture tip under it
+    /// ([`Stroke::picture`]), laid straight over.
+    Picture,
+}
+
+/// A colored picture being laid, and where on it each pixel falls.
+#[derive(Clone, Debug)]
+struct PictureDab {
+    shape: std::sync::Arc<TipShape>,
+    place: Place,
+}
+
+/// How a picture lies on the canvas.
+#[derive(Clone, Copy, Debug)]
+enum Place {
+    /// A dab: its middle, radius and turn (cosine and sine).
+    Dab {
+        center: [f32; 2],
+        radius: f32,
+        turn: [f32; 2],
+    },
+    /// A ribbon's piece from `from` along `run` (its length `length`),
+    /// `start` along the stroke, one picture every `tile`.
+    Ribbon {
+        from: [f32; 2],
+        run: [f32; 2],
+        length: f32,
+        start: f32,
+        tile: f32,
+        radius: f32,
+    },
+}
+
+impl PictureDab {
+    /// The picture's color at pixel center `(px, py)`.
+    fn color(&self, px: f32, py: f32) -> Option<[f32; 3]> {
+        match self.place {
+            Place::Dab {
+                center,
+                radius,
+                turn: [cos, sin],
+            } => {
+                let (dx, dy) = (px - center[0], py - center[1]);
+                let (u, v) = (dx * cos + dy * sin, -dx * sin + dy * cos);
+                self.shape.color_at(u / radius, v / radius)
+            }
+            Place::Ribbon {
+                from,
+                run,
+                length,
+                start,
+                tile,
+                radius,
+            } => {
+                let squared = (run[0] * run[0] + run[1] * run[1]).max(1e-6);
+                let (dx, dy) = (px - from[0], py - from[1]);
+                let t = ((dx * run[0] + dy * run[1]) / squared).clamp(0.0, 1.0);
+                let across = (dx * -run[1] + dy * run[0]) / squared.sqrt();
+                let u = ((start + t * length) / tile).rem_euclid(1.0) * 2.0 - 1.0;
+                self.shape.color_at(u, across / radius)
+            }
+        }
+    }
 }
 
 /// A stroke in progress on one layer.
@@ -900,6 +1018,8 @@ pub struct Stroke {
     /// Which way the line runs at the latest dab, in radians.
     heading: f32,
     carried: [f32; 3],
+    /// The colored picture dab being laid, while it is.
+    picture: Option<PictureDab>,
     last_dab: Option<[f32; 2]>,
     total: Option<f32>,
     flicked: f32,
@@ -945,6 +1065,7 @@ impl Stroke {
             since_dab: 0.0,
             heading: 0.0,
             carried: color,
+            picture: None,
             last_dab: None,
             total: None,
             flicked: 0.0,
@@ -1565,11 +1686,28 @@ impl Stroke {
             ay.max(by) + reach,
         ];
         let span = move |py: f32| capsule_span(a.at, b.at, reach, py);
+        // A colored picture keeps its colors along the ribbon too.
+        let mode = if self.tip.keep_colors && shaped.colors.is_some() && !self.tip.eraser {
+            self.picture = Some(PictureDab {
+                shape: std::sync::Arc::clone(&shaped),
+                place: Place::Ribbon {
+                    from: a.at,
+                    run: [dx, dy],
+                    length,
+                    start,
+                    tile,
+                    radius,
+                },
+            });
+            Mode::Picture
+        } else {
+            Mode::Max
+        };
         self.apply(
             raster,
             rect,
             selection,
-            Mode::Max,
+            mode,
             strength,
             span,
             move |px, py| {
@@ -1590,6 +1728,7 @@ impl Stroke {
                 shaped.at(u, across / radius) * strength
             },
         );
+        self.picture = None;
     }
 
     /// Stamps dabs every `spacing` from `a` (arc length `start`) to `b`.
@@ -1708,7 +1847,29 @@ impl Stroke {
             Mode::Max
         };
         let tip = self.tip;
-        let shaped = shape(tip.shape);
+        // A tip of several pictures takes one of them at random.
+        let count = tip.shape_count.max(1);
+        let picked = if tip.shape != 0 && count > 1 {
+            tip.shape + ((roll(25) * count as f32) as u32).min(count - 1)
+        } else {
+            tip.shape
+        };
+        let shaped = shape(picked);
+        // A colored picture paints its own colors, each pixel.
+        let mode = match &shaped {
+            Some(picture) if tip.keep_colors && picture.colors.is_some() && !tip.eraser => {
+                self.picture = Some(PictureDab {
+                    shape: std::sync::Arc::clone(picture),
+                    place: Place::Dab {
+                        center: [x, y],
+                        radius: radius.max(0.5),
+                        turn: [cos, sin],
+                    },
+                });
+                Mode::Picture
+            }
+            _ => mode,
+        };
         // A turned picture reaches to its square's corners.
         let corner = if shaped.is_some() && turn != 0.0 {
             std::f32::consts::SQRT_2
@@ -1754,6 +1915,7 @@ impl Stroke {
                 }
             },
         );
+        self.picture = None;
     }
 
     /// `color` with the tip's color jitter at `s` along the stroke.
@@ -1861,6 +2023,7 @@ impl Stroke {
             }
         }
         let max = matches!(mode, Mode::Max);
+        let picture = self.picture.clone();
         let work = |band_y: u32, band: &mut [u8], tiles: &mut [&mut TileState]| {
             // For each tile: how many of its pixels this pass went over, and
             // the least coverage among them.
@@ -1941,6 +2104,14 @@ impl Stroke {
                                 }
                             }
                             Mode::Direct(rgb) => {
+                                let now = [band[at], band[at + 1], band[at + 2], band[at + 3]];
+                                paint_pixel(&now, cover, rgb, tip.eraser, alpha_lock)
+                            }
+                            Mode::Picture => {
+                                let rgb = picture
+                                    .as_ref()
+                                    .and_then(|dab| dab.color(x as f32 + 0.5, fy))
+                                    .unwrap_or(color);
                                 let now = [band[at], band[at + 1], band[at + 2], band[at + 3]];
                                 paint_pixel(&now, cover, rgb, tip.eraser, alpha_lock)
                             }
