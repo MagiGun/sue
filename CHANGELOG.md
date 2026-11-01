@@ -51,6 +51,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A dot no longer appears at the start or end of pen strokes: a pen
+  bouncing on the tablet as it lands or lifts touched it for a few
+  thousandths of a second, which Sue Paint took for a tap. A real tap
+  still leaves its dot.
 - Sue on Android can check for updates and download them: it could not
   reach the internet at all. The update installs from inside Sue, asking
   once to be allowed to install apps, and says plainly when it could not.

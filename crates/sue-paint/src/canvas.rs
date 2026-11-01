@@ -2654,6 +2654,14 @@ impl SuePaint {
                     }
                     // A vector line keeps the samples as drawn.
                     drawn = vector.then(|| stroke.samples().to_vec());
+                    // How long the pen was down, so a bounce is no tap.
+                    if let Some((pressed, _)) = trail.first() {
+                        let lifted = self
+                            .clock
+                            .0
+                            .max(trail.last().map_or(*pressed, |last| last.0));
+                        stroke.set_held((lifted - pressed) as f32);
+                    }
                     stroke.end(raster, finish, selection);
                 }
                 let rects = shift_rects(&stroke.take_dirty_tiles(), offset);

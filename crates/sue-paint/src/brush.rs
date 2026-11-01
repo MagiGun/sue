@@ -803,6 +803,10 @@ pub struct Sample {
     pub alpha: f32,
 }
 
+/// The shortest touch that is a tap, in seconds; anything shorter is the
+/// pen bouncing on the tablet.
+pub const TAP_SECONDS: f32 = 0.04;
+
 /// How a stroke is finished when the pen lifts.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Finish {
@@ -849,6 +853,8 @@ enum Mode {
 #[derive(Clone, Debug)]
 pub struct Stroke {
     layer: EntityId,
+    /// How long the pen was down, in seconds, when the canvas knows it.
+    held: Option<f32>,
     tip: Tip,
     color: [f32; 3],
     alpha_lock: bool,
@@ -893,6 +899,7 @@ impl Stroke {
     pub fn new(layer: EntityId, tip: Tip, color: [f32; 3], alpha_lock: bool) -> Self {
         Self {
             layer,
+            held: None,
             tip,
             color,
             alpha_lock,
@@ -929,6 +936,31 @@ impl Stroke {
         } else {
             copies
         };
+    }
+
+    /// Puts every pixel the stroke touched back as it was, so it leaves
+    /// nothing (and no undo step).
+    fn put_back(&mut self, raster: &mut RasterTile2D) {
+        let stride = raster.width() as usize * 4;
+        let Some(bytes) = raster.bytes_mut() else {
+            return;
+        };
+        for tile in self.tiles.values_mut() {
+            let [x, y, w, h] = tile.rect;
+            let row = w as usize * 4;
+            for line in 0..h as usize {
+                let at = (y as usize + line) * stride + x as usize * 4;
+                bytes[at..at + row].copy_from_slice(&tile.before[line * row..(line + 1) * row]);
+            }
+            tile.fresh = Some([x, y, x + w, y + h]);
+        }
+    }
+
+    /// How long the pen was down, in seconds: a touch shorter than
+    /// [`TAP_SECONDS`] is the pen bouncing on the tablet, not a tap, and
+    /// leaves no dot.
+    pub fn set_held(&mut self, seconds: f32) {
+        self.held = Some(seconds);
     }
 
     /// The sub color, for color jitter that blends toward it.
@@ -1115,6 +1147,14 @@ impl Stroke {
         self.flush(raster, selection);
         // A tap (the pen down and up in one place) leaves one dot as large
         // as the brush, as Clip Studio Paint does, whatever the tapers say.
+        // A pen bouncing as it lands or lifts touches for a few thousandths
+        // of a second: that is no tap, and leaves nothing.
+        if (self.samples.len() < 2 || self.travelled < 1.0)
+            && self.held.is_some_and(|held| held < TAP_SECONDS)
+        {
+            self.put_back(raster);
+            return;
+        }
         if let Some(first) = self.samples.first().copied()
             && (self.samples.len() < 2 || self.travelled < 1.0)
         {
@@ -2564,6 +2604,25 @@ mod tests {
         assert!(alpha(&raster, 32, 32) > 200, "the middle is inked");
         assert!(alpha(&raster, 32, 26) > 100, "out to the brush's size");
         assert_eq!(alpha(&raster, 32, 12), 0, "and no further");
+    }
+
+    #[test]
+    fn a_pen_bouncing_on_the_tablet_leaves_no_dot() {
+        let tip = flat_pen(16.0);
+        // Down and up in a few thousandths of a second: a bounce.
+        let mut raster = layer(64, 64);
+        let mut stroke = Stroke::new(EntityId::new(), tip.clone(), [0.0, 0.0, 0.0], false);
+        stroke.to(&mut raster, [32.0, 32.0], 0.6, None);
+        stroke.set_held(0.008);
+        stroke.end(&mut raster, Finish::default(), None);
+        assert_eq!(alpha(&raster, 32, 32), 0, "nothing left");
+        // A real tap, held a tenth of a second, still leaves its dot.
+        let mut raster = layer(64, 64);
+        let mut stroke = Stroke::new(EntityId::new(), tip, [0.0, 0.0, 0.0], false);
+        stroke.to(&mut raster, [32.0, 32.0], 0.6, None);
+        stroke.set_held(0.1);
+        stroke.end(&mut raster, Finish::default(), None);
+        assert!(alpha(&raster, 32, 32) > 200);
     }
 
     #[test]
