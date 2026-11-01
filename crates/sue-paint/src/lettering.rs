@@ -3,7 +3,7 @@
 //! them again with `sue_type::raster` after every edit, so text stays sharp
 //! and editable. Clicked inside a balloon, the words center in it.
 
-use egui::Pos2;
+use egui::{Pos2, pos2};
 use sue_core::txn::{ReplaceComponent, SetProperty};
 use sue_core::{Color, EntityId, PixelFormat, RasterTile2D, Value};
 use sue_wm::AppletContext;
@@ -191,10 +191,19 @@ pub(crate) fn area_of(entity: &sue_core::Entity) -> Option<[f32; 4]> {
 }
 
 impl SuePaint {
-    /// A Text tool click at `p` (picture pixels): edits the current text
-    /// layer when clicked on its words, centers new words in a balloon
-    /// clicked inside, else starts new words there.
+    /// A Text tool click at `p` (picture pixels), as in Clip Studio Paint:
+    /// types into the current text layer when clicked on its words,
+    /// centers new words in a balloon clicked inside, else starts new
+    /// words there, typed right on the canvas.
     pub(crate) fn text_at(&mut self, p: Pos2, cx: &mut AppletContext<'_>) {
+        // A click on the words being typed moves the caret there.
+        if let Some(typing) = self.typing.as_mut()
+            && typing.holds(p)
+        {
+            typing.place = Some(typing.index_at(p));
+            return;
+        }
+        self.finish_typing(cx);
         let arena = &cx.world.arena;
         let current = self
             .doc()
@@ -207,11 +216,18 @@ impl SuePaint {
             && (y0 - 8.0..=y1 + 8.0).contains(&p.y)
             && let Some(lettering) = Lettering::of(entity)
         {
-            self.dialog = Some(crate::dialogs::Dialog::Text(Some(entity.id()), lettering));
+            let layer = entity.id();
+            self.begin_typing(cx, Some(layer), lettering, Some(p));
             return;
         }
-        let rgb = self.drawing_color();
-        let mut lettering = Lettering::new([p.x, p.y], rgb);
+        let (font, size, vertical, center, rgb) = self.text_look();
+        let mut lettering = Lettering {
+            font,
+            size,
+            vertical,
+            center,
+            ..Lettering::new([p.x, p.y], rgb)
+        };
         // Inside a balloon: centered in it.
         let balloon = self.picture().and_then(|picture| {
             crate::doc::layers(arena, picture)
@@ -237,7 +253,7 @@ impl SuePaint {
             lettering.center = true;
             lettering.size = (room / 5.0).clamp(12.0, 96.0);
         }
-        self.dialog = Some(crate::dialogs::Dialog::Text(None, lettering));
+        self.begin_typing(cx, None, lettering, None);
     }
 
     /// Writes `lettering` to `layer` (or a new text layer on top), drawn
@@ -287,6 +303,409 @@ impl SuePaint {
                     .collect();
                 self.spawn_drawn_layer(cx, &name, TEXT, pixels, properties);
             }
+        }
+    }
+}
+
+/// Words being typed on the canvas (Clip Studio Paint's Text tool): the
+/// keys go to them, the canvas shows them as they grow, and they are kept
+/// as one undo step when the typing ends.
+pub(crate) struct Typing {
+    /// The text layer being edited; `None` for new words.
+    pub layer: Option<EntityId>,
+    /// The words as typed so far.
+    pub lettering: Lettering,
+    /// The edited layer's pixels as they were (it shows empty while its
+    /// words are typed over it).
+    before: Option<Vec<u8>>,
+    /// The picture typed in.
+    picture: EntityId,
+    /// The words drawn, what they say, and where (picture pixels).
+    drawn: Option<(egui::TextureHandle, Lettering, [f32; 4])>,
+    /// The caret's glide and blink.
+    glide: sue_type::caret::CaretGlide,
+    /// Where the caret goes next frame (a click on the words).
+    place: Option<usize>,
+    /// The Text tool's settings and the ink the words last took.
+    settings: Look,
+}
+
+/// How the Text tool letters: font, size, columns, centered, ink.
+type Look = (String, f32, bool, bool, [u8; 3]);
+
+impl Typing {
+    fn spec(&self) -> sue_type::raster::TextSpec<'_> {
+        let lettering = &self.lettering;
+        sue_type::raster::TextSpec {
+            text: &lettering.content,
+            font: &lettering.font,
+            size: lettering.size,
+            rgb: lettering.rgb,
+            at: lettering.at,
+            center: lettering.center,
+            vertical: lettering.vertical,
+        }
+    }
+
+    /// The picture area the words take, with room for letters that lean
+    /// out of their places.
+    fn area(&self) -> Option<[f32; 4]> {
+        let room = self.lettering.size * 0.6;
+        sue_type::raster::caret_slots(&self.spec())
+            .iter()
+            .flat_map(|slot| [slot.top, slot.bottom])
+            .fold(None, |area: Option<[f32; 4]>, [x, y]| {
+                Some(area.map_or([x, y, x, y], |[x0, y0, x1, y1]| {
+                    [x0.min(x), y0.min(y), x1.max(x), y1.max(y)]
+                }))
+            })
+            .map(|[x0, y0, x1, y1]| [x0 - room, y0 - room, x1 + room, y1 + room])
+    }
+
+    /// The character nearest `p` (picture pixels).
+    fn index_at(&self, p: Pos2) -> usize {
+        let far = |slot: &sue_type::raster::CaretSlot| {
+            pos2(
+                (slot.top[0] + slot.bottom[0]) / 2.0,
+                (slot.top[1] + slot.bottom[1]) / 2.0,
+            )
+            .distance_sq(p)
+        };
+        sue_type::raster::caret_slots(&self.spec())
+            .iter()
+            .min_by(|a, b| far(a).total_cmp(&far(b)))
+            .map_or(0, |slot| slot.index)
+    }
+
+    /// Whether `p` (picture pixels) is on the words.
+    fn holds(&self, p: Pos2) -> bool {
+        self.area()
+            .is_some_and(|[x0, y0, x1, y1]| (x0..=x1).contains(&p.x) && (y0..=y1).contains(&p.y))
+    }
+}
+
+/// The hidden text box that takes the typed keys.
+fn typing_id() -> egui::Id {
+    egui::Id::unique("sue-paint-typing")
+}
+
+impl SuePaint {
+    /// Starts typing `lettering` on the canvas, into `layer` or as new
+    /// words, the caret at `place` (picture pixels) or at the end.
+    fn begin_typing(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        layer: Option<EntityId>,
+        lettering: Lettering,
+        place: Option<Pos2>,
+    ) {
+        self.finish_typing(cx);
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let mut before = None;
+        if let Some(layer) = layer
+            && let Some(bytes) =
+                crate::doc::raster_mut(&mut cx.world.arena, layer).and_then(RasterTile2D::bytes_mut)
+        {
+            // The old words make way for the ones being typed.
+            before = Some(bytes.to_vec());
+            bytes.fill(0);
+            self.refresh_all(cx);
+        }
+        // The Text tool shows the words' own settings.
+        let sub = self.toolbox.current_mut();
+        if sub.tool == crate::tools::Tool::Text {
+            sub.font.clone_from(&lettering.font);
+            sub.tip.size = lettering.size;
+            sub.kind = u8::from(lettering.vertical);
+            sub.whole = lettering.center;
+        }
+        let settings = self.text_look();
+        let mut typing = Typing {
+            settings,
+            layer,
+            lettering,
+            before,
+            picture,
+            drawn: None,
+            glide: sue_type::caret::CaretGlide::default(),
+            place: None,
+        };
+        typing.place = Some(match place {
+            Some(p) => typing.index_at(p),
+            None => typing.lettering.content.chars().count(),
+        });
+        self.typing = Some(typing);
+    }
+
+    /// Ends the typing: the words are kept as one undo step (none when
+    /// nothing changed).
+    pub(crate) fn finish_typing(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(typing) = self.typing.take() else {
+            return;
+        };
+        // Kept in the picture typed in, even when another tab is in front.
+        let Some(index) = self
+            .docs
+            .iter()
+            .position(|doc| doc.picture == typing.picture)
+        else {
+            return;
+        };
+        let active = std::mem::replace(&mut self.active, index);
+        self.keep_typed(cx, &typing);
+        self.active = active;
+    }
+
+    fn keep_typed(&mut self, cx: &mut AppletContext<'_>, typing: &Typing) {
+        if let (Some(layer), Some(before)) = (typing.layer, typing.before.as_ref())
+            && let Some(bytes) =
+                crate::doc::raster_mut(&mut cx.world.arena, layer).and_then(RasterTile2D::bytes_mut)
+            && bytes.len() == before.len()
+        {
+            bytes.copy_from_slice(before);
+            self.refresh_all(cx);
+        }
+        let unchanged = typing.layer.is_some_and(|layer| {
+            cx.world
+                .arena
+                .get_by_id(layer)
+                .ok()
+                .and_then(Lettering::of)
+                .is_some_and(|was| was == typing.lettering)
+        });
+        if !unchanged {
+            self.put_text(cx, typing.layer, &typing.lettering);
+        }
+    }
+
+    /// How the Text tool letters now (the ink is the drawing color).
+    fn text_look(&self) -> Look {
+        let sub = self.toolbox.current();
+        (
+            sub.font.clone(),
+            sub.tip.size,
+            sub.kind == 1,
+            sub.whole,
+            self.drawing_color(),
+        )
+    }
+
+    fn refresh_all(&mut self, cx: &AppletContext<'_>) {
+        if let Some(doc) = self.doc_mut() {
+            doc.compositor
+                .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+        }
+    }
+
+    /// The words being typed: drawn where they go, with a caret, the keys
+    /// taken by a hidden text box. Esc, Ctrl and Enter, another tool or
+    /// another document keep them.
+    pub(crate) fn typing_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        viewport: egui::Rect,
+        size: [u32; 2],
+        cx: &mut AppletContext<'_>,
+    ) {
+        let Some(typing) = self.typing.as_ref() else {
+            return;
+        };
+        let done = self.toolbox.tool() != crate::tools::Tool::Text
+            || self.picture() != Some(typing.picture)
+            || self.dialog.is_some()
+            || ui.input_mut(|input| {
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                    || input.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter)
+            });
+        if done {
+            self.finish_typing(cx);
+            return;
+        }
+        let Some(view) = self.doc().map(|doc| doc.view) else {
+            return;
+        };
+        let rice = cx.rice();
+        let motion = sue_type::caret::CaretMotion::new(
+            rice.get_bool(sue_wm::SMOOTH_CARET_KEY).unwrap_or(true),
+            rice.get_i64(sue_wm::CARET_GLIDE_KEY)
+                .unwrap_or(sue_type::caret::GLIDE_MS),
+            cx.view.profile.budget().spring_physics,
+            &ui.visuals().text_cursor,
+        );
+        let look = self.text_look();
+        let Some(typing) = self.typing.as_mut() else {
+            return;
+        };
+        // A setting changed in Tool Property or a new color changes the
+        // words being typed.
+        if look != typing.settings {
+            let lettering = &mut typing.lettering;
+            (
+                lettering.font,
+                lettering.size,
+                lettering.vertical,
+                lettering.center,
+                lettering.rgb,
+            ) = look.clone();
+            typing.settings = look;
+        }
+        let screen = |[x, y]: [f32; 2]| view.to_screen(viewport, size, pos2(x, y));
+        let ctx = ui.ctx().clone();
+        let id = typing_id();
+        if let Some(index) = typing.place.take() {
+            let mut state = egui::text_edit::TextEditState::load(&ctx, id).unwrap_or_default();
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::one(
+                    egui::text::CCursor::new(index),
+                )));
+            state.store(&ctx, id);
+        }
+        let slots = sue_type::raster::caret_slots(&typing.spec());
+        let last = slots.len().saturating_sub(1);
+        let caret = egui::text_edit::TextEditState::load(&ctx, id)
+            .and_then(|state| state.cursor.char_range())
+            .map_or(last, |range| usize::from(range.primary.index).min(last));
+        let (top, bottom) = slots
+            .get(caret)
+            .map_or((typing.lettering.at, typing.lettering.at), |slot| {
+                (slot.top, slot.bottom)
+            });
+        // The hidden box sits on the caret, so a system's input method
+        // opens its window there.
+        let hidden = egui::Rect::from_min_size(screen(bottom), egui::vec2(1.0, 1.0));
+        let edited = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(hidden), |ui| {
+                let visuals = ui.visuals_mut();
+                visuals.text_cursor.stroke = egui::Stroke::NONE;
+                visuals.selection.bg_fill = egui::Color32::TRANSPARENT;
+                visuals.selection.stroke = egui::Stroke::NONE;
+                // Lines never wrap in the tiny box, so End and the arrows
+                // go by the words' own lines.
+                let mut lines = |ui: &egui::Ui, text: &dyn egui::TextBuffer, _: f32| {
+                    let job = egui::text::LayoutJob::simple(
+                        text.as_str().to_owned(),
+                        egui::FontId::default(),
+                        egui::Color32::TRANSPARENT,
+                        f32::INFINITY,
+                    );
+                    ui.fonts_mut(|fonts| fonts.layout_job(job))
+                };
+                let response = ui.put(
+                    hidden,
+                    egui::TextEdit::multiline(&mut typing.lettering.content)
+                        .id(id)
+                        .layouter(&mut lines)
+                        .frame(egui::Frame::NONE)
+                        .text_color(egui::Color32::TRANSPARENT)
+                        .desired_rows(1)
+                        .desired_width(1.0),
+                );
+                // The keys stay with the words until the typing ends.
+                response.request_focus();
+                response.changed()
+            })
+            .inner;
+        // The words, drawn again when they change.
+        let stale = typing
+            .drawn
+            .as_ref()
+            .is_none_or(|(_, drawn, _)| *drawn != typing.lettering);
+        if (edited || stale)
+            && let Some([x0, y0, x1, y1]) = typing.area()
+        {
+            let (x0, y0) = (x0.floor(), y0.floor());
+            let (w, h) = (
+                (x1 - x0).ceil().max(1.0) as u32,
+                (y1 - y0).ceil().max(1.0) as u32,
+            );
+            let mut shifted = typing.lettering.clone();
+            shifted.at = [shifted.at[0] - x0, shifted.at[1] - y0];
+            let (pixels, _) = shifted.draw(w, h);
+            let image = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &pixels);
+            let texture = ctx.load_texture("sue-paint-typing", image, egui::TextureOptions::LINEAR);
+            typing.drawn = Some((
+                texture,
+                typing.lettering.clone(),
+                [x0, y0, x0 + w as f32, y0 + h as f32],
+            ));
+        }
+        let painter = ui.painter().with_clip_rect(viewport);
+        if let Some((texture, _, [x0, y0, x1, y1])) = &typing.drawn {
+            let corners = [[*x0, *y0], [*x1, *y0], [*x1, *y1], [*x0, *y1]].map(screen);
+            let mut mesh = egui::Mesh::with_texture(texture.id());
+            let uvs = [
+                pos2(0.0, 0.0),
+                pos2(1.0, 0.0),
+                pos2(1.0, 1.0),
+                pos2(0.0, 1.0),
+            ];
+            for (pos, uv) in corners.into_iter().zip(uvs) {
+                mesh.vertices.push(egui::epaint::Vertex {
+                    pos,
+                    uv,
+                    color: egui::Color32::WHITE,
+                });
+            }
+            mesh.indices.extend([0, 1, 2, 0, 2, 3]);
+            painter.add(egui::Shape::mesh(mesh));
+        }
+        // Clip Studio Paint's frame around the words being typed.
+        if let Some([x0, y0, x1, y1]) = typing.area() {
+            let room = typing.lettering.size * 0.5;
+            let corners = [
+                [x0 + room, y0 + room],
+                [x1 - room, y0 + room],
+                [x1 - room, y1 - room],
+                [x0 + room, y1 - room],
+            ]
+            .map(screen);
+            let mut line = corners.to_vec();
+            line.push(corners[0]);
+            painter.extend(egui::Shape::dashed_line(
+                &line,
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(64, 128, 255)),
+                4.0,
+                3.0,
+            ));
+        }
+        // The caret glides and blinks as in Sue's editors.
+        let look = typing.glide.frame(
+            sue_type::caret::Frame {
+                target: egui::Rect::from_two_pos(pos2(top[0], top[1]), pos2(bottom[0], bottom[1])),
+                cause: ((caret as u64) << 32) | typing.lettering.content.len() as u64,
+                view: u64::from(view.zoom.to_bits()),
+                shown: true,
+                viewport: egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(size[0] as f32, size[1] as f32),
+                ),
+                now: ctx.input(|input| input.time),
+                dragging: false,
+            },
+            motion,
+        );
+        if look.lit {
+            let bar = look.bar;
+            let (a, b) = if typing.lettering.vertical {
+                ([bar.max.x, bar.min.y], [bar.min.x, bar.min.y])
+            } else {
+                ([bar.min.x, bar.min.y], [bar.min.x, bar.max.y])
+            };
+            // Dark on a light edge, so it shows on any picture.
+            for stroke in [
+                egui::Stroke::new(3.5, egui::Color32::from_white_alpha(200)),
+                egui::Stroke::new(1.5, egui::Color32::from_rgb(20, 20, 20)),
+            ] {
+                painter.line_segment([screen(a), screen(b)], stroke);
+            }
+        }
+        if look.moving {
+            ctx.request_repaint();
+        } else if let Some(wake) = look.wake {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wake));
         }
     }
 }

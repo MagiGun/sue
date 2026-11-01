@@ -207,24 +207,31 @@ impl SuePaint {
         };
         self.gesture = None;
         let quad = session.quad();
-        let after = if keep {
+        // Past the layer's edges (the canvas's, for most layers): the layer
+        // grows to keep all of it, as Clip Studio Paint keeps what is moved
+        // off the canvas, so moving it back brings it back.
+        let grown = keep && self.grow_for_transform(cx, &session, &quad);
+        let after = if grown {
+            None
+        } else if keep {
             let size = session.piece_size().map(|value| value as u32);
-            transform::place(
+            Some(transform::place(
                 &session.rest,
                 session.size[0],
                 session.size[1],
                 &session.piece,
                 size,
                 &quad,
-            )
+            ))
         } else {
-            session.before.clone()
+            Some(session.before.clone())
         };
-        if let Some(bytes) = doc::raster_mut(&mut cx.world.arena, session.layer)
-            .and_then(RasterTile2D::bytes_mut)
-            .filter(|bytes| bytes.len() == after.len())
+        if let Some(after) = &after
+            && let Some(bytes) = doc::raster_mut(&mut cx.world.arena, session.layer)
+                .and_then(RasterTile2D::bytes_mut)
+                .filter(|bytes| bytes.len() == after.len())
         {
-            bytes.copy_from_slice(&after);
+            bytes.copy_from_slice(after);
         }
         if !keep {
             return;
@@ -234,8 +241,9 @@ impl SuePaint {
         } else {
             tr!("scale-rotate")
         };
-        if let Some(patch) =
-            doc::diff_patch(&session.before, &after, session.size[0], session.size[1])
+        if let Some(after) = &after
+            && let Some(patch) =
+                doc::diff_patch(&session.before, after, session.size[0], session.size[1])
         {
             cx.record(ArenaEdit(sue_core::txn::RasterEdit::new(
                 session.layer,
@@ -256,6 +264,93 @@ impl SuePaint {
             moved.polygon(&points, crate::select::Op::Replace);
             doc.set_selection(Some(moved));
         }
+    }
+
+    /// Keeps a transform that reaches past the layer's edges: the layer
+    /// grows to hold all of it and moves by as much, as one undo step.
+    /// `false` (nothing done) when the result fits the layer as it is.
+    fn grow_for_transform(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        session: &TransformSession,
+        quad: &Quad,
+    ) -> bool {
+        let [width, height] = session.size;
+        let (mut low, mut high) = ([0.0_f32, 0.0], [width as f32, height as f32]);
+        for [x, y] in quad {
+            low = [low[0].min(*x), low[1].min(*y)];
+            high = [high[0].max(*x), high[1].max(*y)];
+        }
+        let low = low.map(|value| value.floor() as i64);
+        let high = high.map(|value| value.ceil() as i64);
+        if low == [0, 0] && high == [i64::from(width), i64::from(height)] {
+            return false;
+        }
+        let (grown_width, grown_height) = ((high[0] - low[0]) as u32, (high[1] - low[1]) as u32);
+        if grown_width > 16_384 || grown_height > 16_384 {
+            return false;
+        }
+        // What stays of the layer, placed in the grown one.
+        let mut rest = vec![0_u8; grown_width as usize * grown_height as usize * 4];
+        let (dx, dy) = ((-low[0]) as usize, (-low[1]) as usize);
+        let row = width as usize * 4;
+        for y in 0..height as usize {
+            let at = ((y + dy) * grown_width as usize + dx) * 4;
+            rest[at..at + row].copy_from_slice(&session.rest[y * row..(y + 1) * row]);
+        }
+        let moved: Quad = quad.map(|[x, y]| [x - low[0] as f32, y - low[1] as f32]);
+        let size = session.piece_size().map(|value| value as u32);
+        let after = transform::place(
+            &rest,
+            grown_width,
+            grown_height,
+            &session.piece,
+            size,
+            &moved,
+        );
+        let Ok(grown) = RasterTile2D::from_bytes(
+            grown_width,
+            grown_height,
+            sue_core::PixelFormat::Rgba8,
+            after,
+        ) else {
+            return false;
+        };
+        // The layer as it was, so the step's undo has it.
+        if let Some(bytes) = doc::raster_mut(&mut cx.world.arena, session.layer)
+            .and_then(RasterTile2D::bytes_mut)
+            .filter(|bytes| bytes.len() == session.before.len())
+        {
+            bytes.copy_from_slice(&session.before);
+        }
+        let label = if session.free {
+            tr!("free-transform")
+        } else {
+            tr!("scale-rotate")
+        };
+        let offset = [session.offset[0] + low[0], session.offset[1] + low[1]];
+        let edit = sue_core::txn::Batch::new(label.clone())
+            .then(sue_core::txn::ReplaceComponent::new(
+                session.layer,
+                grown,
+                &label,
+            ))
+            .then(sue_core::txn::SetProperty::new(
+                session.layer,
+                sue_model::picture::X,
+                offset[0],
+            ))
+            .then(sue_core::txn::SetProperty::new(
+                session.layer,
+                sue_model::picture::Y,
+                offset[1],
+            ));
+        Self::apply(cx, edit);
+        if let Some(doc) = self.doc_mut() {
+            doc.compositor
+                .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+        }
+        true
     }
 
     /// A press while transforming: grabs a handle, the inside or the

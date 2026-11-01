@@ -429,7 +429,11 @@ impl TextureUpload for EguiPainter {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                // As egui's own textures: egui's shader takes what it samples
+                // as sRGB and converts it itself, so an sRGB texture (which
+                // the GPU turns linear first) showed pictures too dark in the
+                // middle tones, too contrasty.
+                format: wgpu::TextureFormat::Rgba8Unorm,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             });
@@ -491,5 +495,42 @@ mod tests {
         assert_eq!(size, [5, 2]);
         assert_eq!(&pixels[..4], &[9, 9, 9, 255]);
         assert!(upload_pixels([4, 4], 4, &rgba[..8], 4096).is_none());
+    }
+
+    /// A picture shows on the screen in its own colors: a middle gray
+    /// stays a middle gray (it came out much darker when its texture made
+    /// the GPU turn it linear before egui's shader did the same again).
+    #[test]
+    fn a_picture_shows_in_its_own_colors() {
+        let Ok(gpu) = crate::gpu::GpuContext::headless() else {
+            return;
+        };
+        let mut painter = EguiPainter::new(&gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+        let pixels: Vec<u8> = [128_u8, 64, 200, 255].repeat(16 * 16);
+        let id = TextureUpload::texture(&mut painter, 1, 1, [16, 16], 4, &pixels, true)
+            .expect("an uploaded picture");
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.painter().image(
+                id,
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(16.0, 16.0)),
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        });
+        let shot = painter
+            .paint_offscreen(
+                &ctx,
+                [16, 16],
+                egui::Color32::BLACK,
+                output.shapes,
+                output.textures_delta,
+                1.0,
+            )
+            .unwrap();
+        let middle = &shot[(8 * 16 + 8) * 4..(8 * 16 + 8) * 4 + 3];
+        for (got, want) in middle.iter().zip([128_u8, 64, 200]) {
+            assert!(got.abs_diff(want) <= 2, "{middle:?}");
+        }
     }
 }

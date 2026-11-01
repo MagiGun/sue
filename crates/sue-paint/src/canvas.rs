@@ -108,6 +108,7 @@ impl SuePaint {
         self.tone_overlay(ui, viewport, size, cx);
         self.page_frames(ui, viewport, size, cx, theme);
         self.overlays(ui, viewport, size, &response, cx, theme);
+        self.typing_ui(ui, viewport, size, cx);
         self.warp_ui(ui, viewport, size, cx, theme);
         self.selection_launcher(ui, viewport, size, cx, theme);
         self.text_launcher(ui, viewport, size, cx, theme);
@@ -2568,9 +2569,48 @@ impl SuePaint {
                     (p.x - start.x).round() as i64,
                     (p.y - start.y).round() as i64,
                 );
-                if let Ok(entity) = cx.world.arena.get_by_id_mut(*layer) {
-                    entity.properties_mut().set(picture::X, origin[0] + dx);
-                    entity.properties_mut().set(picture::Y, origin[1] + dy);
+                let (layer, next) = (*layer, [origin[0] + dx, origin[1] + dy]);
+                // Where the layer was and where it goes, both drawn again:
+                // the compositor only sees pixels change by itself.
+                let Some((was, size)) = cx.world.arena.get_by_id(layer).ok().and_then(|entity| {
+                    let raster = doc::raster(&cx.world.arena, layer)?;
+                    let at = |key: &str| {
+                        entity
+                            .property(key)
+                            .and_then(sue_core::Value::as_i64)
+                            .unwrap_or(0)
+                    };
+                    Some((
+                        [at(picture::X), at(picture::Y)],
+                        [raster.width(), raster.height()],
+                    ))
+                }) else {
+                    return;
+                };
+                if was == next {
+                    return;
+                }
+                if let Ok(entity) = cx.world.arena.get_by_id_mut(layer) {
+                    entity.properties_mut().set(picture::X, next[0]);
+                    entity.properties_mut().set(picture::Y, next[1]);
+                }
+                let area = |at: [i64; 2]| {
+                    [
+                        at[0].max(0),
+                        at[1].max(0),
+                        (at[0] + i64::from(size[0])).max(0),
+                        (at[1] + i64::from(size[1])).max(0),
+                    ]
+                };
+                let (a, b) = (area(was), area(next));
+                let rect = [
+                    a[0].min(b[0]) as u32,
+                    a[1].min(b[1]) as u32,
+                    a[2].max(b[2]).min(i64::from(u32::MAX)) as u32,
+                    a[3].max(b[3]).min(i64::from(u32::MAX)) as u32,
+                ];
+                if let Some(doc) = self.doc_mut() {
+                    doc.compositor.refresh(&cx.world.arena, rect);
                 }
             }
             Gesture::Pick { .. }

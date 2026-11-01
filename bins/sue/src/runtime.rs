@@ -3207,6 +3207,158 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_moves_a_layer_on_screen_and_undoes_it() {
+        let (mut runtime, root) = runtime("paint-move");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.focus())
+            .unwrap();
+        let layer = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+            .last()
+            .map(|info| info.id)
+            .unwrap();
+        let offset = |runtime: &Runtime| {
+            let entity = runtime.engine.world.arena.get_by_id(layer).unwrap();
+            [sue_model::picture::X, sue_model::picture::Y].map(|key| {
+                entity
+                    .property(key)
+                    .and_then(sue_core::Value::as_i64)
+                    .unwrap_or(0)
+            })
+        };
+        // The Move tool (K), dragged across the canvas.
+        step(&mut runtime, vec![key(egui::Key::K, plain)]);
+        let middle = runtime.shell.page_rect().center();
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: plain,
+        };
+        step(&mut runtime, vec![egui::Event::PointerMoved(middle)]);
+        step(&mut runtime, vec![button(middle, true)]);
+        for part in 1..=8 {
+            step(
+                &mut runtime,
+                vec![egui::Event::PointerMoved(
+                    middle + vec2(part as f32 * 10.0, part as f32 * 5.0),
+                )],
+            );
+        }
+        let moved = offset(&runtime);
+        step(&mut runtime, vec![button(middle + vec2(80.0, 40.0), false)]);
+        assert!(moved[0] > 0 && moved[1] > 0, "{moved:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn sue_paint_types_text_on_the_canvas_as_one_step() {
+        let (mut runtime, root) = runtime("paint-typing");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(8);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.focus())
+            .unwrap();
+        let texts = |runtime: &Runtime| -> Vec<String> {
+            let arena = &runtime.engine.world.arena;
+            sue_paint::doc::layers(arena, picture)
+                .iter()
+                .filter_map(|info| arena.get_by_id(info.id).ok())
+                .filter(|entity| entity.class() == "sue.paint.text")
+                .map(|entity| {
+                    entity
+                        .property("text.content")
+                        .and_then(sue_core::Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned()
+                })
+                .collect()
+        };
+        // The Text tool (T), clicked on the canvas: the words are typed
+        // right there, letters that are also shortcuts included.
+        step(&mut runtime, vec![key(egui::Key::T, plain)]);
+        let middle = runtime.shell.page_rect().center();
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: plain,
+        };
+        step(&mut runtime, vec![egui::Event::PointerMoved(middle)]);
+        step(&mut runtime, vec![button(middle, true)]);
+        step(&mut runtime, vec![button(middle, false)]);
+        step(&mut runtime, Vec::new());
+        step(&mut runtime, vec![egui::Event::Text("Hi".to_owned())]);
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(
+            &mut runtime,
+            vec![key(egui::Key::B, plain), egui::Event::Text("Bo".to_owned())],
+        );
+        assert!(texts(&runtime).is_empty(), "kept only when the typing ends");
+        step(&mut runtime, vec![key(egui::Key::Escape, plain)]);
+        step(&mut runtime, Vec::new());
+        assert_eq!(
+            texts(&runtime),
+            vec![
+                "Hi
+Bo"
+                .to_owned()
+            ]
+        );
+        // One undo takes the words away.
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, Vec::new());
+        assert!(texts(&runtime).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_vector_layers_keep_lines_and_erase_up_to_intersections() {
         let (mut runtime, root) = runtime("paint-vector");
         let ctx = egui::Context::default();

@@ -6,7 +6,7 @@ use sue_core::{Arena, AssetHandle, CoreError, RasterTile2D, StringBuffer};
 
 use crate::{
     IngestRoute, JxlImageInfo, JxlPipeline, NativeFormat, ProgressiveTarget, byte_map_tile,
-    decode_audio, decode_jpeg, decode_png, shannon_entropy, sniff_stream,
+    decode_audio, decode_jpeg, decode_picture, decode_png, shannon_entropy, sniff_stream,
 };
 
 /// Metadata keys set on ingested entities.
@@ -219,6 +219,38 @@ pub fn ingest_bytes(
                 ),
             }
         }
+        // Other pictures the shared picture reader knows open as pictures
+        // too, not as raw bytes.
+        IngestRoute::Native(
+            format @ (NativeFormat::WebP
+            | NativeFormat::Gif
+            | NativeFormat::Bmp
+            | NativeFormat::Tiff
+            | NativeFormat::Ico),
+        ) => match decode_picture(&bytes, None) {
+            Ok(tile) => {
+                return spawn_raster(
+                    arena,
+                    name,
+                    tile,
+                    route,
+                    format.name(),
+                    [
+                        (meta::COLOR, "RGBA".to_owned()),
+                        (meta::BITS, "8".to_owned()),
+                    ],
+                    length,
+                    elapsed(options.clock, started),
+                );
+            }
+            Err(error) => (
+                bytes,
+                Some(format!(
+                    "the {} decoder failed ({error}); showing the raw bytes",
+                    format.name()
+                )),
+            ),
+        },
         IngestRoute::Native(format) if audio_extension(format).is_some() => {
             match decode_audio(bytes, audio_extension(format)) {
                 Ok((decoded, _)) => {
@@ -360,6 +392,24 @@ mod tests {
     }
 
     #[test]
+    fn webp_and_other_pictures_become_decoded_rasters() {
+        let tile = RasterTile2D::from_bytes(3, 2, PixelFormat::Rgba8, vec![90; 24]).unwrap();
+        for (format, name) in [
+            (crate::PictureFormat::WebP, "a.webp"),
+            (crate::PictureFormat::Bmp, "a.bmp"),
+        ] {
+            let bytes = crate::encode_picture(&tile, format).unwrap();
+            let mut arena = Arena::new();
+            let ingested =
+                ingest_bytes(&mut arena, name, bytes, &NativeJxlPipeline, OPTIONS).unwrap();
+            assert_eq!(ingested.view, IngestView::Raster, "{name}");
+            let entity = arena.get(ingested.handle).unwrap();
+            assert_eq!(entity.meta(meta::WIDTH), Some("3"), "{name}");
+            assert_eq!(entity.base_kind(), Some(ComponentKind::RasterTile2D));
+        }
+    }
+
+    #[test]
     fn png_files_become_decoded_rasters() {
         let tile = RasterTile2D::from_bytes(3, 2, PixelFormat::Rgba8, vec![90; 24]).unwrap();
         let png = encode_png(&tile).unwrap();
@@ -429,7 +479,7 @@ mod tests {
 
         let gif = b"GIF89a\x01\0\x01\0\0\0\0".to_vec();
         let ingested = ingest_bytes(&mut arena, "a.gif", gif, &NativeJxlPipeline, OPTIONS).unwrap();
-        assert!(ingested.note.unwrap().contains("no GIF decoder"));
+        assert!(ingested.note.unwrap().contains("GIF decoder failed"));
 
         let broken = vec![0xFF, 0x0A, 0x41, 0x00];
         let ingested =

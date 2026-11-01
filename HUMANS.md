@@ -611,9 +611,13 @@ Once a canvas is open:
   level to move it. Your line picks the direction it starts in, and stays
   exactly on it. Delete Ruler takes them away, Show Ruler hides them, and
   they are saved with the picture.
-- **Text** (T): click and type, in any font on your computer, across or in
-  vertical columns; click inside a balloon and the words sit in its middle.
-  Click the words again to change them.
+- **Text** (T): click and type right on the canvas, as in Clip Studio
+  Paint, with a caret that follows the words; Enter starts a new line and
+  Esc, Ctrl and Enter, or another tool keeps them as one step. Tool
+  Property sets the font (any font on your computer), size, across or in
+  vertical columns, and centered, also for words being typed. Click inside
+  a balloon and the words sit in its middle. Click the words again to type
+  into them where you clicked.
 - **Tone Curve, Levels, Color Balance, Gradient Map** (Edit, Tonal
   Correction): shape the curve by dragging its points, with a live preview.
 - **Correction layers** (Layer, New Correction Layer): the same corrections

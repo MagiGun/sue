@@ -1779,7 +1779,14 @@ placement, centering and vertical setting and draws them again after every
 edit with `sue_type::raster::draw_text`, which lays lines across or columns
 down and right to left and fills glyph outlines (read with ttf-parser from
 the shared font library) with an accumulation rasterizer after font-rs.
-Clicked inside a balloon, the Text tool centers the words in it.
+Clicked inside a balloon, the Text tool centers the words in it. Words are
+typed on the canvas (`lettering::Typing`): a hidden egui text box takes the
+keys (so the studio's shortcuts and the global undo stay away), the words
+are drawn into a texture over the canvas as they change, and
+`sue_type::raster::caret_slots` places the caret, which glides and blinks
+with the shared `sue_type::caret`. An edited layer shows empty in place
+while typed over, and gets its pixels back before the change is kept as
+one transaction when typing ends.
 
 **Tonal corrections.** Tone Curve (a `Response` for RGB and each channel, run
 through a table per channel), Level Correction, Color Balance (shadows,

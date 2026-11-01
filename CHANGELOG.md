@@ -40,6 +40,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint's Text tool types right on the canvas, as Clip Studio Paint
+  does: click, type, Enter for a new line, Esc to keep the words. A click
+  on the words puts the caret there, and Tool Property sets the font, size,
+  direction and centering, also for the words being typed. Letters that are
+  shortcuts no longer switch tools while you type.
 - Sue Paint's pens, pencils, brushes, airbrushes and erasers start as
   Clip Studio Paint's do: the same sizes, opacity, hardness, density,
   anti-aliasing, color mixing and stabilization, and its Starting and
@@ -72,6 +77,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Pictures in Sue Paint show in their own colors instead of too dark and
+  too contrasty.
+- WebP, GIF, BMP, TIFF and ICO pictures open, in Sue Paint and from
+  anywhere in Sue, instead of showing their raw bytes.
+- Moving a layer with the Move tool redraws it where it goes, leaving no
+  copies behind.
+- A layer scaled or moved past the canvas edge with Scale/Rotate keeps the
+  part outside, so moving it back shows the whole picture.
 - Pinch vector line bends a line drawn quickly, whose points lie far
   apart, instead of leaving it as it was.
 - A dot no longer appears at the start or end of pen strokes: a pen

@@ -340,6 +340,104 @@ pub fn draw_text(
     covered
 }
 
+/// Where a caret stands before the character at `index` (counted in
+/// characters, line breaks too; the last one is after the end): a line
+/// from `top` to `bottom`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CaretSlot {
+    /// The character it stands before.
+    pub index: usize,
+    /// The caret's top end (its right end in columns).
+    pub top: [f32; 2],
+    /// The caret's bottom end (its left end in columns).
+    pub bottom: [f32; 2],
+}
+
+/// Every place a caret can stand in `spec`, laid out as [`draw_text`]
+/// draws it, in order. Empty when no font loads.
+#[must_use]
+pub fn caret_slots(spec: &TextSpec<'_>) -> Vec<CaretSlot> {
+    let Some((bytes, index)) = sue_wm::fonts::face_bytes(spec.font, false, false)
+        .or_else(|| sue_wm::fonts::face_bytes("", false, false))
+    else {
+        return Vec::new();
+    };
+    let Ok(face) = Face::parse(&bytes, index) else {
+        return Vec::new();
+    };
+    let scale = spec.size / f32::from(face.units_per_em().max(1));
+    let ascender = f32::from(face.ascender()) * scale;
+    let descender = f32::from(face.descender()) * scale;
+    let line_height = (ascender - descender + f32::from(face.line_gap()) * scale).max(spec.size);
+    let advance = |ch: char| {
+        face.glyph_index(ch)
+            .and_then(|id| face.glyph_hor_advance(id))
+            .map_or(spec.size * 0.5, |units| f32::from(units) * scale)
+    };
+    let lines: Vec<&str> = spec.text.split('\n').collect();
+    let mut slots = Vec::new();
+    let mut index = 0;
+    if spec.vertical {
+        let column = spec.size * 1.2;
+        let step = spec.size * 1.05;
+        let longest = lines
+            .iter()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0) as f32;
+        let (right, top) = if spec.center {
+            (
+                spec.at[0] + column * lines.len() as f32 / 2.0,
+                spec.at[1] - step * longest / 2.0,
+            )
+        } else {
+            (spec.at[0], spec.at[1])
+        };
+        for (number, line) in lines.iter().enumerate() {
+            let middle = right - (number as f32 + 0.5) * column;
+            for row in 0..=line.chars().count() {
+                let y = top + row as f32 * step;
+                slots.push(CaretSlot {
+                    index,
+                    top: [middle + column * 0.45, y],
+                    bottom: [middle - column * 0.45, y],
+                });
+                index += 1;
+            }
+        }
+    } else {
+        let total = line_height * lines.len() as f32;
+        let top = if spec.center {
+            spec.at[1] - total / 2.0
+        } else {
+            spec.at[1]
+        };
+        for (number, line) in lines.iter().enumerate() {
+            let wide: f32 = line.chars().map(advance).sum();
+            let mut x = if spec.center {
+                spec.at[0] - wide / 2.0
+            } else {
+                spec.at[0]
+            };
+            let y = top + number as f32 * line_height;
+            let mut chars = line.chars();
+            loop {
+                slots.push(CaretSlot {
+                    index,
+                    top: [x, y],
+                    bottom: [x, y + line_height],
+                });
+                index += 1;
+                let Some(ch) = chars.next() else {
+                    break;
+                };
+                x += advance(ch);
+            }
+        }
+    }
+    slots
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,5 +505,25 @@ mod tests {
         )
         .expect("drawn");
         assert!(((x0 + x1) / 2.0 - 100.0).abs() < 6.0);
+    }
+
+    #[test]
+    fn carets_stand_between_the_letters_and_on_each_line() {
+        let slots = caret_slots(&spec(
+            "Hi
+yo", false,
+        ));
+        // Three places on each line, the break counted once.
+        assert_eq!(slots.len(), 6);
+        assert_eq!(slots[0].top, [10.0, 10.0]);
+        assert!(slots[1].top[0] > slots[0].top[0]);
+        assert!(
+            slots[3].top[1] > slots[0].top[1],
+            "the second line is lower"
+        );
+        assert_eq!(slots[3].top[0], 10.0, "and starts at the left again");
+        assert!(slots.iter().enumerate().all(|(n, slot)| slot.index == n));
+        let down = caret_slots(&spec("ab", true));
+        assert!(down[1].top[1] > down[0].top[1], "columns go down");
     }
 }

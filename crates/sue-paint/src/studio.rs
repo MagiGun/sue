@@ -531,6 +531,8 @@ pub struct SuePaint {
     pub(crate) timelapse_export: crate::timelapse::Export,
     /// Scale/Rotate or Free Transform, while it is on.
     pub(crate) transform: Option<crate::transform_ui::TransformSession>,
+    /// Words being typed on the canvas with the Text tool.
+    pub(crate) typing: Option<crate::lettering::Typing>,
     /// The keys held this frame (Shift frees a transform's aspect).
     pub(crate) modifiers: egui::Modifiers,
     /// Onion skin shows the cels around the current frame.
@@ -684,6 +686,7 @@ impl Default for SuePaint {
             timelapse: HashMap::new(),
             timelapse_export: crate::timelapse::Export::default(),
             transform: None,
+            typing: None,
             modifiers: egui::Modifiers::NONE,
             onion: false,
             light_table: true,
@@ -3115,12 +3118,21 @@ impl SuePaint {
         let bundle = formats
             .import(bytes, &file, &Properties::new())
             .map_err(|error| tr!("cannot-open", file = file, error = error))?;
-        let raster = bundle
+        // Some pictures (WebP, GIF, TIFF, ...) come in kept as their file;
+        // Sue Paint decodes those itself.
+        let rgba = match bundle
             .entities
             .iter()
             .find_map(|entity| entity.component(ComponentKind::RasterTile2D)?.as_raster())
-            .ok_or_else(|| tr!("has-no-pixels-sue-paint-can", file = file))?;
-        let rgba = to_rgba(raster);
+        {
+            Some(raster) => to_rgba(raster),
+            None => sue_io::decode_png(bytes)
+                .map(|decoded| decoded.tile)
+                .or_else(|_| sue_io::decode_jpeg(bytes).map(|decoded| decoded.tile))
+                .or_else(|_| sue_io::decode_picture(bytes, None))
+                .map(|raster| to_rgba(&raster))
+                .map_err(|_| tr!("has-no-pixels-sue-paint-can", file = file))?,
+        };
         let target = self.picture().filter(|_| as_layer);
         match target {
             Some(picture) => {
@@ -4090,6 +4102,8 @@ impl SuePaint {
     /// Runs a command of the menus, the command bar or a shortcut.
     #[allow(clippy::too_many_lines, reason = "one arm per command")]
     pub(crate) fn run(&mut self, command: &str, cx: &mut AppletContext<'_>) {
+        // Words being typed are kept before anything else happens.
+        self.finish_typing(cx);
         // A tool's command (from a script or Auto Actions) picks the tool.
         if command.starts_with("tool.") && self.tool_key(command) {
             return;
@@ -6991,9 +7005,10 @@ impl SueApplet for SuePaint {
     }
 
     fn captures_keys(&self) -> bool {
-        // A dialog or a stroke in progress owns the keys, so the global
-        // undo cannot pull pixels from under a preview or a pen.
-        self.dialog.is_some() || self.gesture.is_some()
+        // A dialog, a stroke or words being typed own the keys, so the
+        // global undo cannot pull pixels from under a preview, a pen or a
+        // caret.
+        self.dialog.is_some() || self.gesture.is_some() || self.typing.is_some()
     }
 
     fn commands(&self) -> Vec<PaletteEntry> {

@@ -2316,6 +2316,48 @@ impl SuePaint {
                     tr!("drag-to-draw-a-balloon")
                 }));
             }
+            // Clip Studio Paint's Text tool property: the font, its size,
+            // the direction and the justification, also for the words
+            // being typed.
+            Tool::Text => {
+                ui.horizontal(|ui| {
+                    ui.label(small(&tr!("font")));
+                    let shown = if sub.font.is_empty() {
+                        tr!("default-font-ubuntu-light")
+                    } else {
+                        sub.font.clone()
+                    };
+                    egui::ComboBox::from_id_salt("sue-paint-text-tool-font")
+                        .selected_text(shown)
+                        .width(ui.available_width().max(80.0))
+                        .height(320.0)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut sub.font,
+                                String::new(),
+                                tr!("default-font-ubuntu-light"),
+                            );
+                            let selected = sub.font.clone();
+                            if let Some(family) = sue_wm::fonts::list_ui(ui, &selected, "") {
+                                sub.font = family;
+                            }
+                        });
+                });
+                slider_row(
+                    ui,
+                    &tr!("size-2"),
+                    &mut sub.tip.size,
+                    6.0..=400.0,
+                    &tr!("px"),
+                    true,
+                    theme,
+                );
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut sub.kind, 0, small(&tr!("pref-horizontal")));
+                    ui.radio_value(&mut sub.kind, 1, small(&tr!("pref-vertical")));
+                });
+                ui.checkbox(&mut sub.whole, small(&tr!("centered")));
+            }
             _ => {
                 ui.label(small(&tr!("tool-arrives-later-sue-paint")));
             }

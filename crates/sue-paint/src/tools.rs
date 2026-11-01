@@ -705,7 +705,16 @@ impl Tool {
                     ..plain(&tr!("symmetrical-ruler"), 0)
                 },
             ],
-            Self::Text => vec![plain(&tr!("text"), 0)],
+            // Clip Studio Paint's Text: 48 pixel words, across.
+            Self::Text => vec![SubTool::new(
+                self,
+                &tr!("text"),
+                0,
+                Tip {
+                    size: 48.0,
+                    ..Tip::default()
+                },
+            )],
             Self::Blend => {
                 let soft = tip(60.0, |t| {
                     t.opacity = 0.6;
@@ -944,8 +953,10 @@ pub struct SubTool {
     /// width, in pixels, or Remove dust's dust size.
     pub amount: f32,
     /// Adjust line width processes the whole line; Simplify vector line
-    /// deletes short lines.
+    /// deletes short lines; the Text tool centers its lines.
     pub whole: bool,
+    /// The Text tool's font family (empty: Sue's own).
+    pub font: String,
 }
 
 impl SubTool {
@@ -971,6 +982,7 @@ impl SubTool {
             level: 2,
             amount: 0.0,
             whole: false,
+            font: String::new(),
         }
     }
 
