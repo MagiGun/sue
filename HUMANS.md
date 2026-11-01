@@ -653,6 +653,12 @@ Once a canvas is open:
   from: pick the layer, then Register Selected Layer.
   File, Export Animation saves an animated GIF, a movie or every frame as a
   picture.
+- **Decorations:** the Decoration tool lays shapes instead of a line.
+  Stars, Hearts, Sparkles, Snow, Flowers and Bubbles scatter about the
+  stroke at random sizes and turns; Leaves, Chain, Lace, Stitches, Dotted
+  line and Dashed line run along it and turn with its curve. Tool Settings
+  sets how each shape turns, how far it scatters and how much its size
+  and turn vary, for any brush with a shape.
 - **3D drawing figures:** Layer, New Layer, 3D Drawing Figure puts a
   posable figure on a 3D layer. With the Object tool, drag a body part to
   bend it at its joint (Shift twists it) and drag anywhere else to turn

@@ -48,6 +48,7 @@ mod colorsets;
 mod comic;
 pub mod composite;
 pub mod correct;
+pub mod decoration;
 mod dialogs;
 pub mod doc;
 mod dock;

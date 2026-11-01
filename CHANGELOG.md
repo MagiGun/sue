@@ -13,6 +13,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint's Decoration tool, as in Clip Studio Paint: Stars, Hearts,
+  Sparkles, Snow, Flowers and Bubbles scatter about the stroke; Leaves,
+  Chain, Lace, Stitches, Dotted line and Dashed line run along it and
+  turn with it. Any brush with a shape gets Turn along the line, Angle,
+  Scatter, Size jitter and Turn jitter in Tool Settings.
 - Release Notes in the update window opens the whole of what is new,
   inside Sue, on phones and computers.
 - On Windows and Linux, Sue draws its own window frame, as Clip Studio

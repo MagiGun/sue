@@ -358,7 +358,7 @@ The order of work is the plan at the end.
 | Sketch tools: Pencil, Mechanical pencil, Charcoal, Crayon, Pastel, Chalk | Tool > Sketch | done | Clip Studio's six sketch tools |
 | Brush tools with color mixing | Tools | done | Watercolor and gouache pick up and drag the color underneath |
 | Airbrush | Tools | done | A soft sub tool |
-| Decoration tool | Tool | missing | Its slot sits in Clip Studio's order, grayed out |
+| Decoration tool | Tool | partial | Twelve sub tools on Sue's brush (stars, hearts, sparkles, snow, flowers, leaves, bubbles, chain, lace, stitches, dotted and dashed lines): shapes scattered about the stroke or turning along it, with Turn along the line, Angle, Scatter, Size jitter and Turn jitter in Tool Settings. Missing: Clip Studio's ribbon brushes (a texture stretched along the stroke) and its downloadable decoration materials |
 | Tool palette in Clip Studio Paint 4's order, with the main and sub colors and the transparent color beneath | Tool palette | done | Move holds hand, zoom and move layer; Comic holds frame border and balloon |
 | Eraser with Vector modes | Tool | done | Only where it touches, up to where lines cross, or whole lines |
 | Blend: Blur, Finger Tip, Liquify | Tool | done | Liquify has its own slot in Clip Studio's order; it pushes, swells, pinches and twirls |

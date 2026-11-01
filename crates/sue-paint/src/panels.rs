@@ -1760,6 +1760,56 @@ impl SuePaint {
                 starting_and_ending_ui(ui, tip, theme);
                 let stamps = tip.dabbed();
                 color_jitter_ui(ui, &mut tip.jitter, stamps, theme);
+                if tip.shape != 0 {
+                    // Clip Studio Paint's Direction and Spray: how each
+                    // shape turns and how far it falls from the line.
+                    ui.checkbox(&mut tip.follow, small(&tr!("turn-along-the-line")));
+                    slider_row(
+                        ui,
+                        &tr!("angle-2"),
+                        &mut tip.angle,
+                        -180.0..=180.0,
+                        "\u{b0}",
+                        false,
+                        theme,
+                    );
+                    let mut scatter = tip.scatter * 100.0;
+                    if slider_row(
+                        ui,
+                        &tr!("scatter"),
+                        &mut scatter,
+                        0.0..=300.0,
+                        " %",
+                        false,
+                        theme,
+                    ) {
+                        tip.scatter = scatter / 100.0;
+                    }
+                    let mut size = tip.size_jitter * 100.0;
+                    if slider_row(
+                        ui,
+                        &tr!("size-jitter"),
+                        &mut size,
+                        0.0..=100.0,
+                        " %",
+                        false,
+                        theme,
+                    ) {
+                        tip.size_jitter = size / 100.0;
+                    }
+                    let mut turn = tip.turn_jitter * 100.0;
+                    if slider_row(
+                        ui,
+                        &tr!("turn-jitter"),
+                        &mut turn,
+                        0.0..=100.0,
+                        " %",
+                        false,
+                        theme,
+                    ) {
+                        tip.turn_jitter = turn / 100.0;
+                    }
+                }
                 if tip.dabbed() {
                     let mut spacing = tip.spacing * 100.0;
                     if slider_row(

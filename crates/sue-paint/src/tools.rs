@@ -139,7 +139,7 @@ impl Tool {
     /// `true` if it works in this build.
     #[must_use]
     pub const fn available(self) -> bool {
-        !matches!(self, Self::Decoration)
+        true
     }
 
     /// `true` for tools that paint with a [`Tip`].
@@ -147,7 +147,13 @@ impl Tool {
     pub const fn paints(self) -> bool {
         matches!(
             self,
-            Self::Pen | Self::Pencil | Self::Brush | Self::Airbrush | Self::Eraser | Self::Figure
+            Self::Pen
+                | Self::Pencil
+                | Self::Brush
+                | Self::Airbrush
+                | Self::Eraser
+                | Self::Figure
+                | Self::Decoration
         )
     }
 
@@ -616,8 +622,103 @@ impl Tool {
             }
             // Clip Studio Paint's Operation group.
             Self::Operation => vec![plain(&tr!("object"), 0), plain(&tr!("select-layer"), 1)],
+            // Clip Studio Paint's Decoration tool: shapes scattered about the
+            // stroke, or running along it and turning with it.
             Self::Decoration => {
-                vec![plain(&self.label(), 0)]
+                let deco = |shape: &str, size: f32, spacing: f32, change: fn(&mut Tip)| {
+                    let mut tip = Tip {
+                        size,
+                        spacing,
+                        shape: crate::decoration::shape(shape),
+                        ..Tip::default()
+                    };
+                    tip.size_by.pressure = false;
+                    change(&mut tip);
+                    tip
+                };
+                let scattered = |t: &mut Tip| {
+                    t.scatter = 1.0;
+                    t.size_jitter = 0.55;
+                    t.turn_jitter = 1.0;
+                };
+                vec![
+                    SubTool::new(self, "Stars", 0, deco("Star", 36.0, 1.4, scattered)),
+                    SubTool::new(self, "Hearts", 1, deco("Heart", 34.0, 1.4, scattered)),
+                    SubTool::new(
+                        self,
+                        "Sparkles",
+                        2,
+                        deco("Sparkle", 40.0, 1.3, |t| {
+                            t.scatter = 1.2;
+                            t.size_jitter = 0.7;
+                        }),
+                    ),
+                    SubTool::new(
+                        self,
+                        "Snow",
+                        3,
+                        deco("Snowflake", 30.0, 1.6, |t| {
+                            t.scatter = 1.6;
+                            t.size_jitter = 0.65;
+                            t.turn_jitter = 1.0;
+                        }),
+                    ),
+                    SubTool::new(
+                        self,
+                        "Flowers",
+                        4,
+                        deco("Flower", 40.0, 1.15, |t| {
+                            t.scatter = 0.7;
+                            t.size_jitter = 0.4;
+                            t.turn_jitter = 1.0;
+                        }),
+                    ),
+                    SubTool::new(
+                        self,
+                        "Leaves",
+                        5,
+                        deco("Leaf", 34.0, 0.8, |t| {
+                            t.follow = true;
+                            t.scatter = 0.35;
+                            t.size_jitter = 0.35;
+                            t.turn_jitter = 0.2;
+                        }),
+                    ),
+                    SubTool::new(
+                        self,
+                        "Bubbles",
+                        6,
+                        deco("Bubble", 36.0, 1.3, |t| {
+                            t.scatter = 1.4;
+                            t.size_jitter = 0.75;
+                        }),
+                    ),
+                    SubTool::new(
+                        self,
+                        "Chain",
+                        7,
+                        deco("Chain link", 26.0, 0.72, |t| t.follow = true),
+                    ),
+                    SubTool::new(
+                        self,
+                        "Lace",
+                        8,
+                        deco("Scallop", 30.0, 0.9, |t| t.follow = true),
+                    ),
+                    SubTool::new(
+                        self,
+                        "Stitches",
+                        9,
+                        deco("Stitch", 16.0, 1.5, |t| t.follow = true),
+                    ),
+                    SubTool::new(self, "Dotted line", 10, deco("Dot", 8.0, 2.0, |_| {})),
+                    SubTool::new(
+                        self,
+                        "Dashed line",
+                        11,
+                        deco("Stitch", 22.0, 1.25, |t| t.follow = true),
+                    ),
+                ]
             }
         }
     }
@@ -959,11 +1060,8 @@ mod tests {
         assert_eq!(toolbox.tool(), Tool::Eraser);
         assert!(toolbox.current().tip.eraser);
         toolbox.pick(Tool::Decoration);
-        assert_eq!(
-            toolbox.tool(),
-            Tool::Eraser,
-            "unavailable tools stay unpicked"
-        );
+        assert_eq!(toolbox.tool(), Tool::Decoration, "decorations paint");
+        assert!(toolbox.current().tip.shape != 0);
     }
 
     #[test]

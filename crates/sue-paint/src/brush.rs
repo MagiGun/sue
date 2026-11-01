@@ -353,6 +353,18 @@ pub struct Tip {
     /// A picture's shape for each dab (see [`register_shape`]), or 0 for
     /// the round tip.
     pub shape: u32,
+    /// Each dab turns with the line (Clip Studio Paint's direction of the
+    /// line), so a chain or a lace runs along the stroke.
+    pub follow: bool,
+    /// Each dab's turn, in degrees (added to the line's when it follows).
+    pub angle: f32,
+    /// How far dabs fall from the line, in brush sizes, at random (spray
+    /// and decorations).
+    pub scatter: f32,
+    /// How much smaller a dab may be, at random, 0 to 1.
+    pub size_jitter: f32,
+    /// How far a dab may turn, at random, 0 (none) to 1 (all the way).
+    pub turn_jitter: f32,
 }
 
 /// A brush tip's shape made from a picture: how much each spot of a
@@ -520,6 +532,11 @@ impl Tip {
             ("taper_opacity".to_owned(), flag(self.taper_opacity)),
             ("taper_by_speed".to_owned(), flag(self.taper_by_speed)),
             ("mix".to_owned(), self.mix.to_string()),
+            ("follow".to_owned(), flag(self.follow)),
+            ("angle".to_owned(), self.angle.to_string()),
+            ("scatter".to_owned(), self.scatter.to_string()),
+            ("size_jitter".to_owned(), self.size_jitter.to_string()),
+            ("turn_jitter".to_owned(), self.turn_jitter.to_string()),
             ("jitter.tip".to_owned(), flag(self.jitter.tip)),
             ("jitter.hue".to_owned(), self.jitter.hue.to_string()),
             (
@@ -627,6 +644,11 @@ impl Tip {
         flag("taper_opacity", &mut tip.taper_opacity);
         flag("taper_by_speed", &mut tip.taper_by_speed);
         number("mix", &mut tip.mix);
+        flag("follow", &mut tip.follow);
+        number("angle", &mut tip.angle);
+        number("scatter", &mut tip.scatter);
+        number("size_jitter", &mut tip.size_jitter);
+        number("turn_jitter", &mut tip.turn_jitter);
         flag("jitter.tip", &mut tip.jitter.tip);
         number("jitter.hue", &mut tip.jitter.hue);
         number("jitter.saturation", &mut tip.jitter.saturation);
@@ -681,6 +703,11 @@ impl Default for Tip {
             jitter: Jitter::default(),
             mix: 0.0,
             shape: 0,
+            follow: false,
+            angle: 0.0,
+            scatter: 0.0,
+            size_jitter: 0.0,
+            turn_jitter: 0.0,
         }
     }
 }
@@ -863,6 +890,8 @@ pub struct Stroke {
     samples: Vec<Sample>,
     travelled: f32,
     since_dab: f32,
+    /// Which way the line runs at the latest dab, in radians.
+    heading: f32,
     carried: [f32; 3],
     last_dab: Option<[f32; 2]>,
     total: Option<f32>,
@@ -907,6 +936,7 @@ impl Stroke {
             samples: Vec::new(),
             travelled: 0.0,
             since_dab: 0.0,
+            heading: 0.0,
             carried: color,
             last_dab: None,
             total: None,
@@ -1505,6 +1535,9 @@ impl Stroke {
             .dab_at(a.pressure.max(b.pressure), a.speed.max(b.speed), 1.0);
         let radius = radius * a.width.max(b.width);
         let step = (radius * 2.0 * self.tip.spacing).max(0.25);
+        if length > 1e-3 {
+            self.heading = (b.at[1] - a.at[1]).atan2(b.at[0] - a.at[0]);
+        }
         let mut along = step - self.since_dab;
         while along <= length {
             let t = along / length;
@@ -1552,7 +1585,32 @@ impl Stroke {
             radius = 0.7;
         }
         strength *= self.tip.flow;
-        let [x, y] = sample.at;
+        let mut at = sample.at;
+        // Decorations: each dab smaller, off the line and turned, at
+        // random but the same each time the stroke is drawn.
+        let roll = |salt: u32| {
+            noise(
+                self.seed ^ ((s * 16.0) as i32 as u32).wrapping_mul(0x85EB_CA6B),
+                salt,
+            )
+        };
+        if self.tip.size_jitter > 0.0 {
+            radius *= 1.0 - self.tip.size_jitter.clamp(0.0, 1.0) * roll(21);
+        }
+        if self.tip.scatter > 0.0 {
+            let (turn, far) = (roll(22) * std::f32::consts::TAU, roll(23).sqrt());
+            let reach = self.tip.scatter * radius * 2.0 * far;
+            at = [at[0] + turn.cos() * reach, at[1] + turn.sin() * reach];
+        }
+        let mut turn = self.tip.angle.to_radians();
+        if self.tip.follow {
+            turn += self.heading;
+        }
+        if self.tip.turn_jitter > 0.0 {
+            turn += (roll(24) - 0.5) * self.tip.turn_jitter.clamp(0.0, 1.0) * std::f32::consts::TAU;
+        }
+        let (sin, cos) = turn.sin_cos();
+        let [x, y] = at;
         let mode = if self.tip.mix > 0.0 && !self.tip.eraser {
             // The brush picks up the color under it and is reloaded with its
             // own paint, both per distance travelled (not per dab), so the
@@ -1577,9 +1635,15 @@ impl Stroke {
         } else {
             Mode::Max
         };
-        let reach = radius + self.tip.aa.edge() + 1.0;
         let tip = self.tip;
         let shaped = shape(tip.shape);
+        // A turned picture reaches to its square's corners.
+        let corner = if shaped.is_some() && turn != 0.0 {
+            std::f32::consts::SQRT_2
+        } else {
+            1.0
+        };
+        let reach = radius * corner + self.tip.aa.edge() + 1.0;
         // Within this distance a round tip covers fully.
         let inner = tip.inner(radius);
         // A picture tip fills its square; a round one, its disc.
@@ -1603,8 +1667,10 @@ impl Stroke {
             span,
             |px, py| {
                 if let Some(shaped) = &shaped {
-                    return shaped.at((px - x) / radius.max(0.5), (py - y) / radius.max(0.5))
-                        * strength;
+                    // Into the picture's own axes, turned back.
+                    let (dx, dy) = (px - x, py - y);
+                    let (u, v) = (dx * cos + dy * sin, -dx * sin + dy * cos);
+                    return shaped.at(u / radius.max(0.5), v / radius.max(0.5)) * strength;
                 }
                 let d2 = (px - x) * (px - x) + (py - y) * (py - y);
                 if d2 < inner * inner {
