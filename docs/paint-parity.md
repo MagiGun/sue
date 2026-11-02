@@ -108,6 +108,7 @@ The order of work is the plan at the end.
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
 | New canvas with its six projects (Illustration, Webtoon, Comic, Printing of fanzine, Show all comic settings, Animation) | File > New | done | New is laid out as Clip Studio's, each project at its usual size |
+| Register and Delete canvas presets | File > New | done | Kept with your other Sue Paint settings |
 | Create New from Clipboard | File > Create New from Clipboard | done | A new canvas from the picture on the clipboard |
 | Create new from movie | File > Create new from movie | missing | An animation project from a video |
 | Open pictures and projects | File > Open | done | PNG, JPEG, JPEG XL and Sue projects through the system's own dialog (`FilePick`) |
@@ -346,6 +347,7 @@ The order of work is the plan at the end.
 | Add and Delete Keyframe, Insert and Delete Frame | Animation > Edit Track | done | |
 | Onion Skin and its settings | Animation > Show Animation Cels | done | Before in blue, after in green; how many, their colors, how faint |
 | Light Table and Register Selected Layer | Animation > Light Table | done | Trace from other layers |
+| Animation Cels palette's light table: general light table, register file, Light table tool, reset position, opacity | Animation Cels palette | done | Moving a traced layer never moves the layer itself |
 | Play, Stop, Loop, Move Frame | Animation > Playback | done | |
 | Timeline palette as Clip Studio's | Palette | done | Cels as pictures, every other second lighter, the current frame a red bar |
 | Animation Cels palette | Palette | done | |
@@ -389,7 +391,8 @@ The order of work is the plan at the end.
 | Brush Size: Specify by size on screen, At least 1 pixel | Tool Sliders | done | |
 | Create Brush Tip from Image | Edit > Create Brush Tip from Image | partial | Command exists; verify the dialog |
 | Brush tip settings: spray, ribbon, direction from line | Advanced Tool Settings | partial | To verify |
-| Watercolor edge, with the 5.1 Vivid style | Tool Settings, Layer Property | partial | The edge to verify; the Vivid style is missing |
+| Watercolor edge, with the 5.1 Vivid style | Tool Settings, Layer Property | partial | Layer Property's Watercolor edge with width and darkness; the Vivid style is missing |
+| Extract line effect | Layer Property | done | Edge threshold and line width; the drawing never changes |
 | Double-sided brush tips | Advanced Tool Settings | missing | |
 | Pen Pressure Settings | File > Pen Pressure Settings | done | Draw to fit your hand, Stronger and Lighter |
 | Windows Ink and WinTab tablets | Peripherals | done | Huion, XP-Pen and Wacom work either way |
@@ -508,7 +511,7 @@ The order of work is the plan at the end.
 | Materials kept in a folder of your choice | Settings | done | |
 | Recently used folder and frequency sorting (5.0) | Palette | partial | To verify |
 | User tags and batch tag management (5.1) | Palette | missing | |
-| Download materials from CLIP STUDIO ASSETS | Material palette, Browse Assets | partial | Browse Assets reads the pages and opens the site to download; nothing lands in the palette yet |
+| Download materials from CLIP STUDIO ASSETS | Material palette, Browse Assets | partial | Sue downloads any direct link as a transfer and brings its brushes and pictures in; CLIP STUDIO ASSETS itself needs a CLIP STUDIO account, so its button opens the site |
 | Pose, 3D and texture material kinds | Palette | partial | Poses done, each with a picture of it; 3D models and textures as materials to come |
 
 ## Print

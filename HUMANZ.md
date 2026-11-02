@@ -1220,13 +1220,18 @@ them; `WorkList::{labels, has_label, is_favorite}` read them. Sue Paint's
 start page sorts its projects with them.
 
 **Data transfers.** `sue_wm::Transfers` lists what this run brought in,
-wrote out and copied (`TransferKind::{Import, Export, Copy}`), newest
+wrote out, copied and downloaded
+(`TransferKind::{Import, Export, Copy, Download}`), newest
 first: the runtime notes every file it opens and every project it saves,
 the shell every `ShellRequest::Saved`, and an applet runs a long transfer
 with `AppletContext::transfers.spawn`, a `JobPool` job reporting progress
 that the runtime polls every 100 ms while one runs. `clear_completed`
 forgets the finished ones. A start page shows it in its Data Transfers
-popup.
+popup. Sue Paint downloads a link with `sue_platform::update::download_link`
+(a `.part` file renamed when whole, progress and cancel through the job)
+into the materials' `downloads` folder, then `downloads::unpack` sorts it:
+brushes to the tool, PNGs to the materials, a zip's brushes and PNGs
+written by their own names only into a folder beside it.
 
 **Start pages** (`sue_wm::start`). Shared widgets for the page a studio
 opens on: a rail of large buttons with labels (`rail`, the first round),

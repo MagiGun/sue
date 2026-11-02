@@ -626,6 +626,77 @@ pub fn fetch(url: &str, user_agent: &str) -> Job<Result<Vec<u8>, String>> {
     }
 }
 
+/// The file name a download of `url` keeps: the last part of its path,
+/// its `%` escapes undone and anything a file name cannot hold made `_`;
+/// `download` when the path ends in nothing.
+#[must_use]
+pub fn file_name_of(url: &str) -> String {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let last = path.rsplit('/').next().unwrap_or("");
+    let mut bytes = Vec::with_capacity(last.len());
+    let raw = last.as_bytes();
+    let mut at = 0;
+    while at < raw.len() {
+        if raw[at] == b'%'
+            && let Some(hex) = last.get(at + 1..at + 3)
+            && let Ok(byte) = u8::from_str_radix(hex, 16)
+        {
+            bytes.push(byte);
+            at += 3;
+            continue;
+        }
+        bytes.push(if raw[at] == b'+' { b' ' } else { raw[at] });
+        at += 1;
+    }
+    let name: String = String::from_utf8_lossy(&bytes)
+        .chars()
+        .map(|ch| {
+            if ch.is_control() || r#"\/:*?"<>|"#.contains(ch) {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect();
+    let name = name.trim().trim_matches('.').to_owned();
+    if name.is_empty() {
+        "download".to_owned()
+    } else {
+        name
+    }
+}
+
+/// Downloads `url` into `dir` (at most 1 GiB), right here: call it from a
+/// background job. `progress` hears how far along it is (0 to 1, when the
+/// size is known); it stops when `cancelled` says so. The file keeps the
+/// name the server gives it, else [`file_name_of`] the link, and is
+/// written as a `.part` file renamed once whole.
+///
+/// # Errors
+/// If the link cannot be read, is not `https` or `http`, is too large, or
+/// the file cannot be written; or when cancelled.
+pub fn download_link(
+    url: &str,
+    dir: &Path,
+    user_agent: &str,
+    progress: &dyn Fn(f32),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<PathBuf, String> {
+    let url = url.trim();
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("a download link starts with https://".to_owned());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        net::get_link(url, dir, user_agent, progress, cancelled)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (dir, user_agent, progress, cancelled);
+        Err("the browser cannot download files for Sue".to_owned())
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 mod net {
     //! HTTPS through `ureq` (rustls).
@@ -675,6 +746,83 @@ mod net {
             .read_to_end(&mut bytes)
             .map_err(|error| error.to_string())?;
         Ok(bytes)
+    }
+
+    /// The largest file a link may bring: 1 GiB.
+    const LINK_LIMIT: u64 = 1024 * 1024 * 1024;
+
+    /// The name in a `Content-Disposition` header, if it gives one.
+    fn disposed_name(header: &str) -> Option<String> {
+        let at = header.find("filename=")?;
+        let name = header[at + "filename=".len()..]
+            .split(';')
+            .next()?
+            .trim()
+            .trim_matches('"');
+        (!name.is_empty()).then(|| super::file_name_of(name))
+    }
+
+    /// See [`super::download_link`].
+    pub(super) fn get_link(
+        url: &str,
+        dir: &Path,
+        user_agent: &str,
+        progress: &dyn Fn(f32),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<PathBuf, String> {
+        let fail = |error: &dyn std::fmt::Display| error.to_string();
+        std::fs::create_dir_all(dir).map_err(|error| fail(&error))?;
+        let mut response = agent(user_agent)
+            .get(url)
+            .call()
+            .map_err(|error| fail(&error))?;
+        let total = response.body().content_length().unwrap_or(0);
+        if total > LINK_LIMIT {
+            return Err(format!("the file is over 1 GiB ({total} bytes)"));
+        }
+        let name = response
+            .headers()
+            .get("content-disposition")
+            .and_then(|value| value.to_str().ok())
+            .and_then(disposed_name)
+            .unwrap_or_else(|| super::file_name_of(url));
+        let path = dir.join(&name);
+        let part = dir.join(format!("{name}.part"));
+        let mut file = std::fs::File::create(&part).map_err(|error| fail(&error))?;
+        let mut reader = response.body_mut().as_reader();
+        let mut buffer = vec![0_u8; 64 * 1024];
+        let mut received = 0_u64;
+        let copied = loop {
+            if cancelled() {
+                break Err("cancelled".to_owned());
+            }
+            let read = match reader.read(&mut buffer) {
+                Ok(0) => break Ok(()),
+                Ok(read) => read,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => break Err(fail(&error)),
+            };
+            received += read as u64;
+            if received > LINK_LIMIT {
+                break Err("the file is over 1 GiB".to_owned());
+            }
+            if let Err(error) = file.write_all(&buffer[..read]) {
+                break Err(fail(&error));
+            }
+            if total > 0 {
+                progress((received as f32 / total as f32).min(1.0));
+            }
+        };
+        let flushed = copied.and_then(|()| file.sync_all().map_err(|error| fail(&error)));
+        drop(file);
+        if let Err(error) = flushed {
+            let _ = std::fs::remove_file(&part);
+            return Err(error);
+        }
+        let _ = std::fs::remove_file(&path);
+        std::fs::rename(&part, &path).map_err(|error| fail(&error))?;
+        progress(1.0);
+        Ok(path)
     }
 
     /// Downloads `asset` into `dir` as a `.part` file, renamed to its own
@@ -746,6 +894,33 @@ mod net {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn downloads_keep_a_clean_name_from_their_link() {
+        assert_eq!(
+            file_name_of("https://example.com/packs/Free%20Brushes%20v2.zip?dl=1"),
+            "Free Brushes v2.zip"
+        );
+        assert_eq!(
+            file_name_of("https://example.com/a/b/ink.sut#top"),
+            "ink.sut"
+        );
+        assert_eq!(file_name_of("https://example.com/"), "download");
+        assert_eq!(
+            file_name_of("https://example.com/bad%3Aname%2F.abr"),
+            "bad_name_.abr"
+        );
+        assert!(
+            download_link(
+                "ftp://example.com/x.zip",
+                Path::new("."),
+                "Sue",
+                &|_| {},
+                &|| false
+            )
+            .is_err()
+        );
+    }
 
     /// The files of v0.0.4, as GitHub listed them.
     const V004: &[&str] = &[
@@ -989,6 +1164,29 @@ short  PKGBUILD
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
+    }
+
+    /// Downloads a real file by its link, as Data Transfers does. Needs the
+    /// network: `cargo test -p sue-platform -- --ignored real_link`.
+    #[test]
+    #[ignore = "needs the network"]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn real_link() {
+        let dir = std::env::temp_dir().join(format!("sue-link-test-{}", std::process::id()));
+        let seen = std::sync::Mutex::new(0.0f32);
+        let file = download_link(
+            "https://raw.githubusercontent.com/MagiGun/sue/main/LICENSE",
+            &dir,
+            "Sue/test",
+            &|fraction| *seen.lock().unwrap() = fraction,
+            &|| false,
+        )
+        .expect("the file");
+        assert_eq!(file.file_name().unwrap(), "LICENSE");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains("MIT"), "{text}");
+        assert!(!dir.join("LICENSE.part").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Asks GitHub for the real latest release and downloads its smallest

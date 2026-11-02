@@ -53,6 +53,7 @@ pub mod decoration;
 mod dialogs;
 pub mod doc;
 mod dock;
+mod downloads;
 pub mod effects;
 mod extras;
 pub mod figure;

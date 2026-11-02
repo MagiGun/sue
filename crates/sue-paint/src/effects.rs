@@ -1,5 +1,6 @@
 //! Layer effects, as in Clip Studio Paint's Layer Property palette: Border
-//! effect, Tone, Layer color and Expression color. Each is a property of
+//! effect, Watercolor edge, Extract line, Tone, Layer color and Expression
+//! color. Each is a property of
 //! the layer that the compositor applies as it draws, so the layer's
 //! pixels stay as they are and the effect can be turned off again.
 
@@ -11,6 +12,18 @@ pub const BORDER: &str = "effect.border";
 pub const BORDER_WIDTH: &str = "effect.border.width";
 /// The border's color (`Color`).
 pub const BORDER_COLOR: &str = "effect.border.color";
+/// The paint's edges darkened, as watercolor dries (`Bool`).
+pub const WATERCOLOR: &str = "effect.watercolor";
+/// How far in from the edge it darkens, in pixels (`Float`).
+pub const WATERCOLOR_WIDTH: &str = "effect.watercolor.width";
+/// How dark the edge gets, 0 to 1 (`Float`).
+pub const WATERCOLOR_DARKNESS: &str = "effect.watercolor.darkness";
+/// The layer shown as the lines of what it holds (`Bool`).
+pub const EXTRACT: &str = "effect.extract";
+/// How faint an edge still becomes a line, 0 to 1 (`Float`).
+pub const EXTRACT_THRESHOLD: &str = "effect.extract.threshold";
+/// The lines' width in pixels (`Float`).
+pub const EXTRACT_WIDTH: &str = "effect.extract.width";
 /// The layer shown as halftone dots (`Bool`).
 pub const TONE: &str = "effect.tone";
 /// The dots' screen frequency in lines an inch (`Float`).
@@ -34,6 +47,10 @@ pub const EXPRESSIONS: [&str; 3] = ["Color", "Gray", "Monochrome"];
 pub struct Effects {
     /// The border's width and color.
     pub border: Option<(f32, [f32; 3])>,
+    /// Watercolor edge: how far in it darkens, and how much.
+    pub watercolor: Option<(f32, f32)>,
+    /// Extract line: the threshold and the lines' width.
+    pub extract: Option<(f32, f32)>,
     /// The tone's cell size in pixels and angle in radians.
     pub tone: Option<(f32, f32)>,
     /// The layer color.
@@ -48,6 +65,8 @@ impl Default for Effects {
     fn default() -> Self {
         Self {
             border: None,
+            watercolor: None,
+            extract: None,
             tone: None,
             color: None,
             expression: 0,
@@ -96,6 +115,18 @@ impl Effects {
                     rgb(entity, BORDER_COLOR, [1.0; 3]),
                 )
             }),
+            watercolor: on(entity, WATERCOLOR).then(|| {
+                (
+                    number(entity, WATERCOLOR_WIDTH, 6.0).clamp(1.0, 200.0) as f32,
+                    number(entity, WATERCOLOR_DARKNESS, 0.5).clamp(0.0, 1.0) as f32,
+                )
+            }),
+            extract: on(entity, EXTRACT).then(|| {
+                (
+                    number(entity, EXTRACT_THRESHOLD, 0.25).clamp(0.01, 1.0) as f32,
+                    number(entity, EXTRACT_WIDTH, 1.0).clamp(0.5, 10.0) as f32,
+                )
+            }),
             tone: on(entity, TONE).then(|| {
                 (
                     ((dpi / lines) as f32).max(3.0),
@@ -120,7 +151,20 @@ impl Effects {
     /// `true` when the layer shows as it is.
     #[must_use]
     pub fn is_plain(&self) -> bool {
-        self.border.is_none() && self.tone.is_none() && self.color.is_none() && self.expression == 0
+        self.border.is_none()
+            && self.watercolor.is_none()
+            && self.extract.is_none()
+            && self.tone.is_none()
+            && self.color.is_none()
+            && self.expression == 0
+    }
+
+    /// `true` when an effect looks at a pixel's neighbors (a border, a
+    /// watercolor edge, extracted lines), so the layer is drawn a
+    /// rectangle at a time.
+    #[must_use]
+    pub fn needs_area(&self) -> bool {
+        self.border.is_some() || self.watercolor.is_some() || self.extract.is_some()
     }
 
     /// `rgba` (straight, 0 to 1) at picture pixel `(x, y)` through the
@@ -151,6 +195,97 @@ impl Effects {
             out = [color[0], color[1], color[2], out[3]];
         }
         out
+    }
+}
+
+/// The lines of what a layer holds over a rectangle (Extract line): how
+/// much ink each pixel takes, where the layer's color or coverage changes
+/// sharply.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lines {
+    rect: [u32; 4],
+    ink: Vec<f32>,
+}
+
+impl Lines {
+    /// The lines of `rgba(x, y)` (straight, 0 to 1) over `rect`: edges
+    /// stronger than `threshold` become ink, `width` pixels wide.
+    #[must_use]
+    pub fn build(
+        rgba: impl Fn(i64, i64) -> [f32; 4],
+        rect: [u32; 4],
+        threshold: f32,
+        width: f32,
+    ) -> Self {
+        let reach = width.ceil() as i64 + 1;
+        let (x0, y0) = (i64::from(rect[0]) - reach, i64::from(rect[1]) - reach);
+        let (x1, y1) = (i64::from(rect[2]) + reach, i64::from(rect[3]) + reach);
+        let (w, h) = ((x1 - x0).max(0) as usize, (y1 - y0).max(0) as usize);
+        // Each pixel's lightness over white, so clear reads as paper.
+        let mut light = vec![1.0_f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let [r, g, b, a] = rgba(x0 + x as i64, y0 + y as i64);
+                let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                light[y * w + x] = luma * a + (1.0 - a);
+            }
+        }
+        let at = |x: usize, y: usize| light[y.min(h - 1) * w + x.min(w - 1)];
+        // Sobel: how sharply the lightness changes.
+        let mut edge = vec![0.0_f32; w * h];
+        for y in 1..h.saturating_sub(1) {
+            for x in 1..w.saturating_sub(1) {
+                let gx = at(x + 1, y - 1) + 2.0 * at(x + 1, y) + at(x + 1, y + 1)
+                    - at(x - 1, y - 1)
+                    - 2.0 * at(x - 1, y)
+                    - at(x - 1, y + 1);
+                let gy = at(x - 1, y + 1) + 2.0 * at(x, y + 1) + at(x + 1, y + 1)
+                    - at(x - 1, y - 1)
+                    - 2.0 * at(x, y - 1)
+                    - at(x + 1, y - 1);
+                let strength = gx.hypot(gy) / 4.0;
+                edge[y * w + x] =
+                    ((strength - threshold) / threshold.max(0.05) + 0.5).clamp(0.0, 1.0);
+            }
+        }
+        // As wide as asked: the strongest edge within the line's radius.
+        let radius = ((width - 1.0) / 2.0).max(0.0);
+        let spread = radius.ceil() as i64;
+        let (rw, rh) = (
+            rect[2].saturating_sub(rect[0]) as usize,
+            rect[3].saturating_sub(rect[1]) as usize,
+        );
+        let mut ink = Vec::with_capacity(rw * rh);
+        for y in 0..rh {
+            for x in 0..rw {
+                let (cx, cy) = (x as i64 + reach, y as i64 + reach);
+                let mut most: f32 = 0.0;
+                for dy in -spread..=spread {
+                    for dx in -spread..=spread {
+                        if ((dx * dx + dy * dy) as f32).sqrt() > radius + 0.5 {
+                            continue;
+                        }
+                        let (sx, sy) = (cx + dx, cy + dy);
+                        if sx < 0 || sy < 0 || sx >= w as i64 || sy >= h as i64 {
+                            continue;
+                        }
+                        most = most.max(edge[sy as usize * w + sx as usize]);
+                    }
+                }
+                ink.push(most);
+            }
+        }
+        Self { rect, ink }
+    }
+
+    /// The ink at picture pixel `(x, y)`, 0 outside the rectangle.
+    #[must_use]
+    pub fn at(&self, x: u32, y: u32) -> f32 {
+        let [x0, y0, x1, y1] = self.rect;
+        if x < x0 || y < y0 || x >= x1 || y >= y1 {
+            return 0.0;
+        }
+        self.ink[((y - y0) * (x1 - x0) + (x - x0)) as usize]
     }
 }
 
@@ -224,6 +359,25 @@ impl Edge {
     /// least a half, over `rect` (`[x0, y0, x1, y1]`).
     #[must_use]
     pub fn build(alpha: impl Fn(i64, i64) -> f32, rect: [u32; 4], width: f32) -> Self {
+        Self::shaped(alpha, rect, width, |d| (width + 0.5 - d).clamp(0.0, 1.0))
+    }
+
+    /// The same, fading from full at the shape to nothing `width` pixels
+    /// away (the watercolor edge's darkening, from the paint's rim in).
+    #[must_use]
+    pub fn fading(alpha: impl Fn(i64, i64) -> f32, rect: [u32; 4], width: f32) -> Self {
+        Self::shaped(alpha, rect, width, |d| {
+            let t = (1.0 - d / width.max(0.5)).clamp(0.0, 1.0);
+            t * t
+        })
+    }
+
+    fn shaped(
+        alpha: impl Fn(i64, i64) -> f32,
+        rect: [u32; 4],
+        width: f32,
+        cover_of: impl Fn(f32) -> f32,
+    ) -> Self {
         let reach = width.ceil() as i64 + 1;
         let (x0, y0) = (i64::from(rect[0]) - reach, i64::from(rect[1]) - reach);
         let (x1, y1) = (i64::from(rect[2]) + reach, i64::from(rect[3]) + reach);
@@ -259,7 +413,7 @@ impl Edge {
         for y in 0..rh {
             for x in 0..rw {
                 let d = grid[(y + reach as usize) * w + x + reach as usize].sqrt();
-                cover.push((width + 0.5 - d).clamp(0.0, 1.0));
+                cover.push(cover_of(d));
             }
         }
         Self { rect, cover }
@@ -279,6 +433,48 @@ impl Edge {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn watercolor_edges_darken_inside_and_lines_trace_shapes() {
+        // A filled square from 10 to 30.
+        let inside = |x: i64, y: i64| (10..30).contains(&x) && (10..30).contains(&y);
+        // The watercolor edge fades in from the outside.
+        let rim = Edge::fading(
+            |x, y| if inside(x, y) { 0.0 } else { 1.0 },
+            [0, 0, 40, 40],
+            4.0,
+        );
+        assert!(rim.at(10, 20) > 0.5, "the edge itself");
+        assert!(
+            rim.at(12, 20) > 0.0 && rim.at(12, 20) < rim.at(10, 20),
+            "fading in"
+        );
+        assert_eq!(rim.at(20, 20), 0.0, "the middle keeps its color");
+        // Extracted lines follow the square's outline, not its middle.
+        let lines = Lines::build(
+            |x, y| {
+                if inside(x, y) {
+                    [0.8, 0.2, 0.2, 1.0]
+                } else {
+                    [0.0, 0.0, 0.0, 0.0]
+                }
+            },
+            [0, 0, 40, 40],
+            0.1,
+            1.0,
+        );
+        assert!(
+            lines.at(10, 20) > 0.5 || lines.at(9, 20) > 0.5,
+            "the outline"
+        );
+        assert_eq!(lines.at(20, 20), 0.0, "no line in the middle");
+        assert_eq!(lines.at(2, 2), 0.0, "none outside");
+        let effects = Effects {
+            watercolor: Some((4.0, 0.5)),
+            ..Effects::default()
+        };
+        assert!(!effects.is_plain() && effects.needs_area());
+    }
 
     #[test]
     fn borders_grow_round_the_layer_and_effects_recolor_it() {

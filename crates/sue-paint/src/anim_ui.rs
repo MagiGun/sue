@@ -147,14 +147,34 @@ impl SuePaint {
             .picture()
             .map(|picture| anim::Onion::of(&cx.world.arena, picture))
             .unwrap_or_default();
-        // The light table of the cel being drawn.
+        // The light table of the cel being drawn, and the general one.
+        let size_now = self
+            .picture()
+            .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
+            .and_then(sue_model::picture::size)
+            .unwrap_or([0, 0]);
         let traced = if self.light_table && self.light_cel {
             self.editing_cel(&cx.world.arena)
-                .map(|cel| anim::light_table(&cx.world.arena, cel))
+                .map(|cel| {
+                    anim::traced(
+                        &cx.world.arena,
+                        &anim::light_table(&cx.world.arena, cel),
+                        size_now,
+                    )
+                })
                 .unwrap_or_default()
         } else {
             Vec::new()
         };
+        let general = match self.picture() {
+            Some(picture) if self.light_table && self.light_general => anim::traced(
+                &cx.world.arena,
+                &anim::general_light_table(&cx.world.arena, picture),
+                size_now,
+            ),
+            _ => Vec::new(),
+        };
+        let general_opacity = self.general_opacity;
         let opacity = self.light_opacity;
         let light_color = self.light_color.then_some([0.25, 0.45, 1.0]);
         // The camera folders at the frame shown.
@@ -190,7 +210,9 @@ impl SuePaint {
             );
             view.cameras = cameras_at(doc.frame);
             if !playing {
-                view = view.with_light_table(&traced, opacity, light_color);
+                view = view
+                    .with_light_table(&traced, opacity, light_color)
+                    .with_light_table(&general, general_opacity, light_color);
             }
             doc.compositor.set_view(Some(view));
         }
@@ -442,6 +464,61 @@ impl SuePaint {
                 }
             }
             "anim.light_table.color" => self.light_color = !self.light_color,
+            "anim.light_table.general" => {
+                self.light_general = !self.light_general;
+                if self.light_general {
+                    self.light_table = true;
+                }
+            }
+            "anim.light_table.opacity_target" => self.opacity_general = !self.opacity_general,
+            "anim.light_table.tool" => {
+                self.light_tool = !self.light_tool;
+                if self.light_tool {
+                    cx.notify(tr!("light-table-tool-on"));
+                }
+            }
+            "anim.light_table.reset" => {
+                let mut layers = self
+                    .editing_cel(&cx.world.arena)
+                    .map(|cel| anim::light_table(&cx.world.arena, cel))
+                    .unwrap_or_default();
+                layers.extend(anim::general_light_table(&cx.world.arena, picture));
+                let edit = anim::reset_places(&cx.world.arena, &layers);
+                if !edit.is_empty() {
+                    Self::apply(cx, edit);
+                }
+            }
+            "anim.light_table.register_general" => {
+                let Some(layer) = self.layer() else {
+                    cx.notify(tr!("pick-layer-trace-layer-palette-then"));
+                    return true;
+                };
+                if anim::general_light_table(&cx.world.arena, picture).contains(&layer) {
+                    cx.notify(tr!("layer-cels-light-table-already"));
+                } else if Self::apply(cx, anim::register_general(picture, layer)) {
+                    self.light_table = true;
+                    self.light_general = true;
+                }
+            }
+            "anim.light_table.file" => {
+                if self.editing_cel(&cx.world.arena).is_none() {
+                    cx.notify(tr!("go-frame-cel-see-light-table"));
+                    return true;
+                }
+                let start = self
+                    .last_dir
+                    .clone()
+                    .or_else(|| cx.catalog.folders.get("home").cloned());
+                cx.request(ShellRequest::PickFile(
+                    FilePick::open(
+                        Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
+                        "light-table-file",
+                        &tr!("select-and-register-file"),
+                    )
+                    .extensions(&["png", "jpg", "jpeg", "webp", "jxl", "bmp", "tif", "tiff"])
+                    .starting_in(start),
+                ));
+            }
             "anim.light_table.cel" => self.light_cel = !self.light_cel,
             "anim.light_table.deregister" => {
                 if let (Some(cel), Some(layer)) = (self.editing_cel(&cx.world.arena), self.layer())
@@ -1552,5 +1629,25 @@ impl SuePaint {
             ));
         }
         Self::apply(cx, edit);
+    }
+
+    /// Select and register file: the picture at `path` on the cel's light
+    /// table only, a layer that never shows in the picture itself.
+    pub(crate) fn light_table_file(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let Some(cel) = self.editing_cel(&cx.world.arena) else {
+            return;
+        };
+        let before = self.layer();
+        self.open_picked(cx, path, true);
+        let Some(layer) = self.layer().filter(|layer| Some(*layer) != before) else {
+            return;
+        };
+        let edit = anim::register(cel, layer)
+            .then(SetProperty::new(layer, anim::ONLY, true))
+            .then(SetProperty::new(layer, sue_model::picture::VISIBLE, false));
+        if Self::apply(cx, edit) {
+            self.light_table = true;
+            self.light_cel = true;
+        }
     }
 }

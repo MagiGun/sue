@@ -64,7 +64,7 @@ pub(crate) fn icon_button(
     let response = if enabled {
         response.on_hover_text(tip)
     } else {
-        response.on_hover_text(tr!("not-available-yet", tip = tip))
+        response.on_hover_text(tr!("not-available-now", tip = tip))
     };
     enabled && response.clicked()
 }
@@ -4171,12 +4171,25 @@ impl SuePaint {
             (Icon::Mask, "layer.mask.toggle", &tr!("enable-mask")),
         ];
         let mut run = None;
+        // What a grey button needs before it works.
+        let why = |command: &str, tip: &str| match command {
+            "layer.mask.toggle" | "layer.mask.apply" => {
+                tr!("needs-a-layer-mask", tip = tip)
+            }
+            "layer.merge_down" => tr!("needs-a-raster-layer-below", tip = tip),
+            _ => tip.to_owned(),
+        };
         for (index, (icon, command, tip)) in flags.iter().enumerate() {
             let rect = Rect::from_min_size(
                 pos2(body.left() + 6.0 + index as f32 * 28.0, row_top),
                 vec2(26.0, 24.0),
             );
             let state = self.state(command, &cx.world.arena, cx.history);
+            let tip = &if state.enabled {
+                (*tip).to_owned()
+            } else {
+                why(command, tip)
+            };
             let checked = match *command {
                 "layer.toggle.lock_alpha" => current.as_ref().is_some_and(|info| info.alpha_locked),
                 _ => state.checked == Some(true),
@@ -4230,6 +4243,11 @@ impl SuePaint {
                 vec2(26.0, 24.0),
             );
             let state = self.state(command, &cx.world.arena, cx.history);
+            let tip = &if state.enabled {
+                (*tip).to_owned()
+            } else {
+                why(command, tip)
+            };
             if icon_button(ui, rect, *icon, state.enabled, false, tip, theme) {
                 run = Some(*command);
             }
@@ -4710,7 +4728,7 @@ impl SuePaint {
             color_of(effects::COLOR_VALUE),
         );
         // Effect: a row of buttons, as Clip Studio Paint's Layer Property
-        // has them; those Sue Paint has not got yet stay grey.
+        // has them.
         ui.label(small(&tr!("effect")));
         let mut toggle = None;
         let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
@@ -4721,8 +4739,18 @@ impl SuePaint {
                 tr!("border-effect-2"),
                 Some(effects.border.is_some()),
             ),
-            ("", Icon::WatercolorEdge, tr!("watercolor-edge"), None),
-            ("", Icon::ExtractLine, tr!("extract-line"), None),
+            (
+                effects::WATERCOLOR,
+                Icon::WatercolorEdge,
+                tr!("watercolor-edge"),
+                Some(effects.watercolor.is_some()),
+            ),
+            (
+                effects::EXTRACT,
+                Icon::ExtractLine,
+                tr!("extract-line"),
+                Some(effects.extract.is_some()),
+            ),
             (
                 effects::TONE,
                 Icon::Tone,
@@ -4780,6 +4808,78 @@ impl SuePaint {
                 );
             });
         };
+        // Watercolor edge: how wide and how dark.
+        if let Some((width, darkness)) = effects.watercolor {
+            for (label, key, mut value, range, suffix) in [
+                (
+                    tr!("watercolor-edge-width"),
+                    effects::WATERCOLOR_WIDTH,
+                    width,
+                    1.0..=100.0,
+                    tr!("px"),
+                ),
+                (
+                    tr!("watercolor-edge-darkness"),
+                    effects::WATERCOLOR_DARKNESS,
+                    darkness * 100.0,
+                    0.0..=100.0,
+                    "%".to_owned(),
+                ),
+            ] {
+                ui.horizontal(|ui| {
+                    ui.label(small(&label));
+                    let response = ui.add(egui::Slider::new(&mut value, range).suffix(suffix));
+                    let stored = if key == effects::WATERCOLOR_DARKNESS {
+                        value / 100.0
+                    } else {
+                        value
+                    };
+                    self.live_property(
+                        cx,
+                        &response,
+                        info.id,
+                        key,
+                        Value::Float(f64::from(stored)),
+                    );
+                });
+            }
+        }
+        // Extract line: how faint an edge still makes a line, and how wide.
+        if let Some((threshold, width)) = effects.extract {
+            for (label, key, mut value, range, suffix) in [
+                (
+                    tr!("extract-line-threshold"),
+                    effects::EXTRACT_THRESHOLD,
+                    threshold * 100.0,
+                    1.0..=100.0,
+                    "%".to_owned(),
+                ),
+                (
+                    tr!("extract-line-width"),
+                    effects::EXTRACT_WIDTH,
+                    width,
+                    0.5..=10.0,
+                    tr!("px"),
+                ),
+            ] {
+                ui.horizontal(|ui| {
+                    ui.label(small(&label));
+                    let response = ui.add(egui::Slider::new(&mut value, range).suffix(suffix));
+                    let stored = if key == effects::EXTRACT_THRESHOLD {
+                        value / 100.0
+                    } else {
+                        value
+                    };
+                    self.live_property(
+                        cx,
+                        &response,
+                        info.id,
+                        key,
+                        Value::Float(f64::from(stored)),
+                    );
+                });
+            }
+        }
         if effects.border.is_some() {
             let mut width = border_width as f32;
             ui.horizontal(|ui| {
@@ -4996,16 +5096,15 @@ impl SuePaint {
                 egui::Vec2::splat(side),
             )
         };
-        // (row, column, icon, tip, command, enabled, active); a command
-        // of "" is one Sue Paint has not got yet.
+        // (row, column, icon, tip, command, enabled, active).
         let buttons = [
             (
                 0,
                 0,
                 Icon::Reset,
                 tr!("reset-position-layers-light-table"),
-                "",
-                false,
+                "anim.light_table.reset",
+                has || self.light_general,
                 false,
             ),
             (
@@ -5022,9 +5121,9 @@ impl SuePaint {
                 2,
                 Icon::OpacityTarget,
                 tr!("switch-opacity-target"),
-                "",
-                false,
-                false,
+                "anim.light_table.opacity_target",
+                true,
+                self.opacity_general,
             ),
             (
                 1,
@@ -5076,8 +5175,8 @@ impl SuePaint {
                 6,
                 Icon::Import,
                 tr!("select-and-register-file"),
-                "",
-                false,
+                "anim.light_table.file",
+                has,
                 false,
             ),
             (
@@ -5103,9 +5202,9 @@ impl SuePaint {
                 0,
                 Icon::Operation,
                 tr!("light-table-tool"),
-                "",
-                false,
-                false,
+                "anim.light_table.tool",
+                true,
+                self.light_tool,
             ),
             (
                 2,
@@ -5121,9 +5220,9 @@ impl SuePaint {
                 2,
                 Icon::Layers,
                 tr!("show-general-light-table"),
-                "",
-                false,
-                false,
+                "anim.light_table.general",
+                true,
+                self.light_general,
             ),
         ];
         let mut run = None;
@@ -5138,7 +5237,13 @@ impl SuePaint {
             pos2(body.right() - side - 12.0, at(0, 3).bottom()),
         );
         let mut inner = child(ui, opacity_rect, "cels-opacity");
-        let mut opacity = self.light_opacity * 100.0;
+        // The slider sets the cel's light table, or the general one
+        // (Switch opacity target).
+        let mut opacity = if self.opacity_general {
+            self.general_opacity
+        } else {
+            self.light_opacity
+        } * 100.0;
         let width = (opacity_rect.width() - 50.0).max(30.0);
         let changed = inner
             .horizontal(|ui| {
@@ -5154,7 +5259,11 @@ impl SuePaint {
             })
             .inner;
         if changed {
-            self.light_opacity = opacity / 100.0;
+            if self.opacity_general {
+                self.general_opacity = opacity / 100.0;
+            } else {
+                self.light_opacity = opacity / 100.0;
+            }
         }
         let color_rect = Rect::from_min_size(
             pos2(body.right() - side - 6.0, at(0, 0).top()),
@@ -5216,6 +5325,40 @@ impl SuePaint {
                 if let Some(layer) = off {
                     Self::apply(cx, crate::anim::deregister(cel, &[layer]));
                 }
+            }
+        }
+        // The general light table: shown on every cel.
+        if let Some(picture) = self.picture() {
+            inner.add_space(8.0);
+            inner.label(small(&tr!("general-light-table")));
+            let layers = crate::anim::general_light_table(&cx.world.arena, picture);
+            let name = |id: sue_core::EntityId| {
+                cx.world
+                    .arena
+                    .get_by_id(id)
+                    .map_or_else(|_| tr!("layer-2"), |entity| entity.name().to_owned())
+            };
+            let mut off = None;
+            for layer in layers {
+                inner.horizontal(|ui| {
+                    if ui
+                        .small_button("x")
+                        .on_hover_text(tr!("deregister-from-the-light-table"))
+                        .clicked()
+                    {
+                        off = Some(layer);
+                    }
+                    ui.label(name(layer));
+                });
+            }
+            if inner
+                .small_button(tr!("register-layer-general-light-table"))
+                .clicked()
+            {
+                run = Some("anim.light_table.register_general");
+            }
+            if let Some(layer) = off {
+                Self::apply(cx, crate::anim::deregister_general(picture, &[layer]));
             }
         }
         if let Some(command) = run.filter(|command| !command.is_empty()) {

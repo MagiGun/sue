@@ -265,6 +265,13 @@ impl SuePaint {
         self.item_bank = read(folder.as_deref(), "item_bank.txt")
             .map(|text| text.lines().filter_map(Item::from_line).collect())
             .unwrap_or_default();
+        self.canvas_presets = read(folder.as_deref(), "canvas_presets.txt")
+            .map(|text| {
+                text.lines()
+                    .filter_map(crate::dialogs::CanvasPreset::from_line)
+                    .collect()
+            })
+            .unwrap_or_default();
         // The brush tips made from pictures, in the materials location.
         if let Some(entries) = crate::materials::location(cx)
             .and_then(|folder| sue_platform::list_dir(&folder.join("tips"), true).ok())
@@ -343,6 +350,14 @@ impl SuePaint {
         )
         .and_then(|()| write(folder.as_deref(), "command_bar.txt", &bar.concat()))
         .and_then(|()| write(folder.as_deref(), "item_bank.txt", &bank))
+        .and_then(|()| {
+            let presets: String = self
+                .canvas_presets
+                .iter()
+                .map(crate::dialogs::CanvasPreset::to_line)
+                .collect();
+            write(folder.as_deref(), "canvas_presets.txt", &presets)
+        })
         .and_then(|()| write(folder.as_deref(), "workspaces.txt", &spaces));
         if let Err(error) = written {
             cx.fail(tr!("cannot-keep-the-palettes-settings", error = error));

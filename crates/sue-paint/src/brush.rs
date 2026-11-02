@@ -1046,6 +1046,13 @@ pub struct Stroke {
     ended: Option<(f32, f32)>,
     /// The tip's soft edge, looked up.
     falloff: Option<std::sync::Arc<Falloff>>,
+    /// While only part of the stroke is drawn again (its tapered ends
+    /// when the pen lifts): the tiles that may change; the rest stay.
+    clip: Option<std::collections::BTreeSet<(u32, u32)>>,
+    /// Draw the whole stroke again when the pen lifts (to check the quick
+    /// way against).
+    #[cfg(test)]
+    whole: bool,
 }
 
 impl Stroke {
@@ -1082,6 +1089,9 @@ impl Stroke {
             flushing: false,
             ended: None,
             falloff: Falloff::of(&tip).map(std::sync::Arc::new),
+            clip: None,
+            #[cfg(test)]
+            whole: false,
         }
     }
 
@@ -1365,10 +1375,15 @@ impl Stroke {
             mean(&self.samples[..count.min(6)]),
             mean(&self.samples[count.saturating_sub(6)..]),
         ));
+        // Only the tapered ends change when the pen lifts: the tiles near
+        // them are drawn again and the rest of the stroke stays, so a long
+        // stroke finishes as quickly as a short one.
+        let only = self.ends_only(&path, finish);
         // What the screen shows now, to tell it afterwards only what the
         // finished stroke changed (its ends, mostly), not the whole stroke.
-        let shown = self.shown(raster);
-        self.restart(raster);
+        let shown = self.shown_in(raster, only.as_ref());
+        self.restart_in(raster, only.as_ref());
+        self.clip = only;
         self.total = Some(length(&path));
         self.flicked = self.total.unwrap_or(0.0) - before;
         for sample in path {
@@ -1377,10 +1392,88 @@ impl Stroke {
         }
         // The path's last point, however close it came.
         self.flush(raster, selection);
+        self.clip = None;
         self.total = None;
         self.flicked = 0.0;
         self.end_speeds = None;
         self.changed_since(raster, shown);
+    }
+
+    /// The tiles near the stroke's two ends, which the finished path may
+    /// change, when only they need drawing again; `None` when all of it
+    /// does (post correction moves every point, a mixing brush picks up
+    /// what is under it, a ribbon spans the whole stroke, or the ends
+    /// reach most of the way along).
+    fn ends_only(
+        &self,
+        path: &[Sample],
+        finish: Finish,
+    ) -> Option<std::collections::BTreeSet<(u32, u32)>> {
+        let tip = &self.tip;
+        if finish.correction > 0 || tip.mix > 0.0 || tip.ribbon || self.picture.is_some() {
+            return None;
+        }
+        #[cfg(test)]
+        if self.whole {
+            return None;
+        }
+        let total = length(path);
+        // Generous: the most the tapers can reach, at any speed.
+        let speed = if tip.taper_by_speed { 1.7 } else { 1.0 };
+        let (head, tail) = match tip.taper_mode {
+            TaperMode::Percent => (
+                tip.taper_start / 100.0 * total.max(200.0),
+                tip.taper_end / 100.0 * total,
+            ),
+            _ => (tip.taper_start * speed, tip.taper_end * speed),
+        };
+        let margin = tip.size * 2.0 + 8.0;
+        let (head, tail) = (head + margin, tail + self.flicked * 1.2 + margin);
+        if head + tail >= total * 0.9 {
+            return None;
+        }
+        let reach = tip.size + tip.aa.edge() + 3.0;
+        let mut keys = std::collections::BTreeSet::new();
+        let mut s = 0.0;
+        let mut last: Option<[f32; 2]> = None;
+        for point in path {
+            if let Some(last) = last {
+                s += distance(last, point.at);
+            }
+            last = Some(point.at);
+            if s > head && s < total - tail {
+                continue;
+            }
+            let [x, y] = point.at;
+            let (x0, y0) = (
+                ((x - reach).max(0.0) as u32) / TILE,
+                ((y - reach).max(0.0) as u32) / TILE,
+            );
+            let (x1, y1) = (
+                ((x + reach).max(0.0) as u32) / TILE,
+                ((y + reach).max(0.0) as u32) / TILE,
+            );
+            for ty in y0..=y1 {
+                for tx in x0..=x1 {
+                    keys.insert((ty, tx));
+                }
+            }
+        }
+        Some(keys)
+    }
+
+    /// [`Self::shown`], of the tiles in `only` when given.
+    #[allow(clippy::type_complexity)]
+    fn shown_in(
+        &self,
+        raster: &RasterTile2D,
+        only: Option<&std::collections::BTreeSet<(u32, u32)>>,
+    ) -> Vec<((u32, u32), Vec<u8>, Option<[u32; 4]>)> {
+        let mut all = self.shown(raster);
+        if let Some(only) = only {
+            all.retain(|(key, ..)| only.contains(key));
+        }
+        all
     }
 
     /// Each tile's pixels as they are, with what the screen has yet to be
@@ -1505,9 +1598,21 @@ impl Stroke {
 
     /// Puts back the pixels from before the stroke, to paint it again.
     fn restart(&mut self, raster: &mut RasterTile2D) {
+        self.restart_in(raster, None);
+    }
+
+    /// [`Self::restart`], putting back only the tiles in `only` when given.
+    fn restart_in(
+        &mut self,
+        raster: &mut RasterTile2D,
+        only: Option<&std::collections::BTreeSet<(u32, u32)>>,
+    ) {
         let stride = raster.width() as usize * 4;
         if let Some(bytes) = raster.bytes_mut() {
-            for tile in self.tiles.values_mut() {
+            for (key, tile) in &mut self.tiles {
+                if only.is_some_and(|only| !only.contains(key)) {
+                    continue;
+                }
                 let [x, y, w, h] = tile.rect;
                 let row = w as usize * 4;
                 for line in 0..h as usize {
@@ -2006,14 +2111,29 @@ impl Stroke {
                 Some(color.map(to_byte))
             }
         });
-        let Some(bytes) = raster.bytes_mut() else {
-            return;
-        };
         let (tx0, tx1) = (x0 / TILE, (x1 - 1) / TILE);
         let (ty0, ty1) = (y0 / TILE, (y1 - 1) / TILE);
+        // Drawing part of the stroke again: only the tiles being redrawn.
+        let clip = self.clip.take();
+        let inside = |key: &(u32, u32)| clip.as_ref().is_none_or(|clip| clip.contains(key));
+        if clip.as_ref().is_some_and(|clip| {
+            !clip
+                .range((ty0, 0)..=(ty1, u32::MAX))
+                .any(|(_, tx)| (tx0..=tx1).contains(tx))
+        }) {
+            self.clip = clip;
+            return;
+        }
+        let Some(bytes) = raster.bytes_mut() else {
+            self.clip = clip;
+            return;
+        };
         // Every tile keeps its pixels from before the stroke first.
         for ty in ty0..=ty1 {
             for tx in tx0..=tx1 {
+                if !inside(&(ty, tx)) {
+                    continue;
+                }
                 self.tiles.entry((ty, tx)).or_insert_with(|| {
                     let rect = [
                         tx * TILE,
@@ -2048,10 +2168,11 @@ impl Stroke {
             bands.push((ty * TILE, band, Vec::new()));
         }
         for ((ty, tx), state) in self.tiles.range_mut((ty0, tx0)..=(ty1, tx1)) {
-            if (tx0..=tx1).contains(tx) {
+            if (tx0..=tx1).contains(tx) && inside(&(*ty, *tx)) {
                 bands[(ty - ty0) as usize].2.push(state);
             }
         }
+        self.clip = clip.clone();
         let max = matches!(mode, Mode::Max);
         let picture = self.picture.clone();
         let work = |band_y: u32, band: &mut [u8], tiles: &mut [&mut TileState]| {
@@ -2927,6 +3048,74 @@ mod tests {
         let alpha = |x: u32, y: u32| raster.bytes().unwrap()[((y * 40 + x) * 4 + 3) as usize];
         assert!(alpha(20, 14) > 100, "the plus reaches up");
         assert!(alpha(14, 14) < 30, "but not into the corner");
+    }
+
+    #[test]
+    fn lifting_the_pen_redraws_only_the_ends_and_looks_the_same() {
+        // A long wavy stroke with tapers by speed, as Sue Paint's pens.
+        let draw = |whole: bool| {
+            let mut raster = layer(1200, 300);
+            let tip = Tip {
+                taper_start: 20.0,
+                taper_end: 20.0,
+                taper_by_speed: true,
+                ..flat_pen(8.0)
+            };
+            let mut stroke = Stroke::new(EntityId::new(), tip, [0.1, 0.2, 0.3], false);
+            stroke.whole = whole;
+            for step in 0..=400 {
+                let x = 20.0 + step as f32 * 2.9;
+                stroke.set_speed(0.8);
+                stroke.to(&mut raster, [x, 150.0 + (x / 60.0).sin() * 80.0], 1.0, None);
+            }
+            let finish = Finish::default();
+            stroke.end(&mut raster, finish, None);
+            let restored = stroke.tiles.len();
+            (raster, restored)
+        };
+        let (quick, _) = draw(false);
+        let (full, _) = draw(true);
+        let (a, b) = (quick.bytes().unwrap(), full.bytes().unwrap());
+        // The tapered ends come out as a whole redraw makes them (within
+        // a few levels of 255).
+        let worst_in = |columns: std::ops::Range<usize>| {
+            a.as_chunks::<4>()
+                .0
+                .iter()
+                .zip(b.as_chunks::<4>().0)
+                .enumerate()
+                .filter(|(index, _)| columns.contains(&(index % 1200)))
+                .map(|(_, (x, y))| {
+                    x.iter()
+                        .zip(y)
+                        .map(|(p, q)| p.abs_diff(*q))
+                        .max()
+                        .unwrap_or(0)
+                })
+                .max()
+                .unwrap_or(0)
+        };
+        assert!(worst_in(0..60) <= 8, "the start: {}", worst_in(0..60));
+        assert!(
+            worst_in(1150..1200) <= 8,
+            "the end: {}",
+            worst_in(1150..1200)
+        );
+        // The middle stays as it was drawn: a whole redraw only smooths a
+        // few edge pixels of it differently.
+        let moved = a
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(b.as_chunks::<4>().0)
+            .filter(|(x, y)| x[3].abs_diff(y[3]) > 20)
+            .count();
+        let inked = a.as_chunks::<4>().0.iter().filter(|x| x[3] > 0).count();
+        assert!(moved * 100 < inked, "{moved} of {inked} pixels");
+        // And the ends did taper: the first pixels are thinner than the
+        // middle.
+        let ink = |x: u32| (0..300).filter(|y| alpha(&quick, x, *y) > 128).count();
+        assert!(ink(24) < ink(600), "{} then {}", ink(24), ink(600));
     }
 
     #[test]

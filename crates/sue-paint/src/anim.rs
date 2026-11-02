@@ -154,6 +154,134 @@ impl Onion {
     }
 }
 
+/// The relation from a picture to a layer on its general light table,
+/// shown on every cel.
+pub const GENERAL_LIGHT_TABLE: &str = "sue.paint.light_table.general";
+/// Where a layer sits on a light table, moved and turned by the Light
+/// table tool without changing it: `dx,dy,degrees` (`Text`).
+pub const PLACE: &str = "light_table.place";
+/// A layer that shows only on light tables (a file registered with Select
+/// and register file), never in the picture itself (`Bool`).
+pub const ONLY: &str = "light_table.only";
+
+/// A layer's place on light tables: across, down and turned (degrees).
+#[must_use]
+pub fn place_of(entity: &sue_core::Entity) -> [f32; 3] {
+    let values: Vec<f32> = entity
+        .property(PLACE)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|value| value.trim().parse().ok())
+        .collect();
+    match values.as_slice() {
+        &[dx, dy, degrees] => [dx, dy, degrees],
+        _ => [0.0; 3],
+    }
+}
+
+/// The text of a place ([`PLACE`]).
+#[must_use]
+pub fn place_text([dx, dy, degrees]: [f32; 3]) -> String {
+    format!("{dx},{dy},{degrees}")
+}
+
+/// What a canvas point sees on a layer placed at `place` on a `size`
+/// canvas: turned about the canvas's middle, then moved (an affine map,
+/// as camera folders use). `None` for a layer where it is.
+#[must_use]
+pub fn place_map(place: [f32; 3], size: [u32; 2]) -> Option<[f32; 6]> {
+    if place == [0.0; 3] {
+        return None;
+    }
+    let [dx, dy, degrees] = place;
+    let (cx, cy) = (size[0] as f32 / 2.0, size[1] as f32 / 2.0);
+    let (sin, cos) = (-degrees.to_radians()).sin_cos();
+    // Undo the move, then the turn about the middle.
+    let (ox, oy) = (-dx - cx, -dy - cy);
+    Some([
+        cos,
+        -sin,
+        sin,
+        cos,
+        cos * ox - sin * oy + cx,
+        sin * ox + cos * oy + cy,
+    ])
+}
+
+/// The layers on `picture`'s general light table, shown on every cel.
+#[must_use]
+pub fn general_light_table(arena: &Arena, picture: EntityId) -> Vec<EntityId> {
+    arena.relations().targets(picture, GENERAL_LIGHT_TABLE)
+}
+
+/// The edit that puts `layer` on `picture`'s general light table.
+#[must_use]
+pub fn register_general(picture: EntityId, layer: EntityId) -> Edit {
+    Edit::new(tr!("register-to-light-table")).then(sue_core::txn::Relate::new(
+        sue_core::Relation::new(picture, GENERAL_LIGHT_TABLE, layer),
+    ))
+}
+
+/// The edit that takes `layers` off `picture`'s general light table.
+#[must_use]
+pub fn deregister_general(picture: EntityId, layers: &[EntityId]) -> Edit {
+    layers.iter().fold(
+        Edit::new(tr!("deregister-from-light-table")),
+        |edit, layer| {
+            edit.then(sue_core::txn::Unrelate::new(
+                picture,
+                GENERAL_LIGHT_TABLE,
+                *layer,
+            ))
+        },
+    )
+}
+
+/// The edit that puts `layers` back where they are on their own (Reset
+/// position of layers on light table).
+#[must_use]
+pub fn reset_places(arena: &Arena, layers: &[EntityId]) -> Edit {
+    layers
+        .iter()
+        .filter(|layer| {
+            arena
+                .get_by_id(**layer)
+                .is_ok_and(|entity| place_of(entity) != [0.0; 3])
+        })
+        .fold(
+            Edit::new(tr!("reset-position-layers-light-table")),
+            |edit, layer| edit.then(SetProperty::new(*layer, PLACE, place_text([0.0; 3]))),
+        )
+}
+
+/// A layer as a light table shows it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Traced {
+    /// The layer.
+    pub layer: EntityId,
+    /// What each canvas point sees on it, when it is moved.
+    pub place: Option<[f32; 6]>,
+    /// It shows only on light tables.
+    pub only: bool,
+}
+
+/// `layers` as a light table on a `size` canvas shows them.
+#[must_use]
+pub fn traced(arena: &Arena, layers: &[EntityId], size: [u32; 2]) -> Vec<Traced> {
+    layers
+        .iter()
+        .filter_map(|layer| {
+            let entity = arena.get_by_id(*layer).ok()?;
+            Some(Traced {
+                layer: *layer,
+                place: place_map(place_of(entity), size),
+                only: entity.property(ONLY).and_then(Value::as_bool) == Some(true),
+            })
+        })
+        .collect()
+}
+
 /// The layers on `cel`'s light table, in the order they were registered.
 #[must_use]
 pub fn light_table(arena: &Arena, cel: EntityId) -> Vec<EntityId> {
@@ -202,17 +330,24 @@ impl FrameView {
     #[must_use]
     pub fn with_light_table(
         mut self,
-        layers: &[EntityId],
+        layers: &[Traced],
         opacity: f32,
         color: Option<[f32; 3]>,
     ) -> Self {
-        for layer in layers {
-            if !self.onion.iter().any(|skin| skin.cel == *layer) {
+        for traced in layers {
+            // A file on the light table shows only here; a moved layer
+            // shows moved.
+            if traced.only || traced.place.is_some() {
+                self.hidden.insert(traced.layer);
+            }
+            if !self.onion.iter().any(|skin| skin.cel == traced.layer) {
                 self.onion.push(Skin {
-                    cel: *layer,
+                    cel: traced.layer,
                     color: color.unwrap_or([0.0; 3]),
                     tint: if color.is_some() { 1.0 } else { 0.0 },
                     opacity,
+                    place: traced.place,
+                    force: traced.only,
                 });
             }
         }
@@ -318,6 +453,8 @@ pub fn view(sequence: &Sequence, frame: u32, onion: Option<&Onion>) -> FrameView
                         color: unit(color),
                         tint: onion.tint(),
                         opacity: onion.opacity_at(away as u32 + 1),
+                        place: None,
+                        force: false,
                     });
                 }
             }
@@ -825,6 +962,26 @@ mod tests {
     use sue_core::{Entity, ReversibleTransaction};
 
     #[test]
+    fn light_table_places_move_and_turn_what_a_point_sees() {
+        assert_eq!(place_map([0.0; 3], [100, 100]), None, "where it is");
+        // Moved 10 across and 5 down: the canvas point (60, 55) sees the
+        // layer's (50, 50).
+        let moved = place_map([10.0, 5.0, 0.0], [100, 100]).unwrap();
+        let see =
+            |m: [f32; 6], x: f32, y: f32| [m[0] * x + m[1] * y + m[4], m[2] * x + m[3] * y + m[5]];
+        let [x, y] = see(moved, 60.0, 55.0);
+        assert!(
+            (x - 50.0).abs() < 1e-4 && (y - 50.0).abs() < 1e-4,
+            "{x} {y}"
+        );
+        // Turned a quarter about the middle: the middle stays.
+        let turned = place_map([0.0, 0.0, 90.0], [100, 100]).unwrap();
+        let [x, y] = see(turned, 50.0, 50.0);
+        assert!((x - 50.0).abs() < 1e-4 && (y - 50.0).abs() < 1e-4);
+        assert_eq!(place_text([1.5, -2.0, 30.0]), "1.5,-2,30");
+    }
+
+    #[test]
     fn the_exposure_sheet_shows_keys_holds_and_blanks() {
         let picture = EntityId::new();
         let (a, b) = (EntityId::new(), EntityId::new());
@@ -1044,7 +1201,15 @@ mod tests {
         assert_eq!(full.opacity_at(3), 1.0);
         // A light table shows its layers in their own colors.
         let reference = layer(&mut arena);
-        let traced = view(&sequence, 6, None).with_light_table(&[reference], 0.5, None);
+        let traced = view(&sequence, 6, None).with_light_table(
+            &[Traced {
+                layer: reference,
+                place: None,
+                only: false,
+            }],
+            0.5,
+            None,
+        );
         assert_eq!(traced.onion.len(), 1);
         assert_eq!(traced.onion[0].tint, 0.0);
         let mut put = register(cels[3], reference);

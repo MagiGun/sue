@@ -168,6 +168,66 @@ pub(crate) struct NewDialog {
     pub preset: Option<String>,
     /// Record timelapse from the start.
     pub timelapse: bool,
+    /// Presets made with Register preset: name, width, height, dpi,
+    /// paper.
+    pub own: Vec<CanvasPreset>,
+    /// Register (true) or Delete (false) the preset shown, once the
+    /// dialog can keep it.
+    pub preset_action: Option<bool>,
+}
+
+/// A canvas preset someone registered in the New dialog.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CanvasPreset {
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub dpi: f64,
+    pub paper: bool,
+}
+
+impl CanvasPreset {
+    /// One line: name, width, height, dpi and paper, tab separated.
+    pub(crate) fn to_line(&self) -> String {
+        format!(
+            "{}\t{}\t{}\t{}\t{}\n",
+            self.name.replace(['\t', '\n'], " "),
+            self.width,
+            self.height,
+            self.dpi,
+            u8::from(self.paper)
+        )
+    }
+
+    /// A preset read back from [`Self::to_line`].
+    pub(crate) fn from_line(line: &str) -> Option<Self> {
+        let mut parts = line.split('\t');
+        let name = parts.next()?.trim().to_owned();
+        let width = parts.next()?.trim().parse().ok()?;
+        let height = parts.next()?.trim().parse().ok()?;
+        let dpi = parts.next()?.trim().parse().ok()?;
+        let paper = parts.next()?.trim() == "1";
+        (!name.is_empty()).then_some(Self {
+            name,
+            width,
+            height,
+            dpi,
+            paper,
+        })
+    }
+
+    /// As a backbone preset for the New dialog.
+    pub(crate) fn preset(&self) -> Preset {
+        Preset::new(
+            self.name.clone(),
+            NEW_PRESET_TARGET,
+            Properties::new()
+                .with("width", i64::from(self.width))
+                .with("height", i64::from(self.height))
+                .with("dpi", self.dpi)
+                .with("paper", self.paper),
+        )
+    }
 }
 
 impl NewDialog {
@@ -215,6 +275,8 @@ impl NewDialog {
             size: 0,
             preset: None,
             timelapse: false,
+            own: Vec::new(),
+            preset_action: None,
         }
     }
 
@@ -597,6 +659,44 @@ impl FilterDialog {
         {
             bytes.copy_from_slice(pixels);
         }
+    }
+}
+
+impl SuePaint {
+    /// Register preset (or, with `register` false, Delete preset) in the
+    /// New dialog: the canvas size, resolution and paper kept by name for
+    /// next time.
+    fn canvas_preset(&mut self, cx: &mut AppletContext<'_>, new: &mut NewDialog, register: bool) {
+        if register {
+            let taken = |name: &str| {
+                self.canvas_presets.iter().any(|preset| preset.name == name)
+                    || new_presets().get(NEW_PRESET_TARGET, name).is_some()
+            };
+            let name = (1..)
+                .map(|number| {
+                    tr!(
+                        "canvas-preset-name",
+                        width = new.width,
+                        height = new.height,
+                        number = number
+                    )
+                })
+                .find(|name| !taken(name))
+                .unwrap_or_default();
+            self.canvas_presets.push(CanvasPreset {
+                name: name.clone(),
+                width: new.width,
+                height: new.height,
+                dpi: new.dpi,
+                paper: new.paper,
+            });
+            new.preset = Some(name.clone());
+            cx.notify(tr!("canvas-preset-registered", name = name));
+        } else if let Some(name) = new.preset.take() {
+            self.canvas_presets.retain(|preset| preset.name != name);
+        }
+        new.own.clone_from(&self.canvas_presets);
+        self.save_extras(cx);
     }
 }
 
@@ -1207,7 +1307,13 @@ impl SuePaint {
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
                     match &mut dialog {
-                        Dialog::New(new) => outcome = new_ui(ui, new, theme),
+                        Dialog::New(new) => {
+                            new.own.clone_from(&self.canvas_presets);
+                            outcome = new_ui(ui, new, theme);
+                            if let Some(register) = new.preset_action.take() {
+                                self.canvas_preset(cx, new, register);
+                            }
+                        }
                         Dialog::AdvancedFill => {
                             let (main, sub) = (self.main, self.sub);
                             outcome =
@@ -2935,7 +3041,10 @@ fn section(ui: &mut Ui, text: &str, theme: &Theme) {
 #[allow(clippy::too_many_lines, reason = "the whole New dialog")]
 fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
     let mut outcome = Outcome::Open;
-    let presets = new_presets();
+    let mut presets = new_presets();
+    for own in &new.own {
+        presets.add(own.preset());
+    }
     ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
     let column = 82.0;
     // Project, and OK and Cancel at the right.
@@ -3060,20 +3169,29 @@ fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
         if let Some(preset) = picked {
             new.apply_preset(&preset);
         }
-        for (icon, tip) in [
-            (Icon::Import, tr!("register-preset")),
-            (Icon::Delete, tr!("delete-preset")),
+        // Register keeps the size, resolution and paper as a preset;
+        // Delete takes away one registered here.
+        let own = new
+            .preset
+            .as_ref()
+            .is_some_and(|name| new.own.iter().any(|preset| preset.name == *name));
+        for (icon, tip, enabled, register) in [
+            (Icon::Import, tr!("register-preset"), true, true),
+            (
+                Icon::Delete,
+                if own {
+                    tr!("delete-preset")
+                } else {
+                    tr!("delete-preset-own-only")
+                },
+                own,
+                false,
+            ),
         ] {
             let (rect, _) = ui.allocate_exact_size(vec2(24.0, 22.0), Sense::hover());
-            crate::panels::icon_button(
-                ui,
-                rect,
-                icon,
-                false,
-                false,
-                &tr!("not-available-yet", tip = tip),
-                theme,
-            );
+            if crate::panels::icon_button(ui, rect, icon, enabled, false, &tip, theme) {
+                new.preset_action = Some(register);
+            }
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             egui::ComboBox::from_id_salt("sue-paint-unit")
@@ -3800,5 +3918,26 @@ mod tests {
         assert!((mm - 210.0).abs() < 0.5, "{mm}");
         dialog.name = "  ".to_owned();
         assert_eq!(dialog.spec().name, "Illustration");
+    }
+
+    #[test]
+    fn registered_canvas_presets_keep_as_lines() {
+        let preset = CanvasPreset {
+            name: "Poster	wide".to_owned(),
+            width: 3000,
+            height: 2000,
+            dpi: 300.0,
+            paper: false,
+        };
+        let back = CanvasPreset::from_line(preset.to_line().trim_end()).unwrap();
+        assert_eq!(back.name, "Poster wide");
+        assert_eq!(
+            (back.width, back.height, back.dpi, back.paper),
+            (3000, 2000, 300.0, false)
+        );
+        let mut new = NewDialog::new(&NewPicture::default());
+        new.apply_preset(&back.preset());
+        assert_eq!((new.width, new.height, new.paper), (3000, 2000, false));
+        assert_eq!(CanvasPreset::from_line("no tabs here"), None);
     }
 }

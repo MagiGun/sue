@@ -290,6 +290,13 @@ pub(crate) enum Gesture {
         sub: Box<crate::tools::SubTool>,
         points: Vec<[f32; 2]>,
     },
+    /// The Light table tool moving (or, with Shift, turning) the light
+    /// table's layers: each one's place as the drag began.
+    LightTable {
+        layers: Vec<(EntityId, [f32; 3])>,
+        start: Pos2,
+        turn: bool,
+    },
     /// Moving a layer.
     Move {
         layer: EntityId,
@@ -394,6 +401,8 @@ pub struct SuePaint {
     pub(crate) item_bank: Vec<crate::extras::Item>,
     /// The registered workspaces.
     pub(crate) workspaces: Vec<crate::extras::Workspace>,
+    /// Canvas presets registered in the New dialog.
+    pub(crate) canvas_presets: Vec<crate::dialogs::CanvasPreset>,
     /// Every open canvas shows at once, side by side (Window, Canvas,
     /// Tile).
     pub(crate) tiled: bool,
@@ -528,6 +537,8 @@ pub struct SuePaint {
     pub(crate) material_thumbs: HashMap<u64, Vec<u8>>,
     /// CLIP STUDIO ASSETS on the start page's Home, fetched and cached.
     pub(crate) assets: crate::assets::Assets,
+    /// Links being downloaded into Sue Paint.
+    pub(crate) downloads: crate::downloads::Downloads,
     /// The kinds of material, registered at start.
     pub(crate) material_kinds: crate::materials::MaterialKinds,
     /// The start page, shown while no canvas is open.
@@ -563,6 +574,17 @@ pub struct SuePaint {
     pub(crate) light_color: bool,
     /// The cel's own light table shows (Show cel-specific light table).
     pub(crate) light_cel: bool,
+    /// The general light table shows on every cel (Show general light
+    /// table).
+    pub(crate) light_general: bool,
+    /// How much the general light table's layers show, 0 to 1.
+    pub(crate) general_opacity: f32,
+    /// The opacity slider sets the general light table's (Switch opacity
+    /// target); else the cel's.
+    pub(crate) opacity_general: bool,
+    /// Dragging on the canvas moves the light table's layers (Light table
+    /// tool).
+    pub(crate) light_tool: bool,
     /// The cel kept as the one being drawn whatever the frame (Lock
     /// current animation cel as editing target).
     pub(crate) cel_lock: Option<sue_core::EntityId>,
@@ -632,6 +654,7 @@ impl Default for SuePaint {
             on_screen: ([0, 0, u32::MAX, u32::MAX], 1),
             recent_files: Vec::new(),
             recent_seen: None,
+            canvas_presets: Vec::new(),
             auto: crate::extras::AutoActions::default(),
             item_bank: Vec::new(),
             workspaces: Vec::new(),
@@ -698,6 +721,7 @@ impl Default for SuePaint {
             material_pick: None,
             material_thumbs: HashMap::new(),
             assets: crate::assets::Assets::default(),
+            downloads: crate::downloads::Downloads::default(),
             material_kinds: crate::materials::MaterialKinds::builtin(),
             start: crate::start::StartPage::default(),
             canvas_templates: crate::templates::CanvasTemplates::builtin(),
@@ -714,6 +738,10 @@ impl Default for SuePaint {
             light_opacity: 0.5,
             light_color: false,
             light_cel: true,
+            light_general: false,
+            general_opacity: 0.5,
+            opacity_general: false,
+            light_tool: false,
             cel_lock: None,
             looping: true,
             pressure: None,
@@ -1084,6 +1112,12 @@ fn implemented(command: &str) -> bool {
             | "anim.light_table.reverse"
             | "anim.light_table.color"
             | "anim.light_table.cel"
+            | "anim.light_table.general"
+            | "anim.light_table.opacity_target"
+            | "anim.light_table.tool"
+            | "anim.light_table.reset"
+            | "anim.light_table.file"
+            | "anim.light_table.register_general"
             | "anim.light_table.deregister"
             | "anim.cel.lock"
             | "anim.cel.prev"
@@ -4290,6 +4324,9 @@ impl SuePaint {
             "anim.light_table" => flag(self.light_table),
             "anim.light_table.color" => flag(self.light_color),
             "anim.light_table.cel" => flag(self.light_cel),
+            "anim.light_table.general" => flag(self.light_general),
+            "anim.light_table.opacity_target" => flag(self.opacity_general),
+            "anim.light_table.tool" => flag(self.light_tool),
             "anim.cel.lock" => flag(self.cel_lock.is_some()),
             "view.snap_special" => self
                 .doc()
@@ -6594,6 +6631,7 @@ impl SuePaint {
             self.shown = true;
         }
         self.sync_docs(&cx.world.arena);
+        self.poll_downloads(cx);
         self.animate(cx, &ui.ctx().clone());
         self.record_timelapse(cx, &ui.ctx().clone());
         if let Some(doc) = self.docs.get_mut(self.active) {
@@ -7336,6 +7374,7 @@ impl SueApplet for SuePaint {
             "vectors" => self.export_vectors(cx, path),
             "layer-comps" => self.export_comps(cx, path),
             "exposure-sheet-out" => self.export_exposure_sheet(cx, path),
+            "light-table-file" => self.light_table_file(cx, path),
             "exposure-sheet-in" => self.import_exposure_sheet(cx, path),
             "anim-cels" => self.export_cels(cx, path),
             "timelapse" => self.export_timelapse(cx, path),

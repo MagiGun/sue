@@ -1102,6 +1102,34 @@ impl SuePaint {
             }
             return;
         }
+        // The Light table tool: a drag moves the light table's layers
+        // (Shift turns them), the layers themselves as they are.
+        if self.light_tool && !space {
+            let arena = &cx.world.arena;
+            let mut layers = self
+                .editing_cel(arena)
+                .map(|cel| crate::anim::light_table(arena, cel))
+                .unwrap_or_default();
+            if self.light_general
+                && let Some(picture) = self.picture()
+            {
+                layers.extend(crate::anim::general_light_table(arena, picture));
+            }
+            let placed: Vec<(sue_core::EntityId, [f32; 3])> = layers
+                .into_iter()
+                .filter_map(|layer| {
+                    Some((layer, crate::anim::place_of(arena.get_by_id(layer).ok()?)))
+                })
+                .collect();
+            if !placed.is_empty() {
+                self.gesture = Some(Gesture::LightTable {
+                    layers: placed,
+                    start: p,
+                    turn: modifiers.shift,
+                });
+                return;
+            }
+        }
         let rice = |key: &str, default: &str| cx.rice().get_str(key).unwrap_or(default).to_owned();
         let (alt_does, space_does, ctrl_shift) = (
             rice("sue_paint.alt_tool", "eyedropper"),
@@ -2695,6 +2723,30 @@ impl SuePaint {
                 }
             }
             Gesture::Comic(edit) => edit.to(p),
+            Gesture::LightTable {
+                layers,
+                start,
+                turn,
+            } => {
+                // Shown as it moves; one undo step when let go.
+                let size = doc.compositor.display().1;
+                let middle = pos2(size[0] as f32 / 2.0, size[1] as f32 / 2.0);
+                let degrees = (angle(p - middle) - angle(*start - middle)).to_degrees();
+                for (layer, [dx, dy, was]) in layers.iter() {
+                    let place = if *turn {
+                        [*dx, *dy, was + degrees]
+                    } else {
+                        [dx + p.x - start.x, dy + p.y - start.y, *was]
+                    };
+                    if let Ok(entity) = cx.world.arena.get_by_id_mut(*layer) {
+                        entity
+                            .properties_mut()
+                            .set(crate::anim::PLACE, crate::anim::place_text(place));
+                    }
+                }
+                doc.compositor
+                    .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+            }
             Gesture::Lasso { points, .. } | Gesture::Outline { points, .. } => {
                 if points.last().is_none_or(|last| {
                     (last[0] - p.x).hypot(last[1] - p.y) > 1.5 / doc.view.zoom.max(0.01)
@@ -3147,6 +3199,29 @@ impl SuePaint {
             }
             Gesture::Outline { sub, points } => self.balloon_drawn(points, &sub, cx),
             Gesture::Comic(edit) => self.finish_comic_edit(*edit, cx),
+            Gesture::LightTable { layers, .. } => {
+                // Back to where they began, then the move as one step.
+                let mut edit = crate::doc::Edit::new(tr!("light-table-tool"));
+                for (layer, was) in &layers {
+                    let Ok(entity) = cx.world.arena.get_by_id_mut(*layer) else {
+                        continue;
+                    };
+                    let now = crate::anim::place_of(entity);
+                    entity
+                        .properties_mut()
+                        .set(crate::anim::PLACE, crate::anim::place_text(*was));
+                    if now != *was {
+                        edit = edit.then(sue_core::txn::SetProperty::new(
+                            *layer,
+                            crate::anim::PLACE,
+                            crate::anim::place_text(now),
+                        ));
+                    }
+                }
+                if !edit.is_empty() {
+                    Self::apply(cx, edit);
+                }
+            }
             Gesture::Lasso { op, points } => {
                 if let Some(doc) = self.docs.get_mut(self.active) {
                     let mut selection = doc

@@ -381,14 +381,19 @@ the left side:
   their picture, kind, author, downloads and price. **See more** shows a
   whole ranking, a card opens the material's page (its pictures,
   description and what the set holds), and back, forward and reload sit
-  above. **Download on CLIP STUDIO ASSETS** opens the material on the
-  site, where it downloads with a CLIP STUDIO account. Sue keeps the
+  above. On a material's page, paste the link of a file (a brush, a PNG
+  or a zip of them, from the author or any site) and **Download into
+  Sue**: it downloads as a transfer and its brushes and pictures come in
+  by themselves. **Open on CLIP STUDIO ASSETS** opens the material on
+  the site instead, where it downloads with a CLIP STUDIO account. Sue
+  keeps the
   pages and pictures it read, so without a connection it shows them from
   last time. On phones and tablets it comes later.
 
 At the top right: **Data Transfers** (two arrows) lists the files Sue
-opened, saved, exported and copied in this run, with **Clear Completed
-Transfers**; **Help** links to tips, this guide, questions, contact and
+opened, saved, exported, copied and downloaded in this run, with **Clear
+Completed Transfers** and a field to download from a link (brushes,
+PNG pictures and zips of them arrive in Sue Paint by themselves); **Help** links to tips, this guide, questions, contact and
 feedback on the Sue site and GitHub; **Settings** turns dark mode on or off,
 shows or changes where your materials are kept, has a Maintenance Menu
 (draw thumbnails again, look for materials again, forget projects that are

@@ -818,6 +818,7 @@ impl SuePaint {
         match go {
             Some(Go::Place(place)) => start.browser.go(Some(place)),
             Some(Go::Site(link)) => assets::open_site(&link, cx),
+            Some(Go::Download(link)) => self.start_download(cx, &link),
             None => {}
         }
         if self.assets.poll() {
@@ -1776,8 +1777,16 @@ impl SuePaint {
             return;
         };
         let full = start.full;
+        let mut download = None;
         let outcome = match &popup {
-            Popup::Transfers => transfers_popup(full, ctx, cx, theme),
+            Popup::Transfers => transfers_popup(
+                full,
+                ctx,
+                cx,
+                &mut self.downloads.link,
+                &mut download,
+                theme,
+            ),
             Popup::Help => show(
                 full,
                 ctx,
@@ -2044,6 +2053,9 @@ impl SuePaint {
             }
             Popup::Material(id) => self.material_popup(ctx, start, acts, *id, cx, theme),
         };
+        if let Some(link) = download {
+            self.start_download(cx, &link);
+        }
         if outcome == PopupOutcome::Closed && start.popup.as_ref() == Some(&popup) {
             start.popup = None;
             start.armed = false;
@@ -2514,6 +2526,8 @@ fn transfers_popup(
     full: bool,
     ctx: &egui::Context,
     cx: &mut AppletContext<'_>,
+    link: &mut String,
+    download: &mut Option<String>,
     theme: &Theme,
 ) -> PopupOutcome {
     let now = unix_now();
@@ -2545,6 +2559,33 @@ fn transfers_popup(
                     cx.transfers.clear_completed();
                 }
             });
+            ui.add_space(8.0);
+            // Download from a link: brushes, pictures and zips of them
+            // arrive in Sue Paint by themselves.
+            ui.horizontal(|ui| {
+                let field = ui.add(
+                    egui::TextEdit::singleline(link)
+                        .hint_text(tr!("download-link-hint"))
+                        .desired_width(ui.available_width() - 130.0),
+                );
+                let ready = link.trim().starts_with("http");
+                let enter =
+                    field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                if (page::action(
+                    ui,
+                    Glyph::Transfers,
+                    &tr!("download-link"),
+                    ready,
+                    true,
+                    theme,
+                )
+                .clicked()
+                    || enter)
+                    && ready
+                {
+                    *download = Some(std::mem::take(link));
+                }
+            });
             ui.add_space(12.0);
             if cx.transfers.list().is_empty() {
                 ui.add_space(30.0);
@@ -2573,6 +2614,7 @@ fn transfers_popup(
                     TransferKind::Import => Glyph::Folder,
                     TransferKind::Export => Glyph::External,
                     TransferKind::Copy => Glyph::Transfers,
+                    TransferKind::Download => Glyph::Transfers,
                 };
                 page::glyph(
                     painter,

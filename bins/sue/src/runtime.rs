@@ -3585,6 +3585,134 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_light_table_moves_registers_files_and_shows_on_every_cel() {
+        let (mut runtime, root) = runtime("paint-light-table");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let command = |runtime: &mut Runtime, name: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: name.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.focus())
+            .unwrap();
+        // A reference layer, then a timeline with a cel to draw.
+        command(&mut runtime, "layer.new");
+        let reference = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+            .last()
+            .unwrap()
+            .id;
+        command(&mut runtime, "anim.timeline.new");
+        command(&mut runtime, "anim.cel.new");
+        step(&mut runtime, Vec::new());
+        // The reference layer on the general light table.
+        let cel = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+            .last()
+            .unwrap()
+            .id;
+        assert_ne!(cel, reference);
+        command(&mut runtime, "layer.select_below");
+        command(&mut runtime, "anim.light_table.register_general");
+        step(&mut runtime, Vec::new());
+        assert_eq!(
+            sue_paint::anim::general_light_table(&runtime.engine.world.arena, picture),
+            vec![reference]
+        );
+        // The Light table tool moves it, as one step; Reset puts it back.
+        command(&mut runtime, "anim.light_table.tool");
+        let middle = paint_middle(&runtime);
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: plain,
+        };
+        let depth = runtime.engine.history.depth();
+        step(
+            &mut runtime,
+            vec![egui::Event::PointerMoved(middle), press(middle, true)],
+        );
+        for part in 1..=5 {
+            step(
+                &mut runtime,
+                vec![egui::Event::PointerMoved(
+                    middle + vec2(part as f32 * 10.0, 0.0),
+                )],
+            );
+        }
+        step(&mut runtime, vec![press(middle + vec2(50.0, 0.0), false)]);
+        let place = |runtime: &Runtime| {
+            sue_paint::anim::place_of(runtime.engine.world.arena.get_by_id(reference).unwrap())
+        };
+        assert!(place(&runtime)[0] > 5.0, "moved: {:?}", place(&runtime));
+        assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
+        command(&mut runtime, "anim.light_table.reset");
+        assert_eq!(place(&runtime), [0.0; 3], "back where it was");
+        command(&mut runtime, "anim.light_table.tool");
+        // Select and register file: a picture on the cel's light table
+        // only, hidden in the picture itself.
+        let file = root.join("trace.png");
+        std::fs::create_dir_all(&root).unwrap();
+        let tile = sue_core::RasterTile2D::from_bytes(
+            8,
+            8,
+            sue_core::PixelFormat::Rgba8,
+            [10, 20, 30, 255].repeat(64),
+        )
+        .unwrap();
+        std::fs::write(&file, sue_io::encode_png(&tile).unwrap()).unwrap();
+        command(&mut runtime, "layer.select_above");
+        command(&mut runtime, "anim.light_table.file");
+        let _ = runtime.answer_pick(&file, &mut NoTextures, start);
+        step(&mut runtime, Vec::new());
+        let arena = &runtime.engine.world.arena;
+        let on_cel = sue_paint::anim::light_table(arena, cel);
+        assert_eq!(on_cel.len(), 1, "the file is on the cel's light table");
+        let entity = arena.get_by_id(on_cel[0]).unwrap();
+        assert_eq!(
+            entity
+                .property(sue_paint::anim::ONLY)
+                .and_then(sue_core::Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            entity
+                .property(sue_model::picture::VISIBLE)
+                .and_then(sue_core::Value::as_bool),
+            Some(false),
+            "never shown in the picture itself"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn sue_paint_exposure_sheet_goes_out_and_back_as_csv() {
         let (mut runtime, root) = runtime("paint-xsheet");
         let ctx = egui::Context::default();

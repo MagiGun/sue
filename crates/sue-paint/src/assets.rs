@@ -357,6 +357,8 @@ pub(crate) struct Assets {
     pictures: HashMap<String, Option<Picture>>,
     /// Pages the site did not give this time (shown from the cache).
     stale: std::collections::HashSet<String>,
+    /// The download link typed on a material's page.
+    pub(crate) link: String,
 }
 
 impl std::fmt::Debug for Assets {
@@ -618,6 +620,8 @@ pub(crate) enum Go {
     Place(Place),
     /// The page on the site itself, in the system's browser.
     Site(String),
+    /// A file downloaded into Sue Paint as a transfer.
+    Download(String),
 }
 
 /// A card as Clip Studio's start page draws it: the picture at the left,
@@ -945,12 +949,29 @@ pub(crate) fn material_page(
                         .size(theme.ui_size + 1.0)
                         .color(theme.text),
                 );
+                // Download into Sue: a link to the file (from the
+                // material's author, or any site) comes in as a transfer.
+                ui.add(
+                    egui::TextEdit::singleline(&mut assets.link)
+                        .hint_text(tr!("download-link-hint"))
+                        .desired_width(220.0),
+                );
+                let ready = assets.link.trim().starts_with("http");
                 let button =
-                    egui::Button::new(RichText::new(tr!("assets-get-it")).color(Color32::WHITE))
+                    egui::Button::new(RichText::new(tr!("assets-download")).color(Color32::WHITE))
                         .fill(Color32::from_rgb(208, 72, 72))
                         .min_size(vec2(220.0, 32.0));
                 if ui
-                    .add(button)
+                    .add_enabled(ready, button)
+                    .on_hover_text(tr!("assets-download-hint"))
+                    .on_disabled_hover_text(tr!("assets-download-needs-link"))
+                    .clicked()
+                {
+                    go = Some(Go::Download(std::mem::take(&mut assets.link)));
+                }
+                // The other site, only when asked for.
+                if ui
+                    .add(egui::Button::new(tr!("assets-get-it")).min_size(vec2(220.0, 26.0)))
                     .on_hover_text(tr!("assets-get-it-hint"))
                     .clicked()
                 {

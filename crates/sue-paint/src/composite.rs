@@ -55,6 +55,12 @@ pub struct Skin {
     pub tint: f32,
     /// How much shows, 0 to 1.
     pub opacity: f32,
+    /// What each canvas point sees on the layer, when a light table moved
+    /// it.
+    pub place: Option<[f32; 6]>,
+    /// Shown even while the layer itself is hidden (a file only on the
+    /// light table).
+    pub force: bool,
 }
 
 /// A correction layer's change, ready for every pixel: a table a channel
@@ -120,6 +126,10 @@ struct Layer<'a> {
     effects: crate::effects::Effects,
     /// Its border's cover over the rectangle being drawn.
     edge: Option<crate::effects::Edge>,
+    /// Its watercolor edge over the rectangle: how near the paint's edge.
+    rim: Option<crate::effects::Edge>,
+    /// Its extracted lines over the rectangle.
+    lines: Option<crate::effects::Lines>,
     /// Which tiles of the picture it has pixels in, when known for its
     /// current pixels.
     occupancy: Option<std::sync::Arc<Occupancy>>,
@@ -187,13 +197,45 @@ impl Occupancy {
     }
 }
 
-/// Works out the borders of `layers` with a border effect over `rect`.
+/// Works out the effects of `layers` that look at neighbors (border,
+/// watercolor edge, extracted lines) over `rect`.
 fn prepare(layers: &mut [Layer<'_>], rect: [u32; 4]) {
     for layer in layers.iter_mut() {
+        if !layer.style.visible {
+            continue;
+        }
+        let alpha = |layer: &Layer<'_>, x: i64, y: i64| {
+            if x < 0 || y < 0 {
+                0.0
+            } else {
+                layer.sample(x as u32, y as u32)[3]
+            }
+        };
+        if let Some((width, _)) = layer.effects.watercolor {
+            // The watercolor edge: how near each pixel is to where the
+            // paint stops, from inside.
+            let rim = crate::effects::Edge::fading(|x, y| 1.0 - alpha(layer, x, y), rect, width);
+            layer.rim = Some(rim);
+        }
+        if let Some((threshold, width)) = layer.effects.extract {
+            let lines = crate::effects::Lines::build(
+                |x, y| {
+                    if x < 0 || y < 0 {
+                        [0.0; 4]
+                    } else {
+                        layer.sample(x as u32, y as u32)
+                    }
+                },
+                rect,
+                threshold,
+                width,
+            );
+            layer.lines = Some(lines);
+        }
         let Some((width, _)) = layer.effects.border else {
             continue;
         };
-        if width <= 0.0 || !layer.style.visible {
+        if width <= 0.0 {
             continue;
         }
         let edge = crate::effects::Edge::build(
@@ -349,6 +391,7 @@ fn gather_view<'a>(
                 }
             }
             let mut tint = None;
+            let mut placed = None;
             if let Some(view) = view
                 && view.hidden.contains(&entity.id())
             {
@@ -356,6 +399,10 @@ fn gather_view<'a>(
                     Some(skin) => {
                         style.opacity *= skin.opacity;
                         tint = Some((skin.color, skin.tint));
+                        placed = skin.place;
+                        if skin.force {
+                            style.visible = true;
+                        }
                     }
                     None => style.visible = false,
                 }
@@ -389,7 +436,8 @@ fn gather_view<'a>(
                 .and_then(|mask| arena.get_by_id(mask).ok())
                 .and_then(|mask| mask.component(ComponentKind::RasterTile2D)?.as_raster());
             // Seen through the innermost camera folder around it.
-            let warp = view.and_then(|view| {
+            let warp = placed.or_else(|| {
+                let view = view?;
                 crate::doc::folders_around(arena, entity.id())
                     .into_iter()
                     .find_map(|folder| {
@@ -413,6 +461,8 @@ fn gather_view<'a>(
                 warp,
                 effects,
                 edge: None,
+                rim: None,
+                lines: None,
                 occupancy: None,
             })
         })
@@ -503,6 +553,19 @@ fn fold(layers: &[Layer<'_>], x: u32, y: u32, state: &mut Stack) {
                 source[channel] += (color[channel] - source[channel]) * amount;
             }
         }
+        if let Some(lines) = &layer.lines {
+            // Extract line: the layer as its lines, in black.
+            source = [0.0, 0.0, 0.0, lines.at(x, y)];
+        }
+        if let (Some(rim), Some((_, darkness))) = (&layer.rim, layer.effects.watercolor)
+            && source[3] > 0.0
+        {
+            // Watercolor edge: the paint darker where it stops.
+            let near = rim.at(x, y);
+            for channel in &mut source[..3] {
+                *channel *= 1.0 - darkness * near * 0.85;
+            }
+        }
         if !layer.effects.is_plain() {
             source = layer.effects.apply(source, x, y);
         }
@@ -569,6 +632,8 @@ impl Layer<'_> {
             && self.tint.is_none()
             && self.effects.is_plain()
             && self.edge.is_none()
+            && self.rim.is_none()
+            && self.lines.is_none()
             && self
                 .mask
                 .is_none_or(|mask| mask.format() == PixelFormat::Rgba8 && mask.bytes().is_some())
@@ -1092,7 +1157,7 @@ fn plain_above(layers: &[Layer<'_>]) -> bool {
         && layers.iter().all(|layer| {
             !matches!(layer.source, Source::Correction(_))
                 && layer.style.blend == sue_model::BlendMode::Normal
-                && layer.effects.border.is_none()
+                && !layer.effects.needs_area()
         })
 }
 
@@ -1228,7 +1293,7 @@ impl Compositor {
         let painted = painted?;
         let index = layers.iter().position(|layer| layer.id == Some(painted))?;
         // A border is drawn for a rectangle at a time: no cache.
-        if layers.iter().any(|layer| layer.effects.border.is_some()) {
+        if layers.iter().any(|layer| layer.effects.needs_area()) {
             return None;
         }
         let mask = crate::doc::mask_of(arena, painted);
@@ -1772,6 +1837,8 @@ pub fn thumbnail(arena: &Arena, layer: EntityId, max: [u32; 2]) -> Option<(Vec<u
         warp: None,
         effects: crate::effects::Effects::default(),
         edge: None,
+        rim: None,
+        lines: None,
         occupancy: None,
     };
     let scale = (max[0] as f32 / size[0].max(1) as f32).min(max[1] as f32 / size[1].max(1) as f32);

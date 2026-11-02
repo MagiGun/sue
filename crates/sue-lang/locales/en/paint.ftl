@@ -1976,7 +1976,7 @@ assets-offline = CLIP STUDIO ASSETS could not be reached, so this is the copy fr
 assets-try-again = Try again
 assets-credit = From CLIP STUDIO ASSETS (assets.clip-studio.com). Materials download there, with a CLIP STUDIO account.
 assets-content-id = Content ID: { $id }
-assets-get-it = Download on CLIP STUDIO ASSETS
+assets-get-it = Open on CLIP STUDIO ASSETS
 assets-get-it-hint = Opens this material on CLIP STUDIO ASSETS, where it downloads with a CLIP STUDIO account
 assets-by = by { $author }
 assets-in-this-set = In this set
@@ -2304,3 +2304,28 @@ pose-material-name = { $kind } pose { $number }
 figure-kind-body = Figure
 figure-kind-hand = Hand
 figure-kind-head = Head
+watercolor-edge-width = Edge width
+watercolor-edge-darkness = Darkness
+extract-line-threshold = Edge threshold
+extract-line-width = Line width
+general-light-table = General light table (every cel)
+register-layer-general-light-table = Register the current layer here
+light-table-tool-on = Light table tool: drag on the canvas to move the light table's layers, Shift and drag to turn them
+not-available-now = { $tip } (not for what is picked now)
+needs-a-layer-mask = { $tip }: make a layer mask first, with Create layer mask beside it
+needs-a-raster-layer-below = { $tip }: needs a raster layer right below this one (not the paper, a folder or a vector layer)
+delete-preset-own-only = Delete preset (only presets you registered)
+canvas-preset-name = { $width } x { $height } ({ $number })
+canvas-preset-registered = { $name } is kept as a preset
+download-link = Download
+download-link-hint = Paste a link to a brush, picture or zip
+download-needs-a-link = A download needs a link that starts with https://
+download-needs-a-folder = Choose a location of materials first, to keep downloads in
+download-kept = Downloaded to { $path }
+download-pictures-added = { $count ->
+    [one] 1 picture was added to the materials
+   *[other] { $count } pictures were added to the materials
+}
+assets-download = Download into Sue
+assets-download-hint = Downloads the file as a transfer (Data Transfers shows it) and brings its brushes and pictures in
+assets-download-needs-link = Paste the link of the file to download first

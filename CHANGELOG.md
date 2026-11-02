@@ -11,6 +11,36 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Sue Paint downloads by itself: paste a link to a brush file, a PNG or a
+  zip of them in Data Transfers (or on a material's page in Browse
+  Assets) and it downloads as a transfer you can watch and cancel. Its
+  brushes join the current tool and its pictures the materials, without
+  a browser or Clip Studio. **Open on CLIP STUDIO ASSETS** still opens
+  the site, only when you press it.
+- Layer Property has the Watercolor edge (edge width and darkness) and
+  Extract line (edge threshold and line width) effects, as Clip Studio
+  Paint's. Like the other effects they never change the drawing.
+- Everything in the Animation Cels palette works: a general light table
+  shown on every cel, Select and register file, the Light table tool
+  (drag to move a traced layer, Shift to turn it), Reset position of
+  layers on light table and the opacity of either light table.
+- Register preset and Delete preset in File > New keep your own canvas
+  sizes for next time.
+
+### Changed
+
+- A layer button that cannot be used right now says why when you hover
+  it: Enable Mask and Apply Mask to Layer need a layer mask, Merge with
+  Layer Below needs a raster layer below.
+
+### Fixed
+
+- Lifting the pen after a long stroke no longer stalls: only the
+  tapered ends are drawn again, so the finish takes a few milliseconds
+  however long the stroke is (74 ms before on a long stroke).
+
 ## [0.0.71] - 2026-11-01
 
 ### Fixed
