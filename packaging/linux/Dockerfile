@@ -8,7 +8,7 @@
 # older distributions too.
 FROM debian:bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential pkg-config curl ca-certificates file rpm desktop-file-utils \
+      build-essential pkg-config curl ca-certificates file rpm desktop-file-utils appstream \
       libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev \
       libxcursor-dev libxi-dev libxrandr-dev libgl1-mesa-dev libgtk-3-dev \
     && rm -rf /var/lib/apt/lists/*

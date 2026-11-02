@@ -43,6 +43,13 @@ stage() {
   install -Dm644 packaging/linux/io.github.MagiGun.Sue.desktop "$prefix/usr/share/applications/io.github.MagiGun.Sue.desktop"
   install -Dm644 assets/icons/sue_icon_512.png "$prefix/usr/share/icons/hicolor/512x512/apps/io.github.MagiGun.Sue.png"
   install -Dm644 assets/icons/sue_icon.svg "$prefix/usr/share/icons/hicolor/scalable/apps/io.github.MagiGun.Sue.svg"
+  # The AppStream metadata software centers and AppImage tools read: the
+  # same file the Flatpak ships, with this version and today's date.
+  mkdir -p "$prefix/usr/share/metainfo"
+  sed -e "s/@VERSION@/$version/" -e "s/@DATE@/$(date -u +%Y-%m-%d)/" \
+    packaging/flatpak/io.github.MagiGun.Sue.metainfo.xml \
+    > "$prefix/usr/share/metainfo/io.github.MagiGun.Sue.metainfo.xml"
+  chmod 644 "$prefix/usr/share/metainfo/io.github.MagiGun.Sue.metainfo.xml"
   install -Dm644 README.md "$prefix/usr/share/doc/sue/README.md"
   install -Dm644 LICENSE "$prefix/usr/share/doc/sue/LICENSE"
   install -Dm644 LICENSE "$prefix/usr/share/doc/sue/copyright"
@@ -100,6 +107,7 @@ cp -a $rpm/root/. %{buildroot}/
 /usr/share/applications/io.github.MagiGun.Sue.desktop
 /usr/share/icons/hicolor/512x512/apps/io.github.MagiGun.Sue.png
 /usr/share/icons/hicolor/scalable/apps/io.github.MagiGun.Sue.svg
+/usr/share/metainfo/io.github.MagiGun.Sue.metainfo.xml
 /usr/share/doc/sue/README.md
 %license /usr/share/doc/sue/LICENSE
 /usr/share/doc/sue/copyright
@@ -121,6 +129,9 @@ stage "$appdir"
 ln -sf usr/bin/sue "$appdir/AppRun"
 cp packaging/linux/io.github.MagiGun.Sue.desktop "$appdir/io.github.MagiGun.Sue.desktop"
 cp assets/icons/sue_icon_512.png "$appdir/io.github.MagiGun.Sue.png"
+# appimagetool looks for the metadata under its older name.
+mv "$appdir/usr/share/metainfo/io.github.MagiGun.Sue.metainfo.xml" \
+  "$appdir/usr/share/metainfo/io.github.MagiGun.Sue.appdata.xml"
 tools="$root/target/tools"
 mkdir -p "$tools"
 appimagetool="$tools/appimagetool-$arch.AppImage"

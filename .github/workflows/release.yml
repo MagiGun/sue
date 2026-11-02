@@ -130,7 +130,7 @@ jobs:
       - name: Libraries and packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libgl1-mesa-dev libgtk-3-dev rpm file desktop-file-utils
+          sudo apt-get install -y build-essential pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libgl1-mesa-dev libgtk-3-dev rpm file desktop-file-utils appstream
       - uses: Swatinem/rust-cache@v2
       - run: packaging/linux/build.sh
       - uses: actions/upload-artifact@v7
