@@ -42,7 +42,12 @@ pub fn source() -> Option<PenSource> {
 }
 
 /// Records what the pen does now: its pressure while it touches, else
-/// `None`.
+/// `None`. Only Windows' tablet driver and the browser report pressure
+/// this way.
+#[cfg_attr(
+    not(any(target_os = "windows", target_arch = "wasm32")),
+    allow(dead_code)
+)]
 pub(crate) fn set(from: PenSource, pressure: Option<f32>) {
     SOURCE.store(
         match from {
