@@ -1010,6 +1010,7 @@ tool-arrives-later-sue-paint = This tool arrives in a later Sue Paint
 tones = Tones
 patterns = Patterns
 images = Images
+poses = Poses
 paste-to-canvas = Paste to Canvas
 delete-material = Delete Material
 double-click-paste-edit-register-material = Double-click to paste. Edit, Register Material, Image adds the current layer

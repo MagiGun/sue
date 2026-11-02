@@ -892,7 +892,8 @@ mod tests {
                 scan: |_| Vec::new(),
             })
             .unwrap();
-        assert_eq!(kinds.iter().count(), 5);
+        // Tones, patterns, images, brush tips, poses, and the new one.
+        assert_eq!(kinds.iter().count(), 6);
 
         let folder = std::env::temp_dir().join(format!("sue-library-{}", std::process::id()));
         let _ = sue_platform::fs::remove_dir_all(&folder);
