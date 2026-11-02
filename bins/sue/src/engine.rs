@@ -671,6 +671,7 @@ impl Engine {
             ("rice", self.paths.rice_dir()),
             ("paint", self.paths.data_dir.join("paint")),
             ("cache", self.paths.cache_dir.clone()),
+            ("models", self.paths.models_dir()),
         ] {
             catalog.folders.insert(name.to_owned(), folder);
         }

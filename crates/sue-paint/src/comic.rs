@@ -39,6 +39,7 @@ pub(crate) fn clicks_corners(tool: crate::tools::Tool, mode: u8) -> bool {
         Tool::Balloon => matches!(mode, CURVE_BALLOON | POLYLINE_BALLOON),
         Tool::Frame => mode == POLYLINE_FRAME,
         Tool::Select => mode == 3,
+        Tool::Figure => matches!(mode, crate::tools::POLYLINE | crate::tools::CURVE),
         _ => false,
     }
 }
@@ -554,10 +555,22 @@ impl SuePaint {
     pub(crate) fn finish_corners(&mut self, op: crate::select::Op, cx: &mut AppletContext<'_>) {
         let points = std::mem::take(&mut self.polyline);
         let owner = self.polyline_for.take();
+        let sub = self.toolbox.current().clone();
+        // The Figure tool's Polyline and Curve: lines, open or closed.
+        if let Some((crate::tools::Tool::Figure, mode)) = owner {
+            if points.len() >= 2 {
+                let line = if mode == crate::tools::CURVE {
+                    manga::smooth_open(&points, 12)
+                } else {
+                    points
+                };
+                self.stroke_line(line, &sub, cx);
+            }
+            return;
+        }
         if points.len() < 3 {
             return;
         }
-        let sub = self.toolbox.current().clone();
         match owner {
             Some((crate::tools::Tool::Balloon, mode)) => {
                 let outline = if mode == CURVE_BALLOON {

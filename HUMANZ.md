@@ -2670,6 +2670,20 @@ the model supports, then the largest model (as a proxy for quality) that fits
 the memory budget. Nothing in `sue-ai` opens a network connection. Models arrive
 as `AiModel` packages through `sue-pkg`.
 
+`OnnxModel` runs an ONNX model on the processor through `tract` (pure Rust,
+so it builds for every target, the web included): `load(bytes)` plans it once,
+`run(inputs)` takes `OnnxInput::{F32, I32}(shape, values)` and gives each
+output as floats. Sue Paint's Pose Scanner and Hand Scanner use it with
+MoveNet SinglePose Lightning and MediaPipe's hand landmark model (both
+Apache 2.0). Those two files are fetched the first time they are needed
+(`sue_platform::update::download_link` into `Paths::models_dir()`, the
+applet's `models` folder) and kept only when their SHA-256 matches the one
+Sue Paint carries; after that the scanners work offline.
+`figure::aimed(joints, base, root, targets)` turns a figure's joints so
+each bone lies along a target direction (the least turn from its rest
+direction in its parent's frame), which is how found points become a
+pose.
+
 ### 6.4 `ZeroCopyTensorTask`
 
 ```rust

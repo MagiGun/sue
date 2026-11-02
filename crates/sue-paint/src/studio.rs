@@ -546,6 +546,8 @@ pub struct SuePaint {
     pub(crate) assets: crate::assets::Assets,
     /// Links being downloaded into Sue Paint.
     pub(crate) downloads: crate::downloads::Downloads,
+    /// Photos being read by the Pose and Hand Scanners.
+    pub(crate) scans: crate::scan::Scans,
     /// The kinds of material, registered at start.
     pub(crate) material_kinds: crate::materials::MaterialKinds,
     /// The start page, shown while no canvas is open.
@@ -732,6 +734,7 @@ impl Default for SuePaint {
             material_thumbs: HashMap::new(),
             assets: crate::assets::Assets::default(),
             downloads: crate::downloads::Downloads::default(),
+            scans: crate::scan::Scans::default(),
             material_kinds: crate::materials::MaterialKinds::builtin(),
             start: crate::start::StartPage::default(),
             canvas_templates: crate::templates::CanvasTemplates::builtin(),
@@ -885,6 +888,8 @@ fn implemented(command: &str) -> bool {
             | "layer.new.figure"
             | "layer.new.hand"
             | "figure.register_pose"
+            | "figure.pose_scanner"
+            | "figure.hand_scanner"
             | "layer.new.head"
             | "layer.lines_tones_vector"
             | "figure.flip"
@@ -5479,6 +5484,8 @@ impl SuePaint {
                 }
             }
             "figure.register_pose" => self.register_pose(cx),
+            "figure.pose_scanner" => self.pick_scan(cx, false),
+            "figure.hand_scanner" => self.pick_scan(cx, true),
             // A drawing figure's pose by name: a preset, flipped or reset.
             figure if figure.starts_with("figure.") => {
                 let Some(layer) = self.layer() else {
@@ -6643,6 +6650,7 @@ impl SuePaint {
         }
         self.sync_docs(&cx.world.arena);
         self.poll_downloads(cx);
+        self.poll_scans(cx);
         self.animate(cx, &ui.ctx().clone());
         self.record_timelapse(cx, &ui.ctx().clone());
         if let Some(doc) = self.docs.get_mut(self.active) {
@@ -7386,6 +7394,8 @@ impl SueApplet for SuePaint {
             "layer-comps" => self.export_comps(cx, path),
             "exposure-sheet-out" => self.export_exposure_sheet(cx, path),
             "light-table-file" => self.light_table_file(cx, path),
+            "pose-scanner" => self.scan(cx, path, false),
+            "hand-scanner" => self.scan(cx, path, true),
             "exposure-sheet-in" => self.import_exposure_sheet(cx, path),
             "anim-cels" => self.export_cels(cx, path),
             "timelapse" => self.export_timelapse(cx, path),

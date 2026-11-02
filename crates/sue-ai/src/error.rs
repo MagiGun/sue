@@ -23,6 +23,8 @@ pub enum AiError {
     },
     /// Input or output tensors have the wrong shape.
     ShapeMismatch(&'static str),
+    /// A model could not be planned or run.
+    Run(String),
 }
 
 impl fmt::Display for AiError {
@@ -37,6 +39,7 @@ impl fmt::Display for AiError {
             }
             Self::NoBackend { task } => write!(f, "no available compute backend can run {task}"),
             Self::ShapeMismatch(reason) => write!(f, "tensor shape mismatch: {reason}"),
+            Self::Run(reason) => write!(f, "the model could not run: {reason}"),
         }
     }
 }

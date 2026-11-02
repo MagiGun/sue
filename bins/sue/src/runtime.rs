@@ -3729,6 +3729,123 @@ pub(crate) mod tests {
             "copy stamp painted {}",
             painted(&runtime) - filled
         );
+        // Polyline and Curve: a click at each corner, a double-click on the
+        // last ends the line.
+        // (The Figure tool still has Lasso fill, so each is one on.)
+        for index in [8, 9] {
+            let before = painted(&runtime);
+            sub(&mut runtime, "tool.figure", 1);
+            let base = middle + vec2(-150.0, -150.0 + index as f32 * 20.0);
+            for corner in [base, base + vec2(60.0, 30.0), base + vec2(120.0, 0.0)] {
+                drag(&mut runtime, &mut step, &[corner], plain);
+            }
+            drag(&mut runtime, &mut step, &[base + vec2(120.0, 0.0)], plain);
+            assert!(
+                painted(&runtime) > before + 100,
+                "figure sub tool {index} drew {}",
+                painted(&runtime) - before
+            );
+        }
+        // Paint unpainted area: a ring of paint on a new layer, then the
+        // gap inside fills, and only that.
+        command(&mut runtime, "layer.new");
+        command(&mut runtime, "tool.pen");
+        let gap = middle + vec2(-80.0, 160.0);
+        drag(&mut runtime, &mut step, &ring(gap, 20.0), plain);
+        let before = painted(&runtime);
+        // (The Fill tool still has Close and fill, two before.)
+        sub(&mut runtime, "tool.fill", 2);
+        drag(&mut runtime, &mut step, &ring(gap, 30.0), plain);
+        assert!(
+            painted(&runtime) > before + 300,
+            "paint unpainted area filled {}",
+            painted(&runtime) - before
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// The Pose and Hand Scanners in the running app, on real photos with
+    /// the real models (downloaded once): `SUE_SCAN_PHOTOS` names a folder
+    /// with `body.jpg` and `hand.jpg`.
+    /// `cargo test -p sue -- --ignored sue_paint_scanners`
+    #[test]
+    #[ignore = "needs the network and photos"]
+    fn sue_paint_scanners_pose_a_figure_and_a_hand_from_photos() {
+        let photos = PathBuf::from(std::env::var("SUE_SCAN_PHOTOS").unwrap());
+        let (mut runtime, root) = runtime("paint-scanners");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let command = |runtime: &mut Runtime, name: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: name.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.focus())
+            .unwrap();
+        let pose_of = |runtime: &Runtime| {
+            let arena = &runtime.engine.world.arena;
+            let layer = sue_paint::doc::layers(arena, picture).last().unwrap().id;
+            let model = sue_paint::figure::of_layer(arena, layer).unwrap();
+            sue_paint::figure::Pose::of(arena.get_by_id(model).unwrap())
+        };
+        for (new, scanner, photo) in [
+            ("layer.new.figure", "figure.pose_scanner", "body.jpg"),
+            ("layer.new.hand", "figure.hand_scanner", "hand.jpg"),
+        ] {
+            command(&mut runtime, new);
+            step(&mut runtime, Vec::new());
+            let before = pose_of(&runtime);
+            let depth = runtime.engine.history.depth();
+            command(&mut runtime, scanner);
+            let _ = runtime.answer_pick(&photos.join(photo), &mut NoTextures, start);
+            // The scan runs in the background; wait for it.
+            let waited = Instant::now();
+            while pose_of(&runtime) == before {
+                assert!(
+                    waited.elapsed() < Duration::from_secs(120),
+                    "{scanner}: {:?} {:?}",
+                    runtime.shell.message(),
+                    runtime
+                        .transfers
+                        .list()
+                        .iter()
+                        .map(|transfer| (transfer.label.clone(), transfer.state.clone()))
+                        .collect::<Vec<_>>()
+                );
+                std::thread::sleep(Duration::from_millis(20));
+                runtime.timer(&mut NoTextures, Instant::now());
+                step(&mut runtime, Vec::new());
+            }
+            assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
+            println!("{scanner}: {:?}", pose_of(&runtime));
+        }
         let _ = std::fs::remove_dir_all(root);
     }
 

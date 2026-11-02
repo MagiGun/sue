@@ -161,7 +161,7 @@ The order of work is the plan at the end.
 | Import 3D data (OBJ) | File > Import > 3D Data | done | |
 | FBX import (5.1) | File > Import | missing | |
 | 3D pose from Posemaniacs | File > Import > 3D pose | missing | |
-| Pose Scanner (image to pose) | File > Import > Pose Scanner | missing | |
+| Pose Scanner (image to pose) | File > Import > Pose Scanner | done | Tool Settings of a 3D drawing figure; MoveNet finds the body, limbs toward the camera guessed from how short they look |
 | Create file object | File > Import > Create file object | missing | Another file embedded as an object layer |
 | Batch import (EX) | File > Import > Batch import | done | Every picture in a folder, by name, one a page |
 | Scan, Continuous Scan, Select Scan Device | File > Import > Scan | missing | A scanner talks through `sue-platform` |
@@ -369,12 +369,14 @@ The order of work is the plan at the end.
 | Blend: Blur, Finger Tip, Liquify | Tool | done | Liquify has its own slot in Clip Studio's order; it pushes, swells, pinches and twirls |
 | Copy stamp | Blend tool | done | Alt and click sets the source; the first stroke fixes the distance, later strokes keep it |
 | Close and fill | Fill tool | done | Every area the lines inside the lasso close off fills, a pixel under the lines |
+| Paint unpainted area | Fill tool | done | Inside the lasso, what the layer left unpainted and no line covers fills |
+| Ruby (furigana) | Text tool, Tool Property | done | Over the words, or to their right in vertical text; kept on its words as they change |
 | Lasso fill | Figure tool | done | |
 | Download button on the tool bar | Tool palette | done | Opens Browse Assets, where materials download into Sue |
 | Fill bucket: Close gap, Area scaling | Tool | done | Paint stays inside lines with small breaks, no white edge |
 | Auto Select (magic wand) | Tool | done | Looks at reference layers only when set |
 | Gradient tool | Tool | partial | Gradient layers exist; verify the tool's dials |
-| Figure tool (rectangle, ellipse, polygon, polyline) | Tool | partial | Shapes exist; verify strokes, fills and polylines |
+| Figure tool (rectangle, ellipse, polygon, polyline) | Tool | done | Straight line, rectangle, ellipse, filled shapes, Lasso fill, Polyline and Curve (a click at each corner; a double-click ends it, the first corner closes it) |
 | Smart Shape (5.0) | Drawing with any tool | done | Hold the pen still: a line, arc, ellipse, circle or polygon; on or off per sub tool |
 | Text tool | Tool | done | |
 | Ruler tools | Tool | done | |
@@ -440,7 +442,7 @@ The order of work is the plan at the end.
 | Convert 3D to Lines and Tones (EX) | Layer > Convert to Lines and Tones | done | Clean line art and tone to draw over |
 | Drawing figures with poses and pose materials | Materials, 3D | done | Preset poses for the figure, hand and head; any pose kept as a pose material and used again |
 | 3D head models (5.1) | 3D | partial | A posable head (neck, skull, jaw, nose, brow, eyes, ears) with seven presets; simpler than Clip Studio's, no face shapes to edit |
-| 3D hand models and Hand Scanner posing (5.0) | 3D, Materials | partial | A posable hand of sixteen joints with seven presets; no Hand Scanner (posing from a photo) |
+| 3D hand models and Hand Scanner posing (5.0) | 3D, Materials | partial | A posable hand of sixteen joints with seven presets, and the Hand Scanner (MediaPipe's twenty one points, in depth too); one right hand, so a left hand poses as its mirror |
 | Painting directly on 3D (5.0, 5.1) | 3D | missing | |
 | VRM import and photorealistic rendering | File > Import | missing | |
 | Height-based fog, Follow camera light (5.0, 5.1) | 3D settings | done | In the 3D layer's Tool Property |
@@ -564,7 +566,7 @@ The order of work is the plan at the end.
 | Feature | Sue | Notes |
 | --- | --- | --- |
 | Start page with Projects, labels, search and favorites | done | The same lists the Hub shows |
-| Manage Materials and Browse Assets on the start page | done | |
+| Manage Materials and Browse Assets on the start page | done | Phones and tablets have Browse Assets and Data Transfers as tabs too |
 | Simple Mode for phones and tablets | done | Studio Mode for the desktop layout |
 | Studio Mode and touch layouts, modifier keys on a slide-out | done | |
 | One project holds Paint with every studio | done | Entities by EntityId in the `.sue` file |

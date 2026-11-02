@@ -759,8 +759,39 @@ pub fn enclosed(reference: &[u8], size: [u32; 2], lasso: &[u8]) -> Vec<u8> {
     grown
 }
 
+/// Paint unpainted area: inside `lasso`, what the editing layer (`layer`,
+/// RGBA as it lies on the picture) left unpainted, where no line in
+/// `reference` (RGBA) is either. Lines and paint are pixels at least half
+/// opaque.
+#[must_use]
+pub fn unpainted(layer: &[u8], reference: &[u8], size: [u32; 2], lasso: &[u8]) -> Vec<u8> {
+    let count = (size[0] * size[1]) as usize;
+    if layer.len() < count * 4 || reference.len() < count * 4 || lasso.len() < count {
+        return vec![0; count];
+    }
+    (0..count)
+        .map(|index| {
+            let open = layer[index * 4 + 3] < 128 && reference[index * 4 + 3] < 128;
+            if open { lasso[index] } else { 0 }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn paint_unpainted_area_fills_only_the_gaps() {
+        let size = [4u32, 1u32];
+        // Painted, a gap, a line on another layer, a gap outside the lasso.
+        let layer = [0, 0, 0, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let reference = [0, 0, 0, 255, 0, 0, 0, 0, 0, 0, 0, 255, 0, 0, 0, 0];
+        let lasso = [255, 255, 255, 0];
+        assert_eq!(
+            super::unpainted(&layer, &reference, size, &lasso),
+            vec![0, 255, 0, 0]
+        );
+    }
+
     #[test]
     fn close_and_fill_fills_only_what_lines_close_off() {
         // Two rings drawn on 40 x 20: a closed one at the left, one with a

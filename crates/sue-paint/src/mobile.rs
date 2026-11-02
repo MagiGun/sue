@@ -91,20 +91,27 @@ impl SuePaint {
         } else {
             let bar = Rect::from_min_max(pos2(rect.left(), rect.bottom() - BAR), rect.max);
             let body = Rect::from_min_max(rect.min, pos2(rect.right(), bar.top()));
-            // Phones show Projects for Browse Assets (it comes to them
-            // later).
             match start.tab {
-                Tab::Browse | Tab::Projects => {
+                Tab::Projects => {
                     self.mobile_projects(&mut child, body, &mut start, &mut acts, cx, theme)
                 }
+                // CLIP STUDIO ASSETS, as on a computer, fitted to the
+                // screen.
+                Tab::Browse => self.browse_ui(&mut child, body, &mut start, cx, theme),
                 Tab::Materials => {
                     self.mobile_materials(&mut child, body, &mut start, &mut acts, cx, theme)
                 }
             }
+            // Draw in the middle; Data Transfers shows downloads going.
             let items = [
                 RailItem {
                     glyph: Glyph::Projects,
                     label: tr!("start-projects"),
+                    round: false,
+                },
+                RailItem {
+                    glyph: Glyph::Home,
+                    label: tr!("start-browse-assets"),
                     round: false,
                 },
                 RailItem {
@@ -117,15 +124,29 @@ impl SuePaint {
                     label: tr!("start-manage-materials"),
                     round: false,
                 },
+                RailItem {
+                    glyph: Glyph::Transfers,
+                    label: tr!("start-data-transfers"),
+                    round: false,
+                },
             ];
             let selected = Some(match start.tab {
-                Tab::Browse | Tab::Projects => 0,
-                Tab::Materials => 2,
+                Tab::Projects => 0,
+                Tab::Browse => 1,
+                Tab::Materials => 3,
             });
             match page::tab_bar(&mut child, bar, &items, selected, theme) {
                 Some(0) => start.tab = Tab::Projects,
-                Some(1) => acts.push(Act::Draw),
-                Some(2) => start.tab = Tab::Materials,
+                Some(1) => {
+                    // Browse Assets again goes back to its top.
+                    if start.tab == Tab::Browse {
+                        start.browser.go(None);
+                    }
+                    start.tab = Tab::Browse;
+                }
+                Some(2) => acts.push(Act::Draw),
+                Some(3) => start.tab = Tab::Materials,
+                Some(4) => start.popup = Some(Popup::Transfers),
                 _ => {}
             }
         }

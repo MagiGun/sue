@@ -947,6 +947,93 @@ pub fn solve(pose: &Pose, body: &Body) -> Vec<([f32; 3], Mat3)> {
     placed
 }
 
+fn transpose(m: &Mat3) -> Mat3 {
+    [0, 1, 2].map(|row| [0, 1, 2].map(|column| m[column][row]))
+}
+
+fn unit(v: [f32; 3]) -> Option<[f32; 3]> {
+    let length = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    (length > 1e-6).then(|| v.map(|value| value / length))
+}
+
+/// The shortest turn that takes unit `from` onto unit `to`.
+fn between(from: [f32; 3], to: [f32; 3]) -> Mat3 {
+    let dot = (from[0] * to[0] + from[1] * to[1] + from[2] * to[2]).clamp(-1.0, 1.0);
+    let cross = [
+        from[1] * to[2] - from[2] * to[1],
+        from[2] * to[0] - from[0] * to[2],
+        from[0] * to[1] - from[1] * to[0],
+    ];
+    let axis = unit(cross).unwrap_or_else(|| {
+        // Opposite: any axis across `from`.
+        let other = if from[0].abs() < 0.9 {
+            [1.0, 0.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        };
+        unit([
+            from[1] * other[2] - from[2] * other[1],
+            from[2] * other[0] - from[0] * other[2],
+            from[0] * other[1] - from[1] * other[0],
+        ])
+        .unwrap_or([0.0, 0.0, 1.0])
+    });
+    let angle = dot.acos();
+    let (sin, cos) = angle.sin_cos();
+    let [x, y, z] = axis;
+    let t = 1.0 - cos;
+    [
+        [t * x * x + cos, t * x * y - sin * z, t * x * z + sin * y],
+        [t * x * y + sin * z, t * y * y + cos, t * y * z - sin * x],
+        [t * x * z - sin * y, t * y * z + sin * x, t * z * z + cos],
+    ]
+}
+
+/// The degrees about x, y and z of turn `m`, as [`euler`] composes them.
+fn degrees(m: &Mat3) -> [f32; 3] {
+    let y = (-m[2][0]).clamp(-1.0, 1.0).asin();
+    let x = m[2][1].atan2(m[2][2]);
+    let z = m[1][0].atan2(m[0][0]);
+    [x.to_degrees(), y.to_degrees(), z.to_degrees()]
+}
+
+/// A pose that points bones where `targets` say (Clip Studio Paint's Pose
+/// Scanner and Hand Scanner): `root` turns the first joint whole (its
+/// columns are where its x, y and z go), and each joint with a target
+/// direction (in the figure's space) turns the least that lays its bone
+/// along it. Joints without one keep `base`'s turn.
+#[must_use]
+pub fn aimed(
+    joints: &[Joint],
+    base: &Pose,
+    root: Option<[[f32; 3]; 3]>,
+    targets: &[Option<[f32; 3]>],
+) -> Pose {
+    let mut pose = Pose(
+        (0..joints.len())
+            .map(|at| base.0.get(at).copied().unwrap_or([0.0; 3]))
+            .collect(),
+    );
+    let mut frames: Vec<Mat3> = Vec::with_capacity(joints.len());
+    for (at, joint) in joints.iter().enumerate() {
+        let parent = joint.parent.map_or(IDENTITY, |parent| frames[parent]);
+        if at == 0
+            && let Some(root) = root
+        {
+            pose.0[0] = degrees(&root);
+        } else if let Some(target) = targets.get(at).copied().flatten().and_then(unit)
+            && let Some(bone) = unit(joint.bone)
+        {
+            let local = apply(&transpose(&parent), target);
+            pose.0[at] = degrees(&between(bone, local));
+        }
+        frames.push(mul(&parent, &euler(pose.0[at])));
+    }
+    pose
+}
+
+const IDENTITY: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
 /// Each joint's bone, start and end, for `pose`.
 #[must_use]
 pub fn bones(pose: &Pose, body: &Body) -> Vec<([f32; 3], [f32; 3])> {
@@ -1088,6 +1175,28 @@ pub fn set_pose(arena: &Arena, layer: EntityId, pose: &Pose, label: &str) -> Opt
             .then(SetProperty::new(model, POSE, pose.to_text()))
             .then(ReplaceComponent::new(layer, drawn, label)),
     )
+}
+
+/// [`set_pose`], also turning the layer's camera to `view`, as one step.
+#[must_use]
+pub fn set_pose_seen(
+    arena: &Arena,
+    layer: EntityId,
+    pose: &Pose,
+    view: &crate::three::View3D,
+    label: &str,
+) -> Option<Edit> {
+    let model = of_layer(arena, layer)?;
+    let raster = crate::doc::raster(arena, layer)?;
+    let size = [raster.width(), raster.height()];
+    let body = Body::of(arena.get_by_id(model).ok()?);
+    let buffers = crate::three::render_framed(&mesh(pose, &body), view, size, Some(body.frame()));
+    let drawn = crate::three::draw(&buffers, view)?;
+    let mut edit = Edit::new(label).then(SetProperty::new(model, POSE, pose.to_text()));
+    for set in view.edits(layer) {
+        edit = edit.then(set);
+    }
+    Some(edit.then(ReplaceComponent::new(layer, drawn, label)))
 }
 
 /// The edit that shapes the figure of 3D layer `layer` as `body` and draws

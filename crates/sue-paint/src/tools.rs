@@ -10,8 +10,14 @@ use crate::brush::{AntiAlias, Tip};
 /// A tool of the tool palette.
 /// The Fill tool's Close and fill sub tool's mode.
 pub const CLOSE_AND_FILL: u8 = 3;
+/// The Fill tool's Paint unpainted area sub tool's mode.
+pub const PAINT_UNPAINTED: u8 = 4;
 /// The Figure tool's Lasso fill sub tool's mode.
 pub const LASSO_FILL: u8 = 7;
+/// The Figure tool's Polyline sub tool's mode.
+pub const POLYLINE: u8 = 8;
+/// The Figure tool's Curve sub tool's mode.
+pub const CURVE: u8 = 9;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Tool {
@@ -667,6 +673,8 @@ impl Tool {
                 // Encircle lines: the areas they close off fill.
                 plain(&tr!("close-and-fill"), CLOSE_AND_FILL).tolerance(0.1),
                 plain(&tr!("refer-other-layers"), 1).tolerance(0.1),
+                // Draw round colored areas: the gaps left in them fill.
+                plain(&tr!("paint-unpainted-area"), PAINT_UNPAINTED),
             ],
             Self::Gradient => vec![
                 plain(&tr!("drawing-color-to-transparent"), 0),
@@ -689,6 +697,10 @@ impl Tool {
                     SubTool::new(self, "Speed Line", crate::comic::SPEED_LINES, line),
                     // Draw round an area and it fills.
                     SubTool::new(self, "Lasso fill", LASSO_FILL, line),
+                    // A click at each corner; a double-click (or Enter)
+                    // ends it, a click on the first closes it.
+                    SubTool::new(self, "Polyline", POLYLINE, line),
+                    SubTool::new(self, "Curve", CURVE, line),
                 ]
             }
             // Clip Studio Paint's order: rectangle, polyline, then cut.

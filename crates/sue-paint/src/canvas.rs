@@ -126,7 +126,8 @@ impl SuePaint {
             // The corners belong to the sub tool that started them.
             let owner = self.polyline_for.unwrap_or((Tool::Select, 3));
             let now = (self.toolbox.tool(), self.toolbox.current().mode);
-            if enter && self.polyline.len() >= 3 {
+            let least = if owner.0 == Tool::Figure { 2 } else { 3 };
+            if enter && self.polyline.len() >= least {
                 self.finish_corners(self.select_op, cx);
             } else if escape || now != owner {
                 self.polyline.clear();
@@ -1510,7 +1511,11 @@ impl SuePaint {
             // release.
             Tool::Figure | Tool::Fill
                 if (tool == Tool::Figure && sub.mode == crate::tools::LASSO_FILL)
-                    || (tool == Tool::Fill && sub.mode == crate::tools::CLOSE_AND_FILL) =>
+                    || (tool == Tool::Fill
+                        && matches!(
+                            sub.mode,
+                            crate::tools::CLOSE_AND_FILL | crate::tools::PAINT_UNPAINTED
+                        )) =>
             {
                 if let Err(error) = self.paintable(&cx.world.arena) {
                     cx.fail(error);
@@ -1537,7 +1542,7 @@ impl SuePaint {
                     to: p,
                 });
             }
-            Tool::Figure | Tool::Gradient => {
+            Tool::Figure | Tool::Gradient if !crate::comic::clicks_corners(tool, sub.mode) => {
                 if let Err(error) = self.paintable(&cx.world.arena) {
                     cx.fail(error);
                     return;
@@ -1562,12 +1567,23 @@ impl SuePaint {
                             <= 8.0
                     })
                 };
-                let close = near(self.polyline.first()) || near(self.polyline.last());
+                let first = near(self.polyline.first());
+                let close = first || near(self.polyline.last());
                 if self.polyline_for != Some((tool, sub.mode)) {
                     self.polyline.clear();
                     self.polyline_for = Some((tool, sub.mode));
                 }
-                if close && self.polyline.len() >= 3 {
+                if tool == Tool::Figure && close && self.polyline.len() >= 2 {
+                    // A click on the first corner closes the line; on the
+                    // last (a double-click) leaves it open.
+                    if first
+                        && self.polyline.len() >= 3
+                        && let Some(start) = self.polyline.first().copied()
+                    {
+                        self.polyline.push(start);
+                    }
+                    self.finish_corners(op, cx);
+                } else if close && self.polyline.len() >= 3 {
                     self.finish_corners(op, cx);
                 } else {
                     self.polyline.push([p.x, p.y]);
@@ -3640,7 +3656,14 @@ impl SuePaint {
                     drafts: true,
                 },
             );
-            fill::enclosed(&reference, size, &lasso)
+            if sub.mode == crate::tools::PAINT_UNPAINTED {
+                let Some(layer) = self.layer_on_picture(&cx.world.arena, size) else {
+                    return;
+                };
+                fill::unpainted(&layer, &reference, size, &lasso)
+            } else {
+                fill::enclosed(&reference, size, &lasso)
+            }
         } else {
             lasso
         };
@@ -3774,6 +3797,21 @@ impl SuePaint {
             ],
             _ => ellipse_points(from, to),
         };
+        self.stroke_line(points, sub, cx);
+    }
+
+    /// The Figure tool's lines: `points` (picture pixels) drawn with the
+    /// sub tool's brush, untapered, within the selection, as one step.
+    pub(crate) fn stroke_line(
+        &mut self,
+        points: Vec<[f32; 2]>,
+        sub: &SubTool,
+        cx: &mut AppletContext<'_>,
+    ) {
+        let Ok(info) = self.paintable(&cx.world.arena) else {
+            return;
+        };
+        let rgb = color::unit(self.drawing_color());
         let offset = info.style.offset;
         let shifted = self
             .doc()

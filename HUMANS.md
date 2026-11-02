@@ -388,7 +388,8 @@ the left side:
   the site instead, where it downloads with a CLIP STUDIO account. Sue
   keeps the
   pages and pictures it read, so without a connection it shows them from
-  last time. On phones and tablets it comes later.
+  last time. Phones and tablets have it as a tab at the bottom, beside
+  Projects, Draw, Manage Materials and Data Transfers.
 
 At the top right: **Data Transfers** (two arrows) lists the files Sue
 opened, saved, exported, copied and downloaded in this run, with **Clear
@@ -619,6 +620,10 @@ Once a canvas is open:
 - **Text on Curve** (the Text tool's second sub tool): draw a curve, then
   type, and the words follow it, each letter turned with it; more lines
   follow it further down.
+- **Ruby** (furigana): while typing, select some words, type their
+  reading in Tool Settings' Ruby field and press Enter (or Set ruby). The
+  reading sits small over them, or to their right in vertical text, and
+  stays with them as you type around them. Remove ruby takes it away.
 - **Smart Shape:** hold the pen still for a moment at the end of a stroke
   and it becomes the clean shape you meant: a straight line, an arc, an
   ellipse or circle, or a polygon such as a rectangle or triangle. Lift the
@@ -727,6 +732,15 @@ Once a canvas is open:
   pose in the Material palette's Poses, with a picture of it; double-click
   one to pose the figure, hand or head you have picked, or to add a new
   one in that pose.
+- **Pose scanner and Hand scanner** (Tool Settings, with a 3D drawing
+  figure or a 3D hand picked): choose a photo of a person or a hand, and
+  the figure or hand takes the pose it shows, turned to face you as the
+  photo did, in one step you can undo. The first time, Sue downloads the
+  model that finds the body (MoveNet, 9 MB) or the hand (MediaPipe,
+  4 MB) into its models folder; after that it works offline, on the
+  computer itself. A whole person, clearly lit, scans best; arms and
+  legs pointing at the camera are guessed from how short they look. Sue's
+  3D hand is a right hand, so a left hand poses it as its mirror.
 - **3D layers:** Layer, New Layer, 3D Layer puts a cube, sphere, cylinder,
   cone, plane, prism or pyramid on the canvas, and File, Import, 3D Data brings in an OBJ
   model. With the Object tool (O), drag to turn the camera, Shift and drag

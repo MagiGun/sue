@@ -779,6 +779,8 @@ fn grid(
 fn heading(ui: &mut Ui, title: &str, more: Option<&str>, theme: &Theme) -> Option<Go> {
     let mut go = None;
     ui.add_space(14.0);
+    // On a phone the site's link goes under the title, out of its way.
+    let narrow = ui.available_width() < 600.0;
     ui.horizontal(|ui| {
         ui.label(
             RichText::new(title)
@@ -792,16 +794,26 @@ fn heading(ui: &mut Ui, title: &str, more: Option<&str>, theme: &Theme) -> Optio
             {
                 go = Some(Go::Place(Place::List(more.to_owned())));
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .link(RichText::new(tr!("assets-on-the-site")).size(theme.small_size + 0.5))
-                    .clicked()
-                {
-                    go = Some(Go::Site(more.to_owned()));
-                }
-            });
+            if !narrow {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .link(RichText::new(tr!("assets-on-the-site")).size(theme.small_size + 0.5))
+                        .clicked()
+                    {
+                        go = Some(Go::Site(more.to_owned()));
+                    }
+                });
+            }
         }
     });
+    if narrow
+        && let Some(more) = more.filter(|more| !more.is_empty())
+        && ui
+            .link(RichText::new(tr!("assets-on-the-site")).size(theme.small_size + 0.5))
+            .clicked()
+    {
+        go = Some(Go::Site(more.to_owned()));
+    }
     let rect = ui.available_rect_before_wrap();
     ui.painter().hline(
         rect.x_range(),

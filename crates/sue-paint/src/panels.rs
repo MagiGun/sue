@@ -2406,6 +2406,51 @@ impl SuePaint {
                     ui.radio_value(&mut sub.justify, 1, small(&tr!("justify-middle")));
                     ui.radio_value(&mut sub.justify, 2, small(&tr!("justify-end")));
                 });
+                // Ruby (furigana): a reading over the selected words.
+                if let Some(typing) = self.typing.as_mut() {
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label(small(&tr!("ruby")));
+                        let field = ui.add(
+                            egui::TextEdit::singleline(&mut typing.reading)
+                                .hint_text(tr!("ruby-hint"))
+                                .desired_width(ui.available_width()),
+                        );
+                        if field.gained_focus() || field.clicked() {
+                            typing.reading_focus = true;
+                        }
+                        if field.lost_focus() {
+                            if ui.input(|input| input.key_pressed(egui::Key::Enter))
+                                && !typing.selected.is_empty()
+                            {
+                                typing.add_ruby();
+                            }
+                            typing.reading_focus = false;
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        let chosen = !typing.selected.is_empty();
+                        if ui
+                            .add_enabled(
+                                chosen && !typing.reading.trim().is_empty(),
+                                egui::Button::new(small(&tr!("set-ruby"))),
+                            )
+                            .on_disabled_hover_text(tr!("ruby-needs-selection"))
+                            .clicked()
+                        {
+                            typing.add_ruby();
+                        }
+                        if ui
+                            .add_enabled(
+                                chosen && typing.has_ruby(),
+                                egui::Button::new(small(&tr!("remove-ruby"))),
+                            )
+                            .clicked()
+                        {
+                            typing.remove_ruby();
+                        }
+                    });
+                }
             }
             // The Object tool: what it does on the layer in hand.
             Tool::Operation => {
@@ -2884,6 +2929,28 @@ impl SuePaint {
         });
         if ui.button(tr!("register-pose-as-material")).clicked() {
             self.pending_command = Some("figure.register_pose");
+        }
+        // Pose Scanner and Hand Scanner: a photo poses it.
+        match body.kind {
+            crate::figure::Kind::Body => {
+                if ui
+                    .button(tr!("pose-scanner"))
+                    .on_hover_text(tr!("pose-scanner-hint"))
+                    .clicked()
+                {
+                    self.pending_command = Some("figure.pose_scanner");
+                }
+            }
+            crate::figure::Kind::Hand => {
+                if ui
+                    .button(tr!("hand-scanner"))
+                    .on_hover_text(tr!("hand-scanner-hint"))
+                    .clicked()
+                {
+                    self.pending_command = Some("figure.hand_scanner");
+                }
+            }
+            crate::figure::Kind::Head => {}
         }
         ui.horizontal(|ui| {
             ui.label(RichText::new(tr!("joint")).color(theme.muted));

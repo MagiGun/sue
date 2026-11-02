@@ -216,6 +216,7 @@ pub fn draw_folio(arena: &Arena, page: EntityId, flat: &mut sue_core::RasterTile
                 leading: 0.0,
                 justify: sue_type::raster::Justify::Middle,
                 path: &[],
+                ruby: &[],
             },
         );
     }

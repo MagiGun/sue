@@ -794,6 +794,22 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
             }
             shoot(&mut runtime, &mut camera, &format!("{prefix}-{name}"))?;
         }
+        // Browse Assets on a touch screen, read from the site.
+        if std::env::var_os("SUE_SNAPSHOT_ONLINE").is_some() {
+            if let Some(applet) = runtime.applets.get_mut(&paint) {
+                applet.navigate("start/close");
+                applet.navigate("start/browse");
+            }
+            for _ in 0..60 {
+                let output = camera.frame(&mut runtime);
+                camera.painter.apply_textures(output.textures_delta);
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            shoot(&mut runtime, &mut camera, &format!("{prefix}-paint-browse"))?;
+            if let Some(applet) = runtime.applets.get_mut(&paint) {
+                applet.navigate("start/projects");
+            }
+        }
         if let Some(applet) = runtime.applets.get_mut(&paint) {
             applet.navigate("start/hide");
         }

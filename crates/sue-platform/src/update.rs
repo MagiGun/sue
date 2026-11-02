@@ -626,6 +626,20 @@ pub fn fetch(url: &str, user_agent: &str) -> Job<Result<Vec<u8>, String>> {
     }
 }
 
+/// The SHA-256 of the file at `path`, in lowercase hex.
+///
+/// # Errors
+///
+/// When the file cannot be read.
+pub fn sha256_of(path: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    let bytes = crate::fs::read(path)?;
+    Ok(Sha256::digest(&bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
 /// The file name a download of `url` keeps: the last part of its path,
 /// its `%` escapes undone and anything a file name cannot hold made `_`;
 /// `download` when the path ends in nothing.

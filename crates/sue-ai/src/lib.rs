@@ -14,11 +14,13 @@
 mod backend;
 mod error;
 mod model;
+mod onnx;
 mod registry;
 mod task;
 
 pub use backend::ComputeBackend;
 pub use error::AiError;
 pub use model::{AiTask, GgufHeader, ModelDescriptor, ModelFormat, safetensors_header_len};
+pub use onnx::{OnnxInput, OnnxModel, OnnxOutput};
 pub use registry::{LocalModelRegistry, ModelSelection};
 pub use task::{MidSideStemSplit, TaskReport, ZeroCopyTensorTask};

@@ -754,6 +754,34 @@ pub fn smooth_closed(points: &[[f32; 2]], steps: usize) -> Vec<[f32; 2]> {
     out
 }
 
+/// An open curve through `points` (Catmull-Rom, its ends held), `steps`
+/// points between each two: the Figure tool's Curve.
+#[must_use]
+pub fn smooth_open(points: &[[f32; 2]], steps: usize) -> Vec<[f32; 2]> {
+    let n = points.len();
+    if n < 3 {
+        return points.to_vec();
+    }
+    let get = |index: isize| points[index.clamp(0, n as isize - 1) as usize];
+    let mut out = Vec::with_capacity(n * steps + 1);
+    for index in 0..n as isize - 1 {
+        let [p0, p1, p2, p3] = [index - 1, index, index + 1, index + 2].map(get);
+        for step in 0..steps {
+            let t = step as f32 / steps as f32;
+            let (t2, t3) = (t * t, t * t * t);
+            let at = |c: usize| {
+                0.5 * (2.0 * p1[c]
+                    + (p2[c] - p0[c]) * t
+                    + (2.0 * p0[c] - 5.0 * p1[c] + 4.0 * p2[c] - p3[c]) * t2
+                    + (3.0 * p1[c] - p0[c] - 3.0 * p2[c] + p3[c]) * t3)
+            };
+            out.push([at(0), at(1)]);
+        }
+    }
+    out.push(points[n - 1]);
+    out
+}
+
 /// Saturated lines as Clip Studio Paint's tool draws them: `count` lines
 /// from beyond the picture's edges in toward the ellipse in `rect`,
 /// stopping at its rim a little in or out, `line` pixels at their base and
@@ -875,6 +903,16 @@ pub fn tone(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_open_curve_passes_through_its_points_and_keeps_its_ends() {
+        let points = [[0.0, 0.0], [10.0, 10.0], [20.0, 0.0]];
+        let curve = smooth_open(&points, 8);
+        assert_eq!(curve.first(), Some(&[0.0, 0.0]));
+        assert_eq!(curve.last(), Some(&[20.0, 0.0]));
+        assert!(curve.contains(&[10.0, 10.0]), "through the middle point");
+        assert_eq!(smooth_open(&points[..2], 8), points[..2].to_vec());
+    }
 
     fn alpha(pixels: &[u8], width: u32, x: u32, y: u32) -> u8 {
         pixels[((y * width + x) * 4 + 3) as usize]

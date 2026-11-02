@@ -75,6 +75,7 @@ pub mod proof;
 pub mod psd_io;
 pub mod quick;
 pub mod rulers;
+mod scan;
 pub mod select;
 pub mod simple;
 mod smart;

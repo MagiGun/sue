@@ -32,6 +32,8 @@ const JUSTIFY: &str = "text.justify";
 const PATH: &str = "text.path";
 /// Where the drawn text is (`Text`, `x0,y0,x1,y1`), for clicking on it.
 const BOX: &str = "text.box";
+/// Readings over the words (ruby): a line each, `start,end,reading`.
+const RUBY: &str = "text.ruby";
 
 type Edit = sue_core::txn::Batch<sue_core::Arena>;
 
@@ -53,6 +55,8 @@ pub(crate) struct Lettering {
     pub justify: Justify,
     /// A curve the words follow (empty: straight lines).
     pub path: Vec<[f32; 2]>,
+    /// Readings set small over some of the words (ruby, furigana).
+    pub ruby: Vec<sue_type::raster::Ruby>,
 }
 
 impl Lettering {
@@ -70,7 +74,56 @@ impl Lettering {
             leading: 0.0,
             justify: Justify::Start,
             path: Vec::new(),
+            ruby: Vec::new(),
         }
+    }
+
+    /// Sets `reading` over the characters in `range` (taking away any
+    /// reading it overlaps); an empty reading takes them away only.
+    pub(crate) fn set_ruby(&mut self, range: std::ops::Range<usize>, reading: &str) {
+        if range.start >= range.end {
+            return;
+        }
+        self.ruby
+            .retain(|ruby| ruby.range.end <= range.start || ruby.range.start >= range.end);
+        let reading = reading.trim();
+        if !reading.is_empty() {
+            self.ruby.push(sue_type::raster::Ruby {
+                range,
+                text: reading.replace('\n', " "),
+            });
+            self.ruby.sort_by_key(|ruby| ruby.range.start);
+        }
+    }
+
+    /// Keeps the readings on their words after the words changed from
+    /// `before`: readings past the change move with it, readings in it
+    /// go.
+    pub(crate) fn follow_edit(&mut self, before: &str) {
+        if self.ruby.is_empty() || before == self.content {
+            return;
+        }
+        let old: Vec<char> = before.chars().collect();
+        let new: Vec<char> = self.content.chars().collect();
+        let head = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+        let tail = old[head..]
+            .iter()
+            .rev()
+            .zip(new[head..].iter().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let (old_end, new_end) = (old.len() - tail, new.len() - tail);
+        self.ruby.retain_mut(|ruby| {
+            if ruby.range.end <= head {
+                true
+            } else if ruby.range.start >= old_end {
+                ruby.range =
+                    ruby.range.start + new_end - old_end..ruby.range.end + new_end - old_end;
+                true
+            } else {
+                false
+            }
+        });
     }
 
     /// The words as `sue_type` lays them out.
@@ -87,6 +140,7 @@ impl Lettering {
             leading: self.leading,
             justify: self.justify,
             path: &self.path,
+            ruby: &self.ruby,
         }
     }
 
@@ -143,6 +197,19 @@ impl Lettering {
                     Some([x.trim().parse().ok()?, y.trim().parse().ok()?])
                 })
                 .collect(),
+            ruby: text(RUBY)
+                .lines()
+                .filter_map(|line| {
+                    let mut parts = line.splitn(3, ',');
+                    let start = parts.next()?.trim().parse().ok()?;
+                    let end = parts.next()?.trim().parse().ok()?;
+                    let text = parts.next()?.to_owned();
+                    (start < end && !text.is_empty()).then_some(sue_type::raster::Ruby {
+                        range: start..end,
+                        text,
+                    })
+                })
+                .collect(),
         })
     }
 
@@ -187,6 +254,18 @@ impl Lettering {
                     Justify::Middle => "middle",
                     Justify::End => "end",
                 }),
+            ),
+            (
+                RUBY,
+                Value::from(
+                    self.ruby
+                        .iter()
+                        .map(|ruby| {
+                            format!("{},{},{}", ruby.range.start, ruby.range.end, ruby.text)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                ),
             ),
             (BOX, Value::from(area)),
         ]
@@ -427,6 +506,33 @@ pub(crate) struct Typing {
     place: Option<usize>,
     /// The Text tool's settings and the ink the words last took.
     settings: Look,
+    /// The characters selected in the words, for a reading.
+    pub selected: std::ops::Range<usize>,
+    /// The reading typed in Tool Property, and whether its field has the
+    /// keys (the words give them up while it does).
+    pub reading: String,
+    pub reading_focus: bool,
+}
+
+impl Typing {
+    /// Sets the reading typed over the selected characters.
+    pub(crate) fn add_ruby(&mut self) {
+        let reading = std::mem::take(&mut self.reading);
+        self.lettering.set_ruby(self.selected.clone(), &reading);
+        self.reading_focus = false;
+    }
+
+    /// Takes away the readings over the selected characters.
+    pub(crate) fn remove_ruby(&mut self) {
+        self.lettering.set_ruby(self.selected.clone(), "");
+    }
+
+    /// Whether a reading lies over the selected characters.
+    pub(crate) fn has_ruby(&self) -> bool {
+        self.lettering.ruby.iter().any(|ruby| {
+            ruby.range.start < self.selected.end && ruby.range.end > self.selected.start
+        })
+    }
 }
 
 /// How the Text tool letters: everything but the words and where.
@@ -548,6 +654,9 @@ impl SuePaint {
             drawn: None,
             glide: sue_type::caret::CaretGlide::default(),
             place: None,
+            selected: 0..0,
+            reading: String::new(),
+            reading_focus: false,
         };
         typing.place = Some(match place {
             Some(p) => typing.index_at(p),
@@ -682,9 +791,16 @@ impl SuePaint {
         }
         let slots = sue_type::raster::caret_slots(&typing.spec());
         let last = slots.len().saturating_sub(1);
-        let caret = egui::text_edit::TextEditState::load(&ctx, id)
-            .and_then(|state| state.cursor.char_range())
-            .map_or(last, |range| usize::from(range.primary.index).min(last));
+        let range = egui::text_edit::TextEditState::load(&ctx, id)
+            .and_then(|state| state.cursor.char_range());
+        let caret = range.map_or(last, |range| usize::from(range.primary.index).min(last));
+        if !typing.reading_focus {
+            typing.selected = range.map_or(caret..caret, |range| {
+                let [a, b] = [range.primary.index, range.secondary.index].map(usize::from);
+                a.min(b).min(last)..a.max(b).min(last)
+            });
+        }
+        let before = typing.lettering.content.clone();
         let (top, bottom) = slots
             .get(caret)
             .map_or((typing.lettering.at, typing.lettering.at), |slot| {
@@ -720,11 +836,17 @@ impl SuePaint {
                         .desired_rows(1)
                         .desired_width(1.0),
                 );
-                // The keys stay with the words until the typing ends.
-                response.request_focus();
+                // The keys stay with the words until the typing ends (or
+                // while a reading is typed in Tool Property).
+                if !typing.reading_focus {
+                    response.request_focus();
+                }
                 response.changed()
             })
             .inner;
+        if edited {
+            typing.lettering.follow_edit(&before);
+        }
         // The words, drawn again when they change.
         let stale = typing
             .drawn
@@ -845,6 +967,10 @@ mod tests {
             leading: 1.5,
             justify: Justify::End,
             path: vec![[1.0, 2.0], [30.5, 40.0]],
+            ruby: vec![sue_type::raster::Ruby {
+                range: 0..2,
+                text: "he, lo".to_owned(),
+            }],
         };
         let (pixels, covered) = lettering.draw(200, 200);
         assert!(covered.is_some());
@@ -865,5 +991,31 @@ mod tests {
         }
         assert_eq!(Lettering::of(&entity), Some(lettering));
         assert!(area_of(&entity).is_some());
+    }
+
+    #[test]
+    fn readings_stay_on_their_words_as_the_words_change() {
+        let mut lettering = Lettering::new([0.0, 0.0], [0, 0, 0]);
+        lettering.content = "tokyo station".to_owned();
+        lettering.set_ruby(0..5, "toukyou");
+        lettering.set_ruby(6..13, "eki");
+        // Typed before both: they move along.
+        let before = lettering.content.clone();
+        lettering.content = "big tokyo station".to_owned();
+        lettering.follow_edit(&before);
+        assert_eq!(lettering.ruby[0].range, 4..9);
+        assert_eq!(lettering.ruby[1].range, 10..17);
+        // A word changed under a reading: that reading goes.
+        let before = lettering.content.clone();
+        lettering.content = "big kyoto station".to_owned();
+        lettering.follow_edit(&before);
+        assert_eq!(lettering.ruby.len(), 1);
+        assert_eq!(lettering.ruby[0].text, "eki");
+        // A new reading over part of one replaces it; an empty one takes
+        // it away.
+        lettering.set_ruby(10..13, "sta");
+        assert_eq!(lettering.ruby.len(), 1);
+        lettering.set_ruby(10..13, "");
+        assert!(lettering.ruby.is_empty());
     }
 }

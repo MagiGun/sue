@@ -36,7 +36,23 @@ pub struct TextSpec<'a> {
     /// A curve the words follow, their baseline on it (empty: straight).
     /// Lines after the first follow it further down.
     pub path: &'a [[f32; 2]],
+    /// Readings (ruby, furigana) set small over the words they read (to
+    /// their right in columns). Not drawn on a curve.
+    pub ruby: &'a [Ruby],
 }
+
+/// A reading set over some of the words: the characters it covers
+/// (counted as [`CaretSlot`]s count them) and what it says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ruby {
+    /// The characters it reads.
+    pub range: std::ops::Range<usize>,
+    /// The reading.
+    pub text: String,
+}
+
+/// Ruby is half the size of the words it reads.
+const RUBY_SCALE: f32 = 0.5;
 
 /// Edges of a glyph in pixels, as lines.
 struct Outline {
@@ -529,7 +545,12 @@ pub fn draw_text(
         .or_else(|| sue_wm::fonts::face_bytes("", false, false))?;
     let metrics = metrics(Face::parse(&bytes, index).ok()?, spec.size);
     let mut covered: Option<[f32; 4]> = None;
-    for line in lay_out(spec, &metrics) {
+    let laid = lay_out(spec, &metrics);
+    let slots: Vec<[[f32; 2]; 2]> = laid
+        .iter()
+        .flat_map(|line| line.slots.iter().copied())
+        .collect();
+    for line in laid {
         for (ch, origin, turn) in line.glyphs {
             if let Some(id) = metrics.face.glyph_index(ch)
                 && let Some([a, b, c, d]) = glyph(
@@ -549,7 +570,74 @@ pub fn draw_text(
             }
         }
     }
+    if spec.path.len() < 2 {
+        for ruby in spec.ruby {
+            let Some(at) = ruby_at(spec, &slots, ruby, &metrics) else {
+                continue;
+            };
+            let small = TextSpec {
+                text: &ruby.text,
+                size: spec.size * RUBY_SCALE,
+                at,
+                center: false,
+                tracking: 0.0,
+                leading: 0.0,
+                justify: Justify::Start,
+                path: &[],
+                ruby: &[],
+                ..*spec
+            };
+            if let Some([a, b, c, d]) = draw_text(pixels, width, height, &small) {
+                covered = Some(covered.map_or([a, b, c, d], |[x0, y0, x1, y1]| {
+                    [x0.min(a), y0.min(b), x1.max(c), y1.max(d)]
+                }));
+            }
+        }
+    }
     covered
+}
+
+/// Where `ruby`'s small text starts (its top left, top right in columns):
+/// centered over the characters it reads, just above their line (to the
+/// right of their column). `None` when its characters are not there or
+/// span lines.
+fn ruby_at(
+    spec: &TextSpec<'_>,
+    slots: &[[[f32; 2]; 2]],
+    ruby: &Ruby,
+    metrics: &Metrics<'_>,
+) -> Option<[f32; 2]> {
+    if ruby.range.start >= ruby.range.end || ruby.text.is_empty() {
+        return None;
+    }
+    let [start_top, _] = *slots.get(ruby.range.start)?;
+    let [end_top, _] = *slots.get(ruby.range.end)?;
+    let size = spec.size * RUBY_SCALE;
+    let count = ruby.text.chars().count() as f32;
+    if spec.vertical {
+        // The same column: the caret's right end keeps its x.
+        if (start_top[0] - end_top[0]).abs() > 0.5 {
+            return None;
+        }
+        let tall = count * size * 1.05;
+        let middle = (start_top[1] + end_top[1]) / 2.0;
+        Some([start_top[0] + size * 1.2, middle - tall / 2.0])
+    } else {
+        // The same line: the caret's top keeps its y.
+        if (start_top[1] - end_top[1]).abs() > 0.5 {
+            return None;
+        }
+        let small = Metrics {
+            face: metrics.face.clone(),
+            scale: metrics.scale * RUBY_SCALE,
+            ascender: metrics.ascender * RUBY_SCALE,
+            descender: metrics.descender * RUBY_SCALE,
+            line_height: metrics.line_height * RUBY_SCALE,
+        };
+        let wide: f32 = ruby.text.chars().map(|ch| small.advance(ch, size)).sum();
+        let middle = (start_top[0] + end_top[0]) / 2.0;
+        Some([middle - wide / 2.0, start_top[1] - small.line_height * 0.8])
+    }
 }
 
 /// The sizes of `face` at `size` pixels to the em.
@@ -618,6 +706,64 @@ mod tests {
             leading: 0.0,
             justify: Justify::Start,
             path: &[],
+            ruby: &[],
+        }
+    }
+
+    #[test]
+    fn ruby_sits_over_its_words_across_and_beside_them_in_columns() {
+        let ruby = [Ruby {
+            range: 0..2,
+            text: "abc".to_owned(),
+        }];
+        for vertical in [false, true] {
+            let words = TextSpec {
+                at: [120.0, 60.0],
+                ..spec("MMMM", vertical)
+            };
+            let (mut plain, mut read) = (vec![0u8; 240 * 240 * 4], vec![0u8; 240 * 240 * 4]);
+            let Some(alone) = draw_text(&mut plain, 240, 240, &words) else {
+                return;
+            };
+            let with = draw_text(
+                &mut read,
+                240,
+                240,
+                &TextSpec {
+                    ruby: &ruby,
+                    ..words
+                },
+            )
+            .unwrap();
+            if vertical {
+                assert!(
+                    with[2] > alone[2] + 4.0,
+                    "beside the column: {alone:?} {with:?}"
+                );
+            } else {
+                assert!(
+                    with[1] < alone[1] - 4.0,
+                    "over the line: {alone:?} {with:?}"
+                );
+            }
+            // A reading over characters that are not there draws nothing.
+            let mut none = vec![0u8; 240 * 240 * 4];
+            let far = [Ruby {
+                range: 10..12,
+                text: "x".to_owned(),
+            }];
+            assert_eq!(
+                draw_text(
+                    &mut none,
+                    240,
+                    240,
+                    &TextSpec {
+                        ruby: &far,
+                        ..words
+                    }
+                ),
+                Some(alone)
+            );
         }
     }
 

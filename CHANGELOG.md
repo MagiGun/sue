@@ -11,6 +11,20 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Pose scanner** and **Hand scanner**: pick a 3D drawing figure or a
+  3D hand, choose a photo in Tool Settings, and it takes the pose of the
+  person or hand in it. The models (MoveNet and MediaPipe, both openly
+  licensed) download once and then run offline on your computer.
+- **Ruby** (furigana) for text: select words while typing and set their
+  reading in Tool Settings; it sits over them, or beside them in
+  vertical text.
+- The Figure tool's **Polyline** and **Curve**, and the Fill tool's
+  **Paint unpainted area**, as in Clip Studio Paint.
+- **Browse Assets** on phones and tablets, with Data Transfers as its own
+  tab beside it.
+
 ## [0.0.73] - 2026-11-01
 
 ### Added
