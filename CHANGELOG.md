@@ -11,52 +11,42 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-11-01
+
 ### Added
 
 - Sue Paint's Balloon tool has Clip Studio Paint's balloons: rounded
   rectangle, cloud (thought) and flash (shout) balloons, the Balloon pen
   for a balloon in any outline, and the thought balloon tail's bubbles.
   The Text tool centers words in any of them.
+- Curve and polyline balloons and the Polyline frame, clicked out corner
+  by corner as in Clip Studio Paint, and the Object tool drags a panel's
+  corners or the whole panel.
 - Sue Paint's Figure tool draws Saturated Lines around the clear middle
   you drag, and Speed Lines along the way you drag, each on an effect line
   layer that stays editable: the Object tool moves their ends, and Tool
   Property changes how many lines, their width, their scatter and color.
+- Folios: Story, Change Story Information numbers the pages, at their
+  outer corners or centered, on the canvas and in every export, and the
+  first page can start alone or facing page 2 (also in the Page Manager).
+- File, Import, Batch import brings every picture in a folder in, one a
+  page, in name order.
+- The Text tool's Text on Curve: draw a curve, then type along it.
+- The Text tool sets letter spacing, line spacing and justification.
 - Layer, New Layer, 3D Hand and 3D Head, posed like the drawing figure
   by dragging their joints or from their presets, as in Clip Studio Paint
   5.0 and 5.1.
 - Register pose as material keeps any pose of a figure, hand or head in
   the Material palette's Poses, to use again.
+- 3D layers can carry their light with the camera and have fog rising
+  from the foot, as in Clip Studio Paint 5.0 and 5.1.
 - Animation, Timeline, Exposure Sheet: the timing as a table to read and
   change, saved and read back as CSV (File, Export Animation and File,
   Import).
 - File, Export Animation, Animated WebP.
-- The Text tool's Text on Curve: draw a curve, then type along it.
-- 3D layers can carry their light with the camera and have fog rising
-  from the foot, as in Clip Studio Paint 5.0 and 5.1.
-- File, Import, Batch import brings every picture in a folder in, one a
-  page, in name order.
-- The Object tool's Tool Property says what it does on each kind of
-  layer instead of that it arrives later.
-- Layer comps, as in Clip Studio Paint EX: named versions of which
-  layers show, how strongly and how they blend, shown again in one step
-  and exported each as its own picture.
-- File, Special Export, Export vectors saves vector layers as SVG.
-- Tonal corrections change every picked layer at once, as in Clip Studio
-  Paint 5.0, and Layer, Change Selected Layer has Select All Layers and
-  Deselect Layers.
+- File, Export Animation, Animated sticker (APNG).
 - Smart Shape, as in Clip Studio Paint 5.0: hold the pen still at the end
   of a stroke and it becomes a clean line, arc, ellipse or polygon.
-- File, Export Animation, Animated sticker (APNG).
-- Folios: Story, Change Story Information numbers the pages, at their
-  outer corners or centered, on the canvas and in every export, and the
-  first page can start alone or facing page 2 (also in the Page Manager).
-- Filter, Effect has Glow, Inflate and Drop Shadow, as in Clip Studio
-  Paint 5.1.
-- The Text tool sets letter spacing, line spacing and justification.
-- Curve and polyline balloons and the Polyline frame, clicked out corner
-  by corner as in Clip Studio Paint, and the Object tool drags a panel's
-  corners or the whole panel.
-
 - Add from downloads in Sue Paint's Tool Group brings in brushes you
   downloaded: Clip Studio Paint sub tools (.sut), Photoshop brushes
   (.abr), GIMP brushes (.gbr, .gih) and pictures. Their size, opacity,
@@ -70,6 +60,17 @@ follow [Semantic Versioning](https://semver.org/).
   Chain, Lace, Stitches, Dotted line and Dashed line run along it and
   turn with it. Any brush with a shape gets Turn along the line, Angle,
   Scatter, Size jitter and Turn jitter in Tool Settings.
+- Filter, Effect has Glow, Inflate and Drop Shadow, as in Clip Studio
+  Paint 5.1.
+- Tonal corrections change every picked layer at once, as in Clip Studio
+  Paint 5.0, and Layer, Change Selected Layer has Select All Layers and
+  Deselect Layers.
+- Layer comps, as in Clip Studio Paint EX: named versions of which
+  layers show, how strongly and how they blend, shown again in one step
+  and exported each as its own picture.
+- File, Special Export, Export vectors saves vector layers as SVG.
+- The Object tool's Tool Property says what it does on each kind of
+  layer instead of that it arrives later.
 - Release Notes in the update window opens the whole of what is new,
   inside Sue, on phones and computers.
 - On Windows and Linux, Sue draws its own window frame, as Clip Studio
@@ -611,7 +612,8 @@ The first release.
 - Packages for Windows, macOS, Linux, Android and iOS, under the Sayn
   License.
 
-[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.6...HEAD
+[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.7...HEAD
+[0.0.7]: https://github.com/MagiGun/sue/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/MagiGun/sue/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/MagiGun/sue/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/MagiGun/sue/compare/v0.0.3...v0.0.4
