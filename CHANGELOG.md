@@ -11,6 +11,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.74] - 2026-11-02
+
 ### Added
 
 - **Pose scanner** and **Hand scanner**: pick a 3D drawing figure or a
@@ -24,6 +26,11 @@ follow [Semantic Versioning](https://semver.org/).
   **Paint unpainted area**, as in Clip Studio Paint.
 - **Browse Assets** on phones and tablets, with Data Transfers as its own
   tab beside it.
+
+### Fixed
+
+- The Linux packages (AppImage, .deb, .rpm and tarball) carry Sue's
+  AppStream description, so software centers and AppImage tools show it.
 
 ## [0.0.73] - 2026-11-01
 
@@ -679,7 +686,8 @@ The first release.
 - Packages for Windows, macOS, Linux, Android and iOS, under the Sayn
   License.
 
-[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.73...HEAD
+[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.74...HEAD
+[0.0.74]: https://github.com/MagiGun/sue/compare/v0.0.73...v0.0.74
 [0.0.73]: https://github.com/MagiGun/sue/compare/v0.0.72...v0.0.73
 [0.0.72]: https://github.com/MagiGun/sue/compare/v0.0.71...v0.0.72
 [0.0.71]: https://github.com/MagiGun/sue/compare/v0.0.7...v0.0.71
