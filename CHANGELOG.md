@@ -11,6 +11,16 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.71] - 2026-11-01
+
+### Fixed
+
+- The Decoration tool draws: in 0.0.7 a stroke with it only said
+  "Decoration arrives in a later Sue Paint". B now cycles to it too,
+  after the Brush and Airbrush, as in Clip Studio Paint.
+- A new test runs every Sue Paint menu command and draws with every tool,
+  so a tool or command that is not wired up cannot ship again.
+
 ## [0.0.7] - 2026-11-01
 
 ### Added
@@ -612,7 +622,8 @@ The first release.
 - Packages for Windows, macOS, Linux, Android and iOS, under the Sayn
   License.
 
-[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.7...HEAD
+[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.71...HEAD
+[0.0.71]: https://github.com/MagiGun/sue/compare/v0.0.7...v0.0.71
 [0.0.7]: https://github.com/MagiGun/sue/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/MagiGun/sue/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/MagiGun/sue/compare/v0.0.4...v0.0.5

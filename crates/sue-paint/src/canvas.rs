@@ -1198,7 +1198,12 @@ impl SuePaint {
                 self.pick(pos, sub.mode, viewport, size, cx);
                 self.gesture = Some(Gesture::Pick { mode: sub.mode });
             }
-            Tool::Pen | Tool::Pencil | Tool::Brush | Tool::Airbrush | Tool::Eraser => {
+            Tool::Pen
+            | Tool::Pencil
+            | Tool::Brush
+            | Tool::Airbrush
+            | Tool::Eraser
+            | Tool::Decoration => {
                 let info = match self.drawable(&cx.world.arena) {
                     Ok(info) => info,
                     Err(error) => {

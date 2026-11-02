@@ -122,7 +122,7 @@ impl Tool {
             Self::AutoSelect => Some('W'),
             Self::Eyedropper => Some('I'),
             Self::Pen | Self::Pencil => Some('P'),
-            Self::Brush | Self::Airbrush => Some('B'),
+            Self::Brush | Self::Airbrush | Self::Decoration => Some('B'),
             Self::Eraser => Some('E'),
             Self::Fill | Self::Gradient => Some('G'),
             Self::Figure => Some('U'),
@@ -132,7 +132,6 @@ impl Tool {
             Self::Blend => Some('J'),
             Self::Frame | Self::Ruler => Some('U'),
             Self::CorrectLine => Some('Y'),
-            _ => None,
         }
     }
 

@@ -3453,6 +3453,137 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Every Sue Paint menu command runs on a canvas, and every tool draws
+    /// on it, without a panic and without saying it is not there yet.
+    #[test]
+    fn sue_paint_every_menu_command_and_tool_works() {
+        let (mut runtime, root) = runtime("paint-everything");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let not_yet = |runtime: &Runtime| {
+            runtime.shell.message().is_some_and(|(text, _)| {
+                text.contains("not in Sue Paint yet") || text.contains("arrives in a later")
+            })
+        };
+        // Every tool, each sub tool its key cycles to, drawn across the
+        // canvas.
+        let middle = paint_middle(&runtime);
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: plain,
+        };
+        for letter in [
+            egui::Key::P,
+            egui::Key::B,
+            egui::Key::E,
+            egui::Key::J,
+            egui::Key::G,
+            egui::Key::U,
+            egui::Key::T,
+            egui::Key::Y,
+            egui::Key::M,
+            egui::Key::W,
+            egui::Key::I,
+            egui::Key::O,
+            egui::Key::K,
+            egui::Key::H,
+        ] {
+            for _ in 0..4 {
+                step(&mut runtime, vec![key(letter, plain)]);
+                let from = middle - vec2(60.0, 20.0);
+                step(
+                    &mut runtime,
+                    vec![egui::Event::PointerMoved(from), press(from, true)],
+                );
+                for part in 1..=6 {
+                    step(
+                        &mut runtime,
+                        vec![egui::Event::PointerMoved(
+                            from + vec2(part as f32 * 20.0, part as f32 * 8.0),
+                        )],
+                    );
+                }
+                step(&mut runtime, vec![press(from + vec2(120.0, 48.0), false)]);
+                step(&mut runtime, Vec::new());
+                assert!(
+                    !not_yet(&runtime),
+                    "{letter:?}: {:?}",
+                    runtime.shell.message()
+                );
+                step(&mut runtime, vec![key(egui::Key::Escape, plain)]);
+                step(&mut runtime, vec![key(egui::Key::Escape, plain)]);
+                step(&mut runtime, Vec::new());
+            }
+        }
+        // Every command in the menus, as Clip Studio Paint's are laid out.
+        let menus = include_str!("../../../crates/sue-paint/src/menus.rs");
+        let mut commands: Vec<String> = menus
+            .split("act(")
+            .skip(1)
+            .filter_map(|call| {
+                let after = call.split_once("),")?.1;
+                let name = after.trim_start().strip_prefix('"')?.split('"').next()?;
+                Some(name.to_owned())
+            })
+            .collect();
+        commands.dedup();
+        assert!(commands.len() > 300, "{}", commands.len());
+        // Leaving, quitting, printing and help go outside the canvas.
+        let outside = [
+            "file.leave",
+            "file.quit",
+            "file.close",
+            "file.print",
+            "help.",
+            "window.new",
+            "window.interface.",
+        ];
+        for command in commands
+            .iter()
+            .filter(|command| !outside.iter().any(|skip| command.starts_with(skip)))
+        {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: command.clone(),
+                },
+                &mut NoTextures,
+                start,
+            );
+            step(&mut runtime, Vec::new());
+            assert!(
+                !not_yet(&runtime),
+                "{command}: {:?}",
+                runtime.shell.message()
+            );
+            // Close whatever opened.
+            step(&mut runtime, vec![key(egui::Key::Escape, plain)]);
+            step(&mut runtime, Vec::new());
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn sue_paint_exposure_sheet_goes_out_and_back_as_csv() {
         let (mut runtime, root) = runtime("paint-xsheet");
