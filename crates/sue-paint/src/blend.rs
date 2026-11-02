@@ -38,6 +38,62 @@ impl BlendKind {
     }
 }
 
+/// The Blend tool's Copy stamp sub tool's mode.
+pub const COPY_STAMP: u8 = 6;
+
+/// One Copy stamp dab at `center` (layer pixels), `radius` wide, at
+/// `strength`: paints in what `source` (the layer as it was when the
+/// stroke began, as large as `pixels`) holds `offset` away. Returns the
+/// rectangle it changed, `[x0, y0, x1, y1]`.
+#[allow(clippy::too_many_arguments, reason = "a dab's whole description")]
+pub fn stamp(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    source: &[u8],
+    center: [f32; 2],
+    radius: f32,
+    strength: f32,
+    offset: [f32; 2],
+) -> Option<[u32; 4]> {
+    let clamp = |value: f32, top: u32| (value.max(0.0) as u32).min(top);
+    let (x0, y0) = (
+        clamp(center[0] - radius - 1.0, width),
+        clamp(center[1] - radius - 1.0, height),
+    );
+    let (x1, y1) = (
+        clamp(center[0] + radius + 2.0, width),
+        clamp(center[1] + radius + 2.0, height),
+    );
+    if x1 <= x0 || y1 <= y0 || source.len() != pixels.len() {
+        return None;
+    }
+    let strength = strength.clamp(0.0, 1.0);
+    let reach_sq = radius.max(0.5) * radius.max(0.5);
+    for y in y0..y1 {
+        let py = y as f32 + 0.5;
+        for x in x0..x1 {
+            let px = x as f32 + 0.5;
+            let (dx, dy) = (px - center[0], py - center[1]);
+            // Firmer than a blur: whole inside, softening at the rim.
+            let t = ((dx * dx + dy * dy) / reach_sq).clamp(0.0, 1.0);
+            let weight = (1.0 - t * t * t) * strength;
+            if weight <= 0.0 {
+                continue;
+            }
+            let (sx, sy) = (px + offset[0], py + offset[1]);
+            if sx < 0.0 || sy < 0.0 || sx >= width as f32 || sy >= height as f32 {
+                continue;
+            }
+            let from = crate::warp::sample(source, width, height, sx, sy);
+            let at = ((y * width + x) * 4) as usize;
+            let here = [pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3]];
+            pixels[at..at + 4].copy_from_slice(&mix(here, from, weight));
+        }
+    }
+    Some([x0, y0, x1, y1])
+}
+
 /// How much a dab acts at a squared distance from its middle over its
 /// squared radius: 1 in the middle to 0 at the rim.
 fn falloff_sq(t_sq: f32) -> f32 {
@@ -206,6 +262,41 @@ mod tests {
 
     fn gray(pixels: &[u8], x: usize, y: usize) -> u8 {
         pixels[(y * 60 + x) * 4]
+    }
+
+    #[test]
+    fn copy_stamp_paints_what_lies_at_the_source() {
+        let source = square();
+        let mut pixels = square();
+        // The square's middle (30, 30) copied to (10, 10).
+        stamp(
+            &mut pixels,
+            60,
+            60,
+            &source,
+            [10.0, 10.0],
+            4.0,
+            1.0,
+            [20.0, 20.0],
+        )
+        .unwrap();
+        assert_eq!(gray(&pixels, 10, 10), 0);
+        assert_eq!(gray(&pixels, 30, 30), 0);
+        // Outside the dab nothing changes.
+        assert_eq!(gray(&pixels, 20, 10), 255);
+        // A source off the canvas leaves the pixel as it was.
+        let mut edge = square();
+        stamp(
+            &mut edge,
+            60,
+            60,
+            &source,
+            [10.0, 10.0],
+            4.0,
+            1.0,
+            [-40.0, 0.0],
+        );
+        assert_eq!(gray(&edge, 10, 10), 255);
     }
 
     #[test]

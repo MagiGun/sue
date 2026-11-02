@@ -1183,6 +1183,14 @@ impl SuePaint {
         }
         if space {
             tool = Tool::Hand;
+        } else if modifiers.alt
+            && tool == Tool::Blend
+            && self.toolbox.current().mode == crate::blend::COPY_STAMP
+        {
+            // Copy stamp: Alt and click sets where it copies from.
+            self.stamp = Some(([p.x, p.y], None));
+            cx.notify(tr!("copy-stamp-source-set"));
+            return;
         } else if modifiers.alt && tool.paints() && tool != Tool::Eraser && tool != Tool::Figure {
             match alt_does.as_str() {
                 "eyedropper" => tool = Tool::Eyedropper,
@@ -1391,6 +1399,20 @@ impl SuePaint {
                     return;
                 };
                 let offset = info.style.offset;
+                if sub.mode == crate::blend::COPY_STAMP {
+                    match &mut self.stamp {
+                        None => {
+                            cx.fail(tr!("copy-stamp-needs-source"));
+                            return;
+                        }
+                        // The first stroke fixes the distance; later ones
+                        // keep it, as Clip Studio's aligned stamp does.
+                        Some((source, gap @ None)) => {
+                            *gap = Some([source[0] - p.x, source[1] - p.y]);
+                        }
+                        Some(_) => {}
+                    }
+                }
                 self.gesture = Some(Gesture::Blend {
                     layer: info.id,
                     before,
@@ -1482,6 +1504,22 @@ impl SuePaint {
                     op,
                     from: p,
                     to: p,
+                });
+            }
+            // Lasso fill and Close and fill: drawn round, filled on
+            // release.
+            Tool::Figure | Tool::Fill
+                if (tool == Tool::Figure && sub.mode == crate::tools::LASSO_FILL)
+                    || (tool == Tool::Fill && sub.mode == crate::tools::CLOSE_AND_FILL) =>
+            {
+                if let Err(error) = self.paintable(&cx.world.arena) {
+                    cx.fail(error);
+                    return;
+                }
+                self.gesture = Some(Gesture::LassoFill {
+                    close: tool == Tool::Fill,
+                    sub: Box::new(sub),
+                    points: vec![[p.x, p.y]],
                 });
             }
             // Effect lines make a layer of their own.
@@ -2364,8 +2402,10 @@ impl SuePaint {
             return;
         };
         let p = view.to_picture(viewport, size, pos);
+        let stamp = self.stamp.and_then(|(_, gap)| gap);
         let Some(Gesture::Blend {
             layer,
+            before,
             last,
             since,
             offset,
@@ -2392,16 +2432,32 @@ impl SuePaint {
                 while along <= length {
                     let at = [last[0] + unit[0] * along, last[1] + unit[1] * along];
                     let motion = [unit[0] * step, unit[1] * step];
-                    if let Some([x0, y0, x1, y1]) = crate::blend::dab(
-                        pixels,
-                        width,
-                        height,
-                        kind,
-                        at,
-                        radius,
-                        sub.tip.opacity,
-                        motion,
-                    ) {
+                    let changed = if sub.mode == crate::blend::COPY_STAMP {
+                        stamp.and_then(|gap| {
+                            crate::blend::stamp(
+                                pixels,
+                                width,
+                                height,
+                                before,
+                                at,
+                                radius,
+                                sub.tip.opacity,
+                                gap,
+                            )
+                        })
+                    } else {
+                        crate::blend::dab(
+                            pixels,
+                            width,
+                            height,
+                            kind,
+                            at,
+                            radius,
+                            sub.tip.opacity,
+                            motion,
+                        )
+                    };
+                    if let Some([x0, y0, x1, y1]) = changed {
                         dirty = Some(dirty.map_or([x0, y0, x1, y1], |[a, b, c, d]| {
                             [a.min(x0), b.min(y0), c.max(x1), d.max(y1)]
                         }));
@@ -2747,7 +2803,9 @@ impl SuePaint {
                 doc.compositor
                     .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
             }
-            Gesture::Lasso { points, .. } | Gesture::Outline { points, .. } => {
+            Gesture::Lasso { points, .. }
+            | Gesture::Outline { points, .. }
+            | Gesture::LassoFill { points, .. } => {
                 if points.last().is_none_or(|last| {
                     (last[0] - p.x).hypot(last[1] - p.y) > 1.5 / doc.view.zoom.max(0.01)
                 }) {
@@ -3222,6 +3280,9 @@ impl SuePaint {
                     Self::apply(cx, edit);
                 }
             }
+            Gesture::LassoFill { sub, close, points } => {
+                self.lasso_fill(&sub, close, &points, size, cx);
+            }
             Gesture::Lasso { op, points } => {
                 if let Some(doc) = self.docs.get_mut(self.active) {
                     let mut selection = doc
@@ -3513,6 +3574,85 @@ impl SuePaint {
             &cx.world.arena,
             info.id,
             &tr!("fill"),
+            |pixels, width, height| {
+                fill::paint_mask(
+                    pixels,
+                    [width, height],
+                    offset,
+                    &mask,
+                    size,
+                    rgb,
+                    opacity,
+                    alpha_lock,
+                );
+            },
+        ) {
+            Ok(Some(edit)) => {
+                if Self::apply(cx, edit) {
+                    self.recent.push(self.drawing_color());
+                }
+            }
+            Ok(None) => {}
+            Err(error) => cx.fail(error),
+        }
+    }
+
+    /// Lasso fill and Close and fill: the area drawn round (or, closing,
+    /// the areas inside it that lines close off) filled with the drawing
+    /// color, within the selection.
+    fn lasso_fill(
+        &mut self,
+        sub: &SubTool,
+        close: bool,
+        points: &[[f32; 2]],
+        size: [u32; 2],
+        cx: &mut AppletContext<'_>,
+    ) {
+        if points.len() < 3 {
+            return;
+        }
+        let Ok(info) = self.paintable(&cx.world.arena) else {
+            return;
+        };
+        let Some(picture_id) = self.picture() else {
+            return;
+        };
+        let mut shape = Selection::new(size[0], size[1]);
+        shape.polygon(points, Op::Replace);
+        let selection = self.doc().and_then(|doc| doc.selection.clone());
+        let lasso: Vec<u8> = (0..size[0] * size[1])
+            .map(|index| {
+                let (x, y) = (index % size[0], index / size[0]);
+                let inside = shape.at(x, y)
+                    * selection
+                        .as_ref()
+                        .map_or(1.0, |selection| selection.at(x, y));
+                (inside * 255.0).round() as u8
+            })
+            .collect();
+        let mask = if close {
+            let reference = composite::render(
+                &cx.world.arena,
+                picture_id,
+                [0, 0, size[0], size[1]],
+                RenderOptions {
+                    paper: false,
+                    drafts: true,
+                },
+            );
+            fill::enclosed(&reference, size, &lasso)
+        } else {
+            lasso
+        };
+        if mask.iter().all(|value| *value == 0) {
+            return;
+        }
+        let rgb = color::unit(self.drawing_color());
+        let (offset, alpha_lock, opacity) = (info.style.offset, info.alpha_locked, sub.tip.opacity);
+        match doc::rewrite(
+            &cx.world.arena,
+            info.id,
+            &crate::localize(&sub.name),
             |pixels, width, height| {
                 fill::paint_mask(
                     pixels,
@@ -4063,7 +4203,11 @@ impl SuePaint {
                     }
                 }
             }
-            Some(Gesture::Lasso { points, .. } | Gesture::Outline { points, .. }) => {
+            Some(
+                Gesture::Lasso { points, .. }
+                | Gesture::Outline { points, .. }
+                | Gesture::LassoFill { points, .. },
+            ) => {
                 let path = points.iter().copied().map(screen).collect::<Vec<_>>();
                 painter.add(Shape::line(path, Stroke::new(1.0, theme.border_active)));
             }

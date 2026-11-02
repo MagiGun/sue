@@ -679,8 +679,126 @@ pub fn paint_blended(
     }
 }
 
+/// Close and fill: inside `lasso` (a mask, 0 or more), the areas the
+/// lines in `reference` (RGBA) close off from the lasso's edge, grown a
+/// pixel under the lines so no seam shows. Lines are pixels at least half
+/// opaque.
+#[must_use]
+pub fn enclosed(reference: &[u8], size: [u32; 2], lasso: &[u8]) -> Vec<u8> {
+    let [width, height] = size;
+    let count = (width * height) as usize;
+    let mut out = vec![0; count];
+    if reference.len() < count * 4 || lasso.len() < count {
+        return out;
+    }
+    let inside = |index: usize| lasso[index] >= 128;
+    let line = |index: usize| reference[index * 4 + 3] >= 128;
+    // Open: what the lasso's edge reaches without crossing a line.
+    let mut open = vec![false; count];
+    let mut stack = Vec::new();
+    for y in 0..height {
+        for x in 0..width {
+            let index = (y * width + x) as usize;
+            if !inside(index) || line(index) {
+                continue;
+            }
+            let edge = x == 0
+                || y == 0
+                || x + 1 == width
+                || y + 1 == height
+                || !inside(index - 1)
+                || !inside(index + 1)
+                || !inside(index - width as usize)
+                || !inside(index + width as usize);
+            if edge {
+                open[index] = true;
+                stack.push(index);
+            }
+        }
+    }
+    while let Some(index) = stack.pop() {
+        let (x, y) = (index as u32 % width, index as u32 / width);
+        let mut visit = |next: usize| {
+            if !open[next] && inside(next) && !line(next) {
+                open[next] = true;
+                stack.push(next);
+            }
+        };
+        if x > 0 {
+            visit(index - 1);
+        }
+        if x + 1 < width {
+            visit(index + 1);
+        }
+        if y > 0 {
+            visit(index - width as usize);
+        }
+        if y + 1 < height {
+            visit(index + width as usize);
+        }
+    }
+    for index in 0..count {
+        if inside(index) && !line(index) && !open[index] {
+            out[index] = 255;
+        }
+    }
+    // A pixel under the lines around each area.
+    let grown: Vec<u8> = (0..count)
+        .map(|index| {
+            if out[index] > 0 || !inside(index) || !line(index) {
+                return out[index];
+            }
+            let (x, y) = (index as u32 % width, index as u32 / width);
+            let near = (x > 0 && out[index - 1] > 0)
+                || (x + 1 < width && out[index + 1] > 0)
+                || (y > 0 && out[index - width as usize] > 0)
+                || (y + 1 < height && out[index + width as usize] > 0);
+            if near { 255 } else { 0 }
+        })
+        .collect();
+    grown
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn close_and_fill_fills_only_what_lines_close_off() {
+        // Two rings drawn on 40 x 20: a closed one at the left, one with a
+        // gap at the right; the lasso takes in the whole picture but its
+        // border row.
+        let size = [40u32, 20u32];
+        let mut reference = vec![0u8; 40 * 20 * 4];
+        let mut ink = |x: u32, y: u32| reference[((y * 40 + x) * 4 + 3) as usize] = 255;
+        for i in 3..15 {
+            ink(3, i);
+            ink(14, i);
+            ink(i, 3);
+            ink(i, 14);
+            ink(23, i);
+            ink(36, i);
+            ink(i + 20, 3);
+            if i != 8 {
+                ink(i + 20, 14);
+            }
+        }
+        let lasso: Vec<u8> = (0..40 * 20)
+            .map(|index| {
+                let (x, y) = (index % 40, index / 40);
+                if x > 0 && y > 0 && x < 39 && y < 19 {
+                    255
+                } else {
+                    0
+                }
+            })
+            .collect();
+        let filled = super::enclosed(&reference, size, &lasso);
+        let at = |x: usize, y: usize| filled[y * 40 + x];
+        assert_eq!(at(8, 8), 255, "inside the closed ring");
+        assert_eq!(at(3, 8), 255, "a pixel under its line");
+        assert_eq!(at(1, 1), 0, "outside every ring");
+        assert_eq!(at(30, 8), 0, "the ring with a gap stays open");
+    }
+
     use super::*;
 
     #[test]

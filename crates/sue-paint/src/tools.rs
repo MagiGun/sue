@@ -8,6 +8,11 @@
 use crate::brush::{AntiAlias, Tip};
 
 /// A tool of the tool palette.
+/// The Fill tool's Close and fill sub tool's mode.
+pub const CLOSE_AND_FILL: u8 = 3;
+/// The Figure tool's Lasso fill sub tool's mode.
+pub const LASSO_FILL: u8 = 7;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Tool {
     /// Zooms the view in or out.
@@ -659,6 +664,8 @@ impl Tool {
             ],
             Self::Fill => vec![
                 plain(&tr!("refer-only-editing-layer"), 0).tolerance(0.1),
+                // Encircle lines: the areas they close off fill.
+                plain(&tr!("close-and-fill"), CLOSE_AND_FILL).tolerance(0.1),
                 plain(&tr!("refer-other-layers"), 1).tolerance(0.1),
             ],
             Self::Gradient => vec![
@@ -680,6 +687,8 @@ impl Tool {
                     // each on a layer of its own.
                     SubTool::new(self, "Saturated Line", crate::comic::SATURATED_LINES, line),
                     SubTool::new(self, "Speed Line", crate::comic::SPEED_LINES, line),
+                    // Draw round an area and it fills.
+                    SubTool::new(self, "Lasso fill", LASSO_FILL, line),
                 ]
             }
             // Clip Studio Paint's order: rectangle, polyline, then cut.
@@ -746,6 +755,13 @@ impl Tool {
                     SubTool::new(self, "Liquify: Expand", 3, soft),
                     SubTool::new(self, "Liquify: Pinch", 4, soft),
                     SubTool::new(self, "Liquify: Twirl", 5, soft),
+                    // Alt and click picks where it copies from.
+                    SubTool::new(
+                        self,
+                        "Copy stamp",
+                        crate::blend::COPY_STAMP,
+                        tip(30.0, |t| t.size_by.pressure = false),
+                    ),
                 ]
             }
             // Clip Studio Paint's Correct line group, then Remove dust.

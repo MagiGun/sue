@@ -283,6 +283,13 @@ pub(crate) enum Gesture {
     },
     /// A lasso selection.
     Lasso { op: Op, points: Vec<[f32; 2]> },
+    /// Lasso fill (Figure) or Close and fill (Fill): drawn round, then
+    /// filled with the drawing color.
+    LassoFill {
+        sub: Box<crate::tools::SubTool>,
+        close: bool,
+        points: Vec<[f32; 2]>,
+    },
     /// The Object tool moving a panel or effect lines.
     Comic(Box<crate::comic::ComicEdit>),
     /// A balloon drawn by hand (the Balloon pen).
@@ -585,6 +592,9 @@ pub struct SuePaint {
     /// Dragging on the canvas moves the light table's layers (Light table
     /// tool).
     pub(crate) light_tool: bool,
+    /// Copy stamp: where Alt and click set it to copy from, and how far
+    /// from the brush that is once a stroke starts (picture pixels).
+    pub(crate) stamp: Option<([f32; 2], Option<[f32; 2]>)>,
     /// The cel kept as the one being drawn whatever the frame (Lock
     /// current animation cel as editing target).
     pub(crate) cel_lock: Option<sue_core::EntityId>,
@@ -742,6 +752,7 @@ impl Default for SuePaint {
             general_opacity: 0.5,
             opacity_general: false,
             light_tool: false,
+            stamp: None,
             cel_lock: None,
             looping: true,
             pressure: None,

@@ -894,7 +894,7 @@ impl SuePaint {
         ];
         let current = self.toolbox.tool();
         // Liquify is Blend's liquify sub tools; Blend the others.
-        let liquify = current == Tool::Blend && self.toolbox.picked(Tool::Blend) >= 2;
+        let liquify = current == Tool::Blend && is_liquify_mode(self.toolbox.of(Tool::Blend).mode);
         let room = strip.height() - 12.0 - 96.0;
         let buttons = entries.iter().flatten().count() as f32;
         let gaps = (entries.len() as f32 - buttons) * 8.0;
@@ -930,15 +930,18 @@ impl SuePaint {
                 continue;
             }
             match tools {
-                // Downloads (Clip Studio Paint's materials from its site):
-                // not in Sue Paint yet.
-                [] => {}
+                // Downloads: Browse Assets on the start page, where
+                // materials download into Sue as transfers.
+                [] => {
+                    self.start.navigate("start/show");
+                    self.start.navigate("start/browse");
+                }
                 [Tool::Blend] => {
                     self.toolbox.pick(Tool::Blend);
-                    let picked = self.toolbox.picked(Tool::Blend);
-                    if is_liquify && picked < 2 {
+                    let picked = is_liquify_mode(self.toolbox.of(Tool::Blend).mode);
+                    if is_liquify && !picked {
                         self.toolbox.pick_sub(Tool::Blend, 2);
-                    } else if !is_liquify && picked >= 2 {
+                    } else if !is_liquify && picked {
                         self.toolbox.pick_sub(Tool::Blend, 0);
                     }
                 }
@@ -5440,4 +5443,10 @@ pub(crate) fn material_thumb(material: &crate::materials::Material, side: u32) -
         }
     }
     out
+}
+
+/// Blend's liquify sub tools (Push, Expand, Pinch and Twirl), which the
+/// Liquify button shows.
+const fn is_liquify_mode(mode: u8) -> bool {
+    matches!(mode, 2..=5)
 }

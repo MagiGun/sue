@@ -367,6 +367,10 @@ The order of work is the plan at the end.
 | Tool palette in Clip Studio Paint 4's order, with the main and sub colors and the transparent color beneath | Tool palette | done | Move holds hand, zoom and move layer; Comic holds frame border and balloon |
 | Eraser with Vector modes | Tool | done | Only where it touches, up to where lines cross, or whole lines |
 | Blend: Blur, Finger Tip, Liquify | Tool | done | Liquify has its own slot in Clip Studio's order; it pushes, swells, pinches and twirls |
+| Copy stamp | Blend tool | done | Alt and click sets the source; the first stroke fixes the distance, later strokes keep it |
+| Close and fill | Fill tool | done | Every area the lines inside the lasso close off fills, a pixel under the lines |
+| Lasso fill | Figure tool | done | |
+| Download button on the tool bar | Tool palette | done | Opens Browse Assets, where materials download into Sue |
 | Fill bucket: Close gap, Area scaling | Tool | done | Paint stays inside lines with small breaks, no white edge |
 | Auto Select (magic wand) | Tool | done | Looks at reference layers only when set |
 | Gradient tool | Tool | partial | Gradient layers exist; verify the tool's dials |

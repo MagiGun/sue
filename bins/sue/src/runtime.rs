@@ -3585,6 +3585,154 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sue_paint_lasso_fill_close_and_fill_and_copy_stamp_paint() {
+        let (mut runtime, root) = runtime("paint-lasso-stamp");
+        let ctx = egui::Context::default();
+        let start = Instant::now();
+        let mut now = start;
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let paint = AppletId::new(sue_paint::ID).unwrap();
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        let plain = egui::Modifiers::NONE;
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+        step(&mut runtime, Vec::new());
+        let command = |runtime: &mut Runtime, name: &str| {
+            runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: paint.clone(),
+                    command: name.to_owned(),
+                },
+                &mut NoTextures,
+                start,
+            );
+        };
+        let picture = runtime
+            .applets
+            .get(&paint)
+            .and_then(|applet| applet.focus())
+            .unwrap();
+        // Painted pixels on every layer but the paper.
+        let painted = |runtime: &Runtime| -> usize {
+            let arena = &runtime.engine.world.arena;
+            sue_paint::doc::layers(arena, picture)
+                .iter()
+                .filter_map(|info| sue_paint::doc::raster(arena, info.id))
+                .filter_map(|raster| raster.bytes())
+                .filter(|bytes| bytes.as_chunks::<4>().0.iter().any(|pixel| pixel[3] < 255))
+                .map(|bytes| {
+                    bytes
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .filter(|pixel| pixel[3] > 0)
+                        .count()
+                })
+                .sum()
+        };
+        let middle = paint_middle(&runtime);
+        let drag = |runtime: &mut Runtime,
+                    step: &mut dyn FnMut(&mut Runtime, Vec<egui::Event>),
+                    points: &[Pos2],
+                    modifiers: egui::Modifiers| {
+            let press = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers,
+            };
+            step(
+                runtime,
+                vec![egui::Event::PointerMoved(points[0]), press(points[0], true)],
+            );
+            for point in &points[1..] {
+                step(runtime, vec![egui::Event::PointerMoved(*point)]);
+            }
+            step(runtime, vec![press(points[points.len() - 1], false)]);
+            step(runtime, Vec::new());
+        };
+        let ring = |center: Pos2, radius: f32| -> Vec<Pos2> {
+            (0..=24)
+                .map(|index| {
+                    let angle = index as f32 / 24.0 * std::f32::consts::TAU;
+                    center + vec2(angle.cos(), angle.sin()) * radius
+                })
+                .collect()
+        };
+        let sub = |runtime: &mut Runtime, tool: &str, index: usize| {
+            command(runtime, tool);
+            for _ in 0..index {
+                command(runtime, "tool.next_sub");
+            }
+        };
+        // Lasso fill: the area drawn round fills.
+        assert_eq!(painted(&runtime), 0);
+        sub(&mut runtime, "tool.figure", 7);
+        drag(
+            &mut runtime,
+            &mut step,
+            &ring(middle - vec2(80.0, 0.0), 30.0),
+            plain,
+        );
+        let lasso = painted(&runtime);
+        assert!(lasso > 500, "lasso fill painted {lasso} pixels");
+        // Close and fill: nothing closed off on a new layer, then a ring
+        // drawn with the pen fills inside.
+        command(&mut runtime, "layer.new");
+        sub(&mut runtime, "tool.fill", 1);
+        let around = ring(middle + vec2(80.0, 0.0), 50.0);
+        drag(&mut runtime, &mut step, &around, plain);
+        assert_eq!(painted(&runtime), lasso, "no lines, nothing closed off");
+        command(&mut runtime, "tool.pen");
+        drag(
+            &mut runtime,
+            &mut step,
+            &ring(middle + vec2(80.0, 0.0), 25.0),
+            plain,
+        );
+        let lines = painted(&runtime);
+        sub(&mut runtime, "tool.fill", 1);
+        drag(&mut runtime, &mut step, &around, plain);
+        let filled = painted(&runtime);
+        assert!(
+            filled > lines + 500,
+            "close and fill: {lines} before, {filled} after"
+        );
+        // Copy stamp: nothing until Alt and click sets a source, then the
+        // lasso fill's paint copies onto an empty place.
+        command(&mut runtime, "layer.select_below");
+        sub(&mut runtime, "tool.blend", 6);
+        let empty = middle + vec2(-80.0, 120.0);
+        let line = [empty, empty + vec2(10.0, 0.0), empty + vec2(20.0, 0.0)];
+        drag(&mut runtime, &mut step, &line, plain);
+        assert_eq!(painted(&runtime), filled, "no source yet");
+        drag(
+            &mut runtime,
+            &mut step,
+            &[middle - vec2(80.0, 0.0)],
+            egui::Modifiers::ALT,
+        );
+        drag(&mut runtime, &mut step, &line, plain);
+        assert!(
+            painted(&runtime) > filled + 100,
+            "copy stamp painted {}",
+            painted(&runtime) - filled
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn sue_paint_light_table_moves_registers_files_and_shows_on_every_cel() {
         let (mut runtime, root) = runtime("paint-light-table");
         let ctx = egui::Context::default();

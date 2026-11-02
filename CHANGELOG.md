@@ -11,6 +11,17 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.73] - 2026-11-01
+
+### Added
+
+- New Clip Studio Paint sub tools: **Close and fill** (Fill: draw round
+  some lines and every area they close off fills), **Lasso fill**
+  (Figure: fills whatever you draw round) and **Copy stamp** (Blend: Alt
+  and click where to copy from, then paint).
+- The Download button at the top of the tool bar opens Browse Assets
+  instead of doing nothing.
+
 ## [0.0.72] - 2026-11-01
 
 ### Added
@@ -654,7 +665,8 @@ The first release.
 - Packages for Windows, macOS, Linux, Android and iOS, under the Sayn
   License.
 
-[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.72...HEAD
+[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.73...HEAD
+[0.0.73]: https://github.com/MagiGun/sue/compare/v0.0.72...v0.0.73
 [0.0.72]: https://github.com/MagiGun/sue/compare/v0.0.71...v0.0.72
 [0.0.71]: https://github.com/MagiGun/sue/compare/v0.0.7...v0.0.71
 [0.0.7]: https://github.com/MagiGun/sue/compare/v0.0.6...v0.0.7

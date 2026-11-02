@@ -642,10 +642,14 @@ Once a canvas is open:
   change its settings.
 - **Fill that stays inside:** the fill bucket's **Close gap** keeps the paint
   inside lines with small breaks, and **Area scaling** spreads it a little
-  under the lines so no white edge is left.
+  under the lines so no white edge is left. **Close and fill** fills by
+  drawing round instead of clicking: every area inside that the lines close
+  off fills at once, and the Figure tool's **Lasso fill** fills whatever
+  you draw round.
 - **Blend** (J): Blur softens, Finger Tip smudges the colors along your
   stroke, and Liquify pushes the drawing along, swells it, pinches it or
-  twirls it under the brush.
+  twirls it under the brush. **Copy stamp** copies one part of a layer to
+  another: Alt and click where to copy from, then paint.
 - **Puppet warp** (Edit, Transform): click to put pins on a layer, drag one
   and the drawing bends around the others while keeping its shape; Alt and
   click takes a pin away. OK (or Enter) keeps it, Cancel (or Esc) does not.
