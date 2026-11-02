@@ -11,6 +11,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.72] - 2026-11-01
+
 ### Added
 
 - Sue Paint downloads by itself: paste a link to a brush file, a PNG or a
@@ -652,7 +654,8 @@ The first release.
 - Packages for Windows, macOS, Linux, Android and iOS, under the Sayn
   License.
 
-[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.71...HEAD
+[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.72...HEAD
+[0.0.72]: https://github.com/MagiGun/sue/compare/v0.0.71...v0.0.72
 [0.0.71]: https://github.com/MagiGun/sue/compare/v0.0.7...v0.0.71
 [0.0.7]: https://github.com/MagiGun/sue/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/MagiGun/sue/compare/v0.0.5...v0.0.6
