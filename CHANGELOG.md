@@ -21,6 +21,11 @@ follow [Semantic Versioning](https://semver.org/).
   you drag, and Speed Lines along the way you drag, each on an effect line
   layer that stays editable: the Object tool moves their ends, and Tool
   Property changes how many lines, their width, their scatter and color.
+- Layer, New Layer, 3D Hand and 3D Head, posed like the drawing figure
+  by dragging their joints or from their presets, as in Clip Studio Paint
+  5.0 and 5.1.
+- Register pose as material keeps any pose of a figure, hand or head in
+  the Material palette's Poses, to use again.
 - Animation, Timeline, Exposure Sheet: the timing as a table to read and
   change, saved and read back as CSV (File, Export Animation and File,
   Import).

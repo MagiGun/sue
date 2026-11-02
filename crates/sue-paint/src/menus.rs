@@ -482,6 +482,8 @@ pub fn menus() -> Vec<Menu> {
                         SEP,
                         act(&tr!("n-3d-layer"), "layer.new.3d"),
                         act(&tr!("n-3d-drawing-figure"), "layer.new.figure"),
+                        act(&tr!("n-3d-hand"), "layer.new.hand"),
+                        act(&tr!("n-3d-head"), "layer.new.head"),
                         act(&tr!("frame-border-folder-ellipsis"), "layer.new.frame"),
                     ],
                 ),

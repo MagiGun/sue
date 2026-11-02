@@ -468,6 +468,8 @@ pub struct SuePaint {
     pub(crate) polyline: Vec<[f32; 2]>,
     /// The tool and sub tool mode clicking out `polyline`.
     pub(crate) polyline_for: Option<(crate::tools::Tool, u8)>,
+    /// A command a palette asked for, run when the palette has a context.
+    pub(crate) pending_command: Option<&'static str>,
     /// Effect line settings changed in Tool Property, to draw again.
     pub(crate) pending_effect: Option<(EntityId, crate::manga::EffectLines)>,
     /// The Selection Launcher shows under the selection.
@@ -670,6 +672,7 @@ impl Default for SuePaint {
             polyline: Vec::new(),
             polyline_for: None,
             pending_effect: None,
+            pending_command: None,
             launcher: true,
             transform_launcher: true,
             text_launcher: true,
@@ -841,6 +844,9 @@ fn implemented(command: &str) -> bool {
             | "view.scroll_bar"
             | "layer.new.raster_top"
             | "layer.new.figure"
+            | "layer.new.hand"
+            | "figure.register_pose"
+            | "layer.new.head"
             | "layer.lines_tones_vector"
             | "figure.flip"
             | "figure.reset"
@@ -1644,6 +1650,86 @@ impl SuePaint {
         }
     }
 
+    /// Keeps the pose of the figure, hand or head on the current 3D layer
+    /// as a pose material, to use again (Clip Studio Paint's Register
+    /// pose as material).
+    pub(crate) fn register_pose(&mut self, cx: &mut AppletContext<'_>) {
+        let (Some(folder), Some(layer)) = (crate::materials::location(cx), self.layer()) else {
+            return;
+        };
+        let Some(model) = crate::figure::of_layer(&cx.world.arena, layer)
+            .and_then(|model| cx.world.arena.get_by_id(model).ok())
+        else {
+            cx.notify(tr!("pick-a-drawing-figure-layer"));
+            return;
+        };
+        let (pose, body) = (
+            crate::figure::Pose::of(model),
+            crate::figure::Body::of(model),
+        );
+        // The next free name for this kind.
+        let taken: Vec<String> = crate::materials::library(Some(&folder))
+            .into_iter()
+            .filter(|material| material.kind == crate::materials::POSE)
+            .map(|material| material.name)
+            .collect();
+        let name = (1..)
+            .map(|number| {
+                let kind = match body.kind {
+                    crate::figure::Kind::Body => tr!("figure-kind-body"),
+                    crate::figure::Kind::Hand => tr!("figure-kind-hand"),
+                    crate::figure::Kind::Head => tr!("figure-kind-head"),
+                };
+                tr!("pose-material-name", kind = kind, number = number)
+            })
+            .find(|name| !taken.contains(name))
+            .unwrap_or_default();
+        match crate::materials::register_pose(&folder, &name, body.kind, &pose) {
+            Ok(_) => {
+                cx.notify(tr!("is-in-the-material-palette", name = name));
+                self.panels.color_set = true;
+                self.set_tab = 2;
+                self.material_kind = self
+                    .material_kinds
+                    .iter()
+                    .position(|kind| kind.id == crate::materials::POSE)
+                    .map_or(0, |index| index as u8 + 1);
+                self.start.materials_changed();
+                self.material_pick = Some(name);
+            }
+            Err(error) => cx.fail(error),
+        }
+    }
+
+    /// Puts pose material `material` on the current figure, hand or head
+    /// when it is of the pose's kind, else on a new one of that kind.
+    fn apply_pose_material(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        material: &crate::materials::Material,
+    ) {
+        let Some((kind, pose)) = crate::materials::pose_of(material) else {
+            cx.fail(tr!("cannot-read-the-material", name = material.name));
+            return;
+        };
+        let current = self.layer().filter(|layer| {
+            crate::figure::of_layer(&cx.world.arena, *layer)
+                .and_then(|model| cx.world.arena.get_by_id(model).ok())
+                .is_some_and(|model| crate::figure::Body::of(model).kind == kind)
+        });
+        if let Some(layer) = current {
+            if let Some(edit) =
+                crate::figure::set_pose(&cx.world.arena, layer, &pose, &material.name)
+            {
+                Self::apply(cx, edit);
+            }
+            return;
+        }
+        let model = crate::figure::new_of(&material.name, kind)
+            .with_property(crate::figure::POSE, Value::from(pose.to_text()));
+        self.add_3d_layer(cx, &material.name, model);
+    }
+
     /// Puts `material` on the canvas as a new layer above the current one,
     /// in the drawing color.
     pub(crate) fn paste_material(
@@ -1651,6 +1737,10 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         material: &crate::materials::Material,
     ) {
+        if material.placement == crate::materials::Placement::Pose {
+            self.apply_pose_material(cx, material);
+            return;
+        }
         let Some(picture) = self.picture() else {
             return;
         };
@@ -5340,6 +5430,7 @@ impl SuePaint {
                     self.dialog = Some(Dialog::Shape3D(0));
                 }
             }
+            "figure.register_pose" => self.register_pose(cx),
             // A drawing figure's pose by name: a preset, flipped or reset.
             figure if figure.starts_with("figure.") => {
                 let Some(layer) = self.layer() else {
@@ -5349,23 +5440,21 @@ impl SuePaint {
                     cx.notify(tr!("pick-a-drawing-figure-layer"));
                     return;
                 };
-                let Some(now) = cx
-                    .world
-                    .arena
-                    .get_by_id(model)
-                    .ok()
-                    .map(crate::figure::Pose::of)
-                else {
+                let Some(entity) = cx.world.arena.get_by_id(model).ok() else {
                     return;
                 };
+                let (now, body) = (
+                    crate::figure::Pose::of(entity),
+                    crate::figure::Body::of(entity),
+                );
                 let next = match &figure["figure.".len()..] {
                     "flip" => now.flipped(),
-                    "reset" => crate::figure::Pose::default(),
+                    "reset" => body.standing(),
                     other => match other
                         .strip_prefix("preset.")
                         .and_then(|index| index.parse::<usize>().ok())
                     {
-                        Some(index) => crate::figure::preset(index),
+                        Some(index) => body.preset(index),
                         None => return,
                     },
                 };
@@ -5379,6 +5468,23 @@ impl SuePaint {
             "layer.new.figure" => {
                 let name = tr!("drawing-figure");
                 self.add_3d_layer(cx, &name, crate::figure::new_model(&name));
+            }
+            // Clip Studio Paint 5.0's 3D hand and 5.1's 3D head, to pose.
+            "layer.new.hand" => {
+                let name = tr!("n-3d-hand");
+                self.add_3d_layer(
+                    cx,
+                    &name,
+                    crate::figure::new_of(&name, crate::figure::Kind::Hand),
+                );
+            }
+            "layer.new.head" => {
+                let name = tr!("n-3d-head");
+                self.add_3d_layer(
+                    cx,
+                    &name,
+                    crate::figure::new_of(&name, crate::figure::Kind::Head),
+                );
             }
             "file.import.audio" => {
                 if self

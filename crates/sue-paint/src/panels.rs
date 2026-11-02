@@ -1291,6 +1291,9 @@ impl SuePaint {
         if let Some(command) = command {
             self.run(command, cx);
         }
+        if let Some(command) = self.pending_command.take() {
+            self.run(command, cx);
+        }
         // Effect lines from Tool Property, drawn again as one step.
         if let Some((layer, lines)) = self.pending_effect.take() {
             self.redraw_effect(cx, layer, &lines);
@@ -2756,8 +2759,19 @@ impl SuePaint {
         if let Some(model) = crate::figure::of_layer(arena, layer)
             && let Ok(model) = arena.get_by_id(model)
         {
-            self.figure_body(ui, layer, crate::figure::Body::of(model), theme);
-            self.figure_properties(ui, layer, &crate::figure::Pose::of(model), arena, theme);
+            let body = crate::figure::Body::of(model);
+            // A hand or a head has a size but no head to body ratio.
+            if body.kind == crate::figure::Kind::Body {
+                self.figure_body(ui, layer, body, theme);
+            }
+            self.figure_properties(
+                ui,
+                layer,
+                &crate::figure::Pose::of(model),
+                &body,
+                arena,
+                theme,
+            );
         }
         if view != now {
             if self
@@ -2833,10 +2847,11 @@ impl SuePaint {
         ui: &mut Ui,
         layer: sue_core::EntityId,
         pose: &crate::figure::Pose,
+        body: &crate::figure::Body,
         arena: &sue_core::Arena,
         theme: &Theme,
     ) {
-        use crate::figure::{JOINTS, PRESETS, preset};
+        let joints = body.joints();
         ui.separator();
         ui.label(RichText::new(tr!("drawing-figure")).color(theme.text));
         let mut next: Option<crate::figure::Pose> = None;
@@ -2846,9 +2861,9 @@ impl SuePaint {
             egui::ComboBox::from_id_salt(("sue-paint-figure-preset", layer))
                 .selected_text(tr!("choose-a-pose"))
                 .show_ui(ui, |ui| {
-                    for (index, name) in PRESETS.iter().enumerate() {
+                    for (index, name) in body.presets().iter().enumerate() {
                         if ui.selectable_label(false, crate::localize(name)).clicked() {
-                            next = Some(preset(index));
+                            next = Some(body.preset(index));
                             released = true;
                         }
                     }
@@ -2860,21 +2875,24 @@ impl SuePaint {
                 released = true;
             }
             if ui.button(tr!("reset-pose")).clicked() {
-                next = Some(crate::figure::Pose::default());
+                next = Some(body.standing());
                 released = true;
             }
         });
+        if ui.button(tr!("register-pose-as-material")).clicked() {
+            self.pending_command = Some("figure.register_pose");
+        }
         ui.horizontal(|ui| {
             ui.label(RichText::new(tr!("joint")).color(theme.muted));
             let shown = self
                 .figure_joint
-                .and_then(|joint| JOINTS.get(joint))
+                .and_then(|joint| joints.get(joint))
                 .map_or_else(|| tr!("none"), |joint| crate::localize(joint.name));
             egui::ComboBox::from_id_salt(("sue-paint-figure-joint", layer))
                 .selected_text(shown)
                 .height(400.0)
                 .show_ui(ui, |ui| {
-                    for (index, joint) in JOINTS.iter().enumerate() {
+                    for (index, joint) in joints.iter().enumerate() {
                         if ui
                             .selectable_label(
                                 self.figure_joint == Some(index),
@@ -2887,7 +2905,10 @@ impl SuePaint {
                     }
                 });
         });
-        if let Some(joint) = self.figure_joint.filter(|joint| *joint < JOINTS.len()) {
+        if let Some(joint) = self
+            .figure_joint
+            .filter(|joint| *joint < joints.len() && *joint < pose.0.len())
+        {
             let mut turned = pose.clone();
             for (axis, name) in [tr!("bend"), tr!("twist"), tr!("swing")].iter().enumerate() {
                 ui.horizontal(|ui| {
@@ -5261,7 +5282,7 @@ pub(crate) fn tool_icon(tool: Tool) -> Icon {
 pub(crate) fn material_thumb(material: &crate::materials::Material, side: u32) -> Vec<u8> {
     let tile = match material.placement {
         crate::materials::Placement::Fit => crate::materials::layer(material, [side, side], [0; 3]),
-        crate::materials::Placement::Cover => {
+        crate::materials::Placement::Cover | crate::materials::Placement::Pose => {
             crate::materials::picture(material, [side, side], [0; 3])
         }
     };

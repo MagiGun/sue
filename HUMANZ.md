@@ -1781,6 +1781,15 @@ down and right to left and fills glyph outlines (read with ttf-parser from
 the shared font library) with an accumulation rasterizer after font-rs.
 Clicked inside a balloon, the Text tool centers the words in it.
 
+**Figure kinds and pose materials.** A drawing figure model's
+`figure.kind` makes it a body, a hand (`figure::HAND`) or a head
+(`figure::HEAD_JOINTS`); `Body` carries the kind and answers its joints,
+framing and presets, so posing, drawing, joint picking and Tool Property
+work the same for all three. Pose materials are files in the materials
+location's `poses/` (the kind, then `Pose::to_text`), a registered
+material kind (`materials::POSE`) whose thumbnail renders the pose and
+whose placement poses a figure of its kind.
+
 **Exposure sheet, curved text, fog.** `anim::sheet` reads a folder's
 keys as cels, blanks and holds a frame each; `sheet_csv` and
 `from_sheet_csv` write and read it, cels named by their layers.

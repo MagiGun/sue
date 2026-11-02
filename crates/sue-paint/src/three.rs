@@ -836,7 +836,7 @@ pub fn buffers_of(
             &crate::figure::mesh(&pose, &body),
             view,
             size,
-            Some(crate::figure::FRAME),
+            Some(body.frame()),
         ));
     }
     let mesh = model.ext::<Geometry>()?.to_mesh();
@@ -873,11 +873,12 @@ pub fn new_layer(
     };
     let buffers = if figure {
         let pose = crate::figure::Pose::of(&model);
+        let body = crate::figure::Body::of(&model);
         render_framed(
-            &crate::figure::mesh(&pose, &crate::figure::Body::of(&model)),
+            &crate::figure::mesh(&pose, &body),
             &view,
             size,
-            Some(crate::figure::FRAME),
+            Some(body.frame()),
         )
     } else {
         let mesh = model

@@ -13,6 +13,12 @@
 //! Its body shape is two more properties, as Clip Studio Paint's: its
 //! [`HEIGHT`] and its [`HEADS`] (head to body ratio, how many heads tall
 //! it stands).
+//!
+//! A figure is of a [`Kind`] ([`KIND`]): the whole body, or Clip Studio
+//! Paint 5.0's posable hand (a palm and fifteen finger joints) or 5.1's
+//! head (neck, skull, jaw, nose, eyes and ears, to turn and tilt). Each
+//! kind has its own joints, framing and preset poses, and poses, draws
+//! and is posed by dragging its parts the same way.
 
 use sue_core::txn::{ReplaceComponent, SetProperty};
 use sue_core::{Arena, Entity, EntityId, MeshBuffer3D, Value};
@@ -28,6 +34,265 @@ pub const POSE: &str = "figure.pose";
 pub const HEIGHT: &str = "figure.height";
 /// Its head to body ratio: how many heads tall it is (`Float`).
 pub const HEADS: &str = "figure.heads";
+/// What the figure is: `body`, `hand` or `head` (`Text`).
+pub const KIND: &str = "figure.kind";
+
+/// What a figure is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Kind {
+    /// A whole body ([`JOINTS`]).
+    #[default]
+    Body,
+    /// A hand ([`HAND`]).
+    Hand,
+    /// A head ([`HEAD_JOINTS`]).
+    Head,
+}
+
+impl Kind {
+    /// Its name in [`KIND`].
+    #[must_use]
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Body => "body",
+            Self::Hand => "hand",
+            Self::Head => "head",
+        }
+    }
+
+    /// The kind named `key`; a body for anything else.
+    #[must_use]
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "hand" => Self::Hand,
+            "head" => Self::Head,
+            _ => Self::Body,
+        }
+    }
+}
+
+/// A finger of three joints: proximal, middle and distal, from `at` on
+/// the palm, each bone up, `lengths` long and narrowing from `width`.
+const fn finger(
+    names: [&'static str; 3],
+    first: usize,
+    at: [f32; 3],
+    lengths: [f32; 3],
+    width: f32,
+) -> [Joint; 3] {
+    [
+        joint(
+            names[0],
+            Some(0),
+            at,
+            [0.0, lengths[0], 0.0],
+            [width, width * 0.95],
+            [width * 0.92, width * 0.86],
+            None,
+        ),
+        joint(
+            names[1],
+            Some(first),
+            [0.0, lengths[0], 0.0],
+            [0.0, lengths[1], 0.0],
+            [width * 0.9, width * 0.85],
+            [width * 0.84, width * 0.8],
+            None,
+        ),
+        joint(
+            names[2],
+            Some(first + 1),
+            [0.0, lengths[1], 0.0],
+            [0.0, lengths[2], 0.0],
+            [width * 0.82, width * 0.78],
+            [width * 0.72, width * 0.66],
+            None,
+        ),
+    ]
+}
+
+const INDEX: [Joint; 3] = finger(
+    [
+        "Index finger base",
+        "Index finger middle",
+        "Index finger tip",
+    ],
+    1,
+    [-0.028, 0.09, 0.0],
+    [0.042, 0.026, 0.021],
+    0.0095,
+);
+const MIDDLE: [Joint; 3] = finger(
+    [
+        "Middle finger base",
+        "Middle finger middle",
+        "Middle finger tip",
+    ],
+    4,
+    [-0.009, 0.092, 0.0],
+    [0.046, 0.029, 0.022],
+    0.0098,
+);
+const RING: [Joint; 3] = finger(
+    ["Ring finger base", "Ring finger middle", "Ring finger tip"],
+    7,
+    [0.01, 0.09, 0.0],
+    [0.043, 0.027, 0.021],
+    0.0092,
+);
+const LITTLE: [Joint; 3] = finger(
+    [
+        "Little finger base",
+        "Little finger middle",
+        "Little finger tip",
+    ],
+    10,
+    [0.028, 0.084, 0.0],
+    [0.034, 0.02, 0.018],
+    0.0082,
+);
+
+/// A hand (Clip Studio Paint 5.0's 3D hand): the palm facing +z with its
+/// fingers up, then the index, middle, ring and little fingers, then the
+/// thumb, each finger three joints. Bending a finger (about x) curls it
+/// toward the palm.
+pub const HAND: [Joint; 16] = [
+    joint(
+        "Palm",
+        None,
+        [0.0, 0.0, 0.0],
+        [0.0, 0.09, 0.0],
+        [0.04, 0.014],
+        [0.046, 0.013],
+        None,
+    ),
+    INDEX[0],
+    INDEX[1],
+    INDEX[2],
+    MIDDLE[0],
+    MIDDLE[1],
+    MIDDLE[2],
+    RING[0],
+    RING[1],
+    RING[2],
+    LITTLE[0],
+    LITTLE[1],
+    LITTLE[2],
+    joint(
+        "Thumb base",
+        Some(0),
+        [-0.03, 0.015, 0.012],
+        [-0.016, 0.03, 0.014],
+        [0.012, 0.011],
+        [0.011, 0.0095],
+        None,
+    ),
+    joint(
+        "Thumb middle",
+        Some(13),
+        [-0.016, 0.03, 0.014],
+        [-0.006, 0.026, 0.008],
+        [0.0098, 0.0092],
+        [0.0092, 0.0086],
+        None,
+    ),
+    joint(
+        "Thumb tip",
+        Some(14),
+        [-0.006, 0.026, 0.008],
+        [-0.003, 0.021, 0.005],
+        [0.0088, 0.0082],
+        [0.0074, 0.0068],
+        None,
+    ),
+];
+
+/// A head (Clip Studio Paint 5.1's 3D head), facing +z: the neck, the
+/// skull, then the jaw, nose, brow, eyes and ears on it, to turn, tilt
+/// and open the mouth.
+pub const HEAD_JOINTS: [Joint; 9] = [
+    joint(
+        "Neck",
+        None,
+        [0.0, 0.0, 0.0],
+        [0.0, 0.09, 0.0],
+        [0.05, 0.052],
+        [0.048, 0.05],
+        None,
+    ),
+    joint(
+        "Skull",
+        Some(0),
+        [0.0, 0.09, 0.0],
+        [0.0, 0.085, -0.01],
+        [0.075, 0.085],
+        [0.082, 0.095],
+        None,
+    ),
+    joint(
+        "Jaw",
+        Some(1),
+        [0.0, 0.012, 0.022],
+        [0.0, -0.042, 0.036],
+        [0.066, 0.042],
+        [0.042, 0.03],
+        None,
+    ),
+    joint(
+        "Nose",
+        Some(1),
+        [0.0, 0.045, 0.078],
+        [0.0, -0.028, 0.018],
+        [0.011, 0.009],
+        [0.018, 0.013],
+        None,
+    ),
+    joint(
+        "Brow",
+        Some(1),
+        [0.0, 0.082, 0.068],
+        [0.0, 0.0, 0.012],
+        [0.052, 0.012],
+        [0.05, 0.011],
+        None,
+    ),
+    joint(
+        "Left eye",
+        Some(1),
+        [0.032, 0.066, 0.068],
+        [0.0, 0.0, 0.008],
+        [0.016, 0.016],
+        [0.015, 0.015],
+        Some(6),
+    ),
+    joint(
+        "Right eye",
+        Some(1),
+        [-0.032, 0.066, 0.068],
+        [0.0, 0.0, 0.008],
+        [0.016, 0.016],
+        [0.015, 0.015],
+        Some(5),
+    ),
+    joint(
+        "Left ear",
+        Some(1),
+        [0.08, 0.06, -0.005],
+        [0.004, -0.04, 0.0],
+        [0.01, 0.022],
+        [0.009, 0.017],
+        Some(8),
+    ),
+    joint(
+        "Right ear",
+        Some(1),
+        [-0.08, 0.06, -0.005],
+        [-0.004, -0.04, 0.0],
+        [0.01, 0.022],
+        [0.009, 0.017],
+        Some(7),
+    ),
+];
 
 /// One joint: its name, the joint it hangs from, where it sits on that
 /// joint's bone at rest, its own bone, and the body part's half widths
@@ -232,13 +497,16 @@ pub const JOINTS: [Joint; 17] = [
 /// changes how large it shows.
 pub const FRAME: ([f32; 3], f32) = ([0.0, 0.95, 0.0], 2.1);
 
-/// The figure's body shape: how tall, and how many heads tall.
+/// The figure's body shape: how tall, and how many heads tall, and what
+/// kind of figure it is.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Body {
     /// Centimeters.
     pub height: f32,
     /// Head to body ratio.
     pub heads: f32,
+    /// A body, a hand or a head.
+    pub kind: Kind,
 }
 
 impl Body {
@@ -265,7 +533,50 @@ impl Body {
         Self {
             height: number(HEIGHT, Self::HEIGHT, Self::HEIGHTS),
             heads: number(HEADS, Self::HEADS, Self::RATIOS),
+            kind: entity
+                .property(KIND)
+                .and_then(Value::as_str)
+                .map_or(Kind::Body, Kind::from_key),
         }
+    }
+
+    /// The middle and size Sue Paint frames this figure by, so posing
+    /// never changes how large it shows.
+    #[must_use]
+    pub fn frame(&self) -> ([f32; 3], f32) {
+        let scale = self.height / Self::HEIGHT;
+        let (middle, size) = match self.kind {
+            Kind::Body => FRAME,
+            Kind::Hand => ([0.0, 0.095, 0.0], 0.26),
+            Kind::Head => ([0.0, 0.13, 0.025], 0.34),
+        };
+        (middle.map(|value| value * scale), size * scale)
+    }
+
+    /// What people read for this kind's preset poses, in order.
+    #[must_use]
+    pub fn presets(&self) -> &'static [&'static str] {
+        match self.kind {
+            Kind::Body => &PRESETS,
+            Kind::Hand => &HAND_PRESETS,
+            Kind::Head => &HEAD_PRESETS,
+        }
+    }
+
+    /// This kind's preset pose `index` (the first is its rest).
+    #[must_use]
+    pub fn preset(&self, index: usize) -> Pose {
+        match self.kind {
+            Kind::Body => preset(index),
+            Kind::Hand => hand_preset(index),
+            Kind::Head => head_preset(index),
+        }
+    }
+
+    /// This kind's first preset, the pose Reset pose goes back to.
+    #[must_use]
+    pub fn standing(&self) -> Pose {
+        self.preset(0)
     }
 
     /// The joints shaped for this body: the head grown or shrunk to its
@@ -274,8 +585,25 @@ impl Body {
     /// hips keep their width, so a short ratio reads as a child or a
     /// chibi, not a thin adult.
     #[must_use]
-    pub fn joints(&self) -> [Joint; 17] {
+    pub fn joints(&self) -> Vec<Joint> {
         let scale = self.height / Self::HEIGHT;
+        let scaled = |joints: &[Joint]| -> Vec<Joint> {
+            joints
+                .iter()
+                .map(|joint| Joint {
+                    offset: joint.offset.map(|value| value * scale),
+                    bone: joint.bone.map(|value| value * scale),
+                    start: joint.start.map(|value| value * scale),
+                    end: joint.end.map(|value| value * scale),
+                    ..*joint
+                })
+                .collect()
+        };
+        match self.kind {
+            Kind::Hand => return scaled(&HAND),
+            Kind::Head => return scaled(&HEAD_JOINTS),
+            Kind::Body => {}
+        }
         let head = Self::HEADS / self.heads;
         let rest = (1.0 - 1.0 / self.heads) / (1.0 - 1.0 / Self::HEADS);
         let mut joints = JOINTS;
@@ -293,7 +621,7 @@ impl Body {
                 joint.end = joint.end.map(|value| value * scale);
             }
         }
-        joints
+        joints.to_vec()
     }
 }
 
@@ -302,6 +630,7 @@ impl Default for Body {
         Self {
             height: Self::HEIGHT,
             heads: Self::HEADS,
+            kind: Kind::Body,
         }
     }
 }
@@ -340,11 +669,17 @@ impl Pose {
     /// A pose from [`Self::to_text`]; joints it lacks stay unturned.
     #[must_use]
     pub fn from_text(text: &str) -> Self {
-        let mut pose = Self::rest();
+        Self::from_text_for(text, JOINTS.len())
+    }
+
+    /// A pose of `count` joints from [`Self::to_text`].
+    #[must_use]
+    pub fn from_text_for(text: &str, count: usize) -> Self {
+        let mut pose = Self(vec![[0.0; 3]; count]);
         let Some(body) = text.strip_prefix("v1;") else {
             return pose;
         };
-        for (at, joint) in body.split(';').enumerate().take(JOINTS.len()) {
+        for (at, joint) in body.split(';').enumerate().take(count) {
             let values: Vec<f32> = joint
                 .split(',')
                 .filter_map(|value| value.parse().ok())
@@ -359,10 +694,12 @@ impl Pose {
     /// The pose of figure model `entity`.
     #[must_use]
     pub fn of(entity: &Entity) -> Self {
+        let body = Body::of(entity);
+        let count = body.joints().len();
         entity
             .property(POSE)
             .and_then(Value::as_str)
-            .map_or_else(Self::default, Self::from_text)
+            .map_or_else(|| body.standing(), |text| Self::from_text_for(text, count))
     }
 
     /// The pose mirrored left to right (Clip Studio Paint's Flip pose):
@@ -370,9 +707,16 @@ impl Pose {
     /// way.
     #[must_use]
     pub fn flipped(&self) -> Self {
+        let joints: Vec<Joint> = if self.0.len() == HAND.len() {
+            HAND.to_vec()
+        } else if self.0.len() == HEAD_JOINTS.len() {
+            HEAD_JOINTS.to_vec()
+        } else {
+            JOINTS.to_vec()
+        };
         let mut out = self.clone();
-        for (at, joint) in JOINTS.iter().enumerate() {
-            let [x, y, z] = self.0[joint.mirror.unwrap_or(at)];
+        for (at, joint) in joints.iter().enumerate().take(self.0.len()) {
+            let [x, y, z] = self.0[joint.mirror.unwrap_or(at).min(self.0.len() - 1)];
             out.0[at] = [x, -y, -z];
         }
         out
@@ -381,6 +725,113 @@ impl Pose {
 
 /// What people read for the pose presets, in order.
 pub const PRESETS: [&str; 7] = ["Stand", "T-pose", "Walk", "Run", "Sit", "Arms up", "Think"];
+
+/// What people read for the hand's preset poses, in order.
+pub const HAND_PRESETS: [&str; 7] = [
+    "Open hand",
+    "Relaxed",
+    "Fist",
+    "Pointing",
+    "Peace sign",
+    "Thumbs up",
+    "Holding",
+];
+
+/// Hand preset pose `index` (see [`HAND_PRESETS`]).
+#[must_use]
+pub fn hand_preset(index: usize) -> Pose {
+    let mut pose = Pose(vec![[0.0; 3]; HAND.len()]);
+    // A finger (its first joint) curled by its three bends, spread by
+    // `spread` degrees.
+    let mut curl = |first: usize, bends: [f32; 3], spread: f32| {
+        pose.0[first] = [bends[0], 0.0, spread];
+        pose.0[first + 1] = [bends[1], 0.0, 0.0];
+        pose.0[first + 2] = [bends[2], 0.0, 0.0];
+    };
+    let fist = [88.0, 100.0, 62.0];
+    match index {
+        1 => {
+            for (first, spread) in [(1, 4.0), (4, 0.0), (7, -4.0), (10, -8.0)] {
+                curl(first, [14.0, 20.0, 10.0], spread);
+            }
+            curl(13, [10.0, 8.0, 6.0], 6.0);
+        }
+        2 => {
+            for first in [1, 4, 7, 10] {
+                curl(first, fist, 0.0);
+            }
+            curl(13, [24.0, 34.0, 38.0], -42.0);
+        }
+        3 => {
+            for first in [4, 7, 10] {
+                curl(first, fist, 0.0);
+            }
+            curl(13, [24.0, 34.0, 38.0], -42.0);
+        }
+        4 => {
+            curl(1, [0.0, 0.0, 0.0], 9.0);
+            curl(4, [0.0, 0.0, 0.0], -7.0);
+            for first in [7, 10] {
+                curl(first, fist, 0.0);
+            }
+            curl(13, [26.0, 36.0, 40.0], -44.0);
+        }
+        5 => {
+            for first in [1, 4, 7, 10] {
+                curl(first, fist, 0.0);
+            }
+            curl(13, [-10.0, 0.0, 0.0], 18.0);
+        }
+        6 => {
+            for (first, spread) in [(1, 3.0), (4, 0.0), (7, -3.0), (10, -6.0)] {
+                curl(first, [52.0, 48.0, 30.0], spread);
+            }
+            curl(13, [26.0, 18.0, 18.0], -32.0);
+        }
+        _ => {}
+    }
+    pose
+}
+
+/// What people read for the head's preset poses, in order.
+pub const HEAD_PRESETS: [&str; 7] = [
+    "Front",
+    "Three-quarter",
+    "Look up",
+    "Look down",
+    "Turn left",
+    "Tilt",
+    "Open mouth",
+];
+
+/// Head preset pose `index` (see [`HEAD_PRESETS`]): the neck turns and
+/// tilts the head; the jaw opens the mouth.
+#[must_use]
+pub fn head_preset(index: usize) -> Pose {
+    let mut pose = Pose(vec![[0.0; 3]; HEAD_JOINTS.len()]);
+    match index {
+        1 => {
+            pose.0[0] = [0.0, 30.0, 0.0];
+            pose.0[1] = [4.0, 10.0, 0.0];
+        }
+        2 => {
+            pose.0[0] = [-12.0, 0.0, 0.0];
+            pose.0[1] = [-18.0, 0.0, 0.0];
+        }
+        3 => {
+            pose.0[0] = [12.0, 0.0, 0.0];
+            pose.0[1] = [20.0, 0.0, 0.0];
+        }
+        4 => {
+            pose.0[0] = [0.0, 60.0, 0.0];
+            pose.0[1] = [0.0, 15.0, 0.0];
+        }
+        5 => pose.0[1] = [0.0, 0.0, 16.0],
+        6 => pose.0[2] = [26.0, 0.0, 0.0],
+        _ => {}
+    }
+    pose
+}
 
 /// Preset pose `index` (see [`PRESETS`]).
 #[must_use]
@@ -589,7 +1040,19 @@ pub fn mesh(pose: &Pose, body: &Body) -> MeshBuffer3D {
 /// A new figure model, standing.
 #[must_use]
 pub fn new_model(name: &str) -> Entity {
-    Entity::empty(name, CLASS).with_property(POSE, Value::from(Pose::default().to_text()))
+    new_of(name, Kind::Body)
+}
+
+/// A new figure model of `kind`, in its first preset pose.
+#[must_use]
+pub fn new_of(name: &str, kind: Kind) -> Entity {
+    let body = Body {
+        kind,
+        ..Body::default()
+    };
+    Entity::empty(name, CLASS)
+        .with_property(KIND, Value::from(kind.key()))
+        .with_property(POSE, Value::from(body.standing().to_text()))
 }
 
 /// `true` if `entity` is a drawing figure.
@@ -618,7 +1081,7 @@ pub fn set_pose(arena: &Arena, layer: EntityId, pose: &Pose, label: &str) -> Opt
     let size = [raster.width(), raster.height()];
     let view = crate::three::View3D::of(arena.get_by_id(layer).ok()?);
     let body = Body::of(arena.get_by_id(model).ok()?);
-    let buffers = crate::three::render_framed(&mesh(pose, &body), &view, size, Some(FRAME));
+    let buffers = crate::three::render_framed(&mesh(pose, &body), &view, size, Some(body.frame()));
     let drawn = crate::three::draw(&buffers, &view)?;
     Some(
         Edit::new(label)
@@ -636,7 +1099,7 @@ pub fn set_body(arena: &Arena, layer: EntityId, body: &Body, label: &str) -> Opt
     let size = [raster.width(), raster.height()];
     let view = crate::three::View3D::of(arena.get_by_id(layer).ok()?);
     let pose = Pose::of(arena.get_by_id(model).ok()?);
-    let buffers = crate::three::render_framed(&mesh(&pose, body), &view, size, Some(FRAME));
+    let buffers = crate::three::render_framed(&mesh(&pose, body), &view, size, Some(body.frame()));
     let drawn = crate::three::draw(&buffers, &view)?;
     Some(
         Edit::new(label)
@@ -686,7 +1149,8 @@ mod tests {
             Body::of(&model),
             Body {
                 height: 180.0,
-                heads: 10.0
+                heads: 10.0,
+                kind: Kind::Body,
             }
         );
     }
@@ -740,5 +1204,51 @@ mod tests {
                 .indices()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn hands_and_heads_pose_as_their_own_kinds() {
+        // A new hand keeps its kind, and its pose has a turn for each of its
+        // sixteen joints.
+        let hand = new_of("Hand", Kind::Hand);
+        let body = Body::of(&hand);
+        assert_eq!(body.kind, Kind::Hand);
+        assert_eq!(body.joints().len(), 16);
+        assert_eq!(Pose::of(&hand).0.len(), 16);
+        assert_eq!(body.presets().len(), HAND_PRESETS.len());
+        // A fist curls the fingertips toward the palm (+z), below their
+        // knuckles; an open hand's point up.
+        let tip = |pose: &Pose, joint: usize| bones(pose, &body)[joint].1;
+        let open = body.preset(0);
+        let fist = body.preset(2);
+        assert!(tip(&open, 6)[1] > 0.15 && tip(&open, 6)[2].abs() < 1e-3);
+        assert!(
+            tip(&fist, 6)[2] > 0.02,
+            "curled toward the palm: {:?}",
+            tip(&fist, 6)
+        );
+        assert!(tip(&fist, 6)[1] < tip(&open, 6)[1] - 0.05);
+        // Pointing keeps the index finger straight.
+        let pointing = body.preset(3);
+        assert!((tip(&pointing, 3)[1] - tip(&open, 3)[1]).abs() < 1e-3);
+        // A head: turning the neck takes the eyes round to the side.
+        let head = new_of("Head", Kind::Head);
+        let face = Body::of(&head);
+        assert_eq!(face.kind, Kind::Head);
+        let eye = |pose: &Pose| bones(pose, &face)[5].0;
+        let front = eye(&face.preset(0));
+        let turned = eye(&face.preset(4));
+        assert!(front[2] > 0.06, "the eyes face forward: {front:?}");
+        assert!(turned[2] < front[2] - 0.03, "turned away: {turned:?}");
+        // Opening the mouth drops the chin.
+        let chin = |pose: &Pose| bones(pose, &face)[2].1;
+        assert!(chin(&face.preset(6))[1] < chin(&face.preset(0))[1] - 0.005);
+        // Each kind frames itself, so the whole hand or head shows.
+        assert!(body.frame().1 < FRAME.1 / 4.0);
+        assert!(face.frame().1 < FRAME.1 / 3.0);
+        // A body pose read for a hand stops at the hand's joints.
+        let text = Pose(vec![[1.0, 2.0, 3.0]; 17]).to_text();
+        assert_eq!(Pose::from_text_for(&text, 16).0.len(), 16);
+        assert!(!geometry(&fist, &body).to_mesh().indices().is_empty());
     }
 }

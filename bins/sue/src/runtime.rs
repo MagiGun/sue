@@ -4518,6 +4518,66 @@ Paper	{ink},0,1,normal"
             vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
         );
         assert_eq!(layers(&runtime).len(), before, "undone as one step");
+        // The 3D hand and head: new layers of their own kinds, posed by
+        // their own presets, each one step.
+        for (new, kind, pose) in [
+            (
+                "layer.new.hand",
+                sue_paint::figure::Kind::Hand,
+                "figure.preset.2",
+            ),
+            (
+                "layer.new.head",
+                sue_paint::figure::Kind::Head,
+                "figure.preset.4",
+            ),
+        ] {
+            command(&mut runtime, new);
+            step(&mut runtime, Vec::new());
+            let arena = &runtime.engine.world.arena;
+            let layer = layers(&runtime)
+                .into_iter()
+                .find(|info| {
+                    sue_paint::figure::of_layer(arena, info.id)
+                        .and_then(|model| arena.get_by_id(model).ok())
+                        .is_some_and(|model| sue_paint::figure::Body::of(model).kind == kind)
+                })
+                .map(|info| info.id)
+                .expect("a layer of the kind");
+            let drawn = |runtime: &Runtime| {
+                sue_paint::doc::raster(&runtime.engine.world.arena, layer)
+                    .unwrap()
+                    .bytes()
+                    .unwrap()
+                    .to_vec()
+            };
+            let first = drawn(&runtime);
+            let covered = first.chunks(4).filter(|pixel| pixel[3] > 0).count();
+            assert!(covered > 5_000, "{kind:?} shows, framed large: {covered}");
+            let depth = runtime.engine.history.depth();
+            command(&mut runtime, pose);
+            step(&mut runtime, Vec::new());
+            assert_ne!(drawn(&runtime), first, "{kind:?} posed");
+            assert_eq!(runtime.engine.history.depth(), depth + 1);
+        }
+        // Register pose as material: the head's pose kept in the materials
+        // folder, to use again.
+        let materials = root.join("materials-here");
+        let _ = runtime.engine.world.rice.set(
+            "sue_paint.materials_dir",
+            sue_rice::RiceValue::Text(materials.display().to_string()),
+        );
+        command(&mut runtime, "figure.register_pose");
+        step(&mut runtime, Vec::new());
+        let kept = materials.join("poses").join("Head pose 1.pose");
+        let text = std::fs::read_to_string(&kept).expect("the pose is kept");
+        assert!(
+            text.starts_with(
+                "head
+v1;"
+            ),
+            "{text}"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

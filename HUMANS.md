@@ -709,6 +709,15 @@ Once a canvas is open:
   ratio. Convert to Lines and Tones makes line art from
   the pose to draw over; Convert to Vector Lines and Tones makes those
   lines strokes you can reshape with the vector tools.
+- **3D hands and heads:** Layer, New Layer, **3D Hand** and **3D Head**
+  pose the same way: drag a finger joint to curl it, or the neck or jaw
+  to turn, tilt or open the mouth. Their presets include a fist,
+  pointing, a peace sign, thumbs up and holding for the hand, and front,
+  three-quarter, looking up or down, turned, tilted and an open mouth for
+  the head. **Register pose as material** in Tool Settings keeps any
+  pose in the Material palette's Poses, with a picture of it; double-click
+  one to pose the figure, hand or head you have picked, or to add a new
+  one in that pose.
 - **3D layers:** Layer, New Layer, 3D Layer puts a cube, sphere, cylinder,
   cone, plane, prism or pyramid on the canvas, and File, Import, 3D Data brings in an OBJ
   model. With the Object tool (O), drag to turn the camera, Shift and drag

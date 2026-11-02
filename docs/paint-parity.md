@@ -45,16 +45,16 @@ rows are at the end.
 | Tools and drawing | 29 | 6 | 1 | 89 |
 | Text | 6 | 3 | 1 | 75 |
 | Vector | 6 | 2 | 0 | 88 |
-| 3D | 6 | 1 | 6 | 50 |
+| 3D | 7 | 2 | 4 | 62 |
 | Colors | 9 | 0 | 1 | 90 |
 | View and navigation | 9 | 3 | 0 | 88 |
 | Window, palettes and workspaces | 14 | 3 | 1 | 86 |
-| Materials and assets | 6 | 3 | 2 | 68 |
+| Materials and assets | 6 | 4 | 1 | 73 |
 | Print | 0 | 2 | 2 | 25 |
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 10 | 2 | 2 | 79 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 247 | 57 | 32 | 82 |
+| **All of Sue Paint** | 248 | 59 | 29 | 83 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -431,9 +431,9 @@ The order of work is the plan at the end.
 | Camera: drag to turn, Shift to move, Ctrl to come nearer | Object tool | done | |
 | Light and shading settings | Tool Settings | done | Shaded, line art or both |
 | Convert 3D to Lines and Tones (EX) | Layer > Convert to Lines and Tones | done | Clean line art and tone to draw over |
-| Drawing figures with poses and pose materials | Materials, 3D | partial | Seven preset poses on the drawing figure; no pose material library yet |
-| 3D head models (5.1) | 3D | missing | |
-| 3D hand models and Hand Scanner posing (5.0) | 3D, Materials | missing | |
+| Drawing figures with poses and pose materials | Materials, 3D | done | Preset poses for the figure, hand and head; any pose kept as a pose material and used again |
+| 3D head models (5.1) | 3D | partial | A posable head (neck, skull, jaw, nose, brow, eyes, ears) with seven presets; simpler than Clip Studio's, no face shapes to edit |
+| 3D hand models and Hand Scanner posing (5.0) | 3D, Materials | partial | A posable hand of sixteen joints with seven presets; no Hand Scanner (posing from a photo) |
 | Painting directly on 3D (5.0, 5.1) | 3D | missing | |
 | VRM import and photorealistic rendering | File > Import | missing | |
 | Height-based fog, Follow camera light (5.0, 5.1) | 3D settings | done | In the 3D layer's Tool Property |
@@ -509,7 +509,7 @@ The order of work is the plan at the end.
 | Recently used folder and frequency sorting (5.0) | Palette | partial | To verify |
 | User tags and batch tag management (5.1) | Palette | missing | |
 | Download materials from CLIP STUDIO ASSETS | Material palette, Browse Assets | partial | Browse Assets reads the pages and opens the site to download; nothing lands in the palette yet |
-| Pose, 3D and texture material kinds | Palette | missing | |
+| Pose, 3D and texture material kinds | Palette | partial | Poses done, each with a picture of it; 3D models and textures as materials to come |
 
 ## Print
 

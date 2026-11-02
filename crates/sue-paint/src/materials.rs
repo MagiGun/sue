@@ -24,6 +24,8 @@ pub enum Placement {
     Cover,
     /// It sits in the middle, shrunk to fit (pictures).
     Fit,
+    /// It poses a 3D drawing figure, hand or head (pose materials).
+    Pose,
 }
 
 /// Finds the materials of a kind in the materials location, if any.
@@ -56,7 +58,7 @@ impl MaterialKinds {
     #[must_use]
     pub fn builtin() -> Self {
         let mut kinds = Self::default();
-        let own: [(&str, &str, Glyph, Placement, Scan); 4] = [
+        let own: [(&str, &str, Glyph, Placement, Scan); 5] = [
             (TONE, "Tones", Glyph::Tone, Placement::Cover, scan_tones),
             (
                 PATTERN,
@@ -67,6 +69,7 @@ impl MaterialKinds {
             ),
             (IMAGE, "Images", Glyph::Picture, Placement::Fit, scan_images),
             (TIP, "Brush tips", Glyph::Brush, Placement::Fit, scan_tips),
+            (POSE, "Poses", Glyph::Cube, Placement::Pose, scan_poses),
         ];
         for (id, name, glyph, placement, scan) in own {
             kinds
@@ -124,6 +127,8 @@ pub const PATTERN: &str = "sue_paint.pattern";
 pub const IMAGE: &str = "sue_paint.image";
 /// Brush tips made from pictures.
 pub const TIP: &str = "sue_paint.tip";
+/// Poses of 3D drawing figures, hands and heads, kept to use again.
+pub const POSE: &str = "sue_paint.pose";
 
 /// One material in the library.
 #[derive(Clone, Debug, PartialEq)]
@@ -283,6 +288,96 @@ fn scan_tips(folder: Option<&Path>) -> Vec<Material> {
     scan_pngs(folder.map(|folder| folder.join("tips")), TIP)
 }
 
+fn scan_poses(folder: Option<&Path>) -> Vec<Material> {
+    let Some(entries) = folder
+        .map(|folder| folder.join("poses"))
+        .and_then(|dir| sue_platform::list_dir(&dir, true).ok())
+    else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .into_iter()
+        .map(|entry| entry.path)
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("pose"))
+        })
+        .collect();
+    files.sort();
+    files
+        .into_iter()
+        .map(|path| Material {
+            name: path
+                .file_stem()
+                .map_or_else(|| tr!("pose"), |stem| stem.to_string_lossy().into_owned()),
+            kind: POSE.to_owned(),
+            placement: Placement::Pose,
+            source: Source::File(path),
+        })
+        .collect()
+}
+
+/// A pose material's figure kind and pose, read from its file: the kind's
+/// name on the first line, the pose ([`crate::figure::Pose::to_text`]) on
+/// the second.
+#[must_use]
+pub fn pose_of(material: &Material) -> Option<(crate::figure::Kind, crate::figure::Pose)> {
+    let Source::File(path) = &material.source else {
+        return None;
+    };
+    let text = String::from_utf8(sue_platform::fs::read(path).ok()?).ok()?;
+    let mut lines = text.lines();
+    let kind = crate::figure::Kind::from_key(lines.next()?.trim());
+    let count = crate::figure::Body {
+        kind,
+        ..crate::figure::Body::default()
+    }
+    .joints()
+    .len();
+    Some((
+        kind,
+        crate::figure::Pose::from_text_for(lines.next()?.trim(), count),
+    ))
+}
+
+/// Keeps `pose` of a figure of `kind` as a pose material named `name` in
+/// Sue Paint's `folder`; returns its file.
+///
+/// # Errors
+/// If it will not write.
+pub fn register_pose(
+    folder: &Path,
+    name: &str,
+    kind: crate::figure::Kind,
+    pose: &crate::figure::Pose,
+) -> Result<PathBuf, String> {
+    let dir = folder.join("poses");
+    sue_platform::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let path = dir.join(format!("{}.pose", safe_name(name)));
+    let text = format!("{}\n{}\n", kind.key(), pose.to_text());
+    sue_platform::write_atomic(&path, text.as_bytes()).map_err(|error| error.to_string())?;
+    Ok(path)
+}
+
+/// `name` made fit for a file name.
+fn safe_name(name: &str) -> String {
+    let safe: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if safe.trim().is_empty() {
+        tr!("material")
+    } else {
+        safe.trim().to_owned()
+    }
+}
+
 /// The PNG files in `dir` as materials of `kind`, by name.
 fn scan_pngs(dir: Option<PathBuf>, kind: &str) -> Vec<Material> {
     let Some(entries) = dir.and_then(|dir| sue_platform::list_dir(&dir, true).ok()) else {
@@ -332,6 +427,27 @@ pub fn picture(material: &Material, size: [u32; 2], color: [u8; 3]) -> Option<Ra
         Source::Builtin(index) => BUILTIN
             .get(*index)
             .map(|(_, _, ink)| draw(size, color, *ink)),
+        Source::File(_) if material.placement == Placement::Pose => {
+            // The posed figure, drawn.
+            let (kind, pose) = pose_of(material)?;
+            let body = crate::figure::Body {
+                kind,
+                ..crate::figure::Body::default()
+            };
+            let view = crate::three::View3D {
+                yaw: 18.0,
+                pitch: 6.0,
+                distance: 4.4,
+                ..crate::three::View3D::default()
+            };
+            let buffers = crate::three::render_framed(
+                &crate::figure::mesh(&pose, &body),
+                &view,
+                size,
+                Some(body.frame()),
+            );
+            crate::three::draw(&buffers, &view)
+        }
         Source::File(path) => {
             let bytes = sue_platform::fs::read(path).ok()?;
             sue_io::decode_png(&bytes).ok().map(|decoded| decoded.tile)
@@ -431,21 +547,7 @@ pub fn register(folder: &Path, name: &str, tile: &RasterTile2D) -> Result<PathBu
         cut.extend_from_slice(&bytes[at..at + (cw * 4) as usize]);
     }
     let png = sue_io::encode_png_rgba(cw, ch, &cut)?;
-    let safe: String = name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    let safe = if safe.trim().is_empty() {
-        tr!("material")
-    } else {
-        safe.trim().to_owned()
-    };
+    let safe = safe_name(name);
     let dir = folder.join("materials");
     sue_platform::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     let path = dir.join(format!("{safe}.png"));
@@ -703,6 +805,32 @@ mod tests {
             .map(|pixel| f32::from(pixel[3]) / 255.0)
             .sum::<f32>()
             / (bytes.len() / 4) as f32
+    }
+
+    #[test]
+    fn poses_register_as_materials_and_come_back() {
+        use crate::figure::{Body, Kind};
+        let folder = std::env::temp_dir().join(format!("sue-poses-{}", std::process::id()));
+        let _ = sue_platform::fs::remove_dir_all(&folder);
+        let hand = Body {
+            kind: Kind::Hand,
+            ..Body::default()
+        };
+        let fist = hand.preset(2);
+        let path = register_pose(&folder, "Hand pose 1", Kind::Hand, &fist).unwrap();
+        assert_eq!(path, folder.join("poses").join("Hand pose 1.pose"));
+        let found: Vec<Material> = library(Some(&folder))
+            .into_iter()
+            .filter(|material| material.kind == POSE)
+            .collect();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].name, "Hand pose 1");
+        assert_eq!(found[0].placement, Placement::Pose);
+        assert_eq!(pose_of(&found[0]), Some((Kind::Hand, fist)));
+        // Its thumbnail is the posed hand, drawn.
+        let thumb = picture(&found[0], [64, 64], [0; 3]).unwrap();
+        assert!(coverage(&thumb) > 0.05, "{}", coverage(&thumb));
+        let _ = sue_platform::fs::remove_dir_all(&folder);
     }
 
     #[test]

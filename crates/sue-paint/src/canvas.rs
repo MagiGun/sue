@@ -3333,11 +3333,8 @@ impl SuePaint {
         );
         let view = crate::three::View3D::of(arena.get_by_id(layer).ok()?);
         let raster = doc::raster(arena, layer)?;
-        let lens = crate::three::Camera::new(
-            &view,
-            [raster.width(), raster.height()],
-            crate::figure::FRAME,
-        );
+        let lens =
+            crate::three::Camera::new(&view, [raster.width(), raster.height()], body.frame());
         let offset = self
             .layer_info(arena)
             .map_or([0, 0], |info| info.style.offset);
@@ -4178,7 +4175,7 @@ impl SuePaint {
             let lens = crate::three::Camera::new(
                 &crate::three::View3D::of(entity),
                 [raster.width(), raster.height()],
-                crate::figure::FRAME,
+                body.frame(),
             );
             let offset = doc::layers(&cx.world.arena, doc.picture)
                 .into_iter()
