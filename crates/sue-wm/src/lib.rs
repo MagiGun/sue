@@ -32,6 +32,7 @@ mod catalog;
 mod color_pick;
 mod config;
 pub mod cover;
+pub mod dock;
 mod error;
 pub mod fonts;
 pub mod keys;
