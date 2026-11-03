@@ -64,6 +64,20 @@ pub(crate) fn install(ctx: &egui::Context, shared: &Shared) {
             match viewports.children.get_mut(&id) {
                 Some(child) => {
                     let mut raw = child.state.take_egui_input(&child.window);
+                    // A Wayland pen over this window (tablet-v2 takes it
+                    // away from the mouse).
+                    #[cfg(any(
+                        target_os = "linux",
+                        target_os = "freebsd",
+                        target_os = "openbsd",
+                        target_os = "netbsd",
+                        target_os = "dragonfly"
+                    ))]
+                    raw.events.extend(crate::wayland_pen::events_for(
+                        &child.window,
+                        egui_winit::pixels_per_point(ctx, &child.window),
+                        ctx.input(|input| input.modifiers),
+                    ));
                     let info = raw.viewports.entry(id).or_default();
                     egui_winit::update_viewport_info(info, ctx, &child.window, false);
                     if std::mem::take(&mut child.close) {

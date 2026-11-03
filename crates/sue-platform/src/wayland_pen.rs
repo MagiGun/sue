@@ -245,10 +245,6 @@ fn others(surface: usize, event: PenPointer) {
 
 /// The pen's pointer events over `window`, one of Sue's other windows,
 /// as egui events (`pixels_per_point` its egui scale).
-#[allow(
-    dead_code,
-    reason = "the viewport windows' input (viewports.rs, another agent's) is to take these"
-)]
 pub(crate) fn events_for(
     window: &Window,
     pixels_per_point: f32,
