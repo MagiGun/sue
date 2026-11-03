@@ -451,6 +451,15 @@ pub struct SuePaint {
     /// The layout the studio was last drawn in, to lay the palettes out
     /// again when it changes.
     pub(crate) laid_for: Option<sue_platform::FormFactor>,
+    /// The desktop's palette layout, kept while a tablet layout shows.
+    pub(crate) desk_dock: Option<crate::dock::Dock>,
+    /// The Window menu's palettes as the dock last drew them, so a palette
+    /// shown again comes to the front of its tabs.
+    pub(crate) panels_seen: Panels,
+    /// The palette layout as last written to the data folder, and since
+    /// when (in the input's seconds) it differs, to write it again.
+    pub(crate) layout_kept: Vec<String>,
+    pub(crate) layout_changed: Option<f64>,
     /// The fingers on the canvas: each touch's id and where it is.
     pub(crate) touches: Vec<(u64, Pos2)>,
     /// A touch gesture in progress: when it began, the most fingers it had
@@ -693,6 +702,10 @@ impl Default for SuePaint {
             tone_cache: None,
             sheet: None,
             laid_for: None,
+            desk_dock: None,
+            panels_seen: Panels::default(),
+            layout_kept: Vec::new(),
+            layout_changed: None,
             touches: Vec::new(),
             touch_gesture: None,
             docs: Vec::new(),
@@ -6411,6 +6424,7 @@ impl SuePaint {
                 if self.dock.iconized.contains(&palette) {
                     self.dock.popped = Some(palette);
                 }
+                self.dock.choose(palette);
             }
             "window.cels" => {
                 self.panels.layer = true;
@@ -6759,6 +6773,9 @@ impl SuePaint {
         self.sheet = None;
         match form {
             sue_platform::FormFactor::Tablet => {
+                if self.desk_dock.is_none() {
+                    self.desk_dock = Some(self.dock.clone());
+                }
                 self.dock = crate::dock::Dock::default();
                 for palette in [
                     Palette::SubTool,
@@ -6770,32 +6787,25 @@ impl SuePaint {
                     self.dock.iconize(palette);
                 }
             }
+            // Back from a tablet: the desktop's layout as it was.
             sue_platform::FormFactor::Desktop => {
-                if self.dock.iconized.len() >= 4 {
-                    self.dock = crate::dock::Dock::default();
+                if let Some(dock) = self.desk_dock.take() {
+                    self.dock = dock;
                 }
             }
             sue_platform::FormFactor::Mobile => {}
         }
     }
 
-    /// Lays out the palettes around the canvas: docked, collapsed or
-    /// floating (`dock`), the timeline under the canvas, and the canvas.
+    /// Lays out the palettes around the canvas: docked, tabbed, collapsed
+    /// or floating (`dock`), the timeline and other palettes under the
+    /// canvas, and the canvas; and keeps the layout for the next run.
     fn body(&mut self, ui: &mut Ui, body: Rect, cx: &mut AppletContext<'_>, theme: &sue_wm::Theme) {
-        let mut center = self.dock_ui(ui, body, cx, theme);
-        let room = center.height() > 360.0 && center.width() > 320.0;
-        if self.panels.timeline && room {
-            let height = self.dock.timeline.min(center.height() - 200.0).max(90.0);
-            let top = center.bottom() - height * (1.0 - self.hide);
-            let timeline =
-                Rect::from_min_max(pos2(center.left(), top), pos2(center.right(), top + height));
-            self.timeline_panel(ui, timeline, cx, theme);
-            if self.ready {
-                self.timeline_splitter(ui, top, center.x_range(), theme);
-            }
-            center.max.y = top;
-        }
+        let center = self.dock_ui(ui, body, cx, theme);
         self.canvas_area(ui, center, cx, theme);
+        if self.ready {
+            self.keep_layout(ui.ctx(), cx);
+        }
     }
 }
 
@@ -7135,6 +7145,12 @@ impl SueApplet for SuePaint {
                 "How far Rotate Left and Rotate Right turn the view (degrees; Preferences, Canvas)",
             )
             .labeled("Rotation step"),
+            RiceDeclaration::new(
+                crate::extras::REMEMBER_LAYOUT,
+                RiceParameter::Bool { value: true },
+                "Sue Paint opens with its palettes where they were left (Window, Workspace)",
+            )
+            .labeled("Remember the palette layout"),
         ]);
         for (key, name, choices) in crate::dialogs::MODIFIERS {
             declarations.push(RiceDeclaration::new(

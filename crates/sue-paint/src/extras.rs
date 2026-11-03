@@ -1,7 +1,8 @@
 //! Palettes that keep work at hand: Auto Actions (menu commands recorded
 //! and played back), the Item Bank (sub tools kept to add again), Info
 //! (what is under the pointer) and registered workspaces (palette layouts
-//! by name), each kept in Sue Paint's data folder.
+//! by name), each kept in Sue Paint's data folder, with the palette layout
+//! as it was last left.
 
 use std::path::Path;
 
@@ -193,6 +194,21 @@ impl Item {
     }
 }
 
+/// The file in Sue Paint's data folder that keeps the palette layout
+/// between runs (never inside a document).
+const LAYOUT_FILE: &str = "layout.txt";
+
+/// The rice key: Sue Paint opens with its palettes where they were left.
+pub(crate) const REMEMBER_LAYOUT: &str = "sue_paint.remember_layout";
+
+/// How long the layout stays the same before it is written (seconds), so
+/// moving a window writes it once.
+const LAYOUT_SETTLE: f64 = 0.5;
+
+fn remember_layout(cx: &AppletContext<'_>) -> bool {
+    cx.rice().get_bool(REMEMBER_LAYOUT).unwrap_or(true)
+}
+
 /// A palette layout kept by name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Workspace {
@@ -317,6 +333,48 @@ impl SuePaint {
             })
             .unwrap_or_default();
         self.refresh_workspace_menu();
+        // The palettes where they were left.
+        if remember_layout(cx)
+            && let Some(text) = read(folder.as_deref(), LAYOUT_FILE)
+        {
+            let lines: Vec<String> = text.lines().map(str::to_owned).collect();
+            self.apply_layout(&lines);
+        }
+        self.layout_kept = self.workspace_now("").lines;
+    }
+
+    /// Writes the palette layout to the data folder once it has stayed the
+    /// same a moment, when Settings say to remember it.
+    pub(crate) fn keep_layout(&mut self, ctx: &egui::Context, cx: &mut AppletContext<'_>) {
+        if !remember_layout(cx) || self.dock.dragging() {
+            return;
+        }
+        let lines = self.workspace_now("").lines;
+        if lines == self.layout_kept {
+            self.layout_changed = None;
+            return;
+        }
+        let now = ctx.input(|input| input.time);
+        let since = *self.layout_changed.get_or_insert(now);
+        if now - since < LAYOUT_SETTLE {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(LAYOUT_SETTLE + 0.1));
+            return;
+        }
+        let text: String = lines
+            .iter()
+            .map(|line| {
+                format!(
+                    "{line}
+"
+                )
+            })
+            .collect();
+        let folder = crate::colorsets::folder(cx);
+        if let Err(error) = write(folder.as_deref(), LAYOUT_FILE, &text) {
+            cx.fail(tr!("cannot-keep-the-palettes-settings", error = error));
+        }
+        self.layout_kept = lines;
+        self.layout_changed = None;
     }
 
     /// Writes the auto actions, the item bank and the workspaces.
@@ -388,13 +446,17 @@ impl SuePaint {
 
     /// Lays the palettes out as workspace `index` says.
     pub(crate) fn use_workspace(&mut self, index: usize) {
-        let Some(space) = self.workspaces.get(index).cloned() else {
-            return;
-        };
-        if let Some(dock) = crate::dock::Dock::from_lines(&space.lines) {
+        if let Some(space) = self.workspaces.get(index).cloned() {
+            self.apply_layout(&space.lines);
+        }
+    }
+
+    /// Lays the palettes out as [`Self::workspace_now`]'s `lines` say.
+    pub(crate) fn apply_layout(&mut self, lines: &[String]) {
+        if let Some(dock) = crate::dock::Dock::from_lines(lines) {
             self.dock = dock;
         }
-        for line in &space.lines {
+        for line in lines {
             if let Some(panels) = panels_from(line) {
                 self.panels = panels;
             }

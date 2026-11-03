@@ -11,6 +11,16 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Sue Paint's palettes can be arranged your way, as in Clip Studio
+  Paint: drag one by its title bar, tab or icon to dock it at the left,
+  the right or under the canvas, stack it as a tab with another palette
+  (and drag tabs to reorder them), give it a column of its own, fold it
+  into the strip or float it. Sue Paint opens with the palettes where you
+  left them, and Window, Workspace now also holds Reset Palette Layout.
+  (#3)
+
 ### Fixed
 
 - Sue Paint's **animation folders** are folders in the Layer palette

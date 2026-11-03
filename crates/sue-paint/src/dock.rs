@@ -1,19 +1,34 @@
-//! Where Sue Paint's palettes sit, and how people move them: docked in
-//! columns at the left and right of the canvas (drag a column's edge to
-//! make it wider, the line between two palettes to share the height
-//! differently), floating in their own windows, or collapsed to icons in a
-//! strip at the far right, as in Clip Studio Paint. When the window is too
-//! narrow for every column, the widest collapse to icons by themselves and
-//! come back when there is room.
+//! Where Sue Paint's palettes sit, and how people move them, as in Clip
+//! Studio Paint: docked in columns at the left and right of the canvas or
+//! in the row under it (the timeline's), stacked as tabs, floating in their
+//! own windows, or collapsed to icons in a strip at the far right. People
+//! drag a palette by its title bar, tab or icon to move it, drag a
+//! column's edge to make it wider and the line between two palettes to
+//! share the room differently. When the window is too narrow for every
+//! column, the widest collapse to icons by themselves and come back when
+//! there is room.
+//!
+//! The layout itself (columns, groups, tabs, splitters, drop targets and
+//! the lines it is kept as) is Sue's shared dock, [`sue_wm::dock`]; this
+//! module says what Sue Paint's palettes are and draws them.
 
-use egui::{Align2, Id, Order, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use egui::{Id, Order, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use sue_wm::dock::{COLUMN_BAR, Column, DockPanel, Group, Holder, LaidGroup};
 use sue_wm::{AppletContext, Theme};
 
-use crate::icons::{self, Icon};
+use crate::icons::Icon;
 use crate::panels::icon_button;
 use crate::studio::{Panels, SuePaint};
 
-/// A palette people can dock, float or collapse.
+pub(crate) use sue_wm::dock::Side;
+
+/// Where every palette is.
+pub(crate) type Dock = sue_wm::dock::DockLayout<Palette>;
+
+/// Where everything goes this frame.
+pub(crate) type Laid = sue_wm::dock::Laid<Palette>;
+
+/// A palette people can dock, tab, float or collapse.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Palette {
     /// The tool strip.
@@ -46,6 +61,8 @@ pub(crate) enum Palette {
     ItemBank,
     /// The pointer's place and the canvas's size.
     Info,
+    /// The animation timeline.
+    Timeline,
 }
 
 /// The palettes Clip Studio Paint keeps folded in the strip at the right
@@ -59,6 +76,26 @@ pub(crate) const STRIP_PALETTES: [Palette; 8] = [
     Palette::AutoAction,
     Palette::ItemBank,
     Palette::Info,
+];
+
+/// Every palette.
+const PALETTES: [Palette; 16] = [
+    Palette::Tools,
+    Palette::SubTool,
+    Palette::BrushSize,
+    Palette::Color,
+    Palette::ColorSet,
+    Palette::Navigator,
+    Palette::Layer,
+    Palette::Material,
+    Palette::LayerProperty,
+    Palette::History,
+    Palette::Cels,
+    Palette::SubView,
+    Palette::AutoAction,
+    Palette::ItemBank,
+    Palette::Info,
+    Palette::Timeline,
 ];
 
 impl Palette {
@@ -80,6 +117,7 @@ impl Palette {
             Self::AutoAction => tr!("auto-actions"),
             Self::ItemBank => tr!("item-bank"),
             Self::Info => tr!("info"),
+            Self::Timeline => tr!("timeline"),
         }
     }
 
@@ -101,24 +139,7 @@ impl Palette {
             Self::AutoAction => Icon::AutoAction,
             Self::ItemBank => Icon::ItemBank,
             Self::Info => Icon::Info,
-        }
-    }
-
-    /// The width of a palette that is always as wide, like the tool strip.
-    pub fn fixed_width(self) -> Option<f32> {
-        match self {
-            Self::Tools => Some(46.0),
-            Self::BrushSize => Some(86.0),
-            _ => None,
-        }
-    }
-
-    /// The least height it is usable at.
-    pub fn min_height(self) -> f32 {
-        match self {
-            Self::Tools | Self::BrushSize => 120.0,
-            Self::Color => 150.0,
-            _ => 90.0,
+            Self::Timeline => Icon::Timeline,
         }
     }
 
@@ -132,6 +153,7 @@ impl Palette {
             Self::ColorSet => panels.color_set,
             Self::Navigator => panels.navigator,
             Self::Layer => panels.layer,
+            Self::Timeline => panels.timeline,
             Self::Material
             | Self::LayerProperty
             | Self::History
@@ -142,650 +164,97 @@ impl Palette {
             | Self::Info => true,
         }
     }
+}
 
-    /// The default size of its window when it floats.
+impl DockPanel for Palette {
+    fn all() -> &'static [Self] {
+        &PALETTES
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::Tools => "tool",
+            Self::SubTool => "sub_tool",
+            Self::BrushSize => "brush_size",
+            Self::Color => "color",
+            Self::ColorSet => "color_set",
+            Self::Navigator => "navigator",
+            Self::Layer => "layer",
+            Self::Material => "material",
+            Self::LayerProperty => "layer_property",
+            Self::History => "history",
+            Self::Cels => "animation_cels",
+            Self::SubView => "sub_view",
+            Self::AutoAction => "auto_action",
+            Self::ItemBank => "item_bank",
+            Self::Info => "info",
+            Self::Timeline => "timeline",
+        }
+    }
+
+    /// Its key, or (in layouts saved before keys) its title.
+    fn named(text: &str) -> Option<Self> {
+        PALETTES
+            .into_iter()
+            .find(|palette| palette.key() == text)
+            .or_else(|| PALETTES.into_iter().find(|palette| palette.title() == text))
+    }
+
+    fn fixed_width(self) -> Option<f32> {
+        match self {
+            Self::Tools => Some(46.0),
+            Self::BrushSize => Some(86.0),
+            _ => None,
+        }
+    }
+
+    fn min_height(self) -> f32 {
+        match self {
+            Self::Tools | Self::BrushSize => 120.0,
+            Self::Color => 150.0,
+            _ => 90.0,
+        }
+    }
+
     fn float_size(self) -> Vec2 {
         match self {
             Self::Tools => vec2(44.0, 420.0),
             Self::BrushSize => vec2(62.0, 360.0),
             Self::Layer => vec2(300.0, 420.0),
+            Self::Timeline => vec2(640.0, 220.0),
             _ => vec2(260.0, 320.0),
         }
     }
-}
 
-/// A side of the canvas.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum Side {
-    Left,
-    Right,
-}
-
-/// A column of palettes sharing its height by weight.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Column {
-    /// The palettes, top to bottom, with their share of the height.
-    pub palettes: Vec<(Palette, f32)>,
-    /// Its width in points (palettes with a fixed width decide it).
-    pub width: f32,
-}
-
-/// What is being dragged.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Drag {
-    /// A column's inner edge.
-    Edge {
-        side: Side,
-        column: usize,
-        from: f32,
-        width: f32,
-    },
-    /// The line between two palettes of a column.
-    Split {
-        side: Side,
-        column: usize,
-        upper: Palette,
-        lower: Palette,
-        from: f32,
-        weights: (f32, f32),
-        per_point: f32,
-    },
-    /// The top of the timeline.
-    Timeline { from: f32, height: f32 },
-}
-
-/// Where every palette is.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Dock {
-    /// Columns from the window's left edge inward.
-    pub left: Vec<Column>,
-    /// Columns from the window's right edge inward.
-    pub right: Vec<Column>,
-    /// Floating palettes and their place in the studio.
-    pub floating: Vec<(Palette, Rect)>,
-    /// Palettes collapsed to icons on purpose.
-    pub iconized: Vec<Palette>,
-    /// The collapsed palette showing beside the strip.
-    pub popped: Option<Palette>,
-    /// The palette whose menu is open.
-    pub menu: Option<Palette>,
-    /// The timeline's height.
-    pub timeline: f32,
-    /// Each side's palette columns folded into icons (Clip Studio Paint's
-    /// single arrow), left then right. The tools stay.
-    pub folded: [bool; 2],
-    /// Each side closed whole, palettes and icons (Clip Studio Paint's
-    /// double arrow), left then right.
-    pub hidden: [bool; 2],
-    drag: Option<Drag>,
-}
-
-impl Side {
-    /// Its place in [`Dock::folded`] and [`Dock::hidden`].
-    pub(crate) fn index(self) -> usize {
-        match self {
-            Side::Left => 0,
-            Side::Right => 1,
-        }
-    }
-}
-
-impl Default for Dock {
-    fn default() -> Self {
-        let column = |palettes: &[(Palette, f32)], width: f32| Column {
-            palettes: palettes.to_vec(),
-            width,
-        };
-        Self {
-            left: vec![
-                column(&[(Palette::Tools, 1.0)], 46.0),
-                column(
-                    &[
-                        (Palette::SubTool, 0.44),
-                        (Palette::Color, 0.3),
-                        (Palette::ColorSet, 0.26),
-                    ],
-                    236.0,
-                ),
-                column(&[(Palette::BrushSize, 1.0)], 86.0),
-            ],
-            right: vec![column(
-                &[(Palette::Navigator, 0.42), (Palette::Layer, 0.58)],
-                300.0,
-            )],
-            floating: Vec::new(),
-            iconized: STRIP_PALETTES.to_vec(),
-            popped: None,
-            menu: None,
-            timeline: 160.0,
-            folded: [false; 2],
-            hidden: [false; 2],
-            drag: None,
-        }
-    }
-}
-
-/// The width of the icon strip.
-pub(crate) const STRIP: f32 = 34.0;
-
-/// The bar at the top of every column and strip, with Clip Studio Paint's
-/// arrows: one folds the side's columns into icons, two close the side.
-pub(crate) const COLUMN_BAR: f32 = 12.0;
-
-/// How wide a closed side's bar is, with its arrows to open it again.
-pub(crate) const HANDLE: f32 = 14.0;
-
-/// The canvas never gets narrower than this while columns can collapse.
-const MIN_CANVAS: f32 = 300.0;
-
-/// Where everything goes this frame.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Laid {
-    /// Docked palettes and their rects.
-    pub docked: Vec<(Palette, Rect)>,
-    /// Columns: side, index, rect.
-    pub columns: Vec<(Side, usize, Rect)>,
-    /// Lines between palettes: side, column, upper, lower, rect, the
-    /// column's height.
-    pub splits: Vec<(Side, usize, Palette, Palette, Rect, f32)>,
-    /// Columns' inner edges people can drag: side, column, rect.
-    pub edges: Vec<(Side, usize, Rect)>,
-    /// The icon strip at the right, when it shows.
-    pub strip: Option<Rect>,
-    /// Palettes in the right strip: the collapsed ones, the right side's
-    /// folded columns, then those the window had no room for.
-    pub icons: Vec<Palette>,
-    /// The icon strip at the left, while the left columns are folded.
-    pub left_strip: Option<Rect>,
-    /// Palettes in the left strip.
-    pub left_icons: Vec<Palette>,
-    /// Closed sides' bars.
-    pub handles: Vec<(Side, Rect)>,
-    /// What is left for the canvas and the timeline.
-    pub center: Rect,
-}
-
-/// Every palette, for reading layouts back.
-const PALETTES: [Palette; 15] = [
-    Palette::Tools,
-    Palette::SubTool,
-    Palette::BrushSize,
-    Palette::Color,
-    Palette::ColorSet,
-    Palette::Navigator,
-    Palette::Layer,
-    Palette::Material,
-    Palette::LayerProperty,
-    Palette::History,
-    Palette::Cels,
-    Palette::SubView,
-    Palette::AutoAction,
-    Palette::ItemBank,
-    Palette::Info,
-];
-
-fn palette_named(title: &str) -> Option<Palette> {
-    PALETTES
-        .into_iter()
-        .find(|palette| palette.title() == title)
-}
-
-impl Dock {
-    /// The layout as lines (a registered workspace): each column with its
-    /// width and palettes, the floating palettes, the collapsed ones and
-    /// the timeline's height.
-    #[must_use]
-    pub fn to_lines(&self) -> Vec<String> {
-        let mut out = Vec::new();
-        for (side, columns) in [("left", &self.left), ("right", &self.right)] {
-            for column in columns {
-                let palettes: Vec<String> = column
-                    .palettes
-                    .iter()
-                    .map(|(palette, weight)| format!("{}={weight}", palette.title()))
-                    .collect();
-                out.push(format!("{side} {} {}", column.width, palettes.join(",")));
-            }
-        }
-        for (palette, rect) in &self.floating {
-            out.push(format!(
-                "float {} {} {} {} {}",
-                rect.min.x,
-                rect.min.y,
-                rect.width(),
-                rect.height(),
-                palette.title()
-            ));
-        }
-        for palette in &self.iconized {
-            out.push(format!("icon {}", palette.title()));
-        }
-        out.push(format!("timeline {}", self.timeline));
-        for side in [Side::Left, Side::Right] {
-            let name = if side == Side::Left { "left" } else { "right" };
-            if self.folded[side.index()] {
-                out.push(format!("fold {name}"));
-            }
-            if self.hidden[side.index()] {
-                out.push(format!("hide {name}"));
-            }
-        }
-        out
+    fn anchored(self) -> bool {
+        self == Self::Tools
     }
 
-    /// A layout from [`Self::to_lines`] (lines it does not know are
-    /// skipped); `None` when no palette is placed.
-    #[must_use]
-    pub fn from_lines(lines: &[String]) -> Option<Self> {
-        let mut dock = Self {
-            left: Vec::new(),
-            right: Vec::new(),
-            floating: Vec::new(),
-            iconized: Vec::new(),
-            ..Self::default()
-        };
-        for line in lines {
-            let mut words = line.splitn(3, ' ');
-            match (words.next(), words.next(), words.next()) {
-                (Some(side @ ("left" | "right")), Some(width), Some(palettes)) => {
-                    let palettes: Vec<(Palette, f32)> = palettes
-                        .split(',')
-                        .filter_map(|entry| {
-                            let (title, weight) = entry.split_once('=')?;
-                            Some((palette_named(title)?, weight.parse().ok()?))
-                        })
-                        .collect();
-                    if palettes.is_empty() {
-                        continue;
-                    }
-                    let column = Column {
-                        palettes,
-                        width: width.parse().unwrap_or(260.0),
-                    };
-                    if side == "left" {
-                        dock.left.push(column);
-                    } else {
-                        dock.right.push(column);
-                    }
-                }
-                (Some("float"), Some(x), Some(rest)) => {
-                    let parts: Vec<&str> = rest.splitn(4, ' ').collect();
-                    if let ([y, w, h, title], Ok(x)) = (parts.as_slice(), x.parse::<f32>())
-                        && let (Ok(y), Ok(w), Ok(h), Some(palette)) = (
-                            y.parse::<f32>(),
-                            w.parse::<f32>(),
-                            h.parse::<f32>(),
-                            palette_named(title),
-                        )
-                    {
-                        dock.floating
-                            .push((palette, Rect::from_min_size(pos2(x, y), vec2(w, h))));
-                    }
-                }
-                (Some("icon"), Some(first), rest) => {
-                    let title =
-                        rest.map_or_else(|| first.to_owned(), |rest| format!("{first} {rest}"));
-                    if let Some(palette) = palette_named(&title) {
-                        dock.iconized.push(palette);
-                    }
-                }
-                (Some("timeline"), Some(height), None) => {
-                    if let Ok(height) = height.parse() {
-                        dock.timeline = height;
-                    }
-                }
-                (Some(what @ ("fold" | "hide")), Some(side @ ("left" | "right")), None) => {
-                    let at = usize::from(side == "right");
-                    if what == "fold" {
-                        dock.folded[at] = true;
-                    } else {
-                        dock.hidden[at] = true;
-                    }
-                }
-                _ => {}
-            }
-        }
-        let placed = !dock.left.is_empty()
-            || !dock.right.is_empty()
-            || !dock.floating.is_empty()
-            || !dock.iconized.is_empty();
-        // A layout from before a palette existed keeps it in the strip.
-        for palette in STRIP_PALETTES {
-            if !dock.has(palette) {
-                dock.iconized.push(palette);
-            }
-        }
-        placed.then_some(dock)
-    }
-
-    /// `palette` is somewhere: docked, floating or in the strip.
-    #[must_use]
-    pub fn has(&self, palette: Palette) -> bool {
-        self.left
-            .iter()
-            .chain(self.right.iter())
-            .any(|column| column.palettes.iter().any(|(found, _)| *found == palette))
-            || self.floating.iter().any(|(found, _)| *found == palette)
-            || self.iconized.contains(&palette)
-    }
-
-    /// Takes `palette` out of wherever it is.
-    pub fn remove(&mut self, palette: Palette) {
-        for column in self.left.iter_mut().chain(self.right.iter_mut()) {
-            column.palettes.retain(|(found, _)| *found != palette);
-        }
-        self.left.retain(|column| !column.palettes.is_empty());
-        self.right.retain(|column| !column.palettes.is_empty());
-        self.floating.retain(|(found, _)| *found != palette);
-        self.iconized.retain(|found| *found != palette);
-        if self.popped == Some(palette) {
-            self.popped = None;
-        }
-    }
-
-    /// Docks `palette` on `side`: in a column of its own for a palette of
-    /// fixed width, else at the bottom of the innermost wide column.
-    pub fn dock(&mut self, palette: Palette, side: Side) {
-        self.remove(palette);
-        let columns = match side {
-            Side::Left => &mut self.left,
-            Side::Right => &mut self.right,
-        };
-        match palette.fixed_width() {
-            Some(width) => columns.push(Column {
-                palettes: vec![(palette, 1.0)],
-                width,
-            }),
-            None => {
-                let wide = columns.iter_mut().rev().find(|column| {
-                    column
-                        .palettes
-                        .iter()
-                        .all(|(found, _)| found.fixed_width().is_none())
-                });
-                match wide {
-                    Some(column) => {
-                        let share = 1.0 / (column.palettes.len() as f32 + 1.0);
-                        column.palettes.push((palette, share.max(0.2)));
-                    }
-                    None => columns.push(Column {
-                        palettes: vec![(palette, 1.0)],
-                        width: 260.0,
-                    }),
-                }
-            }
-        }
-    }
-
-    /// Floats `palette` in a window at `at`.
-    pub fn float(&mut self, palette: Palette, at: Pos2) {
-        self.remove(palette);
-        self.floating
-            .push((palette, Rect::from_min_size(at, palette.float_size())));
-    }
-
-    /// Collapses `palette` to an icon in the strip.
-    pub fn iconize(&mut self, palette: Palette) {
-        self.remove(palette);
-        self.iconized.push(palette);
-    }
-
-    /// The side `palette` is docked on, if it is docked.
-    pub fn side_of(&self, palette: Palette) -> Option<Side> {
-        let has = |columns: &[Column]| {
-            columns
-                .iter()
-                .any(|column| column.palettes.iter().any(|(found, _)| *found == palette))
-        };
-        if has(&self.left) {
-            Some(Side::Left)
-        } else if has(&self.right) {
-            Some(Side::Right)
-        } else {
-            None
-        }
-    }
-
-    /// Lays everything out in `body`; `shown` says which palettes the
-    /// Window menu shows and `hide` (0 to 1) slides the columns out to
-    /// their edges.
-    pub fn layout(&self, body: Rect, shown: &dyn Fn(Palette) -> bool, hide: f32) -> Laid {
-        let visible = |column: &Column| -> Vec<(Palette, f32)> {
-            column
-                .palettes
-                .iter()
-                .copied()
-                .filter(|(palette, _)| shown(*palette))
-                .collect()
-        };
-        let width_of = |column: &Column| -> f32 {
-            let palettes = visible(column);
-            palettes
-                .iter()
-                .filter_map(|(palette, _)| palette.fixed_width())
-                .fold(None, |most: Option<f32>, width| {
-                    Some(most.map_or(width, |most| most.max(width)))
-                })
-                .unwrap_or(column.width)
-        };
-        let tools = |column: &Column| {
-            column
-                .palettes
-                .iter()
-                .any(|(palette, _)| *palette == Palette::Tools)
-        };
-        // Columns that show anything, and their widths. A closed side shows
-        // nothing; a folded side keeps its tools and folds the rest into
-        // icons.
-        let mut sides: Vec<(Side, usize, f32, bool)> = Vec::new();
-        let mut left_icons: Vec<Palette> = Vec::new();
-        let mut folded_right: Vec<Palette> = Vec::new();
-        for (side, columns) in [(Side::Left, &self.left), (Side::Right, &self.right)] {
-            if self.hidden[side.index()] {
-                continue;
-            }
-            for (index, column) in columns.iter().enumerate() {
-                if visible(column).is_empty() {
-                    continue;
-                }
-                if self.folded[side.index()] && !tools(column) {
-                    let into = if side == Side::Left {
-                        &mut left_icons
-                    } else {
-                        &mut folded_right
-                    };
-                    into.extend(visible(column).iter().map(|(palette, _)| *palette));
-                } else {
-                    sides.push((side, index, width_of(column), true));
-                }
-            }
-        }
-        let mut icons: Vec<Palette> = if self.hidden[1] {
-            Vec::new()
-        } else {
-            self.iconized
-                .iter()
-                .copied()
-                .filter(|palette| shown(*palette))
-                .collect()
-        };
-        icons.extend(folded_right);
-        // Too narrow: the widest columns collapse to icons (never the tools).
-        loop {
-            let used: f32 = sides
-                .iter()
-                .filter(|(_, _, _, open)| *open)
-                .map(|(_, _, width, _)| width)
-                .sum();
-            let strip = if icons.is_empty() { 0.0 } else { STRIP }
-                + if left_icons.is_empty() { 0.0 } else { STRIP };
-            if used + strip + MIN_CANVAS <= body.width() {
-                break;
-            }
-            let widest = sides
-                .iter_mut()
-                .filter(|(side, index, _, open)| {
-                    let column = match side {
-                        Side::Left => &self.left[*index],
-                        Side::Right => &self.right[*index],
-                    };
-                    *open
-                        && !visible(column)
-                            .iter()
-                            .any(|(palette, _)| *palette == Palette::Tools)
-                })
-                .max_by(|a, b| a.2.total_cmp(&b.2));
-            let Some(widest) = widest else {
-                break;
-            };
-            widest.3 = false;
-            let column = match widest.0 {
-                Side::Left => &self.left[widest.1],
-                Side::Right => &self.right[widest.1],
-            };
-            icons.extend(visible(column).iter().map(|(palette, _)| *palette));
-        }
-        let open = |side: Side| -> Vec<(usize, f32)> {
-            sides
-                .iter()
-                .filter(|(found, _, _, open)| *found == side && *open)
-                .map(|(_, index, width, _)| (*index, *width))
-                .collect()
-        };
-        let (left, right) = (open(Side::Left), open(Side::Right));
-        // A folded side keeps its strip, even empty, for its arrows.
-        let strip_width = if icons.is_empty() && !(self.folded[1] && !self.hidden[1]) {
-            0.0
-        } else {
-            STRIP
-        };
-        let left_strip_width = if self.folded[0] && !self.hidden[0] {
-            STRIP
-        } else {
-            0.0
-        };
-        let left_handle = if self.hidden[0] { HANDLE } else { 0.0 };
-        let right_handle = if self.hidden[1] { HANDLE } else { 0.0 };
-        let left_total: f32 = left.iter().map(|(_, width)| width).sum::<f32>() + left_strip_width;
-        let right_total: f32 = right.iter().map(|(_, width)| width).sum::<f32>() + strip_width;
-        let mut laid = Laid {
-            docked: Vec::new(),
-            columns: Vec::new(),
-            splits: Vec::new(),
-            edges: Vec::new(),
-            strip: None,
-            icons,
-            left_strip: None,
-            left_icons,
-            handles: Vec::new(),
-            center: body,
-        };
-        if self.hidden[0] {
-            laid.handles.push((
-                Side::Left,
-                Rect::from_min_max(body.min, pos2(body.left() + HANDLE, body.bottom())),
-            ));
-        }
-        if self.hidden[1] {
-            laid.handles.push((
-                Side::Right,
-                Rect::from_min_max(pos2(body.right() - HANDLE, body.top()), body.max),
-            ));
-        }
-        let place_column = |laid: &mut Laid, side: Side, index: usize, rect: Rect| {
-            let column = match side {
-                Side::Left => &self.left[index],
-                Side::Right => &self.right[index],
-            };
-            laid.columns.push((side, index, rect));
-            let rect = Rect::from_min_max(pos2(rect.left(), rect.top() + COLUMN_BAR), rect.max);
-            let palettes = visible(column);
-            let total: f32 = palettes.iter().map(|(_, weight)| weight.max(0.01)).sum();
-            let mut heights: Vec<f32> = palettes
-                .iter()
-                .map(|(palette, weight)| {
-                    (rect.height() * weight.max(0.01) / total)
-                        .max(palette.min_height().min(rect.height()))
-                })
-                .collect();
-            // Keep the column's height: take any excess from the tallest.
-            let excess: f32 = heights.iter().sum::<f32>() - rect.height();
-            if excess > 0.0
-                && let Some(tallest) = heights.iter_mut().max_by(|a, b| a.total_cmp(b))
-            {
-                *tallest = (*tallest - excess).max(24.0);
-            }
-            let mut top = rect.top();
-            for (at, ((palette, _), height)) in palettes.iter().zip(&heights).enumerate() {
-                let piece =
-                    Rect::from_min_size(pos2(rect.left(), top), vec2(rect.width(), *height));
-                laid.docked.push((*palette, piece));
-                top = piece.bottom();
-                if let Some((lower, _)) = palettes.get(at + 1) {
-                    laid.splits.push((
-                        side,
-                        index,
-                        *palette,
-                        *lower,
-                        Rect::from_center_size(pos2(rect.center().x, top), vec2(rect.width(), 6.0)),
-                        rect.height(),
-                    ));
-                }
-            }
-            let resizable = palettes
-                .iter()
-                .all(|(palette, _)| palette.fixed_width().is_none());
-            if resizable {
-                let x = match side {
-                    Side::Left => rect.right(),
-                    Side::Right => rect.left(),
-                };
-                laid.edges.push((
-                    side,
-                    index,
-                    Rect::from_center_size(pos2(x, rect.center().y), vec2(6.0, rect.height())),
-                ));
-            }
-        };
-        let mut x = body.left() + left_handle - hide * left_total;
-        if left_strip_width > 0.0 {
-            laid.left_strip = Some(Rect::from_min_max(
-                pos2(x, body.top()),
-                pos2(x + STRIP, body.bottom()),
-            ));
-            x += STRIP;
-        }
-        for (index, width) in &left {
-            let rect = Rect::from_min_max(pos2(x, body.top()), pos2(x + width, body.bottom()));
-            place_column(&mut laid, Side::Left, *index, rect);
-            x = rect.right();
-        }
-        let center_left = x;
-        let mut x = body.right() - right_handle + hide * right_total;
-        if strip_width > 0.0 {
-            laid.strip = Some(Rect::from_min_max(
-                pos2(x - STRIP, body.top()),
-                pos2(x, body.bottom()),
-            ));
-            x -= STRIP;
-        }
-        for (index, width) in &right {
-            let rect = Rect::from_min_max(pos2(x - width, body.top()), pos2(x, body.bottom()));
-            place_column(&mut laid, Side::Right, *index, rect);
-            x = rect.left();
-        }
-        laid.center = Rect::from_min_max(
-            pos2(center_left, body.top()),
-            pos2(x.max(center_left), body.bottom()),
-        );
-        laid
-    }
-
-    fn column_mut(&mut self, side: Side, index: usize) -> Option<&mut Column> {
-        match side {
-            Side::Left => self.left.get_mut(index),
-            Side::Right => self.right.get_mut(index),
-        }
+    /// Clip Studio Paint's: the tools, Sub Tool over the color wheel and
+    /// set, and the brush sizes at the left; the navigator over the layers
+    /// at the right; the timeline under the canvas; the rest as icons.
+    fn default_layout() -> Dock {
+        let mut dock = Dock::empty();
+        dock.left = vec![
+            Column::of(&[(Palette::Tools, 1.0)], 46.0),
+            Column::of(
+                &[
+                    (Palette::SubTool, 0.44),
+                    (Palette::Color, 0.3),
+                    (Palette::ColorSet, 0.26),
+                ],
+                236.0,
+            ),
+            Column::of(&[(Palette::BrushSize, 1.0)], 86.0),
+        ];
+        dock.right = vec![Column::of(
+            &[(Palette::Navigator, 0.42), (Palette::Layer, 0.58)],
+            300.0,
+        )];
+        dock.bottom = vec![Group::one(Palette::Timeline, 1.0)];
+        dock.bottom_height = 160.0;
+        dock.iconized = STRIP_PALETTES.to_vec();
+        dock
     }
 }
 
@@ -827,6 +296,32 @@ fn arrows(
     response.clicked()
 }
 
+/// Where people grab a palette drawn in `body` to drag it: its title bar,
+/// clear of its menu button. A palette of fixed width has no title bar;
+/// it is grabbed by the bar above it (`above`, its column's), or its top.
+fn title_bar(palette: Palette, body: Rect, above: Option<Rect>) -> Rect {
+    if palette.fixed_width().is_some() {
+        above.unwrap_or_else(|| Rect::from_min_size(body.min, vec2(body.width(), 8.0)))
+    } else {
+        Rect::from_min_size(body.min, vec2((body.width() - 26.0).max(0.0), 28.0))
+    }
+}
+
+/// The column bar right above `group`, when it is the first in a column.
+fn bar_above(laid: &Laid, group: &LaidGroup<Palette>) -> Option<Rect> {
+    let Holder::Column(side, column) = group.holder else {
+        return None;
+    };
+    laid.columns
+        .iter()
+        .find(|(found, index, rect)| {
+            *found == side
+                && *index == column
+                && (rect.top() + COLUMN_BAR - group.rect.top()).abs() < 0.5
+        })
+        .map(|(_, _, rect)| Rect::from_min_size(rect.min, vec2(rect.width(), COLUMN_BAR)))
+}
+
 impl SuePaint {
     /// Draws one palette into `rect`.
     pub(crate) fn draw_palette(
@@ -846,6 +341,7 @@ impl SuePaint {
             Palette::ColorSet => self.color_set_panel(ui, rect, cx, theme),
             Palette::Navigator => self.navigator(ui, rect, cx, theme),
             Palette::Layer => self.layer_panel(ui, rect, cx, theme),
+            Palette::Timeline => self.timeline_panel(ui, rect, cx, theme),
             other => self.single_palette(ui, other, rect, cx, theme),
         }
     }
@@ -885,6 +381,7 @@ impl SuePaint {
         if self.dock.menu != Some(palette) {
             return;
         }
+        let place = self.dock.find(palette).map(|(holder, _)| holder);
         let side = self.dock.side_of(palette);
         let mut chosen: Option<&str> = None;
         let shown = egui::Area::new(Id::unique(("sue-paint-dock-menu", palette.title())))
@@ -907,6 +404,9 @@ impl SuePaint {
                         if side != Some(Side::Right) {
                             item(ui, &tr!("dock-on-the-right"), "right");
                         }
+                        if place != Some(Holder::Bottom) && palette.fixed_width().is_none() {
+                            item(ui, &tr!("dock-at-the-bottom"), "bottom");
+                        }
                         if !floating {
                             item(ui, &tr!("float-in-a-window"), "float");
                         }
@@ -927,6 +427,7 @@ impl SuePaint {
         match chosen {
             Some("left") => self.dock.dock(palette, Side::Left),
             Some("right") => self.dock.dock(palette, Side::Right),
+            Some("bottom") => self.dock.put(palette, sue_wm::dock::Target::Bottom),
             Some("float") => {
                 let at = rect.min + vec2(-40.0, 30.0);
                 self.dock.float(palette, at.max(pos2(8.0, 40.0)));
@@ -954,6 +455,7 @@ impl SuePaint {
             Palette::ColorSet => panels.color_set = false,
             Palette::Navigator => panels.navigator = false,
             Palette::Layer => panels.layer = false,
+            Palette::Timeline => panels.timeline = false,
             // The others fold back into the strip, as in Clip Studio Paint.
             other => self.dock.iconize(other),
         }
@@ -962,8 +464,8 @@ impl SuePaint {
         }
     }
 
-    /// The palettes, docked, collapsed and floating, around the canvas.
-    /// Returns what is left for the canvas and the timeline.
+    /// The palettes, docked, collapsed and floating, around the canvas and
+    /// under it. Returns what is left for the canvas.
     pub(crate) fn dock_ui(
         &mut self,
         ui: &mut Ui,
@@ -972,6 +474,14 @@ impl SuePaint {
         theme: &Theme,
     ) -> Rect {
         let panels = self.panels;
+        // A palette the Window menu shows again comes to the front of its
+        // tabs.
+        for palette in PALETTES {
+            if palette.shown(&panels) && !palette.shown(&self.panels_seen) {
+                self.dock.choose(palette);
+            }
+        }
+        self.panels_seen = panels;
         let shown = move |palette: Palette| palette.shown(&panels);
         let laid = self.dock.layout(body, &shown, self.hide);
         for (_, _, rect) in &laid.columns {
@@ -979,10 +489,17 @@ impl SuePaint {
             let bar = Rect::from_min_size(rect.min, vec2(rect.width(), COLUMN_BAR));
             ui.painter().rect_filled(bar, 0.0, theme.void);
         }
-        for (palette, rect) in &laid.docked {
-            self.draw_palette(ui, *palette, *rect, cx, theme);
-            ui.painter()
-                .hline(rect.x_range(), rect.bottom(), theme.hairline());
+        for group in &laid.groups {
+            self.draw_palette(ui, group.active, group.body, cx, theme);
+            if group.holder == Holder::Bottom {
+                ui.painter()
+                    .vline(group.rect.right(), group.rect.y_range(), theme.hairline());
+            } else {
+                ui.painter()
+                    .hline(group.rect.x_range(), group.rect.bottom(), theme.hairline());
+            }
+            self.dock
+                .tabs_ui(ui, group, &|palette: Palette| palette.title(), theme);
         }
         for (side, _, rect) in &laid.columns {
             let x = match side {
@@ -992,10 +509,12 @@ impl SuePaint {
             ui.painter().vline(x, rect.y_range(), theme.hairline());
         }
         if self.ready {
-            for (palette, rect) in &laid.docked {
-                self.palette_menu(ui, *palette, *rect, false, theme);
+            for group in &laid.groups {
+                self.palette_menu(ui, group.active, group.body, false, theme);
+                let grab = title_bar(group.active, group.body, bar_above(&laid, group));
+                self.dock.grip(ui, grab, group.active, "docked");
             }
-            self.splitters(ui, &laid, theme);
+            self.dock.splitters(ui, &laid, theme);
         }
         if let Some(strip) = laid.strip {
             self.strip_ui(ui, strip, Side::Right, &laid.icons, cx, theme);
@@ -1006,155 +525,10 @@ impl SuePaint {
         self.side_arrows(ui, &laid, theme);
         if self.ready {
             self.floating_ui(ui, body, cx, theme);
+            self.dock
+                .drop_ui(ui, &laid, &|palette: Palette| palette.title(), theme);
         }
         laid.center
-    }
-
-    /// Dragging columns' edges and the lines between palettes.
-    fn splitters(&mut self, ui: &mut Ui, laid: &Laid, theme: &Theme) {
-        let pointer = ui.input(|input| input.pointer.interact_pos());
-        for (side, column, rect) in &laid.edges {
-            let response = ui.interact(
-                *rect,
-                Id::unique(("sue-paint-edge", *side == Side::Left, *column)),
-                Sense::drag(),
-            );
-            if response.hovered() || response.dragged() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-                ui.painter().vline(
-                    rect.center().x,
-                    rect.y_range(),
-                    Stroke::new(2.0, theme.border_active),
-                );
-            }
-            if response.drag_started()
-                && let (Some(point), Some(found)) = (pointer, self.dock.column_mut(*side, *column))
-            {
-                self.dock.drag = Some(Drag::Edge {
-                    side: *side,
-                    column: *column,
-                    from: point.x,
-                    width: found.width,
-                });
-            }
-        }
-        for (side, column, upper, lower, rect, height) in &laid.splits {
-            let response = ui.interact(
-                *rect,
-                Id::unique((
-                    "sue-paint-split",
-                    *side == Side::Left,
-                    *column,
-                    upper.title(),
-                )),
-                Sense::drag(),
-            );
-            if response.hovered() || response.dragged() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
-                ui.painter().hline(
-                    rect.x_range(),
-                    rect.center().y,
-                    Stroke::new(2.0, theme.border_active),
-                );
-            }
-            if response.drag_started()
-                && let (Some(point), Some(found)) = (pointer, self.dock.column_mut(*side, *column))
-            {
-                let weight = |palette: Palette| {
-                    found
-                        .palettes
-                        .iter()
-                        .find(|(p, _)| *p == palette)
-                        .map_or(0.5, |(_, w)| *w)
-                };
-                let total: f32 = found.palettes.iter().map(|(_, w)| w.max(0.01)).sum();
-                self.dock.drag = Some(Drag::Split {
-                    side: *side,
-                    column: *column,
-                    upper: *upper,
-                    lower: *lower,
-                    from: point.y,
-                    weights: (weight(*upper), weight(*lower)),
-                    per_point: total / height.max(1.0),
-                });
-            }
-        }
-        let down = ui.input(|input| input.pointer.primary_down());
-        match (self.dock.drag, pointer) {
-            (
-                Some(Drag::Edge {
-                    side,
-                    column,
-                    from,
-                    width,
-                }),
-                Some(point),
-            ) if down => {
-                let delta = match side {
-                    Side::Left => point.x - from,
-                    Side::Right => from - point.x,
-                };
-                if let Some(found) = self.dock.column_mut(side, column) {
-                    found.width = (width + delta).clamp(170.0, 560.0);
-                }
-            }
-            (
-                Some(Drag::Split {
-                    side,
-                    column,
-                    upper,
-                    lower,
-                    from,
-                    weights,
-                    per_point,
-                }),
-                Some(point),
-            ) if down => {
-                let moved = (point.y - from) * per_point;
-                let least = 0.08;
-                let up = (weights.0 + moved).max(least);
-                let low = (weights.0 + weights.1 - up).max(least);
-                if let Some(found) = self.dock.column_mut(side, column) {
-                    for (palette, weight) in &mut found.palettes {
-                        if *palette == upper {
-                            *weight = weights.0 + weights.1 - low;
-                        } else if *palette == lower {
-                            *weight = low;
-                        }
-                    }
-                }
-            }
-            (Some(Drag::Timeline { from, height }), Some(point)) if down => {
-                self.dock.timeline = (height + from - point.y).clamp(90.0, 520.0);
-            }
-            (Some(_), _) if !down => self.dock.drag = None,
-            _ => {}
-        }
-    }
-
-    /// The timeline's top edge, which people drag to resize it.
-    pub(crate) fn timeline_splitter(
-        &mut self,
-        ui: &mut Ui,
-        top: f32,
-        x: egui::Rangef,
-        theme: &Theme,
-    ) {
-        let rect = Rect::from_x_y_ranges(x, egui::Rangef::new(top - 3.0, top + 3.0));
-        let response = ui.interact(rect, Id::unique("sue-paint-timeline-edge"), Sense::drag());
-        if response.hovered() || response.dragged() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
-            ui.painter()
-                .hline(x, top, Stroke::new(2.0, theme.border_active));
-        }
-        if response.drag_started()
-            && let Some(point) = ui.input(|input| input.pointer.interact_pos())
-        {
-            self.dock.drag = Some(Drag::Timeline {
-                from: point.y,
-                height: self.dock.timeline,
-            });
-        }
     }
 
     /// Clip Studio Paint's arrows at the top of each side: one folds the
@@ -1217,9 +591,9 @@ impl SuePaint {
             };
             let foldable = columns.iter().any(|column| {
                 !column
-                    .palettes
+                    .groups
                     .iter()
-                    .any(|(palette, _)| *palette == Palette::Tools)
+                    .any(|group| group.tabs.iter().any(|palette| palette.anchored()))
             });
             if !foldable {
                 continue;
@@ -1240,7 +614,8 @@ impl SuePaint {
     }
 
     /// An icon strip (the right one, or the left one while the left side
-    /// is folded), and the collapsed palette it shows.
+    /// is folded), and the collapsed palette it shows. Icons drag out to
+    /// dock or float their palettes.
     fn strip_ui(
         &mut self,
         ui: &mut Ui,
@@ -1281,6 +656,9 @@ impl SuePaint {
             ) {
                 self.dock.popped = if open { None } else { Some(*palette) };
             }
+            if self.ready {
+                self.dock.grip(ui, rect, *palette, "icon");
+            }
         }
         let Some(palette) = self
             .dock
@@ -1309,6 +687,8 @@ impl SuePaint {
                     .rect_filled(rect.expand(1.0), 0.0, theme.border);
                 self.draw_palette(ui, palette, rect, cx, theme);
                 self.palette_menu(ui, palette, rect, false, theme);
+                self.dock
+                    .grip(ui, title_bar(palette, rect, None), palette, "popped");
                 rect
             });
         let inside = area.inner;
@@ -1319,12 +699,14 @@ impl SuePaint {
                     .interact_pos()
                     .is_some_and(|point| !inside.contains(point) && !strip.contains(point))
         });
-        if clicked_outside && self.dock.menu.is_none() {
+        if clicked_outside && self.dock.menu.is_none() && !self.dock.dragging() {
             self.dock.popped = None;
         }
     }
 
-    /// Floating palettes, each in a window people move and resize.
+    /// Floating palettes, each in a window people move and resize. A
+    /// palette inside Sue's window drags out of it by its title bar, onto a
+    /// column, the bottom or the strip.
     fn floating_ui(&mut self, ui: &mut Ui, body: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
         let floating = self.dock.floating.clone();
         let panels = self.panels;
@@ -1351,6 +733,8 @@ impl SuePaint {
                     let area = Rect::from_min_size(area.min, area.size().max(vec2(40.0, 80.0)));
                     ui.allocate_rect(area, Sense::hover());
                     self.draw_palette(ui, palette, area, cx, theme);
+                    self.dock
+                        .grip(ui, title_bar(palette, area, None), palette, "floating");
                     // Back into a column, from inside its window.
                     let back = Rect::from_min_size(
                         pos2(area.right() - 22.0, area.top() + 3.0),
@@ -1384,16 +768,23 @@ impl SuePaint {
                 .and_then(|inner| inner.inner.flatten())
                 .is_some();
             if !open || redock {
-                let side = if rect.center().x < body.center().x {
-                    Side::Left
-                } else {
-                    Side::Right
-                };
-                self.dock.dock(palette, side);
+                self.redock(palette, rect, body);
             }
         }
-        let _ = Align2::LEFT_TOP;
-        let _ = icons::paint;
+    }
+
+    /// Docks a floating `palette` again on the side its window is nearer.
+    fn redock(&mut self, palette: Palette, rect: Rect, body: Rect) {
+        let side = if rect.center().x < body.center().x {
+            Side::Left
+        } else {
+            Side::Right
+        };
+        if palette == Palette::Timeline {
+            self.dock.put(palette, sue_wm::dock::Target::Bottom);
+        } else {
+            self.dock.dock(palette, side);
+        }
     }
 
     /// A floating palette in a window of its own, as Clip Studio Paint's:
@@ -1473,41 +864,29 @@ impl SuePaint {
             entry.1 = now.translate(-main.to_vec2());
         }
         if closed || redock {
-            let side = if rect.center().x < body.center().x {
-                Side::Left
-            } else {
-                Side::Right
-            };
-            self.dock.dock(palette, side);
+            self.redock(palette, rect, body);
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn a_layout_round_trips_as_lines() {
-        let mut dock = Dock::default();
-        dock.float(Palette::Color, pos2(40.0, 60.0));
-        dock.iconize(Palette::ColorSet);
-        dock.timeline = 210.0;
-        let back = Dock::from_lines(&dock.to_lines()).unwrap();
-        assert_eq!(back.to_lines(), dock.to_lines());
-        assert!(Dock::from_lines(&["nonsense".to_owned()]).is_none());
-    }
-
     use super::*;
+    use sue_wm::dock::{STRIP, Target};
 
     fn all(_: Palette) -> bool {
         true
     }
 
+    fn body() -> Rect {
+        Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 900.0))
+    }
+
     #[test]
     fn the_default_layout_is_like_a_painting_apps() {
         let dock = Dock::default();
-        let body = Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 900.0));
-        let laid = dock.layout(body, &all, 0.0);
-        assert_eq!(laid.docked.len(), 7);
+        let laid = dock.layout(body(), &all, 0.0);
+        assert_eq!(laid.groups.len(), 8, "seven palettes and the timeline");
         assert!(
             laid.strip.is_some(),
             "the folded palettes, as Clip Studio Paint"
@@ -1515,99 +894,106 @@ mod tests {
         assert_eq!(laid.icons.len(), STRIP_PALETTES.len());
         assert_eq!(laid.center.left(), 46.0 + 236.0 + 86.0);
         assert_eq!(laid.center.right(), 1600.0 - 300.0 - STRIP);
+        // The timeline under the canvas, between the columns.
+        let timeline = laid.bottom.unwrap();
+        assert_eq!(timeline.x_range(), laid.center.x_range());
+        assert_eq!(timeline.height(), 160.0);
         // Heights share the column without gaps.
-        let sub = laid
-            .docked
-            .iter()
-            .find(|(p, _)| *p == Palette::SubTool)
-            .unwrap()
-            .1;
-        let set = laid
-            .docked
-            .iter()
-            .find(|(p, _)| *p == Palette::ColorSet)
-            .unwrap()
-            .1;
-        assert_eq!(sub.top(), COLUMN_BAR, "below the column's bar");
-        assert!((set.bottom() - 900.0).abs() < 0.5);
+        let place = |palette| {
+            laid.docked()
+                .find(|(found, _)| *found == palette)
+                .unwrap()
+                .1
+        };
+        assert_eq!(place(Palette::SubTool).top(), COLUMN_BAR);
+        assert!((place(Palette::ColorSet).bottom() - 900.0).abs() < 0.5);
         assert_eq!(laid.splits.len(), 3);
         assert_eq!(laid.edges.len(), 2, "the two wide columns resize");
     }
 
     #[test]
-    fn a_narrow_window_collapses_the_widest_columns_to_icons() {
-        let dock = Dock::default();
-        let body = Rect::from_min_size(Pos2::ZERO, vec2(760.0, 700.0));
-        let laid = dock.layout(body, &all, 0.0);
-        assert!(laid.strip.is_some());
-        assert!(laid.icons.contains(&Palette::Navigator) && laid.icons.contains(&Palette::Layer));
+    fn sides_fold_into_icons_and_close_and_come_back() {
+        let mut dock = Dock::default();
+        let open = dock.layout(body(), &all, 0.0);
+        dock.folded[1] = true;
+        let laid = dock.layout(body(), &all, 0.0);
+        assert!(laid.icons.contains(&Palette::Navigator));
+        assert!(!laid.docked().any(|(p, _)| p == Palette::Layer));
+        dock.folded[0] = true;
+        let laid = dock.layout(body(), &all, 0.0);
         assert!(
-            laid.center.width() >= MIN_CANVAS - 0.5,
-            "{}",
-            laid.center.width()
-        );
-        assert!(
-            laid.docked.iter().any(|(p, _)| *p == Palette::Tools),
+            laid.docked().any(|(p, _)| p == Palette::Tools),
             "the tools stay"
         );
-    }
-
-    #[test]
-    fn sides_fold_into_icons_and_close_and_come_back() {
-        let body = Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 900.0));
-        let mut dock = Dock::default();
-        let open = dock.layout(body, &all, 0.0);
-        // The right side folded: its palettes are icons in its strip.
-        dock.folded[1] = true;
-        let laid = dock.layout(body, &all, 0.0);
-        assert!(laid.icons.contains(&Palette::Navigator));
-        assert!(!laid.docked.iter().any(|(p, _)| *p == Palette::Layer));
-        assert_eq!(laid.center.right(), 1600.0 - STRIP, "only the strip");
-        // The left side folded: the tools stay, the rest goes to a strip.
-        dock.folded[0] = true;
-        let laid = dock.layout(body, &all, 0.0);
-        assert!(laid.docked.iter().any(|(p, _)| *p == Palette::Tools));
         assert!(laid.left_icons.contains(&Palette::SubTool));
-        assert!(laid.left_strip.is_some());
-        // Both closed: only their bars.
         dock.hidden = [true; 2];
-        let laid = dock.layout(body, &all, 0.0);
-        assert!(laid.docked.is_empty() && laid.strip.is_none());
-        assert_eq!(laid.handles.len(), 2);
-        assert_eq!(laid.center.width(), 1600.0 - 2.0 * HANDLE);
-        // Kept with the layout, and opened again as they were.
         let back = Dock::from_lines(&dock.to_lines()).unwrap();
         assert_eq!((back.folded, back.hidden), ([true; 2], [true; 2]));
         dock.hidden = [false; 2];
         dock.folded = [false; 2];
-        assert_eq!(dock.layout(body, &all, 0.0), open);
+        assert_eq!(dock.layout(body(), &all, 0.0), open);
     }
 
     #[test]
-    fn palettes_move_float_collapse_and_come_back() {
+    fn palettes_tab_float_collapse_dock_and_come_back() {
         let mut dock = Dock::default();
-        dock.dock(Palette::Color, Side::Right);
+        dock.put(
+            Palette::Color,
+            Target::Join {
+                anchor: Palette::Layer,
+                before: false,
+            },
+        );
         assert_eq!(dock.side_of(Palette::Color), Some(Side::Right));
-        assert_eq!(dock.right[0].palettes.len(), 3);
+        dock.put(Palette::Navigator, Target::Bottom);
+        assert_eq!(dock.find(Palette::Navigator), Some((Holder::Bottom, 1)));
         dock.float(Palette::Layer, pos2(100.0, 100.0));
         assert_eq!(dock.side_of(Palette::Layer), None);
-        assert_eq!(dock.floating.len(), 1);
-        dock.iconize(Palette::Navigator);
-        let body = Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 900.0));
-        let laid = dock.layout(body, &all, 0.0);
-        assert_eq!(laid.icons.last(), Some(&Palette::Navigator));
-        assert_eq!(laid.icons.len(), STRIP_PALETTES.len() + 1);
-        dock.dock(Palette::Navigator, Side::Left);
-        assert!(!dock.iconized.contains(&Palette::Navigator));
+        dock.iconize(Palette::ColorSet);
+        let laid = dock.layout(body(), &all, 0.0);
+        assert_eq!(laid.icons.last(), Some(&Palette::ColorSet));
         dock.dock(Palette::BrushSize, Side::Right);
         assert!(
             dock.right
                 .iter()
-                .any(|column| column.palettes == [(Palette::BrushSize, 1.0)])
+                .any(|column| column.groups == [Group::one(Palette::BrushSize, 1.0)])
         );
-        assert!(
-            dock.left.iter().all(|column| !column.palettes.is_empty()),
-            "no empty columns"
+        // Kept as lines, by key, and read back the same.
+        let back = Dock::from_lines(&dock.to_lines()).unwrap();
+        assert_eq!(back, dock);
+        // Reset.
+        dock = Dock::default();
+        assert_eq!(dock, Palette::default_layout());
+    }
+
+    #[test]
+    fn workspaces_saved_before_tabs_still_open() {
+        // Lines as Sue Paint wrote them before, palettes named by title.
+        let old = [
+            format!("left 46 {}=1", Palette::Tools.title()),
+            format!(
+                "left 236 {}=0.44,{}=0.3,{}=0.26",
+                Palette::SubTool.title(),
+                Palette::Color.title(),
+                Palette::ColorSet.title()
+            ),
+            format!("left 86 {}=1", Palette::BrushSize.title()),
+            format!(
+                "right 300 {}=0.42,{}=0.58",
+                Palette::Navigator.title(),
+                Palette::Layer.title()
+            ),
+            "timeline 210".to_owned(),
+        ];
+        let mut old = old.to_vec();
+        old.extend(
+            STRIP_PALETTES
+                .iter()
+                .map(|palette| format!("icon {}", palette.title())),
         );
+        let read = Dock::from_lines(&old).unwrap();
+        let mut expected = Dock::default();
+        expected.bottom_height = 210.0;
+        assert_eq!(read, expected);
     }
 }
