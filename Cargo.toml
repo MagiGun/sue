@@ -55,6 +55,9 @@ winit = "0.30"
 # Pen pressure from WinTab tablet drivers on Windows; its HWND type.
 wintab = "0.1.1"
 windows = { version = "0.62", default-features = false, features = ["Win32_Foundation"] }
+# Pen pressure, tilt and the eraser through XInput2 on Linux and the BSDs,
+# the pure Rust X11 client winit already uses.
+x11rb = { version = "0.13", default-features = false, features = ["xinput"] }
 zune-core = "0.5"
 zune-jpegxl = "0.5"
 bytemuck = "1"

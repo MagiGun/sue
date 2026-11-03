@@ -58,6 +58,12 @@ sue-ios = { path = "ios" }
 wintab.workspace = true
 windows.workspace = true
 
+# Pen pressure, tilt and the eraser from X11's XInput2 (a pen tablet
+# under X11, or under Wayland through XWayland), on a connection of its
+# own; pure Rust, the x11rb winit already uses.
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly"))'.dependencies]
+x11rb.workspace = true
+
 # The browser: WebGPU with WebGL2 as the fallback, its page, storage,
 # clipboard and file pickers, and a clock (std's panics there). The
 # browser's random numbers too, for the ONNX runtime's random ops.

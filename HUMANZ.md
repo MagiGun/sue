@@ -691,6 +691,7 @@ the `PlatformHost` trait and the portable services next to it:
 | `poll_picks`, `deliver_picked_files`, `picks_busy` | The answers of pickers that run beside Sue (`PickNews`), the hand-back of files written to the paths they chose, and whether to keep polling; no-ops on desktops |
 | `shown_place`, `shown_path`, `file_manager` | How to name a path to people: what they chose for a staged path (`ShownPlace`, a name and, where the system says it, a folder), else the path itself; and the file manager `reveal_file` shows files in (`Explorer`, `Finder`), `None` on phones and tablets, which hide "show it" actions |
 | `stays_in_cache` | `true` for a path under the staging folder that stands for nothing people chose (beside an opened document's copy), so a write there never leaves Sue's cache; always `false` on desktops |
+| `stylus::{pressure, source, tilt, eraser}` | A pen's pressure (0 to 1, while it touches), tilt (-1 to 1 each way) and eraser end where the window's touch events do not carry them, refreshed every frame from the `PenSource`: WinTab on Windows, XInput2 on Linux and the BSDs, the page's pointer events in the browser (see "Pen tablets" below) |
 
 Path resolution is a pure function of the OS and an injected environment lookup,
 so it can be tested without touching the real environment:
@@ -718,6 +719,30 @@ Two hosts implement the trait:
   each frame. It fills `HardwareCapabilities` from the adapter and the
   monitor's refresh rate. The application builds every frame into egui's root
   `Ui` through `DesktopApp::ui`.
+
+**Pen tablets.** A pen moves the pointer everywhere, so its motion, tip and
+barrel buttons reach Sue as mouse events; what else it measures comes per
+system into `stylus`. On Windows a WinTab driver's packets (`wintab_pen`),
+drained every frame. On Linux and the BSDs, winit 0.30 does not speak
+Wayland's tablet protocol (`tablet-v2`), so a native Wayland window gets a
+pen only from compositors that turn it into a mouse (some do; under niri,
+for one, the pen did nothing at all, issue #2), and reading the
+protocol on winit's own connection would take `unsafe` (rule 6). XWayland
+speaks it and hands the pen to X11 programs as an XInput2 device that also
+moves the pointer. So before the event loop opens (`tablets::display_server`),
+a Wayland session with an X server reachable (`DISPLAY`) and a pen tablet
+in the kernel's device list (`/proc/bus/input/devices`, readable by every
+user: a device with `BTN_TOOL_PEN` and `ABS_PRESSURE`) opens Sue through
+XWayland; `SUE_DISPLAY_SERVER=wayland` or `x11` chooses by hand. Under X11
+or XWayland, `xinput_pen` opens a second X11 connection (the pure Rust
+`x11rb` winit already uses), selects raw XInput2 motion and button events
+of every device on the root window (they arrive over any window and while
+a button is held, and cannot clash with winit's own selections), finds
+the pens by their `Abs Pressure` valuator (`Abs Tilt X` and `Y` for tilt,
+"eraser" in the device name for the eraser end, touch screens left out),
+lists them again when devices come and go, and drains the queue every
+frame. Pressure counts while the tip's button is down, or before one is
+seen, while it is above 0.
 
 **GPU choice.** The window draws on the GPU picked by `display.gpu_preference`
 (`GpuPreference`). `auto`, the default, uses the GPU that drives the display: on
@@ -1455,7 +1480,7 @@ clean without the brush feeling slow. A stroke passes through these stages:
 
 | Stage | What it does |
 | --- | --- |
-| Input | egui's raw event stream, in order, so a fast stroke keeps every sample between frames; each frame's samples are spread over its time, so speeds are real. Pen pressure comes from egui touch events with force (Windows Ink, macOS, Linux, phones), else from `sue_platform::stylus` (a WinTab tablet on Windows, drained each frame through the `wintab` crate, or a pen's pointer events in a browser, which winit hands over as a mouse), through the pen pressure curve every tool shares (`sue_paint.pen_pressure`, a `Response`, by default `0,0 0.4,0.5 1,1`). |
+| Input | egui's raw event stream, in order, so a fast stroke keeps every sample between frames; each frame's samples are spread over its time, so speeds are real. Pen pressure comes from egui touch events with force (Windows Ink, macOS, Linux, phones), else from `sue_platform::stylus` (a WinTab tablet on Windows, drained each frame through the `wintab` crate, a pen tablet's XInput2 device under X11 or XWayland on Linux and the BSDs, or a pen's pointer events in a browser, which winit hands over as a mouse), through the pen pressure curve every tool shares (`sue_paint.pen_pressure`, a `Response`, by default `0,0 0.4,0.5 1,1`). |
 | Dynamics | Brush Size and Opacity each have a `Dynamics`, as in Clip Studio Paint: pen pressure, velocity (the pen's speed, still to 2,000 points per second) and random, each on or off with a minimum value and, for pressure and velocity, its own curve; the inputs multiply. Random is steady along the path, so the stroke painted again from its corrected path keeps its sizes. *Specify by size on screen* keeps the brush the same size at any zoom; *At least 1 pixel* keeps a light line from thinning below a pixel. |
 | Stabilization | A time-based filter (lag of about 4 ms per level, the same at any sample rate) that the brush follows. *Adjust by speed* loosens it as the pen speeds up (from 150 to 1500 points per second the lag drops to a tenth), so slow lines lose their tremor while quick hatching stays snappy. However fast the pen, the brush never trails it by more than 10 screen points plus 1.5 per level (`Stabilizer::most_behind`). On lift the brush catches up along the pen's own recent points, from the one nearest the brush, so it follows the way the pen went instead of cutting straight across. |
 | Painting live | Pen-like tips paint a continuous tapered capsule between consecutive samples: each pixel's coverage comes from its exact distance to the segment (four anti-aliasing widths, hardness falloff), so there are no gaps, ridges or beads at any speed, and lines thinner than a pixel stay unbroken as lighter ink. Airbrushes and mixing brushes stamp dabs at a tight spacing instead, because their dabs add up. The start taper grows the line from a point. |
