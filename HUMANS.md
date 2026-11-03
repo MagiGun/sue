@@ -484,7 +484,8 @@ Once a canvas is open:
   Huion, XP-Pen and Wacom tablets work whether or not Windows Ink is turned
   on in their driver. In the browser version, a pen's pressure works too.
   On Linux, the pen draws with its pressure under Wayland (niri, KDE,
-  GNOME, Hyprland and others) and under X11. If your Wayland compositor
+  GNOME, Hyprland and others) and under X11, and under Wayland it shows
+  the same cursor as the mouse. If your Wayland compositor
   has no tablet support and a pen tablet is connected, Sue opens through
   XWayland so the pen still works. To choose yourself, start Sue with
   `SUE_DISPLAY_SERVER=wayland` or `SUE_DISPLAY_SERVER=x11`.

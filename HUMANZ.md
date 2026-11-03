@@ -738,7 +738,8 @@ wraps it in wayland-backend's `Backend::from_foreign_display`, a guest
 backend with its own event queue that never closes the display. Its safety
 rests on the connection going first: the host drops the tablet in
 `ApplicationHandler::exiting` and leaks it if it is still there when
-`run_app` returns. Everything else is wayland-client's safe API, with the
+`run_app` returns, a panic unwinding out of it included (caught with
+`catch_unwind` only to leak the tablet, then resumed). Everything else is wayland-client's safe API, with the
 backend, client and protocol versions winit uses. Sue's queue is never
 read from the socket by Sue: winit reads it (which also wakes the loop),
 and `about_to_wait` and every frame dispatch Sue's queue without blocking.
@@ -755,7 +756,15 @@ main window's go into its egui input, scaled from logical pixels to points;
 other windows' wait in `wayland_pen::events_for` for the viewport windows
 to take them. Pressure (0 to 65535), tilt (degrees, as -1 to 1 of 90) and
 an eraser tool go to `stylus` as `PenSource::WaylandTablet`; a lifted tip
-keeps its last pressure until a frame has drawn the stroke's end.
+keeps its last pressure until a frame has drawn the stroke's end. A tool
+near Sue's surface shows the cursor the mouse would: the compositor's
+cursor-shape-v1 (bound like the rest, at the lower version) gives the tool
+a shape device, set with the `proximity_in` serial to the named shape for
+egui's cursor of the last frame over the main window (no cursor at all
+when egui hides it, the default over other windows), and again whenever
+egui's cursor changes. A compositor without cursor-shape-v1 keeps its own
+tablet cursor; drawing a cursor image of Sue's own (a `wl_shm` surface) is
+left out.
 
 Before the event loop opens (`tablets::display_server`), Sue stays on
 Wayland unless a pen tablet is in the kernel's device list

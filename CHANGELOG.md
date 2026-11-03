@@ -28,7 +28,8 @@ follow [Semantic Versioning](https://semver.org/).
   draws with its pressure, tilt and eraser end, and on X11 it reads them
   too. Where a Wayland compositor has no tablet protocol and a pen tablet
   is connected, Sue opens through XWayland instead. Set
-  `SUE_DISPLAY_SERVER=wayland` or `x11` to choose yourself.
+  `SUE_DISPLAY_SERVER=wayland` or `x11` to choose yourself. Under
+  Wayland the pen shows the same cursor as the mouse.
 
 ## [0.0.74] - 2026-11-02
 
