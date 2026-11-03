@@ -235,6 +235,17 @@ pub struct DesktopHost {
     /// the first frame looks for one, then whether there is one.
     #[cfg(target_os = "windows")]
     tablet: Option<Option<crate::wintab_pen::Tablet>>,
+    /// A pen tablet's pressure, tilt and eraser through XInput2 (see
+    /// `crate::xinput_pen`): `None` until the first frame looks, then the
+    /// connection, while the window is an X11 one and the server answers.
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    xinput: Option<Option<crate::xinput_pen::Tablet>>,
 }
 
 impl std::fmt::Debug for DesktopHost {
@@ -456,6 +467,14 @@ impl DesktopHost {
             viewports,
             #[cfg(target_os = "windows")]
             tablet: None,
+            #[cfg(any(
+                target_os = "linux",
+                target_os = "freebsd",
+                target_os = "openbsd",
+                target_os = "netbsd",
+                target_os = "dragonfly"
+            ))]
+            xinput: None,
         })
     }
 
@@ -504,6 +523,23 @@ impl DesktopHost {
                 .get_or_insert_with(|| crate::wintab_pen::Tablet::open(window));
             if let Some(tablet) = tablet {
                 tablet.poll();
+            }
+        }
+        // A pen tablet under X11 or XWayland, the same way.
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        ))]
+        {
+            let window = &self.window;
+            let tablet = self
+                .xinput
+                .get_or_insert_with(|| crate::xinput_pen::Tablet::open(window));
+            if tablet.as_mut().is_some_and(|tablet| !tablet.poll()) {
+                *tablet = None;
             }
         }
         #[cfg_attr(
@@ -713,7 +749,31 @@ pub fn run_desktop<A: DesktopApp + 'static>(
         .build()
         .map_err(|error| PlatformError::Window(error.to_string()))?;
     #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
-    let event_loop = EventLoop::new().map_err(|error| PlatformError::Window(error.to_string()))?;
+    let event_loop = {
+        #[cfg_attr(
+            not(any(
+                target_os = "linux",
+                target_os = "freebsd",
+                target_os = "openbsd",
+                target_os = "netbsd",
+                target_os = "dragonfly"
+            )),
+            allow(unused_mut)
+        )]
+        let mut builder = EventLoop::builder();
+        // Under Wayland with a pen tablet: XWayland, which passes the pen on.
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        ))]
+        crate::xinput_pen::choose_display_server(&mut builder);
+        builder
+            .build()
+            .map_err(|error| PlatformError::Window(error.to_string()))?
+    };
     event_loop.set_control_flow(ControlFlow::Wait);
     #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let mut runner = Runner {

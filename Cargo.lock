@@ -3833,6 +3833,7 @@ dependencies = [
  "windows 0.62.2",
  "winit",
  "wintab",
+ "x11rb",
 ]
 
 [[package]]

@@ -11,6 +11,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Pen tablets on Linux** (XP-Pen, Huion, Wacom and others): under
+  Wayland compositors such as niri the pen did nothing in Sue. With a pen
+  tablet connected, Sue now opens through XWayland, where the pen moves and
+  draws, and on X11 and XWayland it reads the pen's pressure, tilt and
+  eraser end. Set `SUE_DISPLAY_SERVER=wayland` to keep Wayland anyway.
+
 ## [0.0.74] - 2026-11-02
 
 ### Added

@@ -481,6 +481,11 @@ Once a canvas is open:
 - **Drawing tablets:** pressure works with Windows Ink and with WinTab, so
   Huion, XP-Pen and Wacom tablets work whether or not Windows Ink is turned
   on in their driver. In the browser version, a pen's pressure works too.
+  On Linux, pressure works under X11, and under Wayland Sue opens through
+  XWayland while a pen tablet is connected, so the pen draws with its
+  pressure there too (compositors such as niri do not pass a pen on to
+  Wayland programs that cannot read it). To keep Sue on Wayland anyway,
+  start it with `SUE_DISPLAY_SERVER=wayland`.
 - **Clean lines without lag:** pens smooth out the shake of your hand, and
   smooth less the faster you move ("Adjust by speed"). However fast you
   draw, the line never falls more than a short way behind the pen, and when

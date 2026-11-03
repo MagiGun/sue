@@ -46,6 +46,20 @@ mod paths;
 )]
 mod picks;
 pub mod stylus;
+#[cfg_attr(
+    not(any(
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    )),
+    allow(
+        dead_code,
+        reason = "only Linux and the BSDs read pen tablets through X11; the tests run it everywhere"
+    )
+)]
+mod tablets;
 pub mod time;
 pub mod update;
 #[cfg_attr(
@@ -62,6 +76,14 @@ mod viewports;
 pub mod web;
 #[cfg(target_os = "windows")]
 mod wintab_pen;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+mod xinput_pen;
 
 pub use audio::{
     AudioConfig, AudioOutput, AudioSink, AudioStreamInfo, NullAudio, RealtimeStatus,
