@@ -246,6 +246,18 @@ pub struct DesktopHost {
         target_os = "dragonfly"
     ))]
     xinput: Option<Option<crate::xinput_pen::Tablet>>,
+    /// A pen under Wayland, through tablet-v2 on winit's own connection
+    /// (see `crate::wayland_pen`): `None` until the first frame looks,
+    /// then the tablet while the window is a Wayland one. It must go
+    /// before winit's event loop does (`Runner::exiting`).
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    wayland_pen: Option<Option<crate::wayland_pen::Tablet>>,
 }
 
 impl std::fmt::Debug for DesktopHost {
@@ -475,6 +487,14 @@ impl DesktopHost {
                 target_os = "dragonfly"
             ))]
             xinput: None,
+            #[cfg(any(
+                target_os = "linux",
+                target_os = "freebsd",
+                target_os = "openbsd",
+                target_os = "netbsd",
+                target_os = "dragonfly"
+            ))]
+            wayland_pen: None,
         })
     }
 
@@ -511,6 +531,53 @@ impl DesktopHost {
         self.exit_requested = true;
     }
 
+    /// Handles a Wayland pen's events that arrived (opening the tablet on
+    /// the first call); `true` when there were any, so a frame should
+    /// draw them.
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    fn poll_wayland_pen(&mut self) -> bool {
+        let window = &self.window;
+        let pen = self
+            .wayland_pen
+            .get_or_insert_with(|| crate::wayland_pen::Tablet::open(window));
+        match pen.as_mut().map(crate::wayland_pen::Tablet::poll) {
+            Some(Some(news)) => news,
+            Some(None) => {
+                // The connection failed: let go of it now, while the
+                // display is still there.
+                *pen = None;
+                false
+            }
+            None => false,
+        }
+    }
+
+    /// Lets go of the Wayland pen before winit's event loop (which owns the
+    /// display it uses) ends: dropped while the loop still runs, leaked if
+    /// the loop is already gone.
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    fn release_wayland_pen(&mut self, loop_running: bool) {
+        if let Some(Some(pen)) = self.wayland_pen.replace(None) {
+            if loop_running {
+                drop(pen);
+            } else {
+                std::mem::forget(pen);
+            }
+        }
+    }
+
     /// Builds, paints and presents one frame.
     fn frame<A: DesktopApp>(&mut self, app: &mut A) {
         // A WinTab tablet's pen pressure for this frame. The context opens
@@ -542,6 +609,15 @@ impl DesktopHost {
                 *tablet = None;
             }
         }
+        // A pen under Wayland: its newest events too.
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        ))]
+        self.poll_wayland_pen();
         #[cfg_attr(
             not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")),
             allow(unused_mut)
@@ -576,8 +652,33 @@ impl DesktopHost {
             raw.dropped_files
                 .extend(dropped.into_iter().map(crate::web::page::Staged::handle));
         }
+        // The pen's pointer events under Wayland, in egui's points.
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        ))]
+        if let Some(Some(pen)) = self.wayland_pen.as_mut() {
+            let scale = self.window.scale_factor() as f32
+                / egui_winit::pixels_per_point(&self.ctx, &self.window);
+            // The keys held, as egui last heard of them.
+            let modifiers = self.ctx.input(|input| input.modifiers);
+            raw.events.extend(pen.take_events(scale, modifiers));
+        }
         let ctx = self.ctx.clone();
         let output = ctx.run_ui(raw, |ui| app.ui(ui, self));
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        ))]
+        if let Some(Some(pen)) = self.wayland_pen.as_mut() {
+            pen.frame_done();
+        }
         #[cfg(target_arch = "wasm32")]
         for command in &output.platform_output.commands {
             match command {
@@ -797,9 +898,20 @@ pub fn run_desktop<A: DesktopApp + 'static>(
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        event_loop
-            .run_app(&mut runner)
-            .map_err(|error| PlatformError::Window(error.to_string()))?;
+        let ran = event_loop.run_app(&mut runner);
+        // A Wayland pen still held (the loop ended without saying it was
+        // exiting) would outlive winit's display: leak it instead.
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        ))]
+        if let Some(host) = runner.host.as_mut() {
+            host.release_wayland_pen(false);
+        }
+        ran.map_err(|error| PlatformError::Window(error.to_string()))?;
         runner.error.map_or(Ok(()), Err)
     }
 }
@@ -1029,6 +1141,18 @@ impl<A: DesktopApp> ApplicationHandler<Wake> for Runner<A> {
         if host.ios_keyboard_moved() {
             host.window.request_redraw();
         }
+        // A pen under Wayland: winit read its events off the socket (which
+        // woke the loop) but leaves them on Sue's own queue.
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        ))]
+        if host.poll_wayland_pen() {
+            host.window.request_redraw();
+        }
         let now = Instant::now();
         let mut pacing = self.app.pacing(now);
         if let FramePacing::WakeAt(at) = pacing
@@ -1062,6 +1186,21 @@ impl<A: DesktopApp> ApplicationHandler<Wake> for Runner<A> {
         }
         if host.exit_requested {
             self.finish(event_loop);
+        }
+    }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        // The Wayland pen's connection goes while winit's display is still
+        // there.
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        ))]
+        if let Some(host) = self.host.as_mut() {
+            host.release_wayland_pen(true);
         }
     }
 

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "crates/sue-platform/android", "crates/sue-platform/ios", "bins/*"]
+members = ["crates/*", "crates/sue-platform/android", "crates/sue-platform/ios", "crates/sue-platform/wayland", "bins/*"]
 
 [workspace.package]
 version = "0.0.74"
@@ -58,6 +58,12 @@ windows = { version = "0.62", default-features = false, features = ["Win32_Found
 # Pen pressure, tilt and the eraser through XInput2 on Linux and the BSDs,
 # the pure Rust X11 client winit already uses.
 x11rb = { version = "0.13", default-features = false, features = ["xinput"] }
+# Pen tablets under Wayland (tablet-v2) on winit's own connection: the
+# libwayland backend, client and protocol versions winit already uses.
+raw-window-handle = "0.6"
+wayland-backend = { version = "0.3", default-features = false, features = ["client_system"] }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client"] }
 zune-core = "0.5"
 zune-jpegxl = "0.5"
 bytemuck = "1"

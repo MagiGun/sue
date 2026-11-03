@@ -1,14 +1,15 @@
 //! Pen tablets on Linux and the BSDs: the plain logic, kept apart from the
-//! X11 calls in `crate::xinput_pen` so it runs and is tested everywhere.
+//! Wayland and X11 calls in `crate::wayland_pen` and `crate::xinput_pen`
+//! so it runs and is tested everywhere.
 //!
-//! winit 0.30 does not speak Wayland's tablet protocol (`tablet-v2`), so
-//! under Wayland a pen reaches Sue only when the compositor turns it into a
-//! mouse, which not all do (under niri the pen did nothing). XWayland does
-//! speak it, and hands the pen to X11 programs as an XInput2 device that
-//! also moves the pointer. So when a pen tablet is connected and XWayland
-//! is there, Sue opens its windows through it ([`display_server`]): the
-//! pen moves and draws as a mouse does, and XInput2 adds its pressure,
-//! tilt and eraser.
+//! Under Wayland Sue reads the pen itself through the tablet-v2 protocol
+//! (winit 0.30 does not), and [`PenTrack`] turns its frames into pointer
+//! events, so the pen draws even where the compositor does not turn it
+//! into a mouse (under niri it did nothing). A compositor without
+//! tablet-v2 leaves the pen to XWayland when it is there
+//! ([`display_server`]): XWayland hands it to X11 programs as an XInput2
+//! device that also moves the pointer, and XInput2 adds its pressure, tilt
+//! and eraser.
 
 /// The display server Sue's windows open on in a Linux or BSD session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,12 +24,15 @@ pub(crate) const CHOICE_VARIABLE: &str = "SUE_DISPLAY_SERVER";
 
 /// Where Sue's windows open: `wayland` and `x11` say whether a Wayland
 /// compositor and an X server (XWayland, under Wayland) are reachable, `pen`
-/// whether a pen tablet is connected, `choice` the value of
-/// [`CHOICE_VARIABLE`]. `None` leaves it to winit, which prefers Wayland.
+/// whether a pen tablet is connected, `tablet_protocol` asks the compositor
+/// whether it offers tablet-v2 (only when that decides it), `choice` is the
+/// value of [`CHOICE_VARIABLE`]. `None` leaves it to winit, which prefers
+/// Wayland.
 pub(crate) fn display_server(
     wayland: bool,
     x11: bool,
     pen: bool,
+    tablet_protocol: impl FnOnce() -> bool,
     choice: Option<&str>,
 ) -> Option<DisplayServer> {
     match choice
@@ -39,7 +43,158 @@ pub(crate) fn display_server(
         Some("x11" | "xwayland") if x11 => return Some(DisplayServer::X11),
         _ => {}
     }
-    (wayland && x11 && pen).then_some(DisplayServer::X11)
+    // Wayland reads the pen itself where the compositor speaks tablet-v2;
+    // elsewhere XWayland passes it on.
+    (wayland && x11 && pen && !tablet_protocol()).then_some(DisplayServer::X11)
+}
+
+/// What one tablet-v2 frame said about a tool: the events between two
+/// `frame` events, which happened together.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct ToolFrame {
+    /// It came near over this surface (a key the caller chooses).
+    pub(crate) enter: Option<usize>,
+    /// It went out of range.
+    pub(crate) leave: bool,
+    /// Its tip touched (`true`) or lifted.
+    pub(crate) down: Option<bool>,
+    /// Where it is, in the surface's logical pixels.
+    pub(crate) position: Option<[f32; 2]>,
+    /// How hard it presses, 0 to 65535.
+    pub(crate) pressure: Option<u32>,
+    /// How far it leans, in degrees, to the right and toward the person.
+    pub(crate) tilt: Option<[f64; 2]>,
+    /// Barrel buttons (Linux key codes) pressed or released.
+    pub(crate) buttons: Vec<(u32, bool)>,
+}
+
+/// A pointer event of the pen's, for the surface it is over.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum PenPointer {
+    /// It moved to (or came near at) this point, in logical pixels.
+    Move([f32; 2]),
+    /// A button went down or up at this point: the tip is the primary.
+    Button {
+        button: egui::PointerButton,
+        pressed: bool,
+        at: [f32; 2],
+    },
+    /// It went away.
+    Gone,
+}
+
+impl PenPointer {
+    /// The egui event, `scale` being egui points per logical pixel.
+    pub(crate) fn to_egui(self, scale: f32, modifiers: egui::Modifiers) -> egui::Event {
+        let pos = |[x, y]: [f32; 2]| egui::pos2(x * scale, y * scale);
+        match self {
+            Self::Move(at) => egui::Event::PointerMoved(pos(at)),
+            Self::Button {
+                button,
+                pressed,
+                at,
+            } => egui::Event::PointerButton {
+                pos: pos(at),
+                button,
+                pressed,
+                modifiers,
+            },
+            Self::Gone => egui::Event::PointerGone,
+        }
+    }
+}
+
+/// The pointer button for a pen's barrel button: the lower one
+/// (`BTN_STYLUS`) is the middle button and the upper one (`BTN_STYLUS2`)
+/// the secondary, as X11's tablet drivers have it.
+pub(crate) fn barrel_button(code: u32) -> Option<egui::PointerButton> {
+    match code {
+        0x14b => Some(egui::PointerButton::Middle),
+        0x14c => Some(egui::PointerButton::Secondary),
+        0x149 => Some(egui::PointerButton::Extra1),
+        _ => None,
+    }
+}
+
+/// A pen as its tablet-v2 frames left it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct PenTrack {
+    /// The surface it is over, while it is near.
+    pub(crate) surface: Option<usize>,
+    position: [f32; 2],
+    /// Whether its tip touches.
+    pub(crate) down: bool,
+    /// Its pressure, 0 to 1.
+    pub(crate) pressure: f32,
+    /// Its lean, -1 to 1 each way, once it has said.
+    pub(crate) tilt: Option<[f32; 2]>,
+    /// Its barrel buttons held, as pointer buttons.
+    held: Vec<egui::PointerButton>,
+}
+
+impl PenTrack {
+    /// Takes one frame, adding the pointer events it makes to `out`, each
+    /// with the surface it is for: coming near, moving, the tip and
+    /// buttons going down, then up, then going away.
+    pub(crate) fn apply(&mut self, frame: &ToolFrame, out: &mut Vec<(usize, PenPointer)>) {
+        if let Some(surface) = frame.enter {
+            self.surface = Some(surface);
+        }
+        if let Some(pressure) = frame.pressure {
+            self.pressure = (pressure as f32 / 65535.0).clamp(0.0, 1.0);
+        }
+        if let Some([x, y]) = frame.tilt {
+            self.tilt = Some([
+                (x / 90.0).clamp(-1.0, 1.0) as f32,
+                (y / 90.0).clamp(-1.0, 1.0) as f32,
+            ]);
+        }
+        let Some(surface) = self.surface else {
+            return;
+        };
+        if let Some(at) = frame.position {
+            self.position = at;
+            out.push((surface, PenPointer::Move(at)));
+        } else if frame.enter.is_some() {
+            out.push((surface, PenPointer::Move(self.position)));
+        }
+        let at = self.position;
+        let press = |button, pressed| PenPointer::Button {
+            button,
+            pressed,
+            at,
+        };
+        if frame.down == Some(true) && !self.down {
+            self.down = true;
+            out.push((surface, press(egui::PointerButton::Primary, true)));
+        }
+        for &(code, pressed) in &frame.buttons {
+            let Some(button) = barrel_button(code) else {
+                continue;
+            };
+            let held = self.held.contains(&button);
+            if pressed && !held {
+                self.held.push(button);
+                out.push((surface, press(button, true)));
+            } else if !pressed && held {
+                self.held.retain(|other| *other != button);
+                out.push((surface, press(button, false)));
+            }
+        }
+        // Going away lets go of everything still held.
+        let lift = frame.down == Some(false) || frame.leave;
+        if lift && self.down {
+            self.down = false;
+            out.push((surface, press(egui::PointerButton::Primary, false)));
+        }
+        if frame.leave {
+            for button in std::mem::take(&mut self.held) {
+                out.push((surface, press(button, false)));
+            }
+            out.push((surface, PenPointer::Gone));
+            self.surface = None;
+        }
+    }
 }
 
 /// The kernel's key code for a pen's tip in range (`BTN_TOOL_PEN`).
@@ -136,25 +291,136 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_pen_under_wayland_opens_through_xwayland_unless_chosen_otherwise() {
+    fn a_pen_stays_on_wayland_unless_the_compositor_lacks_tablet_v2() {
         use DisplayServer::{Wayland, X11};
-        assert_eq!(display_server(true, true, true, None), Some(X11));
-        // Without a pen, or without XWayland, winit decides (Wayland).
-        assert_eq!(display_server(true, true, false, None), None);
-        assert_eq!(display_server(true, false, true, None), None);
+        let yes = || true;
+        let no = || false;
+        let unasked = || -> bool { panic!("the compositor need not be asked") };
+        // The compositor reads pens: Wayland, as winit picks.
+        assert_eq!(display_server(true, true, true, yes, None), None);
+        // It does not: XWayland passes the pen on.
+        assert_eq!(display_server(true, true, true, no, None), Some(X11));
+        // Without a pen, or without XWayland, nothing to ask.
+        assert_eq!(display_server(true, true, false, unasked, None), None);
+        assert_eq!(display_server(true, false, true, unasked, None), None);
         // Plain X11 stays X11.
-        assert_eq!(display_server(false, true, true, None), None);
+        assert_eq!(display_server(false, true, true, unasked, None), None);
         // A choice wins when it can be met.
         assert_eq!(
-            display_server(true, true, true, Some("Wayland")),
+            display_server(true, true, true, unasked, Some("Wayland")),
             Some(Wayland)
         );
-        assert_eq!(display_server(true, true, false, Some("x11")), Some(X11));
-        assert_eq!(display_server(true, false, true, Some("x11")), None);
         assert_eq!(
-            display_server(true, true, true, Some("whatever")),
+            display_server(true, true, false, unasked, Some("x11")),
             Some(X11)
         );
+        assert_eq!(display_server(true, false, true, no, Some("x11")), None);
+        assert_eq!(
+            display_server(true, true, true, no, Some("whatever")),
+            Some(X11)
+        );
+    }
+
+    fn frame() -> ToolFrame {
+        ToolFrame::default()
+    }
+
+    #[test]
+    fn a_pen_stroke_becomes_pointer_events_on_its_surface() {
+        use egui::PointerButton::{Middle, Primary};
+        let mut pen = PenTrack::default();
+        let mut out = Vec::new();
+        // Coming near over surface 7.
+        pen.apply(
+            &ToolFrame {
+                enter: Some(7),
+                position: Some([10.0, 20.0]),
+                tilt: Some([45.0, -90.0]),
+                ..frame()
+            },
+            &mut out,
+        );
+        assert_eq!(out, [(7, PenPointer::Move([10.0, 20.0]))]);
+        assert_eq!(pen.tilt, Some([0.5, -1.0]));
+        out.clear();
+        // Touching, then drawing with pressure.
+        pen.apply(
+            &ToolFrame {
+                down: Some(true),
+                pressure: Some(65535),
+                ..frame()
+            },
+            &mut out,
+        );
+        let press = |button, pressed, at| PenPointer::Button {
+            button,
+            pressed,
+            at,
+        };
+        assert_eq!(out, [(7, press(Primary, true, [10.0, 20.0]))]);
+        assert!(pen.down);
+        assert_eq!(pen.pressure, 1.0);
+        out.clear();
+        pen.apply(
+            &ToolFrame {
+                position: Some([11.0, 21.0]),
+                buttons: vec![(0x14b, true), (0x14b, true), (0x110, true)],
+                ..frame()
+            },
+            &mut out,
+        );
+        assert_eq!(
+            out,
+            [
+                (7, PenPointer::Move([11.0, 21.0])),
+                (7, press(Middle, true, [11.0, 21.0])),
+            ],
+            "a button already held and an unknown one add nothing"
+        );
+        out.clear();
+        // Going away while touching and holding lets go of everything.
+        pen.apply(
+            &ToolFrame {
+                leave: true,
+                ..frame()
+            },
+            &mut out,
+        );
+        assert_eq!(
+            out,
+            [
+                (7, press(Primary, false, [11.0, 21.0])),
+                (7, press(Middle, false, [11.0, 21.0])),
+                (7, PenPointer::Gone),
+            ]
+        );
+        assert_eq!(pen.surface, None);
+        assert!(!pen.down);
+        out.clear();
+        // Out of range, nothing is pointed at.
+        pen.apply(
+            &ToolFrame {
+                position: Some([1.0, 1.0]),
+                ..frame()
+            },
+            &mut out,
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn pen_pointer_events_scale_to_egui_points() {
+        let modifiers = egui::Modifiers::default();
+        assert_eq!(
+            PenPointer::Move([10.0, 4.0]).to_egui(1.5, modifiers),
+            egui::Event::PointerMoved(egui::pos2(15.0, 6.0))
+        );
+        assert_eq!(
+            PenPointer::Gone.to_egui(2.0, modifiers),
+            egui::Event::PointerGone
+        );
+        assert_eq!(barrel_button(0x14c), Some(egui::PointerButton::Secondary));
+        assert_eq!(barrel_button(0x110), None);
     }
 
     /// A trimmed `/proc/bus/input/devices` with a mouse, an XP-Pen pen and

@@ -30,10 +30,12 @@ follow [Semantic Versioning](https://semver.org/).
   a cel, and animations from earlier versions get their folders when
   they open (#1).
 - **Pen tablets on Linux** (XP-Pen, Huion, Wacom and others): under
-  Wayland compositors such as niri the pen did nothing in Sue. With a pen
-  tablet connected, Sue now opens through XWayland, where the pen moves and
-  draws, and on X11 and XWayland it reads the pen's pressure, tilt and
-  eraser end. Set `SUE_DISPLAY_SERVER=wayland` to keep Wayland anyway.
+  Wayland compositors such as niri the pen did nothing in Sue. Sue now
+  reads the pen through Wayland's own tablet protocol, so it moves and
+  draws with its pressure, tilt and eraser end, and on X11 it reads them
+  too. Where a Wayland compositor has no tablet protocol and a pen tablet
+  is connected, Sue opens through XWayland instead. Set
+  `SUE_DISPLAY_SERVER=wayland` or `x11` to choose yourself.
 
 ## [0.0.74] - 2026-11-02
 

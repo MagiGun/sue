@@ -72,6 +72,14 @@ pub mod update;
 mod vfs;
 #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
 mod viewports;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+mod wayland_pen;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 #[cfg(target_os = "windows")]
