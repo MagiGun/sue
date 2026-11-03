@@ -1,0 +1,30 @@
+[package]
+name = "sue-wayland"
+description = "Sue on Wayland: the one audited call that joins winit's Wayland connection, so sue-platform can read pen tablets (tablet-v2) with wayland-client's safe API."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+license-file.workspace = true
+
+# The libwayland backend, client and raw handles winit already uses.
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly"))'.dependencies]
+raw-window-handle.workspace = true
+wayland-backend.workspace = true
+wayland-client.workspace = true
+
+# Joining a Wayland connection someone else opened takes a raw pointer,
+# which Rust counts as unsafe: this crate (part of sue-platform, backbone
+# rule 6) relaxes the workspace's `forbid` to `deny` so that one audited
+# function may allow it. Approved by the maintainer on 2026-11-03 for
+# `join` (wayland-backend's `Backend::from_foreign_display`) only; any
+# other unsafe code here needs its own approval.
+[lints.rust]
+unsafe_code = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"

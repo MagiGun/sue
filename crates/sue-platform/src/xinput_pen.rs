@@ -1,7 +1,7 @@
 //! Pen tablets on Linux and the BSDs, through X11's XInput2.
 //!
 //! Under X11, and under Wayland through XWayland (see `crate::tablets` for
-//! why Sue opens there when a pen tablet is connected), a pen is an
+//! when Sue opens there with a pen tablet connected), a pen is an
 //! XInput2 device that also moves the pointer: its motion, tip and barrel
 //! buttons reach Sue as the window's mouse events, as before. What those
 //! leave out (pressure, tilt and which end is in use) comes from the
@@ -23,9 +23,10 @@ use x11rb::rust_connection::RustConnection;
 use crate::stylus::{self, PenSource};
 use crate::tablets::{self, DisplayServer};
 
-/// Picks the display server before the event loop opens: XWayland under
-/// Wayland while a pen tablet is connected (Wayland's own pen protocol is
-/// beyond winit 0.30), or what `SUE_DISPLAY_SERVER` asks for.
+/// Picks the display server before the event loop opens: Wayland as winit
+/// prefers, where Sue reads a pen itself (`crate::wayland_pen`), but
+/// XWayland while a pen tablet is connected and the compositor lacks the
+/// tablet-v2 protocol; or what `SUE_DISPLAY_SERVER` asks for.
 pub(crate) fn choose_display_server(builder: &mut EventLoopBuilder<()>) {
     use winit::platform::wayland::EventLoopBuilderExtWayland;
     use winit::platform::x11::EventLoopBuilderExtX11;
@@ -33,14 +34,22 @@ pub(crate) fn choose_display_server(builder: &mut EventLoopBuilder<()>) {
     let wayland = set("WAYLAND_DISPLAY") || set("WAYLAND_SOCKET");
     let x11 = set("DISPLAY");
     let choice = std::env::var(tablets::CHOICE_VARIABLE).ok();
-    // The device list is read only when it can change the answer.
+    // The device list is read, and the compositor asked, only when they
+    // can change the answer.
     let pen = wayland && x11 && pen_connected();
-    match tablets::display_server(wayland, x11, pen, choice.as_deref()) {
+    let server = tablets::display_server(
+        wayland,
+        x11,
+        pen,
+        crate::wayland_pen::compositor_has_tablets,
+        choice.as_deref(),
+    );
+    match server {
         Some(DisplayServer::X11) => {
             if wayland && choice.is_none() {
                 eprintln!(
-                    "sue: a pen tablet is connected, so Sue opens through XWayland for its \
-                     pressure ({}=wayland keeps Wayland)",
+                    "sue: this Wayland compositor does not pass pen tablets on (no tablet-v2), \
+                     so Sue opens through XWayland for the pen ({}=wayland keeps Wayland)",
                     tablets::CHOICE_VARIABLE
                 );
             }

@@ -1,7 +1,7 @@
 //! A pen's pressure where the window's touch events do not carry it: a
 //! WinTab tablet on Windows (tablet drivers with Windows Ink turned off,
-//! common among artists), a pen tablet under X11 on Linux and the BSDs
-//! (XInput2, also under Wayland through XWayland), and a pen in a browser,
+//! common among artists), a pen tablet on Linux and the BSDs (Wayland's
+//! tablet-v2, or XInput2 under X11 and XWayland), and a pen in a browser,
 //! where winit treats pens as mice. With Windows Ink, on macOS and phones
 //! the pressure arrives with egui's touch events instead.
 //!
@@ -21,11 +21,14 @@ pub enum PenSource {
     /// A pen tablet's XInput2 device (X11 on Linux and the BSDs, or
     /// XWayland under a Wayland compositor).
     XInput,
+    /// A pen through Wayland's tablet-v2 protocol (Linux and the BSDs).
+    WaylandTablet,
 }
 
 /// The pressure's bits, or `u32::MAX` while no pen touches.
 static PRESSURE: AtomicU32 = AtomicU32::new(u32::MAX);
-/// The last [`PenSource`] seen: 0 none, 1 WinTab, 2 a browser, 3 XInput2.
+/// The last [`PenSource`] seen: 0 none, 1 WinTab, 2 a browser, 3 XInput2,
+/// 4 Wayland's tablet-v2.
 static SOURCE: AtomicU8 = AtomicU8::new(0);
 /// The pen's lean to the right and toward the person, each a bit pattern
 /// of -1 to 1, or `u32::MAX` when the source does not say.
@@ -49,12 +52,14 @@ pub fn source() -> Option<PenSource> {
         1 => Some(PenSource::WinTab),
         2 => Some(PenSource::Browser),
         3 => Some(PenSource::XInput),
+        4 => Some(PenSource::WaylandTablet),
         _ => None,
     }
 }
 
 /// How far the pen leans, `[x, y]`, each from -1 to 1: x to the right, y
-/// toward the person, 0 upright and 1 the farthest the tablet measures.
+/// toward the person, 0 upright and 1 the farthest the source reports (90
+/// degrees under Wayland, the axis's end under XInput2).
 /// `None` when the pen's source does not report tilt.
 #[must_use]
 pub fn tilt() -> Option<[f32; 2]> {
@@ -91,6 +96,7 @@ pub(crate) fn set(from: PenSource, pressure: Option<f32>) {
             PenSource::WinTab => 1,
             PenSource::Browser => 2,
             PenSource::XInput => 3,
+            PenSource::WaylandTablet => 4,
         },
         Ordering::Relaxed,
     );
@@ -99,7 +105,8 @@ pub(crate) fn set(from: PenSource, pressure: Option<f32>) {
 }
 
 /// Records which end of the pen is in use and how far it leans (`None`
-/// when the source does not say). Only XInput2 reports these so far.
+/// when the source does not say). Only XInput2 and Wayland's tablet-v2
+/// report these so far.
 #[cfg_attr(
     not(any(
         target_os = "linux",
