@@ -600,6 +600,10 @@ pub struct SuePaint {
     /// The cel kept as the one being drawn whatever the frame (Lock
     /// current animation cel as editing target).
     pub(crate) cel_lock: Option<sue_core::EntityId>,
+    /// Pictures whose older animation folders were gathered this session.
+    pub(crate) gathered: std::collections::HashSet<EntityId>,
+    /// The layer being dragged in the Layer palette.
+    pub(crate) layer_drag: Option<EntityId>,
     /// Playback starts over at the end.
     pub(crate) looping: bool,
     pub(crate) pressure: Option<f32>,
@@ -757,6 +761,8 @@ impl Default for SuePaint {
             light_tool: false,
             stamp: None,
             cel_lock: None,
+            gathered: std::collections::HashSet::new(),
+            layer_drag: None,
             looping: true,
             pressure: None,
             pen_curve: crate::dialogs::DEFAULT_PEN_PRESSURE
@@ -4092,7 +4098,7 @@ impl SuePaint {
             if Some(above) == folder {
                 // Out past the top of its folder.
                 let edit = doc::reorder(arena, picture, layer, at + 1);
-                let out = doc::set_folder(arena, layer, doc::folder_of(arena, above));
+                let out = crate::anim::set_folder(arena, layer, doc::folder_of(arena, above));
                 for edit in [edit, out].into_iter().flatten() {
                     Self::apply(cx, edit);
                 }
@@ -4109,7 +4115,7 @@ impl SuePaint {
                 })
             };
             if let Some(into) = joins
-                && let Some(edit) = doc::set_folder(arena, layer, Some(into))
+                && let Some(edit) = crate::anim::set_folder(arena, layer, Some(into))
             {
                 // Into the folder from below, staying put.
                 Self::apply(cx, edit);
@@ -4125,7 +4131,9 @@ impl SuePaint {
                 && below.is_none_or(|below| !doc::folders_around(arena, below).contains(&folder))
             {
                 // Out past the bottom of its folder, staying put.
-                if let Some(edit) = doc::set_folder(arena, layer, doc::folder_of(arena, folder)) {
+                if let Some(edit) =
+                    crate::anim::set_folder(arena, layer, doc::folder_of(arena, folder))
+                {
                     Self::apply(cx, edit);
                 }
                 return true;
@@ -4136,7 +4144,7 @@ impl SuePaint {
             {
                 // Down into the folder under it, as its top layer.
                 let edit = doc::reorder(arena, picture, layer, at - 1);
-                let into = doc::set_folder(arena, layer, Some(below));
+                let into = crate::anim::set_folder(arena, layer, Some(below));
                 for edit in [edit, into].into_iter().flatten() {
                     Self::apply(cx, edit);
                 }
@@ -5400,7 +5408,7 @@ impl SuePaint {
             "layer.delete" => {
                 if let (Some(picture), Some(layer)) = (self.picture(), self.layer()) {
                     if doc::is_folder(&cx.world.arena, layer) {
-                        let edit = doc::delete_folder(&cx.world.arena, picture, layer);
+                        let edit = crate::anim::delete_folder(&cx.world.arena, picture, layer);
                         Self::apply(cx, edit);
                         return;
                     }
@@ -5780,6 +5788,15 @@ impl SuePaint {
                     {
                         edit = edit.then(moved);
                     }
+                }
+                // An animation folder's track goes with it.
+                if let Some(sequence) = crate::anim::timeline(arena, picture)
+                    && let Some(track) = crate::anim::track_of(sequence, folder)
+                {
+                    edit = edit.then(sue_core::txn::SetExtension::set(
+                        picture,
+                        crate::anim::without_track(sequence, track),
+                    ));
                 }
                 edit = edit.then(sue_core::txn::DespawnEntity::new(folder));
                 if Self::apply(cx, edit)

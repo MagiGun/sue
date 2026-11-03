@@ -694,6 +694,13 @@ Once a canvas is open:
   get. The **light table** (Animation, Light Table, or the Animation Cels
   palette) shows other layers under the cel you are drawing, to trace
   from: pick the layer, then Register Selected Layer.
+  Each **animation folder** is a folder in the Layer palette, with a
+  strip of film for its icon, and its cels sit inside it, indented and
+  folded away with it, as in Clip Studio Paint. New Animation Cel puts
+  the cel in the folder you picked (or the one your cel is in). Drag a
+  layer onto the folder to make it a cel; drag a cel out and it leaves
+  the timeline. Animations made with Sue 0.0.74 or earlier get their
+  folders the first time you open them; Undo takes that back.
   File, Export Animation saves an animated GIF, an animated sticker
   (APNG), an animated WebP, a movie or every frame as a picture.
   Animation, Timeline, **Exposure Sheet** shows the timing as a table, a

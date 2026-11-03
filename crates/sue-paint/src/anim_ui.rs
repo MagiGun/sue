@@ -42,6 +42,35 @@ impl SuePaint {
             .flatten()
     }
 
+    /// The animation folder a new cel goes into: the one picked in the
+    /// Layer palette (or the one the picked cel is in), else the one of
+    /// the timeline's current track `track`, else the first.
+    fn cel_target(
+        &self,
+        arena: &sue_core::Arena,
+        sequence: &Sequence,
+        track: usize,
+    ) -> Option<EntityId> {
+        let of_track = |index: usize| {
+            sequence
+                .tracks
+                .get(index)
+                .and_then(anim::track_folder)
+                .filter(|folder| anim::is_animation_folder(arena, *folder))
+        };
+        self.layer()
+            .and_then(|layer| {
+                if anim::is_animation_folder(arena, layer) {
+                    Some(layer)
+                } else {
+                    anim::cel_folder(arena, layer)
+                }
+            })
+            .filter(|folder| anim::track_of(sequence, *folder).is_some())
+            .or_else(|| of_track(track))
+            .or_else(|| anim::folders(sequence).into_iter().find_map(of_track))
+    }
+
     fn timeline_here(&self, arena: &sue_core::Arena) -> Option<(EntityId, Sequence, u32)> {
         let picture = self.picture()?;
         let sequence = anim::timeline(arena, picture)?.clone();
@@ -67,21 +96,30 @@ impl SuePaint {
         if !Self::apply(cx, edit) {
             return;
         }
-        let timeline = anim::new_timeline(picture, fps, frames);
+        let timeline = anim::new_timeline(&cx.world.arena, picture, fps, frames);
         if Self::apply(cx, timeline) {
             self.activate(&cx.world.arena, picture);
+            // The first layer becomes cel 1, in the animation folder.
             if let Some(layer) = doc::layers(&cx.world.arena, picture)
                 .into_iter()
                 .rev()
                 .find(|info| info.kind == sue_model::picture::LayerKind::Raster)
+                && let Some((_, sequence, length)) = self.timeline_here(&cx.world.arena)
             {
+                let mut edit = Edit::new(tr!("name-cel")).then(Rename::new(layer.id, "1"));
+                if let Some(folder) = sequence.tracks.first().and_then(anim::track_folder)
+                    && let Some(into) = anim::set_folder(&cx.world.arena, layer.id, Some(folder))
+                {
+                    edit = edit.then(into);
+                }
+                let sequence = anim::assign(&sequence, 0, 0, Some(layer.id), picture, length);
                 Self::apply(
                     cx,
-                    Edit::new(tr!("name-cel")).then(Rename::new(layer.id, "1")),
+                    edit.then(sue_core::txn::SetExtension::set(picture, sequence)),
                 );
-                if let Some((_, sequence, length)) = self.timeline_here(&cx.world.arena) {
-                    let sequence = anim::assign(&sequence, 0, 0, Some(layer.id), picture, length);
-                    Self::apply(cx, anim::set(picture, sequence, "Specify Cel"));
+                if let Some(doc) = self.doc_mut() {
+                    doc.layer = Some(layer.id);
+                    doc.track = 0;
                 }
             }
         }
@@ -113,6 +151,23 @@ impl SuePaint {
     /// which cels this frame shows.
     pub(crate) fn animate(&mut self, cx: &mut AppletContext<'_>, ctx: &egui::Context) {
         let now = cx.view.now;
+        // An older project's cels go into their animation folders once a
+        // session (undo takes that back and it stays back).
+        if let Some(picture) = self.picture()
+            && self.gathered.insert(picture)
+            && let Some(edit) = anim::gather(&cx.world.arena, picture)
+        {
+            Self::apply(cx, edit);
+        }
+        // The timeline's current track follows the layer picked: an
+        // animation folder or one of its cels.
+        if let Some((_, sequence, _)) = self.timeline_here(&cx.world.arena)
+            && let Some(layer) = self.layer()
+            && let Some(track) = anim::track_for_layer(&cx.world.arena, &sequence, layer)
+            && let Some(doc) = self.doc_mut()
+        {
+            doc.track = track;
+        }
         let timeline = self
             .timeline_here(&cx.world.arena)
             .filter(|_| self.timeline_on);
@@ -203,7 +258,9 @@ impl SuePaint {
         };
         if let Some(doc) = self.doc_mut() {
             let playing = doc.playing.is_some();
-            let mut view = anim::view(
+            let mut view = anim::view_in(
+                arena,
+                doc.picture,
                 &sequence,
                 doc.frame,
                 (onion && !playing).then_some(&settings),
@@ -300,9 +357,15 @@ impl SuePaint {
             "anim.timeline.new" => {
                 if here.is_some() {
                     cx.notify(tr!("canvas-has-timeline-timeline-palette-edits"));
-                } else {
-                    Self::apply(cx, anim::new_timeline(picture, 24, 24));
+                } else if Self::apply(cx, anim::new_timeline(&cx.world.arena, picture, 24, 24)) {
                     self.panels.timeline = true;
+                    if let Some((_, sequence, _)) = self.timeline_here(&cx.world.arena)
+                        && let Some(folder) = sequence.tracks.first().and_then(anim::track_folder)
+                        && let Some(doc) = self.doc_mut()
+                    {
+                        doc.track = 0;
+                        doc.layer = Some(folder);
+                    }
                 }
             }
             "anim.layer.camera" => {
@@ -333,61 +396,53 @@ impl SuePaint {
                 }
             }
             "anim.layer.folder" => {
-                let Some((_, sequence, _)) = here else {
-                    self.anim_command("anim.timeline.new", cx);
-                    return true;
-                };
-                let name = tr!(
-                    "animation-folder",
-                    value = anim::folders(&sequence).len() + 1
-                );
-                let edit = anim::set(
-                    picture,
-                    anim::with_folder(&sequence, &name),
-                    "New Animation Folder",
-                );
-                if Self::apply(cx, edit)
-                    && let Some(doc) = self.doc_mut()
-                {
-                    doc.track = sequence.tracks.len();
+                // A layer folder holding its cels, with its timeline track,
+                // right above the current layer (Clip Studio Paint's New
+                // Animation Folder).
+                let opened = here.is_none();
+                let (edit, folder, track) =
+                    anim::add_folder(&cx.world.arena, picture, self.layer());
+                if Self::apply(cx, edit) {
+                    if opened {
+                        self.panels.timeline = true;
+                    }
+                    if let Some(doc) = self.doc_mut() {
+                        doc.track = track;
+                        doc.layer = Some(folder);
+                    }
                 }
             }
             "anim.cel.new" => {
-                if here.is_none() {
-                    Self::apply(cx, anim::new_timeline(picture, 24, 24));
-                    self.panels.timeline = true;
-                }
-                let Some((_, sequence, length)) = self.timeline_here(&cx.world.arena) else {
-                    return true;
+                // Into the animation folder picked (or the one the picked
+                // cel is in, or the timeline's current one), as its top cel.
+                let folder = here
+                    .as_ref()
+                    .and_then(|(_, sequence, _)| self.cel_target(&cx.world.arena, sequence, track));
+                let folder = match folder {
+                    Some(folder) => folder,
+                    None => {
+                        let opened = here.is_none();
+                        let (edit, folder, _) =
+                            anim::add_folder(&cx.world.arena, picture, self.layer());
+                        if !Self::apply(cx, edit) {
+                            return true;
+                        }
+                        if opened {
+                            self.panels.timeline = true;
+                        }
+                        folder
+                    }
                 };
-                let track = if anim::folders(&sequence).contains(&track) {
-                    track
-                } else {
-                    anim::folders(&sequence).first().copied().unwrap_or(0)
-                };
-                let count = anim::keys(&sequence.tracks[track], sequence.rate)
-                    .iter()
-                    .filter(|(_, cel)| cel.is_some())
-                    .count();
-                let below = self.doc().and_then(|doc| doc.layer);
-                match doc::add_raster_layer(
-                    &cx.world.arena,
-                    picture,
-                    below,
-                    (count + 1).to_string(),
-                    None,
-                ) {
-                    Ok((spawn, cel)) => {
-                        let sequence =
-                            anim::assign(&sequence, track, frame, Some(cel), picture, length);
-                        let edit = Edit::new(tr!("new-animation-cel"))
-                            .then(spawn)
-                            .then(sue_core::txn::SetExtension::set(picture, sequence));
-                        if Self::apply(cx, edit)
-                            && let Some(doc) = self.doc_mut()
-                        {
-                            doc.layer = Some(cel);
-                            doc.track = track;
+                match anim::new_cel(&cx.world.arena, picture, folder, frame) {
+                    Ok((edit, cel)) => {
+                        if Self::apply(cx, edit) {
+                            let track = self
+                                .timeline_here(&cx.world.arena)
+                                .and_then(|(_, sequence, _)| anim::track_of(&sequence, folder));
+                            if let Some(doc) = self.doc_mut() {
+                                doc.layer = Some(cel);
+                                doc.track = track.unwrap_or(doc.track);
+                            }
                         }
                     }
                     Err(error) => cx.fail(error),
@@ -400,6 +455,10 @@ impl SuePaint {
                     cx.fail(tr!("make-timeline-pick-layer-first"));
                     return true;
                 };
+                if !anim::may_show(&cx.world.arena, &sequence, track, layer) {
+                    cx.notify(tr!("only-cels-of-this-animation-folder"));
+                    return true;
+                }
                 let sequence = anim::assign(&sequence, track, frame, Some(layer), picture, length);
                 Self::apply(cx, anim::set(picture, sequence, "Specify Cel"));
             }
@@ -754,7 +813,7 @@ impl SuePaint {
         };
         let frames = (0..length)
             .filter_map(|frame| {
-                let mut view = anim::view(&sequence, frame, None);
+                let mut view = anim::view_in(arena, picture, &sequence, frame, None);
                 // Seen through the camera folders, as the animation plays.
                 view.cameras = crate::camera::views(
                     arena,
@@ -1219,7 +1278,10 @@ impl SuePaint {
             names_painter.text(
                 line + vec2(40.0, 0.0),
                 Align2::LEFT_CENTER,
-                format!("{} :", sequence.tracks[index].name),
+                format!(
+                    "{} :",
+                    anim::track_name(&cx.world.arena, &sequence.tracks[index])
+                ),
                 theme.font(theme.small_size + 0.5),
                 if chosen { theme.text } else { theme.muted },
             );
@@ -1292,10 +1354,15 @@ impl SuePaint {
                 ui.scope_id().with(("timeline-folder", index)),
                 Sense::click(),
             );
-            if name_click.clicked()
-                && let Some(doc) = self.doc_mut()
-            {
-                doc.track = index;
+            if name_click.clicked() {
+                let shown = anim::cel_at(&sequence.tracks[index], sequence.rate, frame);
+                let folder = anim::track_folder(&sequence.tracks[index]);
+                if let Some(doc) = self.doc_mut() {
+                    doc.track = index;
+                    if let Some(layer) = shown.or(folder) {
+                        doc.layer = Some(layer);
+                    }
+                }
             }
             let at_pointer = |pos: egui::Pos2| {
                 (first + ((pos.x - frames_area.left()) / step).max(0.0) as u32).min(length - 1)
@@ -1318,6 +1385,24 @@ impl SuePaint {
                 if ui.button(tr!("blank-from-here")).clicked() {
                     action = Some((index, at, Some(None)));
                     ui.close();
+                }
+                if let Some(folder) = anim::track_folder(&sequence.tracks[index]) {
+                    let cels = anim::cels(&cx.world.arena, picture, folder);
+                    ui.add_enabled_ui(!cels.is_empty(), |ui| {
+                        ui.menu_button(tr!("specify-cels"), |ui| {
+                            for cel in cels.iter().rev() {
+                                let name = cx
+                                    .world
+                                    .arena
+                                    .get_by_id(*cel)
+                                    .map_or_else(|_| "?".to_owned(), |e| e.name().to_owned());
+                                if ui.button(name).clicked() {
+                                    action = Some((index, at, Some(Some(*cel))));
+                                    ui.close();
+                                }
+                            }
+                        });
+                    });
                 }
             });
         }
@@ -1459,9 +1544,13 @@ impl SuePaint {
             }
             self.go_to_frame(&cx.world.arena, i64::from(at));
             if let Some(cel) = assign {
-                let sequence = anim::assign(&sequence, index, at, cel, picture, length);
-                Self::apply(cx, anim::set(picture, sequence, "Specify Cel"));
-                self.go_to_frame(&cx.world.arena, i64::from(at));
+                if cel.is_some_and(|cel| !anim::may_show(&cx.world.arena, &sequence, index, cel)) {
+                    cx.notify(tr!("only-cels-of-this-animation-folder"));
+                } else {
+                    let sequence = anim::assign(&sequence, index, at, cel, picture, length);
+                    Self::apply(cx, anim::set(picture, sequence, "Specify Cel"));
+                    self.go_to_frame(&cx.world.arena, i64::from(at));
+                }
             }
         }
     }
@@ -1501,6 +1590,18 @@ impl SuePaint {
             .iter()
             .map(|track| anim::sheet(&sequence.tracks[*track], sequence.rate, length))
             .collect();
+        // The cels each column may show: its folder's (any layer for an
+        // older project's track).
+        let choices: std::collections::HashMap<usize, Option<Vec<EntityId>>> = folders
+            .iter()
+            .map(|track| {
+                (
+                    *track,
+                    anim::track_folder(&sequence.tracks[*track])
+                        .map(|folder| anim::cels(&cx.world.arena, picture, folder)),
+                )
+            })
+            .collect();
         let now = self.doc().map_or(0, |doc| doc.frame);
         // What a cell's menu asked for: its folder, frame and new content
         // (`None` holds, `Some(None)` is blank).
@@ -1515,7 +1616,13 @@ impl SuePaint {
                     .show(ui, |ui| {
                         ui.label(RichText::new(tr!("frame")).color(theme.muted));
                         for track in &folders {
-                            ui.label(RichText::new(&sequence.tracks[*track].name).strong());
+                            ui.label(
+                                RichText::new(anim::track_name(
+                                    &cx.world.arena,
+                                    &sequence.tracks[*track],
+                                ))
+                                .strong(),
+                            );
                         }
                         ui.end_row();
                         for frame in 0..length {
@@ -1535,7 +1642,12 @@ impl SuePaint {
                                     None => "|".to_owned(),
                                 };
                                 ui.menu_button(text, |ui| {
-                                    for (id, name) in &names {
+                                    // A folder's column offers its own cels.
+                                    let own = choices[track].as_ref();
+                                    for (id, name) in names
+                                        .iter()
+                                        .filter(|(id, _)| own.is_none_or(|own| own.contains(id)))
+                                    {
                                         if ui.button(name).clicked() {
                                             wanted = Some((*track, frame, Some(Some(*id))));
                                             ui.close();
@@ -1584,7 +1696,7 @@ impl SuePaint {
             self.last_dir = Some(dir.to_path_buf());
         }
         let arena = &cx.world.arena;
-        let text = anim::sheet_csv(&sequence, length, |cel| {
+        let text = anim::sheet_csv(&anim::named(arena, &sequence), length, |cel| {
             arena
                 .get_by_id(cel)
                 .map_or_else(|_| "?".to_owned(), |entity| entity.name().to_owned())
@@ -1612,14 +1724,29 @@ impl SuePaint {
             }
         };
         let arena = &cx.world.arena;
-        let layers = doc::layers(arena, picture);
-        let (read, new_length) = anim::from_sheet_csv(&sequence, length, &text, picture, |name| {
-            layers.iter().map(|info| info.id).find(|id| {
-                arena
-                    .get_by_id(*id)
-                    .is_ok_and(|entity| entity.name() == name)
-            })
-        });
+        let layers: Vec<EntityId> = doc::layers(arena, picture)
+            .into_iter()
+            .map(|info| info.id)
+            .collect();
+        let named = anim::named(arena, &sequence);
+        // A column's cels are its folder's (any layer for an older
+        // project's track).
+        let (read, new_length) =
+            anim::from_sheet_csv(&named, length, &text, picture, |track, name| {
+                let pool = named
+                    .tracks
+                    .get(track)
+                    .and_then(anim::track_folder)
+                    .map_or_else(
+                        || layers.clone(),
+                        |folder| anim::cels(arena, picture, folder),
+                    );
+                pool.into_iter().find(|id| {
+                    arena
+                        .get_by_id(*id)
+                        .is_ok_and(|entity| entity.name() == name)
+                })
+            });
         let mut edit = anim::set(picture, read, &tr!("exposure-sheet"));
         if new_length != length {
             edit = edit.then(SetProperty::new(

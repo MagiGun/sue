@@ -3897,9 +3897,13 @@ pub(crate) mod tests {
         command(&mut runtime, "anim.timeline.new");
         command(&mut runtime, "anim.cel.new");
         step(&mut runtime, Vec::new());
-        // The reference layer on the general light table.
-        let cel = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
-            .last()
+        // The reference layer on the general light table. The cel sits in
+        // its animation folder, on top of the stack.
+        let arena = &runtime.engine.world.arena;
+        let cel = sue_paint::doc::layers(arena, picture)
+            .into_iter()
+            .rev()
+            .find(|info| sue_paint::anim::cel_folder(arena, info.id).is_some())
             .unwrap()
             .id;
         assert_ne!(cel, reference);

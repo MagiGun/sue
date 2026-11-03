@@ -1926,6 +1926,22 @@ advances by the frame rate, and moving to a frame makes its cel the current
 layer. Animations export as an animated GIF
 (`sue_io::encode_gif_animation`) or a numbered picture sequence.
 
+Each animation folder is also a layer folder in the picture's stack, as in
+Clip Studio Paint: a `sue.folder` flagged `folder.animation`, its cels the
+layers in it by the same `sue.paint.member` relation every layer folder
+uses, and its track names it by `EntityId` in the track property
+`anim.folder`. New Animation Cel makes the cel inside the folder picked
+(or the one the picked cel is in) as its top layer; a folder's track shows
+only its own cels, and every cel in it that the track does not show at the
+frame is hidden. Dragging a layer onto a folder in the Layer palette puts
+it in; a cel dragged out leaves the folder's timeline (its keys go blank),
+all in one transaction. Deleting or ungrouping an animation folder takes
+its track too. Projects from 0.0.74 and before, whose tracks name no
+folder and whose cels sit loose in the stack, still open and play as they
+did; when Sue Paint first shows such a picture, `anim::gather` puts each
+track's cels into a new animation folder named as the track, one undoable
+step (a test loads that older layout).
+
 **Other edits.** Fill floods the current layer or all layers within a
 tolerance and grows one pixel under anti-aliased lines; Close gap floods as
 if the lines were a few pixels thicker, so small breaks hold the fill in,

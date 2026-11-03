@@ -341,7 +341,7 @@ The order of work is the plan at the end.
 | --- | --- | --- | --- |
 | New Timeline, Enable Timeline | Animation > Timeline | done | |
 | Edit Timeline: frame rate and length | Animation > Timeline > Edit Timeline | done | Without moving your keys |
-| Animation Folder | Animation > New Animation Layer | done | |
+| Animation Folder | Animation > New Animation Layer | done | A layer folder holding its cels; drag layers in and out |
 | Camera Folder with keyframes | Animation > New Animation Layer > Camera Folder | done | Position, scale and rotation over the timeline; it glides between keys |
 | New Animation Cel, Assign Animation Cel | Animation | done | |
 | Add and Delete Keyframe, Insert and Delete Frame | Animation > Edit Track | done | |

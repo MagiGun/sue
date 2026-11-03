@@ -14,6 +14,9 @@ new-timeline = New Timeline
 the-movie-has-no-frames = The movie has no frames
 the-picture-has-no-size = The picture has no size
 import-movie = Import Movie { $name }
+not-an-animation-folder = That folder is not an animation folder
+gather-cels-into-animation-folders = Gather Cels into Animation Folders
+only-cels-of-this-animation-folder = A track shows only the cels in its animation folder: move the layer into that folder first
 
 ## anim_ui.rs
 

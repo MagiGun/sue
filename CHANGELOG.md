@@ -11,6 +11,15 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Sue Paint's **animation folders** are folders in the Layer palette
+  again, as in Clip Studio Paint: every animation cel sits inside its
+  folder, indented, and folds away with it. New Animation Cel adds the
+  cel to the folder you picked, dragging a layer onto the folder makes it
+  a cel, and animations from earlier versions get their folders when
+  they open (#1).
+
 ## [0.0.74] - 2026-11-02
 
 ### Added

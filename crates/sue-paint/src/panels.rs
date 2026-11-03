@@ -4345,6 +4345,9 @@ impl SuePaint {
         let mut fold = None;
         let mut mask_click = None;
         let mut reopen = None;
+        let mut dragging = None;
+        let mut dropped = None;
+        let mut drop_onto = None;
         egui::ScrollArea::vertical()
             .id_salt("sue-paint-layers")
             .show(&mut list_ui, |ui| {
@@ -4359,8 +4362,31 @@ impl SuePaint {
                         continue;
                     }
                     let is_folder = doc::is_folder(&cx.world.arena, info.id);
-                    let (full, response) =
-                        ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::click());
+                    // On touch screens a drag scrolls the list instead.
+                    let (full, response) = ui.allocate_exact_size(
+                        vec2(ui.available_width(), 46.0),
+                        if cx.view.form_factor == sue_platform::FormFactor::Desktop {
+                            Sense::click_and_drag()
+                        } else {
+                            Sense::click()
+                        },
+                    );
+                    // Drag a layer onto a folder to put it in, or onto a
+                    // layer to put it right above, in that layer's folder.
+                    if response.drag_started() {
+                        dragging = Some(info.id);
+                    }
+                    if response.drag_stopped() {
+                        dropped = Some(info.id);
+                    }
+                    let drop_here = self.layer_drag.is_some_and(|dragged| dragged != info.id)
+                        && ui
+                            .ctx()
+                            .pointer_hover_pos()
+                            .is_some_and(|pos| full.contains(pos));
+                    if drop_here {
+                        drop_onto = Some(info.id);
+                    }
                     let row = Rect::from_min_max(
                         full.min + vec2(around.len() as f32 * 14.0, 0.0),
                         full.max,
@@ -4378,6 +4404,22 @@ impl SuePaint {
                     }
                     ui.painter()
                         .hline(full.x_range(), full.bottom(), theme.hairline());
+                    // Where a dragged layer would go: into a folder (the
+                    // whole row), or right above a layer (a line on top).
+                    if drop_here && is_folder {
+                        ui.painter().rect_stroke(
+                            full.shrink(1.0),
+                            2.0,
+                            Stroke::new(2.0, theme.border_active),
+                            egui::StrokeKind::Inside,
+                        );
+                    } else if drop_here {
+                        ui.painter().hline(
+                            full.x_range(),
+                            full.top() + 1.0,
+                            Stroke::new(2.0, theme.border_active),
+                        );
+                    }
                     // Visibility.
                     let eye = Rect::from_min_size(row.min + vec2(4.0, 13.0), vec2(20.0, 20.0));
                     let eye_response = ui.interact(
@@ -4453,10 +4495,16 @@ impl SuePaint {
                         {
                             fold = Some((info.id, !open));
                         }
+                        // An animation folder shows as a strip of film.
+                        let animation = crate::anim::is_animation_folder(&cx.world.arena, info.id);
                         icons::paint(
                             ui.painter(),
                             Rect::from_min_size(thumb_rect.min + vec2(20.0, 6.0), vec2(24.0, 24.0)),
-                            Icon::NewFolder,
+                            if animation {
+                                Icon::Timeline
+                            } else {
+                                Icon::NewFolder
+                            },
                             theme.text,
                         );
                     } else {
@@ -4627,6 +4675,17 @@ impl SuePaint {
         }
         if let Some((id, open)) = fold {
             Self::apply(cx, doc::set(id, doc::OPEN, open));
+        }
+        if let Some(id) = dragging {
+            self.layer_drag = Some(id);
+        }
+        if let Some(dragged) = dropped {
+            self.layer_drag = None;
+            if let (Some(picture), Some(onto)) = (self.picture(), drop_onto)
+                && let Some(edit) = crate::anim::drop_layer(&cx.world.arena, picture, dragged, onto)
+            {
+                Self::apply(cx, edit);
+            }
         }
         if let Some((id, filter, text)) = reopen {
             self.dialog = Some(crate::dialogs::Dialog::Correction(id, filter, text, false));
