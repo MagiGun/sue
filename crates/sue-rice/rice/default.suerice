@@ -122,6 +122,7 @@ three_finger_tap = "redo"      # {redo|none} What a quick tap of three fingers o
 brush_cursor = "brush"         # {brush|crosshair|dot} The pointer over the canvas while painting: the brush's outline, a crosshair or a dot (Preferences, Cursor)
 selection_layer_opacity = 50   # [0..100] Opacity of a new selection layer (%; Preferences, Layer/Frame)
 rotate_step = 15               # [1..90] How far Rotate Left and Rotate Right turn the view (degrees; Preferences, Canvas)
+remember_layout = true         # Sue Paint opens with its palettes where they were left (Window, Workspace)
 language = "sue"              # @text Language: sue follows Sue's language, a language tag sets this one apart
 
 [sue_paint_colors]

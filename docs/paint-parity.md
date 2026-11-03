@@ -48,13 +48,13 @@ rows are at the end.
 | 3D | 7 | 2 | 4 | 62 |
 | Colors | 9 | 0 | 1 | 90 |
 | View and navigation | 9 | 3 | 0 | 88 |
-| Window, palettes and workspaces | 14 | 3 | 1 | 86 |
+| Window, palettes and workspaces | 17 | 3 | 1 | 88 |
 | Materials and assets | 6 | 4 | 1 | 73 |
 | Print | 0 | 2 | 2 | 25 |
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 10 | 2 | 2 | 79 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 248 | 59 | 29 | 83 |
+| **All of Sue Paint** | 251 | 59 | 29 | 83 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -486,10 +486,13 @@ The order of work is the plan at the end.
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
 | Clip Studio's default frame | Workspace | done | Tools, Tool Group and colors at the left, Navigator and layers at the right, a strip of folded palettes at the far right |
-| Palette docking, floating windows, folding into the strip | Palette menus | done | Floats go anywhere, outside Sue's window too |
-| Drag column widths and palette heights | Dock | done | Narrow windows fold the widest palettes by themselves |
-| Reset Palette Layout | Window > Reset Palette Layout | done | |
-| Register and Manage Workspaces | Window > Workspace | done | |
+| Palette docking, floating windows, folding into the strip | Palette menus | done | Floats go anywhere, outside Sue's window too; the menu also docks at the bottom |
+| Drag a palette by its title bar, tab or icon to dock it left, right or under the canvas, beside another or in a column of its own, or to float or fold it | Palettes | done | The shared dock in `sue-wm` (`sue_wm::dock`) lights up where it will go |
+| Palette groups: palettes stacked as tabs, reordered by dragging a tab | Palettes | done | Drop a palette onto another's middle or onto a tab |
+| The palette layout kept between runs | Workspace | done | `layout.txt` in Sue Paint's data folder, never in a document; Settings, Remember the palette layout |
+| Drag column widths and palette heights | Dock | done | Also the widths in the row under the canvas and its height; narrow windows fold the widest palettes by themselves |
+| Reset Palette Layout | Window > Workspace > Reset Palette Layout | done | |
+| Register and Manage Workspaces | Window > Workspace | done | Register, switch, rename and delete; layouts saved before tabs still open |
 | Hide All Palettes, Hide Menu Bar | Window | done | Tab and Shift+Tab |
 | Command Bar | Window > Command Bar | done | |
 | Palettes: Tool, Tool Group, Tool Settings, Tool Sliders, Brush Size | Window | done | Clip Studio 5.1 renamed Sub Tool to Tool Group and Tool Property to Tool Settings; Sue's names already match |

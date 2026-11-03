@@ -1286,6 +1286,22 @@ style, not the context's, so without it a studio in Gray inside a Paper Sue
 got Paper's white fields. A light theme (`Theme::is_light`, a light page)
 starts from egui's light visuals, so what egui picks by itself reads on it.
 
+**Docking** (`sue_wm::dock`). A studio's palettes, as Clip Studio
+Paint's: the studio lists them as a `DockPanel` (a stable key, an optional
+fixed width, a least height, a floating size, whether it stays when its
+side folds, and its default layout), and `DockLayout` keeps where they are:
+columns at the left and right made of `Group`s (palettes stacked as tabs,
+sharing the column's height by weight), a row of groups under the work
+area, floating windows and an icon strip. `layout` places everything for a
+frame (folding the widest columns into the strip when the window is
+narrow); `tabs_ui`, `grip`, `splitters` and `drop_ui` draw the tabs, start
+a drag from a title bar, tab or icon, resize columns, groups and the
+bottom row, light up the drop target (`drop_at`) and move the palette
+there (`put`); the studio only draws each palette in its rect.
+`to_lines` and `from_lines` keep a layout as text by key (also reading the
+lines from before groups), and a layout missing a palette gets it where
+the default layout has it.
+
 **Shortcuts.** Every applet assigns keys the same way, through
 `sue_wm::shortcuts`: it lists its commands with their default chords
 (`Shortcut::new("file.save_as", "Save As", "Ctrl+Shift+S or Ctrl+Alt+S")`),
@@ -1391,15 +1407,26 @@ out the way painting apps usually are. It fills the window with:
 | Layer, Layer Property, History | Blend mode (26), opacity, clip, draft, lock, lock transparent pixels; new, duplicate, merge down, move, delete; the stack with visibility, thumbnails, rename by double-click; the current layer's settings; the undo list |
 | Timeline, Animation Cels | The timeline picker, new timeline, animation folder and cel, specify and delete cels, keyframes, onion skin, light table and playback, grayed out until animation arrives; the timeline's top edge resizes it |
 
-**Palettes and docking** (`dock.rs`). The palettes (Tool, Sub Tool, Brush
-Size, Color Wheel, Color Set, Navigator, Layer) sit in columns at the left
-and right, each column's height shared by weight. A column's inner edge
-drags its width (170 to 560 points; the tool strip and brush size keep
-theirs), the line between two palettes their shares. A palette's menu docks
-it on either side, floats it in an `egui::Window`, collapses it to an icon
-in the strip at the far right (shown beside the strip on a click), or
-closes it. When the columns, the strip and 300 points of canvas do not fit,
-the widest columns (never the tools) fold into the strip for that frame.
+**Palettes and docking** (`dock.rs`, on the shared `sue_wm::dock`). The
+palettes (Tool, Sub Tool, Brush Size, Color Wheel, Color Set, Navigator,
+Layer, Timeline and the ones folded in the strip) are a `DockPanel` enum
+with stable keys; `Dock` is `sue_wm::dock::DockLayout<Palette>`. They sit
+in groups (one palette, or several as tabs) in columns at the left and
+right, each column's height shared by weight, and in a row under the
+canvas (the timeline's by default). A column's inner edge drags its width
+(170 to 560 points; the tool strip and brush size keep theirs), the line
+between two groups their shares. Dragging a palette by its title bar, tab
+or icon drops it into a group, beside one, into a new column, under the
+canvas, into the strip or into a floating window. A palette's menu docks it
+on either side or at the bottom, floats it in an `egui::Window`, collapses
+it to an icon in the strip at the far right (shown beside the strip on a
+click), or closes it. When the columns, the strip and 300 points of canvas
+do not fit, the widest columns (never the tools) fold into the strip for
+that frame. The layout, with the Window menu's palette flags, is written
+to `layout.txt` in Sue Paint's data folder half a second after it last
+changed (`sue_paint.remember_layout`, on by default) and read at start;
+registered workspaces are the same lines by name in `workspaces.txt`. A
+tablet layout keeps the desktop's aside and gives it back.
 Tabs show a dot when a picture's composite changed since it was opened or
 saved.
 

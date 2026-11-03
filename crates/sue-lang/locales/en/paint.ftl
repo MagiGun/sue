@@ -449,6 +449,7 @@ dock-on-the-right = Dock on the Right
 float-in-a-window = Float in a Window
 collapse-to-an-icon = Collapse to an Icon
 dock-it-again = Dock it again
+dock-at-the-bottom = Dock at the Bottom
 
 ## extras.rs
 

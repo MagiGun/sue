@@ -64,6 +64,8 @@ pub fn set_workspaces(menus: &mut [Menu], names: &[String]) {
         &tr!("manage-workspaces-ellipsis"),
         "window.workspace.manage",
     ));
+    items.push(SEP);
+    items.push(act(&tr!("reset-palette-layout"), "window.workspace.reset"));
     for menu in menus.iter_mut().filter(|menu| menu.title == tr!("window")) {
         for item in &mut menu.items {
             if let MenuItem::Sub {
@@ -820,6 +822,8 @@ pub fn menus() -> Vec<Menu> {
                             &tr!("manage-workspaces-ellipsis"),
                             "window.workspace.manage",
                         ),
+                        SEP,
+                        act(&tr!("reset-palette-layout"), "window.workspace.reset"),
                     ],
                 ),
                 sub(
@@ -836,7 +840,6 @@ pub fn menus() -> Vec<Menu> {
                 ),
                 act(&tr!("hide-all-palettes"), "window.hide_all"),
                 act(&tr!("hide-menu-bar"), "window.hide_menus"),
-                act(&tr!("reset-palette-layout"), "window.workspace.reset"),
                 SEP,
                 act(&tr!("command-bar"), "window.command_bar"),
                 act(&tr!("tool"), "window.tool"),

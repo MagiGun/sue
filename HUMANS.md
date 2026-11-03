@@ -550,16 +550,28 @@ Once a canvas is open:
   scaling tucks the fill under the lines. It remembers its settings.
 - **Align a layer:** Edit, Align/Distribute lines the layer's drawing up
   with the canvas's left, right, top or bottom edge, or its middle.
-- **Arrange the palettes your way:** drag the edge of a column to make it
-  wider, or the line between two palettes to share the height differently.
-  Each palette's menu (the three lines at its top right) docks it on the
-  other side, floats it in a window of its own that you can move anywhere
-  (outside Sue's window too, onto another screen) and resize, folds it
-  into an icon in a strip at the far right (click the icon to see it), or
-  closes it. In a narrow window, the widest palettes fold into the strip by
-  themselves and come back when there is room. Drag the top of the timeline
-  to make it taller. Window, then Reset Palette Layout, puts everything
-  back. `Tab` hides or shows every palette and `Shift+Tab` the menus.
+- **Arrange the palettes your way:** drag a palette by its title bar (or
+  its tab, or its icon in the strip) and let go where it should be. Sue
+  lights up the spot first: the middle of another palette stacks them as
+  tabs (drag a tab along the tabs to reorder them), its top or bottom puts
+  it above or below, a column's edge or the canvas's left or right edge
+  gives it a column of its own, the canvas's bottom puts it under the
+  canvas beside the timeline, the strip folds it into an icon, and
+  anywhere else floats it in a window. Drag the edge of a column to make it
+  wider, the line between two palettes to share the room differently, and
+  the top of the row under the canvas to make it taller. Each palette's
+  menu (the three lines at its top right) also docks it on either side or
+  at the bottom, floats it in a window of its own that you can move
+  anywhere (outside Sue's window too, onto another screen) and resize,
+  folds it into an icon in a strip at the far right (click the icon to see
+  it), or closes it; the Window menu shows it again. In a narrow window,
+  the widest palettes fold into the strip by themselves and come back when
+  there is room. Sue Paint opens with the palettes where you left them
+  (Settings, Remember the palette layout, turns that off). Window,
+  Workspace keeps layouts by name: Register Workspace saves the one you
+  have, its name in the menu brings it back, Manage Workspaces renames and
+  deletes them, and Reset Palette Layout puts everything back as it was at
+  first. `Tab` hides or shows every palette and `Shift+Tab` the menus.
 - **Shortcuts:** Sue Paint uses Clip Studio Paint's default keys: the tool
   letters (`P`, `B`, `E`, `G`, `M`, `W`, `I`, `K`, `H`, `R`, `/` and the
   rest), `,` and `.` for the previous and next sub tool, `[` and `]` for the
