@@ -466,11 +466,13 @@ Once a canvas is open:
   airbrush) whose size, opacity, hardness, smoothing and pen pressure you can
   tune. Your changes stick to that sub tool. The small graph button beside
   **Brush Size** and **Opacity** opens their dynamics, as in Clip Studio
-  Paint: pen pressure, the pen's speed and chance can each change them, down
-  to a minimum you choose, along a curve you shape by dragging points (press
-  an empty spot to add one, drag one out or double-click it to take it
-  away). Brush Size also offers **Specify by size on screen** and **At least
-  1 pixel**.
+  Paint: pen pressure, the pen's speed, its **tilt** (how far it leans) and
+  chance can each change them, down to a minimum you choose, along a curve
+  you shape by dragging points (press an empty spot to add one, drag one
+  out or double-click it to take it away). A mouse, or a pen whose tablet
+  does not report tilt, counts as upright, so a setting that follows tilt
+  stays at its minimum. Brush Size also offers **Specify by size on
+  screen** and **At least 1 pixel**.
 - **Pen Pressure Settings** (File menu, or Pen Pressure in the start
   page's Settings): draw on the pad the way you normally draw, choose
   **Check adjusted settings**, and Sue fits the pressure to your hand;
@@ -486,6 +488,12 @@ Once a canvas is open:
   has no tablet support and a pen tablet is connected, Sue opens through
   XWayland so the pen still works. To choose yourself, start Sue with
   `SUE_DISPLAY_SERVER=wayland` or `SUE_DISPLAY_SERVER=x11`.
+- **The pen's eraser end:** turn the pen over and Sue Paint picks the
+  Eraser (the eraser sub tool you used last); turn it back and you have
+  the tool you were drawing with. It switches between strokes, never in
+  the middle of one, and if you pick another tool by hand meanwhile, Sue
+  keeps your choice. This works where the tablet reports the eraser end:
+  under Linux, both Wayland and X11.
 - **Clean lines without lag:** pens smooth out the shake of your hand, and
   smooth less the faster you move ("Adjust by speed"). However fast you
   draw, the line never falls more than a short way behind the pen, and when

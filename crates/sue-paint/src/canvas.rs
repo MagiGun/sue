@@ -26,6 +26,13 @@ use crate::select::{Op, Selection};
 use crate::studio::{Gesture, SuePaint, texture_key};
 use crate::tools::{SubTool, Tool};
 
+/// How far the pen leans, 0 upright to 1 flat (tilt dynamics). Without a
+/// source of tilt (a mouse, Windows Ink, WinTab, the browser) it reads as
+/// an upright pen, 0, so settings that use tilt stay at their minimum.
+fn pen_tilt() -> f32 {
+    sue_platform::stylus::tilt().map_or(0.0, |[x, y]| x.hypot(y).min(1.0))
+}
+
 /// The angle of a screen vector, in degrees.
 fn angle(v: egui::Vec2) -> f32 {
     v.y.atan2(v.x).to_degrees()
@@ -871,6 +878,16 @@ impl SuePaint {
         if sue_platform::stylus::pressure().is_some() {
             self.pen_seen(cx);
         }
+        // The pen turned over to its eraser end picks the Eraser, and back
+        // the tool before; only between strokes, so a stroke under way
+        // finishes with the tool it began with.
+        if self.eraser_end.follow(
+            sue_platform::stylus::eraser(),
+            self.gesture.is_some(),
+            &mut self.toolbox,
+        ) {
+            ctx.request_repaint();
+        }
         // Studio Mode's modifier keys count as held.
         let held = held | self.touch.modifiers();
         self.modifiers = held;
@@ -1354,6 +1371,7 @@ impl SuePaint {
                 let selection = (!vector)
                     .then(|| shifted.as_ref().or(doc.selection.as_ref()))
                     .flatten();
+                stroke.set_tilt(pen_tilt());
                 if let Some(raster) = doc::raster_mut(&mut cx.world.arena, target) {
                     stroke.to(raster, start, pressure, selection);
                 }
@@ -2741,6 +2759,7 @@ impl SuePaint {
                 let smooth = snap.as_ref().map_or(smooth, |snap| snap.project(smooth));
                 // Fast is 2000 screen points a second (velocity dynamics).
                 stroke.set_speed(stabilizer.speed() / 2000.0);
+                stroke.set_tilt(pen_tilt());
                 let selection = (!*vector)
                     .then(|| shifted.as_ref().or(doc.selection.as_ref()))
                     .flatten();

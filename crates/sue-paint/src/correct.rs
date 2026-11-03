@@ -88,6 +88,7 @@ pub fn simplified_points(points: &[[f32; 2]], tolerance: f32) -> Vec<[f32; 2]> {
             at: *at,
             pressure: 1.0,
             speed: 0.0,
+            tilt: 0.0,
             width: 1.0,
             alpha: 1.0,
         })
@@ -582,7 +583,12 @@ pub fn adjust_width(
                 continue;
             }
             // The pixels wide this point is at its own pressure.
-            let base = (line.tip.dab_at(sample.pressure, sample.speed, 1.0).0 * 2.0).max(0.1);
+            let base = (line
+                .tip
+                .dab_at(sample.pressure, sample.speed, sample.tilt, 1.0)
+                .0
+                * 2.0)
+                .max(0.1);
             let now = sample.width * base;
             let step = if mode == Widen::Fix || done.is_some() {
                 1.0
@@ -766,6 +772,7 @@ mod tests {
                     at: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t],
                     pressure: 1.0,
                     speed: 0.0,
+                    tilt: 0.0,
                     width: 1.0,
                     alpha: 1.0,
                 });
@@ -776,6 +783,7 @@ mod tests {
             at: last,
             pressure: 1.0,
             speed: 0.0,
+            tilt: 0.0,
             width: 1.0,
             alpha: 1.0,
         });
@@ -914,7 +922,7 @@ mod tests {
             8.0,
             None
         ));
-        let base = lines[0].tip.dab_at(1.0, 0.0, 1.0).0 * 2.0;
+        let base = lines[0].tip.dab_at(1.0, 0.0, 0.0, 1.0).0 * 2.0;
         assert!((lines[0].samples[20].width * base - 8.0).abs() < 1e-3);
         assert!(
             (lines[0].samples[0].width - 1.0).abs() < 1e-6,

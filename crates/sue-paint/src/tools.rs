@@ -1257,9 +1257,90 @@ impl Toolbox {
     }
 }
 
+/// The pen's eraser end, as in Clip Studio Paint: turning the pen over
+/// picks the Eraser tool (with its sub tool as last picked), and turning
+/// it back picks the tool and sub tool in use before. It switches only
+/// between strokes, and a tool picked by hand meanwhile stays picked.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EraserEnd {
+    /// Whether the eraser end is in use, as last followed.
+    on: bool,
+    /// The tool and sub tool to go back to, while the eraser end is in use
+    /// and it picked the Eraser.
+    before: Option<(Tool, usize)>,
+}
+
+impl EraserEnd {
+    /// Follows the pen: `eraser` says whether its eraser end is in use,
+    /// `stroking` whether a stroke (or another gesture) is under way, in
+    /// which case nothing changes until it ends. `true` when the tool
+    /// changed.
+    pub fn follow(&mut self, eraser: bool, stroking: bool, toolbox: &mut Toolbox) -> bool {
+        if stroking || eraser == self.on {
+            return false;
+        }
+        self.on = eraser;
+        if eraser {
+            let tool = toolbox.tool();
+            if tool == Tool::Eraser {
+                // On the Eraser already: nothing to go back to.
+                self.before = None;
+                return false;
+            }
+            self.before = Some((tool, toolbox.picked(tool)));
+            toolbox.pick(Tool::Eraser);
+            return toolbox.tool() == Tool::Eraser;
+        }
+        // Back to the tool before, unless another was picked by hand.
+        match self.before.take() {
+            Some((tool, sub)) if toolbox.tool() == Tool::Eraser => {
+                toolbox.pick(tool);
+                toolbox.pick_sub(tool, sub);
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_eraser_end_picks_the_eraser_and_turning_back_the_tool_before() {
+        let mut toolbox = Toolbox::default();
+        let mut end = EraserEnd::default();
+        toolbox.pick(Tool::Brush);
+        let brushes = toolbox.subs(Tool::Brush).len();
+        toolbox.pick_sub(Tool::Brush, brushes - 1);
+        toolbox.pick_sub(Tool::Eraser, toolbox.subs(Tool::Eraser).len() - 1);
+        let eraser_sub = toolbox.picked(Tool::Eraser);
+        // Mid-stroke nothing changes; once the stroke ends, the Eraser,
+        // with its own sub tool kept.
+        assert!(!end.follow(true, true, &mut toolbox));
+        assert_eq!(toolbox.tool(), Tool::Brush);
+        assert!(end.follow(true, false, &mut toolbox));
+        assert_eq!(toolbox.tool(), Tool::Eraser);
+        assert_eq!(toolbox.picked(Tool::Eraser), eraser_sub);
+        assert!(!end.follow(true, false, &mut toolbox), "only on a change");
+        // Turning back waits for the stroke too, then returns exactly.
+        assert!(!end.follow(false, true, &mut toolbox));
+        assert_eq!(toolbox.tool(), Tool::Eraser);
+        assert!(end.follow(false, false, &mut toolbox));
+        assert_eq!(toolbox.tool(), Tool::Brush);
+        assert_eq!(toolbox.picked(Tool::Brush), brushes - 1);
+        // A tool picked by hand while the eraser end is in use stays.
+        assert!(end.follow(true, false, &mut toolbox));
+        toolbox.pick(Tool::Fill);
+        assert!(!end.follow(false, false, &mut toolbox));
+        assert_eq!(toolbox.tool(), Tool::Fill);
+        // On the Eraser already, turning back leaves it there.
+        toolbox.pick(Tool::Eraser);
+        assert!(!end.follow(true, false, &mut toolbox));
+        assert!(!end.follow(false, false, &mut toolbox));
+        assert_eq!(toolbox.tool(), Tool::Eraser);
+    }
 
     #[test]
     fn sub_tools_duplicate_delete_and_reset() {

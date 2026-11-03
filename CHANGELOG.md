@@ -11,6 +11,15 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Tilt** in brush dynamics: beside pen pressure and speed, how far the
+  pen leans can change a brush's size and opacity, with a minimum and a
+  curve, as in Clip Studio Paint. A mouse counts as an upright pen.
+- **The pen's eraser end** picks the Eraser, and turning the pen back
+  picks the tool you were using, between strokes (under Linux, where the
+  tablet reports it).
+
 ### Fixed
 
 - **Pen tablets on Linux** (XP-Pen, Huion, Wacom and others): under

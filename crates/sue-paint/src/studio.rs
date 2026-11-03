@@ -607,6 +607,9 @@ pub struct SuePaint {
     pub(crate) pen_curve: sue_model::Response,
     /// The hint about fitting pen pressure was given (once a run).
     pub(crate) pen_hinted: bool,
+    /// The pen's eraser end picks the Eraser, and turning the pen back the
+    /// tool before (Clip Studio Paint).
+    pub(crate) eraser_end: crate::tools::EraserEnd,
     pub(crate) panels: Panels,
     pub(crate) color_tab: u8,
     /// The Intermediate Color palette's corner colors (top left, top right,
@@ -763,6 +766,7 @@ impl Default for SuePaint {
                 .parse()
                 .unwrap_or_default(),
             pen_hinted: false,
+            eraser_end: crate::tools::EraserEnd::default(),
             panels: Panels::default(),
             color_tab: 0,
             intermediate: (

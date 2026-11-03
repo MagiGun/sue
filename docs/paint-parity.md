@@ -42,7 +42,7 @@ rows are at the end.
 | Comics: frames, balloons and webtoons | 11 | 0 | 0 | 100 |
 | Story: multi-page works (EX) | 6 | 5 | 2 | 65 |
 | Animation | 13 | 1 | 0 | 96 |
-| Tools and drawing | 29 | 6 | 1 | 89 |
+| Tools and drawing | 29 | 9 | 1 | 86 |
 | Text | 6 | 3 | 1 | 75 |
 | Vector | 6 | 2 | 0 | 88 |
 | 3D | 7 | 2 | 4 | 62 |
@@ -54,7 +54,7 @@ rows are at the end.
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 10 | 2 | 2 | 79 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 248 | 59 | 29 | 83 |
+| **All of Sue Paint** | 248 | 62 | 29 | 82 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -390,6 +390,7 @@ The order of work is the plan at the end.
 | A tap with the pen leaves a dot the size of the brush | Drawing | done | Pens no longer start thin with a mouse either |
 | Tool Settings: size, opacity, hardness, smoothing, pressure | Palette | done | Changes stick to the sub tool |
 | Dynamics by pen pressure, speed and chance, along curves | Tool Settings | done | Each with a minimum you choose |
+| Tilt dynamics: the pen's lean changes size and opacity | Tool Settings | partial | On beside pressure and speed, with a minimum and a curve; a pen without tilt (and a mouse) counts as upright, at the minimum. Tilt arrives under Linux (Wayland and X11); Windows Ink and WinTab bring none yet. Verify on a tablet |
 | Starting and Ending: pixels, share of the line, fade | Tool Settings | done | Thin the line, fade it, or both, longer when you draw fast |
 | Color jitter, per dab or per stroke | Tool Settings | done | |
 | Stabilizer with Adjust by speed | Tool Settings | done | The line never falls far behind, and finishes along the pen's way |
@@ -402,6 +403,8 @@ The order of work is the plan at the end.
 | Double-sided brush tips | Advanced Tool Settings | missing | |
 | Pen Pressure Settings | File > Pen Pressure Settings | done | Draw to fit your hand, Stronger and Lighter |
 | Windows Ink and WinTab tablets | Peripherals | done | Huion, XP-Pen and Wacom work either way |
+| Linux pen tablets: Wayland (tablet-v2) and X11 (XInput2) | Peripherals | partial | Position, pressure, tilt, barrel buttons and the eraser end; XWayland when a compositor has no tablet protocol. Verify on niri, KDE, GNOME and X11 |
+| Eraser end of the pen picks the Eraser | Peripherals | partial | Turning the pen back picks the tool before; between strokes only, and a tool picked by hand stays. Under Linux; Windows does not report the eraser end yet. Verify on a tablet |
 
 ## Text
 

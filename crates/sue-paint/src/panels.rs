@@ -632,6 +632,12 @@ fn dynamics_ui(ui: &mut Ui, label: &str, dynamics: &mut Dynamics, theme: &Theme)
     );
     input(
         ui,
+        &tr!("pen-tilt"),
+        &mut dynamics.tilt,
+        &mut dynamics.tilt_min,
+    );
+    input(
+        ui,
         &tr!("random"),
         &mut dynamics.random,
         &mut dynamics.random_min,
@@ -668,6 +674,24 @@ fn dynamics_ui(ui: &mut Ui, label: &str, dynamics: &mut Dynamics, theme: &Theme)
                     theme,
                 );
             });
+        });
+    });
+    ui.vertical(|ui| {
+        ui.label(small(&tr!("tilt-settings")));
+        ui.add_enabled_ui(dynamics.tilt, |ui| {
+            sue_wm::widgets::response_curve(
+                ui,
+                (label, "tilt"),
+                &mut dynamics.tilt_curve,
+                92.0,
+                sue_wm::widgets::CurveLabels {
+                    input: tr!("pen-tilt"),
+                    low: tr!("pen-upright"),
+                    high: tr!("pen-flat"),
+                    output: tr!("output"),
+                },
+                theme,
+            );
         });
     });
 }
