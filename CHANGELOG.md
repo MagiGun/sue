@@ -20,6 +20,12 @@ follow [Semantic Versioning](https://semver.org/).
   into the strip or float it. Sue Paint opens with the palettes where you
   left them, and Window, Workspace now also holds Reset Palette Layout.
   (#3)
+- **Tilt** in brush dynamics: beside pen pressure and speed, how far the
+  pen leans can change a brush's size and opacity, with a minimum and a
+  curve, as in Clip Studio Paint. A mouse counts as an upright pen.
+- **The pen's eraser end** picks the Eraser, and turning the pen back
+  picks the tool you were using, between strokes (under Linux, where the
+  tablet reports it).
 
 ### Fixed
 
@@ -35,7 +41,8 @@ follow [Semantic Versioning](https://semver.org/).
   draws with its pressure, tilt and eraser end, and on X11 it reads them
   too. Where a Wayland compositor has no tablet protocol and a pen tablet
   is connected, Sue opens through XWayland instead. Set
-  `SUE_DISPLAY_SERVER=wayland` or `x11` to choose yourself.
+  `SUE_DISPLAY_SERVER=wayland` or `x11` to choose yourself. Under
+  Wayland the pen shows the same cursor as the mouse.
 
 ## [0.0.74] - 2026-11-02
 

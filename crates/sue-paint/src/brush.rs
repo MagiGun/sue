@@ -99,6 +99,13 @@ pub struct Dynamics {
     pub velocity_min: f32,
     /// How speed (still to fast) becomes the amount.
     pub velocity_curve: Response,
+    /// How far the pen leans changes it (Clip Studio Paint's Tilt).
+    pub tilt: bool,
+    /// The share left with the pen upright (or a mouse, which has no
+    /// tilt), 0 to 1.
+    pub tilt_min: f32,
+    /// How the lean (upright to flat) becomes the amount.
+    pub tilt_curve: Response,
     /// Chance changes it along the stroke.
     pub random: bool,
     /// The least share chance leaves, 0 to 1.
@@ -120,6 +127,9 @@ impl Dynamics {
         velocity: false,
         velocity_min: 0.0,
         velocity_curve: Response::LINEAR,
+        tilt: false,
+        tilt_min: 0.0,
+        tilt_curve: Response::LINEAR,
         random: false,
         random_min: 0.0,
     };
@@ -137,13 +147,13 @@ impl Dynamics {
     /// `true` if any input is on.
     #[must_use]
     pub const fn any(&self) -> bool {
-        self.pressure || self.velocity || self.random
+        self.pressure || self.velocity || self.tilt || self.random
     }
 
-    /// The share of the setting at `pressure`, `speed` and `chance` (each
-    /// 0 to 1).
+    /// The share of the setting at `pressure`, `speed`, `tilt` (the pen's
+    /// lean, 0 upright to 1 flat) and `chance` (each 0 to 1).
     #[must_use]
-    pub fn factor(&self, pressure: f32, speed: f32, chance: f32) -> f32 {
+    pub fn factor(&self, pressure: f32, speed: f32, tilt: f32, chance: f32) -> f32 {
         let scale = |on: bool, min: f32, amount: f32| {
             if on {
                 let min = min.clamp(0.0, 1.0);
@@ -160,7 +170,8 @@ impl Dynamics {
             self.velocity,
             self.velocity_min,
             self.velocity_curve.eval(speed),
-        ) * scale(self.random, self.random_min, chance)
+        ) * scale(self.tilt, self.tilt_min, self.tilt_curve.eval(tilt))
+            * scale(self.random, self.random_min, chance)
     }
 }
 
@@ -624,6 +635,9 @@ impl Tip {
                     format!("{name}.velocity_curve"),
                     by.velocity_curve.to_string(),
                 ),
+                (format!("{name}.tilt"), flag(by.tilt)),
+                (format!("{name}.tilt_min"), by.tilt_min.to_string()),
+                (format!("{name}.tilt_curve"), by.tilt_curve.to_string()),
                 (format!("{name}.random"), flag(by.random)),
                 (format!("{name}.random_min"), by.random_min.to_string()),
             ]);
@@ -730,6 +744,10 @@ impl Tip {
             flag(&format!("{name}.velocity"), &mut by.velocity);
             number(&format!("{name}.velocity_min"), &mut by.velocity_min);
             curve(&format!("{name}.velocity_curve"), &mut by.velocity_curve);
+            // Tips saved before tilt have none of these: tilt stays off.
+            flag(&format!("{name}.tilt"), &mut by.tilt);
+            number(&format!("{name}.tilt_min"), &mut by.tilt_min);
+            curve(&format!("{name}.tilt_curve"), &mut by.tilt_curve);
             flag(&format!("{name}.random"), &mut by.random);
             number(&format!("{name}.random_min"), &mut by.random_min);
         }
@@ -779,15 +797,15 @@ impl Tip {
     /// still and chance at its fullest.
     #[must_use]
     pub fn dab(&self, pressure: f32) -> (f32, f32) {
-        self.dab_at(pressure, 0.0, 1.0)
+        self.dab_at(pressure, 0.0, 0.0, 1.0)
     }
 
-    /// Radius and strength of the brush at `pressure`, `speed` and
-    /// `chance` (each 0 to 1), through its dynamics.
+    /// Radius and strength of the brush at `pressure`, `speed`, `tilt`
+    /// and `chance` (each 0 to 1), through its dynamics.
     #[must_use]
-    pub fn dab_at(&self, pressure: f32, speed: f32, chance: f32) -> (f32, f32) {
-        let scale = self.size_by.factor(pressure, speed, chance);
-        let strength = self.opacity * self.opacity_by.factor(pressure, speed, chance);
+    pub fn dab_at(&self, pressure: f32, speed: f32, tilt: f32, chance: f32) -> (f32, f32) {
+        let scale = self.size_by.factor(pressure, speed, tilt, chance);
+        let strength = self.opacity * self.opacity_by.factor(pressure, speed, tilt, chance);
         ((self.size * 0.5 * scale).max(0.0), strength.clamp(0.0, 1.0))
     }
 
@@ -885,6 +903,9 @@ pub struct Sample {
     pub pressure: f32,
     /// How fast the pen moved there, 0 (still) to 1 (fast).
     pub speed: f32,
+    /// How far the pen leaned there, 0 (upright, or no tilt known) to 1
+    /// (flat).
+    pub tilt: f32,
     /// How much of the brush's width it has there (a vector line's width
     /// as corrected), 1 as drawn.
     pub width: f32,
@@ -1025,6 +1046,8 @@ pub struct Stroke {
     flicked: f32,
     dirty: Option<[u32; 4]>,
     speed: f32,
+    /// How far the pen leans now, 0 to 1 (tilt dynamics).
+    tilt: f32,
     seed: u32,
     /// The share of the width and opacity of the next points.
     width: f32,
@@ -1078,6 +1101,7 @@ impl Stroke {
             flicked: 0.0,
             dirty: None,
             speed: 0.0,
+            tilt: 0.0,
             seed: 0,
             width: 1.0,
             alpha: 1.0,
@@ -1173,6 +1197,12 @@ impl Stroke {
         self.speed = speed.clamp(0.0, 1.0);
     }
 
+    /// How far the pen leans now, 0 (upright, or no tilt known) to 1
+    /// (flat), for the samples that follow (tilt dynamics).
+    pub fn set_tilt(&mut self, tilt: f32) {
+        self.tilt = tilt.clamp(0.0, 1.0);
+    }
+
     /// The share of the brush's width and opacity the next points have
     /// (a corrected vector line); 1 and 1 as drawn.
     pub fn set_shape(&mut self, width: f32, alpha: f32) {
@@ -1221,6 +1251,7 @@ impl Stroke {
             at,
             pressure,
             speed: self.speed,
+            tilt: self.tilt,
             width: self.width,
             alpha: self.alpha,
         };
@@ -1388,6 +1419,7 @@ impl Stroke {
         self.flicked = self.total.unwrap_or(0.0) - before;
         for sample in path {
             self.speed = sample.speed;
+            self.tilt = sample.tilt;
             self.to(raster, sample.at, sample.pressure, selection);
         }
         // The path's last point, however close it came.
@@ -1550,12 +1582,13 @@ impl Stroke {
     /// the line reaches where the pen is.
     pub fn flush(&mut self, raster: &mut RasterTile2D, selection: Option<&Selection>) {
         if let Some(sample) = self.pending.take() {
-            let keep = (self.width, self.alpha, self.speed);
-            (self.width, self.alpha, self.speed) = (sample.width, sample.alpha, sample.speed);
+            let keep = (self.width, self.alpha, self.speed, self.tilt);
+            (self.width, self.alpha, self.speed, self.tilt) =
+                (sample.width, sample.alpha, sample.speed, sample.tilt);
             self.flushing = true;
             self.to(raster, sample.at, sample.pressure, selection);
             self.flushing = false;
-            (self.width, self.alpha, self.speed) = keep;
+            (self.width, self.alpha, self.speed, self.tilt) = keep;
         }
     }
 
@@ -1707,8 +1740,12 @@ impl Stroke {
         ended: Option<(f32, f32)>,
         selection: Option<&Selection>,
     ) -> Option<(f32, f32)> {
-        let (ra, sa) = self.tip.dab_at(a.pressure, a.speed, self.chance(s0));
-        let (rb, sb) = self.tip.dab_at(b.pressure, b.speed, self.chance(s1));
+        let (ra, sa) = self
+            .tip
+            .dab_at(a.pressure, a.speed, a.tilt, self.chance(s0));
+        let (rb, sb) = self
+            .tip
+            .dab_at(b.pressure, b.speed, b.tilt, self.chance(s1));
         let (ra, sa) = (ra * a.width, sa * a.alpha);
         let (rb, sb) = (rb * b.width, sb * b.alpha);
         let (ta, tb) = (self.taper(s0), self.taper(s1));
@@ -1803,9 +1840,12 @@ impl Stroke {
         let Some(shaped) = shape(self.tip.shape) else {
             return;
         };
-        let (radius, strength) =
-            self.tip
-                .dab_at(a.pressure.max(b.pressure), a.speed.max(b.speed), 1.0);
+        let (radius, strength) = self.tip.dab_at(
+            a.pressure.max(b.pressure),
+            a.speed.max(b.speed),
+            a.tilt.max(b.tilt),
+            1.0,
+        );
         let radius = (radius * a.width.max(b.width)).max(0.5);
         let strength = (strength * a.alpha.max(b.alpha)).min(1.0);
         let tile = (radius * 2.0 * self.tip.spacing).max(1.0);
@@ -1876,9 +1916,12 @@ impl Stroke {
         length: f32,
         selection: Option<&Selection>,
     ) {
-        let (radius, _) = self
-            .tip
-            .dab_at(a.pressure.max(b.pressure), a.speed.max(b.speed), 1.0);
+        let (radius, _) = self.tip.dab_at(
+            a.pressure.max(b.pressure),
+            a.speed.max(b.speed),
+            a.tilt.max(b.tilt),
+            1.0,
+        );
         let radius = radius * a.width.max(b.width);
         let step = (radius * 2.0 * self.tip.spacing).max(0.25);
         if length > 1e-3 {
@@ -1894,6 +1937,7 @@ impl Stroke {
                 ],
                 pressure: a.pressure + (b.pressure - a.pressure) * t,
                 speed: a.speed + (b.speed - a.speed) * t,
+                tilt: a.tilt + (b.tilt - a.tilt) * t,
                 width: a.width + (b.width - a.width) * t,
                 alpha: a.alpha + (b.alpha - a.alpha) * t,
             };
@@ -1913,7 +1957,7 @@ impl Stroke {
     ) {
         let (mut radius, mut strength) =
             self.tip
-                .dab_at(sample.pressure, sample.speed, self.chance(s));
+                .dab_at(sample.pressure, sample.speed, sample.tilt, self.chance(s));
         radius *= sample.width;
         strength *= sample.alpha;
         let taper = self.taper(s);
@@ -2624,6 +2668,7 @@ fn resample(path: &[Sample], step: f32) -> Vec<Sample> {
                 ],
                 pressure: a.pressure + (b.pressure - a.pressure) * t,
                 speed: a.speed + (b.speed - a.speed) * t,
+                tilt: a.tilt + (b.tilt - a.tilt) * t,
                 width: a.width + (b.width - a.width) * t,
                 alpha: a.alpha + (b.alpha - a.alpha) * t,
             });
@@ -2767,6 +2812,7 @@ fn flick(path: &mut Vec<Sample>, velocity: [f32; 2], size: f32) {
             ],
             pressure: last.pressure * (1.0 - 0.5 * t),
             speed: last.speed,
+            tilt: last.tilt,
             width: last.width,
             alpha: last.alpha,
         });
@@ -2811,6 +2857,7 @@ fn spline(path: &[Sample], step: f32) -> Vec<Sample> {
                 at: catmull_rom([p0, p1, p2, p3], u),
                 pressure: path[i].pressure + (path[i + 1].pressure - path[i].pressure) * u,
                 speed: path[i].speed + (path[i + 1].speed - path[i].speed) * u,
+                tilt: path[i].tilt + (path[i + 1].tilt - path[i].tilt) * u,
                 width: path[i].width + (path[i + 1].width - path[i].width) * u,
                 alpha: path[i].alpha + (path[i + 1].alpha - path[i].alpha) * u,
             });
@@ -3402,6 +3449,7 @@ mod tests {
                     at: [i as f32 * 0.9, (i % 3) as f32],
                     pressure: 1.0,
                     speed: 0.0,
+                    tilt: 0.0,
                     width: 1.0,
                     alpha: 1.0,
                 })
@@ -3424,6 +3472,7 @@ mod tests {
                 at: [x as f32, 50.0 + if x % 2 == 0 { 1.5 } else { -1.5 }],
                 pressure: 1.0,
                 speed: 0.0,
+                tilt: 0.0,
                 width: 1.0,
                 alpha: 1.0,
             })
@@ -3442,6 +3491,7 @@ mod tests {
                 at: [20.0, y as f32],
                 pressure: 1.0,
                 speed: 0.0,
+                tilt: 0.0,
                 width: 1.0,
                 alpha: 1.0,
             })
@@ -3450,6 +3500,7 @@ mod tests {
             at: [20.0 + x as f32, 60.0],
             pressure: 1.0,
             speed: 0.0,
+            tilt: 0.0,
             width: 1.0,
             alpha: 1.0,
         }));
@@ -3470,6 +3521,7 @@ mod tests {
                 at,
                 pressure: 1.0,
                 speed: 0.0,
+                tilt: 0.0,
                 width: 1.0,
                 alpha: 1.0,
             })
@@ -3496,6 +3548,7 @@ mod tests {
                 at,
                 pressure: 1.0,
                 speed: 0.0,
+                tilt: 0.0,
                 width: 1.0,
                 alpha: 1.0,
             })
@@ -3516,6 +3569,7 @@ mod tests {
                 at: [x as f32, 10.0],
                 pressure: 1.0,
                 speed: 0.0,
+                tilt: 0.0,
                 width: 1.0,
                 alpha: 1.0,
             })
@@ -3525,6 +3579,7 @@ mod tests {
             at: [48.0, 11.5],
             pressure: 0.4,
             speed: 0.0,
+            tilt: 0.0,
             width: 1.0,
             alpha: 1.0,
         });
@@ -3532,6 +3587,7 @@ mod tests {
             at: [47.0, 12.0],
             pressure: 0.2,
             speed: 0.0,
+            tilt: 0.0,
             width: 1.0,
             alpha: 1.0,
         });
@@ -3713,14 +3769,28 @@ mod tests {
             },
             ..tip
         };
-        assert!((by_speed.dab_at(1.0, 0.0, 1.0).0 - 4.0).abs() < 1e-3);
-        assert!((by_speed.dab_at(1.0, 1.0, 1.0).0 - 10.0).abs() < 1e-3);
+        assert!((by_speed.dab_at(1.0, 0.0, 0.0, 1.0).0 - 4.0).abs() < 1e-3);
+        assert!((by_speed.dab_at(1.0, 1.0, 0.0, 1.0).0 - 10.0).abs() < 1e-3);
+        // Tilt: an upright pen (or a mouse, with no tilt) keeps the
+        // minimum, a pen lying flat the full size.
+        let by_tilt = Tip {
+            size_by: Dynamics {
+                tilt: true,
+                tilt_min: 0.3,
+                ..Dynamics::NONE
+            },
+            ..tip
+        };
+        assert!((by_tilt.dab_at(1.0, 0.0, 0.0, 1.0).0 - 3.0).abs() < 1e-3);
+        assert!((by_tilt.dab_at(1.0, 0.0, 0.5, 1.0).0 - 6.5).abs() < 1e-3);
+        assert!((by_tilt.dab_at(1.0, 0.0, 1.0, 1.0).0 - 10.0).abs() < 1e-3);
+        assert!(by_tilt.size_by.any());
         // Opacity dynamics and inputs that multiply.
         let both = Tip {
             opacity_by: Dynamics::pressure(0.5),
             ..by_speed
         };
-        assert!((both.dab_at(0.0, 0.0, 1.0).1 - 0.5).abs() < 1e-3);
+        assert!((both.dab_at(0.0, 0.0, 0.0, 1.0).1 - 0.5).abs() < 1e-3);
         // Chance is steady along a stroke, so painting it again from its
         // corrected path gives the same sizes.
         let mut stroke = Stroke::new(EntityId::new(), tip, [0.0; 3], false);

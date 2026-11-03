@@ -738,7 +738,8 @@ wraps it in wayland-backend's `Backend::from_foreign_display`, a guest
 backend with its own event queue that never closes the display. Its safety
 rests on the connection going first: the host drops the tablet in
 `ApplicationHandler::exiting` and leaks it if it is still there when
-`run_app` returns. Everything else is wayland-client's safe API, with the
+`run_app` returns, a panic unwinding out of it included (caught with
+`catch_unwind` only to leak the tablet, then resumed). Everything else is wayland-client's safe API, with the
 backend, client and protocol versions winit uses. Sue's queue is never
 read from the socket by Sue: winit reads it (which also wakes the loop),
 and `about_to_wait` and every frame dispatch Sue's queue without blocking.
@@ -755,7 +756,15 @@ main window's go into its egui input, scaled from logical pixels to points;
 other windows' wait in `wayland_pen::events_for` for the viewport windows
 to take them. Pressure (0 to 65535), tilt (degrees, as -1 to 1 of 90) and
 an eraser tool go to `stylus` as `PenSource::WaylandTablet`; a lifted tip
-keeps its last pressure until a frame has drawn the stroke's end.
+keeps its last pressure until a frame has drawn the stroke's end. A tool
+near Sue's surface shows the cursor the mouse would: the compositor's
+cursor-shape-v1 (bound like the rest, at the lower version) gives the tool
+a shape device, set with the `proximity_in` serial to the named shape for
+egui's cursor of the last frame over the main window (no cursor at all
+when egui hides it, the default over other windows), and again whenever
+egui's cursor changes. A compositor without cursor-shape-v1 keeps its own
+tablet cursor; drawing a cursor image of Sue's own (a `wl_shm` surface) is
+left out.
 
 Before the event loop opens (`tablets::display_server`), Sue stays on
 Wayland unless a pen tablet is in the kernel's device list
@@ -1511,8 +1520,8 @@ clean without the brush feeling slow. A stroke passes through these stages:
 
 | Stage | What it does |
 | --- | --- |
-| Input | egui's raw event stream, in order, so a fast stroke keeps every sample between frames; each frame's samples are spread over its time, so speeds are real. Pen pressure comes from egui touch events with force (Windows Ink, macOS, Linux, phones), else from `sue_platform::stylus` (a WinTab tablet on Windows, drained each frame through the `wintab` crate, a pen's tablet-v2 events under Wayland or its XInput2 device under X11 on Linux and the BSDs, or a pen's pointer events in a browser, which winit hands over as a mouse), through the pen pressure curve every tool shares (`sue_paint.pen_pressure`, a `Response`, by default `0,0 0.4,0.5 1,1`). |
-| Dynamics | Brush Size and Opacity each have a `Dynamics`, as in Clip Studio Paint: pen pressure, velocity (the pen's speed, still to 2,000 points per second) and random, each on or off with a minimum value and, for pressure and velocity, its own curve; the inputs multiply. Random is steady along the path, so the stroke painted again from its corrected path keeps its sizes. *Specify by size on screen* keeps the brush the same size at any zoom; *At least 1 pixel* keeps a light line from thinning below a pixel. |
+| Input | egui's raw event stream, in order, so a fast stroke keeps every sample between frames; each frame's samples are spread over its time, so speeds are real. Pen pressure comes from egui touch events with force (Windows Ink, macOS, Linux, phones), else from `sue_platform::stylus` (a WinTab tablet on Windows, drained each frame through the `wintab` crate, a pen's tablet-v2 events under Wayland or its XInput2 device under X11 on Linux and the BSDs, or a pen's pointer events in a browser, which winit hands over as a mouse), through the pen pressure curve every tool shares (`sue_paint.pen_pressure`, a `Response`, by default `0,0 0.4,0.5 1,1`). The eraser end (`stylus::eraser()`) drives `tools::EraserEnd`, a small state machine: turning the pen over picks the Eraser through `Toolbox::pick` (its sub tool as last picked, so the Tool palette and Tool Property show it), turning it back picks the tool and sub tool before; it changes only while no gesture is under way, and a tool picked by hand meanwhile stays. |
+| Dynamics | Brush Size and Opacity each have a `Dynamics`, as in Clip Studio Paint: pen pressure, velocity (the pen's speed, still to 2,000 points per second), tilt (the pen's lean, `hypot` of `stylus::tilt()`, 0 upright to 1 flat; with no tilt source, a mouse included, it reads 0, upright, so a setting that follows tilt stays at its minimum) and random, each on or off with a minimum value and, for pressure, velocity and tilt, its own curve; the inputs multiply. Each `Sample` carries its tilt (`Stroke::set_tilt`), and a vector line keeps it as a `tilt` point attribute (lines kept before it read as upright). Tips save the keys `<setting>.tilt`, `.tilt_min` and `.tilt_curve`; a tip saved before them loads with tilt off. Random is steady along the path, so the stroke painted again from its corrected path keeps its sizes. *Specify by size on screen* keeps the brush the same size at any zoom; *At least 1 pixel* keeps a light line from thinning below a pixel. |
 | Stabilization | A time-based filter (lag of about 4 ms per level, the same at any sample rate) that the brush follows. *Adjust by speed* loosens it as the pen speeds up (from 150 to 1500 points per second the lag drops to a tenth), so slow lines lose their tremor while quick hatching stays snappy. However fast the pen, the brush never trails it by more than 10 screen points plus 1.5 per level (`Stabilizer::most_behind`). On lift the brush catches up along the pen's own recent points, from the one nearest the brush, so it follows the way the pen went instead of cutting straight across. |
 | Painting live | Pen-like tips paint a continuous tapered capsule between consecutive samples: each pixel's coverage comes from its exact distance to the segment (four anti-aliasing widths, hardness falloff), so there are no gaps, ridges or beads at any speed, and lines thinner than a pixel stay unbroken as lighter ink. Airbrushes and mixing brushes stamp dabs at a tight spacing instead, because their dabs add up. The start taper grows the line from a point. |
 | Finishing on lift | The hooks a pen leaves when it touches down and lifts are trimmed; the samples become a centripetal Catmull-Rom spline (no loops or overshoot), so even a fast mouse that reported a few points ends as a curve; *post correction* (0 to 10) resamples the path evenly, finds deliberate corners (a turn of more than about 65 degrees over arms a brush wide, on a lightly smoothed copy) and smooths everything between them with a gaussian along the path that grows with the level and the brush; a quick *flick* (over 700 points per second) carries the line on along the pen's momentum. The stroke is then painted again from the finished path with its end tapered, the flick thinning to a point. |

@@ -678,6 +678,8 @@ impl DesktopHost {
         ))]
         if let Some(Some(pen)) = self.wayland_pen.as_mut() {
             pen.frame_done();
+            // A pen near the window shows the cursor the mouse would.
+            pen.set_cursor(output.platform_output.cursor_icon);
         }
         #[cfg(target_arch = "wasm32")]
         for command in &output.platform_output.commands {
@@ -898,9 +900,14 @@ pub fn run_desktop<A: DesktopApp + 'static>(
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let ran = event_loop.run_app(&mut runner);
+        // A panic that unwinds out of the loop is caught only long enough
+        // to let go of the Wayland pen below, then goes on as it was.
+        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            event_loop.run_app(&mut runner)
+        }));
         // A Wayland pen still held (the loop ended without saying it was
-        // exiting) would outlive winit's display: leak it instead.
+        // exiting, or a panic unwound out of it) would outlive winit's
+        // display: leak it instead.
         #[cfg(any(
             target_os = "linux",
             target_os = "freebsd",
@@ -911,6 +918,7 @@ pub fn run_desktop<A: DesktopApp + 'static>(
         if let Some(host) = runner.host.as_mut() {
             host.release_wayland_pen(false);
         }
+        let ran = ran.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
         ran.map_err(|error| PlatformError::Window(error.to_string()))?;
         runner.error.map_or(Ok(()), Err)
     }

@@ -63,7 +63,7 @@ x11rb = { version = "0.13", default-features = false, features = ["xinput"] }
 raw-window-handle = "0.6"
 wayland-backend = { version = "0.3", default-features = false, features = ["client_system"] }
 wayland-client = "0.31"
-wayland-protocols = { version = "0.32", features = ["client"] }
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
 zune-core = "0.5"
 zune-jpegxl = "0.5"
 bytemuck = "1"

@@ -24,6 +24,10 @@ use std::sync::Mutex;
 
 use wayland_client::protocol::{wl_registry, wl_seat};
 use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum};
+use wayland_protocols::wp::cursor_shape::v1::client::{
+    wp_cursor_shape_device_v1::{Shape, WpCursorShapeDeviceV1},
+    wp_cursor_shape_manager_v1::WpCursorShapeManagerV1,
+};
 use wayland_protocols::wp::tablet::zv2::client::{
     zwp_tablet_manager_v2::ZwpTabletManagerV2,
     zwp_tablet_pad_dial_v2::ZwpTabletPadDialV2,
@@ -97,6 +101,8 @@ pub(crate) struct Tablet {
     pending: Vec<PenPointer>,
     /// The pressure a tip had as it lifted, until a frame has drawn it.
     lift: Option<f32>,
+    /// The cursor Sue shows for the mouse over the main window.
+    cursor: egui::CursorIcon,
 }
 
 impl std::fmt::Debug for Tablet {
@@ -113,6 +119,19 @@ struct Tool {
     eraser: bool,
     frame: ToolFrame,
     track: PenTrack,
+    /// Its cursor through cursor-shape-v1, made the first time it is near.
+    shape_device: Option<WpCursorShapeDeviceV1>,
+    /// While it is near: the serial of its `proximity_in` (which every
+    /// cursor request names), whether it is over the main window, and the
+    /// cursor it was last given.
+    near: Option<Near>,
+}
+
+/// A tool in range of one of Sue's surfaces.
+struct Near {
+    serial: u32,
+    main: bool,
+    shown: Option<egui::CursorIcon>,
 }
 
 /// What the queue's events build up.
@@ -120,6 +139,10 @@ struct Tool {
 struct State {
     seats: Vec<wl_seat::WlSeat>,
     manager: Option<ZwpTabletManagerV2>,
+    /// Named cursors (cursor-shape-v1), when the compositor offers them.
+    shapes: Option<WpCursorShapeManagerV1>,
+    /// The main window's surface key, to tell its tools from the others'.
+    main: usize,
     tools: Vec<Tool>,
     /// Pointer events since the last poll, with their surfaces.
     out: Vec<(usize, PenPointer)>,
@@ -155,11 +178,60 @@ impl Tablet {
         Some(Self {
             connection,
             queue,
-            state: State::default(),
+            state: State {
+                main,
+                ..State::default()
+            },
             main,
             pending: Vec::new(),
             lift: None,
+            cursor: egui::CursorIcon::Default,
         })
+    }
+
+    /// The cursor Sue shows for the mouse over the main window (egui's
+    /// cursor of the last frame): pens near it show the same.
+    pub(crate) fn set_cursor(&mut self, icon: egui::CursorIcon) {
+        self.cursor = icon;
+        self.show_cursors();
+    }
+
+    /// Gives every tool near one of Sue's surfaces its cursor, when it
+    /// changed: over the main window the mouse's, elsewhere the default.
+    /// Through cursor-shape-v1 where the compositor offers it; without it,
+    /// the compositor's own tablet cursor stays.
+    fn show_cursors(&mut self) {
+        let Some(shapes) = self.state.shapes.clone() else {
+            return;
+        };
+        let handle = self.queue.handle();
+        let mut sent = false;
+        for tool in &mut self.state.tools {
+            let Some(near) = tool.near.as_mut() else {
+                continue;
+            };
+            let icon = if near.main {
+                self.cursor
+            } else {
+                egui::CursorIcon::Default
+            };
+            if near.shown == Some(icon) {
+                continue;
+            }
+            near.shown = Some(icon);
+            sent = true;
+            match cursor_shape(icon) {
+                // No cursor: a null surface hides it.
+                None => tool.proxy.set_cursor(near.serial, None, 0, 0),
+                Some(shape) => tool
+                    .shape_device
+                    .get_or_insert_with(|| shapes.get_tablet_tool_v2(&tool.proxy, &handle, ()))
+                    .set_shape(near.serial, shape),
+            }
+        }
+        if sent {
+            let _ = self.connection.flush();
+        }
     }
 
     /// Handles the pens' events that arrived, without waiting for more,
@@ -168,6 +240,8 @@ impl Tablet {
     /// tablet).
     pub(crate) fn poll(&mut self) -> Option<bool> {
         let handled = self.queue.dispatch_pending(&mut self.state).ok()?;
+        // A tool that just came near gets its cursor.
+        self.show_cursors();
         // Requests made while handling them (binding, destroying).
         let _ = self.connection.flush();
         for (surface, event) in self.state.out.drain(..) {
@@ -296,6 +370,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
             for seat in &state.seats {
                 state.tablet_seat(seat, queue);
             }
+        } else if interface == WpCursorShapeManagerV1::interface().name && state.shapes.is_none() {
+            let known = WpCursorShapeManagerV1::interface().version;
+            state.shapes = Some(registry.bind(name, version(offered, known), queue, ()));
         }
     }
 }
@@ -339,6 +416,8 @@ impl Dispatch<ZwpTabletSeatV2, ()> for State {
                 eraser: false,
                 frame: ToolFrame::default(),
                 track: PenTrack::default(),
+                shape_device: None,
+                near: None,
             });
         }
     }
@@ -383,10 +462,23 @@ impl Dispatch<ZwpTabletToolV2, ()> for State {
             Event::Type {
                 tool_type: WEnum::Value(kind),
             } => tool.eraser = kind == zwp_tablet_tool_v2::Type::Eraser,
-            Event::ProximityIn { surface, .. } => {
-                tool.frame.enter = Some(surface.id().as_ptr() as usize);
+            Event::ProximityIn {
+                serial, surface, ..
+            } => {
+                let key = surface.id().as_ptr() as usize;
+                tool.frame.enter = Some(key);
+                // Its cursor is set (with this serial) once the events are
+                // handled.
+                tool.near = Some(Near {
+                    serial,
+                    main: key == state.main,
+                    shown: None,
+                });
             }
-            Event::ProximityOut => tool.frame.leave = true,
+            Event::ProximityOut => {
+                tool.frame.leave = true;
+                tool.near = None;
+            }
             Event::Down { .. } => tool.frame.down = Some(true),
             Event::Up => tool.frame.down = Some(false),
             Event::Motion { x, y } => tool.frame.position = Some([x as f32, y as f32]),
@@ -412,6 +504,9 @@ impl Dispatch<ZwpTabletToolV2, ()> for State {
                 state.active = Some(index);
             }
             Event::Removed => {
+                if let Some(device) = tool.shape_device.take() {
+                    device.destroy();
+                }
                 proxy.destroy();
                 state.tools.remove(index);
                 state.active = None;
@@ -475,7 +570,56 @@ macro_rules! ignored {
     )*};
 }
 
-ignored!(ZwpTabletPadRingV2, ZwpTabletPadStripV2, ZwpTabletPadDialV2);
+ignored!(
+    ZwpTabletPadRingV2,
+    ZwpTabletPadStripV2,
+    ZwpTabletPadDialV2,
+    WpCursorShapeManagerV1,
+    WpCursorShapeDeviceV1
+);
+
+/// The named cursor for egui's cursor `icon` (the CSS names both use);
+/// `None` for no cursor at all.
+fn cursor_shape(icon: egui::CursorIcon) -> Option<Shape> {
+    use egui::CursorIcon as Icon;
+    Some(match icon {
+        Icon::None => return None,
+        Icon::Default => Shape::Default,
+        Icon::ContextMenu => Shape::ContextMenu,
+        Icon::Help => Shape::Help,
+        Icon::PointingHand => Shape::Pointer,
+        Icon::Progress => Shape::Progress,
+        Icon::Wait => Shape::Wait,
+        Icon::Cell => Shape::Cell,
+        Icon::Crosshair => Shape::Crosshair,
+        Icon::Text => Shape::Text,
+        Icon::VerticalText => Shape::VerticalText,
+        Icon::Alias => Shape::Alias,
+        Icon::Copy => Shape::Copy,
+        Icon::Move => Shape::Move,
+        Icon::NoDrop => Shape::NoDrop,
+        Icon::NotAllowed => Shape::NotAllowed,
+        Icon::Grab => Shape::Grab,
+        Icon::Grabbing => Shape::Grabbing,
+        Icon::AllScroll => Shape::AllScroll,
+        Icon::ResizeHorizontal => Shape::EwResize,
+        Icon::ResizeNeSw => Shape::NeswResize,
+        Icon::ResizeNwSe => Shape::NwseResize,
+        Icon::ResizeVertical => Shape::NsResize,
+        Icon::ResizeEast => Shape::EResize,
+        Icon::ResizeSouthEast => Shape::SeResize,
+        Icon::ResizeSouth => Shape::SResize,
+        Icon::ResizeSouthWest => Shape::SwResize,
+        Icon::ResizeWest => Shape::WResize,
+        Icon::ResizeNorthWest => Shape::NwResize,
+        Icon::ResizeNorth => Shape::NResize,
+        Icon::ResizeNorthEast => Shape::NeResize,
+        Icon::ResizeColumn => Shape::ColResize,
+        Icon::ResizeRow => Shape::RowResize,
+        Icon::ZoomIn => Shape::ZoomIn,
+        Icon::ZoomOut => Shape::ZoomOut,
+    })
+}
 
 #[cfg(test)]
 mod tests {
@@ -486,5 +630,26 @@ mod tests {
         let known = ZwpTabletManagerV2::interface().version;
         assert_eq!(version(known + 3, known), known, "never above Sue's tables");
         assert_eq!(version(1, known), 1);
+    }
+
+    #[test]
+    fn the_pen_shows_the_mouses_cursor() {
+        assert_eq!(
+            cursor_shape(egui::CursorIcon::Default),
+            Some(Shape::Default)
+        );
+        assert_eq!(
+            cursor_shape(egui::CursorIcon::Crosshair),
+            Some(Shape::Crosshair)
+        );
+        assert_eq!(
+            cursor_shape(egui::CursorIcon::PointingHand),
+            Some(Shape::Pointer)
+        );
+        assert_eq!(
+            cursor_shape(egui::CursorIcon::ResizeHorizontal),
+            Some(Shape::EwResize)
+        );
+        assert_eq!(cursor_shape(egui::CursorIcon::None), None, "hidden");
     }
 }
