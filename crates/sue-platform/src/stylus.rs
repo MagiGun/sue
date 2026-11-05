@@ -1,8 +1,9 @@
 //! A pen's pressure where the window's touch events do not carry it: a
 //! WinTab tablet on Windows (tablet drivers with Windows Ink turned off,
-//! common among artists) and a pen in a browser, where winit treats pens as
-//! mice. With Windows Ink, on macOS, Linux and phones the pressure arrives
-//! with egui's touch events instead.
+//! common among artists), a pen in a browser, and a graphics tablet on
+//! Wayland, where the compositor's tablet protocol reports it. With
+//! Windows Ink, on macOS and phones, and on Linux under X11, the pressure
+//! arrives with egui's touch events instead.
 //!
 //! The host updates it every frame; studios read [`pressure`] when a
 //! stroke's touch events bring none.
@@ -16,11 +17,13 @@ pub enum PenSource {
     WinTab,
     /// A pen's pointer events in a browser.
     Browser,
+    /// A graphics tablet's pen on Wayland.
+    Wayland,
 }
 
 /// The pressure's bits, or `u32::MAX` while no pen touches.
 static PRESSURE: AtomicU32 = AtomicU32::new(u32::MAX);
-/// The last [`PenSource`] seen: 0 none, 1 WinTab, 2 a browser.
+/// The last [`PenSource`] seen: 0 none, 1 WinTab, 2 a browser, 3 Wayland.
 static SOURCE: AtomicU8 = AtomicU8::new(0);
 
 /// The pen's pressure, 0 to 1, while it touches; `None` when no such pen
@@ -37,15 +40,16 @@ pub fn source() -> Option<PenSource> {
     match SOURCE.load(Ordering::Relaxed) {
         1 => Some(PenSource::WinTab),
         2 => Some(PenSource::Browser),
+        3 => Some(PenSource::Wayland),
         _ => None,
     }
 }
 
 /// Records what the pen does now: its pressure while it touches, else
-/// `None`. Only Windows' tablet driver and the browser report pressure
+/// `None`. Windows' tablet driver, the browser and Wayland report pressure
 /// this way.
 #[cfg_attr(
-    not(any(target_os = "windows", target_arch = "wasm32")),
+    not(any(target_os = "windows", target_os = "linux", target_arch = "wasm32")),
     allow(dead_code)
 )]
 pub(crate) fn set(from: PenSource, pressure: Option<f32>) {
@@ -53,6 +57,7 @@ pub(crate) fn set(from: PenSource, pressure: Option<f32>) {
         match from {
             PenSource::WinTab => 1,
             PenSource::Browser => 2,
+            PenSource::Wayland => 3,
         },
         Ordering::Relaxed,
     );
@@ -74,5 +79,8 @@ mod tests {
         set(PenSource::Browser, None);
         assert_eq!(pressure(), None);
         assert_eq!(source(), Some(PenSource::Browser));
+        set(PenSource::Wayland, Some(0.75));
+        assert_eq!(pressure(), Some(0.75));
+        assert_eq!(source(), Some(PenSource::Wayland));
     }
 }

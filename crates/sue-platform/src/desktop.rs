@@ -341,6 +341,8 @@ impl DesktopHost {
         );
         #[cfg(target_os = "windows")]
         resource_icons(&window);
+        #[cfg(target_os = "linux")]
+        crate::wayland_pen::start(&window);
         Ok(window)
     }
 
@@ -506,6 +508,8 @@ impl DesktopHost {
                 tablet.poll();
             }
         }
+        #[cfg(target_os = "linux")]
+        crate::wayland_pen::apply(&mut self.egui, &self.window);
         #[cfg_attr(
             not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")),
             allow(unused_mut)

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "crates/sue-platform/android", "crates/sue-platform/ios", "bins/*"]
+members = ["crates/*", "crates/sue-platform/android", "crates/sue-platform/ios", "crates/sue-platform/wayland-pen", "bins/*"]
 
 [workspace.package]
 version = "0.0.74"

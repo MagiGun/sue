@@ -52,6 +52,10 @@ winit = { workspace = true, features = ["android-native-activity"] }
 [target.'cfg(target_os = "ios")'.dependencies]
 sue-ios = { path = "ios" }
 
+# wayland
+[target.'cfg(target_os = "linux")'.dependencies]
+sue-wayland-pen = { path = "wayland-pen" }
+
 # Pen pressure from tablet drivers that speak WinTab (their Windows Ink is
 # often off), through the driver's own wintab32.dll.
 [target.'cfg(target_os = "windows")'.dependencies]
