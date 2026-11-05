@@ -826,8 +826,9 @@ impl SuePaint {
     // ----- Input ------------------------------------------------------------------
 
     /// How hard the pen presses, through the pen pressure curve: from the
-    /// window's touch events (Windows Ink, macOS, Linux, phones), else from
-    /// a WinTab tablet or a pen in a browser, else full (a mouse).
+    /// window's touch events (Windows Ink, macOS, phones), else from a
+    /// WinTab tablet, Wayland's tablet protocol or a pen in a browser, else
+    /// full (a mouse).
     fn pen_pressure(&self) -> f32 {
         self.pressure
             .or_else(|| sue_platform::stylus::pressure().map(|raw| self.pen_curve.eval(raw)))

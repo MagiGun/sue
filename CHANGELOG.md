@@ -11,6 +11,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Pen tablets and pen displays on Linux (Wayland), such as Huion, Wacom
+  and XP-Pen, now paint with pressure in Sue Paint; before, the
+  compositor showed the pen to Sue as a plain mouse.
+
 ## [0.0.74] - 2026-11-02
 
 ### Added

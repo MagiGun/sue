@@ -58,6 +58,10 @@ sue-ios = { path = "ios" }
 wintab.workspace = true
 windows.workspace = true
 
+# Pen pressure on Linux (Wayland's tablet protocol; winit does not carry it).
+[target.'cfg(target_os = "linux")'.dependencies]
+octotablet.workspace = true
+
 # The browser: WebGPU with WebGL2 as the fallback, its page, storage,
 # clipboard and file pickers, and a clock (std's panics there). The
 # browser's random numbers too, for the ONNX runtime's random ops.
