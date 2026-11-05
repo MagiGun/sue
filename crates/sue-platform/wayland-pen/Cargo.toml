@@ -1,0 +1,28 @@
+[package]
+name = "sue-wayland-pen"
+description = "Pen pressure on Wayland: the one audited call that shares winit's connection so a tablet's pressure reaches sue-platform."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+license-file.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+raw-window-handle = "0.6"
+wayland-backend = { version = "0.3", features = ["client_system"] }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+
+# Sharing winit's wl_display is unsafe in Rust: this crate (part of
+# sue-platform, backbone rule 6) relaxes the workspace's `forbid` to
+# `deny` so that its one audited call may allow it. Needs the
+# maintainer's approval; any other unsafe code here needs its own.
+[lints.rust]
+unsafe_code = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"

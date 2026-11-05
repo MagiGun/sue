@@ -11,6 +11,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Pen pressure and input on Wayland**: a graphics tablet's pen now
+  draws, clicks and varies its width with pressure under KDE Plasma and
+  other Wayland desktops that offer the tablet protocol.
+
 ## [0.0.74] - 2026-11-02
 
 ### Added

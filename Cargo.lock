@@ -3823,6 +3823,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sue-ios",
+ "sue-wayland-pen",
  "sys-locale",
  "ureq",
  "wasm-bindgen",
@@ -3857,6 +3858,16 @@ dependencies = [
  "sue-platform",
  "sue-wm",
  "ttf-parser",
+]
+
+[[package]]
+name = "sue-wayland-pen"
+version = "0.0.74"
+dependencies = [
+ "raw-window-handle",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
 ]
 
 [[package]]

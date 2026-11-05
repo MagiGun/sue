@@ -63,6 +63,9 @@ pub mod web;
 #[cfg(target_os = "windows")]
 mod wintab_pen;
 
+#[cfg(target_os = "linux")]
+mod wayland_pen;
+
 pub use audio::{
     AudioConfig, AudioOutput, AudioSink, AudioStreamInfo, NullAudio, RealtimeStatus,
     audio_output_devices,
