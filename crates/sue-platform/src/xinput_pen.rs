@@ -69,12 +69,23 @@ fn pen_connected() -> bool {
         .is_ok_and(|devices| tablets::lists_pen(&devices, usize::BITS))
 }
 
-/// One axis of a device: its valuator's number and range.
+/// One axis of a device: its valuator's number, range and resolution
+/// (for tilt, units per radian when the driver says), and its value when
+/// the device was listed.
 #[derive(Clone, Copy, Debug)]
 struct Axis {
     number: u16,
     min: f64,
     max: f64,
+    resolution: u32,
+    value: f64,
+}
+
+impl Axis {
+    /// Its value as a lean from -1 to 1 (see [`tablets::lean`]).
+    fn lean(self, value: f64) -> f32 {
+        tablets::lean(value, self.min, self.max, self.resolution)
+    }
 }
 
 /// A pen's XInput2 device.
@@ -194,6 +205,8 @@ impl Tablet {
                             number: valuator.number,
                             min: tablets::fixed(valuator.min.integral, valuator.min.frac),
                             max: tablets::fixed(valuator.max.integral, valuator.max.frac),
+                            resolution: valuator.resolution,
+                            value: tablets::fixed(valuator.value.integral, valuator.value.frac),
                         };
                         if valuator.label == self.labels.pressure {
                             pressure = Some(axis);
@@ -212,13 +225,21 @@ impl Tablet {
                 continue;
             };
             let kept = previous.iter().find(|pen| pen.id == info.deviceid);
+            let tilt = tilt[0].zip(tilt[1]).map(|(x, y)| [x, y]);
+            // A pen seen for the first time starts from its lean now (raw
+            // events carry only the axes that change); not from its
+            // pressure, which a driver may leave where the last stroke
+            // ended and would read as a touch.
             self.pens.push(Pen {
                 id: info.deviceid,
                 pressure,
-                tilt: tilt[0].zip(tilt[1]).map(|(x, y)| [x, y]),
+                tilt,
                 eraser: tablets::is_eraser(&String::from_utf8_lossy(&info.name)),
                 last_pressure: kept.map_or(0.0, |pen| pen.last_pressure),
-                last_tilt: kept.map_or([0.0; 2], |pen| pen.last_tilt),
+                last_tilt: kept.map_or_else(
+                    || tilt.map_or([0.0; 2], |[x, y]| [x.lean(x.value), y.lean(y.value)]),
+                    |pen| pen.last_tilt,
+                ),
                 tip: kept.and_then(|pen| pen.tip),
             });
         }
@@ -287,10 +308,10 @@ impl Tablet {
         }
         if let Some([x, y]) = pen.tilt {
             if let Some(value) = read(x) {
-                pen.last_tilt[0] = tablets::lean(value, x.min, x.max);
+                pen.last_tilt[0] = x.lean(value);
             }
             if let Some(value) = read(y) {
-                pen.last_tilt[1] = tablets::lean(value, y.min, y.max);
+                pen.last_tilt[1] = y.lean(value);
             }
         }
         if tip.is_some() {

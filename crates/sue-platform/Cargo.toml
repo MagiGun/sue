@@ -62,8 +62,10 @@ windows.workspace = true
 # under X11, or under Wayland through XWayland), on a connection of its
 # own; pure Rust, the x11rb winit already uses.
 # Under Wayland, pen tablets through the tablet-v2 protocol on winit's own
-# connection, joined by the one audited call in crates/sue-platform/wayland.
+# connection, joined by the one audited call in crates/sue-platform/wayland;
+# rustix's safe `poll` to wait on its socket.
 [target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly"))'.dependencies]
+rustix.workspace = true
 x11rb.workspace = true
 sue-wayland = { path = "wayland" }
 wayland-client.workspace = true

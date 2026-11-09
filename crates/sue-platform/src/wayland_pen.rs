@@ -5,23 +5,34 @@
 //! under it, so they have to be read on winit's own connection: the one
 //! audited call in `sue-wayland` joins it (backbone rule 6), and the rest
 //! is wayland-client's safe API. Sue's events are read on an event queue
-//! of their own: winit reads the socket as always (which also wakes the
-//! loop for a pen's events) and this queue is only ever dispatched without
-//! blocking, from the loop and each frame. Never winit's queue, never a
-//! blocking read.
+//! of their own, never winit's. winit reads the socket as always; Sue reads
+//! it too each frame, but only when `poll` says bytes are waiting, so a
+//! read never blocks (libwayland would wait on any other reader of the
+//! display, such as the Vulkan driver's presenting thread, until it read).
+//! While the loop sleeps a watcher thread waits on the socket (`poll`
+//! alone) and wakes the loop when something arrives: winit drops a wake
+//! that brought it nothing of its own, which a pen's events alone are
+//! (found on a Huion Kamvas 22 Plus under KDE Plasma 6 by mahesh-labs).
 //!
 //! A pen over the main window becomes its pointer (moving, the tip as the
 //! primary button, the barrel buttons) whether or not the compositor also
 //! turns it into a mouse, and its pressure, tilt and eraser go to
-//! [`crate::stylus`]. Each global is bound at the lower of the version the
-//! compositor offers and the one Sue's protocol tables know, never higher.
+//! [`crate::stylus`], with one sample for each of its pointer events, so
+//! every point of a stroke has its own pressure. Each global is bound at
+//! the lower of the version the compositor offers and the one Sue's
+//! protocol tables know, never higher.
 //!
 //! The connection must go before winit's event loop does: the host drops
 //! the tablet when the loop says it is exiting and leaks it if it is still
 //! there afterwards (see `sue_wayland::join`).
 
-use std::sync::Mutex;
+use std::io::Write as _;
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::os::unix::net::UnixStream;
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::thread::JoinHandle;
 
+use rustix::event::{PollFd, PollFlags, Timespec};
 use wayland_client::protocol::{wl_registry, wl_seat};
 use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum};
 use wayland_protocols::wp::cursor_shape::v1::client::{
@@ -42,8 +53,8 @@ use wayland_protocols::wp::tablet::zv2::client::{
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
-use crate::stylus::{self, PenSource};
-use crate::tablets::{PenPointer, PenTrack, ToolFrame};
+use crate::stylus::{self, PenSource, Sample, SampleKind};
+use crate::tablets::{PenEvent, PenPointer, PenTrack, Socket, ToolFrame, Watch, Watched};
 
 /// `true` when the session's compositor offers tablet-v2, asked on a
 /// short connection of its own before Sue's window opens.
@@ -92,13 +103,16 @@ fn version(offered: u32, known: u32) -> u32 {
 
 /// The pens on Sue's Wayland connection.
 pub(crate) struct Tablet {
+    /// What wakes the loop while it sleeps: `None` until it first sleeps,
+    /// then the watcher, unless its thread could not start.
+    waker: Option<Option<Waker>>,
     connection: Connection,
     queue: EventQueue<State>,
     state: State,
     /// The main window's surface.
     main: usize,
     /// Its pointer events, until a frame takes them.
-    pending: Vec<PenPointer>,
+    pending: Vec<PenEvent>,
     /// The pressure a tip had as it lifted, until a frame has drawn it.
     lift: Option<f32>,
     /// The cursor Sue shows for the mouse over the main window.
@@ -116,7 +130,6 @@ impl std::fmt::Debug for Tablet {
 /// One pen (or eraser, or other tool) the compositor told of.
 struct Tool {
     proxy: ZwpTabletToolV2,
-    eraser: bool,
     frame: ToolFrame,
     track: PenTrack,
     /// Its cursor through cursor-shape-v1, made the first time it is near.
@@ -145,7 +158,7 @@ struct State {
     main: usize,
     tools: Vec<Tool>,
     /// Pointer events since the last poll, with their surfaces.
-    out: Vec<(usize, PenPointer)>,
+    out: Vec<PenEvent>,
     /// The tool that last finished a frame.
     active: Option<usize>,
     /// The pressure of a tip that lifted since the last poll.
@@ -173,9 +186,10 @@ impl Tablet {
         let connection = sue_wayland::join(window.display_handle().ok()?)?;
         let queue = connection.new_event_queue();
         let _registry = connection.display().get_registry(&queue.handle(), ());
-        // Sent now; the answer comes when winit next reads the socket.
+        // Sent now; the answer comes with the socket's next read.
         connection.flush().ok()?;
         Some(Self {
+            waker: None,
             connection,
             queue,
             state: State {
@@ -239,16 +253,28 @@ impl Tablet {
     /// (draw a frame), `None` once the connection has failed (drop the
     /// tablet).
     pub(crate) fn poll(&mut self) -> Option<bool> {
-        let handled = self.queue.dispatch_pending(&mut self.state).ok()?;
+        let mut handled = self.queue.dispatch_pending(&mut self.state).ok()?;
+        // What reached the socket since winit last read it, without ever
+        // waiting: a read is only begun when `poll` says bytes are there
+        // (libwayland's read would otherwise wait for every other reader
+        // of the display, such as the Vulkan driver's, to read too).
+        // A guard dropped unread cancels the read.
+        if let Some(guard) = self.queue.prepare_read()
+            && readable(guard.connection_fd())
+        {
+            // A failure shows in the dispatch that follows.
+            let _ = guard.read();
+            handled += self.queue.dispatch_pending(&mut self.state).ok()?;
+        }
         // A tool that just came near gets its cursor.
         self.show_cursors();
         // Requests made while handling them (binding, destroying).
         let _ = self.connection.flush();
-        for (surface, event) in self.state.out.drain(..) {
-            if surface == self.main {
+        for event in self.state.out.drain(..) {
+            if event.surface == self.main {
                 self.pending.push(event);
             } else {
-                others(surface, event);
+                others(event.surface, event.pointer);
             }
         }
         if let Some(pressure) = self.state.lifted.take() {
@@ -258,8 +284,25 @@ impl Tablet {
         Some(handled > 0)
     }
 
+    /// The loop is about to sleep: the watcher (started the first time)
+    /// wakes it through `proxy` when the socket has something to read.
+    pub(crate) fn arm(&mut self, proxy: &winit::event_loop::EventLoopProxy<()>) {
+        let connection = &self.connection;
+        let waker = self.waker.get_or_insert_with(|| {
+            // A socket of its own (the same connection), so the thread
+            // holds nothing of the connection's and never outlives it.
+            let socket = connection.as_fd().try_clone_to_owned().ok()?;
+            let proxy = proxy.clone();
+            Waker::spawn(socket, move || proxy.send_event(()).is_ok())
+        });
+        if let Some(waker) = waker {
+            waker.arm();
+        }
+    }
+
     /// The main window's pointer events since the last frame, as egui
-    /// events (`scale` egui points per logical pixel).
+    /// events (`scale` egui points per logical pixel); each one's reading
+    /// goes to [`crate::stylus`] as a sample, in the same order.
     pub(crate) fn take_events(
         &mut self,
         scale: f32,
@@ -267,7 +310,13 @@ impl Tablet {
     ) -> Vec<egui::Event> {
         self.pending
             .drain(..)
-            .map(|event| event.to_egui(scale, modifiers))
+            .map(|event| {
+                let egui = event.pointer.to_egui(scale, modifiers);
+                if let Some(sample) = sample(&egui, event) {
+                    stylus::push_sample(sample);
+                }
+                egui
+            })
             .collect()
     }
 
@@ -296,7 +345,150 @@ impl Tablet {
             self.lift
         };
         stylus::set(PenSource::WaylandTablet, pressure);
-        stylus::set_tool(tool.track.tilt, tool.eraser);
+        stylus::set_tool(tool.track.tilt, tool.track.eraser);
+    }
+}
+
+/// The sample for the egui event made from `event`; none for a pen going
+/// away.
+fn sample(egui: &egui::Event, event: PenEvent) -> Option<Sample> {
+    let (kind, pos) = match *egui {
+        egui::Event::PointerMoved(pos) => (SampleKind::Move, pos),
+        egui::Event::PointerButton { pos, pressed, .. } => (
+            if pressed {
+                SampleKind::Press
+            } else {
+                SampleKind::Release
+            },
+            pos,
+        ),
+        _ => return None,
+    };
+    Some(Sample {
+        kind,
+        pos: [pos.x, pos.y],
+        pressure: event.reading.pressure,
+        tilt: event.reading.tilt,
+        eraser: event.reading.eraser,
+    })
+}
+
+/// `true` when `socket` has bytes to read now (a `poll` that never waits).
+fn readable(socket: BorrowedFd<'_>) -> bool {
+    let mut fds = [PollFd::new(&socket, PollFlags::IN)];
+    let now = Timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    rustix::event::poll(&mut fds, Some(&now)).is_ok_and(|ready| ready > 0)
+        && fds[0].revents().contains(PollFlags::IN)
+}
+
+/// The watcher thread that wakes the loop while it sleeps (see
+/// [`Watch`]): it waits on the Wayland socket with `poll` only, never
+/// reading it or calling libwayland, so it cannot take events from winit
+/// or Sue's queue, and costs nothing while nothing arrives.
+struct Waker {
+    shared: Arc<(Mutex<Watch>, Condvar)>,
+    /// Written to when the waker goes, which ends the thread's wait.
+    stop: UnixStream,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Waker {
+    /// Starts the thread on `socket` (a duplicate of the connection's),
+    /// waking the loop with `wake` (`false` once the loop has gone).
+    fn spawn(socket: OwnedFd, wake: impl Fn() -> bool + Send + 'static) -> Option<Self> {
+        let (stop, stopped) = UnixStream::pair().ok()?;
+        let shared = Arc::new((Mutex::new(Watch::default()), Condvar::new()));
+        let theirs = Arc::clone(&shared);
+        let thread = std::thread::Builder::new()
+            .name("sue-pen-waker".to_owned())
+            .spawn(move || watch(&theirs, &socket, &stopped, &wake))
+            .ok()?;
+        Some(Self {
+            shared,
+            stop,
+            thread: Some(thread),
+        })
+    }
+
+    fn arm(&self) {
+        let (watch, told) = &*self.shared;
+        let mut watch = watch.lock().unwrap_or_else(PoisonError::into_inner);
+        if watch.arm() {
+            told.notify_one();
+        }
+    }
+}
+
+impl Drop for Waker {
+    fn drop(&mut self) {
+        {
+            let (watch, told) = &*self.shared;
+            watch.lock().unwrap_or_else(PoisonError::into_inner).stop();
+            told.notify_one();
+        }
+        // Ends a wait on the socket.
+        let _ = (&self.stop).write_all(&[1]);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// The watcher thread's work: each time the loop sleeps, wait on the
+/// socket (or the stop signal) and wake the loop once it is readable.
+fn watch(
+    shared: &(Mutex<Watch>, Condvar),
+    socket: &OwnedFd,
+    stopped: &UnixStream,
+    wake: &dyn Fn() -> bool,
+) {
+    let (watch, told) = shared;
+    loop {
+        let mut state = watch.lock().unwrap_or_else(PoisonError::into_inner);
+        let go = loop {
+            match state.begin() {
+                Some(go) => break go,
+                None => state = told.wait(state).unwrap_or_else(PoisonError::into_inner),
+            }
+        };
+        drop(state);
+        if !go {
+            return;
+        }
+        let mut fds = [
+            PollFd::new(socket, PollFlags::IN),
+            PollFd::new(stopped, PollFlags::IN),
+        ];
+        let waited = rustix::event::poll(&mut fds, None);
+        let events = fds[0].revents();
+        // Interrupted, it waits again; any other failure would fail again
+        // at once, so the socket counts as closed.
+        let failed = waited.is_err_and(|error| error != rustix::io::Errno::INTR);
+        let socket_did =
+            if failed || events.intersects(PollFlags::ERR | PollFlags::HUP | PollFlags::NVAL) {
+                Socket::Closed
+            } else if events.contains(PollFlags::IN) {
+                Socket::Readable
+            } else {
+                Socket::Quiet
+            };
+        let stop_signal = !fds[1].revents().is_empty();
+        let next = watch
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .end(socket_did, stop_signal);
+        match next {
+            Watched::Wake => {
+                if !wake() {
+                    return;
+                }
+            }
+            Watched::Again => {}
+            Watched::Stop => return,
+        }
     }
 }
 
@@ -413,7 +605,6 @@ impl Dispatch<ZwpTabletSeatV2, ()> for State {
         if let zwp_tablet_seat_v2::Event::ToolAdded { id } = event {
             state.tools.push(Tool {
                 proxy: id,
-                eraser: false,
                 frame: ToolFrame::default(),
                 track: PenTrack::default(),
                 shape_device: None,
@@ -461,7 +652,7 @@ impl Dispatch<ZwpTabletToolV2, ()> for State {
         match event {
             Event::Type {
                 tool_type: WEnum::Value(kind),
-            } => tool.eraser = kind == zwp_tablet_tool_v2::Type::Eraser,
+            } => tool.track.eraser = kind == zwp_tablet_tool_v2::Type::Eraser,
             Event::ProximityIn {
                 serial, surface, ..
             } => {
@@ -630,6 +821,97 @@ mod tests {
         let known = ZwpTabletManagerV2::interface().version;
         assert_eq!(version(known + 3, known), known, "never above Sue's tables");
         assert_eq!(version(1, known), 1);
+    }
+
+    #[test]
+    fn each_pen_event_becomes_one_sample_for_its_egui_event() {
+        use crate::tablets::Reading;
+        let reading = Reading {
+            pressure: Some(0.4),
+            tilt: Some([0.1, 0.2]),
+            eraser: true,
+        };
+        let modifiers = egui::Modifiers::default();
+        let pointers = [
+            (PenPointer::Move([2.0, 4.0]), Some(SampleKind::Move)),
+            (
+                PenPointer::Button {
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    at: [2.0, 4.0],
+                },
+                Some(SampleKind::Press),
+            ),
+            (
+                PenPointer::Button {
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    at: [2.0, 4.0],
+                },
+                Some(SampleKind::Release),
+            ),
+            (PenPointer::Gone, None),
+        ];
+        for (pointer, kind) in pointers {
+            let event = PenEvent {
+                surface: 1,
+                pointer,
+                reading,
+            };
+            let egui = pointer.to_egui(1.5, modifiers);
+            let made = sample(&egui, event);
+            assert_eq!(made.map(|sample| sample.kind), kind);
+            if let Some(made) = made {
+                // At the egui event's own position, so a studio can pair
+                // them.
+                assert!(made.is_for(made.kind, [3.0, 6.0]));
+                assert_eq!(made.pressure, Some(0.4));
+                assert_eq!(made.tilt, Some([0.1, 0.2]));
+                assert!(made.eraser);
+            }
+        }
+    }
+
+    #[test]
+    fn the_waker_wakes_once_per_sleep_and_ends_when_dropped() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::{Duration, Instant};
+        // A socket pair stands in for the Wayland socket.
+        let (display, compositor) = UnixStream::pair().unwrap();
+        // A read is begun only when bytes wait.
+        assert!(!readable(display.as_fd()));
+        (&compositor).write_all(&[0]).unwrap();
+        assert!(readable(display.as_fd()));
+        let woken = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&woken);
+        let waker = Waker::spawn(display.into(), move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            true
+        })
+        .unwrap();
+        let wait_for = |count: usize| {
+            let start = Instant::now();
+            while woken.load(Ordering::SeqCst) < count && start.elapsed() < Duration::from_secs(5) {
+                std::thread::yield_now();
+            }
+            woken.load(Ordering::SeqCst)
+        };
+        // Bytes arrived while the loop is awake: no wake until it sleeps.
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(woken.load(Ordering::SeqCst), 0);
+        waker.arm();
+        assert_eq!(wait_for(1), 1);
+        // Woken once for that sleep, however long the bytes stay unread.
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(woken.load(Ordering::SeqCst), 1);
+        waker.arm();
+        assert_eq!(wait_for(2), 2);
+        // Dropping it ends the thread, even mid-watch on a quiet socket.
+        let (quiet, _keep) = UnixStream::pair().unwrap();
+        let idle = Waker::spawn(quiet.into(), || true).unwrap();
+        idle.arm();
+        drop(idle);
+        drop(waker);
     }
 
     #[test]

@@ -64,6 +64,9 @@ raw-window-handle = "0.6"
 wayland-backend = { version = "0.3", default-features = false, features = ["client_system"] }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
+# Waiting on the Wayland socket for a pen's events with a safe `poll`;
+# the rustix winit and wayland-backend already use.
+rustix = { version = "1.1", default-features = false, features = ["event", "std"] }
 zune-core = "0.5"
 zune-jpegxl = "0.5"
 bytemuck = "1"

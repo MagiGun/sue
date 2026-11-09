@@ -558,6 +558,21 @@ impl DesktopHost {
         }
     }
 
+    /// The loop is about to sleep: a Wayland pen's events wake it through
+    /// `proxy` (winit alone would not, see `crate::wayland_pen`).
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    fn arm_wayland_pen(&mut self, proxy: &winit::event_loop::EventLoopProxy<Wake>) {
+        if let Some(Some(pen)) = self.wayland_pen.as_mut() {
+            pen.arm(proxy);
+        }
+    }
+
     /// Lets go of the Wayland pen before winit's event loop (which owns the
     /// display it uses) ends: dropped while the loop still runs, leaked if
     /// the loop is already gone.
@@ -669,6 +684,8 @@ impl DesktopHost {
         }
         let ctx = self.ctx.clone();
         let output = ctx.run_ui(raw, |ui| app.ui(ui, self));
+        // The pen's samples went with this frame's events.
+        crate::stylus::end_frame();
         #[cfg(any(
             target_os = "linux",
             target_os = "freebsd",
@@ -887,7 +904,14 @@ pub fn run_desktop<A: DesktopApp + 'static>(
         last_frame: None,
         exiting: false,
         paused: false,
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(any(
+            target_arch = "wasm32",
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        ))]
         proxy: event_loop.create_proxy(),
         #[cfg(target_arch = "wasm32")]
         opening: None,
@@ -984,8 +1008,16 @@ struct Runner<A> {
     options: DesktopOptions,
     host: Option<DesktopHost>,
     error: Option<PlatformError>,
-    /// Reaches the loop from the browser's start-up.
-    #[cfg(target_arch = "wasm32")]
+    /// Reaches the loop from the browser's start-up, or from the watcher
+    /// that wakes it for a Wayland pen.
+    #[cfg(any(
+        target_arch = "wasm32",
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
     proxy: winit::event_loop::EventLoopProxy<Wake>,
     /// The canvas, while its GPU is being opened.
     #[cfg(target_arch = "wasm32")]
@@ -1178,13 +1210,25 @@ impl<A: DesktopApp> ApplicationHandler<Wake> for Runner<A> {
             };
         }
         let display_hz = host.capabilities.display_refresh_hz;
-        match plan_step(
+        let step = plan_step(
             pacing,
             host.repaint_at,
             Instant::now(),
             self.last_frame,
             display_hz,
-        ) {
+        );
+        // Going to sleep: a Wayland pen's events wake the loop.
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        ))]
+        if step != Step::Redraw {
+            host.arm_wayland_pen(&self.proxy);
+        }
+        match step {
             Step::Wait => event_loop.set_control_flow(ControlFlow::Wait),
             Step::WaitUntil(at) => event_loop.set_control_flow(ControlFlow::WaitUntil(at)),
             Step::Redraw => {
@@ -1241,6 +1285,27 @@ impl<A: DesktopApp> ApplicationHandler<Wake> for Runner<A> {
         self.open_in_browser(event_loop);
         #[cfg(not(target_arch = "wasm32"))]
         self.begin(event_loop, DesktopHost::create(event_loop, &self.options));
+    }
+
+    /// The watcher woke the loop: something reached the Wayland socket,
+    /// perhaps only a pen's events, which winit would not have woken it
+    /// for. They are handled now, and drawn.
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, (): Wake) {
+        if self.exiting || self.paused {
+            return;
+        }
+        if let Some(host) = self.host.as_mut()
+            && host.poll_wayland_pen()
+        {
+            host.window.request_redraw();
+        }
     }
 
     /// The browser's start-up is done: the page's files are read and the

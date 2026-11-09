@@ -3819,6 +3819,7 @@ dependencies = [
  "open",
  "pollster 1.0.1",
  "rfd",
+ "rustix 1.1.6",
  "semver",
  "serde_json",
  "sha2",

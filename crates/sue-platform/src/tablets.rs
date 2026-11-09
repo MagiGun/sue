@@ -116,6 +116,29 @@ pub(crate) fn barrel_button(code: u32) -> Option<egui::PointerButton> {
     }
 }
 
+/// What the pen read at one of its pointer events: the reading a studio
+/// pairs with that event (see `crate::stylus::Sample`), so each point of a
+/// stroke has its own pressure and tilt, not just a frame's last ones.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Reading {
+    /// Its pressure, 0 to 1, while the tip touches; on the tip's release,
+    /// the pressure it had just before.
+    pub(crate) pressure: Option<f32>,
+    /// Its lean, -1 to 1 each way, once it has said.
+    pub(crate) tilt: Option<[f32; 2]>,
+    /// The eraser end (or an eraser tool) is the one in use.
+    pub(crate) eraser: bool,
+}
+
+/// A pointer event of a pen's, with the surface it is for and what the
+/// pen read then.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PenEvent {
+    pub(crate) surface: usize,
+    pub(crate) pointer: PenPointer,
+    pub(crate) reading: Reading,
+}
+
 /// A pen as its tablet-v2 frames left it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct PenTrack {
@@ -128,20 +151,29 @@ pub(crate) struct PenTrack {
     pub(crate) pressure: f32,
     /// Its lean, -1 to 1 each way, once it has said.
     pub(crate) tilt: Option<[f32; 2]>,
+    /// It is an eraser (the pen's eraser end).
+    pub(crate) eraser: bool,
     /// Its barrel buttons held, as pointer buttons.
     held: Vec<egui::PointerButton>,
 }
 
 impl PenTrack {
-    /// Takes one frame, adding the pointer events it makes to `out`, each
-    /// with the surface it is for: coming near, moving, the tip and
-    /// buttons going down, then up, then going away.
-    pub(crate) fn apply(&mut self, frame: &ToolFrame, out: &mut Vec<(usize, PenPointer)>) {
+    /// Takes one frame (every event of one tool between two `frame`
+    /// events, which happened together), adding the pointer events it
+    /// makes to `out`, each with the surface it is for and the pen's
+    /// reading at that event: coming near, moving, the tip and buttons
+    /// going down, then up, then going away. A frame that only changes
+    /// the pressure or the lean of a touching tip moves it where it is,
+    /// so pressing harder in place still reaches the stroke.
+    pub(crate) fn apply(&mut self, frame: &ToolFrame, out: &mut Vec<PenEvent>) {
         if let Some(surface) = frame.enter {
             self.surface = Some(surface);
         }
-        if let Some(pressure) = frame.pressure {
-            self.pressure = (pressure as f32 / 65535.0).clamp(0.0, 1.0);
+        // A frame that lifts the tip keeps the pressure it had for the
+        // stroke's last point; what the frame says (often 0) comes after.
+        let lifts = self.down && (frame.down == Some(false) || frame.leave);
+        if !lifts {
+            self.take_pressure(frame);
         }
         if let Some([x, y]) = frame.tilt {
             self.tilt = Some([
@@ -150,13 +182,22 @@ impl PenTrack {
             ]);
         }
         let Some(surface) = self.surface else {
+            self.down &= !lifts;
+            self.take_pressure(frame);
             return;
         };
         if let Some(at) = frame.position {
             self.position = at;
-            out.push((surface, PenPointer::Move(at)));
-        } else if frame.enter.is_some() {
-            out.push((surface, PenPointer::Move(self.position)));
+            self.emit(out, surface, PenPointer::Move(at), self.touching());
+        } else if frame.enter.is_some()
+            || (self.down && !lifts && (frame.pressure.is_some() || frame.tilt.is_some()))
+        {
+            self.emit(
+                out,
+                surface,
+                PenPointer::Move(self.position),
+                self.touching(),
+            );
         }
         let at = self.position;
         let press = |button, pressed| PenPointer::Button {
@@ -166,7 +207,8 @@ impl PenTrack {
         };
         if frame.down == Some(true) && !self.down {
             self.down = true;
-            out.push((surface, press(egui::PointerButton::Primary, true)));
+            let primary = press(egui::PointerButton::Primary, true);
+            self.emit(out, surface, primary, self.touching());
         }
         for &(code, pressed) in &frame.buttons {
             let Some(button) = barrel_button(code) else {
@@ -175,25 +217,153 @@ impl PenTrack {
             let held = self.held.contains(&button);
             if pressed && !held {
                 self.held.push(button);
-                out.push((surface, press(button, true)));
             } else if !pressed && held {
                 self.held.retain(|other| *other != button);
-                out.push((surface, press(button, false)));
+            } else {
+                continue;
             }
+            self.emit(out, surface, press(button, pressed), self.touching());
         }
         // Going away lets go of everything still held.
-        let lift = frame.down == Some(false) || frame.leave;
-        if lift && self.down {
+        if lifts {
             self.down = false;
-            out.push((surface, press(egui::PointerButton::Primary, false)));
+            let primary = press(egui::PointerButton::Primary, false);
+            self.emit(out, surface, primary, Some(self.pressure));
+            self.take_pressure(frame);
         }
         if frame.leave {
             for button in std::mem::take(&mut self.held) {
-                out.push((surface, press(button, false)));
+                self.emit(out, surface, press(button, false), None);
             }
-            out.push((surface, PenPointer::Gone));
+            self.emit(out, surface, PenPointer::Gone, None);
             self.surface = None;
         }
+    }
+
+    /// Its pressure while the tip touches.
+    fn touching(&self) -> Option<f32> {
+        self.down.then_some(self.pressure)
+    }
+
+    fn take_pressure(&mut self, frame: &ToolFrame) {
+        if let Some(pressure) = frame.pressure {
+            self.pressure = (f64::from(pressure) / 65535.0).clamp(0.0, 1.0) as f32;
+        }
+    }
+
+    fn emit(
+        &self,
+        out: &mut Vec<PenEvent>,
+        surface: usize,
+        pointer: PenPointer,
+        pressure: Option<f32>,
+    ) {
+        out.push(PenEvent {
+            surface,
+            pointer,
+            reading: Reading {
+                pressure,
+                tilt: self.tilt,
+                eraser: self.eraser,
+            },
+        });
+    }
+}
+
+/// What wakes Sue's loop for a pen while it sleeps.
+///
+/// Under Wayland winit reads the socket a pen's events come on, but a
+/// wake that brought winit nothing of its own (only tablet-v2 events, on
+/// Sue's queue) never reaches the loop, so a pen that only hovers or draws
+/// could wait for the next mouse or key event. A watcher thread waits on
+/// the socket while the loop sleeps (with `poll` alone, nothing of
+/// libwayland's) and wakes the loop once something arrives. This is its
+/// state, shared by the loop and the thread.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Watch {
+    /// The loop went to sleep: the thread should watch the socket.
+    armed: bool,
+    /// The thread is watching it now.
+    watching: bool,
+    /// The thread should end.
+    stopped: bool,
+}
+
+/// What the socket did while the watcher waited on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Socket {
+    /// Nothing (the wait was interrupted).
+    Quiet,
+    /// Something arrived to read.
+    Readable,
+    /// It closed or failed.
+    Closed,
+}
+
+/// What the watcher does after its wait.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Watched {
+    /// Wakes the loop, then waits until it sleeps again.
+    Wake,
+    /// Goes on watching.
+    Again,
+    /// Ends.
+    Stop,
+}
+
+impl Watch {
+    /// The loop is about to sleep. `true` when the thread must be told to
+    /// watch: not while it already watches (from an earlier sleep) or was
+    /// told already, and never once it was stopped.
+    pub(crate) fn arm(&mut self) -> bool {
+        if self.stopped || self.watching || self.armed {
+            return false;
+        }
+        self.armed = true;
+        true
+    }
+
+    /// The thread, before it waits on the socket: `Some(true)` to watch
+    /// it now, `Some(false)` to end, `None` to wait until it is armed.
+    pub(crate) fn begin(&mut self) -> Option<bool> {
+        if self.stopped {
+            return Some(false);
+        }
+        if !self.armed {
+            return None;
+        }
+        self.armed = false;
+        self.watching = true;
+        Some(true)
+    }
+
+    /// The thread's wait ended: what the socket did, and whether the stop
+    /// signal came.
+    pub(crate) fn end(&mut self, socket: Socket, stop_signal: bool) -> Watched {
+        self.watching = false;
+        if stop_signal || self.stopped {
+            self.stopped = true;
+            return Watched::Stop;
+        }
+        match socket {
+            Socket::Readable => Watched::Wake,
+            // The loop still sleeps: keep watching for it.
+            Socket::Quiet => {
+                self.armed = true;
+                Watched::Again
+            }
+            // Once, for the loop to find the failure, then never again (a
+            // closed socket would wake it for ever).
+            Socket::Closed => {
+                self.stopped = true;
+                Watched::Wake
+            }
+        }
+    }
+
+    /// Ends the thread.
+    pub(crate) fn stop(&mut self) {
+        self.stopped = true;
     }
 }
 
@@ -266,9 +436,25 @@ pub(crate) fn share(value: f64, min: f64, max: f64) -> f32 {
     ((value - min) / (max - min)).clamp(0.0, 1.0) as f32
 }
 
-/// `value` on a tilt axis from `min` to `max` as a lean from -1 to 1.
-pub(crate) fn lean(value: f64, min: f64, max: f64) -> f32 {
-    share(value, min, max) * 2.0 - 1.0
+/// `value` on an XInput2 tilt axis from `min` to `max` as a lean from -1
+/// to 1, 1 being 90 degrees as under Wayland. X11's tablet drivers report
+/// tilt in degrees on a signed axis (libinput's -64 to 63, the Wacom
+/// driver's), some in radians times the axis's `resolution` (units per
+/// radian) on a wider signed one; any other axis is taken to span 60
+/// degrees each way, as far as most pens lean.
+pub(crate) fn lean(value: f64, min: f64, max: f64, resolution: u32) -> f32 {
+    if max <= min {
+        return 0.0;
+    }
+    let degrees = if min < 0.0 && max.abs() <= 90.5 && min.abs() <= 90.5 {
+        value
+    } else if min < 0.0 && resolution > 0 {
+        (value / f64::from(resolution)).to_degrees()
+    } else {
+        let middle = (min + max) / 2.0;
+        (value - middle) / ((max - min) / 2.0) * 60.0
+    };
+    (degrees / 90.0).clamp(-1.0, 1.0) as f32
 }
 
 /// The pressure to report for a pen whose last pressure is `pressure`:
@@ -340,7 +526,7 @@ mod tests {
             },
             &mut out,
         );
-        assert_eq!(out, [(7, PenPointer::Move([10.0, 20.0]))]);
+        assert_eq!(pointers(&out), [(7, PenPointer::Move([10.0, 20.0]))]);
         assert_eq!(pen.tilt, Some([0.5, -1.0]));
         out.clear();
         // Touching, then drawing with pressure.
@@ -357,7 +543,7 @@ mod tests {
             pressed,
             at,
         };
-        assert_eq!(out, [(7, press(Primary, true, [10.0, 20.0]))]);
+        assert_eq!(pointers(&out), [(7, press(Primary, true, [10.0, 20.0]))]);
         assert!(pen.down);
         assert_eq!(pen.pressure, 1.0);
         out.clear();
@@ -370,7 +556,7 @@ mod tests {
             &mut out,
         );
         assert_eq!(
-            out,
+            pointers(&out),
             [
                 (7, PenPointer::Move([11.0, 21.0])),
                 (7, press(Middle, true, [11.0, 21.0])),
@@ -387,7 +573,7 @@ mod tests {
             &mut out,
         );
         assert_eq!(
-            out,
+            pointers(&out),
             [
                 (7, press(Primary, false, [11.0, 21.0])),
                 (7, press(Middle, false, [11.0, 21.0])),
@@ -406,6 +592,139 @@ mod tests {
             &mut out,
         );
         assert!(out.is_empty());
+    }
+
+    /// The pointer events alone, with their surfaces.
+    fn pointers(out: &[PenEvent]) -> Vec<(usize, PenPointer)> {
+        out.iter()
+            .map(|event| (event.surface, event.pointer))
+            .collect()
+    }
+
+    /// The pressures read at each event.
+    fn pressures(out: &[PenEvent]) -> Vec<Option<f32>> {
+        out.iter().map(|event| event.reading.pressure).collect()
+    }
+
+    #[test]
+    fn each_pen_event_carries_its_own_reading() {
+        let mut pen = PenTrack {
+            eraser: true,
+            ..PenTrack::default()
+        };
+        let mut out = Vec::new();
+        let half = 32768;
+        // Hovering: no pressure, whatever the tablet says.
+        pen.apply(
+            &ToolFrame {
+                enter: Some(3),
+                position: Some([0.0, 0.0]),
+                pressure: Some(0),
+                tilt: Some([30.0, 0.0]),
+                ..frame()
+            },
+            &mut out,
+        );
+        // Landing with a moving tip in one frame: the move, then the touch.
+        pen.apply(
+            &ToolFrame {
+                down: Some(true),
+                position: Some([1.0, 0.0]),
+                pressure: Some(half),
+                ..frame()
+            },
+            &mut out,
+        );
+        // Pressing harder in place still moves the stroke, at the new
+        // pressure; a frame of nothing new adds nothing.
+        pen.apply(
+            &ToolFrame {
+                pressure: Some(65535),
+                ..frame()
+            },
+            &mut out,
+        );
+        pen.apply(&frame(), &mut out);
+        // Lifting with a last motion and a pressure of 0: the last point
+        // and the release keep the pressure the tip had.
+        pen.apply(
+            &ToolFrame {
+                down: Some(false),
+                position: Some([2.0, 0.0]),
+                pressure: Some(0),
+                ..frame()
+            },
+            &mut out,
+        );
+        let half = (f64::from(half) / 65535.0) as f32;
+        assert_eq!(
+            pressures(&out),
+            [None, None, Some(half), Some(1.0), Some(1.0), Some(1.0)]
+        );
+        assert_eq!(out[1].pointer, PenPointer::Move([1.0, 0.0]));
+        assert!(matches!(
+            out[2].pointer,
+            PenPointer::Button { pressed: true, .. }
+        ));
+        assert_eq!(out[3].pointer, PenPointer::Move([1.0, 0.0]));
+        assert_eq!(out[4].pointer, PenPointer::Move([2.0, 0.0]));
+        assert!(matches!(
+            out[5].pointer,
+            PenPointer::Button { pressed: false, .. }
+        ));
+        assert!(out.iter().all(|event| {
+            event.reading.eraser
+                && event
+                    .reading
+                    .tilt
+                    .is_some_and(|[x, y]| (x - 1.0 / 3.0).abs() < 1e-6 && y == 0.0)
+        }));
+        assert_eq!(pen.pressure, 0.0, "the lift's own pressure comes after");
+        out.clear();
+        // Hovering again: tilt alone moves nothing.
+        pen.apply(
+            &ToolFrame {
+                tilt: Some([0.0, 0.0]),
+                ..frame()
+            },
+            &mut out,
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn the_watcher_wakes_the_loop_once_per_sleep() {
+        let mut watch = Watch::default();
+        // Unarmed, the thread waits.
+        assert_eq!(watch.begin(), None);
+        // The loop sleeps: the thread is told once, and watches.
+        assert!(watch.arm());
+        assert!(!watch.arm(), "told already");
+        assert_eq!(watch.begin(), Some(true));
+        assert!(!watch.arm(), "watching already, from an earlier sleep");
+        // Something arrived: wake the loop, then wait to be armed again.
+        assert_eq!(watch.end(Socket::Readable, false), Watched::Wake);
+        assert_eq!(watch.begin(), None);
+        // An interrupted wait goes on watching by itself.
+        assert!(watch.arm());
+        assert_eq!(watch.begin(), Some(true));
+        assert_eq!(watch.end(Socket::Quiet, false), Watched::Again);
+        assert_eq!(watch.begin(), Some(true));
+        // A closed socket wakes the loop once, then the thread ends.
+        assert_eq!(watch.end(Socket::Closed, false), Watched::Wake);
+        assert_eq!(watch.begin(), Some(false));
+        assert!(!watch.arm());
+        // The stop signal ends it, whatever the socket did.
+        let mut watch = Watch::default();
+        assert!(watch.arm());
+        assert_eq!(watch.begin(), Some(true));
+        assert_eq!(watch.end(Socket::Readable, true), Watched::Stop);
+        assert_eq!(watch.begin(), Some(false));
+        // Stopped while waiting to be armed.
+        let mut watch = Watch::default();
+        watch.stop();
+        assert_eq!(watch.begin(), Some(false));
+        assert!(!watch.arm());
     }
 
     #[test]
@@ -487,9 +806,19 @@ B: MSC=10
         assert!((share(32767.5, 0.0, 65535.0) - 0.5).abs() < 1e-6);
         assert_eq!(share(70000.0, 0.0, 65535.0), 1.0);
         assert_eq!(share(5.0, 1.0, 1.0), 0.0, "an empty range");
-        assert_eq!(lean(-64.0, -64.0, 64.0), -1.0);
-        assert_eq!(lean(0.0, -64.0, 64.0), 0.0);
-        assert_eq!(lean(64.0, -64.0, 64.0), 1.0);
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-4;
+        // A signed axis in degrees (libinput's -64 to 63): 45 degrees is
+        // half of 90, as under Wayland, not 45 of 64.
+        assert!(near(lean(45.0, -64.0, 63.0, 57), 0.5));
+        assert!(near(lean(-90.0, -90.0, 90.0, 0), -1.0));
+        assert_eq!(lean(0.0, -64.0, 63.0, 0), 0.0);
+        // Radians times the resolution on a wider axis.
+        let quarter_turn = std::f64::consts::FRAC_PI_4 * 1000.0;
+        assert!(near(lean(quarter_turn, -1571.0, 1571.0, 1000), 0.5));
+        // An unsigned axis spans 60 degrees each way from its middle.
+        assert!(near(lean(127.0, 0.0, 127.0, 0), 60.0 / 90.0));
+        assert!(near(lean(63.5, 0.0, 127.0, 0), 0.0));
+        assert_eq!(lean(5.0, 1.0, 1.0, 0), 0.0, "an empty range");
     }
 
     #[test]
