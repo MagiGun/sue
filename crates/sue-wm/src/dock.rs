@@ -218,8 +218,10 @@ enum Drag<P> {
     },
     /// The bottom row's top edge.
     Bottom { from: f32, height: f32 },
-    /// A palette, by its title bar, tab or icon.
-    Panel { panel: P, from: Pos2 },
+    /// A palette, by its title bar, tab or icon: where the drag began and
+    /// where the pointer was last seen (a pen or a finger goes away in the
+    /// same moment it lifts, so the drop happens there).
+    Panel { panel: P, from: Pos2, at: Pos2 },
 }
 
 /// Where every palette is.
@@ -1281,7 +1283,11 @@ impl<P: DockPanel> DockLayout<P> {
             && self.drag.is_none()
             && let Some(from) = response.interact_pointer_pos()
         {
-            self.drag = Some(Drag::Panel { panel, from });
+            self.drag = Some(Drag::Panel {
+                panel,
+                from,
+                at: from,
+            });
         }
     }
 
@@ -1470,17 +1476,13 @@ impl<P: DockPanel> DockLayout<P> {
     /// it is let go, puts it there. Call it after the palettes, the
     /// splitters and the floating windows.
     pub fn drop_ui(&mut self, ui: &Ui, laid: &Laid<P>, title: &dyn Fn(P) -> String, theme: &Theme) {
-        let Some(Drag::Panel { panel, from }) = self.drag else {
+        let Some(Drag::Panel { panel, from, at }) = self.drag else {
             return;
         };
-        let (at, down) =
+        let (seen, down) =
             ui.input(|input| (input.pointer.latest_pos(), input.pointer.primary_down()));
-        let Some(at) = at else {
-            if !down {
-                self.drag = None;
-            }
-            return;
-        };
+        let at = seen.unwrap_or(at);
+        self.drag = Some(Drag::Panel { panel, from, at });
         if (at - from).length() < DRAG_START {
             if !down {
                 self.drag = None;
