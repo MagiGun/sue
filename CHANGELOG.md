@@ -20,6 +20,22 @@ follow [Semantic Versioning](https://semver.org/).
   into the strip or float it. Sue Paint opens with the palettes where you
   left them, and Window, Workspace now also holds Reset Palette Layout.
   (#3)
+- **More ways to arrange Sue Paint's palettes**, as in Clip Studio
+  Paint: dock a palette at the top beside the command bar, give it a new
+  column on the left or right, pop it out into a window of its own, or
+  tear a tab (Color Slider, Tool Settings, History and the others) off
+  into a palette of its own. The command bar and the tool palette move
+  like the other palettes, and widening the tool palette's column lays
+  its tools out in several columns. Window, Workspace has **Use Current
+  Workspace as Default**, and **Reset to Default** goes back to it.
+  Ideas and code from mahesh-labs' fork. (#3)
+- **Timeline navigation** in Sue Paint, as in Clip Studio Paint: over
+  the Timeline's frames the mouse wheel zooms around the pointer, Shift
+  and the wheel pan sideways, Alt and the wheel scroll the tracks, and
+  Space and a drag (or the middle button) pan; scrollbars run along the
+  Timeline's bottom and right edges. The eye beside an animation folder
+  shows and hides it, in step with the Layer palette. From mahesh-labs'
+  fork.
 - **Tilt** in brush dynamics: beside pen pressure and speed, how far the
   pen leans can change a brush's size and opacity, with a minimum and a
   curve, as in Clip Studio Paint. A mouse counts as an upright pen.

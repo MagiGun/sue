@@ -80,6 +80,20 @@ fn header(
     selected: u8,
     theme: &Theme,
 ) -> (Rect, Option<u8>) {
+    let (body, clicked, _) = header_tearing(ui, rect, tabs, &[], selected, theme);
+    (body, clicked)
+}
+
+/// [`header`], whose tabs flagged in `tearing` also drag: the tab dragged
+/// and where the drag began, to tear it off into a palette of its own.
+fn header_tearing(
+    ui: &mut Ui,
+    rect: Rect,
+    tabs: &[(String, Icon, bool)],
+    tearing: &[bool],
+    selected: u8,
+    theme: &Theme,
+) -> (Rect, Option<u8>, Option<(u8, Pos2)>) {
     let strip = Rect::from_min_size(rect.min, vec2(rect.width(), 28.0));
     let painter = ui.painter().clone();
     painter.rect_filled(strip, 0.0, theme.pill);
@@ -106,6 +120,7 @@ fn header(
     let names = all <= strip.width() - 8.0;
     let mut x = strip.left() + 4.0;
     let mut clicked = None;
+    let mut dragged = None;
     let painter = painter.with_clip_rect(strip);
     for ((index, (title, icon, enabled)), galley) in tabs.iter().enumerate().zip(galleys) {
         let chosen = index as u8 == selected;
@@ -113,11 +128,22 @@ fn header(
         let width = if named { labelled(&galley) } else { bare };
         let tab = Rect::from_min_size(pos2(x, strip.top() + 2.0), vec2(width, 26.0));
         x = tab.right() + 2.0;
+        let tears = tearing.get(index).copied().unwrap_or(false);
         let response = ui.interact(
             tab,
             Id::unique(("sue-paint-tab", title, rect.min.x as i32, rect.min.y as i32)),
-            Sense::click(),
+            if tears {
+                Sense::click_and_drag()
+            } else {
+                Sense::click()
+            },
         );
+        if tears
+            && response.drag_started()
+            && let Some(from) = ui.input(|input| input.pointer.press_origin())
+        {
+            dragged = Some((index as u8, from));
+        }
         if chosen {
             painter.rect_filled(tab, theme.control_radius, theme.panel);
             painter.hline(
@@ -162,7 +188,63 @@ fn header(
     (
         Rect::from_min_max(pos2(rect.left(), strip.bottom()), rect.max),
         clicked,
+        dragged,
     )
+}
+
+/// Buttons laid out left to right in `area`, wrapping to the next line
+/// when one would pass the right edge and stopping when no line is left:
+/// how the command bar and the tool palette fill whatever shape people
+/// give them.
+pub(crate) struct Flow {
+    area: Rect,
+    left: f32,
+    right: f32,
+    line: f32,
+    x: f32,
+    pub y: f32,
+}
+
+impl Flow {
+    /// Lines `line` tall in `area`, starting `inset` in from its left and
+    /// keeping `reserve` clear at its right (a menu button).
+    pub(crate) fn new(area: Rect, inset: f32, reserve: f32, line: f32) -> Self {
+        let left = area.left() + inset;
+        Self {
+            area,
+            left,
+            right: (area.right() - reserve).max(left + line),
+            line,
+            x: left,
+            y: area.top(),
+        }
+    }
+
+    /// The rect of the next button of `size`, `advance` wide in the line,
+    /// or `None` when it has no room.
+    pub(crate) fn next(&mut self, size: egui::Vec2, advance: f32) -> Option<Rect> {
+        if self.x + size.x > self.right && self.x > self.left {
+            self.x = self.left;
+            self.y += self.line;
+        }
+        if self.y + size.y > self.area.bottom() + 0.5 {
+            return None;
+        }
+        let rect = Rect::from_min_size(pos2(self.x, self.y), size);
+        self.x += advance;
+        Some(rect)
+    }
+
+    /// A gap of `width` between groups, unless a line just began; where
+    /// it starts.
+    pub(crate) fn gap(&mut self, width: f32) -> Option<f32> {
+        if self.x <= self.left || self.x + width > self.right {
+            return None;
+        }
+        let at = self.x;
+        self.x += width;
+        Some(at)
+    }
 }
 
 /// Clip Studio Paint's wedge slider: a dark triangle that grows to the
@@ -750,25 +832,28 @@ impl SuePaint {
         ui.painter().rect_filled(strip, 0.0, theme.panel);
         ui.painter()
             .hline(strip.x_range(), strip.bottom(), theme.hairline());
+        // A palette like the others: its grip at the left (drawn by the
+        // dock), its menu button at the right, and its buttons in lines
+        // that wrap when it is narrower than they are (in a column, or a
+        // taller top row).
         let groups = BAR_GROUPS;
-        let mut x = strip.left() + 8.0;
+        let mut flow = Flow::new(strip.shrink2(vec2(0.0, 3.0)), 16.0, 24.0, 34.0);
         let mut clicked: Option<String> = None;
         let mut save_at = None;
         for (index, group) in groups.iter().enumerate() {
-            if index > 0 {
-                ui.painter().vline(
-                    x + 3.0,
-                    strip.shrink2(vec2(0.0, 8.0)).y_range(),
-                    theme.hairline(),
-                );
-                x += 8.0;
+            if index > 0
+                && let Some(x) = flow.gap(8.0)
+            {
+                ui.painter()
+                    .vline(x + 3.0, (flow.y + 5.0)..=(flow.y + 27.0), theme.hairline());
             }
             for (icon, command, tip) in group.iter() {
                 if self.bar_hidden.contains(*command) {
                     continue;
                 }
-                let rect = Rect::from_min_size(pos2(x, strip.top() + 3.0), vec2(32.0, 32.0));
-                x += 34.0;
+                let Some(rect) = flow.next(vec2(32.0, 32.0), 34.0) else {
+                    break;
+                };
                 if *command == "file.save" {
                     save_at = Some(rect);
                 }
@@ -794,11 +879,11 @@ impl SuePaint {
                 .trim_end_matches("...")
                 .to_owned();
             let galley = ui.painter().layout_no_wrap(label, font.clone(), theme.text);
-            let rect = Rect::from_min_size(
-                pos2(x + 4.0, strip.top() + 4.0),
-                vec2(galley.size().x + 14.0, 26.0),
-            );
-            x = rect.right() + 2.0;
+            let Some(rect) = flow.next(vec2(galley.size().x + 14.0, 26.0), galley.size().x + 20.0)
+            else {
+                break;
+            };
+            let rect = rect.translate(vec2(4.0, 1.0));
             let state = self.state(command, &cx.world.arena, cx.history);
             let response = ui.interact(
                 rect,
@@ -829,7 +914,7 @@ impl SuePaint {
             return;
         };
         let save = Rect::from_min_size(
-            pos2(save_button.right() - 2.0, strip.top() + 9.0),
+            pos2(save_button.right() - 2.0, save_button.top() + 6.0),
             vec2(10.0, 16.0),
         );
         let response = ui.interact(save, Id::unique("sue-paint-save-menu"), Sense::click());
@@ -919,26 +1004,101 @@ impl SuePaint {
         let current = self.toolbox.tool();
         // Liquify is Blend's liquify sub tools; Blend the others.
         let liquify = current == Tool::Blend && is_liquify_mode(self.toolbox.of(Tool::Blend).mode);
-        let room = strip.height() - 12.0 - 96.0;
-        let buttons = entries.iter().flatten().count() as f32;
-        let gaps = (entries.len() as f32 - buttons) * 8.0;
-        let step = ((room - gaps) / buttons).clamp(20.0, 34.0);
-        let mut y = strip.top() + 6.0;
-        for entry in &entries {
-            let Some((icon, name, tools)) = entry else {
+        // Where each tool's button goes: in a line along a row (the top or
+        // the bottom), in one column, or in several once people widen the
+        // palette's column, as Clip Studio Paint's tool palette does.
+        let horizontal = strip.width() > strip.height() * 1.3;
+        let colors = if horizontal {
+            strip.width() >= 220.0 && strip.height() >= 64.0
+        } else {
+            strip.height() >= 200.0
+        };
+        let columns = (((strip.width() - 8.0) / 36.0).floor() as usize).max(1);
+        let mut places: Vec<Option<Rect>> = Vec::with_capacity(entries.len());
+        if horizontal {
+            let reserve = if colors { 62.0 } else { 26.0 };
+            let mut flow = Flow::new(strip.shrink2(vec2(0.0, 4.0)), 16.0, reserve, 32.0);
+            for entry in &entries {
+                if entry.is_some() {
+                    places.push(flow.next(vec2(30.0, 30.0), 32.0));
+                } else {
+                    if let Some(x) = flow.gap(8.0) {
+                        ui.painter().vline(
+                            x + 3.0,
+                            (flow.y + 3.0)..=(flow.y + 27.0),
+                            theme.hairline(),
+                        );
+                    }
+                    places.push(None);
+                }
+            }
+        } else {
+            let bottom = strip.bottom() - if colors { 96.0 } else { 8.0 };
+            let line = |y: f32| {
                 ui.painter().hline(
                     strip.shrink2(vec2(8.0, 0.0)).x_range(),
                     y + 3.0,
                     theme.hairline(),
                 );
-                y += 8.0;
+            };
+            let mut y = strip.top() + 6.0;
+            if columns == 1 {
+                let room = bottom - y;
+                let buttons = entries.iter().flatten().count() as f32;
+                let gaps = (entries.len() as f32 - buttons) * 8.0;
+                let step = ((room - gaps) / buttons).clamp(20.0, 34.0);
+                let width = (strip.width() - 8.0).min(38.0);
+                let left = strip.center().x - width / 2.0;
+                for entry in &entries {
+                    if entry.is_none() {
+                        line(y);
+                        y += 8.0;
+                        places.push(None);
+                    } else if y + step > bottom {
+                        places.push(None);
+                    } else {
+                        places.push(Some(Rect::from_min_size(
+                            pos2(left, y),
+                            vec2(width, step - 2.0),
+                        )));
+                        y += step;
+                    }
+                }
+            } else {
+                let cell = ((strip.width() - 8.0) / columns as f32).min(42.0);
+                let left = strip.center().x - cell * columns as f32 / 2.0;
+                let mut column = 0;
+                for entry in &entries {
+                    if entry.is_none() {
+                        if column > 0 {
+                            column = 0;
+                            y += 32.0;
+                        }
+                        line(y);
+                        y += 8.0;
+                        places.push(None);
+                        continue;
+                    }
+                    if y + 30.0 > bottom {
+                        places.push(None);
+                        continue;
+                    }
+                    places.push(Some(Rect::from_min_size(
+                        pos2(left + column as f32 * cell + 1.0, y),
+                        vec2(cell - 2.0, 30.0),
+                    )));
+                    column += 1;
+                    if column == columns {
+                        column = 0;
+                        y += 32.0;
+                    }
+                }
+            }
+        }
+        for (entry, place) in entries.iter().zip(places) {
+            let (Some((icon, name, tools)), Some(rect)) = (entry, place) else {
                 continue;
             };
-            if y + step > strip.bottom() - 96.0 {
-                break;
-            }
-            let rect = Rect::from_min_size(pos2(strip.left() + 4.0, y), vec2(38.0, step - 2.0));
-            y += step;
             let is_liquify = *icon == Icon::Replace;
             let active = match tools.first() {
                 Some(Tool::Blend) => liquify == is_liquify && current == Tool::Blend,
@@ -979,7 +1139,19 @@ impl SuePaint {
                 }
             }
         }
-        self.color_circles(ui, pos2(strip.left() + 17.0, strip.bottom() - 68.0), theme);
+        if colors && horizontal {
+            self.color_circles(
+                ui,
+                pos2(strip.right() - 50.0, strip.center().y - 12.0),
+                theme,
+            );
+        } else if colors {
+            self.color_circles(
+                ui,
+                pos2(strip.center().x - 6.0, strip.bottom() - 68.0),
+                theme,
+            );
+        }
     }
 
     /// The main and sub colors as Clip Studio Paint shows them, in the tool
@@ -1091,25 +1263,42 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        let tool = self.toolbox.tool();
+        use crate::dock::Palette;
         let tabs = [
-            (tr!("tool-group"), Icon::SubTool, self.panels.sub_tool),
+            (tr!("tool-group"), Icon::SubTool, self.panels.sub_tool, None),
             (
                 tr!("tool-settings"),
                 Icon::Sliders,
                 self.panels.tool_property,
+                Some(Palette::ToolProperty),
             ),
-            (tr!("brush-size"), Icon::BrushSize, true),
+            (
+                tr!("brush-size"),
+                Icon::BrushSize,
+                true,
+                Some(Palette::BrushGrid),
+            ),
         ];
-        let (body, clicked) = header(ui, rect, &tabs, self.tool_tab, theme);
-        if let Some(tab) = clicked {
-            self.tool_tab = tab;
-        }
-        if !self.panels.sub_tool && self.tool_tab == 0 {
+        let (body, tab) = self.torn_header(ui, rect, &tabs, self.tool_tab, theme);
+        self.tool_tab = tab;
+        if !self.panels.sub_tool && self.tool_tab == 0 && !self.dock.is_open(Palette::ToolProperty)
+        {
             self.tool_tab = 1;
         } else if !self.panels.tool_property && self.tool_tab == 1 {
             self.tool_tab = 0;
         }
+        self.tool_panel_body(ui, body, cx, theme);
+    }
+
+    /// The Sub Tool palette's tab showing (`tool_tab`), in `body`.
+    pub(crate) fn tool_panel_body(
+        &mut self,
+        ui: &mut Ui,
+        body: Rect,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        let tool = self.toolbox.tool();
         if self.tool_tab == 2 {
             self.brush_size_grid(ui, body.shrink2(vec2(6.0, 6.0)), theme);
             return;
@@ -3156,16 +3345,30 @@ impl SuePaint {
     // ----- Color ---------------------------------------------------------------------
 
     pub(crate) fn color_panel(&mut self, ui: &mut Ui, rect: Rect, theme: &Theme) {
+        use crate::dock::Palette;
         let tabs = [
-            (tr!("color-wheel"), Icon::Wheel, true),
-            (tr!("color-slider"), Icon::ColorSlider, true),
-            (tr!("intermediate-color"), Icon::Intermediate, true),
-            (tr!("approximate-color"), Icon::Approximate, true),
+            (tr!("color-wheel"), Icon::Wheel, true, None),
+            (
+                tr!("color-slider"),
+                Icon::ColorSlider,
+                true,
+                Some(Palette::ColorSlider),
+            ),
+            (
+                tr!("intermediate-color"),
+                Icon::Intermediate,
+                true,
+                Some(Palette::Intermediate),
+            ),
+            (
+                tr!("approximate-color"),
+                Icon::Approximate,
+                true,
+                Some(Palette::Approximate),
+            ),
         ];
-        let (body, clicked) = header(ui, rect, &tabs, self.color_tab, theme);
-        if let Some(tab) = clicked {
-            self.color_tab = tab;
-        }
+        let (body, tab) = self.torn_header(ui, rect, &tabs, self.color_tab, theme);
+        self.color_tab = tab;
         let body = body.shrink(8.0);
         match self.color_tab {
             0 => self.color_wheel(ui, body, theme),
@@ -3457,7 +3660,6 @@ impl SuePaint {
         });
     }
 
-    #[allow(clippy::too_many_lines, reason = "the color set and its controls")]
     pub(crate) fn color_set_panel(
         &mut self,
         ui: &mut Ui,
@@ -3465,15 +3667,36 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
+        use crate::dock::Palette;
         let tabs = [
-            (tr!("color-set"), Icon::Swatches, true),
-            (tr!("color-history"), Icon::History, true),
-            (tr!("material"), Icon::Material, true),
+            (tr!("color-set"), Icon::Swatches, true, None),
+            (
+                tr!("color-history"),
+                Icon::History,
+                true,
+                Some(Palette::ColorHistory),
+            ),
+            (
+                tr!("material"),
+                Icon::Material,
+                true,
+                Some(Palette::Material),
+            ),
         ];
-        let (body, clicked) = header(ui, rect, &tabs, self.set_tab, theme);
-        if let Some(tab) = clicked {
-            self.set_tab = tab;
-        }
+        let (body, tab) = self.torn_header(ui, rect, &tabs, self.set_tab, theme);
+        self.set_tab = tab;
+        self.color_set_body(ui, body, cx, theme);
+    }
+
+    /// The Color Set palette's tab showing (`set_tab`), in `body`.
+    #[allow(clippy::too_many_lines, reason = "the color set and its controls")]
+    pub(crate) fn color_set_body(
+        &mut self,
+        ui: &mut Ui,
+        body: Rect,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
         if self.set_tab == 2 {
             self.material_panel(ui, body.shrink(6.0), cx, theme);
             return;
@@ -3931,8 +4154,72 @@ impl SuePaint {
             Palette::AutoAction => self.auto_tab(ui, body, cx, theme),
             Palette::ItemBank => self.item_bank_tab(ui, body, cx, theme),
             Palette::Info => self.info_tab(ui, body, cx, theme),
+            // Torn off their palettes' tabs.
+            Palette::ToolProperty => {
+                let was = self.tool_tab;
+                self.tool_tab = 1;
+                self.tool_panel_body(ui, body, cx, theme);
+                self.tool_tab = was;
+            }
+            Palette::BrushGrid => self.brush_size_grid(ui, body.shrink2(vec2(6.0, 6.0)), theme),
+            Palette::ColorSlider => {
+                let mut inner = child(ui, body.shrink(8.0), "color-slider-palette");
+                self.color_sliders(&mut inner, theme);
+            }
+            Palette::Intermediate => self.intermediate_colors(ui, body.shrink(8.0), theme),
+            Palette::Approximate => self.approximate_colors(ui, body.shrink(8.0), theme),
+            Palette::ColorHistory => {
+                let was = self.set_tab;
+                self.set_tab = 1;
+                self.color_set_body(ui, body, cx, theme);
+                self.set_tab = was;
+            }
             _ => {}
         }
+    }
+
+    /// A palette's tabs where some are palettes of their own (Clip Studio
+    /// Paint's palettes stacked as tabs): a tab whose palette is open
+    /// elsewhere (docked, floating or in a window) does not show here, and
+    /// dragging one of the others tears it off into a palette of its own.
+    /// `tabs` are (name, icon, enabled, its own palette); returns the body
+    /// and the tab showing (an index into `tabs`).
+    fn torn_header(
+        &mut self,
+        ui: &mut Ui,
+        rect: Rect,
+        tabs: &[(String, Icon, bool, Option<crate::dock::Palette>)],
+        selected: u8,
+        theme: &Theme,
+    ) -> (Rect, u8) {
+        let shown: Vec<usize> = (0..tabs.len())
+            .filter(|at| {
+                !tabs[*at]
+                    .3
+                    .is_some_and(|palette| self.dock.is_open(palette))
+            })
+            .collect();
+        let mut chosen = usize::from(selected);
+        if !shown.contains(&chosen) {
+            chosen = shown.first().copied().unwrap_or(0);
+        }
+        let visible: Vec<(String, Icon, bool)> = shown
+            .iter()
+            .map(|at| (tabs[*at].0.clone(), tabs[*at].1, tabs[*at].2))
+            .collect();
+        let tearing: Vec<bool> = shown.iter().map(|at| tabs[*at].3.is_some()).collect();
+        let place = shown.iter().position(|at| *at == chosen).unwrap_or(0);
+        let (body, clicked, dragged) =
+            header_tearing(ui, rect, &visible, &tearing, place as u8, theme);
+        if let Some(tab) = clicked.and_then(|tab| shown.get(usize::from(tab))) {
+            chosen = *tab;
+        }
+        if let Some((tab, from)) = dragged
+            && let Some(palette) = shown.get(usize::from(tab)).and_then(|at| tabs[*at].3)
+        {
+            self.dock.begin_drag(palette, from);
+        }
+        (body, chosen as u8)
     }
 
     pub(crate) fn navigator(
@@ -3942,20 +4229,22 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        let (body, clicked) = header(
+        let (body, tab) = self.torn_header(
             ui,
             rect,
             &[
-                (tr!("navigator"), Icon::Navigator, true),
-                (tr!("sub-view"), Icon::SubView, true),
+                (tr!("navigator"), Icon::Navigator, true, None),
+                (
+                    tr!("sub-view"),
+                    Icon::SubView,
+                    true,
+                    Some(crate::dock::Palette::SubView),
+                ),
             ],
-            self.nav_tab,
+            self.nav_tab.min(1),
             theme,
         );
-        if let Some(tab) = clicked {
-            self.nav_tab = tab;
-        }
-        self.nav_tab = self.nav_tab.min(1);
+        self.nav_tab = tab;
         let body = body.shrink(6.0);
         if self.nav_tab == 1 {
             self.sub_view(ui, body, cx, theme);
@@ -4145,16 +4434,20 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
+        use crate::dock::Palette;
         let tabs = [
-            (tr!("layer-2"), Icon::Layers, true),
-            (tr!("layer-property"), Icon::LayerProperty, true),
-            (tr!("history"), Icon::History, true),
-            (tr!("animation-cels"), Icon::Cel, true),
+            (tr!("layer-2"), Icon::Layers, true, None),
+            (
+                tr!("layer-property"),
+                Icon::LayerProperty,
+                true,
+                Some(Palette::LayerProperty),
+            ),
+            (tr!("history"), Icon::History, true, Some(Palette::History)),
+            (tr!("animation-cels"), Icon::Cel, true, Some(Palette::Cels)),
         ];
-        let (body, clicked) = header(ui, rect, &tabs, self.layer_tab, theme);
-        if let Some(tab) = clicked {
-            self.layer_tab = tab;
-        }
+        let (body, tab) = self.torn_header(ui, rect, &tabs, self.layer_tab, theme);
+        self.layer_tab = tab;
         let Some(picture_id) = self.picture() else {
             ui.painter().text(
                 body.center(),

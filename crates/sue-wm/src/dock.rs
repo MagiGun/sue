@@ -1,16 +1,22 @@
 //! A dock for a studio's palettes, as Clip Studio Paint's: columns at the
-//! left and right of the work area and a row along its bottom, each made of
+//! left and right of the work area, a row across the top of the window (a
+//! command bar's) and a row along the work area's bottom, each made of
 //! palette groups that share the room by weight; a group holds one palette
-//! or several as tabs. Palettes can also float in windows of their own or
-//! collapse to icons in a strip at the right.
+//! or several as tabs. Palettes can also float in windows inside the
+//! studio, pop out into windows of their own (outside the main window
+//! too), or collapse to icons in a strip at the right.
 //!
 //! People drag a palette by its title bar, its tab or its icon onto a
 //! group (it becomes a tab there), above, below or beside a group (a group
 //! of its own), against a column's edge (a column of its own), onto the
-//! bottom, into the strip, or anywhere else to float it; they drag the
-//! lines between columns and groups to share the room differently. The
-//! layout reads and writes as lines of text ([`DockLayout::to_lines`]), so
-//! a studio keeps it between runs and under names (workspaces).
+//! top or the bottom, into the strip, or anywhere else to float it; they
+//! drag the lines between columns, rows and groups to share the room
+//! differently. Every column resizes, the narrow ones (a tool strip) too.
+//! A studio may also have optional palettes that are nowhere until people
+//! tear them off another palette's tab ([`DockPanel::optional`],
+//! [`DockLayout::begin_drag`]). The layout reads and writes as lines of
+//! text ([`DockLayout::to_lines`]), so a studio keeps it between runs and
+//! under names (workspaces).
 //!
 //! The studio says what its palettes are ([`DockPanel`]) and draws them in
 //! the rects [`DockLayout::layout`] gives; the dock draws the tabs, the
@@ -40,9 +46,22 @@ pub trait DockPanel: Copy + Eq + std::fmt::Debug + 'static {
             .find(|panel| panel.key() == text)
     }
 
-    /// The width of a palette that is always as wide (a tool strip).
+    /// The width a narrow palette (a tool strip) starts at in a column of
+    /// its own; such a palette never becomes a tab.
     fn fixed_width(self) -> Option<f32> {
         None
+    }
+
+    /// The least width it is usable at, when people drag its column's edge.
+    fn min_width(self) -> f32 {
+        self.fixed_width().map_or(170.0, |width| width.min(170.0))
+    }
+
+    /// A palette that is nowhere until people tear it off another
+    /// palette's tab (a missing one is not put back where the default
+    /// layout has it).
+    fn optional(self) -> bool {
+        false
     }
 
     /// The least height it is usable at.
@@ -170,8 +189,18 @@ impl<P: DockPanel> Column<P> {
 pub enum Holder {
     /// Column `usize` on a side, counted from the window's edge inward.
     Column(Side, usize),
+    /// The row across the top.
+    Top,
     /// The row along the bottom.
     Bottom,
+}
+
+impl Holder {
+    /// A row: its groups sit side by side.
+    #[must_use]
+    pub fn is_row(self) -> bool {
+        matches!(self, Holder::Top | Holder::Bottom)
+    }
 }
 
 /// Where a dragged palette goes.
@@ -189,6 +218,8 @@ pub enum Target<P> {
         side: Side,
         beside: Option<(P, bool)>,
     },
+    /// A group of its own at the end of the top row.
+    Top,
     /// A group of its own at the end of the bottom row.
     Bottom,
     /// An icon in the strip.
@@ -218,6 +249,8 @@ enum Drag<P> {
     },
     /// The bottom row's top edge.
     Bottom { from: f32, height: f32 },
+    /// The top row's bottom edge.
+    Top { from: f32, height: f32 },
     /// A palette, by its title bar, tab or icon: where the drag began and
     /// where the pointer was last seen (a pen or a finger goes away in the
     /// same moment it lifts, so the drop happens there).
@@ -231,12 +264,19 @@ pub struct DockLayout<P> {
     pub left: Vec<Column<P>>,
     /// Columns from the window's right edge inward.
     pub right: Vec<Column<P>>,
+    /// The row across the top of the window, left to right.
+    pub top: Vec<Group<P>>,
+    /// The top row's height.
+    pub top_height: f32,
     /// The row along the bottom of the work area, left to right.
     pub bottom: Vec<Group<P>>,
     /// The bottom row's height.
     pub bottom_height: f32,
-    /// Floating palettes and their windows' rects.
+    /// Floating palettes and their windows' rects, inside the studio.
     pub floating: Vec<(P, Rect)>,
+    /// Palettes popped out into windows of their own and those windows'
+    /// rects, relative to the main window (they may lie outside it).
+    pub windows: Vec<(P, Rect)>,
     /// Palettes collapsed to icons in the strip.
     pub iconized: Vec<P>,
     /// The collapsed palette showing beside the strip.
@@ -336,6 +376,8 @@ pub struct Laid<P> {
     pub left_icons: Vec<P>,
     /// Closed sides' bars.
     pub handles: Vec<(Side, Rect)>,
+    /// The top row, when it shows.
+    pub top: Option<Rect>,
     /// The bottom row, when it shows.
     pub bottom: Option<Rect>,
     /// What is left for the work area.
@@ -421,9 +463,12 @@ impl<P: DockPanel> DockLayout<P> {
         Self {
             left: Vec::new(),
             right: Vec::new(),
+            top: Vec::new(),
+            top_height: 38.0,
             bottom: Vec::new(),
             bottom_height: 160.0,
             floating: Vec::new(),
+            windows: Vec::new(),
             iconized: Vec::new(),
             popped: None,
             menu: None,
@@ -453,8 +498,60 @@ impl<P: DockPanel> DockLayout<P> {
                 .columns_mut(side)
                 .get_mut(column)
                 .map(|column| &mut column.groups),
+            Holder::Top => Some(&mut self.top),
             Holder::Bottom => Some(&mut self.bottom),
         }
+    }
+
+    /// Starts dragging `panel` from `from`, as its title bar, tab or icon
+    /// does; a studio calls it to tear an optional palette off another
+    /// palette's tab. Nothing moves until the pointer does.
+    pub fn begin_drag(&mut self, panel: P, from: Pos2) {
+        if self.drag.is_none() {
+            self.drag = Some(Drag::Panel {
+                panel,
+                from,
+                at: from,
+            });
+        }
+    }
+
+    /// Makes column `index` on `side` `width` wide, within what its
+    /// palettes allow (as dragging its edge does).
+    pub fn set_column_width(&mut self, side: Side, index: usize, width: f32) {
+        if let Some(column) = self.columns_mut(side).get_mut(index) {
+            let least = column
+                .groups
+                .iter()
+                .flat_map(|group| group.tabs.iter())
+                .map(|tab| tab.min_width())
+                .fold(24.0, f32::max);
+            column.width = width.clamp(least, 560.0_f32.max(least));
+        }
+    }
+
+    /// Puts `panel` in a window of its own at `rect` (relative to the main
+    /// window, which it may lie outside of).
+    pub fn pop_out(&mut self, panel: P, rect: Rect) {
+        self.remove(panel);
+        self.windows.push((panel, rect));
+    }
+
+    /// Where the layout goes back to: `saved` (a default people chose)
+    /// unless the layout already is it, then the studio's own default.
+    /// `true` when it went to `saved`.
+    pub fn reset(&mut self, saved: Option<&Self>) -> bool {
+        let calm = |dock: &Self| {
+            let mut dock = dock.clone();
+            dock.menu = None;
+            dock.popped = None;
+            dock.drag = None;
+            dock
+        };
+        let back = saved.map(calm).filter(|saved| *saved != calm(self));
+        let to_saved = back.is_some();
+        *self = back.unwrap_or_else(P::default_layout);
+        to_saved
     }
 
     /// A palette is being dragged, or a line or edge.
@@ -486,18 +583,27 @@ impl<P: DockPanel> DockLayout<P> {
                 }
             }
         }
-        self.bottom
-            .iter()
-            .position(|group| group.tabs.contains(&panel))
-            .map(|group| (Holder::Bottom, group))
+        for (holder, groups) in [(Holder::Top, &self.top), (Holder::Bottom, &self.bottom)] {
+            if let Some(group) = groups.iter().position(|group| group.tabs.contains(&panel)) {
+                return Some((holder, group));
+            }
+        }
+        None
     }
 
-    /// `panel` is somewhere: docked, floating or in the strip.
+    /// `panel` is somewhere: docked, floating, in a window or in the strip.
     #[must_use]
     pub fn has(&self, panel: P) -> bool {
+        self.is_open(panel) || self.iconized.contains(&panel)
+    }
+
+    /// `panel` shows by itself: docked, floating or in a window (not just
+    /// an icon in the strip).
+    #[must_use]
+    pub fn is_open(&self, panel: P) -> bool {
         self.find(panel).is_some()
             || self.floating.iter().any(|(found, _)| *found == panel)
-            || self.iconized.contains(&panel)
+            || self.windows.iter().any(|(found, _)| *found == panel)
     }
 
     /// The side `panel` is docked on, if it is in a column.
@@ -527,10 +633,12 @@ impl<P: DockPanel> DockLayout<P> {
         for column in self.left.iter_mut().chain(self.right.iter_mut()) {
             take(&mut column.groups);
         }
+        take(&mut self.top);
         take(&mut self.bottom);
         self.left.retain(|column| !column.groups.is_empty());
         self.right.retain(|column| !column.groups.is_empty());
         self.floating.retain(|(found, _)| *found != panel);
+        self.windows.retain(|(found, _)| *found != panel);
         self.iconized.retain(|found| *found != panel);
         if self.popped == Some(panel) {
             self.popped = None;
@@ -645,6 +753,11 @@ impl<P: DockPanel> DockLayout<P> {
                 let at = at.unwrap_or(columns.len()).min(columns.len());
                 columns.insert(at, Column::of(&[(panel, 1.0)], width));
             }
+            Target::Top => {
+                self.remove(panel);
+                self.top_height = self.top_height.max(panel.min_height());
+                self.top.push(Group::one(panel, 1.0));
+            }
             Target::Bottom => {
                 self.remove(panel);
                 self.bottom.push(Group::one(panel, 1.0));
@@ -660,11 +773,15 @@ impl<P: DockPanel> DockLayout<P> {
     pub fn fill_missing(&mut self) {
         let model = P::default_layout();
         for &panel in P::all() {
-            if self.has(panel) {
+            if self.has(panel) || panel.optional() {
                 continue;
             }
             match model.find(panel) {
                 Some((Holder::Column(side, _), _)) => self.dock(panel, side),
+                Some((Holder::Top, _)) => {
+                    self.top_height = self.top_height.max(panel.min_height());
+                    self.top.push(Group::one(panel, 1.0));
+                }
                 Some((Holder::Bottom, _)) => self.bottom.push(Group::one(panel, 1.0)),
                 None => match model.floating.iter().find(|(found, _)| *found == panel) {
                     Some((_, rect)) => self.floating.push((panel, *rect)),
@@ -677,8 +794,9 @@ impl<P: DockPanel> DockLayout<P> {
     // ----- Lines ------------------------------------------------------------
 
     /// The layout as lines of text: each column with its width and groups,
-    /// the bottom row, the floating palettes, the collapsed ones and the
-    /// folded and closed sides. A group reads `weight:key+key@active`.
+    /// the top and bottom rows, the floating palettes, those in windows of
+    /// their own, the collapsed ones and the folded and closed sides. A
+    /// group reads `weight:key+key@active`.
     #[must_use]
     pub fn to_lines(&self) -> Vec<String> {
         let group = |group: &Group<P>| {
@@ -702,21 +820,28 @@ impl<P: DockPanel> DockLayout<P> {
                 ));
             }
         }
-        let groups: Vec<String> = self.bottom.iter().map(group).collect();
-        out.push(
-            format!("bottom {} {}", self.bottom_height, groups.join(" "))
-                .trim_end()
-                .to_owned(),
-        );
-        for (panel, rect) in &self.floating {
-            out.push(format!(
-                "float {} {} {} {} {}",
-                rect.min.x,
-                rect.min.y,
-                rect.width(),
-                rect.height(),
-                panel.key()
-            ));
+        for (name, height, row) in [
+            ("top", self.top_height, &self.top),
+            ("bottom", self.bottom_height, &self.bottom),
+        ] {
+            let groups: Vec<String> = row.iter().map(group).collect();
+            out.push(
+                format!("{name} {height} {}", groups.join(" "))
+                    .trim_end()
+                    .to_owned(),
+            );
+        }
+        for (name, list) in [("float", &self.floating), ("window", &self.windows)] {
+            for (panel, rect) in list {
+                out.push(format!(
+                    "{name} {} {} {} {} {}",
+                    rect.min.x,
+                    rect.min.y,
+                    rect.width(),
+                    rect.height(),
+                    panel.key()
+                ));
+            }
         }
         for panel in &self.iconized {
             out.push(format!("icon {}", panel.key()));
@@ -780,6 +905,13 @@ impl<P: DockPanel> DockLayout<P> {
                     dock.bottom
                         .extend(rest.unwrap_or("").split(' ').filter_map(group));
                 }
+                (Some("top"), Some(height), rest) => {
+                    if let Ok(height) = height.parse() {
+                        dock.top_height = height;
+                    }
+                    dock.top
+                        .extend(rest.unwrap_or("").split(' ').filter_map(group));
+                }
                 // Before tabs: one palette per group, by title.
                 (Some(side @ ("left" | "right")), Some(width), Some(palettes)) => {
                     let groups: Vec<Group<P>> = palettes
@@ -802,7 +934,7 @@ impl<P: DockPanel> DockLayout<P> {
                         dock.right.push(column);
                     }
                 }
-                (Some("float"), Some(x), Some(rest)) => {
+                (Some(what @ ("float" | "window")), Some(x), Some(rest)) => {
                     let parts: Vec<&str> = rest.splitn(4, ' ').collect();
                     if let ([y, w, h, name], Ok(x)) = (parts.as_slice(), x.parse::<f32>())
                         && let (Ok(y), Ok(w), Ok(h), Some(panel)) = (
@@ -812,8 +944,12 @@ impl<P: DockPanel> DockLayout<P> {
                             P::named(name),
                         )
                     {
-                        dock.floating
-                            .push((panel, Rect::from_min_size(pos2(x, y), vec2(w, h))));
+                        let rect = Rect::from_min_size(pos2(x, y), vec2(w, h));
+                        if what == "float" {
+                            dock.floating.push((panel, rect));
+                        } else {
+                            dock.windows.push((panel, rect));
+                        }
                     }
                 }
                 (Some("icon"), Some(first), rest) => {
@@ -841,8 +977,10 @@ impl<P: DockPanel> DockLayout<P> {
         }
         let placed = !dock.left.is_empty()
             || !dock.right.is_empty()
+            || !dock.top.is_empty()
             || !dock.bottom.is_empty()
             || !dock.floating.is_empty()
+            || !dock.windows.is_empty()
             || !dock.iconized.is_empty();
         dock.fill_missing();
         placed.then_some(dock)
@@ -854,6 +992,25 @@ impl<P: DockPanel> DockLayout<P> {
     /// and `hide` (0 to 1) slides the columns out to their edges and the
     /// bottom row down.
     pub fn layout(&self, body: Rect, shown: &dyn Fn(P) -> bool, hide: f32) -> Laid<P> {
+        // The top row, across the whole window, while there is room.
+        let open_row = |row: &[Group<P>]| -> Vec<usize> {
+            row.iter()
+                .enumerate()
+                .filter(|(_, group)| group.current(shown).is_some())
+                .map(|(index, _)| index)
+                .collect()
+        };
+        let top_groups = open_row(&self.top);
+        let mut top_row = None;
+        let body = if !top_groups.is_empty() && body.height() > 240.0 {
+            let height = self.top_height.min(body.height() - 200.0).max(24.0);
+            let top = body.top() - hide * height;
+            let row = Rect::from_min_max(pos2(body.left(), top), pos2(body.right(), top + height));
+            top_row = Some(row);
+            Rect::from_min_max(pos2(body.left(), row.bottom()), body.max)
+        } else {
+            body
+        };
         let open_groups = |column: &Column<P>| -> Vec<usize> {
             column
                 .groups
@@ -870,14 +1027,13 @@ impl<P: DockPanel> DockLayout<P> {
                 .flat_map(|group| group.visible(shown))
                 .collect()
         };
+        // Every column is as wide as people made it, at least as wide as
+        // its palettes need.
         let width_of = |column: &Column<P>| -> f32 {
             visible_tabs(column)
                 .iter()
-                .filter_map(|panel| panel.fixed_width())
-                .fold(None, |most: Option<f32>, width| {
-                    Some(most.map_or(width, |most| most.max(width)))
-                })
-                .unwrap_or(column.width)
+                .map(|panel| panel.min_width())
+                .fold(column.width, f32::max)
         };
         // Columns that show anything, and their widths. A closed side shows
         // nothing; a folded side keeps its anchored columns and folds the
@@ -971,9 +1127,13 @@ impl<P: DockPanel> DockLayout<P> {
             left_strip: None,
             left_icons,
             handles: Vec::new(),
+            top: top_row,
             bottom: None,
             center: body,
         };
+        if let Some(row) = top_row {
+            self.lay_row(&mut laid, Holder::Top, &top_groups, row, shown);
+        }
         if self.hidden[0] {
             laid.handles.push((
                 Side::Left,
@@ -1025,18 +1185,16 @@ impl<P: DockPanel> DockLayout<P> {
                     });
                 }
             }
-            let resizable = column.groups.iter().all(|group| !group.fixed());
-            if resizable {
-                let x = match side {
-                    Side::Left => rect.right(),
-                    Side::Right => rect.left(),
-                };
-                laid.edges.push((
-                    side,
-                    index,
-                    Rect::from_center_size(pos2(x, rect.center().y), vec2(6.0, rect.height())),
-                ));
-            }
+            // Every column resizes; a tool strip grows into more columns.
+            let x = match side {
+                Side::Left => rect.right(),
+                Side::Right => rect.left(),
+            };
+            laid.edges.push((
+                side,
+                index,
+                Rect::from_center_size(pos2(x, rect.center().y), vec2(6.0, rect.height())),
+            ));
         };
         let mut x = body.left() + left_handle - hide * left_total;
         if left_strip_width > 0.0 {
@@ -1083,37 +1241,60 @@ impl<P: DockPanel> DockLayout<P> {
             let top = center.bottom() - height * (1.0 - hide);
             let row =
                 Rect::from_min_max(pos2(center.left(), top), pos2(center.right(), top + height));
-            let entries: Vec<(f32, f32)> = bottom
-                .iter()
-                .map(|at| (self.bottom[*at].weight, 120.0))
-                .collect();
-            let widths = share(row.width(), &entries);
-            let mut left = row.left();
-            for (at, (group, width)) in bottom.iter().zip(&widths).enumerate() {
-                let piece = Rect::from_min_size(pos2(left, row.top()), vec2(*width, row.height()));
-                if let Some(found) =
-                    lay_group(Holder::Bottom, *group, &self.bottom[*group], piece, shown)
-                {
-                    laid.groups.push(found);
-                }
-                left = piece.right();
-                if let Some(next) = bottom.get(at + 1) {
-                    laid.splits.push(Split {
-                        holder: Holder::Bottom,
-                        upper: *group,
-                        lower: *next,
-                        rect: Rect::from_center_size(
-                            pos2(left, row.center().y),
-                            vec2(6.0, row.height()),
-                        ),
-                        span: row.width(),
-                    });
-                }
-            }
+            self.lay_row(&mut laid, Holder::Bottom, &bottom, row, shown);
             laid.bottom = Some(row);
             laid.center.max.y = top;
         }
         laid
+    }
+
+    /// The groups `open` of a row (top or bottom) side by side in `row`,
+    /// sharing its width by weight, and the lines between them.
+    fn lay_row(
+        &self,
+        laid: &mut Laid<P>,
+        holder: Holder,
+        open: &[usize],
+        row: Rect,
+        shown: &dyn Fn(P) -> bool,
+    ) {
+        let groups = match holder {
+            Holder::Top => &self.top,
+            _ => &self.bottom,
+        };
+        let entries: Vec<(f32, f32)> = open
+            .iter()
+            .map(|at| {
+                let least = groups[*at]
+                    .tabs
+                    .iter()
+                    .map(|tab| tab.min_width())
+                    .fold(46.0, f32::max)
+                    .min(120.0);
+                (groups[*at].weight, least)
+            })
+            .collect();
+        let widths = share(row.width(), &entries);
+        let mut left = row.left();
+        for (at, (group, width)) in open.iter().zip(&widths).enumerate() {
+            let piece = Rect::from_min_size(pos2(left, row.top()), vec2(*width, row.height()));
+            if let Some(found) = lay_group(holder, *group, &groups[*group], piece, shown) {
+                laid.groups.push(found);
+            }
+            left = piece.right();
+            if let Some(next) = open.get(at + 1) {
+                laid.splits.push(Split {
+                    holder,
+                    upper: *group,
+                    lower: *next,
+                    rect: Rect::from_center_size(
+                        pos2(left, row.center().y),
+                        vec2(6.0, row.height()),
+                    ),
+                    span: row.width(),
+                });
+            }
+        }
     }
 
     /// Where `moving` would go if dropped at `at`, and the rect to light
@@ -1202,7 +1383,7 @@ impl<P: DockPanel> DockLayout<P> {
                         rect,
                     );
                 }
-                Holder::Bottom if !fixed => {
+                Holder::Top | Holder::Bottom => {
                     let t = (at.x - rect.left()) / rect.width().max(1.0);
                     let quarter = rect.width() * 0.3;
                     if t < 0.25 || (!joins && t < 0.5) {
@@ -1231,7 +1412,6 @@ impl<P: DockPanel> DockLayout<P> {
                         rect,
                     );
                 }
-                Holder::Bottom => {}
             }
         }
         let center = laid.center;
@@ -1255,10 +1435,16 @@ impl<P: DockPanel> DockLayout<P> {
                     Rect::from_min_max(pos2(center.right() - band, center.top()), center.max),
                 );
             }
-            if !fixed && at.y > center.bottom() - band {
+            if at.y > center.bottom() - band {
                 return (
                     Target::Bottom,
                     Rect::from_min_max(pos2(center.left(), center.bottom() - band), center.max),
+                );
+            }
+            if at.y < center.top() + band {
+                return (
+                    Target::Top,
+                    Rect::from_min_size(center.min, vec2(center.width(), band)),
                 );
             }
         }
@@ -1272,7 +1458,8 @@ impl<P: DockPanel> DockLayout<P> {
     // ----- Interaction --------------------------------------------------------
 
     /// Lets people drag `panel` from `rect` (its title bar, tab or icon).
-    /// It senses drags only, so buttons in `rect` keep their clicks.
+    /// It senses drags only: call it before drawing what sits in `rect`,
+    /// so buttons there stay on top and keep their clicks.
     pub fn grip(&mut self, ui: &Ui, rect: Rect, panel: P, salt: &str) {
         let response = ui.interact(
             rect,
@@ -1280,14 +1467,9 @@ impl<P: DockPanel> DockLayout<P> {
             Sense::drag(),
         );
         if response.drag_started()
-            && self.drag.is_none()
             && let Some(from) = response.interact_pointer_pos()
         {
-            self.drag = Some(Drag::Panel {
-                panel,
-                from,
-                at: from,
-            });
+            self.begin_drag(panel, from);
         }
     }
 
@@ -1310,8 +1492,13 @@ impl<P: DockPanel> DockLayout<P> {
             let response = ui.interact(
                 *rect,
                 Id::unique(("sue-dock-tab", tab.key())),
-                Sense::click(),
+                Sense::click_and_drag(),
             );
+            if response.drag_started()
+                && let Some(from) = response.interact_pointer_pos()
+            {
+                self.begin_drag(*tab, from);
+            }
             let chosen = *tab == group.active;
             if chosen {
                 painter.rect_filled(*rect, 0.0, theme.panel);
@@ -1332,7 +1519,6 @@ impl<P: DockPanel> DockLayout<P> {
             if response.on_hover_text(text).clicked() {
                 self.choose(*tab);
             }
-            self.grip(ui, *rect, *tab, "tab");
         }
         painter.hline(strip.x_range(), strip.bottom(), theme.hairline());
     }
@@ -1369,7 +1555,7 @@ impl<P: DockPanel> DockLayout<P> {
                 Id::unique(("sue-dock-split", split.holder, split.upper)),
                 Sense::drag(),
             );
-            let across = split.holder == Holder::Bottom;
+            let across = split.holder.is_row();
             if response.hovered() || response.dragged() {
                 if across {
                     ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
@@ -1415,6 +1601,24 @@ impl<P: DockPanel> DockLayout<P> {
                 });
             }
         }
+        if let Some(row) = laid.top {
+            let edge = row.bottom();
+            let rect =
+                Rect::from_x_y_ranges(row.x_range(), egui::Rangef::new(edge - 3.0, edge + 3.0));
+            let response = ui.interact(rect, Id::unique("sue-dock-top-edge"), Sense::drag());
+            if response.hovered() || response.dragged() {
+                ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
+                ui.painter().hline(row.x_range(), edge, lit);
+            }
+            if response.drag_started()
+                && let Some(point) = pointer
+            {
+                self.drag = Some(Drag::Top {
+                    from: point.y,
+                    height: self.top_height,
+                });
+            }
+        }
         let down = ui.input(|input| input.pointer.primary_down());
         match (self.drag, pointer) {
             (
@@ -1430,9 +1634,7 @@ impl<P: DockPanel> DockLayout<P> {
                     Side::Left => point.x - from,
                     Side::Right => from - point.x,
                 };
-                if let Some(found) = self.columns_mut(side).get_mut(column) {
-                    found.width = (width + delta).clamp(170.0, 560.0);
-                }
+                self.set_column_width(side, column, width + delta);
             }
             (
                 Some(Drag::Split {
@@ -1445,11 +1647,7 @@ impl<P: DockPanel> DockLayout<P> {
                 }),
                 Some(point),
             ) if down => {
-                let now = if holder == Holder::Bottom {
-                    point.x
-                } else {
-                    point.y
-                };
+                let now = if holder.is_row() { point.x } else { point.y };
                 let moved = (now - from) * per_point;
                 let least = 0.08;
                 let up = (weights.0 + moved).max(least);
@@ -1465,6 +1663,16 @@ impl<P: DockPanel> DockLayout<P> {
             }
             (Some(Drag::Bottom { from, height }), Some(point)) if down => {
                 self.bottom_height = (height + from - point.y).clamp(90.0, 520.0);
+            }
+            (Some(Drag::Top { from, height }), Some(point)) if down => {
+                let least = self
+                    .top
+                    .iter()
+                    .flat_map(|group| group.tabs.iter())
+                    .map(|tab| tab.min_height())
+                    .fold(24.0, f32::max)
+                    .min(90.0);
+                self.top_height = (height + point.y - from).clamp(least, 520.0);
             }
             (Some(Drag::Panel { .. }), _) => {}
             (Some(_), _) if !down => self.drag = None,
@@ -1542,6 +1750,8 @@ mod tests {
         Nav,
         History,
         Timeline,
+        Bar,
+        Slider,
     }
 
     impl DockPanel for Pane {
@@ -1554,6 +1764,8 @@ mod tests {
                 Pane::Nav,
                 Pane::History,
                 Pane::Timeline,
+                Pane::Bar,
+                Pane::Slider,
             ]
         }
 
@@ -1566,6 +1778,8 @@ mod tests {
                 Pane::Nav => "nav",
                 Pane::History => "history",
                 Pane::Timeline => "timeline",
+                Pane::Bar => "bar",
+                Pane::Slider => "slider",
             }
         }
 
@@ -1584,8 +1798,17 @@ mod tests {
             self == Pane::Tools
         }
 
+        fn optional(self) -> bool {
+            self == Pane::Slider
+        }
+
+        fn min_height(self) -> f32 {
+            if self == Pane::Bar { 34.0 } else { 90.0 }
+        }
+
         fn default_layout() -> DockLayout<Self> {
             let mut dock = DockLayout::empty();
+            dock.top = vec![Group::one(Pane::Bar, 1.0)];
             dock.left = vec![
                 Column::of(&[(Pane::Tools, 1.0)], 46.0),
                 Column::of(&[(Pane::Brush, 0.5), (Pane::Color, 0.5)], 240.0),
@@ -1609,14 +1832,19 @@ mod tests {
     fn the_default_layout_places_columns_bottom_and_strip() {
         let dock = DockLayout::<Pane>::default();
         let laid = dock.layout(body(), &all, 0.0);
-        assert_eq!(laid.groups.len(), 6);
+        assert_eq!(laid.groups.len(), 7);
         assert_eq!(laid.icons, [Pane::History]);
         assert_eq!(laid.center.left(), 46.0 + 240.0);
         assert_eq!(laid.center.right(), 1600.0 - 300.0 - STRIP);
         let timeline = laid.bottom.unwrap();
         assert_eq!(timeline.height(), 160.0);
         assert_eq!(laid.center.bottom(), timeline.top());
-        assert_eq!(laid.edges.len(), 2, "the two wide columns resize");
+        // The top row spans the window over the columns.
+        let top = laid.top.unwrap();
+        assert_eq!((top.width(), top.height()), (1600.0, 38.0));
+        assert_eq!(laid.center.top(), 38.0);
+        assert!(laid.columns.iter().all(|(_, _, rect)| rect.top() == 38.0));
+        assert_eq!(laid.edges.len(), 3, "every column resizes, the tools too");
         assert_eq!(laid.splits.len(), 2);
         // Without its palette, no bottom row.
         let laid = dock.layout(body(), &|pane| pane != Pane::Timeline, 0.0);
@@ -1836,5 +2064,174 @@ mod tests {
         assert!(laid.icons.contains(&Pane::Layers));
         assert!(laid.center.width() >= MIN_CENTER - 0.5);
         assert!(laid.docked().any(|(pane, _)| pane == Pane::Tools));
+    }
+
+    #[test]
+    fn palettes_dock_at_the_top_and_its_edge_drops_there() {
+        let mut dock = DockLayout::<Pane>::default();
+        let laid = dock.layout(body(), &all, 0.0);
+        // The band along the work area's top drops into the top row.
+        let (drop, _) = dock.drop_at(
+            &laid,
+            laid.center.center_top() + vec2(0.0, 10.0),
+            Pane::Layers,
+        );
+        assert_eq!(drop, Target::Top);
+        dock.put(Pane::Layers, drop);
+        assert_eq!(dock.find(Pane::Layers), Some((Holder::Top, 1)));
+        assert_eq!(dock.top_height, 90.0, "the row grows to what it holds");
+        let laid = dock.layout(body(), &all, 0.0);
+        let row = laid.top.unwrap();
+        let layers = laid
+            .groups
+            .iter()
+            .find(|group| group.active == Pane::Layers)
+            .unwrap();
+        assert_eq!(layers.holder, Holder::Top);
+        assert_eq!(layers.rect.top(), row.top());
+        assert!(
+            laid.splits.iter().any(|split| split.holder == Holder::Top),
+            "the line between the bar and the layers drags"
+        );
+        // Dropped on the bar's right end: a group of its own after it.
+        let bar = laid
+            .groups
+            .iter()
+            .find(|group| group.active == Pane::Bar)
+            .unwrap()
+            .rect;
+        let (drop, _) = dock.drop_at(&laid, bar.right_center() - vec2(4.0, 0.0), Pane::Nav);
+        assert_eq!(
+            drop,
+            Target::Beside {
+                anchor: Pane::Bar,
+                after: true
+            }
+        );
+        // Hidden, the bar leaves no row; sliding out lifts the row away.
+        let laid = dock.layout(
+            body(),
+            &|pane| !matches!(pane, Pane::Bar | Pane::Layers),
+            0.0,
+        );
+        assert!(laid.top.is_none());
+        assert_eq!(laid.center.top(), 0.0);
+        let laid = dock.layout(body(), &all, 1.0);
+        assert_eq!(laid.top.unwrap().bottom(), 0.0);
+    }
+
+    #[test]
+    fn new_columns_pop_outs_and_narrow_columns_resize() {
+        let mut dock = DockLayout::<Pane>::default();
+        // New Column on the Right: the innermost right column.
+        dock.put(
+            Pane::Color,
+            Target::Column {
+                side: Side::Right,
+                beside: None,
+            },
+        );
+        assert_eq!(
+            dock.find(Pane::Color),
+            Some((Holder::Column(Side::Right, 1), 0))
+        );
+        // A tool strip's column widens into a palette of several columns
+        // and narrows no further than the strip.
+        dock.set_column_width(Side::Left, 0, 120.0);
+        assert_eq!(dock.left[0].width, 120.0);
+        dock.set_column_width(Side::Left, 0, 10.0);
+        assert_eq!(dock.left[0].width, 46.0);
+        dock.set_column_width(Side::Right, 0, 9000.0);
+        assert_eq!(dock.right[0].width, 560.0);
+        let laid = dock.layout(body(), &all, 0.0);
+        assert!(
+            laid.edges
+                .iter()
+                .any(|(side, index, _)| *side == Side::Left && *index == 0)
+        );
+        // Popped out into a window of its own: open, not docked.
+        let rect = Rect::from_min_size(pos2(-200.0, 50.0), vec2(300.0, 400.0));
+        dock.pop_out(Pane::Layers, rect);
+        assert!(dock.is_open(Pane::Layers));
+        assert_eq!(dock.find(Pane::Layers), None);
+        assert_eq!(dock.windows, [(Pane::Layers, rect)]);
+        // Iconized is somewhere but not open.
+        assert!(dock.has(Pane::History) && !dock.is_open(Pane::History));
+        // Docked again, it leaves its window.
+        dock.dock(Pane::Layers, Side::Left);
+        assert!(dock.windows.is_empty());
+        let back = DockLayout::<Pane>::from_lines(&dock.to_lines()).unwrap();
+        assert_eq!(back, dock);
+    }
+
+    #[test]
+    fn optional_palettes_tear_off_and_stay_away_until_then() {
+        let mut dock = DockLayout::<Pane>::default();
+        assert!(!dock.has(Pane::Slider));
+        dock.fill_missing();
+        assert!(!dock.has(Pane::Slider), "not put back by itself");
+        // Torn off a tab: dragged from where the pointer pressed.
+        dock.begin_drag(Pane::Slider, pos2(400.0, 300.0));
+        assert_eq!(dock.dragged_panel(), Some(Pane::Slider));
+        dock.drag = None;
+        dock.put(
+            Pane::Slider,
+            Target::Beside {
+                anchor: Pane::Nav,
+                after: true,
+            },
+        );
+        assert_eq!(
+            dock.find(Pane::Slider),
+            Some((Holder::Column(Side::Right, 0), 1))
+        );
+        dock.pop_out(
+            Pane::Slider,
+            Rect::from_min_size(pos2(10.0, 10.0), vec2(200.0, 200.0)),
+        );
+        let lines = dock.to_lines();
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.starts_with("window 10 10 200 200 slider"))
+        );
+        let back = DockLayout::<Pane>::from_lines(&lines).unwrap();
+        assert_eq!(back, dock);
+        dock.remove(Pane::Slider);
+        assert!(!dock.has(Pane::Slider));
+    }
+
+    #[test]
+    fn layouts_kept_before_the_top_row_open_with_the_bar_on_top() {
+        // Lines as the dock wrote them before it had a top row.
+        let old: Vec<String> = [
+            "column left 46 1:tools",
+            "column left 240 0.5:brush 0.5:color",
+            "column right 300 0.4:nav 0.6:layers",
+            "bottom 180 1:timeline",
+            "float 40 60 260 320 history",
+        ]
+        .map(String::from)
+        .to_vec();
+        let read = DockLayout::<Pane>::from_lines(&old).unwrap();
+        assert_eq!(read.top, [Group::one(Pane::Bar, 1.0)]);
+        assert_eq!(read.top_height, 38.0);
+        assert_eq!(read.bottom_height, 180.0);
+        assert_eq!(read.floating[0].0, Pane::History);
+        assert!(read.windows.is_empty());
+    }
+
+    #[test]
+    fn reset_goes_to_the_saved_default_then_the_studios_own() {
+        let mut dock = DockLayout::<Pane>::default();
+        dock.put(Pane::Layers, Target::Top);
+        let saved = dock.clone();
+        dock.float(Pane::Brush, pos2(300.0, 300.0));
+        assert!(dock.reset(Some(&saved)), "back to the saved default");
+        assert_eq!(dock, saved);
+        assert!(!dock.reset(Some(&saved)), "already there: the studio's own");
+        assert_eq!(dock, Pane::default_layout());
+        assert!(!dock.reset(None));
+        assert_eq!(dock, Pane::default_layout());
     }
 }

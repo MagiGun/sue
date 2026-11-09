@@ -65,7 +65,14 @@ pub fn set_workspaces(menus: &mut [Menu], names: &[String]) {
         "window.workspace.manage",
     ));
     items.push(SEP);
-    items.push(act(&tr!("reset-palette-layout"), "window.workspace.reset"));
+    items.push(act(
+        &tr!("use-current-workspace-as-default"),
+        "window.workspace.default",
+    ));
+    items.push(act(
+        &tr!("reset-workspace-to-default"),
+        "window.workspace.reset",
+    ));
     for menu in menus.iter_mut().filter(|menu| menu.title == tr!("window")) {
         for item in &mut menu.items {
             if let MenuItem::Sub {
@@ -823,7 +830,11 @@ pub fn menus() -> Vec<Menu> {
                             "window.workspace.manage",
                         ),
                         SEP,
-                        act(&tr!("reset-palette-layout"), "window.workspace.reset"),
+                        act(
+                            &tr!("use-current-workspace-as-default"),
+                            "window.workspace.default",
+                        ),
+                        act(&tr!("reset-workspace-to-default"), "window.workspace.reset"),
                     ],
                 ),
                 sub(

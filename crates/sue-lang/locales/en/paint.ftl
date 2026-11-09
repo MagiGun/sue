@@ -2362,3 +2362,11 @@ ruby-needs-selection = Select the words to read while typing, and type their rea
 
 turn-with-pen-tilt = Turn with pen tilt
 a-flat-tip-turns-the-way-the-pen-leans = Each shape turns the way the pen leans, so a flat or chisel tip follows your hand
+show-or-hide-the-animation-folder = Show or hide the animation folder
+dock-at-the-top = Dock at the Top
+new-column-on-the-left = New Column on the Left
+new-column-on-the-right = New Column on the Right
+pop-out-into-a-window = Pop Out into Separate Window
+use-current-workspace-as-default = Use Current Workspace as Default
+reset-workspace-to-default = Reset to Default
+default-workspace-saved = The palettes as they are now are the default workspace

@@ -8382,4 +8382,359 @@ f 2 3 4
         );
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    /// Sue Paint at 1440 by 900 with a new canvas open, driven a frame at
+    /// a time with egui events, as the palette tests above drive it.
+    struct PaintDriver {
+        runtime: Runtime,
+        ctx: egui::Context,
+        now: Instant,
+        root: PathBuf,
+    }
+
+    impl PaintDriver {
+        fn new(tag: &str) -> Self {
+            let (mut runtime, root) = runtime(tag);
+            let ctx = egui::Context::default();
+            let now = Instant::now();
+            runtime.request(
+                ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+                &mut NoTextures,
+                now,
+            );
+            frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+            let mut driver = Self {
+                runtime,
+                ctx,
+                now,
+                root,
+            };
+            driver.step(vec![key(egui::Key::N, egui::Modifiers::COMMAND)]);
+            driver.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+            driver.settle(60);
+            driver
+        }
+
+        /// One frame with `events`; every piece of text it draws and its
+        /// rect.
+        fn step(&mut self, events: Vec<egui::Event>) -> Vec<(String, egui::Rect)> {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+                events,
+                time: Some(self.ctx.input(|input| input.time) + 0.016),
+                ..egui::RawInput::default()
+            };
+            self.now += Duration::from_millis(16);
+            let runtime = &mut self.runtime;
+            let now = self.now;
+            let output = self
+                .ctx
+                .run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
+            let mut found = Vec::new();
+            for clipped in &output.shapes {
+                let mut look = |shape: &egui::Shape| {
+                    if let egui::Shape::Text(text) = shape {
+                        found.push((
+                            text.galley.text().to_owned(),
+                            egui::Rect::from_min_size(text.pos, text.galley.size()),
+                        ));
+                    }
+                };
+                match &clipped.shape {
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(&mut look),
+                    shape => look(shape),
+                }
+            }
+            output.drop_without_applying_deltas();
+            found
+        }
+
+        /// `count` frames with nothing new; what the last one draws.
+        fn settle(&mut self, count: usize) -> Vec<(String, egui::Rect)> {
+            let mut texts = Vec::new();
+            for _ in 0..count {
+                texts = self.step(Vec::new());
+            }
+            texts
+        }
+
+        /// Runs one of Sue Paint's commands, as its menus do.
+        fn command(&mut self, command: &str) {
+            self.runtime.request(
+                ShellRequest::AppletCommand {
+                    applet: AppletId::new(sue_paint::ID).unwrap(),
+                    command: command.to_owned(),
+                },
+                &mut NoTextures,
+                self.now,
+            );
+        }
+
+        /// Presses `button` at `from`, moves to `to` in 20 steps and lets
+        /// go; what the frames after draw.
+        fn drag(
+            &mut self,
+            from: Pos2,
+            to: Pos2,
+            button: egui::PointerButton,
+        ) -> Vec<(String, egui::Rect)> {
+            let press = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            self.step(vec![egui::Event::PointerMoved(from)]);
+            self.step(vec![press(from, true)]);
+            for index in 1..=20 {
+                let at = from + (to - from) * (index as f32 / 20.0);
+                self.step(vec![egui::Event::PointerMoved(at)]);
+            }
+            self.step(vec![press(to, false)]);
+            self.settle(10)
+        }
+
+        /// The page's top, under Sue's own bar.
+        fn page_top(&self) -> f32 {
+            self.runtime.shell.page_rect().top()
+        }
+    }
+
+    impl Drop for PaintDriver {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// Where `name` is drawn in `area`, the leftmost first.
+    fn text_in(texts: &[(String, egui::Rect)], name: &str, area: egui::Rect) -> Option<egui::Rect> {
+        texts
+            .iter()
+            .filter(|(text, rect)| text == name && area.contains(rect.center()))
+            .map(|(_, rect)| *rect)
+            .min_by(|a, b| a.left().total_cmp(&b.left()))
+    }
+
+    #[test]
+    fn sue_paint_timeline_zooms_and_pans_with_the_wheel_and_the_middle_button() {
+        let mut paint = PaintDriver::new("paint-timeline-nav");
+        paint.command("anim.timeline.new");
+        let texts = paint.settle(30);
+        // The Timeline sits under the canvas: its frames' numbers along
+        // its ruler, between the columns.
+        let frames = egui::Rect::from_min_max(Pos2::new(380.0, 600.0), Pos2::new(1100.0, 900.0));
+        let label = |texts: &[(String, egui::Rect)], name: &str| {
+            text_in(texts, name, frames).unwrap_or_else(|| {
+                panic!("frame {name} is numbered on the Timeline's ruler: {texts:?}")
+            })
+        };
+        let (four, seven) = (label(&texts, "4"), label(&texts, "7"));
+        assert!((four.top() - seven.top()).abs() < 0.5, "one ruler");
+        let spacing = seven.left() - four.left();
+        assert!(spacing > 10.0, "{spacing}");
+        let wheel = |delta: egui::Vec2, modifiers| egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            modifiers,
+        };
+
+        // The wheel up over frame 7 zooms in around it.
+        let over = seven.left_center() + vec2(1.0, 0.0);
+        paint.step(vec![egui::Event::PointerMoved(over)]);
+        paint.step(vec![wheel(vec2(0.0, 60.0), egui::Modifiers::NONE)]);
+        let texts = paint.settle(30);
+        let (four_now, seven_now) = (label(&texts, "4"), label(&texts, "7"));
+        let zoomed = seven_now.left() - four_now.left();
+        assert!(
+            zoomed > spacing * 1.15,
+            "frames are wider: {spacing} then {zoomed}"
+        );
+        assert!(
+            (seven_now.left() - seven.left()).abs() < 3.0,
+            "frame 7 stays under the pointer: {seven:?} then {seven_now:?}"
+        );
+
+        // Shift and the wheel pan sideways: later frames come in, the
+        // zoom stays.
+        let ten = label(&texts, "10");
+        paint.step(vec![
+            egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
+            wheel(vec2(0.0, -60.0), egui::Modifiers::SHIFT),
+        ]);
+        let texts = paint.settle(30);
+        paint.step(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+        let texts_after = paint.settle(2);
+        let ten_now = label(&texts_after, "10");
+        let thirteen_now = label(&texts, "13");
+        assert!(
+            (ten_now.left() - (ten.left() - 60.0)).abs() < 3.0,
+            "frame 10 moved 60 points left: {ten:?} then {ten_now:?}"
+        );
+        assert!(
+            ((thirteen_now.left() - ten_now.left()) - zoomed).abs() < 1.0,
+            "the zoom stays"
+        );
+
+        // A middle-button drag pans the frames with the pointer.
+        let from = ten_now.center() + vec2(0.0, 40.0);
+        let texts = paint.drag(from, from + vec2(45.0, 0.0), egui::PointerButton::Middle);
+        let ten_dragged = label(&texts, "10");
+        assert!(
+            (ten_dragged.left() - (ten_now.left() + 45.0)).abs() < 3.0,
+            "frame 10 followed the middle button: {ten_now:?} then {ten_dragged:?}"
+        );
+
+        // The eye beside the animation folder hides and shows the folder
+        // itself, the one the Layer palette lists.
+        let folder_shown = |paint: &PaintDriver| {
+            paint
+                .runtime
+                .engine
+                .world
+                .arena
+                .iter()
+                .filter(|(_, entity)| {
+                    entity
+                        .property("folder.animation")
+                        .and_then(sue_core::Value::as_bool)
+                        == Some(true)
+                })
+                .map(|(_, entity)| sue_model::picture::LayerStyle::of(entity).visible)
+                .collect::<Vec<bool>>()
+        };
+        assert_eq!(folder_shown(&paint), [true]);
+        let name = texts
+            .iter()
+            .find(|(text, rect)| text.ends_with(" :") && rect.top() > 600.0)
+            .map(|(_, rect)| *rect)
+            .expect("the animation folder's name beside its track");
+        let eye = Pos2::new(name.left() - 34.0, name.center().y);
+        let click = |paint: &mut PaintDriver| {
+            let press = |pressed| egui::Event::PointerButton {
+                pos: eye,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            paint.step(vec![egui::Event::PointerMoved(eye)]);
+            paint.step(vec![press(true)]);
+            paint.step(vec![press(false)]);
+            paint.settle(3);
+        };
+        click(&mut paint);
+        assert_eq!(folder_shown(&paint), [false], "the eye hid the folder");
+        click(&mut paint);
+        assert_eq!(folder_shown(&paint), [true], "and showed it again");
+        assert!(
+            paint
+                .runtime
+                .shell
+                .message()
+                .is_none_or(|(_, error)| !error),
+            "{:?}",
+            paint.runtime.shell.message()
+        );
+    }
+
+    #[test]
+    fn sue_paint_docks_at_the_top_keeps_a_default_workspace_and_resets_to_it() {
+        let mut paint = PaintDriver::new("paint-dock-top");
+        let texts = paint.settle(1);
+        let top = paint.page_top();
+        let whole = egui::Rect::from_min_max(Pos2::new(0.0, top + 1.0), Pos2::new(1440.0, 900.0));
+        let title = |texts: &[(String, egui::Rect)]| {
+            texts
+                .iter()
+                .filter(|(text, rect)| text == "Layer" && whole.contains(rect.center()))
+                .map(|(_, rect)| *rect)
+                .min_by(|a, b| a.top().total_cmp(&b.top()))
+                .expect("the Layer palette's title")
+        };
+        let before = title(&texts);
+        assert!(
+            before.left() > 1000.0 && before.top() > top + 200.0,
+            "{before:?}"
+        );
+        // The Layer palette's title dragged to the top edge of the canvas:
+        // it docks in the top row, beside the command bar.
+        let to = Pos2::new(720.0, top + 38.0 + 14.0);
+        let texts = paint.drag(before.center(), to, egui::PointerButton::Primary);
+        let docked = title(&texts);
+        assert!(
+            docked.top() < top + 38.0 + 30.0 && docked.top() > top,
+            "the Layer palette went into the top row: {before:?} then {docked:?}"
+        );
+
+        // Use Current Workspace as Default, then move it away.
+        paint.command("window.workspace.default");
+        paint.settle(2);
+        assert!(
+            paint
+                .runtime
+                .shell
+                .message()
+                .is_none_or(|(_, error)| !error),
+            "{:?}",
+            paint.runtime.shell.message()
+        );
+        assert!(paint.root.join("data").exists() || paint.root.exists());
+        let texts = paint.drag(
+            docked.center(),
+            Pos2::new(150.0, 640.0),
+            egui::PointerButton::Primary,
+        );
+        let moved = title(&texts);
+        assert!(
+            moved.left() < 400.0 && moved.top() > top + 200.0,
+            "{moved:?}"
+        );
+
+        // Reset to Default: back as the default says, in the top row.
+        paint.command("window.workspace.reset");
+        let texts = paint.settle(10);
+        let reset = title(&texts);
+        assert!(
+            reset.top() < top + 38.0 + 30.0,
+            "back to the default workspace: {moved:?} then {reset:?}"
+        );
+        // Reset again, already there: Sue Paint's own default layout.
+        paint.command("window.workspace.reset");
+        let texts = paint.settle(10);
+        let factory = title(&texts);
+        assert!(
+            factory.left() > 1000.0 && factory.top() > top + 200.0,
+            "back to Sue Paint's own layout: {factory:?}"
+        );
+    }
+
+    #[test]
+    fn sue_paint_tears_a_tab_off_into_a_palette_of_its_own() {
+        let mut paint = PaintDriver::new("paint-dock-tear");
+        let texts = paint.settle(1);
+        let left = egui::Rect::from_min_max(Pos2::new(0.0, 40.0), Pos2::new(400.0, 900.0));
+        let right = egui::Rect::from_min_max(Pos2::new(720.0, 40.0), Pos2::new(1440.0, 900.0));
+        // The color wheel palette's second tab, Color Slider: by its name
+        // when the names fit, else the icon right after the chosen tab.
+        let wheel = text_in(&texts, "Color Wheel", left).expect("the Color Wheel tab");
+        let tab = text_in(&texts, "Color Slider", left).map_or_else(
+            || Pos2::new(wheel.right() + 14.0 + 2.0 + 16.0, wheel.center().y),
+            |rect| rect.center(),
+        );
+        assert!(text_in(&texts, "Color Slider", right).is_none());
+        let texts = paint.drag(tab, Pos2::new(1300.0, 700.0), egui::PointerButton::Primary);
+        assert!(
+            text_in(&texts, "Color Slider", right).is_some(),
+            "Color Slider is a palette of its own at the right"
+        );
+        assert!(
+            text_in(&texts, "Color Slider", left).is_none(),
+            "and no longer a tab at the left"
+        );
+        assert!(
+            text_in(&texts, "Color Wheel", left).is_some(),
+            "the color wheel stays where it was"
+        );
+    }
 }

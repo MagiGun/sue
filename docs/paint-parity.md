@@ -41,20 +41,20 @@ rows are at the end.
 | Rulers and symmetry | 7 | 1 | 0 | 94 |
 | Comics: frames, balloons and webtoons | 11 | 0 | 0 | 100 |
 | Story: multi-page works (EX) | 6 | 5 | 2 | 65 |
-| Animation | 13 | 1 | 0 | 96 |
+| Animation | 15 | 1 | 0 | 97 |
 | Tools and drawing | 29 | 9 | 1 | 86 |
 | Text | 6 | 3 | 1 | 75 |
 | Vector | 6 | 2 | 0 | 88 |
 | 3D | 7 | 2 | 4 | 62 |
 | Colors | 9 | 0 | 1 | 90 |
 | View and navigation | 9 | 3 | 0 | 88 |
-| Window, palettes and workspaces | 17 | 3 | 1 | 88 |
+| Window, palettes and workspaces | 21 | 3 | 1 | 90 |
 | Materials and assets | 6 | 4 | 1 | 73 |
 | Print | 0 | 2 | 2 | 25 |
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 10 | 2 | 2 | 79 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 251 | 62 | 29 | 82 |
+| **All of Sue Paint** | 256 | 62 | 29 | 83 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -350,6 +350,7 @@ The order of work is the plan at the end.
 | Animation Cels palette's light table: general light table, register file, Light table tool, reset position, opacity | Animation Cels palette | done | Moving a traced layer never moves the layer itself |
 | Play, Stop, Loop, Move Frame | Animation > Playback | done | |
 | Timeline palette as Clip Studio's | Palette | done | Cels as pictures, every other second lighter, the current frame a red bar |
+| Timeline navigation: the wheel zooms around the pointer, Shift and the wheel pan, Alt and the wheel scroll the tracks, Space or the middle button and a drag pan, scrollbars | Timeline palette | done | The eye beside each animation folder shows and hides the same folder as the Layer palette's |
 | Animation Cels palette | Palette | done | |
 | Sound on the timeline | Animation, File > Import > Audio | done | Plays along, drag to move, right-click to mute or delete |
 | Exposure sheet (EX) | Animation | done | Animation > Timeline > Exposure Sheet: cels, blanks and holds, set by clicking |
@@ -489,12 +490,16 @@ The order of work is the plan at the end.
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
 | Clip Studio's default frame | Workspace | done | Tools, Tool Group and colors at the left, Navigator and layers at the right, a strip of folded palettes at the far right |
-| Palette docking, floating windows, folding into the strip | Palette menus | done | Floats go anywhere, outside Sue's window too; the menu also docks at the bottom |
+| Palette docking, floating windows, folding into the strip | Palette menus | done | The menu also docks at the top or bottom and in a new column on either side; floats sit over the canvas |
+| Pop Out into Separate Window | Palette menus | done | A window of its own that goes anywhere, outside Sue's window too |
+| Dock at the top, beside the command bar | Palettes | done | Drop a palette on the canvas's top edge, or the menu's Dock at the Top |
+| Tear a palette's tab off into a palette of its own | Palettes | done | Tool Settings, Brush Size, Color Slider, Intermediate and Approximate Color, Color History, Material, Sub View, Layer Property, History and Animation Cels; closing one puts it back among the tabs |
+| Command Bar and Tool palette move and resize like any palette | Palettes | done | The tool palette grows more columns as its column widens and lies on its side in a row |
 | Drag a palette by its title bar, tab or icon to dock it left, right or under the canvas, beside another or in a column of its own, or to float or fold it | Palettes | done | The shared dock in `sue-wm` (`sue_wm::dock`) lights up where it will go |
 | Palette groups: palettes stacked as tabs, reordered by dragging a tab | Palettes | done | Drop a palette onto another's middle or onto a tab |
 | The palette layout kept between runs | Workspace | done | `layout.txt` in Sue Paint's data folder, never in a document; Settings, Remember the palette layout |
 | Drag column widths and palette heights | Dock | done | Also the widths in the row under the canvas and its height; narrow windows fold the widest palettes by themselves |
-| Reset Palette Layout | Window > Workspace > Reset Palette Layout | done | |
+| Use Current Workspace as Default, Reset to Default | Window > Workspace | done | Reset goes back to the workspace you chose as the default, and again to Sue Paint's own |
 | Register and Manage Workspaces | Window > Workspace | done | Register, switch, rename and delete; layouts saved before tabs still open |
 | Hide All Palettes, Hide Menu Bar | Window | done | Tab and Shift+Tab |
 | Command Bar | Window > Command Bar | done | |

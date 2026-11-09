@@ -198,6 +198,10 @@ impl Item {
 /// between runs (never inside a document).
 const LAYOUT_FILE: &str = "layout.txt";
 
+/// The file the default workspace is kept in (Use Current Workspace as
+/// Default), one section as `workspaces.txt` has.
+const DEFAULT_FILE: &str = "default_workspace.txt";
+
 /// The rice key: Sue Paint opens with its palettes where they were left.
 pub(crate) const REMEMBER_LAYOUT: &str = "sue_paint.remember_layout";
 
@@ -332,13 +336,19 @@ impl SuePaint {
                     .collect()
             })
             .unwrap_or_default();
+        self.default_workspace = read(folder.as_deref(), DEFAULT_FILE)
+            .and_then(|text| sections(&text).into_iter().next())
+            .map(|(name, lines)| Workspace { name, lines });
         self.refresh_workspace_menu();
-        // The palettes where they were left.
+        // The palettes where they were left, or else where people chose as
+        // the default.
         if remember_layout(cx)
             && let Some(text) = read(folder.as_deref(), LAYOUT_FILE)
         {
             let lines: Vec<String> = text.lines().map(str::to_owned).collect();
             self.apply_layout(&lines);
+        } else if let Some(space) = self.default_workspace.clone() {
+            self.apply_layout(&space.lines);
         }
         self.layout_kept = self.workspace_now("").lines;
     }
@@ -442,6 +452,20 @@ impl SuePaint {
             name: name.to_owned(),
             lines,
         }
+    }
+
+    /// Use Current Workspace as Default: the palettes as they are now are
+    /// where Reset to Default goes back to, kept in the data folder.
+    pub(crate) fn set_default_workspace(&mut self, cx: &mut AppletContext<'_>) {
+        let space = self.workspace_now(&tr!("workspace"));
+        let text = write_sections(std::iter::once((space.name.as_str(), space.lines.clone())));
+        let folder = crate::colorsets::folder(cx);
+        match write(folder.as_deref(), DEFAULT_FILE, &text) {
+            Ok(()) => cx.notify(tr!("default-workspace-saved")),
+            Err(error) => cx.fail(tr!("cannot-keep-the-palettes-settings", error = error)),
+        }
+        // Kept for this run even when the folder cannot be written.
+        self.default_workspace = Some(space);
     }
 
     /// Lays the palettes out as workspace `index` says.
