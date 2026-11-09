@@ -262,6 +262,11 @@ impl ComponentType for Sequence {
 
     fn remap_entities(&mut self, map: &mut dyn FnMut(EntityId) -> EntityId) {
         for track in &mut self.tracks {
+            // A track may name entities too (the folder it stands for).
+            track
+                .properties
+                .values_mut()
+                .for_each(|value| value.remap_entities(map));
             for clip in &mut track.clips {
                 clip.source = map(clip.source);
                 clip.properties
@@ -407,9 +412,11 @@ mod tests {
 
     #[test]
     fn clips_trim_split_and_stack() {
-        let (film, song) = (EntityId::new(), EntityId::new());
+        let (film, song, folder) = (EntityId::new(), EntityId::new(), EntityId::new());
         let mut sequence = Sequence::new(Rate::FPS_24, 48_000);
         let mut video = Track::new("V1", "video");
+        // A track naming an entity (the folder it stands for).
+        video.properties.set("anim.folder", folder);
         let mut clip = Clip::new(film, Time::from_seconds(1.0), Time::from_seconds(4.0));
         clip.source_in = Time::from_seconds(10.0);
         video.insert(clip);
@@ -443,10 +450,26 @@ mod tests {
         let back = Sequence::decode(1, &mut Reader::new(&bytes)).unwrap();
         assert_eq!(back, sequence);
 
-        let other = EntityId::new();
+        let (other, other_folder) = (EntityId::new(), EntityId::new());
         let mut moved = back;
-        ComponentType::remap_entities(&mut moved, &mut |id| if id == film { other } else { id });
+        ComponentType::remap_entities(&mut moved, &mut |id| {
+            if id == film {
+                other
+            } else if id == folder {
+                other_folder
+            } else {
+                id
+            }
+        });
         assert_eq!(moved.tracks[0].clips()[0].source, other);
+        assert_eq!(
+            moved.tracks[0]
+                .properties
+                .get("anim.folder")
+                .and_then(sue_core::Value::as_entity),
+            Some(other_folder),
+            "a track's entity properties follow a remap"
+        );
     }
 
     #[test]
