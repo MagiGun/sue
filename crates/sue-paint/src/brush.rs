@@ -367,7 +367,13 @@ pub struct Tip {
     /// Each dab turns with the line (Clip Studio Paint's direction of the
     /// line), so a chain or a lace runs along the stroke.
     pub follow: bool,
-    /// Each dab's turn, in degrees (added to the line's when it follows).
+    /// Each dab turns the way the pen leans (Clip Studio Paint's direction
+    /// of the pen's tilt), so a flat or chisel tip follows the hand; while
+    /// the pen stands (nearly) upright, or reports no tilt, it turns with
+    /// the line when [`Tip::follow`] says so, else not at all.
+    pub follow_tilt: bool,
+    /// Each dab's turn, in degrees (added to the line's or the pen's when
+    /// it follows one).
     pub angle: f32,
     /// How far dabs fall from the line, in brush sizes, at random (spray
     /// and decorations).
@@ -592,6 +598,7 @@ impl Tip {
             ("taper_by_speed".to_owned(), flag(self.taper_by_speed)),
             ("mix".to_owned(), self.mix.to_string()),
             ("follow".to_owned(), flag(self.follow)),
+            ("follow_tilt".to_owned(), flag(self.follow_tilt)),
             ("angle".to_owned(), self.angle.to_string()),
             ("scatter".to_owned(), self.scatter.to_string()),
             ("size_jitter".to_owned(), self.size_jitter.to_string()),
@@ -710,6 +717,8 @@ impl Tip {
         flag("taper_by_speed", &mut tip.taper_by_speed);
         number("mix", &mut tip.mix);
         flag("follow", &mut tip.follow);
+        // Tips saved before it have none: they keep their turn.
+        flag("follow_tilt", &mut tip.follow_tilt);
         number("angle", &mut tip.angle);
         number("scatter", &mut tip.scatter);
         number("size_jitter", &mut tip.size_jitter);
@@ -781,6 +790,7 @@ impl Default for Tip {
             mix: 0.0,
             shape: 0,
             follow: false,
+            follow_tilt: false,
             angle: 0.0,
             scatter: 0.0,
             size_jitter: 0.0,
@@ -906,11 +916,50 @@ pub struct Sample {
     /// How far the pen leaned there, 0 (upright, or no tilt known) to 1
     /// (flat).
     pub tilt: f32,
+    /// Which way the pen leaned there, in the layer's space: `[x, y]`,
+    /// each -1 to 1, toward which the top of the pen points, as long as
+    /// its lean (`[0, 0]` upright, or no tilt known). Turn with pen tilt
+    /// ([`Tip::follow_tilt`]) turns dabs with it.
+    pub lean: [f32; 2],
     /// How much of the brush's width it has there (a vector line's width
     /// as corrected), 1 as drawn.
     pub width: f32,
     /// How much of the brush's opacity it has there, 0 to 1.
     pub alpha: f32,
+}
+
+impl Sample {
+    /// This sample through `copy` (a symmetry ruler's copy): its place,
+    /// and the way the pen leans, turned and mirrored with it.
+    #[must_use]
+    pub fn through(self, copy: &Copy2D) -> Self {
+        let [x, y] = self.lean;
+        Self {
+            at: copied(copy, self.at),
+            lean: [copy[0] * x + copy[1] * y, copy[2] * x + copy[3] * y],
+            ..self
+        }
+    }
+}
+
+/// The point `t` (0 to 1) of the way from `a` to `b`.
+fn between(a: [f32; 2], b: [f32; 2], t: f32) -> [f32; 2] {
+    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+}
+
+/// The least lean, as [`Sample::lean`]'s length, whose direction Turn with
+/// pen tilt follows: about 3 degrees. Nearer upright, a pen's direction is
+/// mostly the tablet's noise, and a flat tip would spin.
+pub const TILT_TURN_LEAST: f32 = 3.0 / 90.0;
+
+/// The turn, in radians, for a pen leaning `lean` ([`Sample::lean`]): the
+/// direction it leans toward, 0 along the layer's x axis and a quarter
+/// turn along y (down the picture). `None` while it stands upright, or
+/// nearly ([`TILT_TURN_LEAST`]).
+#[must_use]
+pub fn tilt_turn(lean: [f32; 2]) -> Option<f32> {
+    let [x, y] = lean;
+    (x.is_finite() && y.is_finite() && x.hypot(y) >= TILT_TURN_LEAST).then(|| y.atan2(x))
 }
 
 /// The shortest touch that is a tap, in seconds; anything shorter is the
@@ -1048,6 +1097,8 @@ pub struct Stroke {
     speed: f32,
     /// How far the pen leans now, 0 to 1 (tilt dynamics).
     tilt: f32,
+    /// Which way it leans now (see [`Sample::lean`]).
+    lean: [f32; 2],
     seed: u32,
     /// The share of the width and opacity of the next points.
     width: f32,
@@ -1102,6 +1153,7 @@ impl Stroke {
             dirty: None,
             speed: 0.0,
             tilt: 0.0,
+            lean: [0.0, 0.0],
             seed: 0,
             width: 1.0,
             alpha: 1.0,
@@ -1203,6 +1255,19 @@ impl Stroke {
         self.tilt = tilt.clamp(0.0, 1.0);
     }
 
+    /// Which way the pen leans now, in the layer's space (see
+    /// [`Sample::lean`]), for the samples that follow (Turn with pen
+    /// tilt).
+    pub fn set_lean(&mut self, lean: [f32; 2]) {
+        self.lean = lean.map(|value| {
+            if value.is_finite() {
+                value.clamp(-1.0, 1.0)
+            } else {
+                0.0
+            }
+        });
+    }
+
     /// The share of the brush's width and opacity the next points have
     /// (a corrected vector line); 1 and 1 as drawn.
     pub fn set_shape(&mut self, width: f32, alpha: f32) {
@@ -1252,6 +1317,7 @@ impl Stroke {
             pressure,
             speed: self.speed,
             tilt: self.tilt,
+            lean: self.lean,
             width: self.width,
             alpha: self.alpha,
         };
@@ -1276,10 +1342,7 @@ impl Stroke {
             }
         }
         let copies = self.copies.clone();
-        let through = |copy: &Copy2D, sample: Sample| Sample {
-            at: copied(copy, sample.at),
-            ..sample
-        };
+        let through = |copy: &Copy2D, sample: Sample| sample.through(copy);
         match self.samples.last().copied() {
             None => {
                 let mut ended = None;
@@ -1363,10 +1426,7 @@ impl Stroke {
         {
             self.total = Some(0.0);
             for copy in self.copies.clone() {
-                let dot = Sample {
-                    at: copied(&copy, first.at),
-                    ..first
-                };
+                let dot = first.through(&copy);
                 if self.tip.dabbed() {
                     self.dab(raster, dot, 0.0, selection);
                 } else {
@@ -1420,6 +1480,7 @@ impl Stroke {
         for sample in path {
             self.speed = sample.speed;
             self.tilt = sample.tilt;
+            self.lean = sample.lean;
             self.to(raster, sample.at, sample.pressure, selection);
         }
         // The path's last point, however close it came.
@@ -1582,13 +1643,18 @@ impl Stroke {
     /// the line reaches where the pen is.
     pub fn flush(&mut self, raster: &mut RasterTile2D, selection: Option<&Selection>) {
         if let Some(sample) = self.pending.take() {
-            let keep = (self.width, self.alpha, self.speed, self.tilt);
-            (self.width, self.alpha, self.speed, self.tilt) =
-                (sample.width, sample.alpha, sample.speed, sample.tilt);
+            let keep = (self.width, self.alpha, self.speed, self.tilt, self.lean);
+            (self.width, self.alpha, self.speed, self.tilt, self.lean) = (
+                sample.width,
+                sample.alpha,
+                sample.speed,
+                sample.tilt,
+                sample.lean,
+            );
             self.flushing = true;
             self.to(raster, sample.at, sample.pressure, selection);
             self.flushing = false;
-            (self.width, self.alpha, self.speed, self.tilt) = keep;
+            (self.width, self.alpha, self.speed, self.tilt, self.lean) = keep;
         }
     }
 
@@ -1938,6 +2004,7 @@ impl Stroke {
                 pressure: a.pressure + (b.pressure - a.pressure) * t,
                 speed: a.speed + (b.speed - a.speed) * t,
                 tilt: a.tilt + (b.tilt - a.tilt) * t,
+                lean: between(a.lean, b.lean, t),
                 width: a.width + (b.width - a.width) * t,
                 alpha: a.alpha + (b.alpha - a.alpha) * t,
             };
@@ -1993,7 +2060,14 @@ impl Stroke {
             at = [at[0] + turn.cos() * reach, at[1] + turn.sin() * reach];
         }
         let mut turn = self.tip.angle.to_radians();
-        if self.tip.follow {
+        let leaning = self
+            .tip
+            .follow_tilt
+            .then(|| tilt_turn(sample.lean))
+            .flatten();
+        if let Some(lean) = leaning {
+            turn += lean;
+        } else if self.tip.follow {
             turn += self.heading;
         }
         if self.tip.turn_jitter > 0.0 {
@@ -2669,6 +2743,7 @@ fn resample(path: &[Sample], step: f32) -> Vec<Sample> {
                 pressure: a.pressure + (b.pressure - a.pressure) * t,
                 speed: a.speed + (b.speed - a.speed) * t,
                 tilt: a.tilt + (b.tilt - a.tilt) * t,
+                lean: between(a.lean, b.lean, t),
                 width: a.width + (b.width - a.width) * t,
                 alpha: a.alpha + (b.alpha - a.alpha) * t,
             });
@@ -2813,6 +2888,7 @@ fn flick(path: &mut Vec<Sample>, velocity: [f32; 2], size: f32) {
             pressure: last.pressure * (1.0 - 0.5 * t),
             speed: last.speed,
             tilt: last.tilt,
+            lean: last.lean,
             width: last.width,
             alpha: last.alpha,
         });
@@ -2858,6 +2934,7 @@ fn spline(path: &[Sample], step: f32) -> Vec<Sample> {
                 pressure: path[i].pressure + (path[i + 1].pressure - path[i].pressure) * u,
                 speed: path[i].speed + (path[i + 1].speed - path[i].speed) * u,
                 tilt: path[i].tilt + (path[i + 1].tilt - path[i].tilt) * u,
+                lean: between(path[i].lean, path[i + 1].lean, u),
                 width: path[i].width + (path[i + 1].width - path[i].width) * u,
                 alpha: path[i].alpha + (path[i + 1].alpha - path[i].alpha) * u,
             });
@@ -3095,6 +3172,84 @@ mod tests {
         let alpha = |x: u32, y: u32| raster.bytes().unwrap()[((y * 40 + x) * 4 + 3) as usize];
         assert!(alpha(20, 14) > 100, "the plus reaches up");
         assert!(alpha(14, 14) < 30, "but not into the corner");
+    }
+
+    #[test]
+    fn the_pens_lean_turns_into_a_dabs_turn() {
+        use std::f32::consts::{FRAC_PI_2, PI};
+        let near =
+            |turn: Option<f32>, want: f32| turn.is_some_and(|turn| (turn - want).abs() < 1e-5);
+        // Upright, nearly upright or unknown: no direction.
+        assert_eq!(tilt_turn([0.0, 0.0]), None);
+        assert_eq!(tilt_turn([0.02, 0.01]), None);
+        assert_eq!(tilt_turn([f32::NAN, 0.5]), None);
+        // Leaning right, down the picture, left.
+        assert!(near(tilt_turn([0.5, 0.0]), 0.0));
+        assert!(near(tilt_turn([0.0, 0.3]), FRAC_PI_2));
+        assert!(near(tilt_turn([-0.04, 0.0]), PI));
+        // A mirror copy leans the mirrored way; a turned one turns with it.
+        let lean = |sample: Sample| sample.lean;
+        let sample = Sample {
+            at: [10.0, 0.0],
+            pressure: 1.0,
+            speed: 0.0,
+            tilt: 0.5,
+            lean: [0.5, 0.1],
+            width: 1.0,
+            alpha: 1.0,
+        };
+        let mirror: Copy2D = [-1.0, 0.0, 0.0, 1.0, 100.0, 0.0];
+        assert_eq!(lean(sample.through(&mirror)), [-0.5, 0.1]);
+        assert_eq!(sample.through(&mirror).at, [90.0, 0.0]);
+        let quarter: Copy2D = [0.0, -1.0, 1.0, 0.0, 0.0, 0.0];
+        assert_eq!(lean(sample.through(&quarter)), [-0.1, 0.5]);
+        // Saved and loaded; a tip saved before it loads with it off.
+        let tip = Tip {
+            follow_tilt: true,
+            ..Tip::default()
+        };
+        assert!(Tip::from_text(&tip.to_text()).follow_tilt);
+        let old: String = tip
+            .to_text()
+            .lines()
+            .filter(|line| !line.contains("follow_tilt"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!Tip::from_text(&old).follow_tilt);
+    }
+
+    #[test]
+    fn a_flat_tip_turns_with_the_pens_tilt() {
+        // A flat bar, dark on white, lying along x.
+        let mut pixels = [255_u8, 255, 255, 255].repeat(9 * 9);
+        for x in 0..9 {
+            pixels[((4 * 9 + x) * 4) as usize..][..3].copy_from_slice(&[0, 0, 0]);
+        }
+        let id = register_shape(TipShape::from_rgba("Flat test", &pixels, 9, 9).unwrap());
+        let stamp = |follow_tilt: bool, lean: [f32; 2]| {
+            let tip = Tip {
+                size: 18.0,
+                shape: id,
+                spacing: 2.0,
+                size_by: Dynamics::NONE,
+                follow_tilt,
+                ..Tip::default()
+            };
+            let mut raster = RasterTile2D::new(40, 40, PixelFormat::Rgba8).unwrap();
+            let mut stroke = Stroke::new(EntityId::NIL, tip, [0.0, 0.0, 0.0], false);
+            stroke.set_lean(lean);
+            stroke.to(&mut raster, [20.0, 20.0], 1.0, None);
+            stroke.end(&mut raster, Finish::default(), None);
+            let bytes = raster.bytes().unwrap().to_vec();
+            move |x: u32, y: u32| bytes[((y * 40 + x) * 4 + 3) as usize]
+        };
+        // The pen leaning down the picture stands the bar up.
+        let turned = stamp(true, [0.0, 0.6]);
+        assert!(turned(20, 14) > 100 && turned(14, 20) < 30);
+        // Off, or upright, it lies as drawn.
+        for flat in [stamp(false, [0.0, 0.6]), stamp(true, [0.0, 0.0])] {
+            assert!(flat(14, 20) > 100 && flat(20, 14) < 30);
+        }
     }
 
     #[test]
@@ -3450,6 +3605,7 @@ mod tests {
                     pressure: 1.0,
                     speed: 0.0,
                     tilt: 0.0,
+                    lean: [0.0, 0.0],
                     width: 1.0,
                     alpha: 1.0,
                 })
@@ -3473,6 +3629,7 @@ mod tests {
                 pressure: 1.0,
                 speed: 0.0,
                 tilt: 0.0,
+                lean: [0.0, 0.0],
                 width: 1.0,
                 alpha: 1.0,
             })
@@ -3492,6 +3649,7 @@ mod tests {
                 pressure: 1.0,
                 speed: 0.0,
                 tilt: 0.0,
+                lean: [0.0, 0.0],
                 width: 1.0,
                 alpha: 1.0,
             })
@@ -3501,6 +3659,7 @@ mod tests {
             pressure: 1.0,
             speed: 0.0,
             tilt: 0.0,
+            lean: [0.0, 0.0],
             width: 1.0,
             alpha: 1.0,
         }));
@@ -3522,6 +3681,7 @@ mod tests {
                 pressure: 1.0,
                 speed: 0.0,
                 tilt: 0.0,
+                lean: [0.0, 0.0],
                 width: 1.0,
                 alpha: 1.0,
             })
@@ -3549,6 +3709,7 @@ mod tests {
                 pressure: 1.0,
                 speed: 0.0,
                 tilt: 0.0,
+                lean: [0.0, 0.0],
                 width: 1.0,
                 alpha: 1.0,
             })
@@ -3570,6 +3731,7 @@ mod tests {
                 pressure: 1.0,
                 speed: 0.0,
                 tilt: 0.0,
+                lean: [0.0, 0.0],
                 width: 1.0,
                 alpha: 1.0,
             })
@@ -3580,6 +3742,7 @@ mod tests {
             pressure: 0.4,
             speed: 0.0,
             tilt: 0.0,
+            lean: [0.0, 0.0],
             width: 1.0,
             alpha: 1.0,
         });
@@ -3588,6 +3751,7 @@ mod tests {
             pressure: 0.2,
             speed: 0.0,
             tilt: 0.0,
+            lean: [0.0, 0.0],
             width: 1.0,
             alpha: 1.0,
         });

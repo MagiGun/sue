@@ -485,7 +485,9 @@ Once a canvas is open:
   on in their driver. In the browser version, a pen's pressure works too.
   On Linux, the pen draws with its pressure under Wayland (niri, KDE,
   GNOME, Hyprland and others) and under X11, and under Wayland it shows
-  the same cursor as the mouse. If your Wayland compositor
+  the same cursor as the mouse, answers at once even while you only
+  hover or draw, and gives every point of a stroke the pressure it had
+  there. If your Wayland compositor
   has no tablet support and a pen tablet is connected, Sue opens through
   XWayland so the pen still works. To choose yourself, start Sue with
   `SUE_DISPLAY_SERVER=wayland` or `SUE_DISPLAY_SERVER=x11`.
@@ -746,7 +748,10 @@ Once a canvas is open:
   stroke at random sizes and turns; Leaves, Chain, Lace, Stitches, Dotted
   line and Dashed line run along it and turn with its curve. Tool Settings
   sets how each shape turns, how far it scatters and how much its size
-  and turn vary, for any brush with a shape.
+  and turn vary, for any brush with a shape. **Turn with pen tilt** turns
+  each shape the way your pen leans, so a flat or chisel tip follows your
+  hand as a real one would; with the pen upright, or a mouse, the shape
+  turns along the line if that is on, and otherwise stays as set.
 - **3D drawing figures:** Layer, New Layer, 3D Drawing Figure puts a
   posable figure on a 3D layer. With the Object tool, drag a body part to
   bend it at its joint (Shift twists it) and drag anywhere else to turn

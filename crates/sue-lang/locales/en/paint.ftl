@@ -2359,3 +2359,6 @@ ruby-hint = Reading for the selected words
 set-ruby = Set ruby
 remove-ruby = Remove ruby
 ruby-needs-selection = Select the words to read while typing, and type their reading
+
+turn-with-pen-tilt = Turn with pen tilt
+a-flat-tip-turns-the-way-the-pen-leans = Each shape turns the way the pen leans, so a flat or chisel tip follows your hand

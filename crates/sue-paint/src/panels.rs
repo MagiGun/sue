@@ -1824,6 +1824,8 @@ impl SuePaint {
                     ui.checkbox(&mut tip.ribbon, small(&tr!("lay-as-a-ribbon")))
                         .on_hover_text(tr!("the-shape-bends-along-the-whole-stroke"));
                     ui.checkbox(&mut tip.follow, small(&tr!("turn-along-the-line")));
+                    ui.checkbox(&mut tip.follow_tilt, small(&tr!("turn-with-pen-tilt")))
+                        .on_hover_text(tr!("a-flat-tip-turns-the-way-the-pen-leans"));
                     slider_row(
                         ui,
                         &tr!("angle-2"),

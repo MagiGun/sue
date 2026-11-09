@@ -170,6 +170,7 @@ impl Line {
         for sample in &self.samples {
             stroke.set_speed(sample.speed);
             stroke.set_tilt(sample.tilt);
+            stroke.set_lean(sample.lean);
             stroke.set_shape(sample.width, sample.alpha);
             stroke.to(raster, sample.at, sample.pressure, None);
         }
@@ -250,6 +251,7 @@ pub fn from_svg(drawing: &sue_io::svg::SvgDrawing, size: [u32; 2]) -> Vec<Line> 
                     pressure: 1.0,
                     speed: 0.0,
                     tilt: 0.0,
+                    lean: [0.0, 0.0],
                     width: 1.0,
                     alpha: 1.0,
                 })
@@ -464,6 +466,7 @@ pub fn trace(pixels: &[u8], width: u32, height: u32) -> Vec<Line> {
                     pressure: 1.0,
                     speed: 0.0,
                     tilt: 0.0,
+                    lean: [0.0, 0.0],
                     width: width / size,
                     alpha: 1.0,
                 })
@@ -527,6 +530,8 @@ pub fn lines(geometry: &Geometry) -> Vec<Line> {
     let speed = floats(geometry, Domain::Point, "speed", 1).filter(|v| v.len() == count);
     // Lines kept before tilt have none: upright.
     let tilt = floats(geometry, Domain::Point, "tilt", 1).filter(|v| v.len() == count);
+    // And before Turn with pen tilt, no direction: dabs keep their turn.
+    let lean = floats(geometry, Domain::Point, "lean", 2).filter(|v| v.len() == count * 2);
     let width = floats(geometry, Domain::Point, "width", 1).filter(|v| v.len() == count);
     let alpha = floats(geometry, Domain::Point, "alpha", 1).filter(|v| v.len() == count);
     let prims = geometry.prims().len();
@@ -562,6 +567,9 @@ pub fn lines(geometry: &Geometry) -> Vec<Line> {
                         pressure: pressure.map_or(1.0, |values| values[index]),
                         speed: speed.map_or(0.0, |values| values[index]),
                         tilt: tilt.map_or(0.0, |values| values[index]),
+                        lean: lean.map_or([0.0; 2], |values| {
+                            [values[index * 2], values[index * 2 + 1]]
+                        }),
                         width: width.map_or(1.0, |values| values[index]),
                         alpha: alpha.map_or(1.0, |values| values[index]),
                     }
@@ -621,6 +629,7 @@ pub fn lines(geometry: &Geometry) -> Vec<Line> {
 pub fn to_geometry(lines: &[Line]) -> Geometry {
     let mut geometry = Geometry::new();
     let (mut pressure, mut speed, mut tilt) = (Vec::new(), Vec::new(), Vec::new());
+    let mut lean: Vec<f32> = Vec::new();
     let (mut width, mut alpha) = (Vec::new(), Vec::new());
     let mut marks: Vec<i32> = Vec::new();
     let (mut colors, mut subs, mut flicks) = (Vec::new(), Vec::new(), Vec::new());
@@ -637,6 +646,7 @@ pub fn to_geometry(lines: &[Line]) -> Geometry {
                 pressure.push(sample.pressure);
                 speed.push(sample.speed);
                 tilt.push(sample.tilt);
+                lean.extend(sample.lean);
                 width.push(sample.width);
                 alpha.push(sample.alpha);
                 geometry.add_point([f64::from(sample.at[0]), f64::from(sample.at[1]), 0.0])
@@ -650,6 +660,7 @@ pub fn to_geometry(lines: &[Line]) -> Geometry {
             pressure.push(sample.pressure);
             speed.push(sample.speed);
             tilt.push(sample.tilt);
+            lean.extend(sample.lean);
             width.push(sample.width);
             alpha.push(sample.alpha);
             indices.push(geometry.add_point([
@@ -688,6 +699,7 @@ pub fn to_geometry(lines: &[Line]) -> Geometry {
         (Domain::Point, "pressure", float(1, pressure)),
         (Domain::Point, "speed", float(1, speed)),
         (Domain::Point, "tilt", float(1, tilt)),
+        (Domain::Point, "lean", float(2, lean)),
         (Domain::Point, "width", float(1, width)),
         (Domain::Point, "alpha", float(1, alpha)),
         (Domain::Point, "mark", int(marks)),
@@ -826,6 +838,7 @@ pub(crate) fn at_arc(samples: &[Sample], arcs: &[f32], along: f32) -> Sample {
         pressure: mix(a.pressure, b.pressure),
         speed: mix(a.speed, b.speed),
         tilt: mix(a.tilt, b.tilt),
+        lean: [mix(a.lean[0], b.lean[0]), mix(a.lean[1], b.lean[1])],
         width: mix(a.width, b.width),
         alpha: mix(a.alpha, b.alpha),
     }
@@ -966,6 +979,7 @@ mod tests {
                     pressure: 0.5 + t * 0.5,
                     speed: 0.2,
                     tilt: 0.0,
+                    lean: [0.0, 0.0],
                     width: 1.0,
                     alpha: 1.0,
                 }
@@ -1117,12 +1131,13 @@ mod tests {
         let tip = Tip {
             size: 6.0,
             taper_end: 10.0,
-            // The pen's lean is kept too.
+            // The pen's lean is kept too, and the way it leans.
             size_by: Dynamics {
                 tilt: true,
                 tilt_min: 0.5,
                 ..Dynamics::pressure(0.15)
             },
+            follow_tilt: true,
             ..Tip::default()
         };
         let mut live = RasterTile2D::new(64, 64, PixelFormat::Rgba8).unwrap();
@@ -1130,6 +1145,7 @@ mod tests {
         for step in 0..12 {
             stroke.set_speed(0.3);
             stroke.set_tilt(step as f32 / 12.0);
+            stroke.set_lean([step as f32 / 24.0, -0.25]);
             let x = 8.0 + step as f32 * 4.0;
             stroke.to(&mut live, [x, 20.0 + (x * 0.2).sin() * 6.0], 0.8, None);
         }
@@ -1146,6 +1162,7 @@ mod tests {
                 pressure: 1.0,
                 speed: 0.0,
                 tilt: 0.0,
+                lean: [0.0, 0.0],
                 width: 1.0,
                 alpha: 1.0,
             }],

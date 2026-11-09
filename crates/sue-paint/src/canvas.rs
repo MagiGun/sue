@@ -25,12 +25,40 @@ use crate::panels::{child, icon_button};
 use crate::select::{Op, Selection};
 use crate::studio::{Gesture, SuePaint, texture_key};
 use crate::tools::{SubTool, Tool};
+use sue_platform::stylus::SampleKind;
 
-/// How far the pen leans, 0 upright to 1 flat (tilt dynamics). Without a
-/// source of tilt (a mouse, Windows Ink, WinTab, the browser) it reads as
-/// an upright pen, 0, so settings that use tilt stay at their minimum.
-fn pen_tilt() -> f32 {
-    sue_platform::stylus::tilt().map_or(0.0, |[x, y]| x.hypot(y).min(1.0))
+/// How far a pen leaning `lean` (on screen, see
+/// [`sue_platform::stylus::tilt`]) leans, 0 upright to 1 flat (tilt
+/// dynamics). Without a source of tilt (a mouse, Windows Ink, WinTab, the
+/// browser) it reads as an upright pen, 0, so settings that use tilt stay
+/// at their minimum.
+fn tilt_of(lean: Option<[f32; 2]>) -> f32 {
+    lean.map_or(0.0, |[x, y]| x.hypot(y).min(1.0))
+}
+
+/// A pen's lean on screen at `at` as a lean in the picture
+/// ([`crate::brush::Sample::lean`]): as long, pointing where that way on
+/// screen goes in the picture (`to_picture`), so a turned or mirrored view
+/// turns and mirrors it too. Upright (or unknown), none.
+fn lean_in_picture(
+    lean: Option<[f32; 2]>,
+    at: Pos2,
+    to_picture: impl Fn(Pos2) -> Pos2,
+) -> [f32; 2] {
+    let Some([x, y]) = lean else {
+        return [0.0, 0.0];
+    };
+    let length = x.hypot(y).min(1.0);
+    if length <= 1e-6 {
+        return [0.0, 0.0];
+    }
+    // A step of a hundred points that way, in the picture.
+    let way = to_picture(at + egui::vec2(x, y) * (100.0 / length)) - to_picture(at);
+    let reach = way.length();
+    if !reach.is_finite() || reach <= 1e-6 {
+        return [0.0, 0.0];
+    }
+    [way.x / reach * length, way.y / reach * length]
 }
 
 /// The angle of a screen vector, in degrees.
@@ -841,6 +869,43 @@ impl SuePaint {
             .unwrap_or(1.0)
     }
 
+    /// How far the pen leans at `pos` (0 upright to 1 flat, tilt dynamics)
+    /// and which way in the picture (Turn with pen tilt): from the reading
+    /// that came with this pointer event, else the pen's latest.
+    fn pen_lean(&self, pos: Pos2, viewport: Rect, size: [u32; 2]) -> (f32, [f32; 2]) {
+        let lean = self.sample_lean.or_else(sue_platform::stylus::tilt);
+        let way = self.docs.get(self.active).map_or([0.0, 0.0], |doc| {
+            lean_in_picture(lean, pos, |at| doc.view.to_picture(viewport, size, at))
+        });
+        (tilt_of(lean), way)
+    }
+
+    /// Takes the pen's reading for this frame's pointer event of `kind` at
+    /// `pos`, when the next one in `samples` is it: its pressure (through
+    /// the pen pressure curve) and lean count for that event, not the
+    /// frame's last. `true` when there was one.
+    fn take_sample(
+        &mut self,
+        samples: &mut std::collections::VecDeque<sue_platform::stylus::Sample>,
+        kind: sue_platform::stylus::SampleKind,
+        pos: Pos2,
+    ) -> bool {
+        if !samples
+            .front()
+            .is_some_and(|sample| sample.is_for(kind, [pos.x, pos.y]))
+        {
+            return false;
+        }
+        let Some(sample) = samples.pop_front() else {
+            return false;
+        };
+        self.pressure = sample.pressure.map(|raw| self.pen_curve.eval(raw));
+        if sample.tilt.is_some() {
+            self.sample_lean = sample.tilt;
+        }
+        true
+    }
+
     /// The first time a pen's pressure shows up while its curve is still
     /// the one Sue Paint starts with, says where to fit it to the hand.
     fn pen_seen(&mut self, cx: &mut AppletContext<'_>) {
@@ -866,16 +931,23 @@ impl SuePaint {
     ) {
         let ctx = ui.ctx().clone();
         let blocked = self.dialog.is_some() || self.menubar.is_open() || !self.ready;
-        let (events, space, time, dt, held) = ctx.input(|input| {
+        let (events, space, time, dt, held, gone) = ctx.input(|input| {
             (
                 input.events.clone(),
                 input.key_down(Key::Space),
                 input.time,
                 input.unstable_dt,
                 input.modifiers,
+                input.pointer.hover_pos().is_none(),
             )
         });
-        if sue_platform::stylus::pressure().is_some() {
+        // The pen's own reading for each of its pointer events this frame,
+        // where the system's pen comes through Sue (a Wayland tablet), so
+        // each point of a stroke has the pressure and lean it had there.
+        let mut samples = sue_platform::stylus::take_samples();
+        if sue_platform::stylus::pressure().is_some()
+            || samples.iter().any(|sample| sample.pressure.is_some())
+        {
             self.pen_seen(cx);
         }
         // The pen turned over to its eraser end picks the Eraser, and back
@@ -950,12 +1022,16 @@ impl SuePaint {
                     pressed: true,
                     modifiers,
                 } => {
+                    self.take_sample(&mut samples, SampleKind::Press, pos);
                     // Two fingers down are a pinch or a pan, never a stroke.
+                    // A pen tapped quickly can come near, touch and go away
+                    // within one frame: nothing is hovered by the frame's
+                    // end, yet the touch was on the canvas.
                     if blocked
                         || self.gesture.is_some()
                         || self.touches.len() >= 2
                         || !viewport.contains(pos)
-                        || !response.hovered()
+                        || !(response.hovered() || gone)
                         || covered(pos)
                     {
                         continue;
@@ -974,22 +1050,34 @@ impl SuePaint {
                     }
                 }
                 Event::PointerMoved(pos) => {
+                    self.take_sample(&mut samples, SampleKind::Move, pos);
                     self.clock.0 += f64::from(self.clock.1);
                     self.drag(pos, viewport, size, cx);
                 }
                 Event::PointerButton {
                     pos,
+                    button,
                     pressed: false,
                     ..
-                } if self.gesture.is_some() => {
-                    self.drag(pos, viewport, size, cx);
-                    self.release(viewport, size, cx);
+                } => {
+                    // The tip's release keeps the pressure it had for the
+                    // stroke's end; it goes once this frame is handled.
+                    if self.take_sample(&mut samples, SampleKind::Release, pos)
+                        && button == PointerButton::Primary
+                    {
+                        lifted = true;
+                    }
+                    if self.gesture.is_some() {
+                        self.drag(pos, viewport, size, cx);
+                        self.release(viewport, size, cx);
+                    }
                 }
                 _ => {}
             }
         }
         if lifted {
             self.pressure = None;
+            self.sample_lean = None;
         }
         // Two fingers or more move, zoom and turn the view.
         let pinch = ctx
@@ -1371,7 +1459,9 @@ impl SuePaint {
                 let selection = (!vector)
                     .then(|| shifted.as_ref().or(doc.selection.as_ref()))
                     .flatten();
-                stroke.set_tilt(pen_tilt());
+                let (tilt, lean) = self.pen_lean(pos, viewport, size);
+                stroke.set_tilt(tilt);
+                stroke.set_lean(lean);
                 if let Some(raster) = doc::raster_mut(&mut cx.world.arena, target) {
                     stroke.to(raster, start, pressure, selection);
                 }
@@ -2715,6 +2805,7 @@ impl SuePaint {
             return;
         }
         let pressure = self.pen_pressure();
+        let (tilt, lean) = self.pen_lean(pos, viewport, size);
         let (time, step) = self.clock;
         let (Some(gesture), Some(doc)) = (self.gesture.as_mut(), self.docs.get_mut(self.active))
         else {
@@ -2759,7 +2850,8 @@ impl SuePaint {
                 let smooth = snap.as_ref().map_or(smooth, |snap| snap.project(smooth));
                 // Fast is 2000 screen points a second (velocity dynamics).
                 stroke.set_speed(stabilizer.speed() / 2000.0);
-                stroke.set_tilt(pen_tilt());
+                stroke.set_tilt(tilt);
+                stroke.set_lean(lean);
                 let selection = (!*vector)
                     .then(|| shifted.as_ref().or(doc.selection.as_ref()))
                     .flatten();
@@ -5002,4 +5094,40 @@ fn on_screen(
         visible,
         crate::composite::view_step(view.zoom * pixels_per_point),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_pens_lean_turns_and_mirrors_with_the_view() {
+        let near =
+            |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-4 && (a[1] - b[1]).abs() < 1e-4;
+        let at = egui::pos2(40.0, 30.0);
+        // Zoomed only: the same way, the same length.
+        let zoomed = |p: Pos2| egui::pos2(p.x * 3.0, p.y * 3.0);
+        assert!(near(
+            lean_in_picture(Some([0.3, -0.4]), at, zoomed),
+            [0.3, -0.4]
+        ));
+        // A view flipped left to right mirrors it.
+        let flipped = |p: Pos2| egui::pos2(500.0 - p.x, p.y);
+        assert!(near(
+            lean_in_picture(Some([0.5, 0.0]), at, flipped),
+            [-0.5, 0.0]
+        ));
+        // A view turned a quarter: leaning down on screen leans the
+        // picture's way that the screen's down lands on.
+        let turned = |p: Pos2| egui::pos2(-p.y, p.x);
+        assert!(near(
+            lean_in_picture(Some([0.0, 0.5]), at, turned),
+            [-0.5, 0.0]
+        ));
+        // Upright or unknown: no way at all; how far is tilt's.
+        assert_eq!(lean_in_picture(None, at, zoomed), [0.0, 0.0]);
+        assert_eq!(lean_in_picture(Some([0.0, 0.0]), at, zoomed), [0.0, 0.0]);
+        assert_eq!(tilt_of(None), 0.0);
+        assert!((tilt_of(Some([0.6, 0.8])) - 1.0).abs() < 1e-6);
+    }
 }

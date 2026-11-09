@@ -616,6 +616,9 @@ pub struct SuePaint {
     /// Playback starts over at the end.
     pub(crate) looping: bool,
     pub(crate) pressure: Option<f32>,
+    /// The pen's lean (as `sue_platform::stylus::tilt` has it) read with
+    /// this frame's pointer event, until the tip lifts.
+    pub(crate) sample_lean: Option<[f32; 2]>,
     /// The pen pressure curve every tool uses (Pen Pressure Settings).
     pub(crate) pen_curve: sue_model::Response,
     /// The hint about fitting pen pressure was given (once a run).
@@ -781,6 +784,7 @@ impl Default for SuePaint {
             layer_drag: None,
             looping: true,
             pressure: None,
+            sample_lean: None,
             pen_curve: crate::dialogs::DEFAULT_PEN_PRESSURE
                 .parse()
                 .unwrap_or_default(),

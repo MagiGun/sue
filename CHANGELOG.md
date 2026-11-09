@@ -26,6 +26,9 @@ follow [Semantic Versioning](https://semver.org/).
 - **The pen's eraser end** picks the Eraser, and turning the pen back
   picks the tool you were using, between strokes (under Linux, where the
   tablet reports it).
+- **Turn with pen tilt** for brushes with a shape: each shape turns the
+  way the pen leans, so a flat or chisel tip follows your hand, as Clip
+  Studio Paint's direction of the pen does. Vector lines keep it. (#2)
 
 ### Fixed
 
@@ -43,6 +46,13 @@ follow [Semantic Versioning](https://semver.org/).
   is connected, Sue opens through XWayland instead. Set
   `SUE_DISPLAY_SERVER=wayland` or `x11` to choose yourself. Under
   Wayland the pen shows the same cursor as the mouse.
+- **Pen tablets under Wayland** answer at once: a pen that only hovers
+  or draws no longer waits for the mouse or keyboard to wake Sue, every
+  point of a stroke has the pressure the pen had there rather than the
+  last one of its frame, and reading the tablet can no longer stall
+  beside the graphics driver. Under X11 a pen's tilt reads in degrees as
+  under Wayland, so tilt settings feel the same on both. Found and tested
+  on a Huion Kamvas 22 Plus under KDE Plasma 6 by mahesh-labs. (#2)
 
 ## [0.0.74] - 2026-11-02
 
