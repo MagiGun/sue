@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use egui::{Key, Modifiers, Pos2, Rect, Ui, pos2, vec2};
+use egui::{Key, Modifiers, Pos2, Rect, Ui, vec2};
 use sue_core::txn::{Batch, SetProperty, SpawnEntity};
 use sue_core::{
     Arena, CHILD, ComponentKind, Entity, EntityId, PixelFormat, Properties, RasterTile2D, Relation,
@@ -408,6 +408,9 @@ pub struct SuePaint {
     pub(crate) item_bank: Vec<crate::extras::Item>,
     /// The registered workspaces.
     pub(crate) workspaces: Vec<crate::extras::Workspace>,
+    /// The workspace Reset to Default goes back to, once people chose one
+    /// (Use Current Workspace as Default).
+    pub(crate) default_workspace: Option<crate::extras::Workspace>,
     /// Canvas presets registered in the New dialog.
     pub(crate) canvas_presets: Vec<crate::dialogs::CanvasPreset>,
     /// Every open canvas shows at once, side by side (Window, Canvas,
@@ -521,9 +524,9 @@ pub struct SuePaint {
     /// An audio clip being dragged in the timeline: its track, where the
     /// drag began (frame) and the clip's start then.
     pub(crate) audio_drag: Option<(usize, i64, i64)>,
-    /// How wide a frame is on the timeline, once zoomed; `None` fits
-    /// the timeline to the palette.
-    pub(crate) timeline_step: Option<f32>,
+    /// Where the Timeline palette looks: its zoom, the first frame at its
+    /// left and how far its tracks are scrolled.
+    pub(crate) timeline_view: crate::anim_ui::TimelineView,
     /// A 3D layer's view being changed in Tool Property, and its view and
     /// pixels from before.
     pub(crate) view3d_before: Option<(EntityId, crate::three::View3D, Vec<u8>)>,
@@ -686,6 +689,7 @@ impl Default for SuePaint {
             auto: crate::extras::AutoActions::default(),
             item_bank: Vec::new(),
             workspaces: Vec::new(),
+            default_workspace: None,
             tiled: false,
             print: crate::print::PrintSettings::default(),
             bar_hidden: HashSet::new(),
@@ -738,7 +742,7 @@ impl Default for SuePaint {
             audio_mix: None,
             audio_lap: None,
             audio_drag: None,
-            timeline_step: None,
+            timeline_view: crate::anim_ui::TimelineView::default(),
             camera_pending: None,
             view3d_before: None,
             pending_view3d: None,
@@ -1223,6 +1227,7 @@ fn implemented(command: &str) -> bool {
             | "window.tile"
             | "window.cascade"
             | "window.workspace.save"
+            | "window.workspace.default"
             | "window.workspace.manage"
             | "window.sub_view"
             | "window.cels"
@@ -4237,6 +4242,11 @@ impl SuePaint {
             .is_some_and(|info| info.kind == LayerKind::Raster);
         let selection = self.doc().is_some_and(|doc| doc.selection.is_some());
         let flag = |on: bool| ItemState::check(on);
+        // A tab torn off into a palette of its own is shown while it is.
+        if crate::dock::Palette::torn_by(command).is_some_and(|palette| self.dock.is_open(palette))
+        {
+            return flag(true);
+        }
         let when = |on: bool| {
             if on {
                 ItemState::on()
@@ -4462,6 +4472,13 @@ impl SuePaint {
         self.finish_typing(cx);
         // A tool's command (from a script or Auto Actions) picks the tool.
         if command.starts_with("tool.") && self.tool_key(command) {
+            return;
+        }
+        // The Window menu hides a tab torn off into a palette of its own.
+        if let Some(palette) = crate::dock::Palette::torn_by(command)
+            && self.dock.is_open(palette)
+        {
+            self.close_palette(palette);
             return;
         }
         // Studio Mode's keys T1 to T7 run the commands the rice names.
@@ -6448,11 +6465,23 @@ impl SuePaint {
             }
             "window.tile" => self.tiled = true,
             "window.cascade" => self.tiled = false,
+            // Reset to Default: the workspace people chose as the default
+            // (Use Current Workspace as Default), or Sue Paint's own when
+            // there is none or the palettes already are as it says.
             "window.workspace.reset" => {
-                self.dock = crate::dock::Dock::default();
-                self.panels = Panels::default();
-                self.menus_hidden = false;
+                let saved = self
+                    .default_workspace
+                    .clone()
+                    .filter(|space| space.lines != self.workspace_now("").lines);
+                if let Some(space) = saved {
+                    self.apply_layout(&space.lines);
+                } else {
+                    self.dock = crate::dock::Dock::default();
+                    self.panels = Panels::default();
+                    self.menus_hidden = false;
+                }
             }
+            "window.workspace.default" => self.set_default_workspace(cx),
             "window.tool" => self.panels.tool = !self.panels.tool,
             "window.sub_tool" => self.panels.sub_tool = !self.panels.sub_tool,
             "window.tool_property" => self.panels.tool_property = !self.panels.tool_property,
@@ -6746,22 +6775,11 @@ impl SuePaint {
             ui.spacing_mut().button_padding = vec2(8.0, 6.0);
         }
 
-        // The menus are in Sue's top bar (`bar_ui`); the command bar sits
-        // at the page's top. While the studio comes in or goes out, every
-        // palette slides in from or out to its edge of the window.
-        let top_height = if self.menus_hidden || !self.panels.command_bar {
-            0.0
-        } else {
-            38.0
-        };
-        let lift = self.hide * top_height;
-        if top_height > 0.0 {
-            let top = full.top() - lift;
-            let strip = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), top + 38.0));
-            self.command_bar(ui, strip, cx, &theme);
-        }
-        let body = Rect::from_min_max(pos2(full.left(), full.top() + top_height - lift), full.max);
-        self.body(ui, body, cx, &theme);
+        // The menus are in Sue's top bar (`bar_ui`); the command bar is a
+        // palette, in the dock's top row until people move it. While the
+        // studio comes in or goes out, every palette slides in from or out
+        // to its edge of the window.
+        self.body(ui, full, cx, &theme);
         if self.ready {
             self.dialog_ui(&ctx, cx, &theme);
         }

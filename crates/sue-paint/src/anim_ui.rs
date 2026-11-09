@@ -25,6 +25,163 @@ type Edit = sue_core::txn::Batch<sue_core::Arena>;
 /// whether it is on.
 type Button<'a> = (Icon, String, &'a str, bool, bool);
 
+/// Where the Timeline palette looks, as Clip Studio Paint's: how wide a
+/// frame is, the frame at the left edge (fractional while it pans) and
+/// how far the tracks are scrolled down. Over the frames the wheel zooms
+/// around the pointer, Shift and the wheel pan sideways, Alt and the wheel
+/// scroll the tracks, and Space and a drag or the middle button pan; the
+/// scrollbars along the bottom and right edges scroll it too.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct TimelineView {
+    /// Points per frame once people zoomed; `None` fits the frames.
+    pub step: Option<f32>,
+    /// The frame at the left edge.
+    pub first: f32,
+    /// How far the tracks are scrolled down, in points.
+    pub down: f32,
+    /// The current frame the view last made sure to show.
+    seen: Option<u32>,
+}
+
+impl TimelineView {
+    /// The narrowest a frame gets.
+    pub const MIN_STEP: f32 = 4.0;
+    /// The widest a frame gets.
+    pub const MAX_STEP: f32 = 60.0;
+
+    /// Points per frame: the zoom people chose, or `length` frames fitting
+    /// `width`.
+    #[must_use]
+    pub fn step(&self, width: f32, length: u32) -> f32 {
+        self.step
+            .unwrap_or_else(|| ((width - 8.0) / length.max(1) as f32).clamp(10.0, 26.0))
+    }
+
+    /// Zooms from `step` by `factor`, keeping the frame `at` points right of
+    /// the frames' left edge under the pointer. Returns the new step.
+    pub fn zoom_at(&mut self, step: f32, at: f32, factor: f32) -> f32 {
+        let anchor = self.first + at / step;
+        let zoomed = (step * factor).clamp(Self::MIN_STEP, Self::MAX_STEP);
+        self.step = Some(zoomed);
+        self.first = anchor - at / zoomed;
+        zoomed
+    }
+
+    /// Moves the frames `points` to the right (earlier frames come in).
+    pub fn pan(&mut self, points: f32, step: f32) {
+        self.first -= points / step.max(f32::EPSILON);
+    }
+
+    /// Moves the tracks `points` down (the ones above come in).
+    pub fn scroll(&mut self, points: f32) {
+        self.down -= points;
+    }
+
+    /// The wheel over the frames, as Clip Studio Paint takes it: `delta`
+    /// zooms around `at` (points from the frames' left edge), with Shift
+    /// it pans and with Alt it scrolls the tracks. Returns the step.
+    pub fn wheel(&mut self, step: f32, at: f32, delta: egui::Vec2, shift: bool, alt: bool) -> f32 {
+        if alt && delta.y != 0.0 {
+            self.scroll(delta.y);
+            step
+        } else if shift {
+            self.pan(delta.x + delta.y, step);
+            step
+        } else if delta.y + delta.x != 0.0 {
+            self.zoom_at(step, at, ((delta.y + delta.x) * 0.004).exp())
+        } else {
+            step
+        }
+    }
+
+    /// Keeps the view on the timeline and its tracks, and brings `frame`
+    /// into view when it changed (playing, stepping). `width` and
+    /// `visible` are the frames' width and the tracks' height, `content`
+    /// the height of every track. Returns how many frames show.
+    pub fn settle(
+        &mut self,
+        frame: u32,
+        length: u32,
+        width: f32,
+        step: f32,
+        content: f32,
+        visible: f32,
+    ) -> u32 {
+        let shown = ((width / step).ceil() as u32).max(1);
+        let most = length.saturating_sub(shown.saturating_sub(1)) as f32;
+        if self.seen != Some(frame) {
+            self.seen = Some(frame);
+            let now = self.first.max(0.0);
+            let end = now + shown.saturating_sub(1).max(1) as f32;
+            if (frame as f32) < now.floor() || frame as f32 >= end {
+                self.first = frame.saturating_sub(shown.saturating_sub(4)) as f32;
+            }
+        }
+        self.first = self.first.clamp(0.0, most);
+        self.down = self.down.clamp(0.0, (content - visible).max(0.0));
+        shown
+    }
+}
+
+/// The Timeline's scrollbars, as Clip Studio Paint's: along the bottom of
+/// `rows` (the frames under the ruler) when not every frame shows, and
+/// along its right edge when not every track does. `frames` is the
+/// timeline's length and how many frames show; `heights` every track's
+/// height and how much of it shows.
+fn timeline_scrollbars(
+    ui: &Ui,
+    view: &mut TimelineView,
+    rows: Rect,
+    (length, shown): (u32, u32),
+    (content, visible): (f32, f32),
+    theme: &Theme,
+) {
+    const THICK: f32 = 9.0;
+    let tall = content > visible + 0.5;
+    let painter = ui.painter().with_clip_rect(rows);
+    let bar = |track: Rect, thumb: Rect, id: &str| {
+        let response = ui.interact(track, ui.scope_id().with(id), Sense::drag());
+        painter.rect_filled(track, 0.0, theme.void.gamma_multiply(0.5));
+        let lit = response.hovered() || response.dragged();
+        painter.rect_filled(
+            thumb.shrink(1.5),
+            3.0,
+            theme.muted.gamma_multiply(if lit { 1.0 } else { 0.6 }),
+        );
+        response.drag_delta()
+    };
+    if length > shown {
+        let most = length.saturating_sub(shown.saturating_sub(1)).max(1) as f32;
+        let track = Rect::from_min_max(
+            pos2(rows.left(), rows.bottom() - THICK),
+            pos2(rows.right() - if tall { THICK } else { 0.0 }, rows.bottom()),
+        );
+        let size = (track.width() * shown as f32 / length as f32).clamp(24.0, track.width());
+        let room = (track.width() - size).max(1.0);
+        let thumb = Rect::from_min_size(
+            pos2(track.left() + room * view.first / most, track.top()),
+            vec2(size, THICK),
+        );
+        let moved = bar(track, thumb, "timeline-hbar");
+        view.first = (view.first + moved.x * most / room).clamp(0.0, most);
+    }
+    if tall {
+        let most = (content - visible).max(1.0);
+        let track = Rect::from_min_max(
+            pos2(rows.right() - THICK, rows.top()),
+            pos2(rows.right(), rows.bottom() - THICK),
+        );
+        let size = (track.height() * visible / content).clamp(24.0, track.height().max(24.0));
+        let room = (track.height() - size).max(1.0);
+        let thumb = Rect::from_min_size(
+            pos2(track.left(), track.top() + room * view.down / most),
+            vec2(THICK, size),
+        );
+        let moved = bar(track, thumb, "timeline-vbar");
+        view.down = (view.down + moved.y * most / room).clamp(0.0, most);
+    }
+}
+
 impl SuePaint {
     /// The current picture's timeline, cloned, and its length.
     /// The cel being drawn: the one the current folder shows at the
@@ -1090,11 +1247,15 @@ impl SuePaint {
             );
         }
         match run {
-            Some("timeline.zoom_out") => {
-                self.timeline_step = Some((self.timeline_step.unwrap_or(15.0) / 1.25).max(4.0));
-            }
-            Some("timeline.zoom_in") => {
-                self.timeline_step = Some((self.timeline_step.unwrap_or(15.0) * 1.25).min(60.0));
+            Some(zoom @ ("timeline.zoom_out" | "timeline.zoom_in")) => {
+                let view = &mut self.timeline_view;
+                let step = view.step.unwrap_or(15.0);
+                let factor = if zoom == "timeline.zoom_in" {
+                    1.25
+                } else {
+                    1.0 / 1.25
+                };
+                view.zoom_at(step, 0.0, factor);
             }
             Some(command) => {
                 self.anim_command(command, cx);
@@ -1128,14 +1289,55 @@ impl SuePaint {
         let row_height = 74.0;
         let ruler = 34.0;
         let frames_area = Rect::from_min_max(pos2(names.right(), tracks.top()), tracks.max);
-        let step = self.timeline_step.unwrap_or_else(|| {
-            ((frames_area.width() - 8.0) / length.max(1) as f32).clamp(10.0, 26.0)
+        let mut step = self.timeline_view.step(frames_area.width(), length);
+        // As Clip Studio Paint, over the frames: the wheel zooms around the
+        // pointer, Shift and the wheel pan, Alt and the wheel scroll the
+        // tracks, Space and a drag or the middle button pan.
+        let content = ruler
+            + anim::folders(&sequence).len() as f32 * row_height
+            + anim::audio_tracks(&sequence).len() as f32 * 26.0;
+        let (hover, wheel, shift, alt, space, middle, primary, motion) = ui.input(|input| {
+            (
+                input.pointer.hover_pos(),
+                input.smooth_scroll_delta,
+                input.modifiers.shift,
+                input.modifiers.alt,
+                input.key_down(egui::Key::Space),
+                input.pointer.middle_down(),
+                input.pointer.primary_down(),
+                input.pointer.delta(),
+            )
         });
-        let shown = ((frames_area.width() / step).ceil() as u32).max(1);
-        let first = frame
-            .saturating_sub(shown.saturating_sub(4))
-            .min(length.saturating_sub(shown.saturating_sub(1)));
-        let column = |at: u32| frames_area.left() + (at as f32 - first as f32) * step;
+        let over = hover.filter(|_| ui.rect_contains_pointer(frames_area));
+        let panning = over.is_some() && (middle || (space && primary));
+        if let Some(pos) = over {
+            if panning {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                self.timeline_view.pan(motion.x, step);
+                self.timeline_view.scroll(motion.y);
+            } else if space {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            }
+            if wheel != egui::Vec2::ZERO {
+                step =
+                    self.timeline_view
+                        .wheel(step, pos.x - frames_area.left(), wheel, shift, alt);
+                // The timeline took the wheel: nothing under it scrolls.
+                ui.input_mut(|input| input.smooth_scroll_delta = egui::Vec2::ZERO);
+            }
+        }
+        let shown = self.timeline_view.settle(
+            frame,
+            length,
+            frames_area.width(),
+            step,
+            content,
+            tracks.height(),
+        );
+        let origin = self.timeline_view.first;
+        let down = self.timeline_view.down;
+        let first = origin.floor() as u32;
+        let column = |at: u32| frames_area.left() + (at as f32 - origin) * step;
         let painter = ui.painter().with_clip_rect(frames_area);
         let below = Rect::from_min_max(
             pos2(frames_area.left(), frames_area.top() + ruler),
@@ -1163,7 +1365,7 @@ impl SuePaint {
             theme.text,
         );
         // Every other second a lighter band, its number above it.
-        let last = (first + shown).min(length);
+        let last = (first + shown + 1).min(length);
         for second in (first / fps)..=(last / fps) {
             let (from, to) = (second * fps, ((second + 1) * fps).min(length));
             let band = Rect::from_min_max(
@@ -1221,7 +1423,7 @@ impl SuePaint {
         }
         painter.hline(frames_area.x_range(), below.top(), theme.hairline());
         // The end of the timeline: what lies past it is darker.
-        if length < first + shown {
+        if (length as f32) < origin + shown as f32 {
             painter.rect_filled(
                 Rect::from_min_max(pos2(column(length), frames_area.top()), frames_area.max),
                 0.0,
@@ -1236,16 +1438,21 @@ impl SuePaint {
         );
         if let Some(pos) = ruler_response.interact_pointer_pos()
             && (ruler_response.clicked() || ruler_response.dragged())
+            && !panning
         {
-            let at = first + ((pos.x - frames_area.left()) / step).max(0.0) as u32;
+            let at = (origin + (pos.x - frames_area.left()) / step).max(0.0) as u32;
             self.go_to_frame(&cx.world.arena, i64::from(at.min(length - 1)));
         }
         // One tall row per folder: its name and the picture it shows now in
         // the column, and each key's cel as a picture in the frames.
         let mut action: Option<(usize, u32, Option<Option<EntityId>>)> = None;
-        let names_painter = ui.painter().with_clip_rect(names);
+        let mut eye: Option<(usize, bool)> = None;
+        // The rows scroll under the ruler, not over it.
+        let rows_area = Rect::from_min_max(pos2(names.left(), tracks.top() + ruler), names.max);
+        let names_painter = ui.painter().with_clip_rect(rows_area);
+        let painter = painter.with_clip_rect(below);
         for (row, index) in anim::folders(&sequence).into_iter().enumerate() {
-            let top = tracks.top() + ruler + row as f32 * row_height;
+            let top = tracks.top() + ruler + row as f32 * row_height - down;
             let name_rect =
                 Rect::from_min_size(pos2(names.left(), top), vec2(names.width(), row_height));
             let chosen = index == track;
@@ -1263,12 +1470,35 @@ impl SuePaint {
             names_painter.hline(names.x_range(), name_rect.bottom(), theme.hairline());
             painter.hline(frames_area.x_range(), name_rect.bottom(), theme.hairline());
             let line = pos2(name_rect.left() + 8.0, top + 11.0);
+            // The eye shows and hides the animation folder, as the Layer
+            // palette's does: it is the same folder.
+            let folder = anim::track_folder(&sequence.tracks[index]);
+            let visible = folder
+                .and_then(|folder| cx.world.arena.get_by_id(folder).ok())
+                .map_or(!sequence.tracks[index].muted, |entity| {
+                    sue_model::picture::LayerStyle::of(entity).visible
+                });
+            let eye_rect = Rect::from_center_size(line + vec2(6.0, 0.0), vec2(18.0, 18.0));
             crate::icons::paint(
                 &names_painter,
                 Rect::from_center_size(line + vec2(6.0, 0.0), vec2(14.0, 14.0)),
                 Icon::Eye,
-                theme.muted,
+                if visible {
+                    theme.text
+                } else {
+                    theme.muted.gamma_multiply(0.35)
+                },
             );
+            let eye_response = ui
+                .interact(
+                    eye_rect.intersect(rows_area),
+                    ui.scope_id().with(("timeline-eye", index)),
+                    Sense::click(),
+                )
+                .on_hover_text(tr!("show-or-hide-the-animation-folder"));
+            if eye_response.clicked() {
+                eye = Some((index, !visible));
+            }
             crate::icons::paint(
                 &names_painter,
                 Rect::from_center_size(line + vec2(26.0, 0.0), vec2(14.0, 14.0)),
@@ -1343,14 +1573,19 @@ impl SuePaint {
             let cells = Rect::from_min_size(
                 pos2(frames_area.left(), top),
                 vec2(frames_area.width(), row_height),
-            );
+            )
+            .intersect(below);
             let response = ui.interact(
                 cells,
                 ui.scope_id().with(("timeline-cells", index)),
                 Sense::click(),
             );
             let name_click = ui.interact(
-                name_rect,
+                Rect::from_min_max(
+                    pos2(name_rect.left() + 18.0, name_rect.top()),
+                    name_rect.max,
+                )
+                .intersect(rows_area),
                 ui.scope_id().with(("timeline-folder", index)),
                 Sense::click(),
             );
@@ -1365,7 +1600,7 @@ impl SuePaint {
                 }
             }
             let at_pointer = |pos: egui::Pos2| {
-                (first + ((pos.x - frames_area.left()) / step).max(0.0) as u32).min(length - 1)
+                ((origin + (pos.x - frames_area.left()) / step).max(0.0) as u32).min(length - 1)
             };
             if let Some(pos) = response.interact_pointer_pos() {
                 if response.double_clicked() {
@@ -1408,6 +1643,7 @@ impl SuePaint {
         }
         // The current frame: a red bar down the frames, as Clip Studio
         // Paint marks it.
+        let painter = painter.with_clip_rect(frames_area);
         let red = Color32::from_rgb(196, 64, 64);
         let current = Rect::from_min_size(
             pos2(column(frame), frames_area.top() + 14.0),
@@ -1421,6 +1657,7 @@ impl SuePaint {
             theme.font(theme.small_size - 1.0),
             Color32::WHITE,
         );
+        let painter = painter.with_clip_rect(below);
         let row_height = 26.0;
         let ruler = ruler + anim::folders(&sequence).len() as f32 * 74.0
             - anim::folders(&sequence).len() as f32 * row_height;
@@ -1428,7 +1665,7 @@ impl SuePaint {
         let rows = anim::folders(&sequence).len();
         let mut audio_edit: Option<(sue_model::Sequence, String)> = None;
         for (row, index) in anim::audio_tracks(&sequence).into_iter().enumerate() {
-            let top = tracks.top() + ruler + (rows + row) as f32 * row_height;
+            let top = tracks.top() + ruler + (rows + row) as f32 * row_height - down;
             let track_ref = &sequence.tracks[index];
             let name_rect =
                 Rect::from_min_size(pos2(names.left(), top), vec2(names.width(), row_height));
@@ -1455,13 +1692,13 @@ impl SuePaint {
             let dragged_by = match self.audio_drag {
                 Some((dragging, from, _)) if dragging == index => {
                     ui.ctx().pointer_latest_pos().map_or(0, |pos| {
-                        (first as i64 + ((pos.x - frames_area.left()) / step) as i64) - from
+                        (origin + (pos.x - frames_area.left()) / step).floor() as i64 - from
                     })
                 }
                 _ => 0,
             };
             let shown_at = (begin + dragged_by).max(0);
-            let x0 = frames_area.left() + (shown_at - first as i64) as f32 * step;
+            let x0 = frames_area.left() + (shown_at as f32 - origin) * step;
             let bar = Rect::from_min_max(
                 pos2(x0, top + 4.0),
                 pos2(x0 + span as f32 * step, top + row_height - 4.0),
@@ -1483,15 +1720,17 @@ impl SuePaint {
             let row_rect = Rect::from_min_size(
                 pos2(frames_area.left(), top),
                 vec2(frames_area.width(), row_height),
-            );
+            )
+            .intersect(below);
             let response = ui.interact(
                 row_rect,
                 ui.scope_id().with(("timeline-audio", index)),
                 Sense::click_and_drag(),
             );
             let at_pointer =
-                |pos: egui::Pos2| first as i64 + ((pos.x - frames_area.left()) / step) as i64;
+                |pos: egui::Pos2| (origin + (pos.x - frames_area.left()) / step).floor() as i64;
             if response.drag_started()
+                && !panning
                 && let Some(pos) = response.interact_pointer_pos()
             {
                 self.audio_drag = Some((index, at_pointer(pos), begin));
@@ -1535,14 +1774,47 @@ impl SuePaint {
                 }
             });
         }
+        timeline_scrollbars(
+            ui,
+            &mut self.timeline_view,
+            frames_area.with_min_y(frames_area.top() + 34.0),
+            (length, shown),
+            (content - 34.0, tracks.height() - 34.0),
+            theme,
+        );
         if let Some((changed, label)) = audio_edit {
             Self::apply(cx, anim::set(picture, changed, &label));
+        }
+        if let Some((index, visible)) = eye {
+            match anim::track_folder(&sequence.tracks[index]) {
+                Some(folder) => {
+                    Self::apply(cx, doc::set(folder, sue_model::picture::VISIBLE, visible));
+                }
+                // An older project's track, with no folder: it mutes.
+                None => {
+                    let mut toggled = sequence.clone();
+                    toggled.tracks[index].muted = !visible;
+                    Self::apply(
+                        cx,
+                        anim::set(picture, toggled, &tr!("show-or-hide-the-animation-folder")),
+                    );
+                }
+            }
         }
         if let Some((index, at, assign)) = action {
             if let Some(doc) = self.doc_mut() {
                 doc.track = index;
             }
             self.go_to_frame(&cx.world.arena, i64::from(at));
+            // A blank there: the folder itself is picked, as in the Layer
+            // palette, so the two stay in step.
+            if assign.is_none()
+                && anim::cel_at(&sequence.tracks[index], sequence.rate, at).is_none()
+                && let Some(folder) = anim::track_folder(&sequence.tracks[index])
+                && let Some(doc) = self.doc_mut()
+            {
+                doc.layer = Some(folder);
+            }
             if let Some(cel) = assign {
                 if cel.is_some_and(|cel| !anim::may_show(&cx.world.arena, &sequence, index, cel)) {
                     cx.notify(tr!("only-cels-of-this-animation-folder"));
@@ -1776,5 +2048,86 @@ impl SuePaint {
             self.light_table = true;
             self.light_cel = true;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TimelineView;
+    use egui::vec2;
+
+    #[test]
+    fn the_wheel_zooms_the_timeline_around_the_pointer() {
+        let mut view = TimelineView {
+            first: 10.0,
+            ..TimelineView::default()
+        };
+        // 20 points a frame, the pointer 100 points in: frame 15 is there.
+        let step = view.wheel(20.0, 100.0, vec2(0.0, 50.0), false, false);
+        assert!(step > 20.0, "the wheel up zooms in: {step}");
+        assert!(
+            (view.first + 100.0 / step - 15.0).abs() < 1e-3,
+            "frame 15 stays under the pointer"
+        );
+        let back = view.wheel(step, 100.0, vec2(0.0, -50.0), false, false);
+        assert!((back - 20.0).abs() < 1e-3, "and out again: {back}");
+        assert!((view.first - 10.0).abs() < 1e-3);
+        // Never past its narrowest or widest.
+        for _ in 0..40 {
+            view.wheel(view.step.unwrap(), 0.0, vec2(0.0, 200.0), false, false);
+        }
+        assert_eq!(view.step, Some(TimelineView::MAX_STEP));
+        for _ in 0..40 {
+            view.wheel(view.step.unwrap(), 0.0, vec2(0.0, -200.0), false, false);
+        }
+        assert_eq!(view.step, Some(TimelineView::MIN_STEP));
+    }
+
+    #[test]
+    fn shift_pans_alt_scrolls_and_drags_pan() {
+        let mut view = TimelineView {
+            first: 10.0,
+            ..TimelineView::default()
+        };
+        // Shift and the wheel: egui hands it on as a sideways scroll.
+        let step = view.wheel(20.0, 50.0, vec2(-40.0, 0.0), true, false);
+        assert_eq!(step, 20.0, "no zoom");
+        assert_eq!(view.first, 12.0, "two frames later");
+        assert_eq!(view.step, None);
+        // Alt and the wheel scroll the tracks.
+        view.wheel(20.0, 50.0, vec2(0.0, -30.0), false, true);
+        assert_eq!(view.down, 30.0);
+        assert_eq!(view.first, 12.0);
+        // A drag (Space or the middle button) moves the frames with it.
+        view.pan(60.0, 20.0);
+        view.scroll(10.0);
+        assert_eq!((view.first, view.down), (9.0, 20.0));
+    }
+
+    #[test]
+    fn the_view_stays_on_the_timeline_and_follows_the_frame() {
+        let mut view = TimelineView::default();
+        // 120 frames, 10 points each, 300 points wide: 30 show.
+        let shown = view.settle(0, 120, 300.0, 10.0, 400.0, 200.0);
+        assert_eq!(shown, 30);
+        assert_eq!(view.first, 0.0);
+        view.pan(-5000.0, 10.0);
+        view.scroll(-5000.0);
+        view.settle(0, 120, 300.0, 10.0, 400.0, 200.0);
+        assert_eq!(view.first, 91.0, "no further than the last frames");
+        assert_eq!(view.down, 200.0, "no further than the last track");
+        // The frame moving out of view brings the view to it once.
+        view.settle(40, 120, 300.0, 10.0, 400.0, 200.0);
+        assert_eq!(view.first, 14.0);
+        // Panning away from a frame that stays put keeps the pan.
+        view.pan(-200.0, 10.0);
+        view.settle(40, 120, 300.0, 10.0, 400.0, 200.0);
+        assert_eq!(view.first, 34.0);
+        // Everything fits: nothing to scroll.
+        let mut view = TimelineView::default();
+        view.scroll(-50.0);
+        view.settle(0, 12, 300.0, 24.0, 100.0, 200.0);
+        assert_eq!((view.first, view.down), (0.0, 0.0));
+        assert_eq!(view.step(300.0, 12), 24.333_334);
     }
 }

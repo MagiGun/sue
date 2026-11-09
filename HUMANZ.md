@@ -1354,18 +1354,28 @@ starts from egui's light visuals, so what egui picks by itself reads on it.
 **Docking** (`sue_wm::dock`). A studio's palettes, as Clip Studio
 Paint's: the studio lists them as a `DockPanel` (a stable key, an optional
 fixed width, a least height, a floating size, whether it stays when its
-side folds, and its default layout), and `DockLayout` keeps where they are:
-columns at the left and right made of `Group`s (palettes stacked as tabs,
-sharing the column's height by weight), a row of groups under the work
-area, floating windows and an icon strip. `layout` places everything for a
-frame (folding the widest columns into the strip when the window is
+side folds, its least width, whether it is optional, and its default
+layout), and `DockLayout` keeps where they are: columns at the left and
+right made of `Group`s (palettes stacked as tabs, sharing the column's
+height by weight), a row of groups across the top of the window (a
+command bar's) and one under the work area (`Holder::Top`,
+`Holder::Bottom`), floating windows inside the studio, windows of their
+own (`windows`, `pop_out`), and an icon strip. `layout` places everything
+for a frame (folding the widest columns into the strip when the window is
 narrow); `tabs_ui`, `grip`, `splitters` and `drop_ui` draw the tabs, start
-a drag from a title bar, tab or icon, resize columns, groups and the
-bottom row, light up the drop target (`drop_at`) and move the palette
-there (`put`); the studio only draws each palette in its rect.
-`to_lines` and `from_lines` keep a layout as text by key (also reading the
-lines from before groups), and a layout missing a palette gets it where
-the default layout has it.
+a drag from a title bar, tab or icon, resize columns (every column,
+narrow ones too, within `min_width`; `set_column_width`), groups and both
+rows, light up the drop target (`drop_at`, the work area's top edge
+docking at the top) and move the palette there (`put`); the studio only
+draws each palette in its rect, calling `grip` before it draws so its own
+buttons keep their clicks. `begin_drag` starts a drag from anything else:
+a studio tears a palette's inner tab off into an optional palette
+(`DockPanel::optional`), which is nowhere until then and is not put back
+by `fill_missing`. `reset` goes back to a saved default layout, or to the
+studio's own when the layout already is that default. `to_lines` and
+`from_lines` keep a layout as text by key (`top` and `window` lines too;
+also reading the lines from before groups and from before the top row),
+and a layout missing a palette gets it where the default layout has it.
 
 **Shortcuts.** Every applet assigns keys the same way, through
 `sue_wm::shortcuts`: it lists its commands with their default chords
@@ -1477,21 +1487,46 @@ palettes (Tool, Sub Tool, Brush Size, Color Wheel, Color Set, Navigator,
 Layer, Timeline and the ones folded in the strip) are a `DockPanel` enum
 with stable keys; `Dock` is `sue_wm::dock::DockLayout<Palette>`. They sit
 in groups (one palette, or several as tabs) in columns at the left and
-right, each column's height shared by weight, and in a row under the
-canvas (the timeline's by default). A column's inner edge drags its width
-(170 to 560 points; the tool strip and brush size keep theirs), the line
-between two groups their shares. Dragging a palette by its title bar, tab
-or icon drops it into a group, beside one, into a new column, under the
-canvas, into the strip or into a floating window. A palette's menu docks it
-on either side or at the bottom, floats it in an `egui::Window`, collapses
-it to an icon in the strip at the far right (shown beside the strip on a
-click), or closes it. When the columns, the strip and 300 points of canvas
+right, each column's height shared by weight, in a row across the top
+(the command bar's by default, `Palette::CommandBar`) and in a row under
+the canvas (the timeline's by default). A column's inner edge drags its
+width (170 to 560 points; the tool strip from 38 and Tool Sliders from
+56, and `tool_strip` lays the tools in as many columns as fit, or along a
+line in a row, with `panels::Flow`, as the command bar wraps), the line
+between two groups their shares. Dragging a palette by its title bar, tab,
+icon or grip (the command bar's and a row's tool palette's, at their left
+end) drops it into a group, beside one, into a new column, at the top,
+under the canvas, into the strip or into a floating window. Dragging a
+palette's inner tab off (`torn_header` in `panels.rs`) tears it into a
+palette of its own: the six optional ones (`ToolProperty`, `BrushGrid`,
+`ColorSlider`, `Intermediate`, `Approximate`, `ColorHistory`) or the
+strip's (`Material`, `SubView`, `LayerProperty`, `History`, `Cels`); a
+tab whose palette is open elsewhere does not show, and closing an
+optional palette removes it. A palette's menu docks it on either side, in
+a new column on either side, at the top or at the bottom, floats it in an
+`egui::Window` over the canvas, pops it out into a viewport of its own
+(`DockLayout::windows`, where Sue has its own windows), collapses it to an
+icon in the strip at the far right (shown beside the strip on a click),
+or closes it. When the columns, the strip and 300 points of canvas
 do not fit, the widest columns (never the tools) fold into the strip for
 that frame. The layout, with the Window menu's palette flags, is written
 to `layout.txt` in Sue Paint's data folder half a second after it last
 changed (`sue_paint.remember_layout`, on by default) and read at start;
-registered workspaces are the same lines by name in `workspaces.txt`. A
-tablet layout keeps the desktop's aside and gives it back.
+registered workspaces are the same lines by name in `workspaces.txt`, and
+Use Current Workspace as Default writes them to `default_workspace.txt`,
+which Reset to Default (`window.workspace.reset`) goes back to (and Sue
+Paint starts with when no layout was kept). A tablet layout keeps the
+desktop's aside and gives it back.
+
+**Timeline navigation** (`anim_ui::TimelineView`): the Timeline keeps its
+zoom (points per frame, 4 to 60), the frame at its left edge (fractional
+while panning) and how far its tracks are scrolled. Over the frames the
+wheel zooms around the pointer, Shift and the wheel pan, Alt and the wheel
+scroll the tracks, Space or the middle button and a drag pan, and
+scrollbars along the bottom and right drag; `settle` keeps the view on the
+timeline and brings the current frame into view when it changes. The eye
+beside an animation folder sets the folder's `layer.visible` (an older
+project's track without a folder mutes instead).
 Tabs show a dot when a picture's composite changed since it was opened or
 saved.
 
