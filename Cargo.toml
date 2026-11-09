@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "crates/sue-platform/android", "crates/sue-platform/ios", "crates/sue-platform/wayland", "bins/*"]
 
 [workspace.package]
-version = "0.0.74"
+version = "0.0.75"
 edition = "2024"
 rust-version = "1.95"
 publish = false

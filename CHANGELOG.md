@@ -11,6 +11,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.75] - 2026-11-09
+
 ### Added
 
 - Sue Paint's palettes can be arranged your way, as in Clip Studio
@@ -18,8 +20,7 @@ follow [Semantic Versioning](https://semver.org/).
   the right or under the canvas, stack it as a tab with another palette
   (and drag tabs to reorder them), give it a column of its own, fold it
   into the strip or float it. Sue Paint opens with the palettes where you
-  left them, and Window, Workspace now also holds Reset Palette Layout.
-  (#3)
+  left them. (#3)
 - **More ways to arrange Sue Paint's palettes**, as in Clip Studio
   Paint: dock a palette at the top beside the command bar, give it a new
   column on the left or right, pop it out into a window of its own, or
@@ -69,6 +70,12 @@ follow [Semantic Versioning](https://semver.org/).
   beside the graphics driver. Under X11 a pen's tilt reads in degrees as
   under Wayland, so tilt settings feel the same on both. Found and tested
   on a Huion Kamvas 22 Plus under KDE Plasma 6 by mahesh-labs. (#2)
+- A palette dragged with a pen (or a finger) now lands where the pen
+  lifts; before, the drop was lost and the palette stayed where it was.
+  (#3)
+
+Thanks to mahesh-labs for their fork and to Zush for the Wayland pen
+work and testing in #4.
 
 ## [0.0.74] - 2026-11-02
 
