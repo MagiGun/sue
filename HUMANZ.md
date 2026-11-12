@@ -1137,7 +1137,15 @@ transitions take 0 ms.
 `egui-wgpu`. Images (pictures, Sue Paint's layers) are uploaded from the arena's own bytes into
 native textures by key and version: a layer's version is its `revision`
 metadata, bumped by every stroke and by undo and redo. Textures no frame used
-are freed.
+are freed. An image texture also carries a mip chain, filled by a small blit
+pipeline after each upload and each layer change, so a picture drawn smaller
+than it is (a canvas zoomed out, a thumbnail) is sampled through it: what a
+screen pixel covers is averaged rather than sampled, and thin lines come out
+even instead of ragged. The blits see the texture as sRGB, so the levels
+average in light; on a device with no view formats (the GL and WebGL backends)
+they average in the encoded bytes instead, and the chain is the same either
+way. Magnified pixels still take the base level through the nearest filter, so
+painting at 800% is as crisp as it was.
 
 **Telemetry.** The status bar shows where you are (the Hub, or the studio or
 tool) and the latest message on the left; the arena entity count, the undo
