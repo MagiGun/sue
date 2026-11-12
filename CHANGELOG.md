@@ -11,6 +11,13 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Sue Paint's palette icons in the strips beside the canvas answer clicks
+  again: the grip that drags an icon out of the strip was sitting over the
+  icon and taking its clicks, so a collapsed palette could not be opened
+  from its icon at all.
+
 ## [0.0.75] - 2026-11-09
 
 ### Added

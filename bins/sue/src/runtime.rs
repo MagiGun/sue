@@ -1687,6 +1687,117 @@ pub(crate) mod tests {
         runtime.shell.page_rect().center() + vec2(8.0, -63.0)
     }
 
+    /// The icons of the strip beside the canvas open the palette they
+    /// stand for. The grip that drags an icon out of the strip senses
+    /// drags only, and must be registered under the icon: a drag-only
+    /// widget above a click-sensing one makes egui drop the click
+    /// (`hit_test_on_close`), which left the whole strip dead to clicks.
+    #[test]
+    fn sue_paint_strip_icons_open_their_palettes() {
+        let (mut runtime, root) = runtime("paint-strip");
+        let ctx = egui::Context::default();
+        let size = vec2(1440.0, 900.0);
+        let start = Instant::now();
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            start,
+        );
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        // A picture so the studio shows its palettes, not the start page.
+        runtime.with_context(&mut NoTextures, start, |cx| {
+            sue_paint::sample_picture(cx, 320, 240)
+        });
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let page = runtime.shell.page_rect();
+        let mut now = start;
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| -> Vec<(String, Pos2)> {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, size)),
+                events,
+                time: Some(ctx.input(|input| input.time) + 0.016),
+                ..egui::RawInput::default()
+            };
+            now += Duration::from_millis(16);
+            let output = ctx.run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
+            let texts = texts_of(&output);
+            output.drop_without_applying_deltas();
+            texts
+        };
+        // Where a strip icon is: the strip runs down the right edge, its
+        // icons start under the command bar (38 high), inset 4, 26 across
+        // and 32 apart.
+        let icon = |index: usize| {
+            Pos2::new(
+                page.right() - sue_wm::dock::STRIP + 4.0 + 13.0,
+                page.top() + 38.0 + sue_wm::dock::COLUMN_BAR + 6.0 + 13.0 + index as f32 * 32.0,
+            )
+        };
+        // A palette is open when its own title is drawn beside the strip;
+        // the icon's tooltip sits in the strip itself.
+        let open = |texts: &[(String, Pos2)], name: &str| {
+            texts
+                .iter()
+                .any(|(text, at)| text == name && at.x < page.right() - sue_wm::dock::STRIP - 40.0)
+        };
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let mut texts = step(&mut runtime, Vec::new());
+        for _ in 0..4 {
+            texts = step(&mut runtime, Vec::new());
+        }
+        // Material, then History, each opened by its icon and closed by it again.
+        for (index, name) in [(0_usize, "Material"), (3, "History")] {
+            assert!(
+                !open(&texts, name),
+                "{name} is open before its icon is clicked"
+            );
+            let at = icon(index);
+            step(&mut runtime, vec![egui::Event::PointerMoved(at)]);
+            step(&mut runtime, vec![press(at, true)]);
+            step(&mut runtime, vec![press(at, false)]);
+            for _ in 0..4 {
+                texts = step(&mut runtime, Vec::new());
+            }
+            assert!(
+                open(&texts, name),
+                "clicking the {name} icon at {at:?} did not open its palette"
+            );
+            step(&mut runtime, vec![press(at, true)]);
+            step(&mut runtime, vec![press(at, false)]);
+            for _ in 0..4 {
+                texts = step(&mut runtime, Vec::new());
+            }
+            assert!(
+                !open(&texts, name),
+                "clicking the {name} icon again did not close its palette"
+            );
+        }
+        // The icon still drags its palette out: a press and a pull.
+        let at = icon(7);
+        step(&mut runtime, vec![egui::Event::PointerMoved(at)]);
+        step(&mut runtime, vec![press(at, true)]);
+        let to = Pos2::new(page.center().x, page.center().y);
+        for index in 1..=20 {
+            let at = at + (to - at) * (index as f32 / 20.0);
+            step(&mut runtime, vec![egui::Event::PointerMoved(at)]);
+        }
+        step(&mut runtime, vec![press(to, false)]);
+        for _ in 0..4 {
+            texts = step(&mut runtime, Vec::new());
+        }
+        assert!(
+            open(&texts, "Info"),
+            "dragging the Info icon did not float its palette over the canvas"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// One frame of `size` with `events`, at `now`.
     #[test]
     fn a_finger_drag_scrolls_sue_writers_page_on_a_phone() {

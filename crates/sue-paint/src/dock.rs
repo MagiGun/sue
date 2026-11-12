@@ -812,6 +812,12 @@ impl SuePaint {
                 vec2(26.0, 26.0),
             );
             let open = self.dock.popped == Some(*palette);
+            // The grip first, so the icon's own click stays on top of it:
+            // egui drops a click when a drag-only widget is above the one
+            // that senses it (`hit_test_on_close`).
+            if self.ready {
+                self.dock.grip(ui, rect, *palette, "icon");
+            }
             if icon_button(
                 ui,
                 rect,
@@ -822,9 +828,6 @@ impl SuePaint {
                 theme,
             ) {
                 self.dock.popped = if open { None } else { Some(*palette) };
-            }
-            if self.ready {
-                self.dock.grip(ui, rect, *palette, "icon");
             }
         }
         let Some(palette) = self
