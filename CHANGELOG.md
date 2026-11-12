@@ -11,6 +11,13 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Sue Paint's color wheel is smooth at every size: the hue ring's two
+  circular edges are feathered, since egui antialiases no mesh, and the
+  saturation and value square's mesh follows the wheel's size. It used to
+  draw a stair-stepped circle over a gradient with a visible grid in it.
+
 ## [0.0.75] - 2026-11-09
 
 ### Added
