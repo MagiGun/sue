@@ -132,6 +132,21 @@ impl Doc {
     }
 }
 
+/// A stroke Smart Shape corrected while the pen is still down: the shape it
+/// became, and what a drag does to it.
+#[derive(Clone, Debug)]
+pub(crate) struct Shaping {
+    /// The shape as corrected, in layer pixels.
+    pub(crate) path: Vec<[f32; 2]>,
+    /// What a drag turns and scales it about (`smart::pivot`).
+    pub(crate) pivot: [f32; 2],
+    /// The point of the shape the pen was at when it became one, which a
+    /// drag carries to wherever the pen goes.
+    pub(crate) reference: [f32; 2],
+    /// Where the pen was at the last redraw, so a still pen redraws nothing.
+    pub(crate) at: [f32; 2],
+}
+
 /// What a press on the canvas started.
 #[derive(Debug)]
 pub(crate) enum Gesture {
@@ -159,6 +174,10 @@ pub(crate) enum Gesture {
         /// whether the stroke already became its shape.
         rest: Option<(f64, Pos2)>,
         shaped: bool,
+        /// The shape the stroke became, while the pen is still down: a drag
+        /// then moves a line's far end, or turns and sizes a shape around
+        /// its middle, and lifting the pen keeps what the drag left.
+        shaping: Option<Shaping>,
     },
     /// The eraser on a vector layer: its pixels and lines from before, the
     /// lines now, and where the eraser last was (layer pixels).

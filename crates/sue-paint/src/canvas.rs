@@ -1482,6 +1482,7 @@ impl SuePaint {
                     vector,
                     rest: None,
                     shaped: !sub.smart_shape,
+                    shaping: None,
                 });
             }
             // Text on Curve: the curve is drawn first, then typed along.
@@ -2085,24 +2086,51 @@ impl SuePaint {
         });
         let Some(Gesture::Stroke {
             stroke,
-            line,
-            snap,
+            raw,
             rest,
             shaped,
+            shaping,
             shifted,
             vector,
+            snap,
+            line,
             ..
         }) = self.gesture.as_mut()
         else {
             return;
         };
-        let (Some(pointer), true, false) = (pointer, down, *line || *shaped || snap.is_some())
-        else {
+        // Nothing to do on the straight line Shift draws on release, on a
+        // stroke following a ruler, or with Smart Shape off for this tool.
+        let (Some(pointer), true) = (pointer, down) else {
             return;
         };
+        if *line || snap.is_some() || (*shaped && shaping.is_none()) {
+            return;
+        }
         let Some(doc) = self.docs.get(self.active) else {
             return;
         };
+        // Where the stroke last saw the pen, in layer pixels: the place the
+        // samples and the corrected shape are in too. The drag handler keeps
+        // it current even while a corrected shape is being carried.
+        let pen = *raw;
+        // A shape already corrected follows the pen until it lifts: dragging
+        // moves a line's far end, or turns and sizes a shape around its
+        // middle, and lifting the pen keeps what the drag left.
+        if let Some(shaping) = shaping.as_mut() {
+            if (pen[0] - shaping.at[0]).hypot(pen[1] - shaping.at[1]) < 0.5 {
+                return;
+            }
+            let moved = crate::smart::dragged(&shaping.path, shaping.pivot, shaping.reference, pen);
+            shaping.at = pen;
+            let selection = (!*vector)
+                .then(|| shifted.as_ref().or(doc.selection.as_ref()))
+                .flatten();
+            if let Some(raster) = doc::raster_mut(&mut cx.world.arena, stroke.layer()) {
+                stroke.reshape(raster, &moved, selection);
+            }
+            return;
+        }
         match rest {
             Some((since, at)) if at.distance(pointer) <= crate::smart::HOLD_REACH => {
                 let waited = now - *since;
@@ -2129,7 +2157,21 @@ impl SuePaint {
             *rest = Some((now, pointer));
             return;
         };
-        *shaped = true;
+        // The point of the corrected shape the pen is at: a drag carries it
+        // along, so a line's far end follows the pen, and a shape turns and
+        // sizes around its pivot.
+        let reference = path
+            .iter()
+            .copied()
+            .min_by(|a, b| {
+                let (from_a, from_b) = (
+                    (a[0] - pen[0]).hypot(a[1] - pen[1]),
+                    (b[0] - pen[0]).hypot(b[1] - pen[1]),
+                );
+                from_a.total_cmp(&from_b)
+            })
+            .unwrap_or(pen);
+        let pivot = crate::smart::pivot(&path);
         let selection = (!*vector)
             .then(|| shifted.as_ref().or(doc.selection.as_ref()))
             .flatten();
@@ -2137,6 +2179,13 @@ impl SuePaint {
         if let Some(raster) = doc::raster_mut(&mut cx.world.arena, stroke.layer()) {
             stroke.reshape(raster, &path, selection);
         }
+        *shaping = Some(crate::studio::Shaping {
+            pivot,
+            reference,
+            at: pen,
+            path,
+        });
+        *shaped = true;
     }
 
     /// Closes the polyline selection clicked out so far, combined as `op`.
@@ -3030,6 +3079,7 @@ impl SuePaint {
                 vector,
                 rest,
                 shaped,
+                shaping: _,
             } => {
                 let Some(doc) = self.docs.get_mut(self.active) else {
                     return;

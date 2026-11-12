@@ -1979,7 +1979,12 @@ tonal correction (one `Filter::to_text` can keep).
 samples and answers a line, arc (a circle through its ends and middle),
 ellipse or polygon (Ramer-Douglas-Peucker corners that every sample lies
 near), densely; `Stroke::reshape` puts the pixels from before back and
-draws the shape, so it is still one stroke to undo. APNG export
+draws the shape, so it is still one stroke to undo. The pen does not have to
+lift for the shape to be right: while it is still down, `smart::pivot` and
+`smart::dragged` carry the shape with it, a line's far end following the pen
+and a closed shape turning and growing about its middle, and every frame
+draws it again from the shape as corrected, so a drag back and forth never
+drifts. APNG export
 (`sue_io::encode_apng`) writes each frame's PNG data as `IDAT` or `fdAT`
 chunks behind `acTL` and `fcTL`.
 

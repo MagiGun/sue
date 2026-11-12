@@ -11,6 +11,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A Smart Shape line or shape can still be adjusted while the pen is down:
+  after a stroke corrects itself, dragging before you lift still moves it, the
+  way Clip Studio Paint does. A line's far end follows the pen, a shape turns
+  and grows around its middle, and what the drag leaves is what lifting the
+  pen keeps, still one stroke to undo.
+
 ## [0.0.75] - 2026-11-09
 
 ### Added

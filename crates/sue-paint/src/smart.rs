@@ -135,6 +135,53 @@ fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
     (a[0] - b[0]).hypot(a[1] - b[1])
 }
 
+/// The point a drag of a corrected shape turns and scales it about: the
+/// first point of an open one (a line, an arc or a polyline), so its far end
+/// follows the pen; the middle of a closed one (an ellipse or a polygon), so
+/// the whole shape turns and grows in place. Clip Studio Paint moves a
+/// corrected line's end point the same way, and a shape's size and angle.
+#[must_use]
+pub fn pivot(path: &[[f32; 2]]) -> [f32; 2] {
+    let (Some(first), Some(last)) = (path.first(), path.last()) else {
+        return [0.0; 2];
+    };
+    if distance(*first, *last) > 1.0 {
+        return *first;
+    }
+    let [x0, y0, x1, y1] = bounds(path);
+    [(x0 + x1) / 2.0, (y0 + y1) / 2.0]
+}
+
+/// The shape `path` as a drag that carries its `reference` point to `to`
+/// leaves it: turned and scaled about `pivot`, from the shape as it was
+/// corrected, so dragging back and forth never drifts. The size stays
+/// between a twentieth and twenty times the corrected one, so a pen
+/// dragged onto the pivot leaves a shape rather than a point.
+#[must_use]
+pub fn dragged(
+    path: &[[f32; 2]],
+    pivot: [f32; 2],
+    reference: [f32; 2],
+    to: [f32; 2],
+) -> Vec<[f32; 2]> {
+    let arm = |point: [f32; 2]| [point[0] - pivot[0], point[1] - pivot[1]];
+    let (from, now) = (arm(reference), arm(to));
+    let length = from[0].hypot(from[1]);
+    if length < 1e-3 {
+        return path.to_vec();
+    }
+    let scale = (now[0].hypot(now[1]) / length).clamp(0.05, 20.0);
+    let turn = wrap(now[1].atan2(now[0]) - from[1].atan2(from[0]));
+    let (sin, cos) = turn.sin_cos();
+    path.iter()
+        .map(|point| {
+            let [x, y] = arm(*point);
+            let (x, y) = (x * scale, y * scale);
+            [pivot[0] + x * cos - y * sin, pivot[1] + x * sin + y * cos]
+        })
+        .collect()
+}
+
 fn bounds(points: &[[f32; 2]]) -> [f32; 4] {
     points.iter().fold(
         [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
@@ -351,5 +398,64 @@ mod tests {
         );
         assert_eq!(shape[0], [0.0, 0.0]);
         assert_eq!(*shape.last().unwrap(), [200.0, 0.0]);
+    }
+
+    /// A drag while the pen is still down, after the correction: a line's
+    /// far end follows the pen, and a shape turns and grows about its
+    /// middle, the way Clip Studio Paint does it.
+    #[test]
+    fn a_drag_after_the_correction_moves_the_end_or_whole_shape() {
+        // A corrected line: its far end is what a drag carries.
+        let line = vec![[0.0, 0.0], [25.0, 0.0], [50.0, 0.0], [100.0, 0.0]];
+        assert_eq!(pivot(&line), [0.0, 0.0]);
+        let far = dragged(&line, pivot(&line), [100.0, 0.0], [200.0, 0.0]);
+        assert_eq!(
+            far,
+            vec![[0.0, 0.0], [50.0, 0.0], [100.0, 0.0], [200.0, 0.0]]
+        );
+        // Pulled the same distance up, it stands on end.
+        let up = dragged(&line, pivot(&line), [100.0, 0.0], [0.0, 100.0]);
+        assert!(distance(up[0], [0.0, 0.0]) < 0.01, "{:?}", up[0]);
+        assert!(distance(up[3], [0.0, 100.0]) < 0.01, "{:?}", up[3]);
+        assert!(
+            distance(up[1], [0.0, 25.0]) < 0.01,
+            "the line stays straight"
+        );
+        // Dragging back to where it was leaves the line as corrected.
+        let back = dragged(&line, pivot(&line), [100.0, 0.0], [100.0, 0.0]);
+        assert!(back.iter().zip(&line).all(|(a, b)| distance(*a, *b) < 0.01));
+
+        // A corrected circle: the whole shape turns and grows about its
+        // middle, and stays a circle.
+        let round: Vec<[f32; 2]> = (0..=32)
+            .map(|i| {
+                let a = i as f32 / 32.0 * std::f32::consts::TAU;
+                [100.0 + 50.0 * a.cos(), 100.0 + 50.0 * a.sin()]
+            })
+            .collect();
+        let middle = pivot(&round);
+        assert!(distance(middle, [100.0, 100.0]) < 0.01, "{middle:?}");
+        let grabbed = round[8];
+        let twice = dragged(&round, middle, grabbed, [middle[0] + 100.0, middle[1]]);
+        for point in &twice {
+            assert!(
+                (distance(*point, middle) - 100.0).abs() < 0.5,
+                "not twice as far: {:?}",
+                distance(*point, middle)
+            );
+        }
+        // And the same shape read off a stroke as people draw it: a rough
+        // line's pivot is its first point, a rough circle's its middle.
+        let rough: Vec<[f32; 2]> = (0..=20).map(|i| [i as f32 * 5.0, 0.0]).collect();
+        let corrected = recognize(&wobbly(&rough), 2.0).expect("a corrected line");
+        assert!(distance(pivot(&corrected), corrected[0]) < 0.01);
+        let drawn: Vec<[f32; 2]> = (0..=60)
+            .map(|i| {
+                let a = i as f32 / 60.0 * std::f32::consts::TAU;
+                [100.0 + 60.0 * a.cos(), 100.0 + 40.0 * a.sin()]
+            })
+            .collect();
+        let corrected = recognize(&wobbly(&drawn), 2.0).expect("a corrected ellipse");
+        assert!(distance(pivot(&corrected), [100.0, 100.0]) < 2.0);
     }
 }
