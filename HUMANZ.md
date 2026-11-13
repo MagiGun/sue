@@ -1989,16 +1989,26 @@ reaching every layer in the document's `picked` list when the filter is a
 tonal correction (one `Filter::to_text` can keep).
 
 **Smart Shape.** While a stroke's pen rests (`smart::HOLD_SECONDS` within
-`smart::HOLD_REACH` screen points), `smart::recognize` reads the stroke's
-samples and answers a line, arc (a circle through its ends and middle),
-ellipse or polygon (Ramer-Douglas-Peucker corners that every sample lies
-near), densely; `Stroke::reshape` puts the pixels from before back and
-draws the shape, so it is still one stroke to undo. The pen does not have to
-lift for the shape to be right: while it is still down, `smart::pivot` and
-`smart::dragged` carry the shape with it, a line's far end following the pen
-and a closed shape turning and growing about its middle, and every frame
-draws it again from the shape as corrected, so a drag back and forth never
-drifts. APNG export
+`smart::HOLD_REACH` screen points, both as Preferences, Tools, Smart Shape
+has them: `sue_paint.smart_shape_hold_ms` is how long the pen rests, Clip
+Studio Paint's own 0.7 seconds by default, and `sue_paint.smart_shape` can
+turn the hold off for every tool at once), `smart::recognize` reads the
+stroke's samples and answers a line, arc, ellipse or polygon, densely. The
+reading walks the stroke the way Clip Studio Paint's QuickShape does:
+`smart::snapped` lays a shortest path over the stroke's own samples, every
+link paying the mean of its two ends' distances from the candidate figure,
+so the samples that stray are skipped rather than the whole reading given
+up on; an arc's circle is a least-squares fit (`smart::circle_fit`), read
+again over the samples that stayed with it. `Stroke::reshape` puts the
+pixels from before back and draws the shape, so it is still one stroke to
+undo. The pen does not have to lift for the shape to be right: while it is
+still down, `smart::pivot` and `smart::dragged_scaled` carry the shape with
+it, a line's far end following the pen and a closed shape turning and
+growing about its middle, and every frame draws it again from the shape as
+corrected, so a drag back and forth never drifts. The drag answers how far
+it sized the figure, and the line's width grows and shrinks with it
+(`Stroke::reshape`'s width scale), the way Clip Studio Paint scales a
+line's width when a figure is sized. APNG export
 (`sue_io::encode_apng`) writes each frame's PNG data as `IDAT` or `fdAT`
 chunks behind `acTL` and `fcTL`.
 

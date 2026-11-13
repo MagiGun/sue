@@ -55,8 +55,8 @@ pub(super) const PAGES: &[Page] = &[
             Group {
                 title: "pref-smart-shape",
                 items: &[
-                    Item::Check { label: "pref-hold-to-create-figures", on: true, wire: Wire::None },
-                    Item::Number { label: "pref-length-of-long-press", value: 0.7, min: 0.1, max: 5.0, decimals: 2, unit: "seconds", wire: Wire::None },
+                    Item::Check { label: "pref-hold-to-create-figures", on: true, wire: Wire::Bool("sue_paint.smart_shape") },
+                    Item::Number { label: "pref-length-of-long-press", value: 0.7, min: 0.1, max: 5.0, decimals: 2, unit: "seconds", wire: Wire::Int("sue_paint.smart_shape_hold_ms", 1000) },
                     Item::Check { label: "pref-show-smart-shape-launcher", on: true, wire: Wire::None },
                 ],
             },

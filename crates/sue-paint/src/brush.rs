@@ -1102,6 +1102,10 @@ pub struct Stroke {
     seed: u32,
     /// The share of the width and opacity of the next points.
     width: f32,
+    /// How far a Smart Shape drag has sized the figure, so the line's width
+    /// follows it, the way Clip Studio Paint scales a line's width with the
+    /// figure.
+    width_scale: f32,
     alpha: f32,
     /// The color it began with, before jitter.
     base: [f32; 3],
@@ -1156,6 +1160,7 @@ impl Stroke {
             lean: [0.0, 0.0],
             seed: 0,
             width: 1.0,
+            width_scale: 1.0,
             alpha: 1.0,
             base: color,
             sub: [1.0; 3],
@@ -1365,7 +1370,7 @@ impl Stroke {
                 // each point, so a big brush waits until it has moved a
                 // twenty-fifth of its width: a 1500 pixel brush paints
                 // every 30 pixels, not every 3, and looks the same.
-                let radius = self.tip.size * 0.5 * self.width;
+                let radius = self.tip.size * self.width_scale * 0.5 * self.width;
                 if !self.tip.dabbed() && !self.flushing && length < radius * 0.04 {
                     self.pending = Some(sample);
                     return;
@@ -1659,29 +1664,39 @@ impl Stroke {
     }
 
     /// Draws the stroke again along `path` instead of where the pen went
-    /// (Smart Shape), at the stroke's mean pressure; still one stroke to
-    /// undo.
+    /// (Smart Shape), each point with the `pressures` it carries (the drawn
+    /// line's own, [`crate::smart::pressures`]), so a corrected shape keeps
+    /// the line's thickening and thinning; a path without a pressure of its
+    /// own is drawn at the stroke's average. Still one stroke to undo.
     pub fn reshape(
         &mut self,
         raster: &mut RasterTile2D,
         path: &[[f32; 2]],
+        pressures: &[f32],
         selection: Option<&Selection>,
+        width_scale: f32,
     ) {
-        let pressure = self
+        let mean = self
             .samples
             .iter()
             .map(|sample| sample.pressure)
             .sum::<f32>()
             / self.samples.len().max(1) as f32;
-        let pressure = if self.samples.is_empty() {
-            1.0
+        let mean = if self.samples.is_empty() { 1.0 } else { mean };
+        let profile: Vec<f32> = if pressures.len() == path.len() {
+            pressures.to_vec()
         } else {
-            pressure
+            vec![mean; path.len()]
         };
         self.pending = None;
         self.restart(raster);
-        for point in path {
-            self.to(raster, *point, pressure, selection);
+        // A drag that sizes the figure sizes the line with it, the way
+        // Clip Studio Paint scales a line's width when a figure grows. The
+        // scale stays with the stroke, so the dabs the release lays and any
+        // redraw after it keep the width the drag left.
+        self.width_scale = width_scale.clamp(0.05, 20.0);
+        for (point, pressure) in path.iter().zip(&profile) {
+            self.to(raster, *point, *pressure, selection);
         }
         self.flush(raster, selection);
     }
@@ -3332,11 +3347,41 @@ mod tests {
         assert!(alpha(&raster, 63, 79) > 100, "the wave dips");
         // Straightened: only the straight line is left.
         let path: Vec<[f32; 2]> = (0..=100).map(|step| [10.0 + step as f32, 60.0]).collect();
-        stroke.reshape(&mut raster, &path, None);
+        stroke.reshape(&mut raster, &path, &[], None, 1.0);
         stroke.end(&mut raster, Finish::default(), None);
         assert_eq!(alpha(&raster, 63, 79), 0, "the wave is gone");
         assert!(alpha(&raster, 60, 60) > 200, "the line is drawn");
         assert!(stroke.samples().len() > 50, "the stroke is the new path");
+    }
+
+    #[test]
+    fn a_reshaped_stroke_keeps_its_pressure() {
+        let mut raster = layer(120, 120);
+        let mut stroke = Stroke::new(EntityId::new(), flat_pen(6.0), [0.0, 0.0, 0.0], false);
+        // A line drawn with the pen bearing down all along.
+        for step in 0..=20 {
+            let at = [20.0 + step as f32 * 4.0, 60.0];
+            stroke.to(&mut raster, at, 0.2 + step as f32 * 0.04, None);
+        }
+        let path: Vec<[f32; 2]> = (0..=40)
+            .map(|step| [20.0 + step as f32 * 2.0, 60.0])
+            .collect();
+        let profile: Vec<f32> = (0..=40)
+            .map(|step| 0.2 + 0.8 * step as f32 / 40.0)
+            .collect();
+        stroke.reshape(&mut raster, &path, &profile, None, 1.0);
+        let pen: Vec<f32> = stroke
+            .samples()
+            .iter()
+            .map(|sample| sample.pressure)
+            .collect();
+        assert!(pen.len() > 20, "the stroke is the new path: {}", pen.len());
+        let (first, last) = (pen[0], pen[pen.len() - 1]);
+        assert!(last - first > 0.5, "the pressure holds: {first} to {last}");
+        assert!(
+            pen.windows(2).all(|pair| pair[1] >= pair[0] - 1e-4),
+            "it only bears down: {pen:?}"
+        );
     }
 
     #[test]

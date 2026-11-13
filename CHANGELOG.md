@@ -16,8 +16,31 @@ follow [Semantic Versioning](https://semver.org/).
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.
+- Sue Paint's Smart Shape reads strokes the way Clip Studio Paint's
+  QuickShape does: the reading walks the stroke's own samples as a shortest
+  path, each link paying its distance from the figure it is being read as,
+  so a spike in a line or a bite out of an arc no longer throws the whole
+  reading away. Arcs are fitted by least squares, read again over the
+  samples that stayed with the circle.
+- Preferences, Tools, Smart Shape's **Hold to create figures** and **Length
+  of long-press** now work: the hold can be turned off for every tool at
+  once, and how long the pen rests is set in seconds (0.1 to 5, 0.7 by
+  default, the same as Clip Studio Paint).
+- A Smart Shape figure being sized carries the line's width with it: drag a
+  corrected shape bigger and the line thickens, smaller and it thins, the
+  way Clip Studio Paint scales a line's width when a figure grows.
 
 ### Changed
+
+- Smart Shape's curves come back smooth: a stroke drawn as a curve (a
+  crescent, a half circle, an arc the hand rounded unevenly) was corrected
+  into a few straight sides, sharp corners where the drawing had none. A
+  stroke with no corner the hand really turned is read as the curve it was,
+  as a circle when one fits it closely and as a spline through its waypoints
+  otherwise, while a rectangle's or a triangle's corners still stay corners.
+  A shape no reading catches (a moon, a scribble) comes back tidied of its
+  wobble rather than untouched, so resting the pen always answers with
+  something.
 
 - Sue Paint's 3D controls (camera, light, shadow, shapes and body
   shape) are translated into German, French, Spanish, Italian,
