@@ -6126,6 +6126,194 @@ f 2 3 4
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// After Smart Shape corrects a line, dragging with the pen still down
+    /// carries the line's far end with it, and lifting the pen keeps what
+    /// the drag left. Clip Studio Paint does the same, and a shape broken by
+    /// a stray stroke or a leftover of the old one would show here as ink
+    /// away from the line through the two ends.
+    #[test]
+    fn sue_paint_a_corrected_line_follows_the_pen_until_it_lifts() {
+        let (mut runtime, root) = runtime("paint-smart-drag");
+        let ctx = egui::Context::default();
+        let mut now = Instant::now();
+        runtime.request(
+            ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+            frame_with(runtime, &ctx, now, events);
+            now += Duration::from_millis(16);
+        };
+        step(
+            &mut runtime,
+            vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+        );
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        // The ink as it stands, as the points it covers.
+        let ink = |runtime: &Runtime| -> Vec<(usize, usize)> {
+            let arena = &runtime.engine.world.arena;
+            let picture = arena
+                .iter()
+                .find(|(_, entity)| sue_model::picture::is_picture(entity))
+                .map(|(_, entity)| entity.id())
+                .unwrap();
+            let layer = sue_paint::doc::layers(arena, picture).last().unwrap().id;
+            let raster = sue_paint::doc::raster(arena, layer).unwrap();
+            let bytes = raster.bytes().unwrap();
+            let width = raster.width() as usize;
+            let height = raster.height() as usize;
+            let mut points = Vec::new();
+            for y in 0..height {
+                for x in 0..width {
+                    if bytes[(y * width + x) * 4 + 3] > 128 {
+                        points.push((x, y));
+                    }
+                }
+            }
+            points
+        };
+        // How far the ink strays from the straight line it should be: the
+        // widest distance off the line fitted through all of it.
+        let straightness = |points: &[(usize, usize)]| -> f64 {
+            let count = points.len() as f64;
+            let mean_x = points.iter().map(|(x, _)| *x as f64).sum::<f64>() / count;
+            let mean_y = points.iter().map(|(_, y)| *y as f64).sum::<f64>() / count;
+            let (sxx, sxy, syy) = points.iter().fold((0.0, 0.0, 0.0), |acc, (x, y)| {
+                let (dx, dy) = (*x as f64 - mean_x, *y as f64 - mean_y);
+                (acc.0 + dx * dx, acc.1 + dx * dy, acc.2 + dy * dy)
+            });
+            // The direction the ink runs, and the normal to it.
+            let angle = 0.5 * (2.0 * sxy).atan2(sxx - syy);
+            let (sin, cos) = angle.sin_cos();
+            points
+                .iter()
+                .map(|(x, y)| ((*x as f64 - mean_x) * -sin + (*y as f64 - mean_y) * cos).abs())
+                .fold(0.0, f64::max)
+        };
+        let touch = |phase, pos| egui::Event::Touch {
+            device_id: egui::TouchDeviceId(1),
+            id: egui::TouchId(1),
+            phase,
+            pos,
+            force: Some(0.6),
+        };
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        // The New dialog closes over its own frames, before the canvas
+        // behind it takes a stroke.
+        for _ in 0..5 {
+            step(&mut runtime, Vec::new());
+        }
+        // A line drawn by hand: mostly straight, a little wobble.
+        let start = paint_middle(&runtime) - vec2(140.0, 60.0);
+        step(
+            &mut runtime,
+            vec![
+                touch(egui::TouchPhase::Start, start),
+                egui::Event::PointerMoved(start),
+                button(start, true),
+            ],
+        );
+        let mut at = start;
+        for index in 0..40 {
+            at += vec2(7.0, 3.0);
+            if index % 7 == 0 {
+                at += vec2(0.0, 1.5);
+            }
+            step(
+                &mut runtime,
+                vec![
+                    touch(egui::TouchPhase::Move, at),
+                    egui::Event::PointerMoved(at),
+                ],
+            );
+        }
+        // The pen rests: Smart Shape makes it the line it was meant to be.
+        for _ in 0..70 {
+            step(&mut runtime, Vec::new());
+        }
+        // How wide the line is: its ink spread over the way it runs.
+        let width_of = |points: &[(usize, usize)]| -> f64 {
+            let first = points[0];
+            let last = points[points.len() - 1];
+            let length = (last.0 as f64 - first.0 as f64)
+                .hypot(last.1 as f64 - first.1 as f64)
+                .max(1.0);
+            points.len() as f64 / length
+        };
+        let corrected = ink(&runtime);
+        assert!(corrected.len() > 100, "the line was drawn");
+        assert!(
+            straightness(&corrected) < width_of(&corrected) * 0.5 + 2.0,
+            "the corrected line is straight: strays {:.1} px over {:.1} px of width",
+            straightness(&corrected),
+            width_of(&corrected)
+        );
+        let before = (corrected[0], corrected[corrected.len() - 1]);
+        // Dragging, the pen still down, carries the far end down the canvas.
+        for _ in 0..40 {
+            at += vec2(0.0, 6.0);
+            step(
+                &mut runtime,
+                vec![
+                    touch(egui::TouchPhase::Move, at),
+                    egui::Event::PointerMoved(at),
+                ],
+            );
+        }
+        let dragged = ink(&runtime);
+        assert!(
+            straightness(&dragged) < width_of(&dragged) * 0.5 + 2.0,
+            "the dragged line is still straight: strays {:.1} px over {:.1} px of width",
+            straightness(&dragged),
+            width_of(&dragged)
+        );
+        let after = (dragged[0], dragged[dragged.len() - 1]);
+        assert!(
+            after.0.1.abs_diff(before.0.1) <= 4,
+            "the line's near end stayed put: {:?} against {:?}",
+            after.0,
+            before.0
+        );
+        assert!(
+            after.1.1 > before.1.1 + 200,
+            "the far end followed the pen: {:?} against {:?}",
+            after.1,
+            before.1
+        );
+        assert!(
+            dragged.len() > corrected.len() + 100,
+            "the line grew: {} px against {}",
+            dragged.len(),
+            corrected.len()
+        );
+        // Lifting the pen keeps what the drag left.
+        step(
+            &mut runtime,
+            vec![touch(egui::TouchPhase::End, at), button(at, false)],
+        );
+        for _ in 0..5 {
+            step(&mut runtime, Vec::new());
+        }
+        let released = ink(&runtime);
+        assert!(
+            released.len().abs_diff(dragged.len()) < dragged.len() / 100 + 5,
+            "the line stayed as the drag left it: {} px against {}",
+            released.len(),
+            dragged.len()
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn sue_paint_a_light_pen_stroke_ends_light() {
         let (mut runtime, root) = runtime("paint-light-end");

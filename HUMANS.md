@@ -663,7 +663,9 @@ Once a canvas is open:
 - **Smart Shape:** hold the pen still for a moment at the end of a stroke
   and it becomes the clean shape you meant: a straight line, an arc, an
   ellipse or circle, or a polygon such as a rectangle or triangle. Lift the
-  pen to keep it. Each pen and brush has it on or off in Tool Property.
+  pen to keep it. Before you lift, a drag still adjusts it, as in Clip Studio
+  Paint: a line's far end follows the pen, and a shape turns and grows around
+  its middle. Each pen and brush has it on or off in Tool Property.
 - **Text** (T): click and type right on the canvas, as in Clip Studio
   Paint, with a caret that follows the words; Enter starts a new line and
   Esc, Ctrl and Enter, or another tool keeps them as one step. Tool
