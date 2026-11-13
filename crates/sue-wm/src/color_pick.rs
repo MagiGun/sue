@@ -111,20 +111,37 @@ pub fn color_wheel(ui: &mut Ui, id: Id, rgba: &mut [u8; 4], side: f32) -> ColorP
         hsv[0] = ui.data(|data| data.get_temp(hue_id)).unwrap_or(hsv[0]);
     }
 
-    // The hue ring.
+    // The hue ring. egui gives a mesh no antialiasing, so its two circular
+    // edges are drawn as four bands of vertices, the outermost and
+    // innermost fading to nothing: a one-point feather, laid inside the
+    // radius so nothing spills out of the wheel.
     let mut ring = Mesh::default();
-    let steps = 96;
+    let bands = [inner - 1.0, inner, outer - 1.0, outer];
+    let steps = (outer as usize).clamp(96, 360);
     for step in 0..=steps {
         let t = step as f32 / steps as f32;
         let angle = t * std::f32::consts::TAU;
         let direction = vec2(angle.cos(), angle.sin());
         let shade = opaque(rgb_of([t * 360.0, 1.0, 1.0]));
-        ring.colored_vertex(center + direction * inner, shade);
-        ring.colored_vertex(center + direction * outer, shade);
+        for (at, radius) in bands.iter().enumerate() {
+            let faded = at == 0 || at + 1 == bands.len();
+            ring.colored_vertex(
+                center + direction * *radius,
+                if faded {
+                    shade.gamma_multiply(0.0)
+                } else {
+                    shade
+                },
+            );
+        }
         if step > 0 {
-            let base = (step * 2) as u32;
-            ring.add_triangle(base - 2, base - 1, base);
-            ring.add_triangle(base - 1, base + 1, base);
+            let back = bands.len() as u32;
+            let base = step as u32 * back;
+            for at in 0..back - 1 {
+                let low = base - back + at;
+                ring.add_triangle(low, low + 1, low + back);
+                ring.add_triangle(low + 1, low + back + 1, low + back);
+            }
         }
     }
     ui.painter().add(Shape::mesh(ring));
@@ -133,7 +150,9 @@ pub fn color_wheel(ui: &mut Ui, id: Id, rgba: &mut [u8; 4], side: f32) -> ColorP
     let half = inner * 0.68;
     let square = Rect::from_center_size(center, vec2(half * 2.0, half * 2.0));
     let mut mesh = Mesh::default();
-    let cells = 24;
+    // Two points to a cell: fewer and the grid, and the crease along each
+    // cell's diagonal, show up as a blocky pattern in the gradient.
+    let cells = (half.round() as usize).clamp(24, 96);
     for row in 0..=cells {
         for column in 0..=cells {
             let (s, v) = (
@@ -455,5 +474,62 @@ mod tests {
         let [h, s, v] = hsv_of([rgba[0], rgba[1], rgba[2]]);
         assert!(h.abs() < 1.0 && (s - 0.5).abs() < 0.05 && (v - 0.5).abs() < 0.05);
         assert_eq!(rgba[3], 255, "opacity untouched");
+    }
+
+    /// The wheel stays smooth at every size: the ring's two circular edges
+    /// are feathered, because egui antialiases no mesh, and the square's
+    /// mesh follows the wheel so no grid shows in its gradient.
+    #[test]
+    fn the_wheel_stays_smooth_at_every_size() {
+        let ctx = egui::Context::default();
+        let mut largest = Vec::new();
+        for side in [140.0_f32, 300.0] {
+            let mut rgba = [255, 0, 0, 255];
+            let mut faded = 0;
+            let mut biggest = 0;
+            let raw = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    Pos2::ZERO,
+                    vec2(side + 20.0, side + 20.0),
+                )),
+                ..egui::RawInput::default()
+            };
+            let output = ctx.run_ui(raw, |ui| {
+                ui.spacing_mut().item_spacing = Vec2::ZERO;
+                color_wheel(ui, Id::unique("test"), &mut rgba, side);
+            });
+            // The meshes can sit in a layer's shape list inside another.
+            fn look(shape: &Shape, faded: &mut usize, biggest: &mut usize) {
+                match shape {
+                    Shape::Mesh(mesh) => {
+                        *faded += mesh
+                            .vertices
+                            .iter()
+                            .filter(|vertex| vertex.color.a() == 0)
+                            .count();
+                        *biggest = (*biggest).max(mesh.vertices.len());
+                    }
+                    Shape::Vec(shapes) => {
+                        for shape in shapes {
+                            look(shape, faded, biggest);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for clipped in &output.shapes {
+                look(&clipped.shape, &mut faded, &mut biggest);
+            }
+            output.drop_without_applying_deltas();
+            assert!(
+                faded > 0,
+                "the ring has no feathered edge at {side} points across"
+            );
+            largest.push(biggest);
+        }
+        assert!(
+            largest[1] > largest[0],
+            "the meshes do not follow the wheel's size: {largest:?}"
+        );
     }
 }

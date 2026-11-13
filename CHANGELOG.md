@@ -17,6 +17,10 @@ follow [Semantic Versioning](https://semver.org/).
   again: the grip that drags an icon out of the strip was sitting over the
   icon and taking its clicks, so a collapsed palette could not be opened
   from its icon at all.
+- Sue Paint's color wheel is smooth at every size: the hue ring's two
+  circular edges are feathered, since egui antialiases no mesh, and the
+  saturation and value square's mesh follows the wheel's size. It used to
+  draw a stair-stepped circle over a gradient with a visible grid in it.
 
 ## [0.0.75] - 2026-11-09
 
