@@ -1481,7 +1481,10 @@ impl SuePaint {
                     snap,
                     vector,
                     rest: None,
-                    shaped: !sub.smart_shape,
+                    // Preferences, Smart Shape: the hold can be off for
+                    // every tool at once, beside the tool's own switch.
+                    shaped: !(sub.smart_shape
+                        && cx.rice().get_bool("sue_paint.smart_shape").unwrap_or(true)),
                     shaping: None,
                 });
             }
@@ -2121,69 +2124,74 @@ impl SuePaint {
             if (pen[0] - shaping.at[0]).hypot(pen[1] - shaping.at[1]) < 0.5 {
                 return;
             }
-            let moved = crate::smart::dragged(&shaping.path, shaping.pivot, shaping.reference, pen);
+            // The figure itself, and how far this drag sized it: the brush
+            // thickens or thins the line with it, the way Clip Studio
+            // Paint scales a line's width when a figure grows.
+            let (moved, scale) =
+                crate::smart::dragged_scaled(&shaping.path, shaping.pivot, shaping.reference, pen);
             shaping.at = pen;
             let selection = (!*vector)
                 .then(|| shifted.as_ref().or(doc.selection.as_ref()))
                 .flatten();
             if let Some(raster) = doc::raster_mut(&mut cx.world.arena, stroke.layer()) {
-                stroke.reshape(raster, &moved, selection);
+                stroke.reshape(raster, &moved, &shaping.pressures, selection, scale);
             }
             return;
         }
+        // How long the pen must rest, from Preferences, Smart Shape (Clip
+        // Studio Paint's "Length of long-press", 0.7 seconds by default).
+        let hold = cx
+            .rice()
+            .get_i64("sue_paint.smart_shape_hold_ms")
+            .map_or(crate::smart::HOLD_SECONDS, |ms| ms as f64 / 1000.0);
         match rest {
             Some((since, at)) if at.distance(pointer) <= crate::smart::HOLD_REACH => {
                 let waited = now - *since;
-                if waited < crate::smart::HOLD_SECONDS {
-                    ctx.request_repaint_after(std::time::Duration::from_secs_f64(
-                        crate::smart::HOLD_SECONDS - waited,
-                    ));
+                if waited < hold {
+                    ctx.request_repaint_after(std::time::Duration::from_secs_f64(hold - waited));
                     return;
                 }
             }
             _ => {
                 *rest = Some((now, pointer));
-                ctx.request_repaint_after(std::time::Duration::from_secs_f64(
-                    crate::smart::HOLD_SECONDS,
-                ));
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(hold));
                 return;
             }
         }
         // Rested long enough: the shape, if the stroke makes one.
         let points: Vec<[f32; 2]> = stroke.samples().iter().map(|sample| sample.at).collect();
+        let drawn: Vec<f32> = stroke
+            .samples()
+            .iter()
+            .map(|sample| sample.pressure)
+            .collect();
         let step = (stroke.tip().size * 0.25).clamp(0.75, 4.0);
         let Some(path) = crate::smart::recognize(&points, step) else {
             // No shape fits (yet): the stroke carries on as drawn.
             *rest = Some((now, pointer));
             return;
         };
+        // The drawn line's pressure at each point of the shape, so the
+        // corrected line keeps its thickening and thinning.
+        let profile = crate::smart::pressures(&points, &drawn, &path);
         // The point of the corrected shape the pen is at: a drag carries it
         // along, so a line's far end follows the pen, and a shape turns and
         // sizes around its pivot.
-        let reference = path
-            .iter()
-            .copied()
-            .min_by(|a, b| {
-                let (from_a, from_b) = (
-                    (a[0] - pen[0]).hypot(a[1] - pen[1]),
-                    (b[0] - pen[0]).hypot(b[1] - pen[1]),
-                );
-                from_a.total_cmp(&from_b)
-            })
-            .unwrap_or(pen);
+        let reference = crate::smart::nearest(&path, pen);
         let pivot = crate::smart::pivot(&path);
         let selection = (!*vector)
             .then(|| shifted.as_ref().or(doc.selection.as_ref()))
             .flatten();
         let _ = (viewport, size);
         if let Some(raster) = doc::raster_mut(&mut cx.world.arena, stroke.layer()) {
-            stroke.reshape(raster, &path, selection);
+            stroke.reshape(raster, &path, &profile, selection, 1.0);
         }
         *shaping = Some(crate::studio::Shaping {
+            path,
+            pressures: profile,
             pivot,
             reference,
             at: pen,
-            path,
         });
         *shaped = true;
     }
@@ -2641,6 +2649,7 @@ impl SuePaint {
             }
         }
         *last = to;
+        let (visible, step) = self.on_screen;
         if let (Some([x0, y0, x1, y1]), Some(doc)) = (dirty, self.docs.get_mut(self.active)) {
             let shift = |value: u32, by: i64| (i64::from(value) + by).max(0) as u32;
             let rect = [
@@ -2649,7 +2658,14 @@ impl SuePaint {
                 shift(x1, origin[0]),
                 shift(y1, origin[1]),
             ];
-            doc.compositor.refresh(&cx.world.arena, rect);
+            // At the detail the screen shows, the way the paint brush does:
+            // a zoomed out view would otherwise recomposite the whole canvas
+            // at full detail on every pointer event, which is what made a
+            // Blend drag stutter on a big picture. What is shown coarse, and
+            // what lies off screen, comes to full detail through `refine`
+            // once the pen is up.
+            doc.compositor
+                .refresh_view(&cx.world.arena, &[rect], Some(layer), visible, step);
         }
     }
 

@@ -138,6 +138,9 @@ impl Doc {
 pub(crate) struct Shaping {
     /// The shape as corrected, in layer pixels.
     pub(crate) path: Vec<[f32; 2]>,
+    /// The drawn line's pressure at each point of the shape, so a redraw
+    /// keeps its thickening and thinning.
+    pub(crate) pressures: Vec<f32>,
     /// What a drag turns and scales it about (`smart::pivot`).
     pub(crate) pivot: [f32; 2],
     /// The point of the shape the pen was at when it became one, which a
@@ -7190,6 +7193,18 @@ impl SueApplet for SuePaint {
                 "How far Rotate Left and Rotate Right turn the view (degrees; Preferences, Canvas)",
             )
             .labeled("Rotation step"),
+            RiceDeclaration::new(
+                "sue_paint.smart_shape",
+                RiceParameter::Bool { value: true },
+                "Resting the pen turns the stroke into the shape it was meant to be (Preferences, Smart Shape)",
+            )
+            .labeled("Hold to create figures"),
+            RiceDeclaration::new(
+                "sue_paint.smart_shape_hold_ms",
+                int(crate::smart::HOLD_MS, 100, 5000),
+                "How long the pen rests before the shape is drawn, in milliseconds (Preferences, Smart Shape)",
+            )
+            .labeled("Length of long-press"),
             RiceDeclaration::new(
                 crate::extras::REMEMBER_LAYOUT,
                 RiceParameter::Bool { value: true },
