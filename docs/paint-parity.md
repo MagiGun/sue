@@ -29,9 +29,9 @@ rows are at the end.
 
 | Area | done | partial | missing | percent |
 | --- | --- | --- | --- | --- |
-| File: new, open and save | 10 | 1 | 5 | 66 |
+| File: new, open and save | 11 | 1 | 5 | 68 |
 | File: export | 15 | 1 | 2 | 86 |
-| File: import, batch and scanning | 5 | 4 | 6 | 47 |
+| File: import, batch and scanning | 6 | 4 | 5 | 53 |
 | Edit: undo, clipboard and fills | 8 | 5 | 0 | 81 |
 | Edit: transform and canvas size | 8 | 6 | 0 | 79 |
 | Tonal correction and color | 11 | 1 | 0 | 96 |
@@ -42,7 +42,7 @@ rows are at the end.
 | Comics: frames, balloons and webtoons | 11 | 0 | 0 | 100 |
 | Story: multi-page works (EX) | 6 | 5 | 2 | 65 |
 | Animation | 15 | 1 | 0 | 97 |
-| Tools and drawing | 29 | 9 | 1 | 86 |
+| Tools and drawing | 37 | 8 | 1 | 89 |
 | Text | 6 | 3 | 1 | 75 |
 | Vector | 6 | 2 | 0 | 88 |
 | 3D | 7 | 2 | 4 | 62 |
@@ -54,7 +54,7 @@ rows are at the end.
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 10 | 2 | 2 | 79 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 256 | 62 | 29 | 83 |
+| **All of Sue Paint** | 267 | 61 | 28 | 84 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,

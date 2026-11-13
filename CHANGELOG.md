@@ -11,6 +11,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Sue Paint's 3D controls (camera, light, shadow, shapes and body
+  shape) are translated into German, French, Spanish, Italian,
+  Brazilian Portuguese, Japanese, Simplified Chinese and Arabic.
+
 ### Fixed
 
 - Sue Paint's palette icons in the strips beside the canvas answer clicks

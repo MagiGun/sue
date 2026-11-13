@@ -25,7 +25,7 @@ that is already there. Nothing is copied or converted.
 
 ## Where things stand
 
-Sue is made of the eleven crates below and the `sue` executable. It opens a native GPU window drawn with egui in a pure monochrome
+Sue is made of the crates below and the `sue` executable. It opens a native GPU window drawn with egui in a pure monochrome
 theme (black to white, nothing else), straight onto the **Hub**:
 
 - **The Hub:** a full page with a box for every studio (Sue Paint, Sue Writer)
@@ -82,28 +82,32 @@ feature Sue may grow into onto the backbone.
 | --- | --- | --- |
 | [`sue-core`](crates/sue-core) | The backbone: arena, stable ids, entities, open components, relations, values, units, color, time, undo tree, `.sue` file, format and operator registries, presets, jobs | `Arena`, `Entity`, `EntityId`, `ComponentRegistry`, `RelationStore`, `Value`, `Quantity`, `Color`, `Time`, `UndoStack`, `SueFile`, `FormatRegistry`, `OperatorRegistry`, `JobPool` |
 | [`sue-model`](crates/sue-model) | Shared data models every feature can read | `TextMarks`, `Table`, `Animation`, `Sequence`, `Notes`, `NodeGraph`, `Geometry`, `Transform`, `PageLayout`, `picture`, `BlendMode`, `Encoded` |
-| [`sue-platform`](crates/sue-platform) | The only place OS-specific code may live: hosts, the egui window and frame pacing, GPU choice, painting, audio output, clipboard, dialogs | `PlatformHost`, `DesktopHost`, `run_desktop`, `FramePacing`, `EguiPainter`, `TextureUpload`, `AudioOutput` |
+| [`sue-platform`](crates/sue-platform) | The only place OS-specific code may live: hosts, the egui window and frame pacing, GPU choice, painting, audio output, clipboard, dialogs | `PlatformHost`, `DesktopHost`, `run_desktop`, `FramePacing`, `EguiPainter`, `TextureUpload`, `AudioOutput`; its small crates `sue-android`, `sue-ios` and `sue-wayland` hold the only audited `unsafe` |
+| [`sue-lang`](crates/sue-lang) | Every string people read, English first, in every language Sue speaks | `tr!` |
 | [`sue-rice`](crates/sue-rice) | `.suerice` parser, Settings descriptors, monochrome presets, migration, hardware profiles | `RiceSchema`, `RiceParameter`, `SetRiceValues`, `ThemePreset`, `migrate`, `HardwareProfile` |
 | [`sue-io`](crates/sue-io) | Magic-byte sniffer, JPEG XL, PNG, JPEG and audio codecs, every format handler, ingest, tile cache, byte map | `sniff_stream`, `formats`, `ingest_bytes`, `NativeJxlPipeline`, `decode_audio`, `encode_jpeg`, `TileCache` |
 | [`sue-pkg`](crates/sue-pkg) | Content-addressed packages, Ed25519 trust, resolver, atomic generations | `PackageManifest`, `ContentHash`, `TrustStore`, `PackageIndex`, `resolve`, `AtomicUpdater` |
-| [`sue-ai`](crates/sue-ai) | Offline, zero-copy AI substrate | `LocalModelRegistry`, `ComputeBackend`, `ZeroCopyTensorTask` |
-| [`sue-wm`](crates/sue-wm) | The shell: the Hub with its pins, the top bar with the Sue button and menus, studios and tools, palette, springs, theme | `SueApplet`, `Launchpad`, `Shell`, `MenuBar`, `SpringDamper`, `Typing`, `Transport` |
+| [`sue-ai`](crates/sue-ai) | Offline, zero-copy AI substrate | `LocalModelRegistry`, `ComputeBackend`, `ZeroCopyTensorTask`, `OnnxModel` |
+| [`sue-wm`](crates/sue-wm) | The shell: the Hub with its pins, the top bar with the Sue button and menus, studios and tools, palette, springs, theme | `SueApplet`, `Launchpad`, `Shell`, `MenuBar`, `DockLayout`, `SpringDamper`, `Typing`, `Transport` |
 | [`sue-paint`](crates/sue-paint) | Sue Paint: the painting studio, its brush engine, compositing, selections, fills and filters | `SuePaint`, `Stroke`, `Compositor`, `Selection`, `Filter` |
 | [`sue-type`](crates/sue-type) | Typography for every studio that sets text: paragraph styles, the rich text editor, page layout and typesetting | `Editor`, `StyleSheet`, `PageSetup` |
 | [`sue-writer`](crates/sue-writer) | Sue Writer: the writing and publishing studio | `SueWriter` |
 | [`bins/sue`](bins/sue) | The executable: runtime, built-in applets, self-check, snapshots | `Engine`, `Runtime` |
 
 ```text
-bins/sue      ──► every crate below                   + egui
-sue-paint     ──► sue-wm, sue-io, sue-model, sue-rice, sue-platform, sue-core   + egui
-sue-wm        ──► sue-rice, sue-platform, sue-core   + egui
-sue-ai        ──► sue-platform, sue-core
+bins/sue      ──► every crate below                                        + egui
+sue-writer    ──► sue-paint, sue-type, sue-wm, sue-io, sue-model, sue-rice, sue-lang, sue-platform, sue-core
+sue-paint     ──► sue-type, sue-wm, sue-ai, sue-io, sue-model, sue-rice, sue-lang, sue-platform, sue-core
+sue-type      ──► sue-wm, sue-io, sue-model, sue-lang, sue-platform, sue-core
+sue-wm        ──► sue-rice, sue-model, sue-lang, sue-platform, sue-core   + egui
+sue-ai        ──► sue-platform, sue-core                                   + tract-onnx
 sue-rice      ──► sue-platform, sue-core
-sue-io        ──► sue-model, sue-core                 + jxl-oxide, zune-jpegxl, zune-png, zune-jpeg, jpeg-encoder, symphonia, image, flacenc
+sue-io        ──► sue-model, sue-core          + jxl-oxide, zune-*, jpeg-encoder, symphonia, image, flacenc
 sue-model     ──► sue-core
-sue-pkg       ──► sha2, ed25519-dalek, semver         (no engine crates)
-sue-core      ──► nothing                              (leaf)
-sue-platform  ──► winit, wgpu, egui, egui-winit, egui-wgpu, arboard, pollster, cpal, audio_thread_priority, rfd, open   (no engine crates)
+sue-pkg       ──► sha2, ed25519-dalek, semver   (no engine crates)
+sue-lang      ──► fluent-bundle, fluent-syntax   (no engine crates)
+sue-core      ──► nothing                        (leaf)
+sue-platform  ──► sue-ios, sue-wayland          + winit, wgpu, egui, egui-winit, egui-wgpu, arboard, cpal, rfd, x11rb, wayland-client
 ```
 
 ## Install

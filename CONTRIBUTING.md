@@ -61,8 +61,8 @@ backbone; section 8 maps every feature area onto it).
 5. **No hidden copies.** Large buffers move by handle or as `Shared`.
 6. **OS code only in `sue-platform`.** No `cfg(target_os)`, `windows-sys`,
    `libc` or `objc` anywhere else. `unsafe` is forbidden everywhere but
-   in audited, maintainer-approved items of `crates/sue-platform/android`
-   and `crates/sue-platform/ios`.
+   in audited, maintainer-approved items of `crates/sue-platform/android`,
+   `crates/sue-platform/ios` and `crates/sue-platform/wayland`.
 7. **Studios share features.** Use the shared color picker, file dialogs,
    fonts, text editor, exporters and models; give a shared feature a new mode
    instead of copying it.

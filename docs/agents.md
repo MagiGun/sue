@@ -119,3 +119,10 @@ Work through these in order and stop at the first that settles it.
 5. **A stale claim.** A claim not updated for a day whose branch has no
    new commits may be stale. Message its agent; if there is no answer,
    ask the human before taking any of its paths.
+
+## Large changes
+
+Before a refactor or a release-sized change, read
+[`refactor-v0.0.8.md`](refactor-v0.0.8.md): where the code has outgrown
+its files, the order the work goes in, and the rules a refactor keeps (no
+behaviour change in a move, one file per pull request, tests first).
