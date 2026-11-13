@@ -13,3 +13,6 @@
 Dockerfile text eol=lf
 *.desktop text eol=lf
 PKGBUILD text eol=lf
+crates/sue-lang/locales/**/*.ftl merge=union
+CHANGELOG.md merge=union
+crates/*/tests/golden/** -text
