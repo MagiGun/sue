@@ -1517,7 +1517,7 @@ out the way painting apps usually are. It fills the window with:
 | Tool strip | Zoom, Hand, Operation, Move Layer, Selection, Auto Select, Eyedropper, Pen, Pencil, Brush, Airbrush, Decoration, Eraser, Blend, Fill, Gradient, Figure, Frame Border, Ruler, Text, Balloon, Correct Line; main and sub color chips |
 | Sub Tool and Tool Property | The sub tools of the tool (G-Pen, Mapping Pen, Turnip Pen, Marker; Pencil, Mechanical, Rough; Watercolor, Opaque Watercolor, Gouache, Ink Brush; Soft, Strong, Fine airbrushes; Hard, Soft, Rough erasers; fill, gradient, figure, selection modes) and their settings, with a live stroke preview |
 | Size | Vertical brush size and opacity sliders |
-| Color Wheel, Color Slider | A hue ring around a saturation and value square; RGB and HSV sliders and hex |
+| Color Wheel, Color Slider | A hue ring around a saturation and value square or a hue triangle, with a Square/Triangle switch above the wheel; RGB and HSV sliders and hex |
 | Color Set, Color History | Color sets (Default, Grays, Skin Tones, Pastels, and the user's) in a drop-down, kept in the data folder (`color_sets.txt`), with a settings menu (new, duplicate, delete, swatch size, restore), GIMP palette and hex import, GIMP palette export, and add, replace and delete; the colors painted with, newest first |
 | Canvas | Tabs of open pictures; the view zooms (1% to 6400%), scrolls, turns and mirrors; a status strip with zoom, rotation, flip, size, resolution and the pointer's pixel |
 | Navigator, Sub View | The whole picture with the visible area outlined (drag to scroll), zoom and rotation sliders, turns, flips; reference pictures (import through the system's open dialog, previous, next, list, eyedropper, zoom, turn, fit, delete) |
@@ -2660,7 +2660,7 @@ parameter stays reachable (tested).
 | --- | --- |
 | `Bool` | A black and white switch |
 | `IntRange` / `FloatRange` | Slider with a 4 px track, a filled part and a round thumb, its value on the right |
-| `ColorHex` | A swatch that opens the shared color wheel (`sue_wm::color_button`: a hue ring around a saturation and value square, an opacity bar, HSV numbers and a row of grays) in a layer over every window; dragging previews, release commits |
+| `ColorHex` | A swatch that opens the shared color wheel (`sue_wm::color_button`: a hue ring around a saturation and value square or a hue triangle, a switch between the two, an opacity bar, HSV numbers and a row of grays) in a layer over every window; dragging previews, release commits |
 | `EnumChoice` | A segmented control for up to five short options, else a compact drop-down |
 | A text parameter with live choices (output device, the pin) | A drop-down |
 | `Keybind` | One key cap per chord: click one and press its new chord, x takes one away, + adds another, as many as wanted (`Esc` cancels; global shortcuts are held back while recording) |

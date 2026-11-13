@@ -9036,4 +9036,36 @@ f 2 3 4
             "the color wheel stays where it was"
         );
     }
+
+    #[test]
+    fn sue_paint_switches_the_color_wheel_between_square_and_triangle() {
+        let mut paint = PaintDriver::new("paint-wheel-shape");
+        let texts = paint.settle(10);
+        let triangle = texts
+            .iter()
+            .find(|(text, _)| text == "Triangle")
+            .map(|(_, rect)| rect.center())
+            .expect("the Color Wheel's Square/Triangle switch is drawn");
+        // Click Triangle: the wheel turns and remembers the shape.
+        let texts = paint.drag(triangle, triangle, egui::PointerButton::Primary);
+        let shape = paint
+            .ctx
+            .data(|data| data.get_temp::<sue_wm::ColorShape>(Id::unique("sue-paint-wheel-shape")));
+        assert_eq!(
+            shape,
+            Some(sue_wm::ColorShape::Triangle),
+            "the switch stored the triangle"
+        );
+        // And back to Square, as the switch offers both ways.
+        let square = texts
+            .iter()
+            .find(|(text, _)| text == "Square")
+            .map(|(_, rect)| rect.center())
+            .expect("Square is still drawn");
+        paint.drag(square, square, egui::PointerButton::Primary);
+        let shape = paint
+            .ctx
+            .data(|data| data.get_temp::<sue_wm::ColorShape>(Id::unique("sue-paint-wheel-shape")));
+        assert_eq!(shape, Some(sue_wm::ColorShape::Square));
+    }
 }

@@ -63,7 +63,8 @@ pub use catalog::{
     SettingsItem, SettingsPage,
 };
 pub use color_pick::{
-    ColorPick, alpha_bar, checker_fill, color_button, color_wheel, hsv_of, rgb_of, swatch,
+    ColorPick, ColorShape, alpha_bar, checker_fill, color_button, color_wheel, hsv_of, rgb_of,
+    swatch,
 };
 pub use config::{
     CARET_GLIDE_KEY, Keymap, SMOOTH_CARET_KEY, WmConfig, register_rice, rice_declarations,

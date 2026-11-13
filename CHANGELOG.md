@@ -16,6 +16,10 @@ follow [Semantic Versioning](https://semver.org/).
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.
+- The shared color picker and Sue Paint's Color Wheel palette offer Clip
+  Studio Paint's triangular color space beside the square, with a switch
+  between the two. The triangle's hue corner turns with the hue, and every
+  color control remembers the shape it was left in.
 
 ### Changed
 
