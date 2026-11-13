@@ -3576,17 +3576,51 @@ impl SuePaint {
     }
 
     fn color_wheel(&mut self, ui: &mut Ui, body: Rect, theme: &Theme) {
-        // Room under the wheel for the color circles and the pill.
-        let side = (body.width()).min(body.height() - 70.0).max(60.0);
+        // A row above the wheel for the square/triangle switch, then room
+        // under it for the color circles and the pill.
+        let switch_row = ui.spacing().interact_size.y + 10.0;
+        let side = (body.width())
+            .min(body.height() - 70.0 - switch_row)
+            .max(60.0);
         let area = Rect::from_min_size(
-            pos2(body.center().x - side / 2.0, body.top()),
+            pos2(body.center().x - side / 2.0, body.top() + switch_row),
             vec2(side, side),
         );
+        // The shape switch, as Clip Studio Paint's Color Wheel offers.
+        let shape_id = Id::unique("sue-paint-wheel-shape");
+        let mut shape = ui
+            .data(|data| data.get_temp::<sue_wm::ColorShape>(shape_id))
+            .unwrap_or_default();
+        let mut switch = ui.new_child(
+            UiBuilder::new()
+                .max_rect(Rect::from_min_size(
+                    body.min,
+                    vec2(body.width(), switch_row),
+                ))
+                .layout(egui::Layout::top_down(egui::Align::Center)),
+        );
+        let options = [tr!("square").to_owned(), tr!("triangle").to_owned()];
+        if let Some(index) =
+            sue_wm::widgets::segmented(&mut switch, &options, Some(shape as usize), theme)
+        {
+            shape = if index == 0 {
+                sue_wm::ColorShape::Square
+            } else {
+                sue_wm::ColorShape::Triangle
+            };
+            ui.data_mut(|data| data.insert_temp(shape_id, shape));
+        }
         // Sue's own color wheel, the one every color control shares.
         let [r, g, b] = self.drawing_color();
         let mut rgba = [r, g, b, 255];
         let mut wheel = ui.new_child(egui::UiBuilder::new().max_rect(area));
-        let pick = sue_wm::color_wheel(&mut wheel, Id::unique("sue-paint-wheel"), &mut rgba, side);
+        let pick = sue_wm::color_wheel(
+            &mut wheel,
+            Id::unique("sue-paint-wheel"),
+            &mut rgba,
+            side,
+            shape,
+        );
         if pick.changed {
             let [h, s, _] = sue_wm::hsv_of([rgba[0], rgba[1], rgba[2]]);
             if s > 0.0 {
