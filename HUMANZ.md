@@ -709,6 +709,12 @@ Relative `XDG_*` values are ignored, as the XDG Base Directory specification
 requires. On mobile, the sandbox root comes from the native runtime (for example
 `Context.getFilesDir()` or `NSFileManager`).
 
+On every desktop, `SUE_HOME` set to an absolute folder puts all three in
+it (`config`, `data` and `cache`), for a portable copy, a test run or an
+assistant whose sandbox cannot write the usual folders; the home folder
+people's own files start in does not move, and a relative value is
+ignored. Phones and the browser keep their sandbox.
+
 Two hosts implement the trait:
 
 - `HeadlessHost` has virtual surfaces and an injectable input queue. CI, the

@@ -11,6 +11,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
+  caches there instead of the system's usual places, for a portable copy
+  or a test run that leaves your own settings alone.
+
 ### Changed
 
 - Sue Paint's 3D controls (camera, light, shadow, shapes and body

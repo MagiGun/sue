@@ -110,7 +110,7 @@ A suggested order, each step small enough to merge on its own:
   set `CARGO_TARGET_DIR` per checkout to a folder on a fast data drive. A
   debug build of everything is about 3 GB with line tables only for Sue's
   crates and no debug info for dependencies.
-- Sue reads its data folders from `APPDATA` and `LOCALAPPDATA` on Windows.
-  An assistant whose shell runs in a sandbox with its own view of AppData
-  can point both at a scratch folder for `--self-check`:
-  `APPDATA=<dir>/Roaming LOCALAPPDATA=<dir>/Local cargo run -p sue -- --self-check`.
+- Set `SUE_HOME` to a scratch folder when Sue runs for tests or for an
+  assistant: it keeps every file of Sue's own there, so a test run never
+  touches the settings of the person who uses Sue, and an assistant whose
+  sandbox cannot write AppData still passes `--self-check`.

@@ -64,7 +64,7 @@ impl PlatformPaths {
                 .map(PathBuf::from)
                 .ok_or(PlatformError::MissingEnvironment(name))
         };
-        match os {
+        let mut paths = match os {
             OsFamily::Windows => {
                 let roaming = var("APPDATA")?;
                 let local = var("LOCALAPPDATA").unwrap_or_else(|_| roaming.clone());
@@ -142,7 +142,21 @@ impl PlatformPaths {
                     home_dir,
                 })
             }
+        }?;
+        // On a desktop, SUE_HOME (an absolute folder) keeps every file of
+        // Sue's own there: a portable copy, a test run, or an assistant
+        // whose sandbox cannot write the usual folders. People's own home
+        // folder stays where it is.
+        if !matches!(os, OsFamily::Android | OsFamily::Ios | OsFamily::Web)
+            && let Some(root) = env("SUE_HOME")
+                .map(PathBuf::from)
+                .filter(|path| path.has_root())
+        {
+            paths.config_dir = root.join("config");
+            paths.data_dir = root.join("data");
+            paths.cache_dir = root.join("cache");
         }
+        Ok(paths)
     }
 
     /// Directory holding `.suerice` files.
@@ -289,6 +303,50 @@ mod tests {
         assert!(linux.contains(&Path::new("/home/a/.local/share/fonts").to_path_buf()));
         let mac = font_dirs(OsFamily::MacOs, env_of(&[("HOME", "/Users/a")]));
         assert_eq!(mac.len(), 3);
+    }
+
+    #[test]
+    fn sue_home_keeps_sues_own_files_in_one_folder_on_desktops() {
+        let windows = PlatformPaths::resolve(
+            OsFamily::Windows,
+            env_of(&[
+                ("APPDATA", r"C:\Users\a\AppData\Roaming"),
+                ("USERPROFILE", r"C:\Users\a"),
+                ("SUE_HOME", r"N:\Sue\home"),
+            ]),
+            None,
+        )
+        .unwrap();
+        if cfg!(windows) {
+            assert_eq!(windows.config_dir, Path::new(r"N:\Sue\home").join("config"));
+            assert_eq!(windows.data_dir, Path::new(r"N:\Sue\home").join("data"));
+            assert_eq!(windows.cache_dir, Path::new(r"N:\Sue\home").join("cache"));
+        }
+        assert_eq!(windows.home_dir, Path::new(r"C:\Users\a"));
+        let linux = PlatformPaths::resolve(
+            OsFamily::Linux,
+            env_of(&[("HOME", "/home/a"), ("SUE_HOME", "/srv/sue")]),
+            None,
+        )
+        .unwrap();
+        assert_eq!(linux.data_dir, Path::new("/srv/sue/data"));
+        assert_eq!(linux.rice_dir(), Path::new("/srv/sue/config/rice"));
+        assert_eq!(linux.home_dir, Path::new("/home/a"));
+        // A relative folder is ignored, and phones keep their sandbox.
+        let relative = PlatformPaths::resolve(
+            OsFamily::Linux,
+            env_of(&[("HOME", "/home/a"), ("SUE_HOME", "sue")]),
+            None,
+        )
+        .unwrap();
+        assert_eq!(relative.data_dir, Path::new("/home/a/.local/share/sue"));
+        let phone = PlatformPaths::resolve(
+            OsFamily::Android,
+            env_of(&[("SUE_HOME", "/srv/sue")]),
+            Some(Path::new("/data/app")),
+        )
+        .unwrap();
+        assert_eq!(phone.data_dir, Path::new("/data/app/data"));
     }
 
     #[test]
