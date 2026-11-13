@@ -21,6 +21,12 @@ follow [Semantic Versioning](https://semver.org/).
   circular edges are feathered, since egui antialiases no mesh, and the
   saturation and value square's mesh follows the wheel's size. It used to
   draw a stair-stepped circle over a gradient with a visible grid in it.
+- A picture drawn smaller than it is stays smooth: Sue Paint's canvas now
+  samples the mip chain of the picture's texture, so what a screen pixel
+  covers is averaged instead of sampled. Thin lines used to come out ragged,
+  of a weight that wandered along them, and places where lines met went
+  solid. Magnified pixels are untouched: the nearest filter is still what
+  draws them.
 
 ## [0.0.75] - 2026-11-09
 
