@@ -13,6 +13,7 @@ mod folders;
 mod layers;
 mod masks;
 mod order;
+mod palette;
 mod picked;
 #[cfg(test)]
 mod picked_tests;
@@ -34,6 +35,9 @@ pub use masks::{
     mask_offset, mask_on, new_mask, set_mask_linked, shown_at,
 };
 pub(crate) use order::key_above;
+pub use palette::{
+    PALETTE_COLOR, PALETTE_COLORS, named_palette_color, palette_color, set_palette_color,
+};
 pub use order::{key_below, keys_above, landing, move_block, reorder};
 pub use picked::{
     delete_layers, duplicate_layers, folder_insert, merge_picked, move_layers, outermost,
@@ -272,9 +276,15 @@ pub fn label(key: &str, value: &Value) -> String {
         crate::effects::BORDER => pick(&tr!("border-effect"), &tr!("no-border-effect")),
         crate::effects::BORDER_WIDTH | crate::effects::BORDER_COLOR => tr!("border-effect"),
         crate::effects::TONE => pick(&tr!("tone"), &tr!("no-tone")),
-        crate::effects::TONE_LINES | crate::effects::TONE_ANGLE => tr!("tone"),
+        crate::effects::TONE_LINES
+        | crate::effects::TONE_ANGLE
+        | crate::effects::TONE_SOURCE
+        | crate::effects::TONE_LEVELS
+        | crate::effects::TONE_SHAPE => tr!("tone"),
         crate::effects::COLOR => pick(&tr!("layer-color"), &tr!("no-layer-color")),
-        crate::effects::COLOR_VALUE => tr!("layer-color"),
+        crate::effects::COLOR_VALUE | crate::effects::COLOR_SUB => tr!("layer-color"),
+        PALETTE_COLOR => tr!("change-palette-color"),
+        MASK_LINKED => pick(&tr!("link-mask-to-layer"), &tr!("unlink-mask-from-layer")),
         crate::effects::EXPRESSION | crate::effects::THRESHOLD => tr!("expression-color"),
         REFERENCE => pick(
             &tr!("set-as-reference-layer"),
