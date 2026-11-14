@@ -100,9 +100,11 @@
 //! SVG file and [`sheet`] draws the contact sheet the set is reviewed
 //! on.
 
+mod animation;
 mod cache;
 mod canvas;
 mod chrome;
+mod documents;
 mod edit;
 mod file;
 pub mod fit;
@@ -988,6 +990,100 @@ icons! {
     /// A curve rising in a corner between two axes, with a solid point at its end: how the pressure
     /// of the pen sets the width of the stroke.
     PressureCurve = "pressure-curve" => palettes::PRESSURE_CURVE,
+    // Group I: animation and the timeline (`animation.rs`).
+    /// A triangle that points to the right. Play.
+    Play = "play" => animation::PLAY,
+    /// A square. Stop playing.
+    Stop = "stop" => animation::STOP,
+    /// Two solid triangles that point to the left, the one at the front
+    /// touching the back of the other, at an upright bar they run into.
+    /// Go to the first frame.
+    FrameFirst = "frame-first" => animation::FRAME_FIRST,
+    /// Two solid triangles that point to the right, the one at the front
+    /// touching the back of the other, at an upright bar they run into.
+    /// Go to the last frame.
+    FrameLast = "frame-last" => animation::FRAME_LAST,
+    /// A triangle that points to the left and leaves an upright bar
+    /// behind it. One frame back.
+    FramePrev = "frame-prev" => animation::FRAME_PREV,
+    /// A triangle that points to the right and leaves an upright bar
+    /// behind it. One frame on.
+    FrameNext = "frame-next" => animation::FRAME_NEXT,
+    /// Two arrows that follow each other round a track: one along the
+    /// top to the right, one along the bottom to the left. Play over and
+    /// over.
+    Loop = "loop" => animation::LOOP,
+    /// A sheet of animation paper lying on its long side, with the three
+    /// peg holes along its top: a slot, a round hole, a slot. One cel.
+    Cel = "cel" => animation::CEL,
+    /// The sheet of a cel with a plus where its lower right corner would
+    /// be. A new cel.
+    CelNew = "cel-new" => animation::CEL_NEW,
+    /// The sheet of a cel with a solid diamond, the mark of a key on the
+    /// timeline, where its lower right corner would be. This frame shows
+    /// this cel.
+    CelSpecify = "cel-specify" => animation::CEL_SPECIFY,
+    /// A solid ball, and behind it on the left the edges of the same
+    /// ball where it was the two frames before. Onion skin, the frames
+    /// before and after shown through.
+    OnionSkin = "onion-skin" => animation::ONION_SKIN,
+    /// A long track crossed by a playhead with a solid head, a shorter
+    /// track under it, and a plus in the lower right corner. A new
+    /// timeline.
+    TimelineNew = "timeline-new" => animation::TIMELINE_NEW,
+    /// A folder with a small solid triangle that points to the right in
+    /// it. An animation folder, the folder that holds the cels of one
+    /// track.
+    AnimationFolder = "animation-folder" => animation::ANIMATION_FOLDER,
+
+    // Group J: documents and materials (`documents.rs`).
+    /// An easel: a canvas with one brush stroke on it, standing on two
+    /// legs. An illustration, one picture.
+    DocIllustration = "doc-illustration" => documents::DOC_ILLUSTRATION,
+    /// A tall narrow strip cut into three panels, and beside it an arrow
+    /// that points down. A webtoon, one long picture to scroll.
+    DocWebtoon = "doc-webtoon" => documents::DOC_WEBTOON,
+    /// A page cut into three panels: one across the top and two below it
+    /// with a slanted gutter between them. A comic, a story of pages.
+    DocComic = "doc-comic" => documents::DOC_COMIC,
+    /// A closed book seen from the front: a cover with a line of title,
+    /// over the block of its pages, which curls round at the spine. Pages
+    /// sized for a printed book.
+    DocPrintBook = "doc-print-book" => documents::DOC_PRINT_BOOK,
+    /// A page with two panels across its top and a solid gear where its
+    /// lower right corner would be. A comic with every setting shown.
+    DocComicSettings = "doc-comic-settings" => documents::DOC_COMIC_SETTINGS,
+    /// A sheet lying on its long side with a small solid triangle that
+    /// points to the right, over a scrub bar with a solid knob on it. An
+    /// animation, a picture that plays.
+    DocAnimation = "doc-animation" => documents::DOC_ANIMATION,
+    /// An instant photo: a square card with a picture of one peak under
+    /// a solid sun, and a blank strip below it. A picture kept as a
+    /// material.
+    MaterialImage = "material-image" => documents::MATERIAL_IMAGE,
+    /// A square tile laid with bricks: three rows, the joints of each row
+    /// halfway between those of the next. A pattern that repeats.
+    MaterialPattern = "material-pattern" => documents::MATERIAL_PATTERN,
+    /// A square swatch of screentone: three rows of three solid dots,
+    /// small at the upper left and growing toward the lower right, so
+    /// that the tone fades. A tone.
+    MaterialTone = "material-tone" => documents::MATERIAL_TONE,
+    /// The head of a brush seen from the side, pointing down: the metal
+    /// band with a crimp across it and under it a solid tuft that swells
+    /// and ends in a point. A brush tip.
+    MaterialBrushTip = "material-brush-tip" => documents::MATERIAL_BRUSH_TIP,
+    /// A drawing figure in a pose: a round head, a body, one arm up and
+    /// one down, the legs in a stride. A pose for a 3D figure.
+    MaterialPose = "material-pose" => documents::MATERIAL_POSE,
+    /// A pencil lying from the top right down to the left, and the wavy
+    /// line its point is drawing. Start drawing.
+    Draw = "draw" => documents::DRAW,
+    /// A pile: a box with two lines over it, each shorter than the one
+    /// under it, as cards lie stacked. The projects, every work kept.
+    Projects = "projects" => documents::PROJECTS,
+    /// Two rows, each a small square picture with two lines of writing
+    /// beside it. Every picture, as a list of pictures.
+    PictureList = "picture-list" => documents::PICTURE_LIST,
 }
 
 /// Frames drawn without a window or a GPU, for the tests of this module.
