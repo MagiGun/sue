@@ -2239,6 +2239,20 @@ Print lays pages on paper as a PDF (`print.rs`) handed to the system viewer
 through `sue_platform::open_document`. Auto Actions, the Item Bank and
 registered workspaces are plain text files in Sue Paint's data folder.
 
+The `.clip` codec is a folder, `crates/sue-io/src/clip/`: `container` (the
+header and the chunks; `layout` lists every chunk that can be walked and
+says where a broken file breaks), `offscreen` (bitmaps, tiles and the
+`Attribute` blob; `attribute_parts` and `survey_bitmap` describe one
+without building a picture), `schema` (table and column names, blend mode
+numbers), `read` and `write`. `sqlite::Database` opens a database and
+reads only its schema; `lazy_table` answers rows whose blobs stay places
+in the file until `blob` or `blob_range` asks for one. On these stands the
+survey tool for the converter's work, `sue-cli clip dump <file>` and
+`sue-cli clip diff <before> <after>` (`bins/sue/src/bin/sue-cli/clip.rs`):
+chunks, bitmaps block by block, every table with its `CREATE` text, row
+count and rows, known blobs by their parts and unknown ones by their
+bytes. It only reads.
+
 ---
 
 ### 3.8 Sue Writer (`sue-writer`) and typography (`sue-type`)

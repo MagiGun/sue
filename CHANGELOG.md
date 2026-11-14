@@ -26,6 +26,11 @@ follow [Semantic Versioning](https://semver.org/).
   pixels) and PPM too: both are in the "save as type" list of every
   picture export. A PPM holds no transparency, so the picture is laid
   over white, as for a JPEG.
+- `sue-cli clip dump <file>` prints what a Clip Studio file holds (its
+  chunks, what each stored bitmap is made of, and every table with its
+  `CREATE` text, row count and rows), and `sue-cli clip diff <before>
+  <after>` prints what differs between two such files. For people
+  working on the converter; neither changes a file.
 
 ### Changed
 
@@ -106,6 +111,8 @@ follow [Semantic Versioning](https://semver.org/).
   downloads** in the Tool Group palette and `+` in Manage Materials.
 - A page of Sue Paint's Preferences for a hand controller that Sue
   never worked with; its one setting did nothing.
+- A damaged `.clip` whose sizes are too large to add up is refused with a
+  plain message instead of being read from the wrong place.
 
 ## [0.0.75] - 2026-11-09
 

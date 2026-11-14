@@ -7,6 +7,12 @@
 //! names and rows. [`write`] lays tables out as fresh b-trees in a new
 //! database: rowid tables only, no indexes, nothing free, which is what a
 //! `.clip` needs.
+//!
+//! [`Database`] opens the same bytes without reading any table: it lists
+//! the schema, counts rows, reads one table by name, and with
+//! [`Database::lazy_table`] answers rows whose blobs are only places in
+//! the file ([`BlobRef`]) until [`Database::blob`] is asked for one, so a
+//! large database never needs every blob in memory at once.
 
 use std::collections::HashSet;
 
@@ -191,9 +197,74 @@ impl Reader<'_> {
         Ok(out)
     }
 
+    /// How many bytes of a table cell's `size` byte payload sit in the
+    /// leaf page itself; the rest is in its overflow pages.
+    fn local(&self, size: usize) -> usize {
+        let usable = self.usable;
+        let max_local = usable - 35;
+        if size <= max_local {
+            return size;
+        }
+        let min_local = (usable - 12) * 32 / 255 - 23;
+        let k = min_local + (size - min_local) % (usable - 4);
+        if k <= max_local { k } else { min_local }
+    }
+
+    /// `len` bytes from byte `start` of a table cell's payload, copying
+    /// nothing else: overflow pages before `start` are only stepped over.
+    fn range(&self, cell: Cell, start: usize, len: usize) -> Result<Vec<u8>, String> {
+        let end = start
+            .checked_add(len)
+            .filter(|end| *end <= cell.size)
+            .ok_or("a value runs past its record")?;
+        let page = self.page(cell.page)?;
+        let local = self.local(cell.size);
+        let mut out = Vec::with_capacity(len);
+        if start < local {
+            let from = cell.at + start;
+            let to = cell.at + end.min(local);
+            out.extend_from_slice(page.get(from..to).ok_or("a cell runs past its page")?);
+        }
+        if end <= local {
+            return Ok(out);
+        }
+        let step = self.usable - 4;
+        let mut next = be32(page, cell.at + local).ok_or("a cell runs past its page")?;
+        let mut at = local;
+        let mut seen = HashSet::new();
+        while at < end {
+            if next == 0 || !seen.insert(next) {
+                return Err("an overflow chain is broken".to_owned());
+            }
+            let overflow = self.page(next)?;
+            next = be32(overflow, 0).ok_or("an overflow page is short")?;
+            let from = start.max(at);
+            let to = end.min(at + step);
+            if from < to {
+                out.extend_from_slice(
+                    overflow
+                        .get(4 + from - at..4 + to - at)
+                        .ok_or("an overflow page is short")?,
+                );
+            }
+            at += step;
+        }
+        Ok(out)
+    }
+
     /// Every (rowid, record) of the table b-tree at `root`.
     fn table_rows(&self, root: u32) -> Result<Vec<(i64, Vec<u8>)>, String> {
         let mut rows = Vec::new();
+        self.table_cells(root, &mut |rowid, cell, page| {
+            rows.push((rowid, self.payload(page, cell.at, cell.size, false)?));
+            Ok(())
+        })?;
+        Ok(rows)
+    }
+
+    /// Calls `visit` with every cell of the table b-tree at `root`, in
+    /// rowid order: its rowid, where its payload is, and its leaf page.
+    fn table_cells(&self, root: u32, visit: &mut Visit<'_>) -> Result<(), String> {
         let mut pending = vec![root];
         let mut seen = HashSet::new();
         while let Some(number) = pending.pop() {
@@ -211,9 +282,13 @@ impl Reader<'_> {
                         let (size, a) = varint(page, at).ok_or("a cell is short")?;
                         let (rowid, b) = varint(page, at + a).ok_or("a cell is short")?;
                         let size = usize::try_from(size).map_err(|_| "a cell is too big")?;
-                        let payload = self.payload(page, at + a + b, size, false)?;
+                        let cell = Cell {
+                            page: number,
+                            at: at + a + b,
+                            size,
+                        };
                         #[allow(clippy::cast_possible_wrap)]
-                        rows.push((rowid as i64, payload));
+                        visit(rowid as i64, cell, page)?;
                     }
                 }
                 0x05 => {
@@ -229,7 +304,70 @@ impl Reader<'_> {
                 other => return Err(format!("page {number} is not a table page ({other:#x})")),
             }
         }
-        Ok(rows)
+        Ok(())
+    }
+
+    /// The values of the record in `cell`, its blobs left where they are.
+    fn lazy_record(&self, cell: Cell) -> Result<Vec<LazyValue>, String> {
+        let start = self.range(cell, 0, cell.size.min(9))?;
+        let (header_size, first) = varint(&start, 0).ok_or("a record is short")?;
+        let header_size = usize::try_from(header_size).map_err(|_| "a record is broken")?;
+        let header = self.range(cell, 0, header_size)?;
+        let mut at = first;
+        let mut body = header_size;
+        let mut values = Vec::new();
+        while at < header_size {
+            let (kind, used) = varint(&header, at).ok_or("a record header is short")?;
+            at += used;
+            let len = serial_len(kind)?;
+            if kind >= 12 && kind % 2 == 0 {
+                body.checked_add(len)
+                    .filter(|end| *end <= cell.size)
+                    .ok_or("a record is short")?;
+                values.push(LazyValue::Blob(BlobRef {
+                    cell,
+                    start: body,
+                    len,
+                }));
+            } else {
+                let raw = self
+                    .range(cell, body, len)
+                    .map_err(|_| "a record is short")?;
+                values.push(match self.value(kind, &raw) {
+                    Value::Null => LazyValue::Null,
+                    Value::Integer(value) => LazyValue::Integer(value),
+                    Value::Real(value) => LazyValue::Real(value),
+                    Value::Text(text) => LazyValue::Text(text),
+                    Value::Blob(_) => return Err("a record is broken".to_owned()),
+                });
+            }
+            body = body.saturating_add(len);
+        }
+        Ok(values)
+    }
+
+    /// The value of serial type `kind` whose bytes are `raw` (as long as
+    /// [`serial_len`] says).
+    fn value(&self, kind: u64, raw: &[u8]) -> Value {
+        match kind {
+            0 => Value::Null,
+            1..=6 => {
+                let mut value = i64::from(raw.first().copied().unwrap_or(0) as i8);
+                for byte in raw.iter().skip(1) {
+                    value = (value << 8) | i64::from(*byte);
+                }
+                Value::Integer(value)
+            }
+            7 => {
+                let mut bits = [0_u8; 8];
+                bits.copy_from_slice(&raw[..8]);
+                Value::Real(f64::from_bits(u64::from_be_bytes(bits)))
+            }
+            8 => Value::Integer(0),
+            9 => Value::Integer(1),
+            n if n % 2 == 0 => Value::Blob(raw.to_vec()),
+            _ => Value::Text(self.text(raw)),
+        }
     }
 
     fn text(&self, bytes: &[u8]) -> String {
@@ -266,44 +404,345 @@ impl Reader<'_> {
         let mut body = header_size;
         let mut values = Vec::with_capacity(types.len());
         for kind in types {
-            let int = |len: usize| -> Result<i64, String> {
-                let raw = bytes.get(body..body + len).ok_or("a record is short")?;
-                let mut value = i64::from(raw[0] as i8);
-                for byte in &raw[1..] {
-                    value = (value << 8) | i64::from(*byte);
-                }
-                Ok(value)
-            };
-            let (value, len) = match kind {
-                0 => (Value::Null, 0),
-                1 => (Value::Integer(int(1)?), 1),
-                2 => (Value::Integer(int(2)?), 2),
-                3 => (Value::Integer(int(3)?), 3),
-                4 => (Value::Integer(int(4)?), 4),
-                5 => (Value::Integer(int(6)?), 6),
-                6 => (Value::Integer(int(8)?), 8),
-                7 => {
-                    let raw = bytes.get(body..body + 8).ok_or("a record is short")?;
-                    let bits = u64::from_be_bytes(raw.try_into().map_err(|_| "a record is short")?);
-                    (Value::Real(f64::from_bits(bits)), 8)
-                }
-                8 => (Value::Integer(0), 0),
-                9 => (Value::Integer(1), 0),
-                10 | 11 => return Err("a record uses a reserved type".to_owned()),
-                n => {
-                    let len = usize::try_from((n - 12) / 2).map_err(|_| "a record is broken")?;
-                    let raw = bytes.get(body..body + len).ok_or("a record is short")?;
-                    if n % 2 == 0 {
-                        (Value::Blob(raw.to_vec()), len)
-                    } else {
-                        (Value::Text(self.text(raw)), len)
-                    }
-                }
-            };
-            values.push(value);
+            let len = serial_len(kind)?;
+            let raw = body
+                .checked_add(len)
+                .and_then(|end| bytes.get(body..end))
+                .ok_or("a record is short")?;
+            values.push(self.value(kind, raw));
             body += len;
         }
         Ok(values)
+    }
+}
+
+/// Where a table cell's payload is: its leaf page, the payload's first
+/// byte in that page, and the payload's whole size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Cell {
+    page: u32,
+    at: usize,
+    size: usize,
+}
+
+/// What [`Reader::table_cells`] calls with each cell: its rowid, where its
+/// payload is, and its leaf page.
+type Visit<'v> = dyn FnMut(i64, Cell, &[u8]) -> Result<(), String> + 'v;
+
+/// How many bytes a value of serial type `kind` takes in a record.
+fn serial_len(kind: u64) -> Result<usize, String> {
+    Ok(match kind {
+        0 | 8 | 9 => 0,
+        1 => 1,
+        2 => 2,
+        3 => 3,
+        4 => 4,
+        5 => 6,
+        6 | 7 => 8,
+        10 | 11 => return Err("a record uses a reserved type".to_owned()),
+        n => usize::try_from((n - 12) / 2).map_err(|_| "a record is broken")?,
+    })
+}
+
+/// One row of the database's schema table: a table, an index, a view or
+/// a trigger.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SchemaEntry {
+    /// `table`, `index`, `view` or `trigger`.
+    pub kind: String,
+    /// Its name.
+    pub name: String,
+    /// The table it belongs to (its own name for a table).
+    pub table: String,
+    /// The page its b-tree starts on (0 when it has none).
+    pub root: i64,
+    /// The statement that made it (empty for an automatic index).
+    pub sql: String,
+}
+
+/// A blob still in the database: where it is and how long. Read it with
+/// [`Database::blob`] or a part of it with [`Database::blob_range`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BlobRef {
+    cell: Cell,
+    start: usize,
+    len: usize,
+}
+
+impl BlobRef {
+    /// Its length in bytes.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// `true` when it holds no bytes.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+/// One value of a row read lazily: as [`Value`], but a blob is only a
+/// [`BlobRef`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum LazyValue {
+    /// SQL NULL.
+    Null,
+    /// A whole number.
+    Integer(i64),
+    /// A floating point number.
+    Real(f64),
+    /// Text.
+    Text(String),
+    /// Bytes, not read yet.
+    Blob(BlobRef),
+}
+
+impl LazyValue {
+    /// The number, if this is one (reals are cut to whole numbers).
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn int(&self) -> Option<i64> {
+        match self {
+            Self::Integer(value) => Some(*value),
+            Self::Real(value) => Some(*value as i64),
+            _ => None,
+        }
+    }
+
+    /// The text, if this is text.
+    #[must_use]
+    pub fn text(&self) -> Option<&str> {
+        match self {
+            Self::Text(text) => Some(text),
+            _ => None,
+        }
+    }
+
+    /// The blob's place, if this is a blob.
+    #[must_use]
+    pub fn blob(&self) -> Option<BlobRef> {
+        match self {
+            Self::Blob(blob) => Some(*blob),
+            _ => None,
+        }
+    }
+}
+
+/// A table read lazily: as [`Table`], with its blobs left in the database.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LazyTable {
+    /// Its name.
+    pub name: String,
+    /// Its columns, in order.
+    pub columns: Vec<String>,
+    /// Its rows, by rowid.
+    pub rows: Vec<(i64, Vec<LazyValue>)>,
+}
+
+impl LazyTable {
+    /// Where `column` is (any case).
+    #[must_use]
+    pub fn column(&self, column: &str) -> Option<usize> {
+        self.columns
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(column))
+    }
+}
+
+/// An SQLite database opened but not read: its schema is known, and each
+/// table is read only when asked for.
+pub struct Database<'a> {
+    reader: Reader<'a>,
+    schema: Vec<SchemaEntry>,
+}
+
+impl<'a> Database<'a> {
+    /// Opens the database in `bytes` and reads its schema.
+    ///
+    /// # Errors
+    /// When `bytes` is not an SQLite database or its schema is broken.
+    pub fn open(bytes: &'a [u8]) -> Result<Self, String> {
+        if bytes.len() < 100 || &bytes[..16] != b"SQLite format 3\0" {
+            return Err("not an SQLite database".to_owned());
+        }
+        let page_size = match be16(bytes, 16).unwrap_or(0) {
+            1 => 65_536,
+            size if size >= 512 && size.is_power_of_two() => size,
+            size => return Err(format!("an SQLite page size of {size} is not valid")),
+        };
+        let reserved = usize::from(bytes[20]);
+        let usable = page_size
+            .checked_sub(reserved)
+            .filter(|usable| *usable >= 480)
+            .ok_or("the SQLite header is broken")?;
+        let utf16 = match be32(bytes, 56).unwrap_or(1) {
+            2 => Some(false),
+            3 => Some(true),
+            _ => None,
+        };
+        let reader = Reader {
+            bytes,
+            page_size,
+            usable,
+            utf16,
+        };
+        let mut schema = Vec::new();
+        for (_, record) in reader.table_rows(1)? {
+            let row = reader.record(&record)?;
+            let text = |index: usize| {
+                row.get(index)
+                    .and_then(Value::text)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            schema.push(SchemaEntry {
+                kind: text(0),
+                name: text(1),
+                table: text(2),
+                root: row.get(3).and_then(Value::int).unwrap_or(0),
+                sql: text(4),
+            });
+        }
+        Ok(Self { reader, schema })
+    }
+
+    /// The size of a page in bytes.
+    #[must_use]
+    pub fn page_size(&self) -> usize {
+        self.reader.page_size
+    }
+
+    /// How many whole pages the bytes hold.
+    #[must_use]
+    pub fn page_count(&self) -> usize {
+        self.reader.bytes.len() / self.reader.page_size
+    }
+
+    /// How text is stored: `UTF-8`, `UTF-16LE` or `UTF-16BE`.
+    #[must_use]
+    pub fn text_encoding(&self) -> &'static str {
+        match self.reader.utf16 {
+            None => "UTF-8",
+            Some(false) => "UTF-16LE",
+            Some(true) => "UTF-16BE",
+        }
+    }
+
+    /// Every row of the schema, in the order the database lists them.
+    #[must_use]
+    pub fn schema(&self) -> &[SchemaEntry] {
+        &self.schema
+    }
+
+    /// The root page of the table `name`, when the schema has it.
+    fn root(&self, name: &str) -> Option<(&SchemaEntry, u32)> {
+        self.schema
+            .iter()
+            .filter(|entry| entry.kind == "table" && entry.name == name)
+            .find_map(|entry| {
+                let root = u32::try_from(entry.root).ok().filter(|root| *root != 0)?;
+                Some((entry, root))
+            })
+    }
+
+    /// The table `name` with all its values, or `None` when there is none.
+    ///
+    /// # Errors
+    /// When a page of the table is broken.
+    pub fn table(&self, name: &str) -> Result<Option<Table>, String> {
+        let Some((entry, root)) = self.root(name) else {
+            return Ok(None);
+        };
+        self.table_at(entry, root).map(Some)
+    }
+
+    fn table_at(&self, entry: &SchemaEntry, root: u32) -> Result<Table, String> {
+        let (columns, key) = columns_of(&entry.sql);
+        let mut rows = Vec::new();
+        for (rowid, record) in self.reader.table_rows(root)? {
+            let mut values = self.reader.record(&record)?;
+            values.resize(columns.len().max(values.len()), Value::Null);
+            if let Some(key) = key
+                && values.get(key) == Some(&Value::Null)
+            {
+                values[key] = Value::Integer(rowid);
+            }
+            rows.push((rowid, values));
+        }
+        Ok(Table {
+            name: entry.name.clone(),
+            columns,
+            rows,
+        })
+    }
+
+    /// How many rows the table `name` has, counted without reading one,
+    /// or `None` when there is no such table.
+    ///
+    /// # Errors
+    /// When a page of the table is broken.
+    pub fn row_count(&self, name: &str) -> Result<Option<usize>, String> {
+        let Some((_, root)) = self.root(name) else {
+            return Ok(None);
+        };
+        let mut count = 0;
+        self.reader.table_cells(root, &mut |_, _, _| {
+            count += 1;
+            Ok(())
+        })?;
+        Ok(Some(count))
+    }
+
+    /// The table `name` with its blobs left in the database, or `None`
+    /// when there is none. Numbers and text are read; of a blob only the
+    /// place and the length.
+    ///
+    /// # Errors
+    /// When a page of the table is broken.
+    pub fn lazy_table(&self, name: &str) -> Result<Option<LazyTable>, String> {
+        let Some((entry, root)) = self.root(name) else {
+            return Ok(None);
+        };
+        let (columns, key) = columns_of(&entry.sql);
+        let mut rows = Vec::new();
+        self.reader.table_cells(root, &mut |rowid, cell, _| {
+            let mut values = self.reader.lazy_record(cell)?;
+            values.resize(columns.len().max(values.len()), LazyValue::Null);
+            if let Some(key) = key
+                && values.get(key) == Some(&LazyValue::Null)
+            {
+                values[key] = LazyValue::Integer(rowid);
+            }
+            rows.push((rowid, values));
+            Ok(())
+        })?;
+        Ok(Some(LazyTable {
+            name: entry.name.clone(),
+            columns,
+            rows,
+        }))
+    }
+
+    /// The bytes of `blob`.
+    ///
+    /// # Errors
+    /// When the pages the blob lies on are broken.
+    pub fn blob(&self, blob: &BlobRef) -> Result<Vec<u8>, String> {
+        self.reader.range(blob.cell, blob.start, blob.len)
+    }
+
+    /// `len` bytes of `blob` from its byte `start` (fewer when the blob
+    /// ends first), reading only the pages they lie on and stepping over
+    /// the ones before.
+    ///
+    /// # Errors
+    /// When the pages the blob lies on are broken.
+    pub fn blob_range(&self, blob: &BlobRef, start: usize, len: usize) -> Result<Vec<u8>, String> {
+        let start = start.min(blob.len);
+        let len = len.min(blob.len - start);
+        self.reader.range(blob.cell, blob.start + start, len)
     }
 }
 
@@ -367,66 +806,19 @@ fn columns_of(sql: &str) -> (Vec<String>, Option<usize>) {
 /// # Errors
 /// When `bytes` is not an SQLite database or a page of it is broken.
 pub fn read(bytes: &[u8]) -> Result<Vec<Table>, String> {
-    if bytes.len() < 100 || &bytes[..16] != b"SQLite format 3\0" {
-        return Err("not an SQLite database".to_owned());
-    }
-    let page_size = match be16(bytes, 16).unwrap_or(0) {
-        1 => 65_536,
-        size if size >= 512 && size.is_power_of_two() => size,
-        size => return Err(format!("an SQLite page size of {size} is not valid")),
-    };
-    let reserved = usize::from(bytes[20]);
-    let usable = page_size
-        .checked_sub(reserved)
-        .filter(|usable| *usable >= 480)
-        .ok_or("the SQLite header is broken")?;
-    let utf16 = match be32(bytes, 56).unwrap_or(1) {
-        2 => Some(false),
-        3 => Some(true),
-        _ => None,
-    };
-    let reader = Reader {
-        bytes,
-        page_size,
-        usable,
-        utf16,
-    };
+    let database = Database::open(bytes)?;
     let mut tables = Vec::new();
-    for (_, record) in reader.table_rows(1)? {
-        let row = reader.record(&record)?;
-        if row.first().and_then(Value::text) != Some("table") {
+    for entry in database.schema() {
+        if entry.kind != "table" {
             continue;
         }
-        let name = row
-            .get(1)
-            .and_then(Value::text)
-            .unwrap_or_default()
-            .to_owned();
-        let root = row.get(3).and_then(Value::int).unwrap_or(0);
-        let sql = row.get(4).and_then(Value::text).unwrap_or_default();
-        let Ok(root) = u32::try_from(root) else {
+        let Ok(root) = u32::try_from(entry.root) else {
             continue;
         };
         if root == 0 {
             continue;
         }
-        let (columns, key) = columns_of(sql);
-        let mut rows = Vec::new();
-        for (rowid, record) in reader.table_rows(root)? {
-            let mut values = reader.record(&record)?;
-            values.resize(columns.len().max(values.len()), Value::Null);
-            if let Some(key) = key
-                && values.get(key) == Some(&Value::Null)
-            {
-                values[key] = Value::Integer(rowid);
-            }
-            rows.push((rowid, values));
-        }
-        tables.push(Table {
-            name,
-            columns,
-            rows,
-        });
+        tables.push(database.table_at(entry, root)?);
     }
     Ok(tables)
 }
@@ -890,5 +1282,171 @@ mod tests {
         let mut broken = write(&[table("T", 1, 1)]);
         broken[16] = 3;
         assert!(read(&broken).is_err());
+    }
+
+    /// The eager value a lazy one stands for.
+    fn full(database: &Database<'_>, value: &LazyValue) -> Value {
+        match value {
+            LazyValue::Null => Value::Null,
+            LazyValue::Integer(value) => Value::Integer(*value),
+            LazyValue::Real(value) => Value::Real(*value),
+            LazyValue::Text(text) => Value::Text(text.clone()),
+            LazyValue::Blob(blob) => Value::Blob(database.blob(blob).unwrap()),
+        }
+    }
+
+    #[test]
+    fn a_lazy_table_holds_what_the_whole_read_holds() {
+        let tables = vec![
+            table("Small", 3, 10),
+            table("Big", 40, 20_000),
+            table("Many", 5_000, 3),
+            table("None", 0, 0),
+        ];
+        let bytes = write(&tables);
+        let whole = read(&bytes).unwrap();
+        let database = Database::open(&bytes).unwrap();
+        assert_eq!(database.page_size(), PAGE);
+        assert_eq!(database.page_count() * PAGE, bytes.len());
+        assert_eq!(database.text_encoding(), "UTF-8");
+        let names: Vec<&str> = database
+            .schema()
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(names, ["Small", "Big", "Many", "None", "sqlite_sequence"]);
+        for (entry, table) in database.schema().iter().zip(&tables) {
+            assert_eq!((entry.kind.as_str(), &entry.sql), ("table", &table.sql));
+            assert_eq!(entry.table, table.name);
+        }
+        for table in &whole {
+            assert_eq!(
+                database.row_count(&table.name).unwrap(),
+                Some(table.rows.len()),
+                "{}",
+                table.name
+            );
+            assert_eq!(
+                database.table(&table.name).unwrap().as_ref(),
+                Some(table),
+                "{}",
+                table.name
+            );
+            let lazy = database.lazy_table(&table.name).unwrap().unwrap();
+            assert_eq!(lazy.columns, table.columns);
+            assert_eq!(lazy.column("mainid"), table.column("MainId"));
+            assert_eq!(lazy.rows.len(), table.rows.len());
+            for ((rowid, values), (lazy_id, lazy_values)) in table.rows.iter().zip(&lazy.rows) {
+                assert_eq!(rowid, lazy_id);
+                let read: Vec<Value> = lazy_values
+                    .iter()
+                    .map(|value| full(&database, value))
+                    .collect();
+                assert_eq!(&read, values, "{} row {rowid}", table.name);
+            }
+        }
+        assert_eq!(database.table("Missing").unwrap(), None);
+        assert_eq!(database.row_count("Missing").unwrap(), None);
+        assert!(database.lazy_table("Missing").unwrap().is_none());
+    }
+
+    #[test]
+    fn a_part_of_a_blob_is_read_without_the_rest() {
+        let bytes = write(&[table("Big", 3, 50_000)]);
+        let database = Database::open(&bytes).unwrap();
+        let lazy = database.lazy_table("Big").unwrap().unwrap();
+        let data = lazy.column("Data").unwrap();
+        let blob = lazy.rows[1].1[data].blob().unwrap();
+        assert_eq!((blob.len(), blob.is_empty()), (50_000, false));
+        assert_eq!(lazy.rows[1].1[1].int(), Some(2 * 1_000_003 - 70_000));
+        assert!(lazy.rows[1].1[2].text().unwrap().starts_with("row 2"));
+        let whole = database.blob(&blob).unwrap();
+        let expect: Vec<u8> = (0..50_000_usize).map(|i| (i * 7 + 2) as u8).collect();
+        assert_eq!(whole, expect);
+        // Parts inside the leaf page, across page edges, and at the end.
+        for (start, len) in [
+            (0, 16),
+            (100, 5_000),
+            (4_000, 200),
+            (12_345, 20_000),
+            (49_990, 10),
+            (49_990, 500),
+            (50_000, 4),
+            (70_000, 4),
+            (7, 0),
+        ] {
+            let from = start.min(expect.len());
+            let to = (start + len).min(expect.len());
+            assert_eq!(
+                database.blob_range(&blob, start, len).unwrap(),
+                &expect[from..to],
+                "{len} bytes from {start}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_lazy_read_does_not_look_inside_a_blob() {
+        let bytes = write(&[table("Big", 2, 30_000)]);
+        let database = Database::open(&bytes).unwrap();
+        let before = database.lazy_table("Big").unwrap().unwrap();
+        // Scribble over the data of every overflow page (past its "next
+        // page" number): the numbers and text around the blobs still read.
+        let mut scribbled = bytes.clone();
+        let pages = scribbled.len() / PAGE;
+        let mut touched = 0;
+        for page in 1..pages {
+            let start = page * PAGE;
+            // Leaf and interior pages start with 0x0d or 0x05.
+            // The last page of a chain also holds the values after the blob.
+            let last = scribbled[start..start + 4] == [0; 4];
+            if last || matches!(scribbled[start], 0x0d | 0x05) {
+                continue;
+            }
+            for byte in &mut scribbled[start + 4..start + PAGE] {
+                *byte = 0xee;
+            }
+            touched += 1;
+        }
+        assert!(touched >= 12, "{touched} overflow pages");
+        let database = Database::open(&scribbled).unwrap();
+        let after = database.lazy_table("Big").unwrap().unwrap();
+        let scale = after.column("Scale").unwrap();
+        let data = after.column("Data").unwrap();
+        for (old, new) in before.rows.iter().zip(&after.rows) {
+            assert_eq!(old.1[scale], new.1[scale]);
+            assert_eq!(new.1[data].blob().unwrap().len(), 30_000);
+        }
+        assert_eq!(after.rows[1].1[scale], LazyValue::Real(2.0 / 3.0));
+    }
+
+    #[test]
+    fn a_broken_overflow_chain_is_an_error_not_a_panic() {
+        let bytes = write(&[table("Big", 1, 30_000)]);
+        let database = Database::open(&bytes).unwrap();
+        let lazy = database.lazy_table("Big").unwrap().unwrap();
+        let blob = lazy.rows[0].1[lazy.column("Data").unwrap()].blob().unwrap();
+        // The same place in a database whose overflow pages end early, loop,
+        // or are cut off.
+        let overflow: Vec<usize> = (1..bytes.len() / PAGE)
+            .filter(|page| !matches!(bytes[page * PAGE], 0x0d | 0x05))
+            .collect();
+        let third = overflow[2] * PAGE;
+        let mut ended = bytes.clone();
+        ended[third..third + 4].copy_from_slice(&0_u32.to_be_bytes());
+        let mut looped = bytes.clone();
+        let first = u32::try_from(overflow[0] + 1).unwrap();
+        looped[third..third + 4].copy_from_slice(&first.to_be_bytes());
+        let cut = bytes[..third + PAGE].to_vec();
+        for broken in [&ended, &looped, &cut] {
+            let database = Database::open(broken).unwrap();
+            assert!(database.blob(&blob).is_err());
+            assert!(database.blob_range(&blob, 29_000, 10).is_err());
+            if broken.len() == bytes.len() {
+                assert_eq!(database.blob_range(&blob, 0, 10).unwrap().len(), 10);
+            }
+            assert!(read(broken).is_err());
+        }
+        assert!(Database::open(b"not a database").is_err());
     }
 }
