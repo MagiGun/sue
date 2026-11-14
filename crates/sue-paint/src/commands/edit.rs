@@ -527,6 +527,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "paste",
         paste_here,
     )
+    .keys("Ctrl+Shift+V")
     .state(with_clipboard),
     c("edit.clear", "delete", "clear-inside", clear)
         .keys("Ctrl+Delete or Ctrl+Backspace or Delete or Backspace")

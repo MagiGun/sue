@@ -232,6 +232,7 @@ fn the_shortcuts_keep_the_keys_and_names_they_had() {
         ("edit.cut", "Ctrl+X or F2", "Cut"),
         ("edit.copy", "Ctrl+C or F3", "Copy"),
         ("edit.paste", "Ctrl+V or F4", "Paste"),
+        ("edit.paste_here", "Ctrl+Shift+V", "Paste to Shown Position"),
         (
             "edit.clear",
             "Ctrl+Delete or Ctrl+Backspace or Delete or Backspace",

@@ -65,6 +65,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint: Edit, Paste to Shown Position answers to Ctrl+Shift+V, as
+  in Clip Studio Paint (it had no key).
 - A Sue project (`.sue`) with pictures is far smaller and the same on
   disk however it is saved: pixels are stored as 256 pixel tiles, an
   empty or single color tile costs a byte, a tile found twice (a duplicated
