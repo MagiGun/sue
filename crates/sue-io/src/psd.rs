@@ -483,6 +483,9 @@ pub fn decode_psd(bytes: &[u8]) -> Result<Psd, String> {
             layers = read_layers(&mut r, depth)?;
         }
         r.at = info_end;
+        if layers.is_empty() && depth == 16 {
+            layers = tagged_layers(&mut r, section_end, depth)?;
+        }
     }
     r.at = section_end;
     let merged = read_merged(&mut r, width, height, channels, depth)?;
@@ -492,6 +495,54 @@ pub fn decode_psd(bytes: &[u8]) -> Result<Psd, String> {
         layers,
         merged,
     })
+}
+
+/// The layers of a 16-bit document as Photoshop writes them: its layer
+/// info is empty and the layers are in an `Lr16` block among the tagged
+/// blocks after the global mask info, which end at `end`.
+fn tagged_layers(r: &mut Reader<'_>, end: usize, depth: u16) -> Result<Vec<PsdLayer>, String> {
+    // Blocks whose length is 8 bytes in a `.psb`.
+    const LONG: [&[u8; 4]; 13] = [
+        b"LMsk", b"Lr16", b"Lr32", b"Layr", b"Mt16", b"Mt32", b"Mtrn", b"Alph", b"FMsk", b"lnk2",
+        b"FEid", b"FXid", b"PxSD",
+    ];
+    if r.at.saturating_add(4) > end {
+        return Ok(Vec::new());
+    }
+    let global = r.u32()? as usize;
+    r.take(global)?;
+    loop {
+        // Some writers pad a block to a multiple of four.
+        while r.at < end && r.bytes.get(r.at) == Some(&0) {
+            r.at += 1;
+        }
+        if r.at.saturating_add(12) > end {
+            return Ok(Vec::new());
+        }
+        let signature = r.take(4)?;
+        if signature != b"8BIM" && signature != b"8B64" {
+            return Ok(Vec::new());
+        }
+        let key = r.take(4)?;
+        let size = if r.big && LONG.iter().any(|long| long.as_slice() == key) {
+            usize::try_from(r.u64()?).map_err(|_| "the document is damaged")?
+        } else {
+            r.u32()? as usize
+        };
+        let start = r.at;
+        let block_end = start
+            .checked_add(size)
+            .filter(|block_end| *block_end <= end)
+            .ok_or("the document is cut short")?;
+        if key == b"Lr16" {
+            return if size == 0 {
+                Ok(Vec::new())
+            } else {
+                read_layers(r, depth)
+            };
+        }
+        r.at = block_end;
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1372,6 +1423,46 @@ mod tests {
         let mut deeper = bytes.clone();
         deeper[22..24].copy_from_slice(&32_u16.to_be_bytes());
         assert!(decode_psd(&deeper).unwrap_err().contains("32-bit"));
+    }
+
+    /// Photoshop keeps the layers of a 16-bit document in an `Lr16`
+    /// block after the global mask info, with the layer info left empty.
+    #[test]
+    fn sixteen_bit_layers_kept_in_an_lr16_block_are_read() {
+        let (width, height) = (9_u32, 4_u32);
+        let value = |x: u32, y: u32, channel: usize| -> u16 {
+            ((x * 7001 + y * 333 + channel as u32 * 20_000) % 65_536) as u16
+        };
+        let plain = sixteen_bit(width, height, value);
+        let want = decode_psd(&plain).unwrap();
+        // Header, color mode and resources take 34 bytes; then the
+        // section's length, the layer info's length and the layer info.
+        let length = |at: usize| u32::from_be_bytes(plain[at..at + 4].try_into().unwrap());
+        let info = length(38) as usize;
+        let body = &plain[42..42 + info];
+        let rest = &plain[42 + info + 4..];
+        for (signature, padding) in [(b"8BIM", 0), (b"8B64", 3)] {
+            let mut block = Vec::new();
+            // An unknown block first, which is stepped over.
+            block.extend_from_slice(b"8BIMPatt");
+            block.extend_from_slice(&3_u32.to_be_bytes());
+            block.extend_from_slice(&[1, 2, 3]);
+            block.extend(std::iter::repeat_n(0, padding));
+            block.extend_from_slice(signature);
+            block.extend_from_slice(b"Lr16");
+            block.extend_from_slice(&(info as u32).to_be_bytes());
+            block.extend_from_slice(body);
+            let mut bytes = plain[..34].to_vec();
+            bytes.extend_from_slice(&((4 + 4 + block.len()) as u32).to_be_bytes());
+            bytes.extend_from_slice(&0_u32.to_be_bytes());
+            bytes.extend_from_slice(&0_u32.to_be_bytes());
+            bytes.extend(block);
+            bytes.extend_from_slice(rest);
+            assert_eq!(decode_psd(&bytes).unwrap(), want, "padding {padding}");
+            for cut in 34..bytes.len() {
+                let _ = decode_psd(&bytes[..cut]);
+            }
+        }
     }
 
     #[test]
