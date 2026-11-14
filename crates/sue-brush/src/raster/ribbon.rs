@@ -102,13 +102,14 @@ impl Shape for Ribbon<'_> {
                 max[axis] = max[axis].max(p.disc.at[axis] + reach);
             }
         }
-        if painted.len() < 2 {
-            return PixelRect {
-                x0: 0,
-                y0: 0,
-                x1: 0,
-                y1: 0,
-            };
+        // `min` and `max` pass over a coordinate that is not a number, so
+        // a broken point is caught here.
+        if painted.len() < 2
+            || !painted
+                .iter()
+                .all(|p| p.disc.at.iter().all(|v| v.is_finite()))
+        {
+            return PixelRect::EMPTY;
         }
         PixelRect::around(min, max)
     }
@@ -170,7 +171,9 @@ impl Shape for Ribbon<'_> {
         // Beyond an end, across is measured square to the path, not to
         // the end point.
         let distance = if past > 0.0 {
-            (near.distance * near.distance - past * past).max(0.0).sqrt()
+            (near.distance * near.distance - past * past)
+                .max(0.0)
+                .sqrt()
         } else {
             near.distance
         };

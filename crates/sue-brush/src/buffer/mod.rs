@@ -365,45 +365,44 @@ impl Painter<'_> {
     }
 
     /// Lays `shape`'s coverage, pixel by pixel within its bounds and row
-    /// spans, combining it with what the part holds.
+    /// spans, combining it with what the part holds. The work is row by
+    /// row over each row's span only, so a long thin shape at a slant
+    /// costs its pixels, not the tiles of its bounding box.
     pub fn fill(&mut self, shape: &impl Shape) {
         let rect = shape.bounds();
         if rect.is_empty() {
             return;
         }
-        let first = TileKey::of_pixel(rect.x0, rect.y0);
-        let last = TileKey::of_pixel(rect.x1 - 1, rect.y1 - 1);
         let combine = self.buffer.combine;
         let mut values = [0_u16; TILE as usize];
         let mut worked = 0_u64;
-        for ky in first.y..=last.y {
-            for kx in first.x..=last.x {
-                let key = TileKey { x: kx, y: ky };
+        for y in rect.y0..rect.y1 {
+            let cy = y as f32 + 0.5;
+            let Some((lo, hi)) = shape.span(cy) else {
+                continue;
+            };
+            // Pixels whose centers lie within the span.
+            let from = rect.x0.max(clamp_to_i32((lo - 0.5).ceil()));
+            let to = rect
+                .x1
+                .min(clamp_to_i32((hi - 0.5).floor()).saturating_add(1));
+            if from >= to {
+                continue;
+            }
+            worked += (to - from) as u64;
+            // The span cut at tile borders.
+            let mut x0 = from;
+            while x0 < to {
+                let key = TileKey::of_pixel(x0, y);
                 let [ox, oy] = key.origin();
-                let (x0, x1) = (rect.x0.max(ox), rect.x1.min(ox + TILE));
-                let (y0, y1) = (rect.y0.max(oy), rect.y1.min(oy + TILE));
-                for y in y0..y1 {
-                    let cy = y as f32 + 0.5;
-                    let Some((lo, hi)) = shape.span(cy) else {
-                        continue;
-                    };
-                    // Pixels whose centers lie within the span.
-                    let from = x0.max(clamp_to_i32((lo - 0.5).ceil()));
-                    let to = x1.min(clamp_to_i32((hi - 0.5).floor()).saturating_add(1));
-                    if from >= to {
-                        continue;
-                    }
-                    let mut any = false;
-                    for x in from..to {
-                        let c = shape.coverage([x as f32 + 0.5, cy]);
-                        let q = quantize(c);
-                        values[(x - from) as usize] = q;
-                        any |= q > 0;
-                    }
-                    worked += (to - from) as u64;
-                    if !any {
-                        continue;
-                    }
+                let x1 = to.min(ox + TILE);
+                let mut any = false;
+                for x in x0..x1 {
+                    let q = quantize(shape.coverage([x as f32 + 0.5, cy]));
+                    values[(x - x0) as usize] = q;
+                    any |= q > 0;
+                }
+                if any {
                     let tile = self.buffer.tiles.entry(key).or_default();
                     let slot = match self.part {
                         Part::Committed => &mut tile.committed,
@@ -411,7 +410,7 @@ impl Painter<'_> {
                     };
                     let part = Tile::part(slot);
                     let row = ((y - oy) * TILE) as usize;
-                    for (x, &q) in (from..to).zip(&values) {
+                    for (x, &q) in (x0..x1).zip(&values) {
                         let i = row + (x - ox) as usize;
                         part[i] = combine.apply(part[i], q);
                     }
@@ -420,6 +419,7 @@ impl Painter<'_> {
                     }
                     self.buffer.dirty.insert(key);
                 }
+                x0 = x1;
             }
         }
         self.buffer.counters.pixels += worked;
@@ -487,6 +487,27 @@ mod tests {
             FULL,
             "settled coverage is committed"
         );
+    }
+
+    #[test]
+    fn a_broken_sample_paints_nothing_and_walks_nothing() {
+        // Before the guard, one infinite sample walked a hundred million
+        // pixels of rows or columns looking for coverage.
+        let mut buffer = StrokeBuffer::new(Combine::Max);
+        let good = Disc::new([10.0, 10.0], 3.0, 1.0);
+        for broken in [
+            [f32::INFINITY, 5.0],
+            [5.0, f32::NEG_INFINITY],
+            [f32::NAN, 5.0],
+        ] {
+            let bad = Disc::new(broken, 3.0, 1.0);
+            buffer.committed().capsule(good, bad, RoundTip::default());
+            buffer
+                .committed()
+                .dab(&Dab::round(bad, RoundTip::new(0.5, 1.0)));
+        }
+        assert!(buffer.is_empty());
+        assert_eq!(buffer.counters().pixels, 0);
     }
 
     #[test]

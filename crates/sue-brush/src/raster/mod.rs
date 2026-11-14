@@ -117,10 +117,15 @@ pub struct PixelRect {
 impl PixelRect {
     /// The pixels whose centers can fall inside `[min, max]`, widened by
     /// one pixel each way. Far out of range coordinates are held to the
-    /// range of the layer coordinates the buffer uses.
+    /// range of the layer coordinates the buffer uses; a corner that is
+    /// not a finite number (a broken sample) gives no pixels at all,
+    /// rather than the whole range to walk.
     #[must_use]
     pub fn around(min: [f32; 2], max: [f32; 2]) -> Self {
         const LIMIT: f32 = 1.0e8;
+        if !min.iter().chain(&max).all(|v| v.is_finite()) {
+            return Self::EMPTY;
+        }
         let low = |v: f32| (v.clamp(-LIMIT, LIMIT).floor() as i32).saturating_sub(1);
         let high = |v: f32| (v.clamp(-LIMIT, LIMIT).ceil() as i32).saturating_add(1);
         Self {
@@ -130,6 +135,14 @@ impl PixelRect {
             y1: high(max[1]),
         }
     }
+
+    /// The rectangle that holds no pixel.
+    pub const EMPTY: Self = Self {
+        x0: 0,
+        y0: 0,
+        x1: 0,
+        y1: 0,
+    };
 
     /// `true` when the rectangle holds no pixel.
     #[must_use]

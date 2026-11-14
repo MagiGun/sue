@@ -131,6 +131,11 @@ impl Shape for Capsule {
     fn bounds(&self) -> PixelRect {
         let reach = self.tip.reach() + 0.5;
         let (a, b) = (self.a, self.b);
+        // `min` and `max` pass over a coordinate that is not a number, so
+        // a broken disc is caught here.
+        if !a.at.iter().chain(&b.at).all(|v| v.is_finite()) {
+            return PixelRect::EMPTY;
+        }
         PixelRect::around(
             [
                 (a.at[0] - a.radius).min(b.at[0] - b.radius) - reach,
