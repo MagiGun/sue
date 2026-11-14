@@ -1039,7 +1039,21 @@ impl Pages {
 
 /// Splits `cells` into pages of leaf cells, each holding as many as fit.
 /// When `first` (the root is page 1) and they all fit page 1, one group.
+/// When they do not fit page 1, never one group: page 1 then holds the
+/// interior root, and the leaves are pages of their own.
 fn group(cells: &[(i64, Vec<u8>)], header: usize, first: bool) -> Vec<Vec<usize>> {
+    let mut groups = group_leaves(cells, header, first);
+    let total: usize = cells.iter().map(|(_, cell)| cell.len() + 2).sum();
+    if first && groups.len() == 1 && cells.len() > 1 && total > PAGE - 100 - header {
+        // They fit a page, but not page 1 after its file header.
+        let half = cells.len() / 2;
+        groups = vec![(0..half).collect(), (half..cells.len()).collect()];
+    }
+    groups
+}
+
+/// [`group`] before page 1's file header is thought of.
+fn group_leaves(cells: &[(i64, Vec<u8>)], header: usize, first: bool) -> Vec<Vec<usize>> {
     let total: usize = cells.iter().map(|(_, cell)| cell.len() + 2).sum();
     let room_first = PAGE - 100 - header;
     if total <= if first { room_first } else { PAGE - header } {
@@ -1191,6 +1205,39 @@ mod tests {
                     )
                 })
                 .collect(),
+        }
+    }
+
+    #[test]
+    fn a_schema_too_long_for_page_one_but_short_of_a_page_reads_back() {
+        // The statements grow a column at a time, 28 bytes each, so some
+        // fill more than page 1 holds after the file header and less
+        // than a whole page.
+        let wide = |name: &str, columns: usize| NewTable {
+            name: name.to_owned(),
+            sql: format!(
+                "CREATE TABLE {name}(_PW_ID INTEGER PRIMARY KEY AUTOINCREMENT, {})",
+                (0..columns)
+                    .map(|i| format!("C{i:04} INTEGER DEFAULT NULL"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            rows: vec![(
+                1,
+                std::iter::once(Value::Null)
+                    .chain((0..columns).map(|i| Value::Integer(i as i64)))
+                    .collect(),
+            )],
+        };
+        for columns in 120..=150 {
+            let tables = vec![wide("First", 10), wide("Second", columns)];
+            let bytes = write(&tables);
+            let read = read(&bytes).unwrap_or_else(|error| panic!("{columns}: {error}"));
+            let second = read
+                .iter()
+                .find(|table| table.name == "Second")
+                .expect("both tables read");
+            assert_eq!(second.rows[0].1.len(), columns + 1, "{columns}");
         }
     }
 
