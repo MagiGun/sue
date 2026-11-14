@@ -15,8 +15,10 @@ use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 use crate::studio::SuePaint;
 
 /// The group's commands that Auto Actions may record: all of them, as
-/// `extras::recordable` has it today. Each poses the figure, or keeps or
-/// reads a pose, the same way every time it is replayed. Auto Actions
+/// `extras::recordable` has it today. A pose, Flip and Reset pose the
+/// figure the same way every time they are replayed, Register pose keeps
+/// the pose again under the next free name, and a scanner asks again for
+/// its photo. Auto Actions
 /// read it once `extras::recordable` goes (P3-14); a test holds it to the
 /// flags of the table.
 #[cfg_attr(not(test), allow(dead_code))]
