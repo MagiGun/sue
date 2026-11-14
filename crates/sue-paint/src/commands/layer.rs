@@ -1410,16 +1410,14 @@ mod tests {
 
     #[test]
     fn the_flags_say_what_auto_actions_and_the_canvas_test_did() {
-        // Auto Actions record what `recordable()` let through, and the
-        // test that runs every command skips nothing of this group.
+        // Auto Actions record every Layer command, as `recordable()`
+        // let every `layer.` name through, and the test that runs every
+        // command skips nothing of this group. The names are checked
+        // here, not through `recordable()`, which P3-14 deletes.
         for command in COMMANDS {
             assert_eq!(command.group, "layer", "{}", command.name);
-            assert_eq!(
-                command.flags.has(Flags::RECORDABLE),
-                crate::extras::recordable(command.name),
-                "{}",
-                command.name
-            );
+            assert!(command.name.starts_with("layer."), "{}", command.name);
+            assert!(command.flags.has(Flags::RECORDABLE), "{}", command.name);
             assert!(!command.flags.has(Flags::LEAVES_CANVAS), "{}", command.name);
             assert!(!command.is_family(), "{}", command.name);
         }

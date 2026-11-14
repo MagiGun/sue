@@ -274,6 +274,65 @@ fn ctrl_b_switches_the_layer_to_its_layer_color_and_back() {
     assert!(top_in_layer_color(&driver), "undo brings the tint back");
 }
 
+/// The alpha of every pixel of the top layer of the canvas in focus.
+fn top_alpha(driver: &PaintDriver) -> Vec<u8> {
+    let paint = AppletId::new(sue_paint::ID).unwrap();
+    let picture = driver
+        .runtime
+        .applets
+        .get(&paint)
+        .and_then(|applet| applet.focus())
+        .expect("a canvas");
+    let arena = &driver.runtime.engine.world.arena;
+    let top = sue_paint::doc::layers(arena, picture)
+        .last()
+        .expect("a layer")
+        .id;
+    sue_paint::doc::raster(arena, top)
+        .and_then(sue_core::RasterTile2D::bytes)
+        .expect("pixels")
+        .iter()
+        .skip(3)
+        .step_by(4)
+        .copied()
+        .collect()
+}
+
+#[test]
+fn select_overlapping_area_keeps_the_part_the_layer_covers() {
+    // Tutorial step FGV-5. A layer drawn only inside a shrunk selection;
+    // then all of the canvas is selected, and Select Overlapping Area
+    // must leave the selection where the layer is drawn and nowhere
+    // else. Convert to Selection Layer shows the selection as pixels.
+    let mut driver = PaintDriver::new("paint-cmd-layer-overlap");
+    run(&mut driver, "layer.new");
+    run(&mut driver, "select.all");
+    run(&mut driver, "select.shrink");
+    driver.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    driver.settle(3);
+    run(&mut driver, "edit.fill");
+    let drawn = top_alpha(&driver);
+    assert!(drawn.contains(&0), "the layer is not drawn at its border");
+    assert!(drawn.contains(&255), "the layer is drawn inside");
+    run(&mut driver, "select.all");
+    run(&mut driver, "layer.selection.overlap");
+    run(&mut driver, "select.to_layer");
+    assert_eq!(top_alpha(&driver), drawn, "the selection is the overlap");
+}
+
+#[test]
+fn select_overlapping_area_on_an_empty_layer_leaves_nothing_selected() {
+    let mut driver = PaintDriver::new("paint-cmd-layer-overlap-empty");
+    run(&mut driver, "layer.new");
+    run(&mut driver, "select.all");
+    run(&mut driver, "layer.selection.overlap");
+    // With nothing selected, Convert to Selection Layer has nothing to
+    // make.
+    let start = depth(&driver);
+    run(&mut driver, "select.to_layer");
+    assert_eq!(depth(&driver), start, "the selection is gone");
+}
+
 #[test]
 fn esc_on_a_new_correction_layer_takes_the_layer_away() {
     let mut driver = PaintDriver::new("paint-cmd-layer-correction");
