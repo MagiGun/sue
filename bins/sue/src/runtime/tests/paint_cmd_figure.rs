@@ -50,7 +50,7 @@ fn undo_pair(paint: &mut PaintDriver, command: &str) {
 
 /// Runs `command`, which must leave the document and its history alone
 /// and ask for no file.
-fn does_nothing(paint: &mut PaintDriver, command: &str) {
+fn keeps_the_document(paint: &mut PaintDriver, command: &str) {
     let before = arena_bytes(paint);
     let depth = paint.runtime.engine.history.depth();
     run(paint, command);
@@ -59,6 +59,21 @@ fn does_nothing(paint: &mut PaintDriver, command: &str) {
     assert!(
         paint.runtime.pending_pick().is_none(),
         "{command} asked for a file"
+    );
+}
+
+/// Runs `command`, which must be off: it leaves the document, its
+/// history and the status bar alone and asks for no file. (A command
+/// that was on but found no figure to pose would say so in the status
+/// bar.)
+fn does_nothing(paint: &mut PaintDriver, command: &str) {
+    const MARK: &str = "before the command";
+    paint.runtime.shell.notify(MARK, false);
+    keeps_the_document(paint, command);
+    assert_eq!(
+        paint.runtime.shell.message(),
+        Some((MARK, false)),
+        "{command} is off and quiet"
     );
 }
 
@@ -148,7 +163,7 @@ fn sue_paint_runs_every_figure_command() {
         "sue_paint.materials_dir",
         sue_rice::RiceValue::Text(materials.display().to_string()),
     );
-    does_nothing(&mut paint, "figure.register_pose");
+    keeps_the_document(&mut paint, "figure.register_pose");
     let kept = materials.join("poses").join("Figure pose 1.pose");
     let text = std::fs::read_to_string(&kept).expect("the pose is kept");
     assert!(text.starts_with("body\n"), "{text}");
@@ -166,8 +181,12 @@ fn sue_paint_runs_every_figure_command() {
 
     // A 3D head: posed by its presets, and no scanner of its own.
     new_figure(&mut paint, "layer.new.head", sue_paint::figure::Kind::Head);
-    undo_pair(&mut paint, "figure.preset.4");
+    for index in 1..sue_paint::figure::HEAD_PRESETS.len() {
+        undo_pair(&mut paint, &format!("figure.preset.{index}"));
+    }
     undo_pair(&mut paint, "figure.reset");
+    let past = sue_paint::figure::HEAD_PRESETS.len();
+    does_nothing(&mut paint, &format!("figure.preset.{past}"));
     does_nothing(&mut paint, "figure.pose_scanner");
     does_nothing(&mut paint, "figure.hand_scanner");
 
