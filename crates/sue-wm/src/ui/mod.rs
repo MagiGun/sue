@@ -15,16 +15,22 @@
 //! The components built on these (buttons, fields, menus, dialogs) get one
 //! file each beside these three.
 //!
+//! - [`mod@card`]: cards, groups and sections, tiles and thumbnail cards.
 //! - [`list`]: list rows, tree rows, the empty state, dividers and
 //!   headings.
 //! - [`progress`]: the progress bar, the spinner and the skeleton.
 
+pub mod card;
 pub mod focus;
 pub mod list;
 pub mod motion;
 pub mod progress;
 pub mod tokens;
 
+pub use card::{
+    Card, Thumbnail, ThumbnailCard, ThumbnailOutput, Tile, card, group, section, thumbnail_card,
+    tile,
+};
 pub use focus::{FocusScope, Roving, focus_ring, focus_visible, paint_focus_ring, watch_focus};
 pub use list::{
     EmptyState, Leading, ListRow, RowAction, RowOutput, TreeOutput, TreeRow, divider, empty_state,
