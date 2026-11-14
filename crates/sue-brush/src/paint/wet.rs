@@ -89,10 +89,10 @@ pub struct Wet {
     pub blur: f32,
     /// Clip Studio's density of paint: how fully what it lays covers.
     pub density: f32,
-    /// How much it drags the picture under its last place along with it
-    /// (a finger in wet paint: edges and detail move), against laying
-    /// the mean color it carries. 0 to 1; how long what it drags lasts
-    /// is the color stretch, kept per brush width travelled.
+    /// How much it pushes the picture along with it (a finger in wet
+    /// paint: edges and detail move), against laying the mean color it
+    /// carries, 0 to 1. The color stretch says how nearly the pushed
+    /// paint keeps up with the brush, so how far it is dragged.
     pub smear: f32,
 }
 
@@ -226,7 +226,8 @@ pub struct WetCanvas {
     /// The reservoir: premultiplied RGBA the brush carries; `None`
     /// before the first dab.
     reservoir: Option<[f32; 4]>,
-    /// Where the last dab fell, which a smearing brush drags from.
+    /// Where the last dab fell: a smearing brush pushes by the step from
+    /// there.
     last_at: Option<[f32; 2]>,
 }
 
