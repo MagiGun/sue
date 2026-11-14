@@ -84,6 +84,10 @@ static READINGS: Mutex<Vec<Reading>> = Mutex::new(Vec::new());
 /// latest).
 const READINGS_KEPT: usize = 4096;
 
+/// How many pointer events wait at most before further moves replace the
+/// latest one.
+const POINTERS_KEPT: usize = 4096;
+
 /// Queues a pen's packet for the next frame's [`Router::flush`].
 #[cfg_attr(
     not(any(
@@ -252,12 +256,19 @@ impl Router {
     /// The pointer moved to `pos` (egui points) at `time`.
     pub(crate) fn moved(&mut self, pos: [f32; 2], time: f64) {
         self.pos = Some(pos);
-        self.pointers.push(Pointer {
+        let moved = Pointer {
             kind: SampleKind::Move,
             pos,
             time,
             primary: false,
-        });
+        };
+        // A frame that never comes (the window is paused) keeps the
+        // buttons and the latest place, not every move on the way.
+        let full = self.pointers.len() >= POINTERS_KEPT;
+        match self.pointers.last_mut() {
+            Some(last) if full && last.kind == SampleKind::Move => *last = moved,
+            _ => self.pointers.push(moved),
+        }
     }
 
     /// A mouse button went down or up at `time`, where the pointer is.
@@ -1057,13 +1068,78 @@ mod tests {
             );
         }
         assert_sound(&all);
-        // After each source's last touching sample nothing presses.
+        // From each lift to the source's next touch nothing presses
+        // harder than the last contact did: nothing presses at all. The
+        // script must have lifted each source often for that to count.
         for source in [PenSource::WinTab, PenSource::Mouse, PenSource::Touch] {
-            let own: Vec<_> = all.iter().filter(|s| s.source == source).collect();
-            let Some(last) = own.iter().rposition(|s| s.pressure.is_some()) else {
-                continue;
-            };
-            assert!(own[last + 1..].iter().all(|s| s.pressure.is_none()));
+            let mut contact: Option<f32> = None;
+            let mut lifted = false;
+            let mut lifts = 0;
+            for sample in all.iter().filter(|s| s.source == source) {
+                match sample.kind {
+                    PenKind::Down => lifted = false,
+                    PenKind::Up => {
+                        lifted = true;
+                        lifts += 1;
+                    }
+                    PenKind::Move => {}
+                }
+                if lifted {
+                    let after = sample.pressure.unwrap_or(0.0);
+                    assert!(
+                        sample.pressure.is_none() && after <= contact.unwrap_or(0.0),
+                        "{sample:?} presses after the contact at {contact:?}"
+                    );
+                } else if sample.pressure.is_some() {
+                    contact = sample.pressure;
+                }
+            }
+            assert!(lifts > 5, "{source:?} lifted {lifts} times");
         }
+    }
+
+    #[test]
+    fn moves_without_a_frame_do_not_pile_up() {
+        let mut router = Router::default();
+        let mut stream = Stream::new();
+        router.moved([0.0, 0.0], 0.0);
+        router.button(true, true, 0.0);
+        for step in 1..=POINTERS_KEPT + 500 {
+            router.moved([step as f32, 0.0], step as f64 * 0.001);
+        }
+        router.button(true, false, 9.0);
+        assert_eq!(router.pointers.len(), POINTERS_KEPT + 1);
+        router.flush(&mut stream, &[]);
+        let samples = stream.take();
+        assert_sound(&samples);
+        // The latest place and the release are kept.
+        let end = (POINTERS_KEPT + 500) as f32;
+        let last = samples[samples.len() - 1];
+        assert_eq!((last.kind, last.pos), (PenKind::Up, [end, 0.0]));
+        assert_eq!(samples[samples.len() - 2].pos, [end, 0.0]);
+    }
+
+    #[test]
+    fn the_check_of_a_sound_stream_sees_a_press_after_the_lift() {
+        // The check itself can fail: a release that presses, and a sample
+        // that presses in the air, are caught.
+        let touch = |kind, pressure| PenSample {
+            kind,
+            pressure,
+            ..PenSample::at(PenSource::Touch, [0.0, 0.0], 1.0)
+        };
+        let down = touch(PenKind::Down, Some(0.2));
+        for bad in [
+            touch(PenKind::Up, Some(1.0)),
+            touch(PenKind::Down, Some(0.5)),
+        ] {
+            let caught = std::panic::catch_unwind(|| assert_sound(&[down, bad]));
+            assert!(caught.is_err(), "{bad:?}");
+        }
+        let up = touch(PenKind::Up, None);
+        let caught =
+            std::panic::catch_unwind(|| assert_sound(&[down, up, touch(PenKind::Move, Some(1.0))]));
+        assert!(caught.is_err(), "pressure in the air");
+        assert_sound(&[down, touch(PenKind::Move, Some(0.9)), up]);
     }
 }
