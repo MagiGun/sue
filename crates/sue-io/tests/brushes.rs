@@ -327,6 +327,19 @@ fn each_sub_tool_takes_only_its_own_tips() {
     let old = sue_io::brushes::read("two.sut", &file).unwrap();
     assert_eq!((old[0].tips.len(), old[0].tips[0].0), (1, 8));
     assert_eq!((old[1].tips.len(), old[1].tips[0].0), (1, 12));
+
+    // A material that says no path is no material of every sub tool.
+    let mut columns = round_pen();
+    columns.retain(|(name, _)| *name != "BrushUsePatternImage");
+    columns.push(("BrushUsePatternImage", Value::Integer(1)));
+    let path = ".:1:a:data:material_0.layer";
+    columns.push(("BrushPatternImageArray", Value::Blob(array(&[path]))));
+    let file = sut_file(
+        &[("Leaf", columns)],
+        &[("", png(90, 4)), (path, png(40, 8))],
+    );
+    let leaf = sut::import(&file).unwrap().remove(0);
+    assert_eq!(leaf.pictures, vec![TipPicture { png: png(40, 8) }]);
 }
 
 #[test]

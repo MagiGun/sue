@@ -592,11 +592,11 @@ impl Pictures<'_> {
         };
         let mut out = Vec::new();
         for path in picture_paths(blob) {
-            if let Some(material) = self
-                .materials
-                .iter()
-                .find(|material| material.path == path || path.starts_with(&material.path))
-            {
+            if let Some(material) = self.materials.iter().find(|material| {
+                // A material without a path names no picture.
+                !material.path.is_empty()
+                    && (material.path == path || path.starts_with(&material.path))
+            }) {
                 let hash = material.picture.hash();
                 if !self.used.iter().any(|picture| picture.hash() == hash) {
                     self.used.push(material.picture.clone());
