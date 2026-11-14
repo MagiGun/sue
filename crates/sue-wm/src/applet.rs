@@ -328,6 +328,27 @@ pub enum ShellRequest {
     /// Change the labels of the work Sue remembers (favorites, Work and
     /// the labels people add).
     Labels(crate::LabelEdit),
+    /// Show one of an applet's views ([`SueApplet::view_ui`]) in a
+    /// window of its own, which can be moved to another screen. Where
+    /// the system gives Sue one window (phones, tablets, the browser) it
+    /// floats inside it. Asking again for a view that is open brings its
+    /// window to the front.
+    OpenView {
+        /// The applet that draws it.
+        applet: AppletId,
+        /// Which of its views, in the applet's own words (such as
+        /// `canvas:<entity id>`); stays the same while the window is open.
+        view: String,
+        /// The window's title, in the reader's language.
+        title: String,
+    },
+    /// Close the window of one of an applet's views.
+    CloseView {
+        /// The applet that draws it.
+        applet: AppletId,
+        /// Which of its views.
+        view: String,
+    },
 }
 
 /// A request for a file, answered by the system's own open or save dialog:
@@ -943,6 +964,20 @@ pub trait SueApplet: Send {
     /// do, instead of opening the command palette).
     fn reserved_keys(&self) -> Vec<sue_rice::Keybind> {
         Vec::new()
+    }
+
+    /// Draws the view `view` it opened in a window of its own with
+    /// [`ShellRequest::OpenView`]: `ui` covers the window's inside, below
+    /// its title bar. Runs in that window's own frames (only those, where
+    /// the system gives Sue many windows).
+    fn view_ui(&mut self, view: &str, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        let _ = (view, ui, cx);
+    }
+
+    /// The window of view `view` closed: the person closed it, or
+    /// [`ShellRequest::CloseView`] asked.
+    fn view_closed(&mut self, view: &str, cx: &mut AppletContext<'_>) {
+        let _ = (view, cx);
     }
 }
 

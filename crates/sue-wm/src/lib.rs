@@ -88,6 +88,7 @@ pub use menubar::{ItemState, Menu, MenuBar, MenuItem, context_items};
 pub use menubar::{Skeleton, Slot, note_coming_later, note_needs_selection};
 pub use palette::{Palette, PaletteOutcome, fuzzy_score};
 pub use scheduler::{Damage, FrameScheduler, FrameTicket, RenderDemand};
+pub use shell::view_key;
 pub use shell::{
     HubRow, INTERFACE_KEY, PHONE_FRAME_KEY, PIN_KEY, Shell, ShellIo, pinned, profile_label,
 };

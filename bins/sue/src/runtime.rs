@@ -334,6 +334,49 @@ impl Runtime {
         self.restart
     }
 
+    /// The applets' views that want windows of their own, for the host
+    /// to open (none where the system gives Sue one window).
+    #[must_use]
+    pub fn windows(&self) -> Vec<sue_platform::WindowSpec> {
+        self.shell.os_windows()
+    }
+
+    /// Builds one frame of the window of the view named `key` into `ui`,
+    /// which covers that window, then serves what it asked for.
+    pub fn window_ui(
+        &mut self,
+        key: &str,
+        ui: &mut egui::Ui,
+        textures: &mut dyn TextureUpload,
+        now: Instant,
+    ) {
+        let _language = sue_lang::scope(&sue_wm::sue_language(&self.engine.world.rice));
+        {
+            let mut io = shell_io!(self, textures);
+            self.shell.view_window_ui(key, ui, &mut io, now);
+        }
+        self.serve_requests(textures, now);
+        self.refresh_rice();
+    }
+
+    /// The window of the view named `key` was closed (its close button,
+    /// or the system's).
+    pub fn window_closed(&mut self, key: &str, textures: &mut dyn TextureUpload, now: Instant) {
+        let mut io = shell_io!(self, textures);
+        self.shell.close_view(key, &mut io, now);
+    }
+
+    /// Changes whenever what a window shows may have changed: a document
+    /// or a setting.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.engine
+            .world
+            .arena
+            .revision()
+            .wrapping_add(self.engine.world.rice.revision())
+    }
+
     /// Builds one frame of the whole window into the root `ui`.
     /// Puts in use the history of the studio or tool on the page and its
     /// document, or Sue's own on the Hub; typing still open goes to the

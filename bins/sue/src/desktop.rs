@@ -3,7 +3,7 @@
 use sue_platform::time::Instant;
 use sue_platform::{
     DesktopApp, DesktopHost, DesktopOptions, FramePacing, GpuPreference, PlatformHost,
-    PlatformPaths, audio_output_devices, run_desktop, write_atomic,
+    PlatformPaths, WindowSpec, audio_output_devices, run_desktop, write_atomic,
 };
 use sue_rice::{DEFAULT_RICE, RiceSchema};
 
@@ -38,6 +38,8 @@ impl DesktopApp for DesktopShell {
         sue_lang::set_language(&engine.config.language);
         let mut runtime = Runtime::new(engine)?.interactive(true);
         runtime.shell.set_own_frame(sue_platform::own_frames());
+        // Views go to windows of their own where the system has them.
+        runtime.shell.set_window_support(host.window_support());
         host.set_clear_color(runtime.theme().void);
         self.runtime = Some(runtime);
         Ok(())
@@ -68,6 +70,32 @@ impl DesktopApp for DesktopShell {
 
     fn close_requested(&mut self, _host: &mut DesktopHost) -> bool {
         self.runtime.as_mut().is_none_or(Runtime::close_requested)
+    }
+
+    fn windows(&mut self) -> Vec<WindowSpec> {
+        self.runtime
+            .as_ref()
+            .map_or_else(Vec::new, Runtime::windows)
+    }
+
+    fn window_ui(&mut self, key: &str, ui: &mut egui::Ui, host: &mut DesktopHost) {
+        let Some(runtime) = self.runtime.as_mut() else {
+            return;
+        };
+        runtime.window_ui(key, ui, host.textures(), Instant::now());
+        if runtime.wants_exit() {
+            host.request_exit();
+        }
+    }
+
+    fn window_close_requested(&mut self, key: &str, host: &mut DesktopHost) {
+        if let Some(runtime) = self.runtime.as_mut() {
+            runtime.window_closed(key, host.textures(), Instant::now());
+        }
+    }
+
+    fn revision(&self) -> u64 {
+        self.runtime.as_ref().map_or(0, Runtime::revision)
     }
 
     fn exit(&mut self, _host: &mut DesktopHost) {
