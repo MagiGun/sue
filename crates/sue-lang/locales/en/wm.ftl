@@ -187,3 +187,9 @@ start-view-large = Large cards
 start-view-list = List
 start-view-small = Small cards
 start-where = Where
+## ui/input.rs, ui/slider.rs
+
+field-clear = Clear
+field-choices = Choices
+range-start = Start of { $name }
+range-end = End of { $name }

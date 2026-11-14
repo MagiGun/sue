@@ -164,3 +164,9 @@ start-view-large = Große Karten
 start-view-list = Liste
 start-view-small = Kleine Karten
 start-where = Speicherort
+## ui/input.rs, ui/slider.rs
+
+field-clear = Leeren
+field-choices = Auswahl
+range-start = Anfang von { $name }
+range-end = Ende von { $name }

@@ -168,3 +168,9 @@ start-view-large = بطاقات كبيرة
 start-view-list = قائمة
 start-view-small = بطاقات صغيرة
 start-where = المكان
+## ui/input.rs, ui/slider.rs
+
+field-clear = مسح
+field-choices = الخيارات
+range-start = بداية { $name }
+range-end = نهاية { $name }

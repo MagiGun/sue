@@ -158,3 +158,9 @@ start-view-large = 大アイコン
 start-view-list = リスト
 start-view-small = 小アイコン
 start-where = 保存場所
+## ui/input.rs, ui/slider.rs
+
+field-clear = クリア
+field-choices = 候補
+range-start = { $name }の開始
+range-end = { $name }の終了

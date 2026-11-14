@@ -20,6 +20,7 @@ mod paint_touch;
 mod settings;
 mod shell;
 mod ui_buttons;
+mod ui_inputs;
 mod writer_compile;
 mod writer_corkboard;
 mod writer_document;
@@ -101,6 +102,8 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
 
     // 28a and 28b. The buttons and the choices of the design system.
     ui_buttons::sheets(tour)?;
+    // 28 to 28d. The inputs and sliders of the component library.
+    ui_inputs::sheets(tour)?;
     Ok(())
 }
 

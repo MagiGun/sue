@@ -152,3 +152,9 @@ start-view-large = Cartões grandes
 start-view-list = Lista
 start-view-small = Cartões pequenos
 start-where = Local
+## ui/input.rs, ui/slider.rs
+
+field-clear = Limpar
+field-choices = Opções
+range-start = Início de { $name }
+range-end = Fim de { $name }

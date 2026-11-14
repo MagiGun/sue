@@ -152,3 +152,9 @@ start-view-large = Schede grandi
 start-view-list = Elenco
 start-view-small = Schede piccole
 start-where = Posizione
+## ui/input.rs, ui/slider.rs
+
+field-clear = Cancella
+field-choices = Scelte
+range-start = Inizio di { $name }
+range-end = Fine di { $name }

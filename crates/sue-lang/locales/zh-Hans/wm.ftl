@@ -140,3 +140,9 @@ start-view-large = 大卡片
 start-view-list = 列表
 start-view-small = 小卡片
 start-where = 位置
+## ui/input.rs, ui/slider.rs
+
+field-clear = 清除
+field-choices = 选项
+range-start = { $name }起点
+range-end = { $name }终点

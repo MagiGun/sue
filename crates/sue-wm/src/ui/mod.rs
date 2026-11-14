@@ -34,8 +34,18 @@ pub use choice::{
     Check, Chip, ChipResponse, Marked, Segmented, SegmentedResponse, checkbox, chip, radio, rove,
     segmented, switch,
 };
+pub mod input;
+pub mod slider;
+
 pub use focus::{FocusScope, Roving, focus_ring, focus_visible, paint_focus_ring, watch_focus};
+pub use input::{
+    Combo, Dropdown, NumberField, TextField, combo, dropdown, number_field, search_field,
+    text_field,
+};
 pub use motion::{Motion, Pace};
+pub use slider::{
+    RangeSlider, Scale, Slider, TallSlider, Wedge, range, slider, tall_slider, wedge,
+};
 pub use tokens::{
     Density, EDGE_CONTRAST, Elevation, Layer, MIN_TEXT_SIZE, Radius, Space, TEXT_CONTRAST,
     TextRole, contrast, nested_radius,
