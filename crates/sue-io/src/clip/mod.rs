@@ -21,14 +21,24 @@
 //! (vector lines, tones, effects), while Clip Studio sees the layers.
 
 mod container;
+mod kinds;
 mod model;
 mod offscreen;
+pub mod parts;
 mod read;
 mod schema;
 pub mod testkit;
 mod write;
 
 pub use container::{Chunk, Layout, layout, sniff};
+pub use kinds::{
+    ClipAlign, ClipAnimationFolder, ClipAudio, ClipBalloon, ClipBalloonShape, ClipCamera, ClipCel,
+    ClipComp, ClipCompState, ClipContent, ClipCorrection, ClipEffects, ClipFill, ClipFrame,
+    ClipGradient, ClipGradientRepeat, ClipGradientShape, ClipInterpolation, ClipKey, ClipLayerPath,
+    ClipLine, ClipNative, ClipPanel, ClipPicture, ClipPoint, ClipRuler, ClipRulerKind, ClipStop,
+    ClipTail, ClipText, ClipTextRun, ClipThreeD, ClipTimeline, ClipTone, ClipTrack, ClipVector,
+    Rgba,
+};
 pub use model::{
     ClipAttribute, ClipBitmap, ClipBlock, ClipBlocks, ClipChunk, ClipDocument, ClipDrawColor,
     ClipForeign, ClipHead, ClipLayer, ClipMask, ClipPixels, ClipRow, ClipShape, ClipTable, Columns,

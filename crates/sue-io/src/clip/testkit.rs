@@ -8,6 +8,13 @@
 //! keep what they do not understand. Whether Clip Studio opens what Sue
 //! writes is checked by hand (the hands-on gate of D13).
 
+use super::kinds::{
+    ClipAlign, ClipAnimationFolder, ClipAudio, ClipBalloon, ClipBalloonShape, ClipCamera, ClipCel,
+    ClipComp, ClipCompState, ClipContent, ClipCorrection, ClipEffects, ClipFill, ClipFrame,
+    ClipGradient, ClipGradientRepeat, ClipGradientShape, ClipInterpolation, ClipKey, ClipLine,
+    ClipPanel, ClipPicture, ClipPoint, ClipRuler, ClipRulerKind, ClipStop, ClipTail, ClipText,
+    ClipTextRun, ClipThreeD, ClipTimeline, ClipTone, ClipTrack, ClipVector,
+};
 use super::model::{
     ClipBitmap, ClipChunk, ClipDocument, ClipLayer, ClipMask, ClipRow, ClipShape, ClipTable,
     Columns,
@@ -461,8 +468,467 @@ pub fn documents() -> Vec<(String, ClipDocument)> {
         add_foreign(&mut doc, seed);
         out.push((format!("foreign data, seed {seed}"), doc));
     }
+    for (width, height) in [(1, 1), (90, 70), (300, 260)] {
+        out.push((
+            format!("every kind {width} by {height}"),
+            every_kind(width, height, u64::from(width + height)),
+        ));
+    }
+    let mut both = every_kind(40, 30, 9);
+    add_foreign(&mut both, 9);
+    out.push(("every kind with foreign data".to_owned(), both));
     out.push(("empty canvas".to_owned(), ClipDocument::new(10, 10, 72.0)));
     out
+}
+
+/// A short text in two runs, the second bold, italic and larger.
+fn two_runs(at: [f32; 2]) -> ClipText {
+    ClipText {
+        runs: vec![
+            ClipTextRun {
+                text: "Hello\n".to_owned(),
+                font: "Sue Sans".to_owned(),
+                size: 12.0,
+                color: [0, 0, 0, 255],
+                bold: false,
+                italic: false,
+            },
+            ClipTextRun {
+                text: "w\u{f6}rld \u{65e5}\u{672c}".to_owned(),
+                font: "Sue Serif".to_owned(),
+                size: 18.5,
+                color: [200, 20, 40, 255],
+                bold: true,
+                italic: true,
+            },
+        ],
+        at,
+        frame: Some([120.0, 40.0]),
+        vertical: false,
+        align: ClipAlign::Center,
+        line_spacing: 1.25,
+    }
+}
+
+/// A small picture of `width` by `height` from `seed`.
+#[must_use]
+pub fn small_picture(width: u32, height: u32, seed: u64) -> ClipPicture {
+    ClipPicture {
+        width,
+        height,
+        rgba: noise(width, height, seed),
+    }
+}
+
+/// Every correction kind Sue stores, with settings away from their
+/// defaults.
+#[must_use]
+pub fn corrections() -> Vec<ClipCorrection> {
+    let stop = |at, color| ClipStop { at, color };
+    vec![
+        ClipCorrection::BrightnessContrast {
+            brightness: 12.5,
+            contrast: -30.0,
+        },
+        ClipCorrection::HueSaturationLuminosity {
+            hue: -170.0,
+            saturation: 40.0,
+            luminosity: -5.5,
+        },
+        ClipCorrection::Posterize { levels: 6 },
+        ClipCorrection::Invert,
+        ClipCorrection::Levels {
+            input: [10.0, 240.0],
+            gamma: 1.4,
+            output: [5.0, 250.0],
+        },
+        ClipCorrection::ToneCurve {
+            curves: [
+                vec![[0.0, 0.0], [128.0, 150.0], [255.0, 255.0]],
+                vec![[0.0, 10.0], [255.0, 245.0]],
+                Vec::new(),
+                vec![[64.0, 32.0]],
+            ],
+        },
+        ClipCorrection::ColorBalance {
+            shadows: [10.0, -20.0, 30.0],
+            midtones: [0.0, 5.0, -5.0],
+            highlights: [-100.0, 100.0, 0.5],
+            keep_luminosity: true,
+        },
+        ClipCorrection::Threshold { level: 127.5 },
+        ClipCorrection::GradientMap {
+            stops: vec![
+                stop(0.0, [10, 0, 40, 255]),
+                stop(0.6, [250, 120, 0, 255]),
+                stop(1.0, [255, 255, 230, 255]),
+            ],
+        },
+    ]
+}
+
+/// A vector line of `count` points in `color`.
+#[allow(clippy::cast_precision_loss)]
+fn line(count: usize, color: [u8; 4]) -> ClipLine {
+    ClipLine {
+        points: (0..count)
+            .map(|i| ClipPoint {
+                at: [i as f32 * 7.5, (i * i) as f32 * 0.5 - 3.0],
+                pressure: (i as f32 / count as f32).min(1.0),
+                width: 1.0 - i as f32 * 0.01,
+                opacity: 0.9,
+                corner: i % 3 == 1,
+            })
+            .collect(),
+        width: 4.25,
+        color,
+        brush: "sue.pen.g".to_owned(),
+        closed: count > 3,
+    }
+}
+
+/// A document holding every kind of layer and document part the model
+/// types, over a `width` by `height` canvas: fill, gradients of every
+/// shape and repeat, every correction layer, text across and down, vector
+/// lines, a frame border folder, balloons of every shape (one with text),
+/// a 3D layer, an animation folder with cels and a blank cel, the 2D
+/// camera, rulers of every kind, every layer effect, palette colors,
+/// thumbnails, layer comps, the timeline with tracks, keyframes and
+/// sound, and the canvas preview. Each layer's pixels stand in for what
+/// Clip Studio would show.
+#[must_use]
+#[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
+pub fn every_kind(width: u32, height: u32, seed: u64) -> ClipDocument {
+    let mut doc = ClipDocument::new(width, height, 300.0);
+    let (w, h) = (width as f32, height as f32);
+    let pixels = |seed: u64| ClipBitmap::color(width, height, &noise(width, height, seed));
+    let clear = || ClipBitmap::color(width, height, &[]);
+    let stop = |at, color| ClipStop { at, color };
+    let mut layers = Vec::new();
+
+    let mut fill = ClipLayer::generated(
+        "Fill",
+        ClipContent::Fill(ClipFill {
+            color: [30, 60, 90, 255],
+        }),
+        0,
+        0,
+        clear(),
+    );
+    fill.palette_color = Some([255, 0, 0]);
+    layers.push(fill);
+    for (shape, repeat) in [
+        (ClipGradientShape::Linear, ClipGradientRepeat::Clamp),
+        (ClipGradientShape::Circle, ClipGradientRepeat::Repeat),
+        (ClipGradientShape::Ellipse, ClipGradientRepeat::Reflect),
+        (ClipGradientShape::Linear, ClipGradientRepeat::Empty),
+    ] {
+        layers.push(ClipLayer::generated(
+            "Gradient",
+            ClipContent::Gradient(ClipGradient {
+                shape,
+                start: [0.0, h / 2.0],
+                end: [w, h / 3.0],
+                ratio: 0.5,
+                repeat,
+                stops: vec![
+                    stop(0.0, [0, 0, 0, 255]),
+                    stop(0.25, [255, 0, 0, 128]),
+                    stop(1.0, [255, 255, 255, 0]),
+                ],
+            }),
+            0,
+            0,
+            pixels(seed ^ 11),
+        ));
+    }
+    for correction in corrections() {
+        let name = format!("Correction {}", correction.number());
+        let mut layer =
+            ClipLayer::generated(&name, ClipContent::Correction(correction), 0, 0, clear());
+        layer.set_blend(*b"over");
+        layers.push(layer);
+    }
+
+    let mut text = ClipLayer::generated(
+        "Text",
+        ClipContent::Text(two_runs([4.0, 5.0])),
+        2,
+        3,
+        pixels(seed ^ 12),
+    );
+    text.effects = Some(ClipEffects {
+        border: Some((3.5, [255, 255, 255, 255])),
+        ..ClipEffects::default()
+    });
+    layers.push(text);
+    let mut vertical = two_runs([w - 10.0, 0.0]);
+    vertical.vertical = true;
+    vertical.frame = None;
+    vertical.align = ClipAlign::Justify;
+    layers.push(ClipLayer::generated(
+        "Vertical text",
+        ClipContent::Text(vertical),
+        0,
+        0,
+        pixels(seed ^ 13),
+    ));
+
+    let mut vector = ClipLayer::generated(
+        "Vector",
+        ClipContent::Vector(ClipVector {
+            lines: vec![
+                line(3, [0, 0, 0, 255]),
+                line(40, [0, 90, 200, 255]),
+                line(1, [9, 9, 9, 9]),
+            ],
+        }),
+        0,
+        0,
+        pixels(seed ^ 14),
+    );
+    vector.effects = Some(ClipEffects {
+        border: None,
+        tone: Some(ClipTone {
+            frequency: 60.0,
+            angle: 45.0,
+            dot: 2,
+        }),
+        extract_line: Some(128.0),
+        sub_color: Some([0, 255, 128]),
+    });
+    vector.draw_color = super::model::ClipDrawColor::rgb([10, 20, 200]);
+    vector.rulers = vec![
+        ClipRuler {
+            kind: ClipRulerKind::Linear,
+            points: vec![[0.0, 0.0], [w, h]],
+            lines: 0,
+            snap: true,
+            everywhere: false,
+        },
+        ClipRuler {
+            kind: ClipRulerKind::Curve,
+            points: vec![[0.0, 1.0], [5.0, 9.0], [10.0, 1.0]],
+            lines: 0,
+            snap: false,
+            everywhere: true,
+        },
+    ];
+    layers.push(vector);
+
+    let mut frame = ClipLayer::generated(
+        "Frame 1",
+        ClipContent::Frame(ClipFrame {
+            panels: vec![
+                ClipPanel {
+                    points: vec![
+                        [5.0, 5.0],
+                        [w - 5.0, 5.0],
+                        [w - 5.0, h / 2.0],
+                        [5.0, h / 2.0],
+                    ],
+                    border: 2.0,
+                    color: [0, 0, 0, 255],
+                },
+                ClipPanel {
+                    points: vec![[5.0, h / 2.0 + 4.0], [w - 5.0, h - 5.0], [5.0, h - 5.0]],
+                    border: 0.5,
+                    color: [20, 20, 20, 200],
+                },
+            ],
+        }),
+        0,
+        0,
+        ClipBitmap::empty(width, height),
+    );
+    frame
+        .children
+        .push(ClipLayer::raster("Inside", 0, 0, pixels(seed ^ 15)));
+    layers.push(frame);
+
+    layers.push(ClipLayer::generated(
+        "Balloon",
+        ClipContent::Balloon(ClipBalloon {
+            shape: ClipBalloonShape::Cloud,
+            rect: [10.0, 10.0, w / 2.0, h / 3.0],
+            tails: vec![ClipTail {
+                points: vec![[20.0, 30.0], [25.0, 50.0], [40.0, 70.0]],
+                width: 6.0,
+            }],
+            line_width: 1.5,
+            line_color: [0, 0, 0, 255],
+            fill: [255, 255, 255, 255],
+            text: Some(two_runs([12.0, 12.0])),
+        }),
+        0,
+        0,
+        pixels(seed ^ 16),
+    ));
+    for shape in [
+        ClipBalloonShape::Ellipse,
+        ClipBalloonShape::Rectangle,
+        ClipBalloonShape::Rounded,
+        ClipBalloonShape::Flash,
+    ] {
+        layers.push(ClipLayer::generated(
+            "Empty balloon",
+            ClipContent::Balloon(ClipBalloon {
+                shape,
+                rect: [0.0; 4],
+                tails: Vec::new(),
+                line_width: 0.0,
+                line_color: [0; 4],
+                fill: [0; 4],
+                text: None,
+            }),
+            0,
+            0,
+            clear(),
+        ));
+    }
+
+    let mut three = ClipLayer::generated(
+        "3D",
+        ClipContent::ThreeD(ClipThreeD {
+            scene: (0..300_u32).map(|i| (i * 7) as u8).collect(),
+        }),
+        0,
+        0,
+        pixels(seed ^ 17),
+    );
+    three.rulers = [
+        ClipRulerKind::Figure,
+        ClipRulerKind::Parallel,
+        ClipRulerKind::Concentric,
+        ClipRulerKind::Radial,
+        ClipRulerKind::Symmetry,
+        ClipRulerKind::Perspective,
+    ]
+    .into_iter()
+    .map(|kind| ClipRuler {
+        kind,
+        points: vec![[w / 2.0, h / 2.0], [-500.0, 20.0], [900.0, 20.0]],
+        lines: 6,
+        snap: true,
+        everywhere: true,
+    })
+    .collect();
+    layers.push(three);
+
+    let cel = |frame, child| ClipCel { frame, child };
+    let mut animation = ClipLayer::generated(
+        "Animation 1",
+        ClipContent::AnimationFolder(ClipAnimationFolder {
+            cels: vec![
+                cel(0, Some(0)),
+                cel(4, Some(1)),
+                cel(8, None),
+                cel(9, Some(2)),
+            ],
+        }),
+        0,
+        0,
+        ClipBitmap::empty(width, height),
+    );
+    for i in 0..3 {
+        let mut drawing = ClipLayer::raster(&format!("{}", i + 1), 0, 0, pixels(seed ^ (20 + i)));
+        drawing.thumbnail = Some(small_picture(8, 6, seed ^ i));
+        animation.children.push(drawing);
+    }
+    animation.palette_color = Some([0, 128, 255]);
+    layers.push(animation);
+    layers.push(ClipLayer::generated(
+        "Camera 1",
+        ClipContent::Camera(ClipCamera {
+            center: [w / 2.0, h / 2.0],
+            scale: 1.5,
+            angle: -0.25,
+        }),
+        0,
+        0,
+        ClipBitmap::empty(width, height),
+    ));
+    doc.root.children = layers;
+
+    let paths: Vec<_> = doc
+        .paths()
+        .into_iter()
+        .map(|(path, layer)| (path, layer.name.clone(), layer.visible(), layer.composite))
+        .collect();
+    let path_of = |name: &str| {
+        paths
+            .iter()
+            .find(|(_, layer, _, _)| layer == name)
+            .map(|(path, ..)| path.clone())
+            .unwrap_or_default()
+    };
+    doc.comps = vec![
+        ClipComp {
+            name: "All".to_owned(),
+            states: paths
+                .iter()
+                .map(|(path, _, visible, composite)| ClipCompState {
+                    layer: path.clone(),
+                    visible: *visible,
+                    opacity: 1.0,
+                    composite: *composite,
+                })
+                .collect(),
+        },
+        ClipComp {
+            name: "No text \u{65e5}".to_owned(),
+            states: vec![ClipCompState {
+                layer: path_of("Text"),
+                visible: false,
+                opacity: 0.5,
+                composite: 2,
+            }],
+        },
+    ];
+    let key = |frame, value, interpolation| ClipKey {
+        frame,
+        value,
+        interpolation,
+    };
+    doc.timeline = Some(ClipTimeline {
+        name: "Timeline 1".to_owned(),
+        fps: 24.0,
+        frames: 24,
+        playback: [0, 23],
+        tracks: vec![
+            ClipTrack {
+                layer: path_of("Animation 1"),
+                property: "x".to_owned(),
+                keys: vec![
+                    key(0, 0.0, ClipInterpolation::Linear),
+                    key(23, f64::from(width), ClipInterpolation::Hold),
+                ],
+            },
+            ClipTrack {
+                layer: path_of("Camera 1"),
+                property: "camera.scale".to_owned(),
+                keys: vec![
+                    key(0, 1.0, ClipInterpolation::Smooth),
+                    key(12, 2.5, ClipInterpolation::Smooth),
+                    key(23, 1.0, ClipInterpolation::Hold),
+                ],
+            },
+            ClipTrack {
+                layer: path_of("Inside"),
+                property: "opacity".to_owned(),
+                keys: Vec::new(),
+            },
+        ],
+        audio: vec![ClipAudio {
+            name: "Beat".to_owned(),
+            start: 3,
+            volume: 0.8,
+            muted: false,
+            file: b"RIFF....WAVEfmt not really a sound".to_vec(),
+        }],
+    });
+    doc.preview = Some(small_picture(width.min(64), height.min(48), seed));
+    doc
 }
 
 #[cfg(test)]
@@ -930,5 +1396,351 @@ mod tests {
             columns: Vec::new(),
         });
         assert!(write(&lost).is_err());
+    }
+
+    /// The typed parts of every layer, by path.
+    #[allow(clippy::type_complexity)]
+    fn typed(
+        doc: &ClipDocument,
+    ) -> Vec<(
+        super::super::kinds::ClipLayerPath,
+        String,
+        Option<ClipContent>,
+        Option<ClipEffects>,
+        Option<[u8; 3]>,
+        Vec<ClipRuler>,
+        Option<ClipPicture>,
+    )> {
+        doc.paths()
+            .into_iter()
+            .map(|(path, layer)| {
+                (
+                    path,
+                    layer.name.clone(),
+                    layer.content.clone(),
+                    layer.effects.clone(),
+                    layer.palette_color,
+                    layer.rulers.clone(),
+                    layer.thumbnail.clone(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_kind_comes_back_typed() {
+        for (name, doc) in documents() {
+            let bytes = write(&doc).unwrap();
+            let back = read(&bytes).unwrap();
+            assert_eq!(typed(&back), typed(&doc), "{name}");
+            assert_eq!(back.comps, doc.comps, "{name}");
+            assert_eq!(back.timeline, doc.timeline, "{name}");
+            assert_eq!(back.preview, doc.preview, "{name}");
+            assert!(
+                !back
+                    .foreign
+                    .rows
+                    .iter()
+                    .any(|row| row.table.starts_with("SueLayerPart")
+                        || row.table.starts_with("SueDocumentPart")),
+                "{name}: every part was taken"
+            );
+        }
+        // Every kind is there, and Clip Studio still sees each layer's
+        // pixels where it was told they are.
+        let doc = every_kind(90, 70, 4);
+        let kinds: std::collections::BTreeSet<&str> = doc
+            .all_layers()
+            .iter()
+            .filter_map(|layer| layer.content.as_ref().map(ClipContent::kind))
+            .collect();
+        assert_eq!(kinds.len(), super::super::parts::CONTENT_KINDS.len());
+        let back = read(&write(&doc).unwrap()).unwrap();
+        for (want, got) in doc.all_layers().iter().zip(back.all_layers()) {
+            assert_eq!(
+                want.pixels.as_ref().map(decoded),
+                got.pixels.as_ref().map(decoded),
+                "{}",
+                want.name
+            );
+            assert_eq!((want.layer_type, want.folder), (got.layer_type, got.folder));
+        }
+        // A frame, an animation folder and the camera are folders.
+        for name in ["Frame 1", "Animation 1", "Camera 1"] {
+            let layer = back.layers().iter().find(|l| l.name == name).unwrap();
+            assert!(layer.is_folder(), "{name}");
+        }
+        assert_eq!(
+            back.layer_at(&doc.comps[1].states[0].layer).unwrap().name,
+            "Text"
+        );
+    }
+
+    /// A row of a part table with `columns`.
+    fn part(table: &str, columns: Vec<(&str, Value)>) -> ClipRow {
+        ClipRow {
+            table: table.to_owned(),
+            columns: columns
+                .into_iter()
+                .map(|(name, value)| (name.to_owned(), value))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn parts_a_newer_sue_wrote_or_that_are_broken_are_kept_as_they_were() {
+        let doc = every_kind(30, 20, 1);
+        let bytes = write(&doc).unwrap();
+        let mut read_doc = read(&bytes).unwrap();
+        let id = read_doc.layers()[0].id;
+        let fill = super::super::parts::encode_content(&ClipContent::Fill(ClipFill {
+            color: [1, 2, 3, 4],
+        }));
+        let int = Value::Integer;
+        let kept = vec![
+            // A kind from the future.
+            part(
+                "SueLayerPart",
+                vec![
+                    ("LayerId", int(id)),
+                    ("Kind", Value::Text("zz-hologram".to_owned())),
+                    ("Version", int(1)),
+                    ("Data", Value::Blob(vec![9, 9])),
+                ],
+            ),
+            // A known kind in a newer version.
+            part(
+                "SueLayerPart",
+                vec![
+                    ("LayerId", int(id)),
+                    ("Kind", Value::Text("fill".to_owned())),
+                    ("Version", int(2)),
+                    ("Data", Value::Blob(fill.clone())),
+                ],
+            ),
+            // A second content for a layer that has one.
+            part(
+                "SueLayerPart",
+                vec![
+                    ("LayerId", int(id)),
+                    ("Kind", Value::Text("fill".to_owned())),
+                    ("Version", int(1)),
+                    ("Data", Value::Blob(fill)),
+                ],
+            ),
+            // Broken bytes.
+            part(
+                "SueLayerPart",
+                vec![
+                    ("LayerId", int(id)),
+                    ("Kind", Value::Text("text".to_owned())),
+                    ("Version", int(1)),
+                    ("Data", Value::Blob(vec![200, 1, 2])),
+                ],
+            ),
+            // A layer no one has.
+            part(
+                "SueLayerPart",
+                vec![
+                    ("LayerId", int(999_999)),
+                    ("Kind", Value::Text("palette-color".to_owned())),
+                    ("Version", int(1)),
+                    ("Data", Value::Blob(vec![1, 2, 3])),
+                ],
+            ),
+            part(
+                "SueDocumentPart",
+                vec![
+                    ("Kind", Value::Text("zz-storyboard".to_owned())),
+                    ("Version", int(1)),
+                    ("Data", Value::Blob(b"panels".to_vec())),
+                ],
+            ),
+            // A second timeline.
+            part(
+                "SueDocumentPart",
+                vec![
+                    ("Kind", Value::Text("timeline".to_owned())),
+                    ("Version", int(1)),
+                    (
+                        "Data",
+                        Value::Blob(super::super::parts::encode_timeline(
+                            doc.timeline.as_ref().unwrap(),
+                        )),
+                    ),
+                ],
+            ),
+        ];
+        read_doc.foreign.rows.extend(kept.iter().cloned());
+        let first = write(&read_doc).unwrap();
+        let again = read(&first).unwrap();
+        assert_eq!(typed(&again), typed(&doc));
+        assert_eq!(again.timeline, doc.timeline);
+        for row in &kept {
+            assert!(
+                again
+                    .foreign
+                    .rows
+                    .iter()
+                    .any(|got| got.table == row.table && holds(&got.columns, &row.columns)),
+                "{row:?} is kept"
+            );
+        }
+        assert_eq!(write(&again).unwrap(), first);
+    }
+
+    #[test]
+    fn cut_or_flipped_parts_never_panic() {
+        use super::super::parts as p;
+        let doc = every_kind(20, 10, 3);
+        let mut encoded: Vec<(String, Vec<u8>)> = Vec::new();
+        for layer in doc.all_layers() {
+            if let Some(content) = &layer.content {
+                encoded.push((content.kind().to_owned(), p::encode_content(content)));
+            }
+            if let Some(effects) = &layer.effects {
+                encoded.push(("effects".to_owned(), p::encode_effects(effects)));
+            }
+            if !layer.rulers.is_empty() {
+                encoded.push(("rulers".to_owned(), p::encode_rulers(&layer.rulers)));
+            }
+            if let Some(picture) = &layer.thumbnail {
+                encoded.push(("thumbnail".to_owned(), p::encode_picture(picture)));
+            }
+        }
+        encoded.push(("comps".to_owned(), p::encode_comps(&doc.comps)));
+        encoded.push((
+            "timeline".to_owned(),
+            p::encode_timeline(doc.timeline.as_ref().unwrap()),
+        ));
+        let decode = |kind: &str, bytes: &[u8]| -> bool {
+            match kind {
+                "effects" => p::decode_effects(bytes).is_ok(),
+                "rulers" => p::decode_rulers(bytes).is_ok(),
+                "thumbnail" => p::decode_picture(bytes).is_ok(),
+                "comps" => p::decode_comps(bytes).is_ok(),
+                "timeline" => p::decode_timeline(bytes).is_ok(),
+                kind => p::decode_content(kind, bytes).is_ok(),
+            }
+        };
+        let mut random = Seeded::new(77);
+        for (kind, bytes) in &encoded {
+            assert!(decode(kind, bytes), "{kind} decodes whole");
+            for cut in 0..bytes.len() {
+                // A part cut short never decodes as if it were whole,
+                // except where the cut drops only an empty tail.
+                let _ = decode(kind, &bytes[..cut]);
+            }
+            let mut longer = bytes.clone();
+            longer.push(0);
+            assert!(!decode(kind, &longer), "{kind} with a byte too many");
+            for _ in 0..200 {
+                let mut flipped = bytes.clone();
+                if flipped.is_empty() {
+                    break;
+                }
+                let at = random.below(flipped.len());
+                flipped[at] ^= 1 << random.below(8);
+                let _ = decode(kind, &flipped);
+            }
+        }
+        // A whole file of every kind, cut and flipped.
+        let bytes = write(&doc).unwrap();
+        for cut in (0..bytes.len()).step_by(97) {
+            survives(&bytes[..cut]);
+        }
+        for _ in 0..300 {
+            let mut flipped = bytes.clone();
+            let at = random.below(flipped.len());
+            flipped[at] ^= 1 << random.below(8);
+            survives(&flipped);
+        }
+    }
+
+    #[test]
+    fn a_huge_count_in_a_part_is_refused_before_anything_is_made() {
+        use super::super::parts as p;
+        // A vector part claiming a billion lines in four bytes.
+        assert!(p::decode_content("vector", &[0x80, 0x94, 0xeb, 0xdc, 0x03]).is_err());
+        // A picture claiming more than its side may be.
+        let mut huge = Vec::new();
+        huge.extend([0x80, 0x80, 0x04, 1, 0]);
+        assert!(p::decode_picture(&huge).is_err());
+        assert!(p::decode_content("nothing", &[]).is_err());
+        assert!(p::decode_color(&[1, 2]).is_err());
+    }
+
+    /// Every `.clip` in the folder `SUE_CLIP_CORPUS` names (the owner's
+    /// own files, never in the repository) is read, written and read
+    /// again: the second read must equal the first, and what the model
+    /// does not type yet (tables, columns of `Layer`, chunk kinds) is
+    /// printed so the survey can be kept honest. Without the variable the
+    /// test does nothing. The files are only read.
+    #[test]
+    fn the_local_corpus_reads_and_writes_without_loss() {
+        let Some(folder) = std::env::var_os("SUE_CLIP_CORPUS") else {
+            return;
+        };
+        let mut files = Vec::new();
+        let mut stack = vec![std::path::PathBuf::from(folder)];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("clip"))
+                {
+                    files.push(path);
+                }
+            }
+        }
+        files.sort();
+        let mut failures = Vec::new();
+        for path in &files {
+            let Ok(bytes) = std::fs::read(path) else {
+                continue;
+            };
+            let shown = path.display();
+            let doc = match read(&bytes) {
+                Ok(doc) => doc,
+                Err(error) => {
+                    failures.push(format!("{shown}: does not read: {error}"));
+                    continue;
+                }
+            };
+            match write(&doc).map(|again| read(&again)) {
+                Ok(Ok(again)) if again == doc => {}
+                Ok(Ok(_)) => failures.push(format!("{shown}: differs after a write")),
+                Ok(Err(error)) => failures.push(format!("{shown}: written, not read: {error}")),
+                Err(error) => failures.push(format!("{shown}: does not write: {error}")),
+            }
+            let tables: Vec<&str> = doc.foreign.tables.iter().map(|t| t.name.as_str()).collect();
+            let mut columns: Vec<&str> = doc
+                .all_layers()
+                .iter()
+                .flat_map(|layer| layer.columns.iter().map(|(name, _)| name.as_str()))
+                .collect();
+            columns.sort_unstable();
+            columns.dedup();
+            let chunks: Vec<String> = doc
+                .foreign
+                .chunks
+                .iter()
+                .map(|chunk| String::from_utf8_lossy(&chunk.kind).into_owned())
+                .collect();
+            let types: std::collections::BTreeSet<i64> =
+                doc.all_layers().iter().map(|l| l.layer_type).collect();
+            println!(
+                "{shown}\n  layer types {types:?}\n  tables kept whole {tables:?}\n  \
+                 Layer columns not typed {columns:?}\n  chunks kept {chunks:?}"
+            );
+        }
+        println!("{} files", files.len());
+        assert!(failures.is_empty(), "{failures:#?}");
     }
 }

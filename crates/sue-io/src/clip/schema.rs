@@ -87,6 +87,24 @@ pub(super) const LAYER_THUMBNAIL_COLUMNS: &str = "MainId INTEGER DEFAULT NULL, C
 pub(super) const SUE_LAYER_SQL: &str =
     "CREATE TABLE SueLayer(LayerId INTEGER, Draft INTEGER, Reference INTEGER)";
 
+/// Sue's own table of the parts of a layer Clip Studio's own storage for
+/// is not yet observed: content, effects, palette color, rulers and
+/// thumbnail (`docs/clip-sue-tables.md`).
+pub(super) const SUE_LAYER_PART_SQL: &str =
+    "CREATE TABLE SueLayerPart(LayerId INTEGER, Kind TEXT, Version INTEGER, Data BLOB)";
+
+/// Sue's column list of `SueLayerPart`.
+pub(super) const SUE_LAYER_PART_COLUMNS: &str =
+    "LayerId INTEGER, Kind TEXT, Version INTEGER, Data BLOB";
+
+/// Sue's own table of the parts of the document: layer comps, the
+/// timeline and the canvas preview.
+pub(super) const SUE_DOCUMENT_PART_SQL: &str =
+    "CREATE TABLE SueDocumentPart(Kind TEXT, Version INTEGER, Data BLOB)";
+
+/// Sue's column list of `SueDocumentPart`.
+pub(super) const SUE_DOCUMENT_PART_COLUMNS: &str = "Kind TEXT, Version INTEGER, Data BLOB";
+
 /// `SueProject`: the picture's `.sue` bytes in files Sue writes.
 pub(super) const SUE_PROJECT_SQL: &str = "CREATE TABLE SueProject(Version INTEGER, Data BLOB)";
 
