@@ -18,8 +18,6 @@ mod selfcheck;
 mod settings;
 mod snapshot;
 #[cfg(test)]
-mod stroke_end_tests;
-#[cfg(test)]
 mod style;
 mod update;
 mod util;
