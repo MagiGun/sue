@@ -6,9 +6,8 @@
 //! system's browser, so they are `LEAVES_CANVAS`; the rest open a
 //! window or a notice over the canvas and stay.
 
-use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState, ShellRequest};
+use sue_wm::{AppletContext, Call, Command, Flags, ShellRequest};
 
-use super::when;
 use crate::dialogs::Dialog;
 use crate::studio::SuePaint;
 
@@ -23,17 +22,6 @@ pub(crate) const FAQ: &str = "https://github.com/MagiGun/sue/issues?q=label%3Aqu
 pub(crate) const CONTACT: &str = "https://github.com/MagiGun/sue/issues/new/choose";
 /// Where to ask for a feature.
 pub(crate) const FEEDBACK: &str = "https://github.com/MagiGun/sue/issues/new?template=feature.yml";
-
-/// The guide and the update notes read about a canvas: grayed without
-/// one, as they were in the old match.
-fn with_canvas(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
-    when(paint.doc().is_some())
-}
-
-/// The key list, About and the links work with or without a canvas.
-fn always(_: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
-    ItemState::on()
-}
 
 /// Help, Sue Paint Guide: the guide in a window over the canvas.
 fn guide(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
@@ -91,17 +79,15 @@ fn feedback(_: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     open(cx, FEEDBACK);
 }
 
-/// A command of this group.
+/// A command of this group. None reads the canvas, so each works with
+/// or without one (the guide and the update notes too).
 const fn c(
     name: &'static str,
     label: &'static str,
     icon: &'static str,
     run: fn(&mut SuePaint, &mut AppletContext<'_>, Call<'_>),
-    state: fn(&SuePaint, &Facts<'_>, Call<'_>) -> ItemState,
 ) -> Command<SuePaint> {
-    Command::new(name, label, "help", run)
-        .icon(icon)
-        .state(state)
+    Command::new(name, label, "help", run).icon(icon)
 }
 
 /// A link of the start page's Help popup: offered in the command
@@ -112,28 +98,21 @@ const fn link(
     icon: &'static str,
     run: fn(&mut SuePaint, &mut AppletContext<'_>, Call<'_>),
 ) -> Command<SuePaint> {
-    c(name, label, icon, run, always).with(Flags::PALETTE.with(Flags::LEAVES_CANVAS))
+    c(name, label, icon, run).with(Flags::PALETTE.with(Flags::LEAVES_CANVAS))
 }
 
 pub(super) const COMMANDS: &[Command<SuePaint>] = &[
-    c("help.guide", "sue-paint-guide", "book", guide, with_canvas),
+    c("help.guide", "sue-paint-guide", "book", guide),
     c(
         "help.shortcuts",
         "keyboard-shortcuts",
         "keyboard",
         shortcuts,
-        always,
     )
     .keys("Ctrl+Alt+Shift+K or F1 or Alt+I")
     .with(Flags::PALETTE),
-    c(
-        "help.updates",
-        "check-for-updates",
-        "update",
-        updates,
-        with_canvas,
-    ),
-    c("help.about", "about-sue-paint", "info", about, always),
+    c("help.updates", "check-for-updates", "update", updates),
+    c("help.about", "about-sue-paint", "info", about),
     link("help.tips", "help-basic-tips", "help", tips),
     link(
         "help.online_guide",
@@ -213,6 +192,34 @@ mod tests {
                 link.starts_with("https://magigun.github.io/sue/")
                     || link.starts_with("https://github.com/MagiGun/sue/"),
                 "{link}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_help_command_works_without_a_canvas() {
+        // The guide, the update notes and the rest read nothing of a
+        // picture, so Help stays usable before one is open.
+        let paint = SuePaint::default();
+        assert!(paint.doc().is_none());
+        let rice = sue_rice::RiceSchema::new();
+        let world = sue_wm::World {
+            arena: sue_core::Arena::new(),
+            rice,
+        };
+        let history = sue_core::UndoStack::new();
+        let facts = sue_wm::Facts {
+            arena: &world.arena,
+            history: &history,
+            rice: &world.rice,
+        };
+        let registry = crate::registry();
+        for command in COMMANDS {
+            assert_eq!(
+                registry.state(&paint, &facts, command.name),
+                sue_wm::ItemState::on(),
+                "{}",
+                command.name
             );
         }
     }

@@ -100,3 +100,35 @@ fn every_help_command_runs_on_a_canvas() {
         assert!(!error, "{command}");
     }
 }
+
+#[test]
+fn the_guide_and_the_update_notes_open_without_a_canvas() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let (mut runtime, root) = runtime("paint-cmd-help-bare");
+    let ctx = egui::Context::default();
+    let now = Instant::now();
+    runtime.request(
+        ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+        &mut NoTextures,
+        now,
+    );
+    frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+    let mut paint = PaintDriver {
+        runtime,
+        ctx,
+        now,
+        root,
+        texts: Vec::new(),
+    };
+    let before = paint.settle(30);
+    assert!(!drawn(&before, "Sue Paint Guide"), "{before:?}");
+    assert!(!drawn(&before, "Check for Updates"), "{before:?}");
+
+    let texts = run(&mut paint, "help.guide");
+    assert!(drawn(&texts, "Sue Paint Guide"), "{texts:?}");
+    close(&mut paint);
+
+    let texts = run(&mut paint, "help.updates");
+    assert!(drawn(&texts, "Check for Updates"), "{texts:?}");
+    close(&mut paint);
+}
