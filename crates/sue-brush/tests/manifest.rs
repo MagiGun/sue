@@ -29,8 +29,14 @@ fn the_engine_depends_on_the_kernel_and_the_models_only() {
     );
     for line in manifest.lines().map(str::trim) {
         assert!(
-            !line.starts_with("[target.") && line != "[build-dependencies]",
+            !line.starts_with("[target.") && !line.starts_with("[build-dependencies"),
             "{line}: the engine is the same on every system"
+        );
+        // A dependency written as a table of its own would not be in the
+        // lists read here.
+        assert!(
+            !line.starts_with("[dependencies.") && !line.starts_with("[dev-dependencies."),
+            "{line}: name a dependency on one line under its section"
         );
     }
     // What its tests may use is held too: nothing that draws or opens a
