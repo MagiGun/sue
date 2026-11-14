@@ -1,0 +1,11 @@
+[Flip Canvas and Fit]
+canvas.flip_h
+view.fit
+[Rotate Canvas Right]
+canvas.rotate_right
+view.fit
+[Clean line art]
+select.all
+filter.invert
+layer.merge_down
+view.fit

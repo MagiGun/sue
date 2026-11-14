@@ -1,0 +1,6 @@
+# Sue labels, format 1
+label	Work
+label	Clients
+mark	Work	C:\Users\artist\Pictures\cat.clip
+mark	Clients	C:\Users\artist\Documents\The Lighthouse Keeper.sue
+favorite	C:\Users\artist\Pictures\cat.clip

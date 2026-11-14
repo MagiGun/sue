@@ -7,6 +7,10 @@ rust-version.workspace = true
 publish.workspace = true
 repository.workspace = true
 license-file.workspace = true
+# tests/golden.rs is a module of the crate itself (see the end of
+# src/lib.rs): it reads the private file formats. Cargo must not also
+# build it as a test crate of its own.
+autotests = false
 
 [dependencies]
 egui.workspace = true
@@ -22,3 +26,8 @@ sue-wm.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# Only the golden file generator uses it, to make a Sue Writer project
+# the way Sue Writer does.
+sue-writer.workspace = true

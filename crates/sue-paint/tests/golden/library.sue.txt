@@ -1,0 +1,56 @@
+# paint/library.sue, as Sue 0.0.75 wrote it
+chunk ARNA version 1
+entities 12
+entity 01f0afe5-a163-4438-802b-38b178d93a63 class "sue_paint.material" name "Sand"
+  property sue_paint.material.added = int 0
+  property sue_paint.material.kind = text "sue_paint.tone"
+  property sue_paint.material.source = text "builtin:Sand"
+entity 10252887-c710-4123-8f4c-2faefe4ced6e class "sue_paint.material" name "Checker"
+  property sue_paint.material.added = int 0
+  property sue_paint.material.kind = text "sue_paint.pattern"
+  property sue_paint.material.source = text "builtin:Checker"
+entity 131c7595-394b-496d-a034-fa1c72c1004d class "sue_paint.material" name "Lines 20%"
+  property sue_paint.material.added = int 0
+  property sue_paint.material.kind = text "sue_paint.tone"
+  property sue_paint.material.source = text "builtin:Lines 20%"
+entity 17be32c2-64d7-4542-af8f-25fc7529e8ae class "sue_paint.material" name "Speckles"
+  property sue_paint.material.added = int 0
+  property sue_paint.material.kind = text "sue_paint.pattern"
+  property sue_paint.material.source = text "builtin:Speckles"
+entity 1a1fe442-8d45-496f-a631-a288474fb679 class "sue_paint.material" name "Dot 30%"
+  property sue_paint.material.added = int 0
+  property sue_paint.material.kind = text "sue_paint.tone"
+  property sue_paint.material.source = text "builtin:Dot 30%"
+entity 1dca1750-6b2f-44ab-af63-f730624b8f69 class "sue_paint.material" name "Stripes"
+  property sue_paint.material.added = int 0
+  property sue_paint.material.kind = text "sue_paint.pattern"
+  property sue_paint.material.source = text "builtin:Stripes"
+entity 29607a34-45ba-460f-ba5f-a666fde64e62 class "sue_paint.material" name "Dot 50%"
+  property sue_paint.material.added = int 0
+  property sue_paint.material.favorite = bool true
+  property sue_paint.material.kind = text "sue_paint.tone"
+  property sue_paint.material.source = text "builtin:Dot 50%"
+entity 622c0e3c-f116-4bb7-9b21-4cdb13ba3237 class "sue_paint.material" name "Crosshatch"
+  property sue_paint.material.added = int 0
+  property sue_paint.material.kind = text "sue_paint.pattern"
+  property sue_paint.material.source = text "builtin:Crosshatch"
+entity a19656de-b674-4bcc-aece-85e3ef007dc8 class "sue_paint.material" name "Dot 20%"
+  property sue_paint.material.added = int 0
+  property sue_paint.material.kind = text "sue_paint.tone"
+  property sue_paint.material.source = text "builtin:Dot 20%"
+  property sue_paint.material.used = int 1760000000
+entity c49ab48e-9680-4e96-a9d8-db306f48c6c1 class "sue_paint.material" name "Grid"
+  property sue_paint.material.added = int 0
+  property sue_paint.material.kind = text "sue_paint.pattern"
+  property sue_paint.material.source = text "builtin:Grid"
+entity f543434d-c6e7-485e-968d-560baa29fe62 class "sue_paint.material" name "Dot 10%"
+  property sue_paint.material.added = int 0
+  property sue_paint.material.favorite = bool true
+  property sue_paint.material.kind = text "sue_paint.tone"
+  property sue_paint.material.source = text "builtin:Dot 10%"
+entity ffcd6da6-9fb4-4e6b-84cc-11ceb22b307f class "sue_paint.material" name "Bricks"
+  property sue_paint.material.added = int 0
+  property sue_paint.material.kind = text "sue_paint.pattern"
+  property sue_paint.material.source = text "builtin:Bricks"
+tree kinds sue.child
+relations 0

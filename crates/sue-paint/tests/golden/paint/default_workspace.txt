@@ -1,0 +1,19 @@
+[Workspace]
+column left 46 1:tool
+column left 236 0.44:sub_tool 0.3:color
+column left 86 1:brush_size
+column right 300 0.58:layer
+top 38 1:command_bar
+bottom 160 1:timeline
+float 420 180 260 320 navigator
+icon material
+icon layer_property
+icon animation_cels
+icon history
+icon sub_view
+icon auto_action
+icon item_bank
+icon info
+icon color_set
+panels 1111111111
+menus 1

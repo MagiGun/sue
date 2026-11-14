@@ -1,0 +1,47 @@
+# work, as Sue 0.0.75 kept it
+labels ["Work", "Clients"]
+recent files 3
+recent "C:\\Users\\artist\\Documents\\The Lighthouse Keeper.sue": opened 1760000300, saved 1760000000, page sue-writer, a project true, favorite false, labels ["Clients"]
+recent "D:\\Scans\\page 01.png": opened 1760000200, saved 0, page none, a project false, favorite false, labels []
+recent "C:\\Users\\artist\\Pictures\\cat.clip": opened 1760000100, saved 0, page sue-paint, a project false, favorite true, labels ["Work"]
+kept work 2
+kept "1760000500-20276-1" in 1760000500-20276-1.sue: at 1760000500, of project "", holding "Illustration", page sue-paint
+# 1760000500-20276-1.sue, as Sue 0.0.75 wrote it
+chunk ARNA version 1
+entities 3
+entity 11d79022-27d6-4da6-8bcf-86179146940c class "sue.image" name "Illustration"
+  property image.dpi = float 72
+  property image.height = int 16
+  property image.width = int 16
+  property timelapse.record = bool false
+entity 71970cef-a88c-4119-8226-2fbcfcf14ce3 class "sue.layer.paper" name "Paper"
+  property layer.color = color 1 1 1 alpha 1 in srgb
+entity 7869b055-49f9-4efb-b654-04654ff74ef5 class "sue.layer" name "Layer 1"
+  base pixels 16 by 16 Rgba8, 56 not clear, fnv e80983ad6d6d5280
+tree kinds sue.child
+relations 2
+relation 11d79022-27d6-4da6-8bcf-86179146940c sue.child 71970cef-a88c-4119-8226-2fbcfcf14ce3 order "i"
+relation 11d79022-27d6-4da6-8bcf-86179146940c sue.child 7869b055-49f9-4efb-b654-04654ff74ef5 order "r"
+picture 11d79022-27d6-4da6-8bcf-86179146940c "Illustration": 16 by 16
+  layer 71970cef-a88c-4119-8226-2fbcfcf14ce3 "Paper" paper: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+  layer 7869b055-49f9-4efb-b654-04654ff74ef5 "Layer 1" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+kept "1760000400-20276-1" in 1760000400-20276-1.sue: at 1760000400, of project "C:\\Users\\artist\\Documents\\The Lighthouse Keeper.sue", holding "The Lighthouse Keeper", page sue-writer
+# 1760000400-20276-1.sue, as Sue 0.0.75 wrote it
+chunk ARNA version 1
+entities 3
+entity 0482cfed-0226-4311-9f51-31dbd22c1592 class "sue.layer" name "Layer 1"
+  base pixels 16 by 16 Rgba8, 56 not clear, fnv e80983ad6d6d5280
+entity 3f95edc1-6e70-42af-83a7-d4c16ce7d8fe class "sue.layer.paper" name "Paper"
+  property layer.color = color 1 1 1 alpha 1 in srgb
+entity cf415671-8190-4e20-be51-cf8dd35a1680 class "sue.image" name "Cover sketch"
+  property image.dpi = float 72
+  property image.height = int 16
+  property image.width = int 16
+  property timelapse.record = bool false
+tree kinds sue.child
+relations 2
+relation cf415671-8190-4e20-be51-cf8dd35a1680 sue.child 3f95edc1-6e70-42af-83a7-d4c16ce7d8fe order "i"
+relation cf415671-8190-4e20-be51-cf8dd35a1680 sue.child 0482cfed-0226-4311-9f51-31dbd22c1592 order "r"
+picture cf415671-8190-4e20-be51-cf8dd35a1680 "Cover sketch": 16 by 16
+  layer 3f95edc1-6e70-42af-83a7-d4c16ce7d8fe "Paper" paper: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+  layer 0482cfed-0226-4311-9f51-31dbd22c1592 "Layer 1" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false

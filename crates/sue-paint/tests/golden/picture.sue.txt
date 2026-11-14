@@ -1,0 +1,79 @@
+# picture.sue, as Sue 0.0.75 wrote it
+chunk GOLD version 3: 6b657074206173206974206973
+chunk ARNA version 1
+entities 7
+entity 1de746c6-556a-45f2-9839-f99d81f7ba24 class "sue.paint.vector" name "Vector lines"
+  property layer.locked = bool true
+  base pixels 64 by 64 Rgba8, 1403 not clear, fnv affba98234e7a40f
+  geometry: 92 points fnv 6fbc3df390f631f8, 5 primitives
+    0 polygons, 5 polylines, 0 curves
+    attribute point alpha: 92 floats, 1 each, fnv f0b6fcf9fa29cc85
+    attribute point lean: 184 floats, 2 each, fnv daaa74a434914ca5
+    attribute point mark: 92 whole numbers, 1 each, fnv 37fa3da8a9a40fe5
+    attribute point pressure: 92 floats, 1 each, fnv c07169b82ca191fe
+    attribute point speed: 92 floats, 1 each, fnv 4aa53707069ef3fd
+    attribute point tilt: 92 floats, 1 each, fnv 37fa3da8a9a40fe5
+    attribute point width: 92 floats, 1 each, fnv f0b6fcf9fa29cc85
+    attribute primitive color: 15 floats, 3 each, fnv da919f667824e655
+    attribute primitive copies: 5 texts: ["1,0,0,1,0,0", "1,0,0,1,0,0", "1,0,0,1,0,0", "1,0,0,1,0,0", "1,-0,0,1,0,0;-1,-0.00000008742278,-0.00000008742278,1,64,0.0000019073486;-1,0.00000008742278,-0.00000008742278,-1,64,64;1,0.00000017484555,0.00000017484555,-1,-0.0000038146973,63.999992"]
+    attribute primitive correction: 5 whole numbers, 1 each: 0 0 0 3 0
+    attribute primitive flick: 10 floats, 2 each, fnv 789d3ff5ac93ce31
+    attribute primitive flicked: 5 whole numbers, 1 each: 0 0 0 1 0
+    attribute primitive single: 5 whole numbers, 1 each: 0 0 1 0 0
+    attribute primitive sub: 15 floats, 3 each, fnv 2ead83f7e826bde8
+    attribute primitive tip: 5 texts: ["size=10;opacity=1;hardness=1;aa=2;spacing=0.06;build_up=0;flow=1;grain=0;screen_size=0;at_least_one=0;eraser=0;taper_start=20;taper_end=20;taper_mode=0;taper_size=1;taper_opacity=0;taper_by_speed=1;mix=0;follow=0;follow_tilt=0;angle=0;scatter=0;size_jitter=0;turn_jitter=0;ribbon=0;keep_colors=0;shape_count=1;jitter.tip=0;jitter.hue=0;jitter.saturation=0;jitter.value=0;jitter.sub=0;jitter.stroke=0;jitter.stroke_hue=0;jitter.stroke_saturation=0;jitter.stroke_value=0;size_by.pressure=1;size_by.pressure_min=0.15;size_by.pressure_curve=0,0 1,1;size_by.velocity=0;size_by.velocity_min=0;size_by.velocity_curve=0,0 1,1;size_by.tilt=0;size_by.tilt_min=0;size_by.tilt_curve=0,0 1,1;size_by.random=0;size_by.random_min=0;opacity_by.pressure=0;opacity_by.pressure_min=0;opacity_by.pressure_curve=0,0 1,1;opacity_by.velocity=0;opacity_by.velocity_min=0;opacity_by.velocity_curve=0,0 1,1;opacity_by.tilt=0;opacity_by.tilt_min=0;opacity_by.tilt_curve=0,0 1,1;opacity_by.random=0;opacity_by.random_min=0", "size=36;opacity=1;hardness=1;aa=1;spacing=1.4;build_up=0;flow=1;grain=0;screen_size=0;at_least_one=0;eraser=0;taper_start=0;taper_end=0;taper_mode=0;taper_size=1;taper_opacity=0;taper_by_speed=0;mix=0;follow=0;follow_tilt=0;angle=0;scatter=1;size_jitter=0.55;turn_jitter=1;ribbon=0;keep_colors=0;shape_count=1;jitter.tip=0;jitter.hue=0;jitter.saturation=0;jitter.value=0;jitter.sub=0;jitter.stroke=0;jitter.stroke_hue=0;jitter.stroke_saturation=0;jitter.stroke_value=0;size_by.pressure=0;size_by.pressure_min=0.15;size_by.pressure_curve=0,0 1,1;size_by.velocity=0;size_by.velocity_min=0;size_by.velocity_curve=0,0 1,1;size_by.tilt=0;size_by.tilt_min=0;size_by.tilt_curve=0,0 1,1;size_by.random=0;size_by.random_min=0;opacity_by.pressure=0;opacity_by.pressure_min=0;opacity_by.pressure_curve=0,0 1,1;opacity_by.velocity=0;opacity_by.velocity_min=0;opacity_by.velocity_curve=0,0 1,1;opacity_by.tilt=0;opacity_by.tilt_min=0;opacity_by.tilt_curve=0,0 1,1;opacity_by.random=0;opacity_by.random_min=0;shape=Star", "size=10;opacity=1;hardness=1;aa=2;spacing=0.06;build_up=0;flow=1;grain=0;screen_size=0;at_least_one=0;eraser=0;taper_start=20;taper_end=20;taper_mode=0;taper_size=1;taper_opacity=0;taper_by_speed=1;mix=0;follow=0;follow_tilt=0;angle=0;scatter=0;size_jitter=0;turn_jitter=0;ribbon=0;keep_colors=0;shape_count=1;jitter.tip=0;jitter.hue=0;jitter.saturation=0;jitter.value=0;jitter.sub=0;jitter.stroke=0;jitter.stroke_hue=0;jitter.stroke_saturation=0;jitter.stroke_value=0;size_by.pressure=1;size_by.pressure_min=0.15;size_by.pressure_curve=0,0 1,1;size_by.velocity=0;size_by.velocity_min=0;size_by.velocity_curve=0,0 1,1;size_by.tilt=0;size_by.tilt_min=0;size_by.tilt_curve=0,0 1,1;size_by.random=0;size_by.random_min=0;opacity_by.pressure=0;opacity_by.pressure_min=0;opacity_by.pressure_curve=0,0 1,1;opacity_by.velocity=0;opacity_by.velocity_min=0;opacity_by.velocity_curve=0,0 1,1;opacity_by.tilt=0;opacity_by.tilt_min=0;opacity_by.tilt_curve=0,0 1,1;opacity_by.random=0;opacity_by.random_min=0", "size=10;opacity=1;hardness=1;aa=2;spacing=0.06;build_up=0;flow=1;grain=0;screen_size=0;at_least_one=0;eraser=0;taper_start=20;taper_end=20;taper_mode=0;taper_size=1;taper_opacity=0;taper_by_speed=1;mix=0;follow=0;follow_tilt=0;angle=0;scatter=0;size_jitter=0;turn_jitter=0;ribbon=0;keep_colors=0;shape_count=1;jitter.tip=0;jitter.hue=0;jitter.saturation=0;jitter.value=0;jitter.sub=0;jitter.stroke=0;jitter.stroke_hue=0;jitter.stroke_saturation=0;jitter.stroke_value=0;size_by.pressure=1;size_by.pressure_min=0.15;size_by.pressure_curve=0,0 1,1;size_by.velocity=0;size_by.velocity_min=0;size_by.velocity_curve=0,0 1,1;size_by.tilt=0;size_by.tilt_min=0;size_by.tilt_curve=0,0 1,1;size_by.random=0;size_by.random_min=0;opacity_by.pressure=0;opacity_by.pressure_min=0;opacity_by.pressure_curve=0,0 1,1;opacity_by.velocity=0;opacity_by.velocity_min=0;opacity_by.velocity_curve=0,0 1,1;opacity_by.tilt=0;opacity_by.tilt_min=0;opacity_by.tilt_curve=0,0 1,1;opacity_by.random=0;opacity_by.random_min=0", "size=10;opacity=1;hardness=1;aa=2;spacing=0.06;build_up=0;flow=1;grain=0;screen_size=0;at_least_one=0;eraser=0;taper_start=20;taper_end=20;taper_mode=0;taper_size=1;taper_opacity=0;taper_by_speed=1;mix=0;follow=0;follow_tilt=0;angle=0;scatter=0;size_jitter=0;turn_jitter=0;ribbon=0;keep_colors=0;shape_count=1;jitter.tip=0;jitter.hue=0;jitter.saturation=0;jitter.value=0;jitter.sub=0;jitter.stroke=0;jitter.stroke_hue=0;jitter.stroke_saturation=0;jitter.stroke_value=0;size_by.pressure=1;size_by.pressure_min=0.15;size_by.pressure_curve=0,0 1,1;size_by.velocity=0;size_by.velocity_min=0;size_by.velocity_curve=0,0 1,1;size_by.tilt=0;size_by.tilt_min=0;size_by.tilt_curve=0,0 1,1;size_by.random=0;size_by.random_min=0;opacity_by.pressure=0;opacity_by.pressure_min=0;opacity_by.pressure_curve=0,0 1,1;opacity_by.velocity=0;opacity_by.velocity_min=0;opacity_by.velocity_curve=0,0 1,1;opacity_by.tilt=0;opacity_by.tilt_min=0;opacity_by.tilt_curve=0,0 1,1;opacity_by.random=0;opacity_by.random_min=0"]
+entity 5430ef9c-a384-4a1a-82a5-d61bc1282df2 class "sue.paint.layer_mask" name "Mask"
+  base pixels 64 by 64 Rgba8, 4096 not clear, fnv 497b9a5b74210325
+entity 59a7c5fd-b5d6-4870-8965-c7c3c2a94add class "sue.note" name "Loose note"
+entity 6fa5c185-800b-44ab-9ae0-35a61a5db5d1 class "sue.layer" name "Draft"
+  property layer.clip = bool true
+  property layer.draft = bool true
+  property layer.visible = bool false
+  property layer.x = int 3
+  property layer.y = int -2
+  base pixels 64 by 64 Rgba8, 597 not clear, fnv f73f0f0482cd8ea7
+entity 72885434-f3d3-423e-ab46-5e4e556242bb class "sue.image" name "Golden picture"
+  property golden.note = text "A property Sue Paint does not know"
+  property image.dpi = float 350
+  property image.height = int 64
+  property image.width = int 64
+  property ruler.symmetry = text "32,32,1.5707964"
+  property timelapse.record = bool false
+entity 9e2102e5-eef7-4bd8-b1cb-19502ad8de7f class "sue.layer.paper" name "Paper"
+  property layer.color = color 0.98039216 0.972549 0.9411765 alpha 1 in srgb
+entity adefd12b-e2a8-4791-a77f-bd5dc8e99c97 class "sue.layer" name "Layer 1"
+  property layer.alpha_locked = bool true
+  property layer.mask_on = bool true
+  property style.blend = text "multiply"
+  property style.opacity = float 0.75
+  base pixels 64 by 64 Rgba8, 4096 not clear, fnv 1d4deaa02ac31255
+tree kinds sue.child
+relations 5
+relation 72885434-f3d3-423e-ab46-5e4e556242bb sue.child 9e2102e5-eef7-4bd8-b1cb-19502ad8de7f order "i"
+relation 72885434-f3d3-423e-ab46-5e4e556242bb sue.child adefd12b-e2a8-4791-a77f-bd5dc8e99c97 order "r"
+relation 72885434-f3d3-423e-ab46-5e4e556242bb sue.child 1de746c6-556a-45f2-9839-f99d81f7ba24 order "w"
+relation 72885434-f3d3-423e-ab46-5e4e556242bb sue.child 6fa5c185-800b-44ab-9ae0-35a61a5db5d1 order "y"
+relation adefd12b-e2a8-4791-a77f-bd5dc8e99c97 sue.paint.mask 5430ef9c-a384-4a1a-82a5-d61bc1282df2 order "i"
+picture 72885434-f3d3-423e-ab46-5e4e556242bb "Golden picture": 64 by 64
+  layer 9e2102e5-eef7-4bd8-b1cb-19502ad8de7f "Paper" paper: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+  layer adefd12b-e2a8-4791-a77f-bd5dc8e99c97 "Layer 1" raster: visible true, opacity 0.75, blend multiply, clip false, offset 0 0, draft false, locked false, alpha locked true
+    mask 5430ef9c-a384-4a1a-82a5-d61bc1282df2, in use true
+  layer 1de746c6-556a-45f2-9839-f99d81f7ba24 "Vector lines" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked true, alpha locked false
+    vector lines 5
+    line 0: 33 samples from 6.4 12 to 57.600002 12.000001, pressure fnv 4c711604822c212b, colors 0.05 0.05 0.08 and 1 1 1, correction 0, flick none, 0 marks
+      copies 1 0 0 1 0 0
+      tip size=10;opacity=1;hardness=1;aa=2;spacing=0.06;build_up=0;flow=1;grain=0;screen_size=0;at_least_one=0;eraser=0;taper_start=20;taper_end=20;taper_mode=0;taper_size=1;taper_opacity=0;taper_by_speed=1;mix=0;follow=0;follow_tilt=0;angle=0;scatter=0;size_jitter=0;turn_jitter=0;ribbon=0;keep_colors=0;shape_count=1;jitter.tip=0;jitter.hue=0;jitter.saturation=0;jitter.value=0;jitter.sub=0;jitter.stroke=0;jitter.stroke_hue=0;jitter.stroke_saturation=0;jitter.stroke_value=0;size_by.pressure=1;size_by.pressure_min=0.15;size_by.pressure_curve=0,0 1,1;size_by.velocity=0;size_by.velocity_min=0;size_by.velocity_curve=0,0 1,1;size_by.tilt=0;size_by.tilt_min=0;size_by.tilt_curve=0,0 1,1;size_by.random=0;size_by.random_min=0;opacity_by.pressure=0;opacity_by.pressure_min=0;opacity_by.pressure_curve=0,0 1,1;opacity_by.velocity=0;opacity_by.velocity_min=0;opacity_by.velocity_curve=0,0 1,1;opacity_by.tilt=0;opacity_by.tilt_min=0;opacity_by.tilt_curve=0,0 1,1;opacity_by.random=0;opacity_by.random_min=0
+    line 1: 33 samples from 6.4 52 to 57.600002 52, pressure fnv 4c711604822c212b, colors 0.9 0.7 0.1 and 1 1 1, correction 0, flick none, 0 marks
+      copies 1 0 0 1 0 0
+      tip size=36;opacity=1;hardness=1;aa=1;spacing=1.4;build_up=0;flow=1;grain=0;screen_size=0;at_least_one=0;eraser=0;taper_start=0;taper_end=0;taper_mode=0;taper_size=1;taper_opacity=0;taper_by_speed=0;mix=0;follow=0;follow_tilt=0;angle=0;scatter=1;size_jitter=0.55;turn_jitter=1;ribbon=0;keep_colors=0;shape_count=1;jitter.tip=0;jitter.hue=0;jitter.saturation=0;jitter.value=0;jitter.sub=0;jitter.stroke=0;jitter.stroke_hue=0;jitter.stroke_saturation=0;jitter.stroke_value=0;size_by.pressure=0;size_by.pressure_min=0.15;size_by.pressure_curve=0,0 1,1;size_by.velocity=0;size_by.velocity_min=0;size_by.velocity_curve=0,0 1,1;size_by.tilt=0;size_by.tilt_min=0;size_by.tilt_curve=0,0 1,1;size_by.random=0;size_by.random_min=0;opacity_by.pressure=0;opacity_by.pressure_min=0;opacity_by.pressure_curve=0,0 1,1;opacity_by.velocity=0;opacity_by.velocity_min=0;opacity_by.velocity_curve=0,0 1,1;opacity_by.tilt=0;opacity_by.tilt_min=0;opacity_by.tilt_curve=0,0 1,1;opacity_by.random=0;opacity_by.random_min=0;shape=Star
+    line 2: 1 samples from 50 20 to 50 20, pressure fnv 863d6bdce3b1a83d, colors 0.8 0.1 0.1 and 1 1 1, correction 0, flick none, 0 marks
+      copies 1 0 0 1 0 0
+      tip size=10;opacity=1;hardness=1;aa=2;spacing=0.06;build_up=0;flow=1;grain=0;screen_size=0;at_least_one=0;eraser=0;taper_start=20;taper_end=20;taper_mode=0;taper_size=1;taper_opacity=0;taper_by_speed=1;mix=0;follow=0;follow_tilt=0;angle=0;scatter=0;size_jitter=0;turn_jitter=0;ribbon=0;keep_colors=0;shape_count=1;jitter.tip=0;jitter.hue=0;jitter.saturation=0;jitter.value=0;jitter.sub=0;jitter.stroke=0;jitter.stroke_hue=0;jitter.stroke_saturation=0;jitter.stroke_value=0;size_by.pressure=1;size_by.pressure_min=0.15;size_by.pressure_curve=0,0 1,1;size_by.velocity=0;size_by.velocity_min=0;size_by.velocity_curve=0,0 1,1;size_by.tilt=0;size_by.tilt_min=0;size_by.tilt_curve=0,0 1,1;size_by.random=0;size_by.random_min=0;opacity_by.pressure=0;opacity_by.pressure_min=0;opacity_by.pressure_curve=0,0 1,1;opacity_by.velocity=0;opacity_by.velocity_min=0;opacity_by.velocity_curve=0,0 1,1;opacity_by.tilt=0;opacity_by.tilt_min=0;opacity_by.tilt_curve=0,0 1,1;opacity_by.random=0;opacity_by.random_min=0
+    line 3: 13 samples from 8 60 to 28 46, pressure fnv 6d121687be28b7f3, colors 0.1 0.4 0.1 and 1 1 1, correction 3, flick 420 -260, 0 marks
+      copies 1 0 0 1 0 0
+      tip size=10;opacity=1;hardness=1;aa=2;spacing=0.06;build_up=0;flow=1;grain=0;screen_size=0;at_least_one=0;eraser=0;taper_start=20;taper_end=20;taper_mode=0;taper_size=1;taper_opacity=0;taper_by_speed=1;mix=0;follow=0;follow_tilt=0;angle=0;scatter=0;size_jitter=0;turn_jitter=0;ribbon=0;keep_colors=0;shape_count=1;jitter.tip=0;jitter.hue=0;jitter.saturation=0;jitter.value=0;jitter.sub=0;jitter.stroke=0;jitter.stroke_hue=0;jitter.stroke_saturation=0;jitter.stroke_value=0;size_by.pressure=1;size_by.pressure_min=0.15;size_by.pressure_curve=0,0 1,1;size_by.velocity=0;size_by.velocity_min=0;size_by.velocity_curve=0,0 1,1;size_by.tilt=0;size_by.tilt_min=0;size_by.tilt_curve=0,0 1,1;size_by.random=0;size_by.random_min=0;opacity_by.pressure=0;opacity_by.pressure_min=0;opacity_by.pressure_curve=0,0 1,1;opacity_by.velocity=0;opacity_by.velocity_min=0;opacity_by.velocity_curve=0,0 1,1;opacity_by.tilt=0;opacity_by.tilt_min=0;opacity_by.tilt_curve=0,0 1,1;opacity_by.random=0;opacity_by.random_min=0
+    line 4: 11 samples from 36 28 to 46 22, pressure fnv 5197fdfbf1a08484, colors 0.3 0.1 0.5 and 1 1 1, correction 0, flick none, 0 marks
+      copies 1 -0 0 1 0 0 | -1 -0.00000008742278 -0.00000008742278 1 64 0.0000019073486 | -1 0.00000008742278 -0.00000008742278 -1 64 64 | 1 0.00000017484555 0.00000017484555 -1 -0.0000038146973 63.999992
+      tip size=10;opacity=1;hardness=1;aa=2;spacing=0.06;build_up=0;flow=1;grain=0;screen_size=0;at_least_one=0;eraser=0;taper_start=20;taper_end=20;taper_mode=0;taper_size=1;taper_opacity=0;taper_by_speed=1;mix=0;follow=0;follow_tilt=0;angle=0;scatter=0;size_jitter=0;turn_jitter=0;ribbon=0;keep_colors=0;shape_count=1;jitter.tip=0;jitter.hue=0;jitter.saturation=0;jitter.value=0;jitter.sub=0;jitter.stroke=0;jitter.stroke_hue=0;jitter.stroke_saturation=0;jitter.stroke_value=0;size_by.pressure=1;size_by.pressure_min=0.15;size_by.pressure_curve=0,0 1,1;size_by.velocity=0;size_by.velocity_min=0;size_by.velocity_curve=0,0 1,1;size_by.tilt=0;size_by.tilt_min=0;size_by.tilt_curve=0,0 1,1;size_by.random=0;size_by.random_min=0;opacity_by.pressure=0;opacity_by.pressure_min=0;opacity_by.pressure_curve=0,0 1,1;opacity_by.velocity=0;opacity_by.velocity_min=0;opacity_by.velocity_curve=0,0 1,1;opacity_by.tilt=0;opacity_by.tilt_min=0;opacity_by.tilt_curve=0,0 1,1;opacity_by.random=0;opacity_by.random_min=0
+  layer 6fa5c185-800b-44ab-9ae0-35a61a5db5d1 "Draft" raster: visible false, opacity 1, blend normal, clip true, offset 3 -2, draft true, locked false, alpha locked false
+  symmetrical ruler through 32 32 at 1.5707964

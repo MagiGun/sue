@@ -1,0 +1,96 @@
+# animation.sue, as Sue 0.0.75 wrote it
+chunk GOLD version 3: 6b657074206173206974206973
+chunk ARNA version 1
+entities 10
+entity 3565b5c6-f275-4484-8063-cdb3803be3b9 class "sue.layer" name "2"
+  base pixels 32 by 32 Rgba8, 110 not clear, fnv 595479818e5b7a64
+entity 37368984-772e-4493-a6a3-8408b719386b class "sue.folder" name "Camera 1"
+  property folder.camera = bool true
+  property layer.open = bool true
+  animation: 4 channels
+    channel camera.angle: 0 at 0 flicks straight; 0.25 at 970200000 flicks straight
+    channel camera.scale: 1 at 0 flicks straight; 1.5 at 970200000 flicks straight
+    channel camera.x: 16 at 0 flicks straight; 20 at 970200000 flicks straight
+    channel camera.y: 16 at 0 flicks straight; 12 at 970200000 flicks straight
+entity 3b9c1bff-b2ce-4838-bba5-9989ea666d0e class "sue.layer" name "1"
+  base pixels 32 by 32 Rgba8, 110 not clear, fnv fa2b09c9c514ba14
+entity 57126e9e-f290-40dc-9360-c4bc2b27bd04 class "sue.layer" name "3"
+  base pixels 32 by 32 Rgba8, 110 not clear, fnv 46c4b4765dbb6d5c
+entity 8a1fe856-2f41-43aa-ba10-d2bdb6fe6db2 class "sue.layer" name "Layer 1"
+  base pixels 32 by 32 Rgba8, 105 not clear, fnv b4f8cef83364714a
+entity a09db9cb-f274-4ee5-9384-bc83d830da0f class "sue.image" name "Golden animation"
+  property anim.length = int 12
+  property anim.onion = text "2,3,1,ff0080,0080ff,1,0.6,0.2"
+  property image.dpi = float 144
+  property image.height = int 32
+  property image.width = int 32
+  property timelapse.record = bool true
+  sequence: 8/1 frames a second, 48000 Hz, 2 tracks
+    track "Animation Folder 1" kind "sue.paint.cels" muted false locked false, 5 clips
+      property anim.folder = entity d03dca5b-8b82-4c85-b6a5-3779ac616e06
+      clip of 3b9c1bff-b2ce-4838-bba5-9989ea666d0e at 0 for 264600000 flicks, from 0 at speed 1
+      clip of 3565b5c6-f275-4484-8063-cdb3803be3b9 at 264600000 for 264600000 flicks, from 0 at speed 1
+      clip of 57126e9e-f290-40dc-9360-c4bc2b27bd04 at 529200000 for 176400000 flicks, from 0 at speed 1
+      clip of 3b9c1bff-b2ce-4838-bba5-9989ea666d0e at 705600000 for 176400000 flicks, from 0 at speed 1
+      clip of a09db9cb-f274-4ee5-9384-bc83d830da0f at 882000000 for 176400000 flicks, from 0 at speed 1
+        property anim.blank = bool true
+    track "Tone" kind "sue.paint.audio" muted false locked false, 1 clips
+      clip of e559d83f-3aa8-4170-a28a-82cca28db54c at 176400000 for 42336000 flicks, from 0 at speed 1
+entity a4b3da62-979b-4cfa-a9cb-a0c1d3cd5253 class "sue.layer" name "Reference"
+  property light_table.place = text "4,-2,15"
+  base pixels 32 by 32 Rgba8, 164 not clear, fnv 33796ba4451594b4
+entity b65183ad-06b5-4d14-bc57-f7deba5c1a55 class "sue.layer.paper" name "Paper"
+  property layer.color = color 1 1 1 alpha 1 in srgb
+entity d03dca5b-8b82-4c85-b6a5-3779ac616e06 class "sue.folder" name "Animation Folder 1"
+  property folder.animation = bool true
+  property layer.open = bool true
+entity e559d83f-3aa8-4170-a28a-82cca28db54c class "sue.audio" name "Tone"
+  base sound 8000 Hz, 1 channels, 480 frames, samples fnv 50f63fc4d88e3233
+tree kinds sue.child
+relations 14
+relation 3565b5c6-f275-4484-8063-cdb3803be3b9 sue.paint.light_table a4b3da62-979b-4cfa-a9cb-a0c1d3cd5253 order "i"
+relation 37368984-772e-4493-a6a3-8408b719386b sue.paint.member d03dca5b-8b82-4c85-b6a5-3779ac616e06 order "i"
+relation a09db9cb-f274-4ee5-9384-bc83d830da0f sue.child b65183ad-06b5-4d14-bc57-f7deba5c1a55 order "i"
+relation a09db9cb-f274-4ee5-9384-bc83d830da0f sue.child 8a1fe856-2f41-43aa-ba10-d2bdb6fe6db2 order "r"
+relation a09db9cb-f274-4ee5-9384-bc83d830da0f sue.child a4b3da62-979b-4cfa-a9cb-a0c1d3cd5253 order "t"
+relation a09db9cb-f274-4ee5-9384-bc83d830da0f sue.child 3b9c1bff-b2ce-4838-bba5-9989ea666d0e order "u"
+relation a09db9cb-f274-4ee5-9384-bc83d830da0f sue.child 3565b5c6-f275-4484-8063-cdb3803be3b9 order "v"
+relation a09db9cb-f274-4ee5-9384-bc83d830da0f sue.child 57126e9e-f290-40dc-9360-c4bc2b27bd04 order "vi"
+relation a09db9cb-f274-4ee5-9384-bc83d830da0f sue.child d03dca5b-8b82-4c85-b6a5-3779ac616e06 order "w"
+relation a09db9cb-f274-4ee5-9384-bc83d830da0f sue.child 37368984-772e-4493-a6a3-8408b719386b order "y"
+relation a09db9cb-f274-4ee5-9384-bc83d830da0f sue.paint.light_table.general 8a1fe856-2f41-43aa-ba10-d2bdb6fe6db2 order "i"
+relation d03dca5b-8b82-4c85-b6a5-3779ac616e06 sue.paint.member 3565b5c6-f275-4484-8063-cdb3803be3b9 order "i"
+relation d03dca5b-8b82-4c85-b6a5-3779ac616e06 sue.paint.member 3b9c1bff-b2ce-4838-bba5-9989ea666d0e order "i"
+relation d03dca5b-8b82-4c85-b6a5-3779ac616e06 sue.paint.member 57126e9e-f290-40dc-9360-c4bc2b27bd04 order "i"
+picture a09db9cb-f274-4ee5-9384-bc83d830da0f "Golden animation": 32 by 32
+  layer b65183ad-06b5-4d14-bc57-f7deba5c1a55 "Paper" paper: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+  layer 8a1fe856-2f41-43aa-ba10-d2bdb6fe6db2 "Layer 1" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+  layer a4b3da62-979b-4cfa-a9cb-a0c1d3cd5253 "Reference" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    placed on light tables at 4 -2 15
+  layer 3b9c1bff-b2ce-4838-bba5-9989ea666d0e "1" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    in folder d03dca5b-8b82-4c85-b6a5-3779ac616e06
+  layer 3565b5c6-f275-4484-8063-cdb3803be3b9 "2" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    in folder d03dca5b-8b82-4c85-b6a5-3779ac616e06
+    light table a4b3da62-979b-4cfa-a9cb-a0c1d3cd5253
+  layer 57126e9e-f290-40dc-9360-c4bc2b27bd04 "3" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    in folder d03dca5b-8b82-4c85-b6a5-3779ac616e06
+  layer d03dca5b-8b82-4c85-b6a5-3779ac616e06 "Animation Folder 1" other: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    in folder 37368984-772e-4493-a6a3-8408b719386b
+    a folder, open true
+    an animation folder, cels 3b9c1bff-b2ce-4838-bba5-9989ea666d0e 3565b5c6-f275-4484-8063-cdb3803be3b9 57126e9e-f290-40dc-9360-c4bc2b27bd04
+  layer 37368984-772e-4493-a6a3-8408b719386b "Camera 1" other: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    a folder, open true
+    a camera folder
+      key at 0 flicks: center 16 16, scale 1, angle 0
+      key at 970200000 flicks: center 20 12, scale 1.5, angle 0.25
+  onion skin: 2 before in 255 0 128, 3 after in 0 128 255, mode 1, opacity 0.6 less 0.2 each
+  general light table 8a1fe856-2f41-43aa-ba10-d2bdb6fe6db2
+  timeline: 12 frames at 8 a second
+    cels of "Animation Folder 1", folder d03dca5b-8b82-4c85-b6a5-3779ac616e06
+      frame 0: 3b9c1bff-b2ce-4838-bba5-9989ea666d0e
+      frame 3: 3565b5c6-f275-4484-8063-cdb3803be3b9
+      frame 6: 57126e9e-f290-40dc-9360-c4bc2b27bd04
+      frame 8: 3b9c1bff-b2ce-4838-bba5-9989ea666d0e
+      frame 10: blank
+      shows 1 1 1 2 2 2 3 3 1 1 - -
+    sound "Tone" of e559d83f-3aa8-4170-a28a-82cca28db54c from frame 2

@@ -300,3 +300,11 @@ mod language_tests {
         assert!(missing.is_empty(), "model.ftl lacks: {missing:?}");
     }
 }
+
+/// Old files still load: the golden files of `tests/golden` and the tests
+/// that read them. The file lives beside its fixtures and is compiled
+/// here, inside the crate, because half of what it loads is read by
+/// private code (`autotests` is off in Cargo.toml for that reason).
+#[cfg(test)]
+#[path = "../tests/golden.rs"]
+mod golden;
