@@ -203,6 +203,10 @@ fn numbers_are_read_the_way_english_writes_them() {
 
 #[test]
 fn numbers_are_read_the_way_german_and_french_write_them() {
+    // The separators come from the language database, which loads on
+    // its first read: a scope alone does not read it, so a test that runs
+    // first or alone would find English separators.
+    let _ = sue_lang::current();
     let _german = sue_lang::scope("de");
     assert_eq!(decimal_separator(), ",");
     assert_eq!(parse_number("1,5", ""), Some(1.5));
