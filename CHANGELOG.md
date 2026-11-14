@@ -34,9 +34,11 @@ follow [Semantic Versioning](https://semver.org/).
 - Every Sue Paint command can be given a key, not only the ones that
   come with one: each filter, layer, selection, view, window and
   animation command, and the light table and cel commands of their
-  palettes. Keyboard Shortcuts (Help) lists them all, and a key for one
-  without a default goes in Settings, Keymaps, Sue Paint
-  (`sue_paint_keys.custom`).
+  palettes. A key for one without a default goes in Settings, Keymaps,
+  Sue Paint, as the command's name and its key
+  (`sue_paint_keys.custom`, for example `layer.merge_visible=Ctrl+M`).
+  Keyboard Shortcuts (Help) lists every command that has a key, in the
+  order of the menus.
 
 ### Changed
 
