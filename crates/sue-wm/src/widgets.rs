@@ -396,6 +396,12 @@ impl CurveLabels {
     }
 }
 
+/// Room left of a response curve graph for what it says along its side.
+const CURVE_LEFT: f32 = 46.0;
+
+/// Room above a response curve graph.
+const CURVE_TOP: f32 = 4.0;
+
 /// Edits a response curve as a graph, the way paint programs show pen
 /// pressure: a grid, the control points joined by straight lines and the
 /// smooth curve they shape. Drag a point to move it, press an empty spot
@@ -411,7 +417,7 @@ pub fn response_curve(
     theme: &Theme,
 ) -> bool {
     let font = egui::FontId::proportional(theme.small_size);
-    let left = 46.0;
+    let left = CURVE_LEFT;
     // A small graph puts what goes in on its own line, under the ends.
     let narrow = side < 140.0;
     let below = if narrow {
@@ -421,7 +427,7 @@ pub fn response_curve(
     };
     let (outer, _) =
         ui.allocate_exact_size(vec2(left + side + 6.0, side + 4.0 + below), Sense::hover());
-    let plot = Rect::from_min_size(outer.min + vec2(left, 4.0), Vec2::splat(side));
+    let plot = Rect::from_min_size(outer.min + vec2(left, CURVE_TOP), Vec2::splat(side));
     let id = ui.scope_id().with(("response-curve", id));
     let response = ui.interact(plot.expand(8.0), id, Sense::click_and_drag());
     let to_screen = |[x, y]: [f32; 2]| egui::pos2(plot.left() + x * side, plot.bottom() - y * side);
@@ -449,8 +455,14 @@ pub fn response_curve(
     if response.drag_started()
         && let Some(pos) = pointer
     {
-        held = nearest(curve, pos).or_else(|| {
-            let added = curve.insert(to_value(pos));
+        // What is grabbed is what the button went down on. A drag is only
+        // told from a click some points later, and a fast hand is past
+        // the point's reach by then.
+        let press = ui
+            .input(|input| input.pointer.press_origin())
+            .unwrap_or(pos);
+        held = nearest(curve, press).or_else(|| {
+            let added = curve.insert(to_value(press));
             changed |= added.is_some();
             added
         });
@@ -555,4 +567,103 @@ pub fn response_curve(
     };
     label(input_at, Align2::CENTER_TOP, &labels.input);
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{Event, Pos2, pos2};
+
+    fn test_theme() -> Theme {
+        let mut rice = sue_rice::RiceSchema::parse(sue_rice::DEFAULT_RICE).unwrap();
+        crate::register_rice(&mut rice).unwrap();
+        Theme::from_rice(&rice)
+    }
+
+    /// One frame of a response curve graph `side` points across at the
+    /// top left of the screen. Answers where its plot is.
+    fn curve_frame(
+        ctx: &egui::Context,
+        curve: &mut sue_model::Response,
+        side: f32,
+        events: Vec<Event>,
+    ) -> Rect {
+        let theme = test_theme();
+        let mut plot = Rect::NOTHING;
+        let raw = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0))),
+            events,
+            ..egui::RawInput::default()
+        };
+        ctx.run_ui(raw, |ui| {
+            egui::Area::new(egui::Id::unique("curve-test"))
+                .fixed_pos(Pos2::ZERO)
+                .show(ui.ctx(), |ui| {
+                    let corner = ui.cursor().min + vec2(CURVE_LEFT, CURVE_TOP);
+                    plot = Rect::from_min_size(corner, Vec2::splat(side));
+                    response_curve(ui, "test", curve, side, CurveLabels::pressure(), &theme);
+                });
+        })
+        .drop_without_applying_deltas();
+        plot
+    }
+
+    fn button(pos: Pos2, pressed: bool) -> Event {
+        Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// Hands-on H-8: a point is grabbed by where the button went down. A
+    /// hand that moves 12 points a frame is past the point's reach when
+    /// the drag is recognised, and the graph used to add a second point
+    /// there and leave the one that was pressed where it was.
+    #[test]
+    fn the_curve_grabs_the_point_the_button_went_down_on() {
+        let ctx = egui::Context::default();
+        let side = 200.0;
+        let mut curve = sue_model::Response::new(&[[0.0, 0.0], [0.5, 0.5], [1.0, 1.0]]);
+        let plot = curve_frame(&ctx, &mut curve, side, Vec::new());
+        let on_screen = |[x, y]: [f32; 2]| pos2(plot.left() + x * side, plot.bottom() - y * side);
+        let press = on_screen([0.5, 0.5]);
+        curve_frame(&ctx, &mut curve, side, vec![Event::PointerMoved(press)]);
+        curve_frame(&ctx, &mut curve, side, vec![button(press, true)]);
+        // Straight up, 12 points a frame, for three frames.
+        let mut at = press;
+        for _ in 0..3 {
+            at.y -= 12.0;
+            curve_frame(&ctx, &mut curve, side, vec![Event::PointerMoved(at)]);
+        }
+        curve_frame(&ctx, &mut curve, side, vec![button(at, false)]);
+        let points = curve.points();
+        assert_eq!(points.len(), 3, "a point was added: {points:?}");
+        let moved = on_screen(points[1]);
+        assert!(
+            moved.distance(at) < 0.5,
+            "the pressed point is at {moved:?}, the pointer let go at {at:?}"
+        );
+    }
+
+    /// A press on an empty spot still adds a point, where the press was,
+    /// and the drag carries it along.
+    #[test]
+    fn a_press_on_an_empty_spot_of_the_curve_adds_a_point_there() {
+        let ctx = egui::Context::default();
+        let side = 200.0;
+        let mut curve = sue_model::Response::LINEAR;
+        let plot = curve_frame(&ctx, &mut curve, side, Vec::new());
+        let on_screen = |[x, y]: [f32; 2]| pos2(plot.left() + x * side, plot.bottom() - y * side);
+        let press = on_screen([0.25, 0.75]);
+        curve_frame(&ctx, &mut curve, side, vec![Event::PointerMoved(press)]);
+        curve_frame(&ctx, &mut curve, side, vec![button(press, true)]);
+        let at = press + vec2(12.0, 0.0);
+        curve_frame(&ctx, &mut curve, side, vec![Event::PointerMoved(at)]);
+        curve_frame(&ctx, &mut curve, side, vec![button(at, false)]);
+        let points = curve.points();
+        assert_eq!(points.len(), 3, "{points:?}");
+        assert!(on_screen(points[1]).distance(at) < 0.5, "{points:?}");
+    }
 }
