@@ -76,8 +76,9 @@ pub(crate) fn fill(
 
 /// What a project save takes to its job.
 pub(crate) struct SaveInput {
-    /// The open project's file (chunks this build does not know survive).
-    pub file: SueFile,
+    /// The open project's file (chunks this build does not know survive),
+    /// copied by the job only if a keep's job still holds it too.
+    pub file: Arc<SueFile>,
     /// A snapshot of the document.
     pub arena: Arena,
     /// Where it goes.
@@ -90,11 +91,12 @@ pub(crate) struct SaveInput {
 /// error as people read it on failure.
 pub(crate) fn save(input: SaveInput, job: Option<&JobContext>) -> (SueFile, Result<(), String>) {
     let SaveInput {
-        mut file,
+        file,
         arena,
         path,
         fail_after,
     } = input;
+    let mut file = Arc::unwrap_or_clone(file);
     fill(&mut file, &arena, &PixelOptions::SAVE, job);
     // The snapshot's pixels are let go before the write, so a stroke made
     // meanwhile copies nothing more than it must.

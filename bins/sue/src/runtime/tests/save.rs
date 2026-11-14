@@ -452,3 +452,94 @@ fn an_empty_a4_of_twenty_layers_is_small_and_a_keep_costs_the_interface_little()
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn a_save_that_ends_while_a_keep_runs_leaves_no_kept_work() {
+    let (mut runtime, root) = with_picture("save-during-keep", true);
+    paint(&mut runtime, 10, 120);
+    // A keep starts and is held; Save is chosen meanwhile and ends first.
+    let (go, gate) = std::sync::mpsc::channel();
+    runtime.keep_gate = Some(gate);
+    runtime.autosave();
+    let target = runtime
+        .keeping
+        .as_ref()
+        .map(|(_, autosave)| autosave.clone());
+    let target = target.expect("the keep runs on a job");
+    let path = root.join("saved.sue");
+    runtime.start_save(&path);
+    while runtime.saving.is_some() {
+        runtime.transfers.poll();
+        if !runtime.finish_jobs() {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    assert!(runtime.keeping.is_some(), "the keep still runs");
+    go.send(()).unwrap();
+    runtime.wait_jobs();
+    // The saved file holds what was kept: nothing is offered as unsaved,
+    // now or in the next run, and no kept file is left behind.
+    assert!(runtime.work.autosave(&target.id).is_none());
+    assert!(runtime.kept.is_none() && runtime.kept_at.is_none());
+    assert!(!target.file.exists() && !target.journal().exists());
+    assert!(!target.file.with_extension("txt").exists());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn chunks_this_build_does_not_know_survive_saves_and_keeps() {
+    let (mut runtime, root) = with_picture("unknown-chunk", true);
+    let path = root.join("later.sue");
+    let mut file = SueFile::new();
+    file.set_arena(&runtime.engine.world.arena);
+    let later = sue_core::file::Chunk {
+        tag: *b"ZLTR",
+        version: 3,
+        payload: b"from a later Sue".to_vec(),
+    };
+    file.set(later.clone());
+    std::fs::write(&path, file.to_bytes()).unwrap();
+    runtime
+        .open_project(&path, &std::fs::read(&path).unwrap())
+        .unwrap();
+    // A keep starts from the project's file and is held while a save
+    // takes the same file.
+    paint(&mut runtime, 30, 10);
+    let (go, gate) = std::sync::mpsc::channel();
+    runtime.keep_gate = Some(gate);
+    runtime.autosave();
+    runtime.start_save(&path);
+    go.send(()).unwrap();
+    runtime.wait_jobs();
+    let saved = SueFile::from_bytes(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved.chunk(later.tag), Some(&later), "the save kept it");
+    // The next keep starts from the saved project's file again.
+    paint(&mut runtime, 60, 20);
+    runtime.autosave();
+    let target = runtime
+        .keeping
+        .as_ref()
+        .map(|(_, autosave)| autosave.clone());
+    runtime.wait_jobs();
+    let kept = target.expect("a keep ran").load().unwrap();
+    assert_eq!(kept.chunk(later.tag), Some(&later), "the keep kept it");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_save_that_fails_in_place_is_listed_as_failed() {
+    let (mut runtime, root) = with_picture("save-fails-in-place", false);
+    let path = root.join("failed.sue");
+    runtime.fail_save_after = Some(10);
+    assert!(runtime.save_project_to(&path).is_err());
+    assert!(!path.exists());
+    let transfer = runtime.transfers.list().first().unwrap();
+    assert_eq!(transfer.label, "failed.sue");
+    assert!(
+        matches!(transfer.state, sue_wm::TransferState::Failed(_)),
+        "{:?}",
+        transfer.state
+    );
+    assert_eq!(runtime.project(), None);
+    let _ = std::fs::remove_dir_all(&root);
+}

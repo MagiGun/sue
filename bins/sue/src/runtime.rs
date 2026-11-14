@@ -18,6 +18,7 @@
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use egui::{Align2, Id, Order, RichText, Sense};
@@ -180,7 +181,9 @@ pub struct Runtime {
     /// Where the open project lives, once saved or opened.
     project: Option<PathBuf>,
     /// The open project file, so chunks this build does not know survive.
-    project_file: SueFile,
+    /// Shared, so a keep's job can start from it without a copy on the
+    /// interface thread.
+    project_file: Arc<SueFile>,
     /// The files of late and the work Sue kept (the Hub's lists).
     work: WorkList,
     /// The files brought in, written out and copied in this run.
@@ -209,6 +212,9 @@ pub struct Runtime {
     /// Holds a project save's job until it is let go (tests).
     #[cfg(test)]
     pub(crate) save_gate: Option<std::sync::mpsc::Receiver<()>>,
+    /// Holds a keep's job until it is let go (tests).
+    #[cfg(test)]
+    pub(crate) keep_gate: Option<std::sync::mpsc::Receiver<()>>,
     /// Makes a project save fail after this many bytes (tests).
     #[cfg(test)]
     pub(crate) fail_save_after: Option<u64>,
@@ -271,7 +277,7 @@ impl Runtime {
             waiting_pick: None,
             next_pick_poll: None,
             project: None,
-            project_file: SueFile::new(),
+            project_file: Arc::default(),
             work: WorkList::default(),
             transfers: Transfers::default(),
             next_transfer_poll: None,
@@ -285,6 +291,8 @@ impl Runtime {
             keeping: None,
             #[cfg(test)]
             save_gate: None,
+            #[cfg(test)]
+            keep_gate: None,
             #[cfg(test)]
             fail_save_after: None,
             hub_was_open: false,
@@ -753,13 +761,14 @@ impl Runtime {
             return;
         };
         // The first keep starts from the open project's file, so chunks
-        // this build does not know are kept too.
-        let kept = self
-            .kept
-            .take()
-            .unwrap_or_else(|| Kept::starting_from(self.project_file.clone()));
+        // this build does not know are kept too. The job copies it, not
+        // the interface thread.
+        let kept = self.kept.take();
+        let project_file = kept.is_none().then(|| Arc::clone(&self.project_file));
         let snapshot = self.engine.world.arena.clone();
         let target = autosave.clone();
+        #[cfg(test)]
+        let gate = self.keep_gate.take();
         let running = Running::spawn(
             &mut self.transfers,
             TransferKind::Export,
@@ -767,6 +776,13 @@ impl Runtime {
             None,
             revision,
             move |job| {
+                #[cfg(test)]
+                if let Some(gate) = gate {
+                    let _ = gate.recv();
+                }
+                let kept = kept.unwrap_or_else(|| {
+                    Kept::starting_from(project_file.map(Arc::unwrap_or_clone).unwrap_or_default())
+                });
                 let mut next = kept.file.clone();
                 next.set_arena_with(
                     &snapshot,
@@ -801,15 +817,22 @@ impl Runtime {
             if let Some((file, result)) = running.take() {
                 let (revision, path) = (running.revision, path.clone());
                 self.saving = None;
-                self.project_file = file;
+                self.project_file = Arc::new(file);
                 self.saved(&path, revision, result);
                 done = true;
             } else if running.lost(&self.transfers) {
-                // The job crashed with the file; the next save starts anew
-                // (chunks this build does not know are lost then).
+                // The job crashed with the file. The project's file on
+                // disk was not replaced, so it is read again for the
+                // chunks this build does not know (Rule 3).
                 let path = path.clone();
                 self.saving = None;
-                self.project_file = SueFile::new();
+                self.project_file = Arc::new(
+                    self.project
+                        .as_deref()
+                        .and_then(|project| sue_platform::fs::read(project).ok())
+                        .and_then(|bytes| SueFile::from_bytes(&bytes).ok())
+                        .unwrap_or_default(),
+                );
                 self.shell.notify(
                     tr!(
                         "cannot-save",
@@ -831,6 +854,11 @@ impl Runtime {
                         self.kept = Some(kept);
                         self.kept_at = Some(revision);
                         self.work.kept(autosave);
+                        // A save that ended while this keep ran holds this
+                        // work or newer: what was just kept goes.
+                        if self.saved_at.is_some_and(|saved| saved >= revision) {
+                            self.release_kept();
+                        }
                     }
                     Some(Err(error)) => {
                         // Written whole next time.
@@ -995,7 +1023,7 @@ impl Runtime {
         self.engine.forget_histories();
         self.typing = Typing::default();
         self.project.clone_from(&kept.project);
-        self.project_file = file;
+        self.project_file = Arc::new(file);
         // This run keeps it from now on, until it is saved; its next keep
         // writes it whole.
         self.work.adopt(&kept.id);
@@ -1439,12 +1467,20 @@ impl Runtime {
         self.typing.flush(&mut self.engine.history);
         let revision = self.engine.world.arena.revision();
         let (file, result) = save::save(self.save_input(path), None);
-        self.project_file = file;
-        self.transfers.done(
-            TransferKind::Export,
-            &file_name(path),
-            Some(path.to_path_buf()),
-        );
+        self.project_file = Arc::new(file);
+        match &result {
+            Ok(()) => self.transfers.done(
+                TransferKind::Export,
+                &file_name(path),
+                Some(path.to_path_buf()),
+            ),
+            Err(error) => self.transfers.failed(
+                TransferKind::Export,
+                &file_name(path),
+                Some(path.to_path_buf()),
+                error,
+            ),
+        };
         self.saved(path, revision, result.clone());
         result
     }
@@ -1490,7 +1526,7 @@ impl Runtime {
         self.engine.forget_histories();
         self.typing = Typing::default();
         self.project = Some(path.to_path_buf());
-        self.project_file = file;
+        self.project_file = Arc::new(file);
         self.saved_at = Some(self.engine.world.arena.revision());
         self.kept_at = None;
         self.kept = None;
