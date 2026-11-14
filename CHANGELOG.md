@@ -22,6 +22,11 @@ follow [Semantic Versioning](https://semver.org/).
   scene by scene, the pixels that differ between two snapshot folders, so a
   change to how Sue looks can be checked against the scenes it was meant to
   touch.
+- `sue-cli clip dump <file>` prints what a Clip Studio file holds (its
+  chunks, what each stored bitmap is made of, and every table with its
+  `CREATE` text, row count and rows), and `sue-cli clip diff <before>
+  <after>` prints what differs between two such files. For people
+  working on the converter; neither changes a file.
 
 ### Changed
 
@@ -60,6 +65,8 @@ follow [Semantic Versioning](https://semver.org/).
   way Clip Studio Paint does. A line's far end follows the pen, a shape turns
   and grows around its middle, and what the drag leaves is what lifting the
   pen keeps, still one stroke to undo.
+- A damaged `.clip` whose sizes are too large to add up is refused with a
+  plain message instead of being read from the wrong place.
 
 ## [0.0.75] - 2026-11-09
 
