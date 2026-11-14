@@ -184,7 +184,11 @@ fn a_generated_pack_with_every_svg_feature_draws_every_file() {
             let tile = set.tile(icon, style, pixels, stroke);
             assert_eq!(tile.size, pixels);
             let covered = tile.alpha.iter().filter(|alpha| **alpha > 127).count();
-            assert!(covered >= pixels, "{} at {pixels} is all but empty", icon.name());
+            assert!(
+                covered >= pixels,
+                "{} at {pixels} is all but empty",
+                icon.name()
+            );
             // It is the pack's drawing, not Sue's.
             assert_ne!(tile, icon.tile(style, pixels, stroke), "{}", icon.name());
         }
@@ -231,7 +235,12 @@ fn malformed_files_are_named_and_the_rest_of_the_pack_is_used() {
     };
     has("icon-pack.txt", Problem::NewerFormat { format: 9 });
     has("icon-pack.txt", Problem::ManifestLine { line: 3 });
-    has("icon-pack.txt", Problem::UnknownKey { key: "colour".into() });
+    has(
+        "icon-pack.txt",
+        Problem::UnknownKey {
+            key: "colour".into(),
+        },
+    );
     has("folder.svg", Problem::Svg(svg::Problem::NotText));
     has("delete.svg", Problem::Svg(svg::Problem::NoSvg));
     has(
@@ -242,10 +251,25 @@ fn malformed_files_are_named_and_the_rest_of_the_pack_is_used() {
             at: 13,
         }),
     );
-    has("info.svg", Problem::Svg(svg::Problem::NotDrawn { element: "text".into() }));
+    has(
+        "info.svg",
+        Problem::Svg(svg::Problem::NotDrawn {
+            element: "text".into(),
+        }),
+    );
     has("star.svg", Problem::Svg(svg::Problem::Empty));
-    has("no-such-icon.svg", Problem::UnknownIcon { name: "no-such-icon".into() });
-    has("search.solid.svg", Problem::NoSolidTwin { name: "search".into() });
+    has(
+        "no-such-icon.svg",
+        Problem::UnknownIcon {
+            name: "no-such-icon".into(),
+        },
+    );
+    has(
+        "search.solid.svg",
+        Problem::NoSolidTwin {
+            name: "search".into(),
+        },
+    );
     has("notes.docx", Problem::Skipped);
     has(
         "heart.svg",
@@ -253,7 +277,12 @@ fn malformed_files_are_named_and_the_rest_of_the_pack_is_used() {
             bytes: LARGEST_FILE + 11,
         }),
     );
-    has("lock.svg", Problem::NoSolid { name: "lock".into() });
+    has(
+        "lock.svg",
+        Problem::NoSolid {
+            name: "lock".into(),
+        },
+    );
     // What could be read is used; what could not falls back to Sue.
     let mut drawn = pack.drawn();
     drawn.sort();
@@ -282,7 +311,10 @@ fn nothing_in_a_file_makes_the_reader_panic() {
     // Every SVG of the test pack and of Sue's own set, cut short at
     // every few bytes and with bytes changed: read and drawn, never a
     // panic.
-    let mut sources: Vec<String> = TEST_PACK.iter().map(|(_, text)| (*text).to_owned()).collect();
+    let mut sources: Vec<String> = TEST_PACK
+        .iter()
+        .map(|(_, text)| (*text).to_owned())
+        .collect();
     sources.push(super::super::svg(Icon::Eye, IconStyle::Line));
     sources.push(super::super::svg(Icon::Delete, IconStyle::Line));
     let mut seed = 0x2545_f491_u32;
@@ -354,7 +386,10 @@ fn an_override_wins_over_the_pack_and_the_pack_over_sue() {
     assert_eq!(home.overrides(), vec![(Icon::Search, IconStyle::Line)]);
     // Back to the pack, then to Sue.
     home.clear_override(Icon::Search, IconStyle::Line).unwrap();
-    assert_eq!(home.load().0.source(Icon::Search, IconStyle::Line), Source::Pack);
+    assert_eq!(
+        home.load().0.source(Icon::Search, IconStyle::Line),
+        Source::Pack
+    );
     home.choose(None).unwrap();
     let (set, _) = home.load();
     assert!(set.is_empty());
@@ -407,7 +442,12 @@ fn packs_are_installed_listed_chosen_replaced_and_removed() {
     let rounded = home.install(&archive).unwrap();
     assert_eq!(rounded.id, "rounded");
     assert_eq!(rounded.drawn(), vec![(Icon::Folder, IconStyle::Line)]);
-    assert!(rounded.notes.iter().any(|note| note.problem == Problem::Skipped));
+    assert!(
+        rounded
+            .notes
+            .iter()
+            .any(|note| note.problem == Problem::Skipped)
+    );
     assert!(!home.root().join("packs/escape.svg").exists());
     assert!(!home.root().parent().unwrap().join("escape.svg").exists());
     let listed: Vec<String> = home.packs().into_iter().map(|pack| pack.id).collect();
@@ -417,7 +457,11 @@ fn packs_are_installed_listed_chosen_replaced_and_removed() {
     assert_eq!(home.chosen().as_deref(), Some("rounded"));
     let (preview, _) = home.preview("test-blocks");
     assert_eq!(preview.source(Icon::Heart, IconStyle::Line), Source::Pack);
-    assert_eq!(home.chosen().as_deref(), Some("rounded"), "a preview chooses nothing");
+    assert_eq!(
+        home.chosen().as_deref(),
+        Some("rounded"),
+        "a preview chooses nothing"
+    );
     let mut newer = ZipWriter::new();
     newer.add_text("icon-pack.txt", "format = 1\nname = Rounded\nversion = 3\n");
     newer.add_text(
@@ -430,7 +474,11 @@ fn packs_are_installed_listed_chosen_replaced_and_removed() {
     assert!(!home.root().join("packs/rounded/folder.svg").exists());
     assert_eq!(home.ids().len(), 2, "no folder is left over from the swap");
     home.remove("rounded").unwrap();
-    assert_eq!(home.chosen(), None, "removing the chosen pack goes back to Sue");
+    assert_eq!(
+        home.chosen(),
+        None,
+        "removing the chosen pack goes back to Sue"
+    );
     assert_eq!(home.ids(), vec!["test-blocks".to_owned()]);
     // What is refused.
     assert_eq!(
@@ -579,7 +627,10 @@ fn switching_packs_changes_the_next_frame() {
     show(&ctx, pack.set());
     assert_eq!(super::super::cached(&ctx), 0, "the old tiles are dropped");
     let second = headless::frame(&ctx, [64.0, 64.0], 1.0, draw);
-    let theirs = pack.set().tile(Icon::Heart, IconStyle::Line, 24, weight(24.0)).alpha;
+    let theirs = pack
+        .set()
+        .tile(Icon::Heart, IconStyle::Line, 24, weight(24.0))
+        .alpha;
     assert_eq!(pixels_of(&second).unwrap(), theirs);
     assert_ne!(theirs, own);
     assert_ne!(quads(&ctx, &second)[0], sue_texture);
@@ -590,7 +641,14 @@ fn switching_packs_changes_the_next_frame() {
     // A preview draws from its own set and leaves the shown one alone.
     let preview = pack.set();
     let fourth = headless::frame(&ctx, [64.0, 64.0], 1.0, |painter, _| {
-        paint_from(painter, rect, &preview, Icon::Heart, IconStyle::Line, Color32::WHITE);
+        paint_from(
+            painter,
+            rect,
+            &preview,
+            Icon::Heart,
+            IconStyle::Line,
+            Color32::WHITE,
+        );
     });
     assert_eq!(pixels_of(&fourth).unwrap(), theirs);
     assert!(showing(&ctx).is_empty());
@@ -651,7 +709,8 @@ impl Picture {
         use zune_core::bit_depth::BitDepth;
         use zune_core::colorspace::ColorSpace;
         use zune_core::options::EncoderOptions;
-        let options = EncoderOptions::new(self.width, self.height, ColorSpace::RGB, BitDepth::Eight);
+        let options =
+            EncoderOptions::new(self.width, self.height, ColorSpace::RGB, BitDepth::Eight);
         let mut out = Vec::new();
         zune_png::PngEncoder::new(&self.rgb, options)
             .encode(&mut out)

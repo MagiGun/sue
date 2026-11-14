@@ -166,7 +166,11 @@ impl Note {
             Problem::Svg(problem) => match problem {
                 svg::Problem::NotText => tr!("icon-pack-not-text", file = file),
                 svg::Problem::TooLarge { bytes } => {
-                    tr!("icon-pack-too-large", file = file, bytes = bytes.to_string())
+                    tr!(
+                        "icon-pack-too-large",
+                        file = file,
+                        bytes = bytes.to_string()
+                    )
                 }
                 svg::Problem::NoSvg => tr!("icon-pack-no-svg", file = file),
                 svg::Problem::Empty => tr!("icon-pack-empty", file = file),
@@ -183,7 +187,11 @@ impl Note {
                     attribute = attribute.as_str()
                 ),
                 svg::Problem::NotDrawn { element } => {
-                    tr!("icon-pack-not-drawn", file = file, element = element.as_str())
+                    tr!(
+                        "icon-pack-not-drawn",
+                        file = file,
+                        element = element.as_str()
+                    )
                 }
                 svg::Problem::Ignored { attribute } => tr!(
                     "icon-pack-ignored",
@@ -198,7 +206,11 @@ impl Note {
             },
             Problem::NoManifest => tr!("icon-pack-no-manifest", file = file),
             Problem::ManifestLine { line } => {
-                tr!("icon-pack-manifest-line", file = file, line = line.to_string())
+                tr!(
+                    "icon-pack-manifest-line",
+                    file = file,
+                    line = line.to_string()
+                )
             }
             Problem::UnknownKey { key } => {
                 tr!("icon-pack-unknown-key", file = file, key = key.as_str())
@@ -558,7 +570,10 @@ impl Pack {
     #[must_use]
     pub fn from_files(id: &str, files: &[(String, Vec<u8>)]) -> Self {
         let mut notes = Vec::new();
-        let manifest = match files.iter().find(|(name, _)| name.eq_ignore_ascii_case(MANIFEST)) {
+        let manifest = match files
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(MANIFEST))
+        {
             Some((name, bytes)) => {
                 let (manifest, found) = Manifest::parse(&String::from_utf8_lossy(bytes), name);
                 notes.extend(found);
@@ -702,7 +717,8 @@ fn folder_files(folder: &Path) -> Result<(Vec<(String, Vec<u8>)>, Vec<Note>), Pa
             });
             continue;
         }
-        let wanted = name.eq_ignore_ascii_case(MANIFEST) || kept_beside(&name) || file_icon(&name).is_some();
+        let wanted =
+            name.eq_ignore_ascii_case(MANIFEST) || kept_beside(&name) || file_icon(&name).is_some();
         if !wanted {
             notes.push(Note {
                 file: name,
@@ -793,8 +809,10 @@ fn archive_files(bytes: &[u8]) -> Result<(Vec<(String, Vec<u8>)>, Vec<Note>), Pa
             None => name,
         };
         let plain = !inner.contains('/') && !inner.is_empty() && inner != "." && inner != "..";
-        let wanted =
-            plain && (inner.eq_ignore_ascii_case(MANIFEST) || kept_beside(&inner) || file_icon(&inner).is_some());
+        let wanted = plain
+            && (inner.eq_ignore_ascii_case(MANIFEST)
+                || kept_beside(&inner)
+                || file_icon(&inner).is_some());
         if !wanted {
             notes.push(Note {
                 file: inner,
@@ -1014,7 +1032,9 @@ impl IconHome {
     ) -> Result<Pack, PackError> {
         let fallback = id_for(fallback);
         let read = Pack::from_files(&fallback, &files);
-        let has_manifest = files.iter().any(|(name, _)| name.eq_ignore_ascii_case(MANIFEST));
+        let has_manifest = files
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(MANIFEST));
         if read.drawings.is_empty() && !has_manifest {
             return Err(PackError::NotAPack);
         }
@@ -1237,10 +1257,7 @@ impl IconHome {
 struct Shown(Arc<Mutex<Arc<IconSet>>>);
 
 fn shown(ctx: &Context) -> Shown {
-    ctx.data_mut(|data| {
-        data.get_temp_mut_or_default::<Shown>(Id::NULL)
-            .clone()
-    })
+    ctx.data_mut(|data| data.get_temp_mut_or_default::<Shown>(Id::NULL).clone())
 }
 
 /// The set `ctx` draws its icons from now: Sue's own until [`show`] is

@@ -173,7 +173,8 @@ fn paint_items(items: &[FlatItem], size: usize, stroke: f32) -> Coverage {
                         keep.clear(&cut);
                     }
                 }
-                for ((cell, kept), under) in seen.cells.iter_mut().zip(&keep.cells).zip(&mut tile.cells)
+                for ((cell, kept), under) in
+                    seen.cells.iter_mut().zip(&keep.cells).zip(&mut tile.cells)
                 {
                     *cell *= kept;
                     *under = under.max(*cell);

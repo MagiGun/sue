@@ -87,6 +87,11 @@
 //! never named after where it is used, or after another program's word
 //! for it.
 //!
+//! A name is saved data and never changes once released: icon packs and
+//! the icons people replace one by one are files named after it
+//! ([`pack`], `docs/icon-packs.md`), and a ledger test
+//! (`tests/icon_names.rs`) fails when one disappears.
+//!
 //! # How an icon reaches the screen
 //!
 //! The path data is cut into straight pieces a fiftieth of a pixel true
@@ -99,6 +104,11 @@
 //! every edge is anti-aliased by area. [`svg`] writes the same art as an
 //! SVG file and [`sheet`] draws the contact sheet the set is reviewed
 //! on.
+//!
+//! What is drawn for an icon can be replaced: by a single icon a person
+//! put in place of it, else by the icon pack they chose, else it is
+//! Sue's own ([`pack`]). The set an egui context draws from is swapped
+//! with [`pack::show`], and the next frame draws the new icons.
 
 mod animation;
 mod cache;

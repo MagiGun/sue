@@ -341,7 +341,9 @@ fn length(text: &str) -> Option<f32> {
 enum Ink {
     None,
     /// Ink of a color: light or dark, which only a mask asks.
-    Color { light: bool },
+    Color {
+        light: bool,
+    },
 }
 
 /// Reads a paint. `None` when it cannot be read.
@@ -400,14 +402,12 @@ fn ink(text: &str, problems: &mut Vec<Problem>) -> Option<Ink> {
         }
         // Any other color name: ink, light or dark by a guess that only a
         // mask would ask for.
-        _ if lower.chars().all(|ch| ch.is_ascii_alphabetic()) && !lower.is_empty() => {
-            Ink::Color {
-                light: !matches!(
-                    lower.as_str(),
-                    "navy" | "darkblue" | "maroon" | "darkgreen" | "indigo" | "purple"
-                ),
-            }
-        }
+        _ if lower.chars().all(|ch| ch.is_ascii_alphabetic()) && !lower.is_empty() => Ink::Color {
+            light: !matches!(
+                lower.as_str(),
+                "navy" | "darkblue" | "maroon" | "darkgreen" | "indigo" | "purple"
+            ),
+        },
         _ => return None,
     })
 }
@@ -1104,7 +1104,10 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].paint, Paint::Stroke(2.0));
         assert_eq!(found[0].paths[0].start, [0.0, 6.0]);
-        assert_eq!(found[0].paths[0].segments, vec![Segment::Line([24.0, 18.0])]);
+        assert_eq!(
+            found[0].paths[0].segments,
+            vec![Segment::Line([24.0, 18.0])]
+        );
     }
 
     #[test]
@@ -1217,7 +1220,8 @@ mod tests {
         assert_eq!(read("not svg at all").1, vec![Problem::NoSvg]);
         assert_eq!(read("<svg/>").1, vec![Problem::Empty]);
         assert_eq!(read("").1, vec![Problem::NoSvg]);
-        let (_, problems) = read(r##"<svg viewBox="0 0 0 5"><path d="M1 1 H4" stroke="#000"/></svg>"##);
+        let (_, problems) =
+            read(r##"<svg viewBox="0 0 0 5"><path d="M1 1 H4" stroke="#000"/></svg>"##);
         assert_eq!(
             problems,
             vec![Problem::BadValue {
@@ -1247,7 +1251,10 @@ mod tests {
 
     #[test]
     fn transform_lists_read() {
-        assert_eq!(transform("translate(1,2)"), Some(Matrix([1.0, 0.0, 0.0, 1.0, 1.0, 2.0])));
+        assert_eq!(
+            transform("translate(1,2)"),
+            Some(Matrix([1.0, 0.0, 0.0, 1.0, 1.0, 2.0]))
+        );
         assert_eq!(
             transform("scale(2) translate(1 1)").map(|m| m.map([0.0, 0.0])),
             Some([2.0, 2.0])

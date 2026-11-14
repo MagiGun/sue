@@ -187,8 +187,12 @@ pub fn parse(data: &str) -> (Vec<Subpath>, Option<PathError>) {
                 continue;
             }
             b'L' => reader.point(base).map(Segment::Line),
-            b'H' => reader.number().map(|x| Segment::Line([base[0] + x, pen[1]])),
-            b'V' => reader.number().map(|y| Segment::Line([pen[0], base[1] + y])),
+            b'H' => reader
+                .number()
+                .map(|x| Segment::Line([base[0] + x, pen[1]])),
+            b'V' => reader
+                .number()
+                .map(|y| Segment::Line([pen[0], base[1] + y])),
             b'Q' => (|| Ok(Segment::Quad(reader.point(base)?, reader.point(base)?)))(),
             b'T' => reader.point(base).map(|to| {
                 let control = quad.map_or(pen, |control| mirror(control, pen));
