@@ -4,7 +4,7 @@ use std::fmt;
 use std::ops::Range;
 
 use crate::codec::{CodecError, Reader, Writer};
-use crate::{CoreError, EntityId};
+use crate::{CoreError, EntityId, Shared};
 
 /// Discriminant of the seven typed buffer components.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -359,16 +359,27 @@ impl PixelFormat {
     }
 }
 
-/// Backing storage of a [`RasterTile2D`].
+/// Backing storage of a [`RasterTile2D`]. The samples sit in a [`Shared`]
+/// buffer, so a clone is another handle to the same samples and copies
+/// none of them.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PixelStorage {
     /// 8-bit channels (`Gray8`, `Rgba8`).
-    U8(Vec<u8>),
+    U8(Shared<Vec<u8>>),
     /// 32-bit float channels (`RgbaF32`).
-    F32(Vec<f32>),
+    F32(Shared<Vec<f32>>),
 }
 
 /// A rectangular tile of pixels.
+///
+/// The pixels are shared and copy-on-write. `clone` is a snapshot that
+/// costs a reference count: a clone of a raster, of its entity or of the
+/// whole arena reads the pixels as they were at that moment, on any
+/// thread, for as long as it lives. The first write after a snapshot was
+/// taken ([`Self::bytes_mut`], [`Self::f32_samples_mut`]) copies the
+/// buffer once, and only if the snapshot is still alive; a raster nobody
+/// else holds is written in place. [`crate::shared_copies`] counts the
+/// copies.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RasterTile2D {
     width: u32,
@@ -385,8 +396,8 @@ impl RasterTile2D {
     pub fn new(width: u32, height: u32, format: PixelFormat) -> Result<Self, CoreError> {
         let len = Self::sample_count(width, height, format)?;
         let pixels = match format {
-            PixelFormat::Gray8 | PixelFormat::Rgba8 => PixelStorage::U8(vec![0; len]),
-            PixelFormat::RgbaF32 => PixelStorage::F32(vec![0.0; len]),
+            PixelFormat::Gray8 | PixelFormat::Rgba8 => PixelStorage::U8(Shared::new(vec![0; len])),
+            PixelFormat::RgbaF32 => PixelStorage::F32(Shared::new(vec![0.0; len])),
         };
         Ok(Self {
             width,
@@ -418,7 +429,7 @@ impl RasterTile2D {
             width,
             height,
             format,
-            pixels: PixelStorage::U8(bytes),
+            pixels: PixelStorage::U8(Shared::new(bytes)),
         })
     }
 
@@ -434,7 +445,7 @@ impl RasterTile2D {
             width,
             height,
             format: PixelFormat::RgbaF32,
-            pixels: PixelStorage::F32(samples),
+            pixels: PixelStorage::F32(Shared::new(samples)),
         })
     }
 
@@ -476,15 +487,19 @@ impl RasterTile2D {
     #[must_use]
     pub fn bytes(&self) -> Option<&[u8]> {
         match &self.pixels {
-            PixelStorage::U8(bytes) => Some(bytes),
+            PixelStorage::U8(bytes) => Some(bytes.as_slice()),
             PixelStorage::F32(_) => None,
         }
     }
 
     /// 8-bit channel data, mutably. The length is fixed.
+    ///
+    /// Copies the buffer first if a snapshot of it is alive (see the type);
+    /// the snapshot keeps the bytes it had. Asking is what copies, not
+    /// writing, so ask only when about to write.
     pub fn bytes_mut(&mut self) -> Option<&mut [u8]> {
         match &mut self.pixels {
-            PixelStorage::U8(bytes) => Some(bytes),
+            PixelStorage::U8(bytes) => Some(bytes.make_mut().as_mut_slice()),
             PixelStorage::F32(_) => None,
         }
     }
@@ -493,25 +508,49 @@ impl RasterTile2D {
     #[must_use]
     pub fn f32_samples(&self) -> Option<&[f32]> {
         match &self.pixels {
-            PixelStorage::F32(samples) => Some(samples),
+            PixelStorage::F32(samples) => Some(samples.as_slice()),
             PixelStorage::U8(_) => None,
         }
     }
 
-    /// Float channel data, mutably. The length is fixed.
+    /// Float channel data, mutably. The length is fixed. Copies the buffer
+    /// first if a snapshot of it is alive, as [`Self::bytes_mut`] does.
     pub fn f32_samples_mut(&mut self) -> Option<&mut [f32]> {
         match &mut self.pixels {
-            PixelStorage::F32(samples) => Some(samples),
+            PixelStorage::F32(samples) => Some(samples.make_mut().as_mut_slice()),
             PixelStorage::U8(_) => None,
         }
     }
 
-    /// Size of the pixel data in bytes.
+    /// Size of the pixel data in bytes. Every raster that shares one
+    /// buffer reports it, so a sum over snapshots counts it more than once.
     #[must_use]
     pub fn byte_len(&self) -> usize {
         match &self.pixels {
             PixelStorage::U8(bytes) => bytes.len(),
             PixelStorage::F32(samples) => samples.len() * size_of::<f32>(),
+        }
+    }
+
+    /// `true` while a snapshot shares this raster's pixels, which is when
+    /// the next [`Self::bytes_mut`] or [`Self::f32_samples_mut`] copies
+    /// them.
+    #[must_use]
+    pub fn is_shared(&self) -> bool {
+        match &self.pixels {
+            PixelStorage::U8(bytes) => bytes.is_shared(),
+            PixelStorage::F32(samples) => samples.is_shared(),
+        }
+    }
+
+    /// `true` if `other` reads the very same buffer: one is a snapshot of
+    /// the other and neither was written since.
+    #[must_use]
+    pub fn shares_pixels_with(&self, other: &Self) -> bool {
+        match (&self.pixels, &other.pixels) {
+            (PixelStorage::U8(a), PixelStorage::U8(b)) => Shared::ptr_eq(a, b),
+            (PixelStorage::F32(a), PixelStorage::F32(b)) => Shared::ptr_eq(a, b),
+            _ => false,
         }
     }
 }
@@ -1109,6 +1148,65 @@ mod tests {
         let bytes = encode(wide);
         assert_eq!(bytes[..11], [6, 0, 0, 0, 6, 0, 0, 0, 1, 0x90, 0x01]);
         assert_eq!(bytes[11..], [7; 144]);
+    }
+
+    #[test]
+    fn a_cloned_raster_shares_its_pixels_until_one_is_written() {
+        let start = crate::shared_copies();
+        let mut layer = RasterTile2D::from_bytes(2, 2, PixelFormat::Rgba8, vec![5; 16]).unwrap();
+        assert!(!layer.is_shared());
+        // Nobody else holds it: written where it lies.
+        let address = layer.bytes().unwrap().as_ptr();
+        layer.bytes_mut().unwrap()[0] = 6;
+        assert_eq!(layer.bytes().unwrap().as_ptr(), address);
+        assert_eq!(crate::shared_copies(), start);
+
+        let snapshot = layer.clone();
+        assert!(layer.is_shared() && snapshot.is_shared());
+        assert!(layer.shares_pixels_with(&snapshot));
+        assert_eq!(snapshot.bytes().unwrap().as_ptr(), address);
+        assert_eq!(layer, snapshot);
+        assert_eq!(crate::shared_copies(), start, "a clone copies no pixel");
+
+        // A write while the snapshot is alive leaves its bytes as they were.
+        layer.bytes_mut().unwrap()[1] = 7;
+        assert_eq!(crate::shared_copies(), start + 1);
+        assert!(!layer.shares_pixels_with(&snapshot));
+        assert_eq!(snapshot.bytes().unwrap()[..2], [6, 5]);
+        assert_eq!(snapshot.bytes().unwrap().as_ptr(), address);
+        assert_eq!(layer.bytes().unwrap()[..2], [6, 7]);
+        assert_ne!(layer, snapshot);
+        assert!(!layer.is_shared() && !snapshot.is_shared());
+        layer.bytes_mut().unwrap()[2] = 8;
+        assert_eq!(crate::shared_copies(), start + 1, "the copy is made once");
+
+        // Once the snapshot is gone, a write copies nothing.
+        let mut layer = snapshot.clone();
+        drop(snapshot);
+        layer.bytes_mut().unwrap()[3] = 9;
+        assert_eq!(layer.bytes().unwrap().as_ptr(), address);
+        assert_eq!(crate::shared_copies(), start + 1);
+        // An 8-bit raster has no float samples to hand out, shared or not.
+        assert!(layer.f32_samples_mut().is_none());
+    }
+
+    #[test]
+    fn float_rasters_share_and_copy_the_same_way() {
+        let start = crate::shared_copies();
+        let mut layer = RasterTile2D::from_f32(1, 2, vec![0.25; 8]).unwrap();
+        let snapshot = layer.clone();
+        assert!(layer.shares_pixels_with(&snapshot));
+        let mut data = ComponentData::from(layer);
+        assert_eq!(crate::shared_copies(), start);
+        data.f32_view_mut().unwrap()[0] = 1.0;
+        assert_eq!(crate::shared_copies(), start + 1);
+        assert_eq!(snapshot.f32_samples().unwrap()[0], 0.25);
+        assert_eq!(data.f32_view().unwrap()[0], 1.0);
+        layer = data.as_raster().unwrap().clone();
+        assert!(layer.bytes_mut().is_none());
+        // Rasters of different sample types never share.
+        let bytes = RasterTile2D::new(1, 2, PixelFormat::Rgba8).unwrap();
+        assert!(!bytes.shares_pixels_with(&snapshot));
     }
 
     #[test]
