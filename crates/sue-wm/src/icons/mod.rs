@@ -108,6 +108,7 @@ mod reference;
 pub mod sheet;
 pub mod stroke;
 mod svg;
+mod text;
 
 use egui::{Color32, Painter, Rect, pos2, vec2};
 
@@ -419,6 +420,99 @@ icons! {
     /// A padlock: a body with a keyhole and a shackle over it. Locked;
     /// solid for the state that is on.
     Lock = "lock" => reference::LOCK,
+    /// A capital letter B with its upright drawn solid and wide: the
+    /// letters made heavier. Bold.
+    Bold = "bold" => text::BOLD,
+    /// A capital letter I leaning to the right, with a bar at its head
+    /// and at its foot. Italic, the letters slanted.
+    Italic = "italic" => text::ITALIC,
+    /// A capital letter U standing over a level line. Underline.
+    Underline = "underline" => text::UNDERLINE,
+    /// A capital letter S with a level line through its middle.
+    /// Strikethrough, the letters struck out.
+    Strikethrough = "strikethrough" => text::STRIKETHROUGH,
+    /// Four lines of writing, the second and the fourth shorter, all
+    /// starting at the left edge. Lines aligned to the left.
+    AlignLeft = "align-left" => text::ALIGN_LEFT,
+    /// Four lines of writing, the second and the fourth shorter, all
+    /// centered on the middle. Lines centered.
+    AlignCenter = "align-center" => text::ALIGN_CENTER,
+    /// Four lines of writing, the second and the fourth shorter, all
+    /// ending at the right edge. Lines aligned to the right.
+    AlignRight = "align-right" => text::ALIGN_RIGHT,
+    /// Four lines of writing, every one running from edge to edge: a
+    /// justified paragraph. Lines justified.
+    AlignJustify = "align-justify" => text::ALIGN_JUSTIFY,
+    /// Four lines of writing, the middle two starting further in, and a
+    /// solid head at the left pointing right, into the space. Indent
+    /// more.
+    IndentMore = "indent-more" => text::INDENT_MORE,
+    /// Four lines of writing, the middle two starting further in, and a
+    /// solid head at the left pointing left, out of the space. Indent
+    /// less.
+    IndentLess = "indent-less" => text::INDENT_LESS,
+    /// Two items of a list, each a solid round dot before a line of
+    /// writing and a shorter line under it. A bulleted list.
+    ListBullets = "list-bullets" => text::LIST_BULLETS,
+    /// Two items of a list, numbered 1 and 2, each number before a line
+    /// of writing and a shorter line under it. A numbered list.
+    ListNumbers = "list-numbers" => text::LIST_NUMBERS,
+    /// A note: a wide box with rounded corners and a short tail down
+    /// from its lower left, two lines of writing in it. A comment on the
+    /// text.
+    Comment = "comment" => text::COMMENT,
+    /// A table of three columns and three rows, its heading row solid.
+    /// A table.
+    Table = "table" => text::TABLE,
+    /// A sheet of paper standing upright, nothing folded, with three
+    /// lines of writing on its upper part. A page of text in a
+    /// manuscript.
+    Page = "page" => text::PAGE,
+    /// A sheet of paper standing upright, nothing on it but the short
+    /// upright mark where typing would begin. A page not yet written.
+    PageEmpty = "page-empty" => text::PAGE_EMPTY,
+    /// A ring binder standing upright: a cover with three rings across
+    /// its left edge and a solid label on its front. The binder, where
+    /// the parts of a manuscript are kept in order.
+    Binder = "binder" => text::BINDER,
+    /// A capital letter A, and beside it a solid head pointing up. The
+    /// letters made larger.
+    TextLarger = "text-larger" => text::TEXT_LARGER,
+    /// A small capital letter A, and beside it a solid head pointing
+    /// down. The letters made smaller.
+    TextSmaller = "text-smaller" => text::TEXT_SMALLER,
+    /// A capital letter A over a solid bar: the color the letters are
+    /// drawn in.
+    TextColor = "text-color" => text::TEXT_COLOR,
+    /// A marker pen with a slanted tip, lying from the top right down to
+    /// the bottom left, over the solid stripe it has drawn. Highlight,
+    /// color laid behind the letters.
+    Highlight = "highlight" => text::HIGHLIGHT,
+    /// A capital letter A over a wavy line: a word marked as spelled
+    /// wrong. Spelling.
+    Spelling = "spelling" => text::SPELLING,
+    /// A paragraph mark: a solid round bowl at the left of two tall
+    /// stems. The style of a paragraph.
+    Style = "style" => text::STYLE,
+    /// A sheet of paper with lines of writing at its top and, near its
+    /// foot, a short rule over a solid dot before a line: the note at the
+    /// foot of a page. A footnote.
+    Footnote = "footnote" => text::FOOTNOTE,
+    /// Two columns of writing running down, the right one longer, and at
+    /// the left an arrow with a solid head pointing down. Text written
+    /// from top to bottom.
+    TextVertical = "text-vertical" => text::TEXT_VERTICAL,
+    /// Three short lines of writing in the middle, and a solid head on
+    /// each side pointing in at them: words centered on their spot.
+    TextCenter = "text-center" => text::TEXT_CENTER,
+    /// Four index cards in two rows, each held by a solid round pin in
+    /// its middle. The corkboard, where the parts of a manuscript are
+    /// laid out as cards.
+    Corkboard = "corkboard" => text::CORKBOARD,
+    /// An outline: a line of writing after a solid dot, and two lines
+    /// further in hanging from it by a bent line. The outliner, the parts
+    /// of a manuscript as a tree.
+    Outliner = "outliner" => text::OUTLINER,
 }
 
 /// Frames drawn without a window or a GPU, for the tests of this module.
