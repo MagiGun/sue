@@ -206,13 +206,34 @@ fn every_filter_command_runs_undoes_and_redoes() {
 fn filters_are_grayed_without_a_raster_layer() {
     let mut driver = PaintDriver::new("paint-filter-paper");
     // From the first raster layer down to the paper: no filter works
-    // there, and none records a step.
+    // there. A grayed command does nothing at all: no step, no dialog
+    // and no message (a filter that ran would say the paper cannot be
+    // drawn on).
     driver.command("layer.select_below");
     driver.settle(4);
+    let message = |driver: &PaintDriver| {
+        driver
+            .runtime
+            .shell
+            .message()
+            .map(|(text, _)| text.to_owned())
+    };
     let depth = driver.runtime.engine.history.depth();
-    driver.command("filter.invert");
-    driver.settle(4);
-    assert_eq!(driver.runtime.engine.history.depth(), depth);
+    let said = message(&driver);
+    let registry = sue_paint::registry();
+    let group: Vec<&str> = registry
+        .iter()
+        .filter(|command| command.group == "filter")
+        .map(|command| command.name)
+        .collect();
+    assert_eq!(group.len(), 50);
+    for name in group {
+        driver.command(name);
+        driver.settle(4);
+        assert_eq!(driver.runtime.engine.history.depth(), depth, "{name}");
+        assert!(driver.rect_of("OK").is_none(), "{name} opened a dialog");
+        assert_eq!(message(&driver), said, "{name} ran on the paper");
+    }
 }
 
 #[test]
@@ -270,4 +291,38 @@ fn grayscale_turns_every_picked_layer_gray_in_one_step() {
     let raster = sue_paint::doc::raster(&driver.runtime.engine.world.arena, top).unwrap();
     let gray = raster.bytes().unwrap()[0];
     assert!(gray < 40, "blue turned {gray}");
+}
+
+#[test]
+fn grayscale_keeps_to_the_selection_and_names_its_step() {
+    let (mut driver, layer) = canvas("paint-filter-gray-selection");
+    // Select All, then Shrink Selected Area by its first value (4): a
+    // band at the canvas edge is left out.
+    driver.command("select.all");
+    driver.settle(2);
+    driver.command("select.shrink");
+    driver.settle(4);
+    driver.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    driver.settle(4);
+    let depth = driver.runtime.engine.history.depth();
+    driver.command("filter.grayscale");
+    driver.settle(4);
+    let history = &driver.runtime.engine.history;
+    assert_eq!(history.depth(), depth + 1, "one step");
+    assert_eq!(history.label(history.cursor()), Some("Grayscale"));
+    let raster = sue_paint::doc::raster(&driver.runtime.engine.world.arena, layer).unwrap();
+    let (width, height) = (raster.width() as usize, raster.height() as usize);
+    let pixels = raster.bytes().unwrap().as_chunks::<4>().0;
+    let gray = |pixel: &[u8; 4]| pixel[0] == pixel[1] && pixel[1] == pixel[2];
+    for y in 8..height - 8 {
+        for x in 8..width - 8 {
+            assert!(gray(&pixels[y * width + x]), "({x}, {y}) is selected");
+        }
+    }
+    // The top row was left out of the selection: its colors stay.
+    let top = &pixels[width / 4..width * 3 / 4];
+    assert!(
+        top.iter().any(|pixel| pixel[3] > 0 && !gray(pixel)),
+        "the unselected edge turned gray too"
+    );
 }
