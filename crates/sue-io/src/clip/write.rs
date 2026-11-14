@@ -943,28 +943,13 @@ fn styled(record: &PsdLayer, mut layer: ClipLayer) -> ClipLayer {
 
 /// `record`'s pixels where they sit on a `width` by `height` canvas.
 fn canvas_pixels(record: &PsdLayer, width: u32, height: u32) -> ClipBitmap {
-    let (w, h) = (width as usize, height as usize);
-    let (lw, lh) = (record.width as usize, record.height as usize);
-    let mut canvas = vec![0_u8; w * h * 4];
-    if record.pixels.len() >= lw * lh * 4 {
-        for y in 0..lh {
-            let cy = i64::from(record.top) + y as i64;
-            if cy < 0 || cy >= h as i64 {
-                continue;
-            }
-            for x in 0..lw {
-                let cx = i64::from(record.left) + x as i64;
-                if cx < 0 || cx >= w as i64 {
-                    continue;
-                }
-                let from = (y * lw + x) * 4;
-                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-                let to = (cy as usize * w + cx as usize) * 4;
-                canvas[to..to + 4].copy_from_slice(&record.pixels[from..from + 4]);
-            }
-        }
-    }
-    ClipBitmap::color(width, height, &canvas)
+    ClipBitmap::color_placed(
+        width,
+        height,
+        [i64::from(record.left), i64::from(record.top)],
+        [record.width, record.height],
+        &record.pixels,
+    )
 }
 
 fn layers_of(nodes: &[Node<'_>], width: u32, height: u32) -> Vec<ClipLayer> {

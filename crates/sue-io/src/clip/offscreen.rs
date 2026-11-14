@@ -325,8 +325,25 @@ impl ClipBitmap {
     /// as in Clip Studio.
     #[must_use]
     pub fn color(width: u32, height: u32, rgba: &[u8]) -> Self {
+        Self::color_placed(width, height, [0, 0], [width, height], rgba)
+    }
+
+    /// A color bitmap of `width` by `height` holding `rgba` (straight
+    /// RGBA8 of `size[0]` by `size[1]` pixels; a short buffer reads as
+    /// clear) with its top left corner at `at`; what it does not cover
+    /// is clear. Packed tile by tile, so no picture of the whole bitmap
+    /// is ever made.
+    #[must_use]
+    pub fn color_placed(
+        width: u32,
+        height: u32,
+        at: [i64; 2],
+        size: [u32; 2],
+        rgba: &[u8],
+    ) -> Self {
         let (w, h) = (width as usize, height as usize);
-        let full = rgba.len() >= w * h * 4;
+        let (rw, rh) = (size[0] as usize, size[1] as usize);
+        let full = rgba.len() >= rw.saturating_mul(rh).saturating_mul(4);
         let columns = w.div_ceil(TILE);
         let area = TILE * TILE;
         pack(
@@ -336,15 +353,27 @@ impl ClipBitmap {
             false,
             u32::try_from(area * 5).unwrap_or(0),
             |index| {
-                if !full || columns == 0 {
+                if !full || columns == 0 || rw == 0 || rh == 0 {
                     return None;
                 }
                 let (tx, ty) = (index % columns * TILE, index / columns * TILE);
                 let mut raw = vec![0_u8; area * 5];
                 let mut has = false;
                 for y in 0..TILE.min(h.saturating_sub(ty)) {
+                    let Some(ry) = usize::try_from((ty + y) as i64 - at[1])
+                        .ok()
+                        .filter(|ry| *ry < rh)
+                    else {
+                        continue;
+                    };
                     for x in 0..TILE.min(w.saturating_sub(tx)) {
-                        let o = ((ty + y) * w + tx + x) * 4;
+                        let Some(rx) = usize::try_from((tx + x) as i64 - at[0])
+                            .ok()
+                            .filter(|rx| *rx < rw)
+                        else {
+                            continue;
+                        };
+                        let o = (ry * rw + rx) * 4;
                         let px = &rgba[o..o + 4];
                         if px[3] == 0 {
                             continue;
