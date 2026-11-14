@@ -164,6 +164,9 @@ follow [Semantic Versioning](https://semver.org/).
   you pressed on even when the hand moves quickly, instead of adding a
   second point beside it.
 - The opacity bar's handle shows on light themes too.
+- Undoing Assign Animation Cel, Add Keyframe or Delete Keyframe in Sue
+  Paint names the step after the menu item, in your language, instead
+  of "Specify Cel" or "Delete Key".
 
 ### Removed
 
