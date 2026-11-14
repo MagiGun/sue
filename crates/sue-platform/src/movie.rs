@@ -388,5 +388,113 @@ mod tests {
             let empty = open(MovieFormat::Mp4H264, MovieSettings::new(64, 64, 24)).unwrap();
             assert_eq!(empty.finish(), Err(MovieError::NoFrames));
         }
+
+        /// A 1280 by 720 clip of `frames` frames: "flat" is flat colour
+        /// shapes and black lines moving over paper, as cel animation
+        /// is; "painted" is soft gradients with fine grain, as a painted
+        /// picture is.
+        fn clip(painted: bool, frames: u32) -> Vec<RasterTile2D> {
+            let (width, height) = (1280_u32, 720_u32);
+            (0..frames)
+                .map(|step| {
+                    let mut pixels = vec![0_u8; (width * height * 4) as usize];
+                    for y in 0..height {
+                        for x in 0..width {
+                            let at = ((y * width + x) * 4) as usize;
+                            let (cx, cy) = (200.0 + step as f32 * 12.0, 360.0);
+                            let (dx, dy) = (x as f32 - cx, y as f32 - cy);
+                            let inside = dx * dx + dy * dy < 150.0 * 150.0;
+                            let edge = (dx * dx + dy * dy).sqrt();
+                            let rgb = if painted {
+                                // A pseudo random grain, the same each run.
+                                let grain =
+                                    ((x * 7919 + y * 104_729 + step * 31) % 23) as f32 - 11.0;
+                                let r = 120.0 + 100.0 * (x as f32 / 1280.0) + grain;
+                                let g = 80.0 + 120.0 * (y as f32 / 720.0) + grain;
+                                let b = if inside { 220.0 - edge * 0.5 } else { 140.0 } + grain;
+                                [r, g, b].map(|value| value.clamp(0.0, 255.0) as u8)
+                            } else if (edge - 150.0).abs() < 3.0 || (x + step * 6) % 160 < 3 {
+                                [20, 20, 20]
+                            } else if inside {
+                                [230, 120, 60]
+                            } else {
+                                [250, 248, 240]
+                            };
+                            pixels[at..at + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+                        }
+                    }
+                    RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels).unwrap()
+                })
+                .collect()
+        }
+
+        /// Measures the three qualities on both clips and writes the
+        /// movies to `SUE_MOVIE_OUT` when it is set:
+        /// `cargo test -p sue-platform --lib measure_movie_qualities -- --ignored --nocapture`.
+        #[test]
+        #[ignore = "a measurement, it prints a table"]
+        fn measure_movie_qualities() {
+            let out = std::env::var_os("SUE_MOVIE_OUT").map(std::path::PathBuf::from);
+            println!("| clip | quality | KiB | luma PSNR dB | worst frame dB |");
+            println!("| --- | --- | --- | --- | --- |");
+            for painted in [false, true] {
+                let frames = clip(painted, 48);
+                let name = if painted { "painted" } else { "flat" };
+                for quality in MovieQuality::ALL {
+                    let mut settings = MovieSettings::new(1280, 720, 24);
+                    settings.quality = quality;
+                    settings.sound = Some(MovieSound {
+                        rate: 48_000,
+                        channels: 2,
+                    });
+                    let mut sink = open(MovieFormat::Mp4H264, settings).unwrap();
+                    let tone: Vec<f32> = (0..96_000)
+                        .flat_map(|at| {
+                            let value =
+                                (at as f32 * 440.0 * std::f32::consts::TAU / 48_000.0).sin() * 0.3;
+                            [value, value]
+                        })
+                        .collect();
+                    sink.push_sound(&tone).unwrap();
+                    for frame in &frames {
+                        sink.push_frame(frame).unwrap();
+                    }
+                    let bytes = sink.finish().unwrap();
+                    let read = read_mp4(&bytes, frames.len()).unwrap();
+                    assert_eq!(read.frames, frames.len());
+                    let luma = 1280 * 720;
+                    let mut total = 0.0;
+                    let mut worst = f64::MAX;
+                    for (decoded, source) in read.pictures.iter().zip(&frames) {
+                        let want = rgba_to_nv12(source).unwrap();
+                        let mse = decoded[..luma]
+                            .iter()
+                            .zip(&want.bytes[..luma])
+                            .map(|(a, b)| f64::from(a.abs_diff(*b)).powi(2))
+                            .sum::<f64>()
+                            / luma as f64;
+                        let psnr = 10.0 * (255.0 * 255.0 / mse.max(1e-9)).log10();
+                        total += psnr;
+                        worst = worst.min(psnr);
+                    }
+                    println!(
+                        "| {name} | {} | {} | {:.1} | {:.1} |",
+                        quality.id(),
+                        bytes.len() / 1024,
+                        total / frames.len() as f64,
+                        worst
+                    );
+                    if let Some(dir) = &out {
+                        std::fs::create_dir_all(dir).unwrap();
+                        std::fs::write(dir.join(format!("{name}-{}.mp4", quality.id())), &bytes)
+                            .unwrap();
+                        if quality == MovieQuality::Normal {
+                            let png = sue_io::encode_png(&frames[24]).unwrap();
+                            std::fs::write(dir.join(format!("{name}-source-24.png")), png).unwrap();
+                        }
+                    }
+                }
+            }
+        }
     }
 }
