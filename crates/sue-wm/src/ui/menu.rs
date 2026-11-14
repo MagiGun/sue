@@ -728,8 +728,12 @@ impl MenuState {
         }
 
         let surface = theme.surface(3);
-        let radius = theme.radius(Radius::Lg);
-        let row_radius = super::nested_radius(radius, pad);
+        // The radii of the token table: menus round as dialogs and the
+        // menus egui draws, their rows as chips.
+        let radius = theme.radius(Radius::Xl);
+        let row_radius = theme
+            .radius(Radius::Sm)
+            .min(super::nested_radius(radius, pad));
         let disabled = theme.text_disabled(surface);
         let muted = theme.text_muted_on(surface);
         // The row under the pointer or the keyboard. The hover fill is
@@ -1102,7 +1106,7 @@ pub fn popover<R>(
     let frame = egui::Frame::new()
         .fill(theme.surface(3))
         .stroke(theme.hairline())
-        .corner_radius(theme.corner(Radius::Lg))
+        .corner_radius(theme.corner(Radius::Xl))
         .shadow(theme.elevation(Elevation::Floating))
         .inner_margin(egui::Margin::same(pad));
     egui::Popup::new(id, ctx.clone(), anchor, layer)
