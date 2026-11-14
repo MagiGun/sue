@@ -758,6 +758,97 @@ mod tests {
         assert!(compositor.live().is_none());
     }
 
+    /// What the compositor shows of a pressed, wavy pen stroke while the
+    /// pen is down and after the lift, into `$SUE_BRUSH_SHOTS` as
+    /// `compositor-live.png` and `compositor-merged.png`, for the eye.
+    #[test]
+    fn a_picture_of_the_compositor_showing_a_stroke() {
+        let Some(folder) = std::env::var_os("SUE_BRUSH_SHOTS") else {
+            return;
+        };
+        let mut arena = Arena::new();
+        let (mut edit, picture) = doc::create(&NewPicture {
+            name: "Test".to_owned(),
+            width: 640,
+            height: 240,
+            dpi: 72.0,
+            paper: Some(Color::srgb8(255, 255, 255)),
+            timelapse: false,
+        })
+        .unwrap();
+        edit.apply(&mut arena).unwrap();
+        let layer = doc::layers(&arena, picture).last().unwrap().id;
+        let mut compositor = Compositor::new(picture);
+        compositor.sync(&arena);
+        let mut preset = BrushPreset::new("Pen");
+        preset.set(param::SIZE, 24.0);
+        preset.dynamics.push(
+            sue_model::brush::Binding::new(param::SIZE, sue_model::brush::input::PRESSURE)
+                .range(0.15, 1.0),
+        );
+        preset.input.stabilization = 10;
+        preset.taper.end = 40.0;
+        let brush = Brush::new(preset, [0.05, 0.05, 0.1]);
+        let mut worker =
+            StrokeWorker::start(share_brush_pool(), &brush, Settings::new(Device::Pen));
+        let live: Arc<dyn LiveStroke> = Arc::new(BrushLive::new(layer, worker.live()));
+        compositor.set_live(&arena, Some(live));
+        let count = 160;
+        let mut samples: Vec<Sample> = (0..=count)
+            .map(|i| {
+                let s = f64::from(i) / f64::from(count);
+                let kind = if i == 0 { Kind::Down } else { Kind::Move };
+                let at = [
+                    30.0 + 580.0 * s as f32,
+                    120.0 + 60.0 * (s * 7.0).sin() as f32,
+                ];
+                Sample::new(kind, at, s * 0.8)
+                    .pressing((0.2 + 0.75 * (s * std::f64::consts::PI).sin()) as f32)
+            })
+            .collect();
+        let last = *samples.last().unwrap();
+        samples.push(Sample::new(Kind::Up, last.pos, last.time + 0.005));
+        let write = |compositor: &Compositor, name: &str| {
+            let (bytes, [width, height], _) = compositor.display();
+            let png = sue_io::encode_png_rgba(width, height, bytes).unwrap();
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(std::path::Path::new(&folder).join(name), png).unwrap();
+        };
+        let (body, up) = samples.split_at(samples.len() - 1);
+        for frame in body.chunks(4) {
+            worker.push_all(frame);
+            let mut dirty = worker.poll();
+            while worker.is_busy() {
+                std::thread::yield_now();
+                dirty.extend(worker.poll());
+            }
+            let rects: Vec<[u32; 4]> = dirty
+                .iter()
+                .map(|key| {
+                    let [x, y] = key.origin();
+                    let at = |v: i32| v.max(0) as u32;
+                    [at(x), at(y), at(x + 64), at(y + 64)]
+                })
+                .collect();
+            compositor.refresh_rects(&arena, &rects, Some(layer));
+        }
+        write(&compositor, "compositor-live.png");
+        worker.push_all(up);
+        let stroke = worker.finish().unwrap();
+        stroke
+            .commit(
+                doc::raster_mut(&mut arena, layer).unwrap(),
+                [0, 0],
+                layer,
+                "Pen",
+            )
+            .unwrap();
+        stroke.live().end();
+        compositor.set_live(&arena, None);
+        compositor.refresh(&arena, [0, 0, 640, 240]);
+        write(&compositor, "compositor-merged.png");
+    }
+
     #[test]
     fn sharing_the_brush_pool_sizes_the_compositors_splits() {
         let pool = share_brush_pool();
