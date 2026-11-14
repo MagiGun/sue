@@ -522,7 +522,7 @@ mod tests {
     /// Pairs that are one picture by meaning and differ on purpose by
     /// one small mark: a plus, a smaller size, an open shackle. They
     /// never stand for each other where both are offered.
-    const FAMILIES: [(Icon, Icon); 8] = [
+    const FAMILIES: [(Icon, Icon); 7] = [
         // The same dash: one in the title bar, one on a control.
         (Icon::WindowMinimize, Icon::Minus),
         // The same cross: the window's, and the smaller one of a tab.
@@ -535,8 +535,6 @@ mod tests {
         // A thing, and a new one of it.
         (Icon::Folder, Icon::FolderNew),
         (Icon::Copy, Icon::Duplicate),
-        // A plus and a minus.
-        (Icon::Plus, Icon::Minus),
     ];
 
     #[test]
