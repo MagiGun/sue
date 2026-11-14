@@ -229,7 +229,6 @@ impl SuePaint {
     }
 }
 
-/// A filter dialog's body: its settings, the preview switch, OK and Cancel.
 /// A filter's or correction's settings.
 pub(super) fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
     ui.spacing_mut().slider_width = 220.0;
@@ -533,6 +532,7 @@ pub(super) fn filter_params(ui: &mut Ui, filter: &mut Filter, theme: &Theme) {
     }
 }
 
+/// A filter dialog's body: its settings, the preview switch, OK and Cancel.
 pub(super) fn filter_ui(ui: &mut Ui, dialog: &mut FilterDialog, theme: &Theme) -> Outcome {
     let mut outcome = Outcome::Open;
     if let Filter::Quick { .. } = dialog.filter {
