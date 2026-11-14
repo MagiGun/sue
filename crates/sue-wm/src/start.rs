@@ -6,17 +6,19 @@
 //! Popups come up in the middle over a dimmed page, with a title, an X and
 //! grouped rows.
 //!
-//! These are plain widgets drawn from the [`Theme`], sharp like the Hub's
-//! boxes, so every studio can have a start page that looks like the
+//! These are plain widgets drawn from the [`Theme`], with its rounded
+//! corners and Sue's icons ([`crate::icons`]), so every studio can have a start page that looks like the
 //! others. Each studio keeps its own state and decides what the pieces
 //! do.
 
 use egui::{
-    Align2, Color32, CornerRadius, Id, Order, Painter, Pos2, Rect, Response, Sense, Shape, Stroke,
+    Align2, Color32, CornerRadius, Id, Order, Painter, Pos2, Rect, Response, Sense, Stroke,
     StrokeKind, TextureId, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 
 use crate::Theme;
+use crate::icons::{self, Icon};
+use crate::ui::{Density, Radius, Space};
 
 /// A picture drawn for a button, a row or a card. Sue draws its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,568 +109,68 @@ pub enum Glyph {
     Reload,
 }
 
-fn line(painter: &Painter, points: &[Pos2], stroke: Stroke) {
-    painter.add(Shape::line(points.to_vec(), stroke));
-}
-
-/// Draws `glyph` in `rect` in `color`.
-pub fn glyph(painter: &Painter, rect: Rect, glyph: Glyph, color: Color32) {
-    let side = rect.width().min(rect.height());
-    let c = rect.center();
-    let s = side / 2.0;
-    let at = |x: f32, y: f32| pos2(c.x + x * s, c.y + y * s);
-    let stroke = Stroke::new((side / 14.0).clamp(1.0, 2.5), color);
-    match glyph {
-        Glyph::Reload => {
-            let points: Vec<Pos2> = (0..=20)
-                .map(|step| {
-                    let angle = (-60.0 + 300.0 * step as f32 / 20.0_f32).to_radians();
-                    at(0.5 * angle.cos(), 0.5 * angle.sin())
-                })
-                .collect();
-            let end = points[0];
-            line(painter, &points, stroke);
-            let head = side * 0.18;
-            line(
-                painter,
-                &[
-                    end + vec2(-head * 0.2, -head),
-                    end,
-                    end + vec2(head, -head * 0.1),
-                ],
-                stroke,
-            );
-        }
-        Glyph::Home => {
-            // A roof over a house with a door.
-            line(
-                painter,
-                &[at(-0.7, -0.05), at(0.0, -0.68), at(0.7, -0.05)],
-                stroke,
-            );
-            line(
-                painter,
-                &[
-                    at(-0.5, -0.22),
-                    at(-0.5, 0.62),
-                    at(0.5, 0.62),
-                    at(0.5, -0.22),
-                ],
-                stroke,
-            );
-            line(
-                painter,
-                &[
-                    at(-0.15, 0.62),
-                    at(-0.15, 0.2),
-                    at(0.15, 0.2),
-                    at(0.15, 0.62),
-                ],
-                stroke,
-            );
-        }
-        Glyph::Draw => {
-            // A pen, nib down to the left.
-            line(painter, &[at(-0.55, 0.55), at(-0.35, 0.05)], stroke);
-            line(
-                painter,
-                &[
-                    at(-0.55, 0.55),
-                    at(-0.05, 0.35),
-                    at(0.65, -0.35),
-                    at(0.35, -0.65),
-                    at(-0.35, 0.05),
-                    at(-0.05, 0.35),
-                ],
-                stroke,
-            );
-            line(painter, &[at(0.2, -0.5), at(0.5, -0.2)], stroke);
-        }
-        Glyph::Projects => {
-            painter.rect_stroke(
-                Rect::from_min_max(at(-0.45, -0.3), at(0.65, 0.6)),
-                0.0,
-                stroke,
-                StrokeKind::Middle,
-            );
-            line(
-                painter,
-                &[at(-0.65, 0.4), at(-0.65, -0.5), at(0.45, -0.5)],
-                stroke,
-            );
-            line(
-                painter,
-                &[
-                    at(-0.3, 0.45),
-                    at(0.0, 0.1),
-                    at(0.2, 0.3),
-                    at(0.35, 0.15),
-                    at(0.55, 0.45),
-                ],
-                stroke,
-            );
-        }
-        Glyph::Materials => {
-            painter.circle_stroke(at(-0.3, -0.3), 0.3 * s, stroke);
-            painter.rect_stroke(
-                Rect::from_min_max(at(0.05, -0.6), at(0.65, 0.0)),
-                0.0,
-                stroke,
-                StrokeKind::Middle,
-            );
-            line(
-                painter,
-                &[at(-0.6, 0.65), at(-0.3, 0.1), at(0.0, 0.65), at(-0.6, 0.65)],
-                stroke,
-            );
-            painter.rect_stroke(
-                Rect::from_min_max(at(0.15, 0.15), at(0.65, 0.65)),
-                0.0,
-                stroke,
-                StrokeKind::Middle,
-            );
-        }
-        Glyph::Transfers => {
-            line(painter, &[at(-0.6, -0.25), at(0.6, -0.25)], stroke);
-            line(
-                painter,
-                &[at(0.3, -0.55), at(0.6, -0.25), at(0.3, 0.05)],
-                stroke,
-            );
-            line(painter, &[at(0.6, 0.3), at(-0.6, 0.3)], stroke);
-            line(
-                painter,
-                &[at(-0.3, 0.0), at(-0.6, 0.3), at(-0.3, 0.6)],
-                stroke,
-            );
-        }
-        Glyph::Help => {
-            painter.circle_stroke(c, 0.68 * s, stroke);
-            line(
-                painter,
-                &[
-                    at(-0.22, -0.2),
-                    at(-0.15, -0.36),
-                    at(0.0, -0.42),
-                    at(0.16, -0.36),
-                    at(0.22, -0.2),
-                    at(0.15, -0.06),
-                    at(0.0, 0.03),
-                    at(0.0, 0.18),
-                ],
-                stroke,
-            );
-            painter.circle_filled(at(0.0, 0.37), stroke.width * 0.8, color);
-        }
-        Glyph::Settings => {
-            let teeth = 8;
-            let mut points = Vec::with_capacity(teeth * 4 + 1);
-            for tooth in 0..teeth {
-                let a = tooth as f32 / teeth as f32 * std::f32::consts::TAU;
-                let w = std::f32::consts::TAU / teeth as f32;
-                for (offset, radius) in [(-0.3, 0.48), (-0.18, 0.68), (0.18, 0.68), (0.3, 0.48)] {
-                    let angle = a + offset * w;
-                    points.push(at(angle.cos() * radius, angle.sin() * radius));
-                }
-            }
-            points.push(points[0]);
-            line(painter, &points, stroke);
-            painter.circle_stroke(c, 0.2 * s, stroke);
-        }
-        Glyph::Add => {
-            line(painter, &[at(-0.55, 0.0), at(0.55, 0.0)], stroke);
-            line(painter, &[at(0.0, -0.55), at(0.0, 0.55)], stroke);
-        }
-        Glyph::Delete => {
-            line(painter, &[at(-0.55, -0.4), at(0.55, -0.4)], stroke);
-            line(
-                painter,
-                &[
-                    at(-0.2, -0.4),
-                    at(-0.15, -0.6),
-                    at(0.15, -0.6),
-                    at(0.2, -0.4),
-                ],
-                stroke,
-            );
-            line(
-                painter,
-                &[
-                    at(-0.42, -0.4),
-                    at(-0.32, 0.62),
-                    at(0.32, 0.62),
-                    at(0.42, -0.4),
-                ],
-                stroke,
-            );
-            line(painter, &[at(-0.12, -0.15), at(-0.1, 0.4)], stroke);
-            line(painter, &[at(0.12, -0.15), at(0.1, 0.4)], stroke);
-        }
-        Glyph::Rename => {
-            line(
-                painter,
-                &[
-                    at(-0.55, 0.55),
-                    at(-0.5, 0.25),
-                    at(0.3, -0.55),
-                    at(0.55, -0.3),
-                    at(-0.25, 0.5),
-                    at(-0.55, 0.55),
-                ],
-                stroke,
-            );
-            line(painter, &[at(0.15, -0.4), at(0.4, -0.15)], stroke);
-        }
-        Glyph::Heart => {
-            let mut points = Vec::new();
-            for step in 0..=32 {
-                let t = step as f32 / 32.0 * std::f32::consts::TAU;
-                let x = 16.0 * t.sin().powi(3);
-                let y = 13.0 * t.cos()
-                    - 5.0 * (2.0 * t).cos()
-                    - 2.0 * (3.0 * t).cos()
-                    - (4.0 * t).cos();
-                points.push(at(x / 26.0, -y / 26.0 + 0.08));
-            }
-            painter.add(Shape::convex_polygon(points, color, Stroke::NONE));
-        }
-        Glyph::Details => {
-            painter.circle_stroke(c, 0.62 * s, stroke);
-            line(
-                painter,
-                &[at(-0.1, -0.3), at(0.15, 0.0), at(-0.1, 0.3)],
-                stroke,
-            );
-        }
-        Glyph::Chevron => {
-            line(
-                painter,
-                &[at(-0.15, -0.45), at(0.2, 0.0), at(-0.15, 0.45)],
-                stroke,
-            );
-        }
-        Glyph::ChevronDown => {
-            line(
-                painter,
-                &[at(-0.45, -0.15), at(0.0, 0.2), at(0.45, -0.15)],
-                stroke,
-            );
-        }
-        Glyph::Search => {
-            painter.circle_stroke(at(-0.12, -0.12), 0.4 * s, stroke);
-            line(painter, &[at(0.18, 0.18), at(0.6, 0.6)], stroke);
-        }
-        Glyph::Grid => {
-            for (x, y) in [(-0.6, -0.6), (0.08, -0.6), (-0.6, 0.08), (0.08, 0.08)] {
-                painter.rect_filled(
-                    Rect::from_min_size(at(x, y), Vec2::splat(0.52 * s)),
-                    0.0,
-                    color,
-                );
-            }
-        }
-        Glyph::GridSmall => {
-            for row in 0..3 {
-                for column in 0..3 {
-                    let (x, y) = (-0.6 + column as f32 * 0.45, -0.6 + row as f32 * 0.45);
-                    painter.rect_filled(
-                        Rect::from_min_size(at(x, y), Vec2::splat(0.3 * s)),
-                        0.0,
-                        color,
-                    );
-                }
-            }
-        }
-        Glyph::List => {
-            for y in [-0.45, 0.0, 0.45] {
-                line(painter, &[at(-0.6, y), at(0.6, y)], stroke);
-            }
-        }
-        Glyph::SortUp | Glyph::SortDown => {
-            let up = glyph == Glyph::SortUp;
-            line(painter, &[at(-0.3, -0.6), at(-0.3, 0.6)], stroke);
-            let tip = if up { -0.6 } else { 0.6 };
-            line(
-                painter,
-                &[at(-0.6, tip * 0.5), at(-0.3, tip), at(0.0, tip * 0.5)],
-                stroke,
-            );
-            for (index, width) in [0.15, 0.3, 0.45].into_iter().enumerate() {
-                let y = -0.45 + index as f32 * 0.45;
-                let width = if up { width } else { 0.6 - width };
-                line(painter, &[at(0.15, y), at(0.15 + width, y)], stroke);
-            }
-        }
-        Glyph::Close => {
-            line(painter, &[at(-0.45, -0.45), at(0.45, 0.45)], stroke);
-            line(painter, &[at(0.45, -0.45), at(-0.45, 0.45)], stroke);
-        }
-        Glyph::External => {
-            line(
-                painter,
-                &[
-                    at(0.0, -0.5),
-                    at(-0.55, -0.5),
-                    at(-0.55, 0.55),
-                    at(0.5, 0.55),
-                    at(0.5, 0.0),
-                ],
-                stroke,
-            );
-            line(painter, &[at(-0.05, 0.05), at(0.6, -0.6)], stroke);
-            line(
-                painter,
-                &[at(0.15, -0.6), at(0.6, -0.6), at(0.6, -0.15)],
-                stroke,
-            );
-        }
-        Glyph::Moon => {
-            let mut points = Vec::new();
-            for step in 0..=24 {
-                let a = 0.6 + step as f32 / 24.0 * 5.1;
-                points.push(at(a.cos() * 0.6, a.sin() * 0.6));
-            }
-            for step in (0..=24).rev() {
-                let a = 1.6 + step as f32 / 24.0 * 3.1;
-                points.push(at(0.25 + a.cos() * 0.45, -0.15 + a.sin() * 0.45));
-            }
-            points.push(points[0]);
-            line(painter, &points, stroke);
-        }
-        Glyph::Folder => {
-            line(
-                painter,
-                &[
-                    at(-0.65, 0.55),
-                    at(-0.65, -0.5),
-                    at(-0.2, -0.5),
-                    at(-0.05, -0.32),
-                    at(0.65, -0.32),
-                    at(0.65, 0.55),
-                    at(-0.65, 0.55),
-                ],
-                stroke,
-            );
-        }
-        Glyph::Wrench => {
-            line(painter, &[at(-0.55, 0.55), at(0.1, -0.1)], stroke);
-            painter.circle_stroke(at(0.25, -0.25), 0.3 * s, stroke);
-            line(
-                painter,
-                &[at(0.35, -0.35), at(0.6, -0.6)],
-                Stroke::new(stroke.width * 2.0, color),
-            );
-        }
-        Glyph::Check => {
-            line(
-                painter,
-                &[at(-0.5, 0.0), at(-0.15, 0.4), at(0.55, -0.4)],
-                stroke,
-            );
-        }
-        Glyph::Picture => {
-            painter.rect_stroke(
-                Rect::from_min_max(at(-0.65, -0.5), at(0.65, 0.5)),
-                0.0,
-                stroke,
-                StrokeKind::Middle,
-            );
-            line(
-                painter,
-                &[
-                    at(-0.5, 0.4),
-                    at(-0.15, 0.0),
-                    at(0.1, 0.25),
-                    at(0.3, 0.05),
-                    at(0.55, 0.4),
-                ],
-                stroke,
-            );
-            painter.circle_filled(at(0.3, -0.22), 0.1 * s, color);
-        }
-        Glyph::Brush => {
-            line(painter, &[at(0.6, -0.6), at(-0.05, 0.1)], stroke);
-            let tip = [
-                at(-0.05, 0.1),
-                at(-0.25, -0.05),
-                at(-0.55, 0.3),
-                at(-0.6, 0.6),
-                at(-0.25, 0.5),
-                at(0.1, 0.25),
-            ];
-            painter.add(Shape::convex_polygon(tip.to_vec(), color, Stroke::NONE));
-        }
-        Glyph::Pattern => {
-            painter.rect_stroke(
-                Rect::from_min_max(at(-0.6, -0.6), at(0.6, 0.6)),
-                0.0,
-                stroke,
-                StrokeKind::Middle,
-            );
-            // Diagonals y = x - offset, cut to the square.
-            for offset in [-0.6_f32, -0.2, 0.2, 0.6] {
-                let a = (offset - 0.6_f32).max(-0.6);
-                let b = (offset + 0.6_f32).min(0.6);
-                line(painter, &[at(a, a - offset), at(b, b - offset)], stroke);
-            }
-        }
-        Glyph::Tone => {
-            for row in 0..4 {
-                for column in 0..4 {
-                    let shift = if row % 2 == 0 { 0.0 } else { 0.17 };
-                    let x = -0.55 + column as f32 * 0.34 + shift;
-                    let y = -0.5 + row as f32 * 0.34;
-                    if x < 0.65 {
-                        painter.circle_filled(at(x, y), 0.08 * s, color);
-                    }
-                }
-            }
-        }
-        Glyph::Cube => {
-            line(
-                painter,
-                &[
-                    at(0.0, -0.65),
-                    at(0.6, -0.33),
-                    at(0.6, 0.35),
-                    at(0.0, 0.67),
-                    at(-0.6, 0.35),
-                    at(-0.6, -0.33),
-                    at(0.0, -0.65),
-                ],
-                stroke,
-            );
-            line(
-                painter,
-                &[at(-0.6, -0.33), at(0.0, 0.0), at(0.6, -0.33)],
-                stroke,
-            );
-            line(painter, &[at(0.0, 0.0), at(0.0, 0.67)], stroke);
-        }
-        Glyph::Clock => {
-            painter.circle_stroke(c, 0.62 * s, stroke);
-            line(
-                painter,
-                &[at(0.0, -0.4), at(0.0, 0.0), at(0.3, 0.2)],
-                stroke,
-            );
-        }
-        Glyph::Tag => {
-            line(
-                painter,
-                &[
-                    at(-0.6, -0.6),
-                    at(0.05, -0.6),
-                    at(0.65, 0.0),
-                    at(0.0, 0.65),
-                    at(-0.6, 0.05),
-                    at(-0.6, -0.6),
-                ],
-                stroke,
-            );
-            painter.circle_filled(at(-0.28, -0.28), 0.1 * s, color);
-        }
-        Glyph::Move => {
-            line(
-                painter,
-                &[at(-0.2, -0.6), at(0.6, -0.6), at(0.6, 0.6), at(-0.2, 0.6)],
-                stroke,
-            );
-            line(painter, &[at(-0.65, 0.0), at(0.25, 0.0)], stroke);
-            line(
-                painter,
-                &[at(-0.05, -0.3), at(0.25, 0.0), at(-0.05, 0.3)],
-                stroke,
-            );
-        }
-        Glyph::Book => {
-            line(
-                painter,
-                &[
-                    at(0.0, -0.4),
-                    at(-0.3, -0.55),
-                    at(-0.65, -0.5),
-                    at(-0.65, 0.5),
-                    at(-0.3, 0.45),
-                    at(0.0, 0.6),
-                    at(0.3, 0.45),
-                    at(0.65, 0.5),
-                    at(0.65, -0.5),
-                    at(0.3, -0.55),
-                    at(0.0, -0.4),
-                    at(0.0, 0.6),
-                ],
-                stroke,
-            );
-        }
-        Glyph::Bubble => {
-            line(
-                painter,
-                &[
-                    at(-0.6, -0.5),
-                    at(0.6, -0.5),
-                    at(0.6, 0.3),
-                    at(-0.1, 0.3),
-                    at(-0.4, 0.6),
-                    at(-0.35, 0.3),
-                    at(-0.6, 0.3),
-                    at(-0.6, -0.5),
-                ],
-                stroke,
-            );
-        }
-        Glyph::Mail => {
-            painter.rect_stroke(
-                Rect::from_min_max(at(-0.65, -0.45), at(0.65, 0.45)),
-                0.0,
-                stroke,
-                StrokeKind::Middle,
-            );
-            line(
-                painter,
-                &[at(-0.65, -0.45), at(0.0, 0.1), at(0.65, -0.45)],
-                stroke,
-            );
-        }
-        Glyph::Back => {
-            line(painter, &[at(0.6, 0.0), at(-0.55, 0.0)], stroke);
-            line(
-                painter,
-                &[at(-0.1, -0.45), at(-0.55, 0.0), at(-0.1, 0.45)],
-                stroke,
-            );
-        }
-        Glyph::Film => {
-            painter.rect_stroke(
-                Rect::from_min_max(at(-0.55, -0.65), at(0.55, 0.65)),
-                0.0,
-                stroke,
-                StrokeKind::Middle,
-            );
-            line(painter, &[at(-0.3, -0.65), at(-0.3, 0.65)], stroke);
-            line(painter, &[at(0.3, -0.65), at(0.3, 0.65)], stroke);
-            for y in [-0.4, 0.0, 0.4] {
-                painter.circle_filled(at(-0.43, y), 0.05 * s, color);
-                painter.circle_filled(at(0.43, y), 0.05 * s, color);
-            }
-        }
-        Glyph::More => {
-            for x in [-0.45, 0.0, 0.45] {
-                painter.circle_filled(at(x, 0.0), 0.11 * s, color);
-            }
-        }
-        Glyph::All => {
-            for row in 0..3 {
-                for column in 0..3 {
-                    painter.circle_filled(
-                        at(-0.45 + column as f32 * 0.45, -0.45 + row as f32 * 0.45),
-                        0.09 * s,
-                        color,
-                    );
-                }
-            }
+impl Glyph {
+    /// The icon of Sue's set ([`crate::icons`]) it is drawn as, so the
+    /// start pages and the Hub draw one family of pictures, and an icon
+    /// pack reaches them too.
+    #[must_use]
+    pub const fn icon(self) -> Icon {
+        match self {
+            Self::Draw => Icon::Draw,
+            Self::Projects => Icon::Projects,
+            Self::Materials => Icon::Materials,
+            Self::Transfers => Icon::Transfers,
+            Self::Help => Icon::Help,
+            Self::Settings => Icon::Settings,
+            Self::Add => Icon::Plus,
+            Self::Delete => Icon::Delete,
+            Self::Rename => Icon::Rename,
+            Self::Heart => Icon::Heart,
+            Self::Details => Icon::Details,
+            Self::Chevron => Icon::ChevronRight,
+            Self::ChevronDown => Icon::ChevronDown,
+            Self::Search => Icon::Search,
+            Self::Grid => Icon::ViewGrid,
+            Self::GridSmall => Icon::ViewGridSmall,
+            Self::List => Icon::ViewList,
+            Self::SortUp => Icon::SortUp,
+            Self::SortDown => Icon::SortDown,
+            Self::Close => Icon::Close,
+            Self::External => Icon::External,
+            Self::Moon => Icon::Moon,
+            Self::Folder => Icon::Folder,
+            Self::Wrench => Icon::Wrench,
+            Self::Check => Icon::Check,
+            Self::Picture => Icon::Picture,
+            Self::Brush => Icon::ToolBrush,
+            Self::Pattern => Icon::MaterialPattern,
+            Self::Tone => Icon::MaterialTone,
+            Self::Cube => Icon::Cube,
+            Self::Clock => Icon::Recent,
+            Self::Tag => Icon::Tag,
+            Self::Move => Icon::MoveTo,
+            Self::Book => Icon::Book,
+            Self::Bubble => Icon::Feedback,
+            Self::Mail => Icon::Mail,
+            Self::All => Icon::All,
+            Self::Back => Icon::ArrowLeft,
+            Self::Film => Icon::Film,
+            Self::More => Icon::More,
+            Self::Home => Icon::Home,
+            Self::Reload => Icon::Reload,
         }
     }
+}
+
+/// Draws `glyph` in `rect` in `color`: its icon from Sue's set.
+pub fn glyph(painter: &Painter, rect: Rect, glyph: Glyph, color: Color32) {
+    let side = rect.width().min(rect.height());
+    icons::paint(
+        painter,
+        Rect::from_center_size(rect.center(), Vec2::splat(side)),
+        glyph.icon(),
+        color,
+    );
 }
 
 /// One button of a start page's rail.
@@ -692,7 +194,7 @@ pub fn rail(
     theme: &Theme,
 ) -> Option<usize> {
     let painter = ui.painter().clone();
-    painter.rect_filled(rect, 0.0, theme.panel);
+    painter.rect_filled(rect, CornerRadius::ZERO, theme.panel);
     painter.line_segment([rect.right_top(), rect.right_bottom()], theme.hairline());
     let mut clicked = None;
     let mut y = rect.top() + 8.0;
@@ -740,7 +242,7 @@ pub fn rail(
             if on || hot {
                 painter.rect_filled(
                     cell.shrink2(vec2(4.0, 2.0)),
-                    0.0,
+                    theme.radius(Radius::Md),
                     if on { theme.active } else { theme.hover },
                 );
             }
@@ -751,7 +253,7 @@ pub fn rail(
                         pos2(cell.left(), cell.top() + 2.0),
                         pos2(cell.left() + 3.0, cell.bottom() - 2.0),
                     ),
-                    0.0,
+                    theme.radius(Radius::Full),
                     theme.border_active,
                 );
             }
@@ -815,10 +317,19 @@ pub fn icon_button_enabled(
     let painter = ui.painter();
     let hot = enabled && response.hovered();
     if on || hot {
-        painter.rect_filled(rect, 0.0, if on { theme.active } else { theme.hover });
+        painter.rect_filled(
+            rect,
+            theme.radius(Radius::Md),
+            if on { theme.active } else { theme.hover },
+        );
     }
     if on {
-        painter.rect_stroke(rect, 0.0, theme.hairline_active(), StrokeKind::Inside);
+        painter.rect_stroke(
+            rect,
+            theme.radius(Radius::Md),
+            theme.hairline_active(),
+            StrokeKind::Inside,
+        );
     }
     let ink = if !enabled {
         theme.muted.gamma_multiply(0.5)
@@ -850,10 +361,17 @@ pub fn search_box(
     width: f32,
     theme: &Theme,
 ) -> Response {
-    let height = 28.0;
+    // Finger sized on touch.
+    let height = Density::of(ui).min_hit();
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let painter = ui.painter();
-    painter.rect(rect, 0.0, theme.void, theme.hairline(), StrokeKind::Inside);
+    painter.rect(
+        rect,
+        theme.radius(Radius::Full),
+        theme.surface(2),
+        theme.hairline(),
+        StrokeKind::Inside,
+    );
     glyph(
         painter,
         Rect::from_center_size(pos2(rect.left() + 15.0, rect.center().y), Vec2::splat(14.0)),
@@ -908,10 +426,19 @@ pub fn action(
     let painter = ui.painter();
     let hot = enabled && response.hovered();
     if armed || hot {
-        painter.rect_filled(rect, 0.0, if armed { theme.active } else { theme.hover });
+        painter.rect_filled(
+            rect,
+            theme.radius(Radius::Md),
+            if armed { theme.active } else { theme.hover },
+        );
     }
     if armed {
-        painter.rect_stroke(rect, 0.0, theme.hairline_active(), StrokeKind::Inside);
+        painter.rect_stroke(
+            rect,
+            theme.radius(Radius::Md),
+            theme.hairline_active(),
+            StrokeKind::Inside,
+        );
     }
     let ink = if enabled {
         theme.text
@@ -936,13 +463,18 @@ pub fn action(
 pub fn progress(ui: &mut Ui, width: f32, fraction: f32, theme: &Theme) {
     let (rect, _) = ui.allocate_exact_size(vec2(width, 6.0), Sense::hover());
     let painter = ui.painter();
-    painter.rect_filled(rect, 0.0, theme.void);
+    painter.rect_filled(rect, theme.radius(Radius::Full), theme.void);
     let done = Rect::from_min_size(
         rect.min,
         vec2(rect.width() * fraction.clamp(0.0, 1.0), rect.height()),
     );
-    painter.rect_filled(done, 0.0, theme.text);
-    painter.rect_stroke(rect, 0.0, theme.hairline(), StrokeKind::Inside);
+    painter.rect_filled(done, theme.radius(Radius::Full), theme.text);
+    painter.rect_stroke(
+        rect,
+        theme.radius(Radius::Full),
+        theme.hairline(),
+        StrokeKind::Inside,
+    );
 }
 
 /// A chip: a small button that stays lit while `on`.
@@ -952,7 +484,13 @@ pub fn chip(ui: &mut Ui, label: &str, on: bool, theme: &Theme) -> Response {
         theme.font(theme.small_size + 1.0),
         theme.text,
     );
-    let size = vec2(galley.size().x + 24.0, 24.0);
+    let density = Density::of(ui);
+    let height = if density == Density::Touch {
+        density.min_hit()
+    } else {
+        density.min_hit() - theme.space(Space::S2)
+    };
+    let size = vec2(galley.size().x + height, height);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let painter = ui.painter();
     let fill = if on {
@@ -962,10 +500,10 @@ pub fn chip(ui: &mut Ui, label: &str, on: bool, theme: &Theme) -> Response {
     } else {
         theme.pill
     };
-    painter.rect_filled(rect, 0.0, fill);
+    painter.rect_filled(rect, theme.radius(Radius::Full), fill);
     painter.rect_stroke(
         rect,
-        0.0,
+        theme.radius(Radius::Full),
         if on {
             theme.hairline_active()
         } else {
@@ -1004,7 +542,7 @@ pub fn check(ui: &mut Ui, label: &str, chosen: Chosen, theme: &Theme) -> Respons
         Rect::from_center_size(pos2(rect.left() + 10.0, rect.center().y), Vec2::splat(18.0));
     painter.rect(
         square,
-        0.0,
+        theme.radius(Radius::Xs),
         if response.hovered() {
             theme.hover
         } else {
@@ -1055,7 +593,7 @@ pub fn dropdown(
     let painter = ui.painter();
     painter.rect(
         rect,
-        0.0,
+        theme.radius(Radius::Md),
         if response.hovered() {
             theme.hover
         } else {
@@ -1151,9 +689,14 @@ pub fn category(
     } else {
         theme.pill
     };
-    painter.rect_filled(rect, 0.0, fill);
+    painter.rect_filled(rect, theme.radius(Radius::Md), fill);
     if selected {
-        painter.rect_stroke(rect, 0.0, theme.hairline_active(), StrokeKind::Inside);
+        painter.rect_stroke(
+            rect,
+            theme.radius(Radius::Md),
+            theme.hairline_active(),
+            StrokeKind::Inside,
+        );
     }
     let mut x = rect.left() + 6.0 + f32::from(row.depth) * 14.0;
     let mut click = None;
@@ -1254,11 +797,15 @@ pub fn card(ui: &mut Ui, size: Vec2, card: &Card, theme: &Theme) -> (Option<Card
     let picture_rect = Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom() - footer));
     let hot = response.hovered();
     let painter = ui.painter().clone();
-    painter.rect_filled(rect, 0.0, if hot { theme.hover } else { theme.pill });
+    painter.rect_filled(
+        rect,
+        theme.radius(Radius::Lg),
+        if hot { theme.hover } else { theme.pill },
+    );
     picture(&painter, picture_rect, card, theme);
     painter.rect_stroke(
         rect,
-        0.0,
+        theme.radius(Radius::Lg),
         if card.chosen {
             Stroke::new(2.0, theme.border_active)
         } else if hot {
@@ -1293,7 +840,7 @@ pub fn card(ui: &mut Ui, size: Vec2, card: &Card, theme: &Theme) -> (Option<Card
     if card.chosen || hot || tick_response.hovered() {
         painter.rect(
             tick,
-            0.0,
+            theme.radius(Radius::Xs),
             theme.void,
             theme.hairline_active(),
             StrokeKind::Inside,
@@ -1373,10 +920,19 @@ pub fn card(ui: &mut Ui, size: Vec2, card: &Card, theme: &Theme) -> (Option<Card
 /// A card's picture fitted inside `rect` on a light ground, or its
 /// placeholder glyph.
 fn picture(painter: &Painter, rect: Rect, card: &Card, theme: &Theme) {
-    let inner = rect.shrink(1.0);
+    let inner = rect.shrink(theme.border_width.max(1.0));
+    // Round at the top, as the card around it is; square where the
+    // footer meets it.
+    let top = theme.corner(Radius::Lg).nw.saturating_sub(1);
+    let ground = CornerRadius {
+        nw: top,
+        ne: top,
+        sw: 0,
+        se: 0,
+    };
     match card.picture {
         Some((texture, [width, height])) if width > 0 && height > 0 => {
-            painter.rect_filled(inner, 0.0, theme.void);
+            painter.rect_filled(inner, ground, theme.void);
             let scale = (inner.width() / width as f32).min(inner.height() / height as f32);
             let shown = vec2(width as f32 * scale, height as f32 * scale);
             painter.image(
@@ -1387,7 +943,7 @@ fn picture(painter: &Painter, rect: Rect, card: &Card, theme: &Theme) {
             );
         }
         _ => {
-            painter.rect_filled(inner, 0.0, theme.void);
+            painter.rect_filled(inner, ground, theme.void);
             let side = (inner.width().min(inner.height()) * 0.4).max(10.0);
             glyph(
                 painter,
@@ -1413,7 +969,7 @@ pub fn list_row(
     let painter = ui.painter().clone();
     painter.rect(
         rect,
-        0.0,
+        theme.radius(Radius::Md),
         if hot { theme.hover } else { theme.pill },
         if card.chosen {
             Stroke::new(2.0, theme.border_active)
@@ -1427,7 +983,7 @@ pub fn list_row(
     let tick_response = ui.interact(tick, response.id.with("tick"), Sense::click());
     painter.rect(
         tick,
-        0.0,
+        theme.radius(Radius::Xs),
         theme.void,
         if card.chosen {
             theme.hairline_active()
@@ -1578,7 +1134,7 @@ pub fn group(ui: &mut Ui, rows: &[Row], theme: &Theme) -> Option<usize> {
         let painter = ui.painter();
         painter.rect_filled(
             rect,
-            0.0,
+            theme.radius(Radius::Md),
             if row.enabled && response.hovered() {
                 theme.hover
             } else {
@@ -1677,7 +1233,7 @@ pub fn group(ui: &mut Ui, rows: &[Row], theme: &Theme) -> Option<usize> {
             pos2(ui.min_rect().left(), top),
             pos2(ui.min_rect().left() + width, bottom),
         ),
-        0.0,
+        theme.radius(Radius::Lg),
         theme.hairline(),
         StrokeKind::Inside,
     );
@@ -1712,8 +1268,11 @@ pub fn popup(
         .fixed_pos(screen.min)
         .show(ctx, |ui| {
             let response = ui.allocate_rect(screen, Sense::click());
-            ui.painter()
-                .rect_filled(screen, 0.0, theme.shadow.gamma_multiply(0.55));
+            ui.painter().rect_filled(
+                screen,
+                CornerRadius::ZERO,
+                theme.shadow.gamma_multiply(0.55),
+            );
             if response.clicked() {
                 outcome = PopupOutcome::Closed;
             }
@@ -1730,12 +1289,12 @@ pub fn popup(
             let painter = ui.painter();
             painter.rect_filled(
                 rect.translate(vec2(0.0, 6.0)).expand(2.0),
-                0.0,
+                theme.radius(Radius::Xl),
                 theme.shadow.gamma_multiply(0.5),
             );
             painter.rect(
                 rect,
-                CornerRadius::ZERO,
+                theme.corner(Radius::Xl),
                 theme.panel,
                 theme.hairline(),
                 StrokeKind::Inside,
@@ -1800,7 +1359,8 @@ pub fn sheet(
             ui.set_max_size(rect.size());
             // The sheet takes every touch, so nothing under it reacts.
             let _ = ui.interact(rect, ui.scope_id().with("cover"), Sense::click_and_drag());
-            ui.painter().rect_filled(rect, 0.0, theme.panel);
+            ui.painter()
+                .rect_filled(rect, CornerRadius::ZERO, theme.panel);
             ui.painter().text(
                 pos2(rect.center().x, rect.top() + 34.0),
                 Align2::CENTER_CENTER,
@@ -1852,7 +1412,7 @@ pub fn tab_bar(
     theme: &Theme,
 ) -> Option<usize> {
     let painter = ui.painter().clone();
-    painter.rect_filled(rect, 0.0, theme.panel);
+    painter.rect_filled(rect, CornerRadius::ZERO, theme.panel);
     painter.line_segment([rect.left_top(), rect.right_top()], theme.hairline());
     let width = rect.width() / items.len().max(1) as f32;
     let mut tapped = None;
@@ -1910,7 +1470,7 @@ pub fn tab_bar(
                     cell.left_top() + vec2(cell.width() * 0.3, 0.0),
                     vec2(cell.width() * 0.4, 3.0),
                 ),
-                0.0,
+                theme.radius(Radius::Full),
                 theme.border_active,
             );
         }
@@ -1941,7 +1501,7 @@ pub fn big_row(ui: &mut Ui, size: Vec2, picture: Glyph, label: &str, theme: &The
     let painter = ui.painter();
     painter.rect(
         rect,
-        0.0,
+        theme.radius(Radius::Lg),
         if response.hovered() {
             theme.hover
         } else {
@@ -2006,7 +1566,7 @@ pub fn tabs(
                     pos2(cell.left() + 6.0, cell.bottom() - 2.0),
                     pos2(cell.right() - 6.0, cell.bottom()),
                 ),
-                0.0,
+                theme.radius(Radius::Full),
                 theme.border_active,
             );
         }
@@ -2041,7 +1601,7 @@ pub fn tile(
     let painter = ui.painter();
     painter.rect(
         square,
-        0.0,
+        theme.radius(Radius::Lg),
         if response.hovered() {
             theme.hover
         } else {
@@ -2072,10 +1632,10 @@ pub fn tile(
             let paper = Rect::from_center_size(square.center(), size);
             painter.rect_filled(
                 paper.translate(vec2(3.0, 3.0)),
-                0.0,
+                theme.radius(Radius::Xs),
                 theme.shadow.gamma_multiply(0.5),
             );
-            painter.rect_filled(paper, 0.0, Color32::WHITE);
+            painter.rect_filled(paper, theme.radius(Radius::Xs), Color32::WHITE);
         }
     }
     painter.text(
@@ -2106,9 +1666,14 @@ pub fn outline_button(ui: &mut Ui, picture: Option<Glyph>, label: &str, theme: &
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let painter = ui.painter();
     if response.hovered() {
-        painter.rect_filled(rect, 0.0, theme.hover);
+        painter.rect_filled(rect, theme.radius(Radius::Md), theme.hover);
     }
-    painter.rect_stroke(rect, 0.0, Stroke::new(1.5, theme.text), StrokeKind::Inside);
+    painter.rect_stroke(
+        rect,
+        theme.radius(Radius::Md),
+        Stroke::new(1.5, theme.text),
+        StrokeKind::Inside,
+    );
     if let Some(picture) = picture {
         glyph(
             painter,
