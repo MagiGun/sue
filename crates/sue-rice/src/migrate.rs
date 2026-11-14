@@ -141,12 +141,15 @@ mod tests {
     const V5: &str = include_str!("../rice/history/v5.suerice");
     const V6: &str = include_str!("../rice/history/v6.suerice");
 
-    /// The shipped default with `changes` made to it: what a later
-    /// default of the same format may look like.
-    fn default_with(changes: &[(&str, &str)]) -> String {
-        changes
+    /// The frozen format 6 default as a format 7 file with `changes` made
+    /// to it: what the shipped default may become. It starts from the
+    /// frozen file, so it stays the same when the shipped default moves.
+    fn next_default(changes: &[(&str, &str)]) -> String {
+        let header = [("# sue-rice format 6", "# sue-rice format 7")];
+        header
             .iter()
-            .fold(DEFAULT_RICE.to_owned(), |text, (old, new)| {
+            .chain(changes)
+            .fold(V6.to_owned(), |text, (old, new)| {
                 assert_eq!(text.matches(old).count(), 1, "{old} is there once");
                 text.replace(old, new)
             })
@@ -222,7 +225,7 @@ mod tests {
         assert!(migration.purged.is_empty());
         assert_eq!(migrate(&migration.text).unwrap(), None);
         // A default that changes later in format 7 reaches the file too.
-        let next = default_with(&[
+        let next = next_default(&[
             ("small_size = 11 ", "small_size = 12 "),
             ("confirm_on_exit = false", "confirm_on_exit = true "),
         ]);
@@ -253,7 +256,7 @@ mod tests {
         assert_eq!(format_of(&migration.text), RICE_FORMAT);
         // Also where the default of that very key changes: the choice
         // wins, and the untouched key beside it follows the new default.
-        let next = default_with(&[
+        let next = next_default(&[
             ("small_size = 11 ", "small_size = 12 "),
             ("ui_size = 13 ", "ui_size = 14 "),
         ]);
@@ -272,7 +275,10 @@ mod tests {
 
     #[test]
     fn a_section_removed_after_format_6_is_reported_as_dropped() {
-        let next = without_section(&without_section(DEFAULT_RICE, "convert"), "image_viewer");
+        let next = without_section(
+            &without_section(&next_default(&[]), "convert"),
+            "image_viewer",
+        );
         // Nobody changed anything in them: the sections go without a word.
         let migration = migrate_onto(V6, &next).unwrap().unwrap();
         assert_eq!(migration.text, next.replace("\r\n", "\n"));
