@@ -278,11 +278,7 @@ pub(super) fn studio_card(
     } else {
         density.row() * 1.6
     };
-    let badge_rect = if row {
-        Rect::from_min_size(rect.min + Vec2::splat(pad), Vec2::splat(badge_side))
-    } else {
-        Rect::from_min_size(rect.min + Vec2::splat(pad), Vec2::splat(badge_side))
-    };
+    let badge_rect = Rect::from_min_size(rect.min + Vec2::splat(pad), Vec2::splat(badge_side));
     badge(ui, badge_rect, studio.icon, theme);
     let soft = theme.text_muted_on(fill);
     let text_left = if row {

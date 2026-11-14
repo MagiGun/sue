@@ -79,8 +79,8 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     writer_start::desktop(tour)?;
     writer_document::comments(tour)?;
 
-    // 19b to 19k. The Hub with work in it (and 31a to 31e: Home and
-    // Files in Gray and Paper), languages and the Layout menu.
+    // 19b to 19k. The Hub with work in it (and 31a to 31f: Home and
+    // Files in the other presets), languages and the Layout menu.
     hub::lists(tour)?;
     shell::languages(tour)?;
     shell::layouts(tour)?;

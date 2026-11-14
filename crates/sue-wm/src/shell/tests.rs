@@ -388,7 +388,10 @@ fn an_applets_place_joins_the_hubs_rail_and_draws_its_pane() {
     });
     rig.frames(&mut shell);
     assert!(seen.lock().unwrap().iter().all(|place| place == "shelf"));
-    assert!(!seen.lock().unwrap().is_empty(), "the studio drew its place");
+    assert!(
+        !seen.lock().unwrap().is_empty(),
+        "the studio drew its place"
+    );
     // A place no applet has falls back to Home.
     rig.with(|io| {
         shell.handle(

@@ -78,7 +78,7 @@ pub(super) fn opening(tour: &mut Tour<'_>) -> Result<(), String> {
 
 /// 19b, 19c and 31a to 31f. The Hub with work in it: the novel saved as
 /// a project, a picture opened in Sue Paint, and a picture another run
-/// kept unsaved. Home and Files, in Void, Paper and Gray.
+/// kept unsaved. Home in the four presets, Files in Void, Paper and Gray.
 pub(super) fn lists(tour: &mut Tour<'_>) -> Result<(), String> {
     let project = tour.home.join("Novel.sue");
     tour.runtime.save_project_to(&project)?;
@@ -103,6 +103,7 @@ pub(super) fn lists(tour: &mut Tour<'_>) -> Result<(), String> {
     for (preset, name) in [
         ("paper", "19c-hub-home-paper"),
         ("gray", "31a-hub-home-gray"),
+        ("graphite", "31f-hub-home-graphite"),
     ] {
         wear(tour, preset)?;
         tour.shoot(name)?;

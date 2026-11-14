@@ -706,7 +706,7 @@ fn the_files_menu_rebuilds_thumbnails_forgets_what_is_gone_and_clears_transfers(
         .recent()
         .map(|file| file.path.clone())
         .collect();
-    assert_eq!(paths, [kept.clone()]);
+    assert_eq!(paths, std::slice::from_ref(&kept));
     assert!(hub_row(&runtime, &sue_wm::HubRow::Open(gone)).is_none());
     // Rebuild Thumbnails says so.
     pick(&mut runtime, "Rebuild Thumbnails");

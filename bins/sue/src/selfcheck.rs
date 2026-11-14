@@ -908,6 +908,33 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         runtime.shell.hub_boxes().len() == studios + tools,
         "the Hub does not show a box for every studio and tool",
     )?;
+    // Its rail holds Home and Files, and Files is one request away.
+    let has = |runtime: &Runtime, button: &sue_wm::HubButton| {
+        runtime
+            .shell
+            .hub_buttons()
+            .iter()
+            .any(|(drawn, _)| drawn == button)
+    };
+    for place in [sue_wm::HUB_HOME, sue_wm::HUB_FILES] {
+        ensure(
+            has(runtime, &sue_wm::HubButton::Place(place.to_owned())),
+            "the Hub's rail misses Home or Files",
+        )?;
+    }
+    runtime.request(
+        ShellRequest::HubPlace(sue_wm::HUB_FILES.to_owned()),
+        &mut tex,
+        clock,
+    );
+    run_frames(runtime, &ctx, &mut clock, Vec::new());
+    ensure(
+        runtime.shell.hub_place() == Some(sue_wm::HUB_FILES)
+            && has(runtime, &sue_wm::HubButton::Upkeep),
+        "the Hub's Files place did not open",
+    )?;
+    runtime.request(ShellRequest::Hub, &mut tex, clock);
+    run_frames(runtime, &ctx, &mut clock, Vec::new());
     let sue = runtime.shell.sue_button();
     ensure(
         sue.min == egui::Pos2::ZERO,
@@ -1083,7 +1110,7 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         "the idle shell keeps drawing",
     )?;
     let mut detail = format!(
-        "{opened} ({}, {}); pinned with a click, one pin at a time, Ctrl+Z and Ctrl+Y; a box opened Sue Paint, gliding in {glide} frames ({}) vs {snap} (legacy snap); the Sue button's menu; a PNG opened in Sue Paint and saved as JPEG XL; palette, Settings, back to the Hub; then 0 FPS",
+        "{opened} ({}, {}); Home and Files in its rail; pinned with a click, one pin at a time, Ctrl+Z and Ctrl+Y; a box opened Sue Paint, gliding in {glide} frames ({}) vs {snap} (legacy snap); the Sue button's menu; a PNG opened in Sue Paint and saved as JPEG XL; palette, Settings, back to the Hub; then 0 FPS",
         count(studios, "studio", "studios"),
         count(windows, "window", "windows"),
         sue_wm::profile_label(profile)
