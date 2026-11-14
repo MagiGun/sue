@@ -64,8 +64,8 @@ pub use applet::{
     FileType, PaletteEntry, ShellRequest, ShellView, SueAction, SueApplet, Tick, sue_menu,
 };
 pub use catalog::{
-    Catalog, Choice, CommandButton, InfoTable, Property, PropertyGroup, SettingsGroup,
-    SettingsItem, SettingsPage,
+    Catalog, Choice, CommandButton, InfoTable, KeyCommand, KeyGroup, KeyMap, Property,
+    PropertyGroup, SettingsGroup, SettingsItem, SettingsPage,
 };
 pub use color_pick::{
     ColorPick, WheelShape, alpha_bar, checker_fill, color_button, color_wheel, hls_of, hsv_of,
