@@ -7,10 +7,10 @@
 //!   (`sue_wm::ui::tokens`). They are counted per area, an area being a
 //!   folder of interface code together with the file it was cut from
 //!   (`panels.rs` and `panels/`), so a pure move never changes a count.
-//!   The six areas are those of the 0.0.8 plan; one is switched on once
-//!   it exists as a folder. A count that rises fails the test; a count
-//!   that falls passes and asks for [`AREAS`] to be lowered, so that the
-//!   ground won stays won.
+//!   The six areas are those of the 0.0.8 plan, each held since the cuts
+//!   of Phase 2 made its folder. A count that rises fails the test; a
+//!   count that falls passes and asks for [`AREAS`] to be lowered, so that
+//!   the ground won stays won.
 //! - **Font characters used as icons**, per crate (decision D7 of the
 //!   0.0.8 plan): arrows, geometric shapes, dingbats, emoji and the like
 //!   written into the interface code's strings and characters. Icons are
@@ -128,48 +128,40 @@ struct Area {
     /// The most literal styling the area may hold, column by column as in
     /// [`Counts`]: color, font, radius, space, size, stroke, gamma.
     baseline: Counts,
-    /// The package of the 0.0.8 plan that cuts the area's file into its
-    /// folder. Until the folder exists the area is counted and shown, but
-    /// not held; from the cut on it is held, with no edit here.
-    cut_by: &'static str,
 }
 
 /// The areas, with what each held when it was taken in. Lower a row when
 /// its area is cleaned up; never raise one.
 ///
-/// The rows were counted at 0.0.8's Phase 2 (`v008/p2-4`, 3b8bfa7). For
+/// The rows were counted at 0.0.8's Phase 2 (`v008/p2-4`, 3b8bfa7) and
+/// counted again on the merged Phase 2 line, after the cuts of P2-2 and
+/// P2-3 had made every folder: the same numbers. Every area is held. For
 /// comparison, `code-ui-polish.md` 2.1 counted these files at 823b060
 /// with a coarser rule (six columns, `vec2` positions included).
 const AREAS: [Area; 6] = [
     Area {
         folder: "crates/sue-paint/src/panels",
         baseline: Counts::new([10, 23, 34, 8, 92, 11, 10]),
-        cut_by: "P2-3a",
     },
     Area {
         folder: "crates/sue-paint/src/canvas",
         baseline: Counts::new([3, 2, 35, 4, 34, 46, 3]),
-        cut_by: "P2-3b",
     },
     Area {
         folder: "crates/sue-paint/src/dialogs",
         baseline: Counts::new([6, 2, 15, 17, 82, 0, 3]),
-        cut_by: "P2-3c",
     },
     Area {
         folder: "crates/sue-paint/src/studio",
         baseline: Counts::new([0, 0, 0, 0, 3, 0, 0]),
-        cut_by: "P2-2",
     },
     Area {
         folder: "crates/sue-writer/src/ui",
         baseline: Counts::new([16, 13, 29, 34, 60, 27, 6]),
-        cut_by: "P1-4",
     },
     Area {
         folder: "crates/sue-wm/src/shell",
         baseline: Counts::new([0, 4, 19, 8, 26, 4, 3]),
-        cut_by: "P1-3",
     },
 ];
 
@@ -865,19 +857,7 @@ fn literal_styling_never_grows() {
     let mut grown = Vec::new();
     for area in &AREAS {
         let now = area_counts(&root, area);
-        let held = root.join(area.folder).is_dir();
-        let state = if held {
-            "held".to_owned()
-        } else {
-            format!("not held until {} cuts its file", area.cut_by)
-        };
-        report.push(format!(
-            "{}: {now} (table {}, {state})",
-            area.folder, area.baseline
-        ));
-        if !held {
-            continue;
-        }
+        report.push(format!("{}: {now} (table {})", area.folder, area.baseline));
         for ((column, was), (_, is)) in area.baseline.columns().into_iter().zip(now.columns()) {
             if is > was {
                 grown.push(format!(
@@ -929,7 +909,6 @@ fn every_picture_exception_names_a_function_that_exists() {
         let area = Area {
             folder,
             baseline: Counts::default(),
-            cut_by: "",
         };
         let pattern = format!("fn {function}");
         let found = area_files(&root, &area).iter().any(|path| {
