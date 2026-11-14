@@ -22,6 +22,10 @@ follow [Semantic Versioning](https://semver.org/).
   scene by scene, the pixels that differ between two snapshot folders, so a
   change to how Sue looks can be checked against the scenes it was meant to
   touch.
+- `sue --gallery` opens Sue with a Gallery under Tools in the Hub: every
+  color, size, radius, shadow and control of Sue's design system on one
+  page, live, in the theme you use and in each density, for whoever
+  styles or reviews Sue's interface. A plain run does not list it.
 - Sue Paint saves pictures as ICO (Windows icons, at most 256 by 256
   pixels) and PPM too: both are in the "save as type" list of every
   picture export. A PPM holds no transparency, so the picture is laid

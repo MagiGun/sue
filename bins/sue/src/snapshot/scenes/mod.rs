@@ -6,6 +6,7 @@
 //! from here at the point where Sue is in the state it needs. A scene
 //! that changes something for its picture puts it back before it returns.
 
+mod gallery;
 mod hub;
 mod icons;
 mod menus;
@@ -111,6 +112,9 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     menus::scenes(tour)?;
     // 28a to 28f. The dialog host, the sheet and the toast stack.
     ui_dialogs::gallery(tour)?;
+    // 29. The gallery of the design system: per preset, at 1.5 and 2.0
+    // pixels per point and per density, with the focus ring showing.
+    gallery::scenes(tour)?;
     Ok(())
 }
 

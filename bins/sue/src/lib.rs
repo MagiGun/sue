@@ -12,6 +12,7 @@ macro_rules! tr {
 mod applets;
 mod desktop;
 mod engine;
+mod gallery;
 #[cfg(test)]
 mod legal;
 mod runtime;
@@ -20,6 +21,8 @@ mod settings;
 mod snapshot;
 #[cfg(test)]
 mod style;
+#[cfg(test)]
+mod ui_lint;
 mod update;
 mod util;
 
@@ -43,6 +46,8 @@ Usage: sue [--self-check | --snapshot <dir> | --version | --help]
                     Count, scene by scene, the pixels that differ between
                     two snapshot folders; fails when a scene differs that
                     no --changed names (a name, or its start and a *)
+  --gallery         Open the Sue window with the design system's gallery
+                    listed under Tools in the Hub
   --version         Print the version
   --help            Print this help
   lang list         List Sue's languages and how much of each is translated
@@ -149,6 +154,10 @@ pub fn cli(args: &[String]) -> ExitCode {
             }
         },
         ["--self-check"] => self_check(),
+        ["--gallery"] => {
+            gallery::list_in_this_run();
+            cli(&[])
+        }
         ["--snapshot", dir] => snapshots(PathBuf::from(dir)),
         ["--snapshot", dir, options @ ..] => snapshot::cli(dir, options),
         ["--snapshot-compare", folders @ ..] => snapshot::compare_cli(folders),
