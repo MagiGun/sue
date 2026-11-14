@@ -312,6 +312,16 @@ fn gesture(
     paint.layers()
 }
 
+/// A gesture to try: its name, whether something is drawn first, the
+/// commands that pick its tool, the keys held, and the commands run after.
+type Case = (
+    &'static str,
+    bool,
+    &'static [&'static str],
+    egui::Modifiers,
+    &'static [&'static str],
+);
+
 /// A release event is the gesture's last position even when no move to it
 /// came first: a rectangle selection, a straight line (the Figure tool's,
 /// and a pen's with Shift), a gradient and Move Layer end where the button
@@ -320,7 +330,7 @@ fn gesture(
 fn sue_paint_gestures_end_where_the_button_is_let_go() {
     let (near, far) = (vec2(120.0, 60.0), vec2(150.0, 84.0));
     let plain = egui::Modifiers::NONE;
-    let cases: [(&str, bool, &[&str], egui::Modifiers, &[&str]); 5] = [
+    let cases: [Case; 5] = [
         ("select", false, &["tool.selection"], plain, &["edit.fill"]),
         ("figure-line", false, &["tool.figure"], plain, &[]),
         (
