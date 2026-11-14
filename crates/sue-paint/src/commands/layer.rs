@@ -4,7 +4,7 @@
 use sue_core::txn::SetProperty;
 use sue_core::{Arena, EntityId, PixelFormat, RasterTile2D, ReversibleTransaction};
 use sue_model::picture::{self, LayerKind};
-use sue_wm::{AppletContext, Call, Command, Facts, ItemState};
+use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
 use super::{doc_open, flag, when};
 use crate::dialogs::Dialog;
@@ -1026,123 +1026,170 @@ fn convert(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 
 /// A command of this group, which works while a canvas is open unless
 /// its `state` says more.
+///
+/// Every Layer command changes the picture or the view of it, so Auto
+/// Actions may record each one (`RECORDABLE`); none of them leaves the
+/// canvas (no `LEAVES_CANVAS`), so the test that runs every command
+/// runs them all.
 const fn c(
     name: &'static str,
     label: &'static str,
     run: fn(&mut SuePaint, &mut AppletContext<'_>, Call<'_>),
 ) -> Command<SuePaint> {
-    Command::new(name, label, "layer", run).state(doc_open)
+    Command::new(name, label, "layer", run)
+        .state(doc_open)
+        .with(Flags::RECORDABLE)
 }
 
 pub(super) const COMMANDS: &[Command<SuePaint>] = &[
-    c("layer.new.raster_top", "new-raster-layer", new_raster_top),
-    c("layer.new", "raster-layer-2", new_layer).keys("Ctrl+Shift+N"),
-    c("layer.new.vector", "vector-layer-2", new_vector),
-    c("layer.new.text", "text", new_text),
-    c("layer.new.balloon", "balloon", new_balloon),
-    c("layer.new.gradient", "gradient-ellipsis", new_gradient),
-    c("layer.new.fill", "fill", new_fill),
-    c("layer.new.tone", "tone-ellipsis", new_tone),
-    c("layer.new.paper", "paper-2", new_paper).state(new_paper_state),
-    c("layer.new.3d", "n-3d-layer", new_3d),
-    c("layer.new.figure", "n-3d-drawing-figure", new_figure),
-    c("layer.new.hand", "n-3d-hand", new_hand),
-    c("layer.new.head", "n-3d-head", new_head),
-    c("layer.new.frame", "frame-border-folder-ellipsis", new_frame),
+    c("layer.new.raster_top", "new-raster-layer", new_raster_top).icon("layer-new"),
+    c("layer.new", "raster-layer-2", new_layer)
+        .icon("layer-new")
+        .keys("Ctrl+Shift+N"),
+    c("layer.new.vector", "vector-layer-2", new_vector).icon("layer-new-vector"),
+    c("layer.new.text", "text", new_text).icon("tool-text"),
+    c("layer.new.balloon", "balloon", new_balloon).icon("tool-balloon"),
+    c("layer.new.gradient", "gradient-ellipsis", new_gradient).icon("tool-gradient"),
+    c("layer.new.fill", "fill", new_fill).icon("tool-fill"),
+    c("layer.new.tone", "tone-ellipsis", new_tone).icon("tone"),
+    c("layer.new.paper", "paper-2", new_paper)
+        .icon("layer-paper")
+        .state(new_paper_state),
+    c("layer.new.3d", "n-3d-layer", new_3d).icon("cube"),
+    c("layer.new.figure", "n-3d-drawing-figure", new_figure).icon("material-pose"),
+    c("layer.new.hand", "n-3d-hand", new_hand).icon("material-pose"),
+    c("layer.new.head", "n-3d-head", new_head).icon("material-pose"),
+    c("layer.new.frame", "frame-border-folder-ellipsis", new_frame).icon("tool-frame"),
     c(
         "layer.correction.brightness",
         "brightness-contrast-ellipsis",
         correction_brightness,
-    ),
+    )
+    .icon("sun"),
     c(
         "layer.correction.levels",
         "level-correction-ellipsis",
         correction_levels,
-    ),
+    )
+    .icon("palette-color-sliders"),
     c(
         "layer.correction.curve",
         "tone-curve-ellipsis",
         correction_curve,
-    ),
+    )
+    .icon("pressure-curve"),
     c(
         "layer.correction.hue",
         "hue-saturation-luminosity-ellipsis",
         correction_hue,
-    ),
+    )
+    .icon("palette-color-wheel"),
     c(
         "layer.correction.balance",
         "color-balance-ellipsis",
         correction_balance,
-    ),
+    )
+    .icon("palette-color-sliders"),
     c(
         "layer.correction.invert",
         "reverse-gradient",
         correction_invert,
-    ),
+    )
+    .icon("reverse"),
     c(
         "layer.correction.posterize",
         "posterization-ellipsis",
         correction_posterize,
-    ),
+    )
+    .icon("palette-color-set"),
     c(
         "layer.correction.binarize",
         "binarization-ellipsis",
         correction_binarize,
-    ),
+    )
+    .icon("layer-color-mode"),
     c(
         "layer.correction.gradient_map",
         "gradient-map-ellipsis",
         correction_gradient_map,
-    ),
+    )
+    .icon("tool-gradient"),
     c(
         "layer.folder_insert",
         "create-folder-and-insert-layer",
         folder_insert,
     )
+    .icon("move-to")
     .keys("Ctrl+G"),
-    c("layer.new.folder", "new-layer-folder", new_folder),
-    c("layer.ungroup", "ungroup-layer-folder", ungroup).keys("Ctrl+Shift+G"),
+    c("layer.new.folder", "new-layer-folder", new_folder).icon("layer-new-folder"),
+    c("layer.ungroup", "ungroup-layer-folder", ungroup)
+        .icon("folder-open")
+        .keys("Ctrl+Shift+G"),
     c(
         "layer.from_selection",
         "new-layer-from-selection",
         from_selection,
     )
+    .icon("copy")
     .state(from_selection_state),
-    c("layer.duplicate", "duplicate-layer", duplicate),
-    c("layer.delete", "delete-layer", delete),
-    c("layer.delete_empty", "empty-layers", delete_empty),
-    c("layer.delete_hidden", "hidden-layers", delete_hidden),
+    c("layer.duplicate", "duplicate-layer", duplicate).icon("layer-duplicate"),
+    c("layer.delete", "delete-layer", delete).icon("delete"),
+    c("layer.delete_empty", "empty-layers", delete_empty).icon("delete"),
+    c("layer.delete_hidden", "hidden-layers", delete_hidden).icon("eye-off"),
     c(
         "layer.hide_drafts",
         "hide-all-visible-draft-layers",
         hide_drafts,
-    ),
-    c("layer.mask.outside", "mask-outside-selection", mask_outside).state(new_mask_state),
-    c("layer.mask.inside", "mask-selection", mask_inside).state(new_mask_state),
-    c("layer.mask.delete", "delete-mask", mask_delete).state(has_mask_state),
-    c("layer.mask.apply", "apply-mask-to-layer", mask_apply).state(has_mask_state),
-    c("layer.mask.toggle", "enable-mask", mask_toggle).state(mask_on_state),
-    c("layer.mask.edit", "edit-mask", mask_edit).state(mask_edit_state),
-    c("layer.ruler.delete", "delete-ruler", delete_ruler).state(delete_ruler_state),
-    c("layer.ruler.show", "show-ruler", show_rulers).state(show_rulers_state),
+    )
+    .icon("layer-draft"),
+    c("layer.mask.outside", "mask-outside-selection", mask_outside)
+        .icon("layer-mask-new")
+        .state(new_mask_state),
+    c("layer.mask.inside", "mask-selection", mask_inside)
+        .icon("layer-mask-new")
+        .state(new_mask_state),
+    c("layer.mask.delete", "delete-mask", mask_delete)
+        .icon("delete")
+        .state(has_mask_state),
+    c("layer.mask.apply", "apply-mask-to-layer", mask_apply)
+        .icon("layer-mask-apply")
+        .state(has_mask_state),
+    c("layer.mask.toggle", "enable-mask", mask_toggle)
+        .icon("layer-mask")
+        .state(mask_on_state),
+    c("layer.mask.edit", "edit-mask", mask_edit)
+        .icon("edit")
+        .state(mask_edit_state),
+    c("layer.ruler.delete", "delete-ruler", delete_ruler)
+        .icon("delete")
+        .state(delete_ruler_state),
+    c("layer.ruler.show", "show-ruler", show_rulers)
+        .icon("tool-ruler")
+        .state(show_rulers_state),
     c(
         "layer.ruler.perspective",
         "create-perspective-ruler-ellipsis",
         perspective_ruler,
-    ),
+    )
+    .icon("tool-ruler"),
     c(
         "layer.ruler.symmetry",
         "create-symmetrical-ruler",
         symmetry_ruler,
-    ),
+    )
+    .icon("tool-ruler"),
     c(
         "layer.ruler.circle",
         "create-concentric-circle-ruler",
         circle_ruler,
-    ),
-    c("layer.toggle.visible", "show-layer", toggle_visible).state(visible_state),
-    c("layer.rename", "change-layer-name-ellipsis", rename),
+    )
+    .icon("tool-ruler"),
+    c("layer.toggle.visible", "show-layer", toggle_visible)
+        .icon("eye")
+        .state(visible_state),
+    c("layer.rename", "change-layer-name-ellipsis", rename).icon("rename"),
     c("layer.toggle.clip", "clip-to-layer-below", toggle_clip)
+        .icon("layer-clip")
         .keys("Ctrl+Alt+G")
         .state(clip_state),
     c(
@@ -1150,31 +1197,47 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "set-as-reference-layer",
         toggle_reference,
     )
+    .icon("layer-reference")
     .state(reference_state),
-    c("layer.toggle.draft", "set-as-draft-layer", toggle_draft).state(draft_state),
-    c("layer.toggle.lock", "lock-layer", toggle_lock).state(lock_state),
+    c("layer.toggle.draft", "set-as-draft-layer", toggle_draft)
+        .icon("layer-draft")
+        .state(draft_state),
+    c("layer.toggle.lock", "lock-layer", toggle_lock)
+        .icon("lock")
+        .state(lock_state),
     c(
         "layer.toggle.lock_alpha",
         "lock-transparent-pixels",
         toggle_lock_alpha,
     )
+    .icon("layer-lock-alpha")
     .state(on_raster),
-    c("layer.properties", "layer-property", properties),
-    c("layer.comps", "layer-comps-ellipsis", comps),
-    c("layer.select_above", "select-layer-above", select_above).keys("Alt+]"),
-    c("layer.select_below", "select-layer-below", select_below).keys("Alt+["),
-    c("layer.select_all", "select-all-layers", select_all),
-    c("layer.select_none", "deselect-layers", select_none),
-    c("layer.order.front", "bring-to-front", order_front),
-    c("layer.order.up", "move-up", order_up).keys("Ctrl+]"),
-    c("layer.order.down", "move-down", order_down).keys("Ctrl+["),
-    c("layer.order.back", "send-to-back", order_back),
+    c("layer.properties", "layer-property", properties).icon("layer-property"),
+    c("layer.comps", "layer-comps-ellipsis", comps).icon("layers"),
+    c("layer.select_above", "select-layer-above", select_above)
+        .icon("chevron-up")
+        .keys("Alt+]"),
+    c("layer.select_below", "select-layer-below", select_below)
+        .icon("chevron-down")
+        .keys("Alt+["),
+    c("layer.select_all", "select-all-layers", select_all).icon("all"),
+    c("layer.select_none", "deselect-layers", select_none).icon("deselect"),
+    c("layer.order.front", "bring-to-front", order_front).icon("sort-up"),
+    c("layer.order.up", "move-up", order_up)
+        .icon("arrow-up")
+        .keys("Ctrl+]"),
+    c("layer.order.down", "move-down", order_down)
+        .icon("arrow-down")
+        .keys("Ctrl+["),
+    c("layer.order.back", "send-to-back", order_back).icon("sort-down"),
     c(
         "layer.transfer_down",
         "transfer-to-lower-layer",
         transfer_down,
-    ),
+    )
+    .icon("layer-transfer-down"),
     c("layer.merge_down", "merge-with-layer-below", merge_down)
+        .icon("layer-merge-down")
         .keys("Ctrl+E")
         .state(merge_down_state),
     c(
@@ -1182,6 +1245,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "merge-selected-layers",
         merge_selected,
     )
+    .icon("layer-merge-down")
     .keys("Alt+Shift+E")
     .state(merge_selected_state),
     c(
@@ -1189,18 +1253,60 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "merge-visible-layers",
         merge_visible_here,
     )
+    .icon("layers")
     .keys("Ctrl+Shift+E"),
     c(
         "layer.merge_visible",
         "merge-visible-to-new-layer",
         merge_visible,
-    ),
-    c("layer.flatten", "flatten-image", flatten),
-    c("layer.rasterize", "rasterize", rasterize).state(rasterize_state),
-    c("layer.convert", "convert-layer-ellipsis", convert).state(on_raster),
+    )
+    .icon("layers"),
+    c("layer.flatten", "flatten-image", flatten).icon("picture"),
+    c("layer.rasterize", "rasterize", rasterize)
+        .icon("picture")
+        .state(rasterize_state),
+    c("layer.convert", "convert-layer-ellipsis", convert)
+        .icon("replace")
+        .state(on_raster),
     c(
         "layer.lines_tones_vector",
         "convert-to-vector-lines-and-tones",
         lines_tones_vector,
-    ),
+    )
+    .icon("extract-line"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::COMMANDS;
+    use sue_wm::Flags;
+
+    #[test]
+    fn every_layer_command_has_an_icon_of_the_shared_set() {
+        for command in COMMANDS {
+            assert!(
+                sue_wm::icons::Icon::from_name(command.icon).is_some(),
+                "{}: no icon {:?}",
+                command.name,
+                command.icon
+            );
+        }
+    }
+
+    #[test]
+    fn the_flags_say_what_auto_actions_and_the_canvas_test_did() {
+        // Auto Actions record what `recordable()` let through, and the
+        // test that runs every command skips nothing of this group.
+        for command in COMMANDS {
+            assert_eq!(command.group, "layer", "{}", command.name);
+            assert_eq!(
+                command.flags.has(Flags::RECORDABLE),
+                crate::extras::recordable(command.name),
+                "{}",
+                command.name
+            );
+            assert!(!command.flags.has(Flags::LEAVES_CANVAS), "{}", command.name);
+            assert!(!command.is_family(), "{}", command.name);
+        }
+    }
+}
