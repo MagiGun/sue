@@ -19,6 +19,7 @@ mod paint_layers;
 mod paint_palettes;
 mod paint_rulers;
 mod paint_vector_3d;
+mod save;
 mod shell;
 mod writer;
 

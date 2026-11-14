@@ -1,8 +1,10 @@
 //! Small pictures of files for the browser's cards, made in the
 //! background and kept while the file stays the same.
 //!
-//! A `.sue` file that holds a preview (its `THMB` part) is shown from
-//! that, without reading the document. Any other file goes to the
+//! A `.sue` file that holds a preview (its `THMB` part, which every
+//! save of a project writes) is shown from that: the file's chunk frames
+//! are read and the preview fetched, and nothing of the document (its
+//! `ARNA` or `PIXL`) is read at all. Any other file goes to the
 //! [`Thumbnailer`] of the studio whose work it is
 //! ([`crate::SueApplet::thumbnail`]); without one, Sue reads the picture
 //! formats it knows by itself.
@@ -159,10 +161,13 @@ fn thumbnail(
     side: u32,
     job: &JobContext,
 ) -> Option<Thumb> {
-    let bytes = sue_platform::fs::read(path).ok()?;
-    if let Some(thumb) = preview(&bytes, side) {
+    if let Some(thumb) = sue_platform::fs::open(path)
+        .ok()
+        .and_then(|mut file| preview_from(&mut file, side))
+    {
         return Some(thumb);
     }
+    let bytes = sue_platform::fs::read(path).ok()?;
     match maker {
         Some(maker) => maker.make(path, &bytes, side, job),
         None => {
@@ -181,10 +186,16 @@ pub fn preview(bytes: &[u8], side: u32) -> Option<Thumb> {
     if !sue_core::SueFile::sniff(bytes) {
         return None;
     }
-    let mut input = std::io::Cursor::new(bytes);
-    let directory = sue_core::SueFile::scan(&mut input).ok()?;
+    preview_from(&mut std::io::Cursor::new(bytes), side)
+}
+
+/// The preview a `.sue` file's `THMB` part holds, read from `input`: the
+/// header, the frame of each chunk and the preview, and nothing else.
+/// `None` as for [`preview`].
+pub fn preview_from<R: std::io::Read + std::io::Seek>(input: &mut R, side: u32) -> Option<Thumb> {
+    let directory = sue_core::SueFile::scan(input).ok()?;
     let entry = directory.chunk(sue_core::file::THUMBNAIL)?;
-    let chunk = sue_core::file::Directory::read(&mut input, entry).ok()?;
+    let chunk = sue_core::file::Directory::read(input, entry).ok()?;
     let name = if chunk.payload.starts_with(b"\x89PNG") {
         "preview.png"
     } else {
@@ -342,6 +353,68 @@ mod tests {
         // A damaged preview is no preview.
         assert!(preview(b"SUE\0FILE", SIDE).is_none());
         assert!(preview(b"\x89PNG", SIDE).is_none());
+        let _ = sue_platform::fs::remove_dir_all(&root);
+    }
+
+    /// Counts the bytes read through it.
+    struct Counted<R> {
+        inner: R,
+        read: usize,
+    }
+
+    impl<R: std::io::Read> std::io::Read for Counted<R> {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            let count = self.inner.read(buffer)?;
+            self.read += count;
+            Ok(count)
+        }
+    }
+
+    impl<R: std::io::Seek> std::io::Seek for Counted<R> {
+        fn seek(&mut self, to: std::io::SeekFrom) -> std::io::Result<u64> {
+            self.inner.seek(to)
+        }
+    }
+
+    #[test]
+    fn the_preview_is_read_without_the_document() {
+        // A large document (a damaged one, even) and a small preview after it.
+        let png = sue_io::encode_png_rgba(8, 4, &[200, 0, 0, 255].repeat(8 * 4)).unwrap();
+        let mut file = sue_core::SueFile::new();
+        for tag in [sue_core::file::ARENA, sue_core::file::PIXELS] {
+            file.set(sue_core::file::Chunk {
+                tag,
+                version: 1,
+                payload: vec![0xee; 2 << 20],
+            });
+        }
+        file.set(sue_core::file::Chunk {
+            tag: sue_core::file::THUMBNAIL,
+            version: 1,
+            payload: png.clone(),
+        });
+        let bytes = file.to_bytes();
+        let mut input = Counted {
+            inner: std::io::Cursor::new(&bytes),
+            read: 0,
+        };
+        let thumb = preview_from(&mut input, SIDE).unwrap();
+        assert_eq!(thumb.size, [8, 4]);
+        assert_eq!(&thumb.pixels[..4], &[200, 0, 0, 255]);
+        assert!(
+            input.read < png.len() + 4096,
+            "{} bytes read of {}",
+            input.read,
+            bytes.len()
+        );
+        // From a file on disk the same.
+        let root = temp("no-document");
+        let path = root.join("big.sue");
+        sue_platform::fs::write(&path, &bytes).unwrap();
+        let mut thumbs = Thumbs::new(Some(solid(3)));
+        assert!(thumbs.get(&path).is_none());
+        settle(&mut thumbs);
+        assert_eq!(thumbs.get(&path).unwrap().1.size, [8, 4]);
         let _ = sue_platform::fs::remove_dir_all(&root);
     }
 

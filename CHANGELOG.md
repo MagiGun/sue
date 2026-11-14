@@ -124,6 +124,14 @@ follow [Semantic Versioning](https://semver.org/).
   the font list follow the theme's spacing, corners and type sizes. The
   title bar's buttons light up smoothly under the pointer and tell a
   screen reader their names.
+- Saving a project no longer stops your work: it runs in the background
+  with its progress in Data Transfers, and writes only the parts of the
+  picture that changed since the last save. Every saved project carries
+  a small preview, which the Hub's cards show without opening the file.
+- Unsaved work is kept the same way: after the first time, Sue adds only
+  what changed to a journal beside the kept copy, so keeping it after a
+  stroke takes a moment instead of writing the whole picture again. A
+  crash in the middle loses at most the last change kept.
 
 ### Fixed
 

@@ -601,23 +601,94 @@ impl<'a> PixelReader<'a> {
 /// Where a key's blob comes from.
 #[derive(Clone, Copy, Debug)]
 enum Source<'k> {
-    /// A tile of this save, the `n`th to encode.
+    /// A blob of this save, the `n`th of [`PixelWriter::pending`].
     New(usize),
     /// A blob of the file this save replaces, kept as it was.
     Kept(BlobView<'k>),
 }
 
-/// A tile to encode when the save finishes.
+/// What becomes a blob of this save.
 #[derive(Debug)]
-struct Pending {
+enum Blob<'k> {
+    /// A tile to encode when the save finishes, from a snapshot of its
+    /// raster (a clone shares the pixels).
+    Encode { raster: RasterTile2D, rect: Rect },
+    /// A blob of the store this save replaces, the same pixels already
+    /// encoded: written back as it is.
+    Copy(BlobView<'k>),
+}
+
+/// A blob this save writes.
+#[derive(Debug)]
+struct Pending<'k> {
     key: Key,
-    /// A snapshot of the raster (a clone shares its pixels).
-    raster: RasterTile2D,
-    rect: Rect,
+    blob: Blob<'k>,
 }
 
 /// The hash a writer keys tiles with.
 type Hasher = fn(u64, &[u8], &[u8]) -> Key;
+
+/// A tile's place, format and revision ([`RasterTile2D::tile_revisions`]):
+/// two tiles with the same hold the same pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct Memo {
+    revision: u64,
+    format: u8,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+}
+
+/// How a save wrote one tile.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum TileCode {
+    Empty,
+    /// The one pixel every pixel of the tile is.
+    Solid(Vec<u8>),
+    Blob(Key),
+}
+
+/// What a save of a `.sue` file remembers for the next save of the same
+/// file: how it wrote each tile, by the tile's revision. A tile whose
+/// revision did not change is written again without being read, hashed or
+/// encoded; its blob is copied from the store the last save wrote. It
+/// lives beside the file in memory only and is dropped whenever the store
+/// it describes is replaced.
+#[derive(Clone, Debug, Default)]
+pub struct SaveCache {
+    tiles: HashMap<Memo, TileCode>,
+}
+
+impl SaveCache {
+    /// How many tiles it remembers.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.tiles.len()
+    }
+
+    /// `true` when it remembers nothing (a file never saved by this run).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.tiles.is_empty()
+    }
+}
+
+/// What one save did with the tiles, so tests and the benchmark can tell
+/// an incremental save from a full one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SaveStats {
+    /// Tiles written, empty and solid ones included.
+    pub tiles: usize,
+    /// Tiles written from the [`SaveCache`] without reading their pixels.
+    pub remembered: usize,
+    /// Tiles whose pixels were hashed for their key.
+    pub hashed: usize,
+    /// Blobs copied, still encoded, from the store this save replaces.
+    pub copied: usize,
+    /// Blobs encoded anew.
+    pub encoded: usize,
+}
 
 /// Collects the tiles of the rasters a save writes by reference, and
 /// writes the `PIXL` chunk at the end.
@@ -627,9 +698,17 @@ pub(crate) struct PixelWriter<'k> {
     level: u8,
     hasher: Hasher,
     keys: HashMap<Key, Source<'k>>,
-    pending: Vec<Pending>,
+    pending: Vec<Pending<'k>>,
     /// Blobs of the old file kept whatever points at them, in their order.
     kept: Vec<&'k [u8]>,
+    /// Blobs of the store this save replaces, written again only when a
+    /// tile of this save has their very pixels.
+    old: HashMap<Key, BlobView<'k>>,
+    /// How the last save wrote each tile.
+    memo: Option<&'k SaveCache>,
+    /// How this save wrote each tile, for the next one.
+    next: SaveCache,
+    stats: SaveStats,
     /// Whether any raster was written by reference.
     used: bool,
     scratch: Vec<u8>,
@@ -650,17 +729,47 @@ impl<'k> PixelWriter<'k> {
             keys: HashMap::new(),
             pending: Vec::new(),
             kept: Vec::new(),
+            old: HashMap::new(),
+            memo: None,
+            next: SaveCache::default(),
+            stats: SaveStats::default(),
             used: false,
             scratch: Vec::new(),
             other: Vec::new(),
         }
     }
 
+    /// A store of this save's tiles that takes the blobs of `old` (the
+    /// store this save replaces) as they are, already encoded, for every
+    /// tile whose pixels one of them holds; `memo` says how the save that
+    /// wrote `old` wrote each tile. Nothing of `old` is written that no
+    /// tile uses. Tile size and key width stay `old`'s when they are
+    /// this build's, so the keys stay valid; otherwise `old` is not used.
+    pub(crate) fn reusing(
+        old: &PixelReader<'k>,
+        memo: Option<&'k SaveCache>,
+        options: &PixelOptions,
+    ) -> Self {
+        let mut writer = Self::new(options);
+        if old.header.tile_size == writer.header.tile_size
+            && old.header.key_width == writer.header.key_width
+            && old.header.hash_kind == HASH_SHA256
+        {
+            writer.old = old.blobs.clone();
+            writer.memo = memo;
+        }
+        writer
+    }
+
     /// A store that writes back every blob of `old` as it was, because
     /// something this build cannot read may point at any of them (Rule 3).
     /// Tile size and key width stay the old file's, so its keys stay
     /// valid; new tiles that equal an old blob share it.
-    pub(crate) fn keeping(old: &PixelReader<'k>, options: &PixelOptions) -> Self {
+    pub(crate) fn keeping(
+        old: &PixelReader<'k>,
+        memo: Option<&'k SaveCache>,
+        options: &PixelOptions,
+    ) -> Self {
         let mut writer = Self::new(options);
         writer.header = StoreHeader {
             tile_size: old.header.tile_size,
@@ -676,6 +785,7 @@ impl<'k> PixelWriter<'k> {
             writer.keys.insert(*key, Source::Kept(blob));
             writer.kept.push(blob.record);
         }
+        writer.memo = memo;
         writer
     }
 
@@ -695,28 +805,105 @@ impl<'k> PixelWriter<'k> {
         out.u8(TILED | raster.format().code());
         let bpp = raster.format().bytes_per_pixel();
         let width = usize::from(self.header.key_width);
-        for rect in tiles(raster.width(), raster.height(), self.header.tile_size) {
-            let mut tile = std::mem::take(&mut self.scratch);
-            tile_bytes(raster, rect, &mut tile);
-            match classify(&tile, bpp) {
-                Class::Empty => out.u8(TILE_EMPTY),
-                Class::Solid => {
-                    out.u8(TILE_SOLID);
-                    out.raw(&tile[..bpp]);
+        // Revisions follow this build's tile grid; a store of another tile
+        // size cannot use them.
+        let revisions = (self.header.tile_size == TILE_SIZE).then(|| raster.tile_revisions());
+        for (index, rect) in
+            tiles(raster.width(), raster.height(), self.header.tile_size).enumerate()
+        {
+            self.stats.tiles += 1;
+            let memo = revisions
+                .and_then(|revisions| revisions.get(index))
+                .map(|revision| Memo {
+                    revision: *revision,
+                    format: raster.format().code(),
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: rect.height,
+                });
+            let code = match memo.and_then(|memo| self.remembered(&memo)) {
+                Some(code) => {
+                    self.stats.remembered += 1;
+                    code
                 }
-                Class::Blob => {
-                    let key = self.key_for(raster, rect, &tile);
+                None => {
+                    let mut tile = std::mem::take(&mut self.scratch);
+                    tile_bytes(raster, rect, &mut tile);
+                    let code = match classify(&tile, bpp) {
+                        Class::Empty => TileCode::Empty,
+                        Class::Solid => TileCode::Solid(tile[..bpp].to_vec()),
+                        Class::Blob => TileCode::Blob(self.key_for(raster, rect, &tile)),
+                    };
+                    self.scratch = tile;
+                    code
+                }
+            };
+            match &code {
+                TileCode::Empty => out.u8(TILE_EMPTY),
+                TileCode::Solid(pixel) => {
+                    out.u8(TILE_SOLID);
+                    out.raw(pixel);
+                }
+                TileCode::Blob(key) => {
                     out.u8(TILE_BLOB);
                     out.raw(&key[..width]);
                 }
             }
-            self.scratch = tile;
+            if let Some(memo) = memo {
+                self.next.tiles.insert(memo, code);
+            }
         }
+    }
+
+    /// How the last save wrote the tile `memo`, if that still holds here:
+    /// an empty or solid tile always, a blob when its key is free in this
+    /// save and its blob is at hand (kept, or in the old store, which it
+    /// then joins). `None` sends the tile the long way: read and hashed.
+    fn remembered(&mut self, memo: &Memo) -> Option<TileCode> {
+        let code = self.memo?.tiles.get(memo)?;
+        let TileCode::Blob(key) = code else {
+            return Some(code.clone());
+        };
+        match self.keys.get(key) {
+            // Already named in this save: by this very tile elsewhere, or by
+            // others pixels after a collision; the long way tells which.
+            Some(Source::New(_)) => None,
+            Some(Source::Kept(_)) => Some(code.clone()),
+            None => {
+                let blob = *self.old.get(key)?;
+                self.copy(*key, blob);
+                Some(code.clone())
+            }
+        }
+    }
+
+    /// Takes the old blob `blob` into this save under `key`.
+    fn copy(&mut self, key: Key, blob: BlobView<'k>) {
+        self.keys.insert(key, Source::New(self.pending.len()));
+        self.pending.push(Pending {
+            key,
+            blob: Blob::Copy(blob),
+        });
+        self.stats.copied += 1;
+    }
+
+    /// `true` if `blob` holds the pixels `tile` of a `format` tile of
+    /// `rect`'s size.
+    fn blob_holds(blob: &BlobView<'_>, format: PixelFormat, rect: Rect, tile: &[u8]) -> bool {
+        blob.format == format.code()
+            && blob.width == rect.width
+            && blob.height == rect.height
+            && matches!(
+                decode_blob(blob, format),
+                Ok(Decoded::Pixels(pixels)) if pixels == tile
+            )
     }
 
     /// The key of a tile: its hash, salted again until the key is free or
     /// names the very same pixels.
     fn key_for(&mut self, raster: &RasterTile2D, rect: Rect, tile: &[u8]) -> Key {
+        self.stats.hashed += 1;
         let format = raster.format();
         let mut description = vec![format.code()];
         description.extend_from_slice(&rect.width.to_le_bytes());
@@ -727,33 +914,44 @@ impl<'k> PixelWriter<'k> {
             key[width..].fill(0);
             let same = match self.keys.get(&key) {
                 None => {
-                    self.keys.insert(key, Source::New(self.pending.len()));
-                    self.pending.push(Pending {
-                        key,
-                        raster: raster.clone(),
-                        rect,
-                    });
+                    // The store this save replaces may hold these pixels
+                    // already encoded; any other blob under the key is not
+                    // written, so the key is free for these pixels anyway.
+                    match self.old.get(&key) {
+                        Some(blob) if Self::blob_holds(blob, format, rect, tile) => {
+                            let blob = *blob;
+                            self.copy(key, blob);
+                        }
+                        _ => {
+                            self.keys.insert(key, Source::New(self.pending.len()));
+                            self.pending.push(Pending {
+                                key,
+                                blob: Blob::Encode {
+                                    raster: raster.clone(),
+                                    rect,
+                                },
+                            });
+                            self.stats.encoded += 1;
+                        }
+                    }
                     return key;
                 }
-                Some(Source::New(index)) => {
-                    let pending = &self.pending[*index];
-                    pending.raster.format() == format
-                        && pending.rect.width == rect.width
-                        && pending.rect.height == rect.height
-                        && {
-                            tile_bytes(&pending.raster, pending.rect, &mut self.other);
-                            self.other == tile
-                        }
-                }
-                Some(Source::Kept(blob)) => {
-                    blob.format == format.code()
-                        && blob.width == rect.width
-                        && blob.height == rect.height
-                        && matches!(
-                            decode_blob(blob, format),
-                            Ok(Decoded::Pixels(pixels)) if pixels == tile
-                        )
-                }
+                Some(Source::New(index)) => match &self.pending[*index].blob {
+                    Blob::Encode {
+                        raster: earlier,
+                        rect: place,
+                    } => {
+                        earlier.format() == format
+                            && place.width == rect.width
+                            && place.height == rect.height
+                            && {
+                                tile_bytes(earlier, *place, &mut self.other);
+                                self.other == tile
+                            }
+                    }
+                    Blob::Copy(blob) => Self::blob_holds(blob, format, rect, tile),
+                },
+                Some(Source::Kept(blob)) => Self::blob_holds(blob, format, rect, tile),
             };
             if same {
                 return key;
@@ -764,20 +962,30 @@ impl<'k> PixelWriter<'k> {
 
     /// The `PIXL` payload, or `None` when no raster was written by
     /// reference and no old blob is kept.
+    #[cfg(test)]
     pub(crate) fn finish(self) -> Option<Vec<u8>> {
+        self.finish_saving().0
+    }
+
+    /// As [`Self::finish`], with how this save wrote each tile (for the
+    /// next save) and what it did.
+    pub(crate) fn finish_saving(self) -> (Option<Vec<u8>>, SaveCache, SaveStats) {
         if !self.used && self.kept.is_empty() {
-            return None;
+            return (None, SaveCache::default(), self.stats);
         }
         let level = self.level;
-        let encoded = parallel_map(&self.pending, |pending| {
-            let mut tile = Vec::new();
-            tile_bytes(&pending.raster, pending.rect, &mut tile);
-            encode_tile(
-                &tile,
-                pending.raster.format(),
-                pending.rect.width as usize,
-                level,
-            )
+        let encoded = parallel_map(&self.pending, |pending| match &pending.blob {
+            Blob::Encode { raster, rect } => {
+                let mut tile = Vec::new();
+                tile_bytes(raster, *rect, &mut tile);
+                Some(encode_tile(
+                    &tile,
+                    raster.format(),
+                    rect.width as usize,
+                    level,
+                ))
+            }
+            Blob::Copy(_) => None,
         });
         let width = usize::from(self.header.key_width);
         let mut out = Writer::new();
@@ -788,16 +996,85 @@ impl<'k> PixelWriter<'k> {
         for record in &self.kept {
             out.raw(record);
         }
-        for (pending, (codec, data)) in self.pending.iter().zip(encoded) {
-            out.raw(&pending.key[..width]);
-            out.u8(codec);
-            out.u8(pending.raster.format().code());
-            out.varint(u64::from(pending.rect.width));
-            out.varint(u64::from(pending.rect.height));
-            out.bytes(&data);
+        for (pending, encoded) in self.pending.iter().zip(encoded) {
+            match (&pending.blob, encoded) {
+                (Blob::Encode { raster, rect }, Some((codec, data))) => {
+                    out.raw(&pending.key[..width]);
+                    out.u8(codec);
+                    out.u8(raster.format().code());
+                    out.varint(u64::from(rect.width));
+                    out.varint(u64::from(rect.height));
+                    out.bytes(&data);
+                }
+                (Blob::Copy(blob), _) => out.raw(blob.record),
+                (Blob::Encode { .. }, None) => unreachable!("every tile to encode was encoded"),
+            }
         }
-        Some(out.into_bytes())
+        (Some(out.into_bytes()), self.next, self.stats)
     }
+}
+
+/// The `PIXL` payload `next` without the blobs `previous` already holds
+/// under the same key with the same bytes: what an autosave journal
+/// record adds ([`crate::journal`]). `None` if either payload is not a
+/// store this build reads, or their tile size or key width differ.
+#[must_use]
+pub fn store_delta(previous: &[u8], next: &[u8]) -> Option<Vec<u8>> {
+    let previous = PixelReader::parse(previous).ok()?;
+    let next = PixelReader::parse(next).ok()?;
+    if previous.header.tile_size != next.header.tile_size
+        || previous.header.key_width != next.header.key_width
+    {
+        return None;
+    }
+    let fresh: Vec<&[u8]> = next
+        .order
+        .iter()
+        .map(|key| next.blobs[key].record)
+        .filter(|record| {
+            let key = key_of(&record[..usize::from(next.header.key_width)]);
+            previous
+                .blobs
+                .get(&key)
+                .is_none_or(|old| old.record != *record)
+        })
+        .collect();
+    Some(store_payload(next.header, &fresh))
+}
+
+/// The `PIXL` payload of `base` with the blobs of `delta` added; a blob of
+/// `delta` replaces one of `base` under the same key. `None` as for
+/// [`store_delta`].
+#[must_use]
+pub fn store_merge(base: &[u8], delta: &[u8]) -> Option<Vec<u8>> {
+    let base = PixelReader::parse(base).ok()?;
+    let delta = PixelReader::parse(delta).ok()?;
+    if base.header.tile_size != delta.header.tile_size
+        || base.header.key_width != delta.header.key_width
+    {
+        return None;
+    }
+    let mut records: Vec<&[u8]> = base
+        .order
+        .iter()
+        .filter(|key| !delta.blobs.contains_key(*key))
+        .map(|key| base.blobs[key].record)
+        .collect();
+    records.extend(delta.order.iter().map(|key| delta.blobs[key].record));
+    Some(store_payload(delta.header, &records))
+}
+
+/// A `PIXL` payload of `header` and the blob `records`.
+fn store_payload(header: StoreHeader, records: &[&[u8]]) -> Vec<u8> {
+    let mut out = Writer::new();
+    out.varint(u64::from(header.tile_size));
+    out.u8(header.hash_kind);
+    out.u8(header.key_width);
+    out.len(records.len());
+    for record in records {
+        out.raw(record);
+    }
+    out.into_bytes()
 }
 
 #[cfg(test)]
@@ -923,7 +1200,8 @@ mod tests {
         writer.write_raster(&a, &mut Writer::new());
         let old = writer.finish().unwrap();
         let old = PixelReader::parse(&old).unwrap();
-        let mut writer = PixelWriter::keeping(&old, &PixelOptions::SAVE).with_hasher(colliding);
+        let mut writer =
+            PixelWriter::keeping(&old, None, &PixelOptions::SAVE).with_hasher(colliding);
         let mut out = Writer::new();
         writer.write_raster(&b, &mut out);
         writer.write_raster(&a, &mut out);

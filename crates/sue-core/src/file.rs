@@ -29,8 +29,8 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 
 use crate::codec::{CodecError, Reader, Writer, crc32};
 use crate::pixels::{
-    KEY_WIDTH, PixelOptions, PixelReader, PixelWriter, StoreHeader, VERSION as PIXELS_VERSION,
-    may_refer_to_blobs,
+    KEY_WIDTH, PixelOptions, PixelReader, PixelWriter, SaveCache, SaveStats, StoreHeader,
+    VERSION as PIXELS_VERSION, may_refer_to_blobs,
 };
 use crate::{Arena, ComponentRegistry, PresetLibrary, Properties};
 
@@ -253,12 +253,34 @@ impl<R: Read + Seek> Scanner<'_, R> {
 }
 
 /// A `.sue` file in memory: its header and its chunks, in order.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// Saving into the same `SueFile` again is incremental: it remembers how
+/// it wrote each tile of the pixel store ([`SaveCache`]), so a tile that
+/// did not change is neither read, hashed nor encoded again, and a tile
+/// whose pixels the store already holds is copied as it is encoded. What
+/// it remembers is not part of the file and plays no part in `==`.
+#[derive(Clone, Debug)]
 pub struct SueFile {
     version: u32,
     extension: Vec<u8>,
     chunks: Vec<Chunk>,
+    /// How the last [`Self::set_arena_with`] wrote each tile of the
+    /// [`PIXELS`] chunk it made; empty when that chunk came from anywhere
+    /// else.
+    cache: SaveCache,
+    stats: SaveStats,
 }
+
+impl PartialEq for SueFile {
+    /// Same header and chunks.
+    fn eq(&self, other: &Self) -> bool {
+        self.version == other.version
+            && self.extension == other.extension
+            && self.chunks == other.chunks
+    }
+}
+
+impl Eq for SueFile {}
 
 impl Default for SueFile {
     fn default() -> Self {
@@ -266,6 +288,8 @@ impl Default for SueFile {
             version: CONTAINER_VERSION,
             extension: Vec::new(),
             chunks: Vec::new(),
+            cache: SaveCache::default(),
+            stats: SaveStats::default(),
         }
     }
 }
@@ -312,6 +336,9 @@ impl SueFile {
 
     /// Adds a chunk, replacing one with the same tag in place.
     pub fn set(&mut self, chunk: Chunk) {
+        if chunk.tag == PIXELS {
+            self.cache = SaveCache::default();
+        }
         match self.chunks.iter_mut().find(|old| old.tag == chunk.tag) {
             Some(old) => *old = chunk,
             None => self.chunks.push(chunk),
@@ -320,6 +347,9 @@ impl SueFile {
 
     /// Removes the chunk tagged `tag`.
     pub fn remove(&mut self, tag: [u8; 4]) -> Option<Chunk> {
+        if tag == PIXELS {
+            self.cache = SaveCache::default();
+        }
         let index = self.chunks.iter().position(|chunk| chunk.tag == tag)?;
         Some(self.chunks.remove(index))
     }
@@ -348,6 +378,13 @@ impl SueFile {
     /// unread component, a tail, an opaque extension component or an
     /// opaque value (Rule 3). Otherwise only the blobs the rasters use are
     /// written.
+    ///
+    /// It is incremental (see the type): a tile is read, hashed and
+    /// encoded only when it changed since this file was last saved, and a
+    /// blob of the store this file holds is copied, still encoded, for
+    /// every tile that has its pixels. The bytes equal a save into a new
+    /// file whenever the old blobs were written at the same deflate level.
+    /// [`Self::last_save`] says what it did.
     pub fn set_arena_with(
         &mut self,
         arena: &Arena,
@@ -366,6 +403,7 @@ impl SueFile {
                 .iter()
                 .any(|(_, entity)| keep(entity) && may_refer_to_blobs(entity));
         let mut out = Writer::new();
+        let mut next = None;
         let (arena_version, store) = match &old {
             Some((version, payload)) if unknown => {
                 // New tiles share the old store's keys, so its keys must be
@@ -375,10 +413,14 @@ impl SueFile {
                     *version == PIXELS_VERSION && reader.header().key_width >= KEY_WIDTH
                 });
                 if let Some(reader) = reader {
-                    let mut pixels = PixelWriter::keeping(&reader, options);
+                    let mut pixels = PixelWriter::keeping(&reader, Some(&self.cache), options);
                     arena.encode_where_with(&mut out, keep, Some(&mut pixels));
-                    let store = pixels.finish().map(|payload| (PIXELS_VERSION, payload));
-                    (ARENA_VERSION, store)
+                    let (store, cache, stats) = pixels.finish_saving();
+                    next = Some((cache, stats));
+                    (
+                        ARENA_VERSION,
+                        store.map(|payload| (PIXELS_VERSION, payload)),
+                    )
                 } else {
                     // A store this build cannot read stays as it was, and
                     // the rasters go inline beside it.
@@ -387,9 +429,20 @@ impl SueFile {
                 }
             }
             _ => {
-                let mut pixels = PixelWriter::new(options);
+                // The store this file holds lends its encoded blobs to
+                // the tiles that did not change.
+                let reader = old
+                    .as_ref()
+                    .filter(|(version, _)| *version == PIXELS_VERSION)
+                    .and_then(|(_, payload)| PixelReader::parse(payload).ok());
+                let mut pixels = match &reader {
+                    Some(reader) => PixelWriter::reusing(reader, Some(&self.cache), options),
+                    None => PixelWriter::new(options),
+                };
                 arena.encode_where_with(&mut out, keep, Some(&mut pixels));
-                match pixels.finish() {
+                let (store, cache, stats) = pixels.finish_saving();
+                next = Some((cache, stats));
+                match store {
                     Some(payload) => (ARENA_VERSION, Some((PIXELS_VERSION, payload))),
                     None => (ARENA_VERSION_INLINE, None),
                 }
@@ -410,6 +463,28 @@ impl SueFile {
                 self.remove(PIXELS);
             }
         }
+        // Set after the chunk, which forgets what was remembered.
+        let (cache, stats) = next.unwrap_or_default();
+        self.cache = cache;
+        self.stats = stats;
+    }
+
+    /// A file with this one's container version and header extension, and
+    /// `chunks` (the autosave journal's records, [`crate::journal`]).
+    pub(crate) fn with_chunks(&self, chunks: Vec<Chunk>) -> Self {
+        Self {
+            version: self.version,
+            extension: self.extension.clone(),
+            chunks,
+            ..Self::default()
+        }
+    }
+
+    /// What the last [`Self::set_arena_with`] into this file did with the
+    /// tiles: how many it wrote, remembered, hashed, copied and encoded.
+    #[must_use]
+    pub fn last_save(&self) -> SaveStats {
+        self.stats
     }
 
     /// A copy of this file that Sue 0.0.75 and older open: `arena` in an
@@ -442,6 +517,7 @@ impl SueFile {
                 .filter(|chunk| chunk.tag != PIXELS)
                 .cloned()
                 .collect(),
+            ..Self::default()
         };
         copy.set(Chunk {
             tag: ARENA,
@@ -641,6 +717,7 @@ impl SueFile {
             version,
             extension,
             chunks,
+            ..Self::default()
         })
     }
 

@@ -552,6 +552,32 @@ Pixel format codes 3 (`Gray16`, `PixelFormat::GRAY16_CODE`) and 4
 little-endian `u16` per sample. No build reads them yet: such a raster is
 kept and not drawn.
 
+#### Incremental saves and tile revisions (0.0.8)
+
+Every raster carries a revision for each of its 256 pixel tiles
+(`RasterTile2D::tile_revisions`). Each way to write pixels gives the tiles
+it may change a number no write was given before: `bytes_mut` and
+`f32_samples_mut` all of them, `bytes_mut_in(rect)` only those the
+rectangle touches (a `RasterPatch`, so undo and redo of a stroke mark only
+its tiles). A clone keeps the revisions of the pixels it shares, so two
+tiles of one place with one revision hold the same pixels. Revisions live
+in memory only and play no part in `==`.
+
+A `SueFile` remembers how its last `set_arena_with` wrote each tile
+(`pixels::SaveCache`, beside the file, dropped when its `PIXL` chunk is
+replaced by any other means). Saving into the same `SueFile` again writes a
+tile whose revision did not change without reading, hashing or encoding it,
+and copies the old store's encoded blob, compared byte for byte, for every
+tile whose pixels it already holds. The bytes equal a save into a new file
+whenever the old blobs were written at the same deflate level.
+`SueFile::last_save` counts what a save did (tiles written, remembered,
+hashed, copied, encoded). The benchmark in `tests/incremental.rs`
+(release build, this machine, 2026-11-15): an A4 page at 350 dpi of 20
+layers, 3.4 MiB on disk, saves in 0.74 s whole, 0.15 s with nothing
+changed and 0.14 s after a one-tile patch (one tile encoded); an empty
+20 layer A4 is 5.4 KiB. Kept work is written as a whole file and a
+journal of changes (`journal.rs`, `docs/autosave-journal.md`).
+
 ### 1.10 Formats and bundles
 
 Every importer and exporter is a `FormatHandler` in one `FormatRegistry`:
@@ -1551,6 +1577,27 @@ and adopts its id, so it stays kept until saved. Kept work its project file
 has since caught up with is let go when the Hub opens. Only a runtime that
 remembers (`Runtime::remembering`, on in the desktop and mobile window)
 touches the data folder; tests choose it, and the self-check never does.
+
+**Saving and keeping on a job (0.0.8).** This replaces the digest above.
+Save and Save As (`Runtime::start_save`) and keeping unsaved work run on a
+job in the transfers list, from a snapshot of the arena (a clone, which
+shares every raster's pixels): people go on working while the file is
+written, and a save asked for meanwhile follows the running one. The job
+saves into the project's `SueFile`, lent to it and handed back, so the
+save is incremental; it puts the first picture's preview into `THMB`
+(`runtime/save.rs`) and streams the file through
+`sue_platform::write_atomic_with`, so a save that fails at any byte leaves
+the old file whole. Kept work goes through `Autosave::write`: the first keep
+writes `<id>.sue` whole, later ones append a record of what changed to
+`<id>.journal`, and a journal larger than the whole file (or 4 MiB) or of
+256 records is compacted into a new whole file. Whether the work changed is
+the arena's revision at the snapshot (`saved_at`, `kept_at`).
+The project's `SueFile` is held in an `Arc`, so the first keep after a
+save or an open starts from it with the copy made on the keep's job. A
+keep that ends after a save of the same or a later revision is let go at
+once, so saved work is never offered as unsaved.
+`save_project_to` does the same work before it returns; quitting, opening
+another project and recovering wait for running jobs first.
 
 **Asking for a file.** No applet opens a dialog itself. It sends
 `ShellRequest::PickFile(FilePick)` (who asks, what for, a title, the

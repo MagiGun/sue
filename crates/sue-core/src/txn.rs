@@ -893,8 +893,10 @@ impl RasterPatch {
         if source.len() != row * self.height as usize {
             return Err(TxnError::new("the patch has the wrong size"));
         }
+        // Only the tiles under the patch change, so a save after an undo
+        // re-encodes no other tile.
         let bytes = raster
-            .bytes_mut()
+            .bytes_mut_in([self.x, self.y, self.width, self.height])
             .ok_or_else(|| TxnError::new("the raster is not 8-bit"))?;
         for line in 0..self.height as usize {
             let at = (self.y as usize + line) * stride + self.x as usize * pixel;

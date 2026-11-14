@@ -96,5 +96,5 @@ pub use text::{ArenaText, TYPING_PAUSE, Typing};
 pub use theme::{COLOR_KEYS, STUDIO_THEME_CUSTOM, STUDIO_THEME_SUE, Theme};
 pub use transfers::{Transfer, TransferKind, TransferState, Transfers};
 pub use transport::{Clip, ClipSource, Transport, pcm_of};
-pub use work::{Autosave, LabelEdit, RecentFile, WorkList, ago, unix_now};
+pub use work::{Autosave, Kept, LabelEdit, RecentFile, WorkList, ago, unix_now};
 pub use world::{ArenaEdit, Batch, RiceEdit, World};
