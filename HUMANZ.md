@@ -558,6 +558,18 @@ and hand back a result that the interface applies as a transaction, so undo
 covers background work too. Where no thread can start (the browser), `JobPool::new` gives
 `JobPool::inline`, which runs each job on the spot as it is spawned.
 
+The pixels of every `RasterTile2D` sit in such a handle
+(`PixelStorage::U8(Shared<Vec<u8>>)`, and the same for `F32`). Cloning a
+raster, an entity or a whole arena is therefore a snapshot that copies no
+pixel: a background save or a worker reads the clone on its own thread
+while the interface goes on painting, and nothing painted afterwards shows
+in it. The writer pays once: the first `bytes_mut` (or `f32_samples_mut`)
+on a layer while a snapshot of it is alive copies that one layer, and later
+writes go in place. A raster nobody else holds is always written in place.
+Ask for the mutable slice only when about to write, since asking is what
+copies. `sue_core::shared_copies` counts every copy made on the calling
+thread, so a test can prove that a path made none.
+
 ### 1.13 Shared data models (`sue-model`)
 
 `sue-model` defines the data shapes many features share, as registered
