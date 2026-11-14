@@ -325,3 +325,79 @@ fn a_hub_place_request_goes_to_the_hub_and_remembers_the_place() {
     assert_eq!(shell.page(), None);
     assert_eq!(shell.hub_place(), None);
 }
+
+/// A studio that adds a place to the Hub and notes when it draws it.
+struct Places(Arc<Mutex<Vec<String>>>);
+
+impl SueApplet for Places {
+    fn manifest(&self) -> AppletManifest {
+        AppletManifest::new(
+            "places",
+            "Places",
+            AppletRole::Studio,
+            crate::icons::Icon::AppGeneric,
+        )
+    }
+
+    fn hub_places(&self) -> Vec<crate::HubPlace> {
+        vec![crate::HubPlace::new(
+            "shelf",
+            "Shelf",
+            crate::icons::Icon::Materials,
+        )]
+    }
+
+    fn hub_ui(&mut self, place: &str, _ui: &mut Ui, _cx: &mut AppletContext<'_>) {
+        self.0.lock().unwrap().push(place.to_owned());
+    }
+}
+
+#[test]
+fn an_applets_place_joins_the_hubs_rail_and_draws_its_pane() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut launchpad = Launchpad::new();
+    let probe = Arc::clone(&seen);
+    launchpad
+        .register(move || Box::new(Places(Arc::clone(&probe))))
+        .unwrap();
+    let mut rig = Rig::new(&launchpad);
+    let mut shell = Shell::new(
+        WmConfig::from_rice(&rig.world.rice).unwrap(),
+        Theme::from_rice(&rig.world.rice),
+        HardwareProfile::Balanced,
+        60,
+        FormFactor::Desktop,
+    );
+    rig.frames(&mut shell);
+    let places: Vec<String> = shell
+        .hub_buttons()
+        .iter()
+        .filter_map(|(button, _)| match button {
+            crate::HubButton::Place(id) => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(places, [crate::HUB_HOME, crate::HUB_FILES, "shelf"]);
+    assert!(seen.lock().unwrap().is_empty(), "Home shows first");
+    rig.with(|io| {
+        shell.handle(
+            ShellRequest::HubPlace("shelf".to_owned()),
+            io,
+            Instant::now(),
+        )
+    });
+    rig.frames(&mut shell);
+    assert!(seen.lock().unwrap().iter().all(|place| place == "shelf"));
+    assert!(!seen.lock().unwrap().is_empty(), "the studio drew its place");
+    // A place no applet has falls back to Home.
+    rig.with(|io| {
+        shell.handle(
+            ShellRequest::HubPlace("nowhere".to_owned()),
+            io,
+            Instant::now(),
+        )
+    });
+    seen.lock().unwrap().clear();
+    rig.frames(&mut shell);
+    assert!(seen.lock().unwrap().is_empty());
+}

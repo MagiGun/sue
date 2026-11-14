@@ -1009,7 +1009,7 @@ confirmation, and `exit` lets it save before the loop ends.
 | --- | --- | --- |
 | `Desktop` | Mouse + keyboard, keybinds from rice | The top bar is `layout.bar_height` (28 points) tall |
 | `Tablet` | Stylus pressure curves ($p' = p^{\gamma}$), larger targets | The top bar is at least 36 points tall; Sue Paint docks its tool strip and layers and iconizes the rest |
-| `Mobile` | Touch | The top bar is at least 52 points tall, for 44 point buttons; the Hub shows two columns of boxes; Sue Paint moves its palettes into bottom sheets |
+| `Mobile` | Touch | The top bar is at least 52 points tall, for 44 point buttons; the Hub's rail becomes a tab bar and its studio cards rows; Sue Paint moves its palettes into bottom sheets |
 
 Classification follows Android's resource-qualifier convention: on a mobile OS, a
 smallest screen side of **at least 600 dp** is a tablet (`FormFactor::classify`).
@@ -1408,33 +1408,57 @@ preview (its `THMB` part, read without decoding the document) first,
 else the `Thumbnailer` of the studio whose work it is
 (`Thumbs::set_maker`), else the picture formats `sue-io` reads. Sue
 Paint's start page draws its Projects page and popups from it until
-the Hub's Files place replaces that page.
+the Hub's Files place replaces that page. `browse` takes a `Browse`:
+`compact` (labels as chips over the cards, a toolbar of sort and view)
+and `drawn`, where each card (`Spot::Card`) and kept work's Recover and
+Discard were drawn; cards are `ui::ThumbnailCard`s and rows
+`ui::ListRow`s, so their text ends before their buttons.
 
-**The Hub** is the page Sue opens on, a full page and not an overlay: a
-heading **Studios** with a box for every `Studio` manifest, then **Tools** with
-a box for every `Tool`, in manifest order. Each box has sharp corners and
-shows the applet's icon, name and summary; a click opens it
-(`ShellRequest::Open`). At each box's bottom right is a **pin**. Pinning makes
-that studio or tool the one Sue opens straight into at launch, already in
-place; there is one pin at a time, so pinning another moves it, and a click
-on the pinned one takes it away (`ShellRequest::Pin`). The pin is the rice
-key `launchpad.pinned` (empty for the Hub), set as one undoable `RiceEdit`,
-so `Ctrl+Z` takes it back, and it shows in Settings, General, Startup as a
-drop-down of the Hub and every studio and tool. A narrow window or a phone
-gets two columns of boxes and 44 point pins.
+**The Hub** is the page Sue opens on, a full page and not an overlay
+(`shell/hub.rs`, with `hub/home.rs`, `hub/files.rs` and the pieces in
+`hub/kit.rs`): a workspace of **places**. A rail at the left lists them
+(`HubButton::Place`): Home (`HUB_HOME`), Files (`HUB_FILES`) and every
+`HubPlace` an applet adds, whose pane its `hub_ui` draws. Under 560 points
+of room (`hub::NARROW`, on any device) the rail is a tab bar along the
+bottom and the cards become rows; a touch layout makes every target 44
+points. `ShellRequest::HubPlace(id)` goes to a place, `ShellRequest::Hub`
+to Home; an unknown place shows Home.
 
-Under the boxes the Hub lists the **work Sue remembers** (`WorkList`, below):
-**Recent** (the files and projects opened or saved lately, newest first, as
-many as `launchpad.recent_count`), **Saved Projects** (every `.sue` project
-the list knows, by name, with the studio it was saved from) and **Unsaved
-Work** (autosaves of other runs). Three columns side by side when the page
-is wide enough, one under the other when not, each row a sharp box with the
-title, what it is, when and the folder, the full path on hover, 56 points
-tall on touch. A recent file or project opens with `ShellRequest::OpenFile`;
-kept work has **Recover** (also a click on the row, `ShellRequest::Recover`)
-and **Discard** (`ShellRequest::Discard`), which arms on a first click
-(Really Discard) and acts on a second. `Shell::hub_rows` reports where each
-row and button was drawn, for scripted runs and tests.
+Home has **New** (a menu of every applet's `templates`, by category;
+`ShellRequest::Create`) and **Open** (`file.open`), a card per `Studio`
+manifest, then per `Tool`, in manifest order (the manifest's `Icon` on a
+badge, its name and summary; a click is `ShellRequest::Open`), **Jump Back
+In** (the newest work of `files::items`, as many as fit one row and at most
+`launchpad.recent_count`, as `ui::ThumbnailCard`s with their thumbnails,
+and All Files), and **Your Work** (`WorkShelf`: Recent, Projects, Unsaved
+Work, Favorites, each with its count, and Folder, `reveal:<home>`, only
+where `sue_platform::file_manager()` is some). Each shelf opens Files on
+it. At each studio card's top right is a round **pin**, shown on hover,
+on touch and while pinned. Pinning makes that studio or tool the one Sue
+opens straight into at launch, already in place; there is one pin at a
+time, so pinning another moves it, and a click on the pinned one takes it
+away (`ShellRequest::Pin`). The pin is the rice key `launchpad.pinned`
+(empty for the Hub), set as one undoable `RiceEdit`, so `Ctrl+Z` takes it
+back, and it shows in Settings, General, Startup as a drop-down of the Hub
+and every studio and tool.
+
+Files is the shared browser (`files::browse`, below) over the work of
+every page applet, compact on a narrow page. A file opens with
+`ShellRequest::OpenFile` (a file that is gone is forgotten with a word);
+kept work's card recovers it (`ShellRequest::Recover`) and its Discard
+arms on a first click and acts on a second (`ShellRequest::Discard`). Its
+menu rebuilds the thumbnails, forgets the files that are gone and clears
+the finished transfers (`Shell::hub_files_menu_pick` runs it by name).
+
+Every card and button fades its hover on the riced motion
+(`ui::motion::hover_t`) and snaps when transitions are instant, so an idle
+Hub asks for no frame. Tab is the command palette's, so the arrow keys walk
+the Hub's controls in reading order (`ui::FocusScope`, roving both ways),
+starting on the place shown, and `Enter` uses the one in focus.
+`Shell::hub_boxes` (studio cards and pins), `Shell::hub_rows` (the cards
+and buttons of Files, as `HubRow`) and `Shell::hub_buttons` (everything
+else, as `HubButton`) report where the last frame drew them, for scripted
+runs and tests.
 
 **The top bar** runs across the window (§3.3). The **Sue button** sits once,
 in its top left corner, with Sue's silhouette; no studio or tool draws one of

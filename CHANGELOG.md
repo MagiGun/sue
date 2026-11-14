@@ -62,6 +62,16 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The Hub is a workspace of places: a rail (a tab bar on a phone) with
+  Home and Files. Home has New and Open, a rounded card per studio with a
+  round pin, Jump Back In with pictures of your newest work, and Your
+  Work buttons (Recent, Projects, Unsaved Work, Favorites, Folder) that
+  open Files already sorted. Files shows every studio's work as cards with
+  Recover and Discard on kept work, and its menu rebuilds thumbnails and
+  forgets files that are gone. Over the Hub the top bar has a search
+  field for commands and buttons for Transfers and Settings; the arrow
+  keys walk the Hub.
+- The start pages draw Sue's icons and have rounded corners.
 - A Sue project (`.sue`) with pictures is far smaller and the same on
   disk however it is saved: pixels are stored as 256 pixel tiles, an
   empty or single color tile costs a byte, a tile found twice (a duplicated
@@ -115,6 +125,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The second line of a file's card no longer runs under its heart and
+  details button.
 - Instant transitions and Animation speed (Settings, Motion) now reach
   the switches in Settings and on the start pages and everything else
   the interface toolkit animates by itself: they used to keep their own
