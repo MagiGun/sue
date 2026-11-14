@@ -9,9 +9,7 @@
 use sue_core::txn::{Relate, SetProperty, Unrelate};
 use sue_core::{Arena, EntityId, OrderKey, Relation};
 use sue_model::Sequence;
-use sue_wm::{
-    AppletContext, Call, Command, Facts, FilePick, FileType, Flags, ItemState, ShellRequest,
-};
+use sue_wm::{AppletContext, Call, Command, Facts, FilePick, Flags, ItemState, ShellRequest};
 
 use super::{doc_open, flag};
 use crate::anim;
@@ -44,8 +42,8 @@ impl SuePaint {
         })
     }
 
-    /// Runs an Animation command, or one of the File menu's animation
-    /// exports that live beside them; `false` if `command` is neither.
+    /// Runs an Animation command by its name; `false` if `command` is not
+    /// one.
     pub(crate) fn anim_command(&mut self, command: &str, cx: &mut AppletContext<'_>) -> bool {
         if let Some(entry) = COMMANDS.iter().find(|entry| entry.name == command) {
             (entry.run)(
@@ -58,77 +56,7 @@ impl SuePaint {
             );
             return true;
         }
-        self.anim_file_command(command, cx)
-    }
-
-    /// Runs one of the File menu's animation commands (the exports and
-    /// the exposure sheet); `false` if `command` is not one, or with no
-    /// canvas open.
-    pub(crate) fn anim_file_command(&mut self, command: &str, cx: &mut AppletContext<'_>) -> bool {
-        if self.picture().is_none() {
-            return false;
-        }
-        match command {
-            "file.export.exposure_sheet" | "file.import.exposure_sheet" => {
-                let Some((picture, _, _)) = self.timeline_here(&cx.world.arena) else {
-                    cx.fail(tr!("make-timeline-first-animation-timeline-new"));
-                    return true;
-                };
-                let name = cx
-                    .world
-                    .arena
-                    .get_by_id(picture)
-                    .map_or_else(|_| tr!("animation"), |entity| entity.name().to_owned());
-                let types = vec![FileType::new(&tr!("exposure-sheet-csv"), &["csv"])];
-                let pick = if command == "file.export.exposure_sheet" {
-                    FilePick::save(
-                        Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
-                        "exposure-sheet-out",
-                        &tr!("exposure-sheet"),
-                        &format!("{name}.csv"),
-                    )
-                } else {
-                    FilePick::open(
-                        Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
-                        "exposure-sheet-in",
-                        &tr!("exposure-sheet"),
-                    )
-                };
-                cx.request(ShellRequest::PickFile(
-                    pick.types(types).starting_in(self.last_dir.clone()),
-                ));
-            }
-            "file.export.cels" => {
-                let name = self
-                    .picture()
-                    .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
-                    .map_or_else(|| tr!("cel"), |entity| entity.name().to_owned());
-                cx.request(ShellRequest::PickFile(
-                    FilePick::save(
-                        Some(sue_wm::AppletId::new(crate::ID).expect("a valid id")),
-                        "anim-cels",
-                        &tr!("export-animation-cels"),
-                        &format!("{name}.png"),
-                    )
-                    .types(
-                        sue_io::PICTURE_SAVE_TYPES
-                            .iter()
-                            .map(|(what, extensions)| FileType::new(what, extensions))
-                            .collect(),
-                    )
-                    .starting_in(self.last_dir.clone()),
-                ));
-            }
-            "file.export.gif"
-            | "file.export.apng"
-            | "file.export.webp_animation"
-            | "file.export.sequence"
-            | "file.export.movie" => {
-                self.ask_export_animation(cx, command);
-            }
-            _ => return false,
-        }
-        true
+        false
     }
 }
 

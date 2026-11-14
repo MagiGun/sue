@@ -108,17 +108,7 @@ impl SuePaint {
             return;
         }
         self.record_auto(command);
-        if (command.starts_with("anim.")
-            || command.starts_with("file.export.gif")
-            || command == "file.export.apng"
-            || command == "file.export.webp_animation"
-            || command == "file.export.exposure_sheet"
-            || command == "file.import.exposure_sheet"
-            || command == "file.export.sequence"
-            || command == "file.export.movie"
-            || command == "file.export.cels")
-            && self.anim_command(command, cx)
-        {
+        if command.starts_with("anim.") && self.anim_command(command, cx) {
             return;
         }
         if !self.state(command, &Facts::of(cx)).enabled {
