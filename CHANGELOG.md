@@ -66,6 +66,9 @@ follow [Semantic Versioning](https://semver.org/).
   that holds keyboard focus shows it with a thicker outline. Two new
   settings, Card radius (Layout) and Title size (Typography), join the
   ones you can tune. A radius or color you set yourself stays as it is.
+- Duplicating a layer or a page no longer copies its pixels: the copy
+  and the original share them until one of the two is painted on, so
+  duplicating is instant and costs no memory, however large the picture.
 
 ### Fixed
 
