@@ -80,8 +80,54 @@ pub trait DockPanel: Copy + Eq + std::fmt::Debug + 'static {
         false
     }
 
+    /// Every layout style the studio has, the default one first. A studio
+    /// with a single design may leave it empty and give its layout in
+    /// [`Self::default_layout`] alone.
+    fn styles() -> &'static [LayoutStyle<Self>] {
+        &[]
+    }
+
+    /// Where the palettes are until people move them, and after Reset,
+    /// for callers without a style at hand: the first style's layout.
+    fn default_layout() -> DockLayout<Self> {
+        Self::styles()
+            .first()
+            .map_or_else(DockLayout::empty, |style| (style.layout)())
+    }
+
+    /// The style `id` names when it can be chosen, else the first style
+    /// that can (a settings file may name a style that is not built yet,
+    /// or one a later version dropped). `None` only without styles.
+    fn style(id: &str) -> Option<&'static LayoutStyle<Self>> {
+        let styles = Self::styles();
+        styles
+            .iter()
+            .find(|style| style.available && style.id == id)
+            .or_else(|| styles.iter().find(|style| style.available))
+    }
+
+    /// The layout of the style `id` names ([`Self::style`]), or
+    /// [`Self::default_layout`] without styles.
+    fn style_layout(id: &str) -> DockLayout<Self> {
+        Self::style(id).map_or_else(Self::default_layout, |style| (style.layout)())
+    }
+}
+
+/// One way a studio's workspace is designed: which palettes there are and
+/// where they sit until people move them. A studio lists its styles in
+/// [`DockPanel::styles`]; people pick one, and Reset goes back to that
+/// style's layout ([`DockLayout::reset`]).
+#[derive(Clone, Copy, Debug)]
+pub struct LayoutStyle<P: DockPanel> {
+    /// Its name in settings files; never translated, never changed.
+    pub id: &'static str,
+    /// The language database id of the name people read.
+    pub label: &'static str,
+    /// `false` lists it grayed out: it is not built yet and can never be
+    /// the one in use.
+    pub available: bool,
     /// Where the palettes are until people move them, and after Reset.
-    fn default_layout() -> DockLayout<Self>;
+    pub layout: fn() -> DockLayout<P>,
 }
 
 /// A side of the work area with columns.
@@ -105,6 +151,42 @@ impl Side {
         match self {
             Side::Left => "left",
             Side::Right => "right",
+        }
+    }
+}
+
+/// A row of the dock: across the top of the window, or along the work
+/// area's bottom.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Row {
+    Top,
+    Bottom,
+}
+
+impl Row {
+    /// Its place in [`DockLayout::row_folded`] and
+    /// [`DockLayout::row_hidden`].
+    #[must_use]
+    pub fn index(self) -> usize {
+        match self {
+            Row::Top => 0,
+            Row::Bottom => 1,
+        }
+    }
+
+    /// What holds its groups.
+    #[must_use]
+    pub fn holder(self) -> Holder {
+        match self {
+            Row::Top => Holder::Top,
+            Row::Bottom => Holder::Bottom,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Row::Top => "top",
+            Row::Bottom => "bottom",
         }
     }
 }
@@ -288,6 +370,17 @@ pub struct DockLayout<P> {
     pub folded: [bool; 2],
     /// Each side closed whole (Clip Studio Paint's double arrow).
     pub hidden: [bool; 2],
+    /// Each row folded into a strip of icons, top then bottom (a Timeline
+    /// that is only an icon under the work area).
+    pub row_folded: [bool; 2],
+    /// Each row closed whole, leaving a thin bar that opens it again.
+    pub row_hidden: [bool; 2],
+    /// Collapsed palettes that share an icon group with the one before
+    /// them in [`Self::iconized`] (they were tabs of one group).
+    pub icon_joined: Vec<P>,
+    /// Palettes people closed for good: [`Self::fill_missing`] leaves them
+    /// closed, and saved layouts remember it.
+    pub closed: Vec<P>,
     drag: Option<Drag<P>>,
 }
 
@@ -382,6 +475,27 @@ pub struct Laid<P> {
     pub bottom: Option<Rect>,
     /// What is left for the work area.
     pub center: Rect,
+    /// [`Self::icons`] in groups: palettes that were tabs of one group
+    /// share an icon group.
+    pub icon_groups: Vec<Vec<P>>,
+    /// [`Self::left_icons`] in groups.
+    pub left_icon_groups: Vec<Vec<P>>,
+    /// The top row folded into icons, across the window.
+    pub top_strip: Option<IconStrip<P>>,
+    /// The bottom row folded into icons, under the work area.
+    pub bottom_strip: Option<IconStrip<P>>,
+    /// Closed rows' bars.
+    pub row_handles: Vec<(Row, Rect)>,
+}
+
+/// A row folded into icons: where it is and its icon groups, left to
+/// right.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IconStrip<P> {
+    /// The strip.
+    pub rect: Rect,
+    /// The icons, a group per palette group of the row.
+    pub groups: Vec<Vec<P>>,
 }
 
 impl<P: DockPanel> Laid<P> {
@@ -474,6 +588,10 @@ impl<P: DockPanel> DockLayout<P> {
             menu: None,
             folded: [false; 2],
             hidden: [false; 2],
+            row_folded: [false; 2],
+            row_hidden: [false; 2],
+            icon_joined: Vec::new(),
+            closed: Vec::new(),
             drag: None,
         }
     }
@@ -538,9 +656,10 @@ impl<P: DockPanel> DockLayout<P> {
     }
 
     /// Where the layout goes back to: `saved` (a default people chose)
-    /// unless the layout already is it, then the studio's own default.
-    /// `true` when it went to `saved`.
-    pub fn reset(&mut self, saved: Option<&Self>) -> bool {
+    /// unless the layout already is it, then `model`, the layout of the
+    /// style in use ([`DockPanel::style_layout`]). `true` when it went to
+    /// `saved`.
+    pub fn reset(&mut self, saved: Option<&Self>, model: &Self) -> bool {
         let calm = |dock: &Self| {
             let mut dock = dock.clone();
             dock.menu = None;
@@ -550,7 +669,7 @@ impl<P: DockPanel> DockLayout<P> {
         };
         let back = saved.map(calm).filter(|saved| *saved != calm(self));
         let to_saved = back.is_some();
-        *self = back.unwrap_or_else(P::default_layout);
+        *self = back.unwrap_or_else(|| calm(model));
         to_saved
     }
 
@@ -615,9 +734,20 @@ impl<P: DockPanel> DockLayout<P> {
         }
     }
 
-    /// Takes `panel` out of wherever it is; groups and columns left empty
-    /// go.
+    /// Takes `panel` out of wherever it is (closed for good too, so it can
+    /// be placed again); groups and columns left empty go. To take it
+    /// away for good, [`Self::close`] it.
     pub fn remove(&mut self, panel: P) {
+        if let Some(at) = self.iconized.iter().position(|found| *found == panel)
+            && !self.icon_joined.contains(&panel)
+            && let Some(next) = self.iconized.get(at + 1)
+        {
+            // The next icon of its group leads the group now.
+            let next = *next;
+            self.icon_joined.retain(|found| *found != next);
+        }
+        self.icon_joined.retain(|found| *found != panel);
+        self.closed.retain(|found| *found != panel);
         let take = |groups: &mut Vec<Group<P>>| {
             for group in groups.iter_mut() {
                 if let Some(at) = group.tabs.iter().position(|tab| *tab == panel) {
@@ -680,6 +810,88 @@ impl<P: DockPanel> DockLayout<P> {
     pub fn iconize(&mut self, panel: P) {
         self.remove(panel);
         self.iconized.push(panel);
+    }
+
+    /// Collapses `panel` and the other tabs of its group into one icon
+    /// group in the strip, in tab order (a lone palette, or one that is
+    /// not docked, becomes an icon of its own).
+    pub fn iconize_group(&mut self, panel: P) {
+        let tabs = match self.find(panel) {
+            Some((holder, index)) => self
+                .groups_mut(holder)
+                .and_then(|groups| groups.get(index))
+                .map_or_else(|| vec![panel], |group| group.tabs.clone()),
+            None => vec![panel],
+        };
+        for (at, tab) in tabs.iter().enumerate() {
+            self.iconize(*tab);
+            if at > 0 {
+                self.icon_joined.push(*tab);
+            }
+        }
+        self.tidy_icons();
+    }
+
+    /// Keeps [`Self::icon_joined`] in strip order, so equal layouts
+    /// compare equal however they were made.
+    fn tidy_icons(&mut self) {
+        let joined = std::mem::take(&mut self.icon_joined);
+        self.icon_joined = self
+            .iconized
+            .iter()
+            .copied()
+            .filter(|panel| joined.contains(panel))
+            .collect();
+    }
+
+    /// Puts collapsed `panel` into `anchor`'s icon group, as its last icon
+    /// (as dropping one collapsed icon on another does). Nothing happens
+    /// unless `anchor` is collapsed and is not `panel`.
+    pub fn join_icon(&mut self, panel: P, anchor: P) {
+        if panel == anchor || !self.iconized.contains(&anchor) {
+            return;
+        }
+        self.remove(panel);
+        let groups = self.icon_groups();
+        let Some(group) = groups.iter().find(|group| group.contains(&anchor)) else {
+            return;
+        };
+        let last = group[group.len() - 1];
+        let at = self
+            .iconized
+            .iter()
+            .position(|found| *found == last)
+            .map_or(self.iconized.len(), |at| at + 1);
+        self.iconized.insert(at, panel);
+        self.icon_joined.push(panel);
+        self.tidy_icons();
+    }
+
+    /// The collapsed palettes in their icon groups, in strip order.
+    #[must_use]
+    pub fn icon_groups(&self) -> Vec<Vec<P>> {
+        let mut groups: Vec<Vec<P>> = Vec::new();
+        for panel in &self.iconized {
+            match groups.last_mut() {
+                Some(group) if self.icon_joined.contains(panel) => group.push(*panel),
+                _ => groups.push(vec![*panel]),
+            }
+        }
+        groups
+    }
+
+    /// Closes `panel` for good: it leaves the layout, and reading the
+    /// layout again or filling in missing palettes does not bring it back
+    /// until it is placed again.
+    pub fn close(&mut self, panel: P) {
+        self.remove(panel);
+        self.closed.push(panel);
+    }
+
+    /// `panel` was closed for good.
+    #[must_use]
+    pub fn is_closed(&self, panel: P) -> bool {
+        self.closed.contains(&panel)
     }
 
     /// Shows `panel`'s tab in its group.
@@ -755,11 +967,13 @@ impl<P: DockPanel> DockLayout<P> {
             }
             Target::Top => {
                 self.remove(panel);
+                self.row_hidden[Row::Top.index()] = false;
                 self.top_height = self.top_height.max(panel.min_height());
                 self.top.push(Group::one(panel, 1.0));
             }
             Target::Bottom => {
                 self.remove(panel);
+                self.row_hidden[Row::Bottom.index()] = false;
                 self.bottom.push(Group::one(panel, 1.0));
             }
             Target::Icon => self.iconize(panel),
@@ -769,11 +983,23 @@ impl<P: DockPanel> DockLayout<P> {
     }
 
     /// Puts every palette the layout lacks where the default layout has
-    /// it (a layout saved before the palette existed).
+    /// it (a layout saved before the palette existed); see
+    /// [`Self::fill_missing_from`].
     pub fn fill_missing(&mut self) {
-        let model = P::default_layout();
+        self.fill_missing_from(&P::default_layout());
+    }
+
+    /// Puts every palette the layout lacks where `model` (the layout of
+    /// the style in use) has it: a layout saved before the palette
+    /// existed. Palettes closed for good (here or in `model`) and optional
+    /// ones stay away; one `model` lacks becomes an icon.
+    pub fn fill_missing_from(&mut self, model: &Self) {
         for &panel in P::all() {
-            if self.has(panel) || panel.optional() {
+            if self.has(panel)
+                || self.is_closed(panel)
+                || model.is_closed(panel)
+                || panel.optional()
+            {
                 continue;
             }
             match model.find(panel) {
@@ -795,8 +1021,9 @@ impl<P: DockPanel> DockLayout<P> {
 
     /// The layout as lines of text: each column with its width and groups,
     /// the top and bottom rows, the floating palettes, those in windows of
-    /// their own, the collapsed ones and the folded and closed sides. A
-    /// group reads `weight:key+key@active`.
+    /// their own, the collapsed ones, the folded and closed sides and rows,
+    /// which collapsed palettes share an icon group and which palettes
+    /// were closed for good. A group reads `weight:key+key@active`.
     #[must_use]
     pub fn to_lines(&self) -> Vec<String> {
         let group = |group: &Group<P>| {
@@ -854,6 +1081,23 @@ impl<P: DockPanel> DockLayout<P> {
                 out.push(format!("hide {}", side.name()));
             }
         }
+        // Lines older readers skip: their palettes still read as above.
+        for row in [Row::Top, Row::Bottom] {
+            if self.row_folded[row.index()] {
+                out.push(format!("fold {}", row.name()));
+            }
+            if self.row_hidden[row.index()] {
+                out.push(format!("hide {}", row.name()));
+            }
+        }
+        for panel in &self.iconized {
+            if self.icon_joined.contains(panel) {
+                out.push(format!("icon-join {}", panel.key()));
+            }
+        }
+        for panel in &self.closed {
+            out.push(format!("close {}", panel.key()));
+        }
         out
     }
 
@@ -861,10 +1105,18 @@ impl<P: DockPanel> DockLayout<P> {
     /// named one palette per group (`left 236 Title=0.44,Title=0.3`, and
     /// `timeline` for the bottom's height). Lines it does not know are
     /// skipped, and palettes it lacks go where the default layout has
-    /// them. `None` when no palette is placed.
+    /// them. `None` when no palette is placed or closed.
     #[must_use]
     pub fn from_lines(lines: &[String]) -> Option<Self> {
+        Self::from_lines_with(lines, &P::default_layout())
+    }
+
+    /// [`Self::from_lines`], with the palettes the lines lack put where
+    /// `model` (the layout of the style in use) has them.
+    #[must_use]
+    pub fn from_lines_with(lines: &[String], model: &Self) -> Option<Self> {
         let mut dock = Self::empty();
+        let mut joined: Vec<P> = Vec::new();
         let group = |text: &str| -> Option<Group<P>> {
             let (weight, rest) = text.split_once(':')?;
             let (keys, active) = match rest.split_once('@') {
@@ -972,6 +1224,22 @@ impl<P: DockPanel> DockLayout<P> {
                         dock.hidden[at] = true;
                     }
                 }
+                (Some(what @ ("fold" | "hide")), Some(row @ ("top" | "bottom")), None) => {
+                    let at = usize::from(row == "bottom");
+                    if what == "fold" {
+                        dock.row_folded[at] = true;
+                    } else {
+                        dock.row_hidden[at] = true;
+                    }
+                }
+                (Some("icon-join"), Some(name), None) => joined.extend(P::named(name)),
+                (Some("close"), Some(name), None) => {
+                    if let Some(panel) = P::named(name)
+                        && !dock.closed.contains(&panel)
+                    {
+                        dock.closed.push(panel);
+                    }
+                }
                 _ => {}
             }
         }
@@ -981,8 +1249,19 @@ impl<P: DockPanel> DockLayout<P> {
             || !dock.bottom.is_empty()
             || !dock.floating.is_empty()
             || !dock.windows.is_empty()
-            || !dock.iconized.is_empty();
-        dock.fill_missing();
+            || !dock.iconized.is_empty()
+            || !dock.closed.is_empty();
+        // A palette both placed and closed (a hand-edited file) is placed.
+        let placed_too: Vec<P> = dock
+            .closed
+            .iter()
+            .copied()
+            .filter(|panel| dock.has(*panel))
+            .collect();
+        dock.closed.retain(|panel| !placed_too.contains(panel));
+        dock.icon_joined = joined;
+        dock.tidy_icons();
+        dock.fill_missing_from(model);
         placed.then_some(dock)
     }
 
@@ -1000,13 +1279,36 @@ impl<P: DockPanel> DockLayout<P> {
                 .map(|(index, _)| index)
                 .collect()
         };
+        // A row's open groups as icon groups, while it is folded.
+        let row_icons = |row: &[Group<P>], open: &[usize]| -> Vec<Vec<P>> {
+            open.iter().map(|at| row[*at].visible(shown)).collect()
+        };
         let top_groups = open_row(&self.top);
         let mut top_row = None;
+        let mut top_strip = None;
+        let mut row_handles = Vec::new();
         let body = if !top_groups.is_empty() && body.height() > 240.0 {
-            let height = self.top_height.min(body.height() - 200.0).max(24.0);
+            let closed = self.row_hidden[Row::Top.index()];
+            let folded = self.row_folded[Row::Top.index()];
+            let height = if closed {
+                HANDLE
+            } else if folded {
+                STRIP
+            } else {
+                self.top_height.min(body.height() - 200.0).max(24.0)
+            };
             let top = body.top() - hide * height;
             let row = Rect::from_min_max(pos2(body.left(), top), pos2(body.right(), top + height));
-            top_row = Some(row);
+            if closed {
+                row_handles.push((Row::Top, row));
+            } else if folded {
+                top_strip = Some(IconStrip {
+                    rect: row,
+                    groups: row_icons(&self.top, &top_groups),
+                });
+            } else {
+                top_row = Some(row);
+            }
             Rect::from_min_max(pos2(body.left(), row.bottom()), body.max)
         } else {
             body
@@ -1038,9 +1340,17 @@ impl<P: DockPanel> DockLayout<P> {
         // Columns that show anything, and their widths. A closed side shows
         // nothing; a folded side keeps its anchored columns and folds the
         // rest into icons.
+        let visible_groups = |column: &Column<P>| -> Vec<Vec<P>> {
+            column
+                .groups
+                .iter()
+                .map(|group| group.visible(shown))
+                .filter(|tabs| !tabs.is_empty())
+                .collect()
+        };
         let mut sides: Vec<(Side, usize, f32, bool)> = Vec::new();
-        let mut left_icons: Vec<P> = Vec::new();
-        let mut folded_right: Vec<P> = Vec::new();
+        let mut left_icon_groups: Vec<Vec<P>> = Vec::new();
+        let mut folded_right: Vec<Vec<P>> = Vec::new();
         for side in [Side::Left, Side::Right] {
             if self.hidden[side.index()] {
                 continue;
@@ -1051,26 +1361,26 @@ impl<P: DockPanel> DockLayout<P> {
                 }
                 if self.folded[side.index()] && !column.anchored() {
                     let into = if side == Side::Left {
-                        &mut left_icons
+                        &mut left_icon_groups
                     } else {
                         &mut folded_right
                     };
-                    into.extend(visible_tabs(column));
+                    into.extend(visible_groups(column));
                 } else {
                     sides.push((side, index, width_of(column), true));
                 }
             }
         }
-        let mut icons: Vec<P> = if self.hidden[1] {
+        let mut icon_groups: Vec<Vec<P>> = if self.hidden[1] {
             Vec::new()
         } else {
-            self.iconized
-                .iter()
-                .copied()
-                .filter(|panel| shown(*panel))
+            self.icon_groups()
+                .into_iter()
+                .map(|group| group.into_iter().filter(|panel| shown(*panel)).collect())
+                .filter(|group: &Vec<P>| !group.is_empty())
                 .collect()
         };
-        icons.extend(folded_right);
+        icon_groups.extend(folded_right);
         // Too narrow: the widest columns collapse to icons (never the
         // anchored ones).
         loop {
@@ -1079,8 +1389,12 @@ impl<P: DockPanel> DockLayout<P> {
                 .filter(|(_, _, _, open)| *open)
                 .map(|(_, _, width, _)| width)
                 .sum();
-            let strip = if icons.is_empty() { 0.0 } else { STRIP }
-                + if left_icons.is_empty() { 0.0 } else { STRIP };
+            let strip = if icon_groups.is_empty() { 0.0 } else { STRIP }
+                + if left_icon_groups.is_empty() {
+                    0.0
+                } else {
+                    STRIP
+                };
             if used + strip + MIN_CENTER <= body.width() {
                 break;
             }
@@ -1092,8 +1406,10 @@ impl<P: DockPanel> DockLayout<P> {
                 break;
             };
             widest.3 = false;
-            icons.extend(visible_tabs(&self.columns(widest.0)[widest.1]));
+            icon_groups.extend(visible_groups(&self.columns(widest.0)[widest.1]));
         }
+        let icons: Vec<P> = icon_groups.iter().flatten().copied().collect();
+        let left_icons: Vec<P> = left_icon_groups.iter().flatten().copied().collect();
         let open = |side: Side| -> Vec<(usize, f32)> {
             sides
                 .iter()
@@ -1130,6 +1446,11 @@ impl<P: DockPanel> DockLayout<P> {
             top: top_row,
             bottom: None,
             center: body,
+            icon_groups,
+            left_icon_groups,
+            top_strip,
+            bottom_strip: None,
+            row_handles,
         };
         if let Some(row) = top_row {
             self.lay_row(&mut laid, Holder::Top, &top_groups, row, shown);
@@ -1236,14 +1557,34 @@ impl<P: DockPanel> DockLayout<P> {
             .filter(|(_, group)| group.current(shown).is_some())
             .map(|(index, _)| index)
             .collect();
-        if !bottom.is_empty() && center.height() > 360.0 && center.width() > 320.0 {
-            let height = self.bottom_height.min(center.height() - 200.0).max(90.0);
+        let at_bottom = |height: f32| {
             let top = center.bottom() - height * (1.0 - hide);
-            let row =
-                Rect::from_min_max(pos2(center.left(), top), pos2(center.right(), top + height));
+            Rect::from_min_max(pos2(center.left(), top), pos2(center.right(), top + height))
+        };
+        let closed = self.row_hidden[Row::Bottom.index()];
+        let folded = self.row_folded[Row::Bottom.index()];
+        if bottom.is_empty() || center.width() <= 320.0 {
+            // No row.
+        } else if closed || folded {
+            // A thin bar that opens the row again, or its icons.
+            if center.height() > 200.0 {
+                let bar = at_bottom(if closed { HANDLE } else { STRIP });
+                if closed {
+                    laid.row_handles.push((Row::Bottom, bar));
+                } else {
+                    laid.bottom_strip = Some(IconStrip {
+                        rect: bar,
+                        groups: row_icons(&self.bottom, &bottom),
+                    });
+                }
+                laid.center.max.y = bar.top();
+            }
+        } else if center.height() > 360.0 {
+            let height = self.bottom_height.min(center.height() - 200.0).max(90.0);
+            let row = at_bottom(height);
             self.lay_row(&mut laid, Holder::Bottom, &bottom, row, shown);
             laid.bottom = Some(row);
-            laid.center.max.y = top;
+            laid.center.max.y = row.top();
         }
         laid
     }
@@ -1305,6 +1646,26 @@ impl<P: DockPanel> DockLayout<P> {
         for strip in [laid.strip, laid.left_strip].into_iter().flatten() {
             if strip.contains(at) {
                 return (Target::Icon, strip);
+            }
+        }
+        // A folded or closed row takes the palette into the row.
+        let rows = [
+            (Row::Top, laid.top_strip.as_ref().map(|strip| strip.rect)),
+            (
+                Row::Bottom,
+                laid.bottom_strip.as_ref().map(|strip| strip.rect),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(row, rect)| Some((row, rect?)))
+        .chain(laid.row_handles.iter().copied());
+        for (row, rect) in rows {
+            if rect.contains(at) {
+                let target = match row {
+                    Row::Top => Target::Top,
+                    Row::Bottom => Target::Bottom,
+                };
+                return (target, rect);
             }
         }
         for group in &laid.groups {
@@ -1806,18 +2167,64 @@ mod tests {
             if self == Pane::Bar { 34.0 } else { 90.0 }
         }
 
-        fn default_layout() -> DockLayout<Self> {
-            let mut dock = DockLayout::empty();
-            dock.top = vec![Group::one(Pane::Bar, 1.0)];
-            dock.left = vec![
-                Column::of(&[(Pane::Tools, 1.0)], 46.0),
-                Column::of(&[(Pane::Brush, 0.5), (Pane::Color, 0.5)], 240.0),
-            ];
-            dock.right = vec![Column::of(&[(Pane::Nav, 0.4), (Pane::Layers, 0.6)], 300.0)];
-            dock.bottom = vec![Group::one(Pane::Timeline, 1.0)];
-            dock.iconized = vec![Pane::History];
-            dock
+        fn styles() -> &'static [LayoutStyle<Self>] {
+            &STYLES
         }
+    }
+
+    /// The test panel's styles: the default, a second one and one that is
+    /// not built yet.
+    static STYLES: [LayoutStyle<Pane>; 3] = [
+        LayoutStyle {
+            id: "classic",
+            label: "style-classic",
+            available: true,
+            layout: classic,
+        },
+        LayoutStyle {
+            id: "wide",
+            label: "style-wide",
+            available: true,
+            layout: wide,
+        },
+        LayoutStyle {
+            id: "later",
+            label: "style-later",
+            available: false,
+            layout: wide,
+        },
+    ];
+
+    fn classic() -> DockLayout<Pane> {
+        let mut dock = DockLayout::empty();
+        dock.top = vec![Group::one(Pane::Bar, 1.0)];
+        dock.left = vec![
+            Column::of(&[(Pane::Tools, 1.0)], 46.0),
+            Column::of(&[(Pane::Brush, 0.5), (Pane::Color, 0.5)], 240.0),
+        ];
+        dock.right = vec![Column::of(&[(Pane::Nav, 0.4), (Pane::Layers, 0.6)], 300.0)];
+        dock.bottom = vec![Group::one(Pane::Timeline, 1.0)];
+        dock.iconized = vec![Pane::History];
+        dock
+    }
+
+    /// Everything at the right, the timeline folded under the work area
+    /// and no history at all.
+    fn wide() -> DockLayout<Pane> {
+        let mut dock = DockLayout::empty();
+        dock.top = vec![Group::one(Pane::Bar, 1.0)];
+        dock.right = vec![
+            Column::of(&[(Pane::Tools, 1.0)], 46.0),
+            Column::of(
+                &[(Pane::Brush, 0.3), (Pane::Color, 0.3), (Pane::Nav, 0.4)],
+                280.0,
+            ),
+            Column::of(&[(Pane::Layers, 1.0)], 260.0),
+        ];
+        dock.bottom = vec![Group::one(Pane::Timeline, 1.0)];
+        dock.row_folded[Row::Bottom.index()] = true;
+        dock.closed = vec![Pane::History];
+        dock
     }
 
     fn all(_: Pane) -> bool {
@@ -2227,11 +2634,289 @@ mod tests {
         dock.put(Pane::Layers, Target::Top);
         let saved = dock.clone();
         dock.float(Pane::Brush, pos2(300.0, 300.0));
-        assert!(dock.reset(Some(&saved)), "back to the saved default");
+        let model = Pane::default_layout();
+        assert!(
+            dock.reset(Some(&saved), &model),
+            "back to the saved default"
+        );
         assert_eq!(dock, saved);
-        assert!(!dock.reset(Some(&saved)), "already there: the studio's own");
+        assert!(
+            !dock.reset(Some(&saved), &model),
+            "already there: the studio's own"
+        );
         assert_eq!(dock, Pane::default_layout());
-        assert!(!dock.reset(None));
+        assert!(!dock.reset(None, &model));
         assert_eq!(dock, Pane::default_layout());
+    }
+
+    #[test]
+    fn styles_are_a_registry_and_an_unbuilt_one_is_never_chosen() {
+        assert_eq!(Pane::default_layout(), classic(), "the first style's");
+        assert_eq!(DockLayout::<Pane>::default(), classic());
+        assert_eq!(Pane::style("wide").map(|style| style.id), Some("wide"));
+        // Grayed out, unknown or missing: the default.
+        for id in ["later", "nonsense", ""] {
+            assert_eq!(Pane::style(id).map(|style| style.id), Some("classic"));
+            assert_eq!(Pane::style_layout(id), classic());
+        }
+        assert_eq!(Pane::style_layout("wide"), wide());
+        assert!(STYLES.iter().all(|style| !style.label.is_empty()));
+    }
+
+    #[test]
+    fn a_second_style_resets_to_its_own_layout() {
+        let model = Pane::style_layout("wide");
+        let mut dock = DockLayout::<Pane>::default();
+        dock.float(Pane::Layers, pos2(500.0, 200.0));
+        dock.menu = Some(Pane::Nav);
+        assert!(!dock.reset(None, &model));
+        assert_eq!(dock, wide());
+        assert!(!dock.has(Pane::History) && dock.is_closed(Pane::History));
+        // A saved default first, then the style's own again.
+        let mut saved = wide();
+        saved.put(Pane::Nav, Target::Top);
+        assert!(dock.reset(Some(&saved), &model));
+        assert_eq!(dock, saved);
+        assert!(!dock.reset(Some(&saved), &model));
+        assert_eq!(dock, wide());
+        // The style's layout lays out as it says: no columns at the left,
+        // the timeline an icon under the work area.
+        let laid = dock.layout(body(), &all, 0.0);
+        assert!(laid.columns.iter().all(|(side, _, _)| *side == Side::Right));
+        assert_eq!(laid.center.left(), 0.0);
+        assert!(laid.bottom.is_none());
+        let strip = laid.bottom_strip.unwrap();
+        assert_eq!(strip.groups, [vec![Pane::Timeline]]);
+        assert_eq!(strip.rect.height(), STRIP);
+        assert_eq!(laid.center.bottom(), strip.rect.top());
+        assert_eq!(strip.rect.bottom(), 900.0);
+        // Palettes a layout lacks go where the style has them.
+        let mut lacking = wide();
+        lacking.remove(Pane::Nav);
+        lacking.fill_missing_from(&model);
+        assert_eq!(lacking.side_of(Pane::Nav), Some(Side::Right));
+        assert!(!lacking.has(Pane::History), "closed in the style");
+        let read =
+            DockLayout::<Pane>::from_lines_with(&["column right 300 1:nav".to_owned()], &model)
+                .unwrap();
+        assert_eq!(read.side_of(Pane::Brush), Some(Side::Right));
+        assert!(!read.has(Pane::History));
+    }
+
+    #[test]
+    fn an_emptied_layout_stays_empty_after_save_and_load() {
+        let mut dock = DockLayout::<Pane>::default();
+        for &pane in Pane::all() {
+            dock.close(pane);
+        }
+        assert!(Pane::all().iter().all(|pane| !dock.has(*pane)));
+        dock.fill_missing();
+        assert!(Pane::all().iter().all(|pane| !dock.has(*pane)));
+        let lines = dock.to_lines();
+        assert!(lines.contains(&"close history".to_owned()));
+        let back = DockLayout::<Pane>::from_lines(&lines).expect("an empty layout is a layout");
+        assert_eq!(back, dock);
+        assert!(Pane::all().iter().all(|pane| !back.has(*pane)));
+        let laid = back.layout(body(), &all, 0.0);
+        assert!(laid.groups.is_empty() && laid.icons.is_empty());
+        assert_eq!(laid.center, body(), "the work area has the window");
+    }
+
+    #[test]
+    fn a_closed_palette_stays_closed_until_it_is_placed_again() {
+        let mut dock = DockLayout::<Pane>::default();
+        dock.close(Pane::Layers);
+        dock.close(Pane::History);
+        dock.close(Pane::History);
+        assert_eq!(dock.closed, [Pane::Layers, Pane::History]);
+        dock.fill_missing();
+        assert!(!dock.has(Pane::Layers) && !dock.has(Pane::History));
+        let back = DockLayout::<Pane>::from_lines(&dock.to_lines()).unwrap();
+        assert_eq!(back, dock);
+        // Placed again (from the Window menu, say), it is no longer
+        // closed; nor after a drop.
+        dock.dock(Pane::Layers, Side::Right);
+        assert!(!dock.is_closed(Pane::Layers));
+        dock.put(Pane::History, Target::Bottom);
+        assert!(!dock.is_closed(Pane::History));
+        assert!(dock.closed.is_empty());
+        // A palette a file both places and closes is placed.
+        let read = DockLayout::<Pane>::from_lines(
+            &["column left 46 1:tools", "close tools"].map(String::from),
+        )
+        .unwrap();
+        assert!(read.has(Pane::Tools) && !read.is_closed(Pane::Tools));
+        // Older lines without close lines refill as before.
+        let old = DockLayout::<Pane>::from_lines(&["column left 46 1:tools".to_owned()]).unwrap();
+        assert!(old.has(Pane::History) && old.has(Pane::Layers));
+    }
+
+    #[test]
+    fn the_top_and_bottom_rows_fold_and_close_like_the_sides() {
+        let mut dock = DockLayout::<Pane>::default();
+        dock.row_folded[Row::Bottom.index()] = true;
+        dock.put(
+            Pane::Brush,
+            Target::Join {
+                anchor: Pane::Timeline,
+                before: false,
+            },
+        );
+        dock.put(
+            Pane::Color,
+            Target::Beside {
+                anchor: Pane::Timeline,
+                after: true,
+            },
+        );
+        let laid = dock.layout(body(), &all, 0.0);
+        assert!(laid.bottom.is_none(), "no row, only its icons");
+        let strip = laid.bottom_strip.clone().unwrap();
+        assert_eq!(
+            strip.groups,
+            [vec![Pane::Timeline, Pane::Brush], vec![Pane::Color]],
+            "a group of tabs is one icon group"
+        );
+        assert_eq!(
+            (strip.rect.left(), strip.rect.right()),
+            (laid.center.left(), laid.center.right()),
+            "under the work area, between the columns"
+        );
+        assert_eq!(laid.center.bottom(), 900.0 - STRIP);
+        assert!(
+            laid.splits
+                .iter()
+                .all(|split| split.holder != Holder::Bottom),
+            "nothing to drag in a folded row"
+        );
+        // Dropped on the strip, a palette joins the row.
+        let (drop, _) = dock.drop_at(&laid, strip.rect.center(), Pane::Nav);
+        assert_eq!(drop, Target::Bottom);
+        // Hidden palettes leave no icon; a row with none shows nothing.
+        let laid = dock.layout(
+            body(),
+            &|pane| !matches!(pane, Pane::Timeline | Pane::Brush | Pane::Color),
+            0.0,
+        );
+        assert!(laid.bottom_strip.is_none());
+        assert_eq!(laid.center.bottom(), 900.0);
+        // Closed: a thin bar that takes drops and opens the row again.
+        dock.row_hidden[Row::Bottom.index()] = true;
+        let laid = dock.layout(body(), &all, 0.0);
+        assert!(laid.bottom_strip.is_none() && laid.bottom.is_none());
+        let (row, bar) = laid.row_handles[0];
+        assert_eq!((row, bar.height()), (Row::Bottom, HANDLE));
+        assert_eq!(laid.center.bottom(), bar.top());
+        let (drop, _) = dock.drop_at(&laid, bar.center(), Pane::Nav);
+        assert_eq!(drop, Target::Bottom);
+        dock.put(Pane::Nav, drop);
+        assert!(!dock.row_hidden[Row::Bottom.index()], "a drop opens it");
+        // The top row: folded across the window, closed to a bar.
+        dock.row_folded[Row::Top.index()] = true;
+        let laid = dock.layout(body(), &all, 0.0);
+        assert!(laid.top.is_none());
+        let top = laid.top_strip.clone().unwrap();
+        assert_eq!(
+            top.rect,
+            Rect::from_min_size(Pos2::ZERO, vec2(1600.0, STRIP))
+        );
+        assert_eq!(top.groups, [vec![Pane::Bar]]);
+        assert!(laid.columns.iter().all(|(_, _, rect)| rect.top() == STRIP));
+        dock.row_hidden[Row::Top.index()] = true;
+        let laid = dock.layout(body(), &all, 0.0);
+        assert!(laid.top_strip.is_none());
+        assert!(laid.row_handles.contains(&(
+            Row::Top,
+            Rect::from_min_size(Pos2::ZERO, vec2(1600.0, HANDLE))
+        )));
+        // Sliding out (Tab) moves the bar away with the rest.
+        let laid = dock.layout(body(), &all, 1.0);
+        assert!(
+            laid.row_handles
+                .iter()
+                .all(|(_, rect)| rect.bottom() <= 0.0 || rect.top() >= 900.0)
+        );
+        // The states are kept, and older readers skip their lines.
+        dock.row_hidden[Row::Bottom.index()] = true;
+        let lines = dock.to_lines();
+        for line in ["fold top", "hide top", "fold bottom", "hide bottom"] {
+            assert!(lines.contains(&line.to_owned()), "{line}");
+        }
+        let back = DockLayout::<Pane>::from_lines(&lines).unwrap();
+        assert_eq!(back, dock);
+    }
+
+    #[test]
+    fn collapsed_icons_group_as_their_tabs_did() {
+        let mut dock = DockLayout::<Pane>::default();
+        dock.put(
+            Pane::Color,
+            Target::Join {
+                anchor: Pane::Brush,
+                before: false,
+            },
+        );
+        dock.iconize_group(Pane::Color);
+        assert_eq!(
+            dock.icon_groups(),
+            [vec![Pane::History], vec![Pane::Brush, Pane::Color]]
+        );
+        assert_eq!(dock.find(Pane::Brush), None);
+        // Dropping one icon on another joins its group.
+        dock.join_icon(Pane::History, Pane::Color);
+        assert_eq!(
+            dock.icon_groups(),
+            [vec![Pane::Brush, Pane::Color, Pane::History]]
+        );
+        dock.join_icon(Pane::Nav, Pane::Tools);
+        assert!(
+            dock.is_open(Pane::Nav),
+            "Tools is not an icon: nothing moves"
+        );
+        // The strip shows the groups; the flat list stays as it was.
+        let laid = dock.layout(body(), &all, 0.0);
+        assert_eq!(
+            laid.icon_groups,
+            [vec![Pane::Brush, Pane::Color, Pane::History]]
+        );
+        assert_eq!(laid.icons, [Pane::Brush, Pane::Color, Pane::History]);
+        let laid = dock.layout(body(), &|pane| pane != Pane::Color, 0.0);
+        assert_eq!(laid.icon_groups, [vec![Pane::Brush, Pane::History]]);
+        // Groups survive save and load, and an older reader sees icons.
+        let lines = dock.to_lines();
+        assert!(lines.contains(&"icon-join color".to_owned()));
+        let back = DockLayout::<Pane>::from_lines(&lines).unwrap();
+        assert_eq!(back, dock);
+        // Taking the group's first icon out leaves the rest together.
+        dock.dock(Pane::Brush, Side::Left);
+        assert_eq!(dock.icon_groups(), [vec![Pane::Color, Pane::History]]);
+        dock.remove(Pane::History);
+        assert_eq!(dock.icon_groups(), [vec![Pane::Color]]);
+        dock.iconize(Pane::History);
+        assert_eq!(
+            dock.icon_groups(),
+            [vec![Pane::Color], vec![Pane::History]],
+            "a plain collapse is an icon of its own"
+        );
+        // A folded side's groups stay together in its strip.
+        let mut dock = DockLayout::<Pane>::default();
+        dock.put(
+            Pane::Layers,
+            Target::Join {
+                anchor: Pane::Nav,
+                before: false,
+            },
+        );
+        dock.folded = [true, true];
+        let laid = dock.layout(body(), &all, 0.0);
+        assert_eq!(
+            laid.left_icon_groups,
+            [vec![Pane::Brush], vec![Pane::Color]]
+        );
+        assert_eq!(
+            laid.icon_groups,
+            [vec![Pane::History], vec![Pane::Nav, Pane::Layers]]
+        );
+        assert_eq!(laid.left_icons, [Pane::Brush, Pane::Color]);
     }
 }
