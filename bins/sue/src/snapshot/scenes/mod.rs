@@ -6,6 +6,7 @@
 //! from here at the point where Sue is in the state it needs. A scene
 //! that changes something for its picture puts it back before it returns.
 
+mod gallery;
 mod hub;
 mod icons;
 mod paint_canvas;
@@ -97,6 +98,10 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
 
     // 27. The icons: the reference sheet, then every icon.
     icons::contact_sheets(tour)?;
+
+    // 29. The gallery of the design system: per preset, at 1.5 and 2.0
+    // pixels per point and per density, with the focus ring showing.
+    gallery::scenes(tour)?;
     Ok(())
 }
 
