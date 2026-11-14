@@ -30,3 +30,7 @@ blend-hue = Hue
 blend-saturation = Saturation
 blend-color = Color
 blend-luminosity = Luminosity
+blend-glow-dodge = Glow Dodge
+blend-add-glow = Add (Glow)
+blend-brightness = Brightness
+blend-through = Through
