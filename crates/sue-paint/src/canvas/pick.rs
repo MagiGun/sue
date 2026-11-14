@@ -9,7 +9,6 @@ use crate::doc;
 use crate::studio::SuePaint;
 
 impl SuePaint {
-    /// Picks the color under `pos`: as shown, or from the current layer.
     /// Makes the topmost visible layer with paint under picture point `p`
     /// the current layer (Ctrl, Shift and click).
     pub(super) fn pick_layer_at(&mut self, arena: &sue_core::Arena, p: Pos2) {
@@ -47,6 +46,7 @@ impl SuePaint {
         }
     }
 
+    /// Picks the color under `pos`: as shown, or from the current layer.
     pub(super) fn pick(
         &mut self,
         pos: Pos2,
