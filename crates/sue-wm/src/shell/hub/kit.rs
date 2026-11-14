@@ -412,10 +412,17 @@ pub(super) fn work_button(
     let room = (rect.right() - pad - left).max(0.0);
     let clip = Rect::from_min_max(pos2(left, rect.top()), pos2(left + room, rect.bottom()));
     let text = painter.with_clip_rect(clip.intersect(painter.clip_rect()));
-    let title =
-        painter.layout_no_wrap(name.to_owned(), theme.text_font(TextRole::Body), theme.text);
+    // Each line ends in an ellipsis where the button ends, never cut.
+    let one_line = |text: &str, font: egui::FontId, color: Color32| {
+        let mut job = egui::text::LayoutJob::simple(text.to_owned(), font, color, room);
+        job.wrap.max_rows = 1;
+        job.wrap.break_anywhere = true;
+        job.wrap.overflow_character = Some('\u{2026}');
+        painter.layout_job(job)
+    };
+    let title = one_line(name, theme.text_font(TextRole::Body), theme.text);
     let soft = theme.text_muted_on(fill);
-    let line = painter.layout_no_wrap(detail.to_owned(), theme.text_font(TextRole::Caption), soft);
+    let line = one_line(detail, theme.text_font(TextRole::Caption), soft);
     let block = title.size().y + theme.space(Space::S1) + line.size().y;
     let top = rect.center().y - block / 2.0;
     let below = top + title.size().y + theme.space(Space::S1);
@@ -497,4 +504,36 @@ pub(super) fn grid(width: f32, least: f32, gap: f32) -> (usize, f32) {
     let columns = ((width + gap) / (least + gap)).floor().max(1.0) as usize;
     let each = ((width - gap * (columns - 1) as f32) / columns as f32).floor();
     (columns, each)
+}
+
+/// As [`grid`], for `count` cards: when they take more than one row, the
+/// rows are as even as they can be (five cards in four columns become
+/// three and two, never four and a lone one).
+pub(super) fn balanced_grid(width: f32, least: f32, gap: f32, count: usize) -> (usize, f32) {
+    let (most, _) = grid(width, least, gap);
+    let rows = count.max(1).div_ceil(most);
+    let columns = count.max(1).div_ceil(rows);
+    let each = ((width - gap * (columns - 1) as f32) / columns as f32).floor();
+    (columns, each)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{balanced_grid, grid};
+
+    #[test]
+    fn a_grid_of_buttons_never_leaves_one_alone_on_a_row() {
+        // Room for four: five become three and two.
+        let (four, _) = grid(1000.0, 200.0, 12.0);
+        assert_eq!(four, 4);
+        assert_eq!(balanced_grid(1000.0, 200.0, 12.0, 5).0, 3);
+        // What fits on one row stays on one row.
+        assert_eq!(balanced_grid(1000.0, 200.0, 12.0, 4).0, 4);
+        assert_eq!(balanced_grid(1300.0, 200.0, 12.0, 5).0, 5);
+        // Each column fills its share of the width.
+        let (columns, each) = balanced_grid(1000.0, 200.0, 12.0, 5);
+        assert!(
+            (each * columns as f32 + 12.0 * (columns - 1) as f32 - 1000.0).abs() <= columns as f32
+        );
+    }
 }

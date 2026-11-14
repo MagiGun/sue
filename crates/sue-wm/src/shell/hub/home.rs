@@ -50,8 +50,16 @@ impl Shell {
                 self.home_header(&mut column, width, io, theme, narrow, acts);
                 column.add_space(gap);
                 self.home_studios(&mut column, width, io, theme, narrow, acts);
-                self.home_jump(&mut column, width, io, theme, narrow, acts);
-                self.home_work(&mut column, width, io, theme, narrow, acts);
+                // On a narrow screen Your work comes before the pictures,
+                // so its buttons are in sight without scrolling.
+                if narrow {
+                    self.home_work(&mut column, width, io, theme, narrow, acts);
+                    column.add_space(gap);
+                    self.home_jump(&mut column, width, io, theme, narrow, acts);
+                } else {
+                    self.home_jump(&mut column, width, io, theme, narrow, acts);
+                    self.home_work(&mut column, width, io, theme, narrow, acts);
+                }
                 column.add_space(margin);
                 // The column's height, so the scroll area knows it.
                 let used = column.min_rect();
@@ -271,9 +279,8 @@ impl Shell {
             theme.space(Space::S9) * 4.5
         };
         let (columns, each) = kit::grid(width, least, gap);
-        // One row on a wide screen, two on a narrow one.
-        let rows = if narrow { 2 } else { 1 };
-        let shown = (columns * rows).min(count).min(recent.len());
+        // One row: a strip of the newest, All Files has the rest.
+        let shown = columns.min(count).min(recent.len());
         let footer = ListRow::height(theme, density, true);
         let size = vec2(each, (each * 0.75).round() + footer);
         let now = crate::unix_now();
@@ -383,7 +390,7 @@ impl Shell {
         let (columns, each) = if narrow {
             (2, ((width - gap) / 2.0).floor())
         } else {
-            kit::grid(width, least, gap)
+            kit::balanced_grid(width, least, gap, buttons.len())
         };
         let height = density.icon_button() + theme.space(Space::S5) * 2.0;
         for row in buttons.chunks(columns) {
