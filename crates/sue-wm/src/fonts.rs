@@ -23,6 +23,10 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use egui::{FontData, FontDefinitions, FontFamily};
 
+mod manage;
+
+pub use manage::{FontManager, MANAGE_SIZE, manage_ui};
+
 /// The bundled proportional family.
 pub const SANS: &str = "Ubuntu Light";
 /// The bundled monospace family.

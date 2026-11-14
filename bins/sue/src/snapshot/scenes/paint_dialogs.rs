@@ -17,7 +17,8 @@ pub(super) fn galleries(tour: &mut Tour<'_>) -> Result<(), String> {
     Ok(())
 }
 
-/// Scene 10. The Layer menu; 11. New, 11b. Pen Pressure and 11e. Preferences.
+/// Scene 10. The Layer menu; 11. New, 11b. Pen Pressure, 11e. Preferences
+/// and 11f. Manage Fonts.
 pub(super) fn menu_and_dialogs(tour: &mut Tour<'_>) -> Result<(), String> {
     for (target, name) in [
         ("menu/Layer", "10-sue-paint-menu"),
@@ -28,6 +29,10 @@ pub(super) fn menu_and_dialogs(tour: &mut Tour<'_>) -> Result<(), String> {
         tour.paint_go(&["dialog/close", target]);
         tour.shoot(name)?;
     }
+    // 11f. Manage Fonts: Sue's shared font list.
+    tour.paint_go(&["dialog/close"]);
+    tour.paint_command("file.fonts");
+    tour.shoot("11f-sue-paint-manage-fonts")?;
     Ok(())
 }
 

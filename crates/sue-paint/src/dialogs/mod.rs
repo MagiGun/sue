@@ -121,6 +121,8 @@ pub(crate) enum Dialog {
     StoryEditor(Vec<(usize, sue_core::EntityId, sue_core::EntityId, String)>),
     /// Convert Layer: the layer, to raster (0) or vector (1), and its name.
     Convert(sue_core::EntityId, u8, String),
+    /// File, Manage Fonts: Sue's shared font list.
+    Fonts(sue_wm::fonts::FontManager),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -199,6 +201,7 @@ impl Dialog {
             Dialog::StoryInfo(_) => (tr!("change-story-information"), vec2(420.0, 360.0)),
             Dialog::StoryEditor(_) => (tr!("story-editor"), vec2(520.0, 520.0)),
             Dialog::Convert(..) => (tr!("convert-layer"), vec2(360.0, 190.0)),
+            Dialog::Fonts(_) => (tr!("manage-fonts"), sue_wm::fonts::MANAGE_SIZE),
             Dialog::Correction(_, filter, ..) => (
                 filter.label(),
                 vec2(
@@ -412,6 +415,13 @@ impl SuePaint {
             Dialog::Canvas(canvas) => canvas_ui(ui, canvas, theme),
             Dialog::Resolution(resolution) => resolution_ui(ui, resolution, theme),
             Dialog::Shortcuts => shortcuts_ui(ui, cx, size, change_keys, theme),
+            Dialog::Fonts(manager) => {
+                if sue_wm::fonts::manage_ui(ui, manager, theme) {
+                    Outcome::Ok
+                } else {
+                    Outcome::Open
+                }
+            }
         }
     }
 
@@ -470,7 +480,8 @@ impl SuePaint {
             | Dialog::Shortcuts
             | Dialog::Pages(_)
             | Dialog::Comps(_)
-            | Dialog::Exposure => {}
+            | Dialog::Exposure
+            | Dialog::Fonts(_) => {}
         }
     }
 
@@ -513,7 +524,8 @@ impl SuePaint {
             | Dialog::StoryInfo(_)
             | Dialog::StoryEditor(_)
             | Dialog::Convert(..)
-            | Dialog::Shortcuts => {}
+            | Dialog::Shortcuts
+            | Dialog::Fonts(_) => {}
         }
     }
 }

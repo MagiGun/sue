@@ -13,6 +13,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint: Manage Fonts shows Sue's font list, the one every font menu
+  of Sue offers, with a search, each family drawn in its own font, and its
+  faces and a sample line; Pose Scanner (Scan Pose from Image) runs from
+  the command palette and makes a 3D drawing figure first when none is
+  picked. Both join the File menu with the menu work of this release.
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.
