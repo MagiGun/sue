@@ -125,7 +125,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     link(
         "help.feedback",
         "help-feedback-and-requests",
-        "comment",
+        "feedback",
         feedback,
     ),
 ];
@@ -182,6 +182,17 @@ mod tests {
                 command.label
             );
         }
+    }
+
+    #[test]
+    fn feedback_has_the_icon_drawn_for_it() {
+        // `comment` is a comment on a text in Sue Writer; `feedback` is
+        // the bubble the set has for telling the makers of Sue.
+        let feedback = COMMANDS
+            .iter()
+            .find(|command| command.name == "help.feedback")
+            .expect("help.feedback");
+        assert_eq!(feedback.icon, "feedback");
     }
 
     #[test]
