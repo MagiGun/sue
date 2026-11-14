@@ -4,6 +4,7 @@ use std::fmt;
 use std::ops::Range;
 
 use crate::codec::{CodecError, Reader, Writer};
+use crate::pixels::{PixelReader, PixelWriter, TILED};
 use crate::{CoreError, EntityId, Shared};
 
 /// Discriminant of the seven typed buffer components.
@@ -327,6 +328,15 @@ impl PixelFormat {
             Self::RgbaF32 => 2,
         }
     }
+
+    /// The code kept for 16-bit integer gray (one little-endian `u16`
+    /// sample per pixel). No build reads it yet: a raster of this code is
+    /// kept as it is and not drawn, so a `.psd` or `.clip` of 16 bits has
+    /// a place to land without another arena version.
+    pub const GRAY16_CODE: u8 = 3;
+    /// The code kept for 16-bit integer RGBA (four little-endian `u16`
+    /// samples per pixel), as [`Self::GRAY16_CODE`].
+    pub const RGBA16_CODE: u8 = 4;
 
     /// The format a file's code names, if this build knows it.
     #[must_use]
@@ -939,6 +949,48 @@ impl ComponentData {
                     .for_each(|child| out.raw(&child.to_bytes()));
             }
         }
+    }
+
+    /// As [`Self::encode`], but a raster goes by reference into the pixel
+    /// store of the file being written, when there is one.
+    pub(crate) fn encode_with(&self, out: &mut Writer, pixels: Option<&mut PixelWriter<'_>>) {
+        match (self, pixels) {
+            (Self::RasterTile2D(tile), Some(pixels)) => pixels.write_raster(tile, out),
+            _ => self.encode(out),
+        }
+    }
+
+    /// As [`Self::decode_if_known`], reading a raster written by reference
+    /// from `pixels`, the store of the file being read. Without a store, a
+    /// raster by reference is one this build cannot read, kept as bytes.
+    ///
+    /// # Errors
+    /// If the bytes are malformed, or a tile is missing or damaged.
+    pub(crate) fn decode_if_known_with(
+        kind: ComponentKind,
+        input: &mut Reader<'_>,
+        pixels: Option<&PixelReader<'_>>,
+    ) -> Result<Option<Self>, CodecError> {
+        if kind == ComponentKind::RasterTile2D
+            && let Some(pixels) = pixels
+        {
+            let mut peek = input.clone();
+            let tiled = peek
+                .raw(8)
+                .and_then(|_| peek.u8())
+                .is_ok_and(|code| code & TILED != 0);
+            if tiled {
+                let mut body = input.clone();
+                return Ok(match pixels.read_raster(&mut body)? {
+                    Some(tile) => {
+                        *input = body;
+                        Some(Self::RasterTile2D(tile))
+                    }
+                    None => None,
+                });
+            }
+        }
+        Self::decode_if_known(kind, input)
     }
 
     /// As [`Self::decode`], but a payload this build cannot read because a

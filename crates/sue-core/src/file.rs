@@ -28,6 +28,10 @@ use std::convert::Infallible;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
 use crate::codec::{CodecError, Reader, Writer, crc32};
+use crate::pixels::{
+    KEY_WIDTH, PixelOptions, PixelReader, PixelWriter, StoreHeader, VERSION as PIXELS_VERSION,
+    may_refer_to_blobs,
+};
 use crate::{Arena, ComponentRegistry, PresetLibrary, Properties};
 
 /// The first eight bytes of every `.sue` file.
@@ -42,8 +46,22 @@ pub const META: [u8; 4] = *b"META";
 pub const PRESETS: [u8; 4] = *b"PRST";
 /// A small preview picture (PNG or JPEG XL bytes).
 pub const THUMBNAIL: [u8; 4] = *b"THMB";
+/// The pixel store: the tiles of the rasters an [`ARENA`] of version 2
+/// writes by reference ([`crate::pixels`]).
+pub const PIXELS: [u8; 4] = *b"PIXL";
 const END: [u8; 4] = *b"END\0";
-const ARENA_VERSION: u32 = 1;
+/// The arena version whose rasters may go by reference into [`PIXELS`].
+const ARENA_VERSION: u32 = 2;
+/// The arena version of 0.0.75 and older: every raster inline.
+const ARENA_VERSION_INLINE: u32 = 1;
+/// The tags this build knows. Any other chunk may point at blobs of the
+/// pixel store, so they are kept (Rule 3). A chunk a feature of this build
+/// adds must be named here, or no save drops a blob again.
+const KNOWN: [[u8; 4]; 5] = [ARENA, META, PRESETS, THUMBNAIL, PIXELS];
+/// Chunks only builds older than the pixel store wrote (the canvas layout
+/// of the builds before the Hub). This build does not read them and keeps
+/// them, but they cannot point at a blob, so they keep no blob alive.
+const OLDER_THAN_PIXELS: [[u8; 4]; 1] = [*b"SCNE"];
 /// Tag, version and length: what stands before a chunk's payload.
 const FRAME: usize = 16;
 
@@ -57,6 +75,13 @@ fn damaged(tag: [u8; 4], offset: usize) -> CodecError {
     CodecError::new(
         format!("the {} part of the document is damaged", tag_name(tag)),
         offset,
+    )
+}
+
+fn newer(part: &str, version: u32) -> CodecError {
+    CodecError::new(
+        format!("the document was saved by a newer Sue ({part} version {version})"),
+        0,
     )
 }
 
@@ -299,7 +324,8 @@ impl SueFile {
         Some(self.chunks.remove(index))
     }
 
-    /// Stores `arena` in the [`ARENA`] chunk.
+    /// Stores `arena` in the [`ARENA`] chunk, its rasters as tiles in the
+    /// [`PIXELS`] chunk ([`PixelOptions::SAVE`]).
     pub fn set_arena(&mut self, arena: &Arena) {
         self.set_arena_where(arena, &|_| true);
     }
@@ -307,38 +333,168 @@ impl SueFile {
     /// Stores the entities of `arena` that `keep` accepts, with the
     /// relations between them.
     pub fn set_arena_where(&mut self, arena: &Arena, keep: &dyn Fn(&crate::Entity) -> bool) {
-        let mut out = Writer::new();
-        arena.encode_where(&mut out, keep);
-        self.set(Chunk {
-            tag: ARENA,
-            version: ARENA_VERSION,
-            payload: out.into_bytes(),
-        });
+        self.set_arena_with(arena, keep, &PixelOptions::SAVE);
     }
 
-    /// Reads the [`ARENA`] chunk (an empty arena if there is none).
+    /// As [`Self::set_arena_where`], with the pixels written as `options`
+    /// say.
+    ///
+    /// The arena is version 2 when a raster went into the pixel store and
+    /// version 1, as 0.0.75 wrote it, when none did (a document without
+    /// pictures). The store holds each distinct tile once. A blob of the
+    /// store this file was read with is written back, even when no raster
+    /// points at it any more, whenever something this build cannot read
+    /// may point at it: a chunk it does not know, or an entity holding an
+    /// unread component, a tail, an opaque extension component or an
+    /// opaque value (Rule 3). Otherwise only the blobs the rasters use are
+    /// written.
+    pub fn set_arena_with(
+        &mut self,
+        arena: &Arena,
+        keep: &dyn Fn(&crate::Entity) -> bool,
+        options: &PixelOptions,
+    ) {
+        let old = self
+            .chunks
+            .iter_mut()
+            .find(|chunk| chunk.tag == PIXELS)
+            .map(|chunk| (chunk.version, std::mem::take(&mut chunk.payload)));
+        let unknown =
+            self.chunks.iter().any(|chunk| {
+                !KNOWN.contains(&chunk.tag) && !OLDER_THAN_PIXELS.contains(&chunk.tag)
+            }) || arena
+                .iter()
+                .any(|(_, entity)| keep(entity) && may_refer_to_blobs(entity));
+        let mut out = Writer::new();
+        let (arena_version, store) = match &old {
+            Some((version, payload)) if unknown => {
+                // New tiles share the old store's keys, so its keys must be
+                // wide enough to name every tile of this save (D12: at
+                // least 128 bits); a narrower store is kept as it is.
+                let reader = PixelReader::parse(payload).ok().filter(|reader| {
+                    *version == PIXELS_VERSION && reader.header().key_width >= KEY_WIDTH
+                });
+                if let Some(reader) = reader {
+                    let mut pixels = PixelWriter::keeping(&reader, options);
+                    arena.encode_where_with(&mut out, keep, Some(&mut pixels));
+                    let store = pixels.finish().map(|payload| (PIXELS_VERSION, payload));
+                    (ARENA_VERSION, store)
+                } else {
+                    // A store this build cannot read stays as it was, and
+                    // the rasters go inline beside it.
+                    arena.encode_where(&mut out, keep);
+                    (ARENA_VERSION_INLINE, Some((*version, payload.clone())))
+                }
+            }
+            _ => {
+                let mut pixels = PixelWriter::new(options);
+                arena.encode_where_with(&mut out, keep, Some(&mut pixels));
+                match pixels.finish() {
+                    Some(payload) => (ARENA_VERSION, Some((PIXELS_VERSION, payload))),
+                    None => (ARENA_VERSION_INLINE, None),
+                }
+            }
+        };
+        self.set(Chunk {
+            tag: ARENA,
+            version: arena_version,
+            payload: out.into_bytes(),
+        });
+        match store {
+            Some((version, payload)) => self.set(Chunk {
+                tag: PIXELS,
+                version,
+                payload,
+            }),
+            None => {
+                self.remove(PIXELS);
+            }
+        }
+    }
+
+    /// A copy of this file that Sue 0.0.75 and older open: `arena` in an
+    /// [`ARENA`] chunk of version 1 with every raster inline, no pixel
+    /// store, and the other chunks as they are. What such a build cannot
+    /// read is left out of the copy and named in the second value, for the
+    /// conversion report: today the components a later Sue wrote in a form
+    /// this build keeps without reading (an older Sue refuses the whole
+    /// file over one).
+    #[must_use]
+    pub fn copy_for_older_sue(&self, arena: &Arena) -> (Self, Vec<String>) {
+        let mut older = arena.clone();
+        let handles: Vec<_> = older.iter().map(|(handle, _)| handle).collect();
+        let mut left_out = Vec::new();
+        for handle in handles {
+            if let Ok(entity) = older.get_mut(handle)
+                && entity.forget_unread_components()
+            {
+                left_out.push(entity.name().to_owned());
+            }
+        }
+        let mut out = Writer::new();
+        older.encode(&mut out);
+        let mut copy = Self {
+            version: self.version,
+            extension: self.extension.clone(),
+            chunks: self
+                .chunks
+                .iter()
+                .filter(|chunk| chunk.tag != PIXELS)
+                .cloned()
+                .collect(),
+        };
+        copy.set(Chunk {
+            tag: ARENA,
+            version: ARENA_VERSION_INLINE,
+            payload: out.into_bytes(),
+        });
+        (copy, left_out)
+    }
+
+    /// Reads the [`ARENA`] chunk (an empty arena if there is none), with
+    /// the rasters of a version 2 arena from the [`PIXELS`] chunk.
     ///
     /// # Errors
-    /// If the chunk is malformed or written by a newer Sue.
+    /// If the chunk is malformed or written by a newer Sue, or a raster's
+    /// pixels are missing or damaged (the error names its entity).
     pub fn arena(&self, registry: &ComponentRegistry) -> Result<Arena, CodecError> {
         let Some(chunk) = self.chunk(ARENA) else {
             return Ok(Arena::new());
         };
         if chunk.version > ARENA_VERSION {
-            return Err(CodecError::new(
-                format!(
-                    "the document was saved by a newer Sue (arena version {})",
-                    chunk.version
-                ),
-                0,
-            ));
+            return Err(newer("arena", chunk.version));
         }
+        let pixels = if chunk.version >= ARENA_VERSION {
+            let store = self
+                .chunk(PIXELS)
+                .ok_or_else(|| CodecError::new("the pixel store of the document is missing", 0))?;
+            if store.version > PIXELS_VERSION {
+                return Err(newer("pixel store", store.version));
+            }
+            Some(PixelReader::parse(&store.payload)?)
+        } else {
+            None
+        };
         let mut input = Reader::new(&chunk.payload);
-        let arena = Arena::decode(&mut input, registry)?;
+        let arena = Arena::decode_with(&mut input, registry, pixels.as_ref())?;
         if !input.is_empty() {
             return Err(input.error("unexpected bytes after the arena"));
         }
         Ok(arena)
+    }
+
+    /// The header of the [`PIXELS`] chunk (tile size, hash kind, key
+    /// width), if the file has one this build reads.
+    ///
+    /// # Errors
+    /// If the chunk is malformed.
+    pub fn pixel_store(&self) -> Result<Option<StoreHeader>, CodecError> {
+        match self.chunk(PIXELS) {
+            Some(store) if store.version <= PIXELS_VERSION => {
+                PixelReader::parse(&store.payload).map(|reader| Some(reader.header()))
+            }
+            _ => Ok(None),
+        }
     }
 
     /// Stores document properties in the [`META`] chunk.

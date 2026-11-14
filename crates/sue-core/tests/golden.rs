@@ -17,7 +17,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use sue_core::codec::{CodecError, Reader, Writer};
-use sue_core::file::{ARENA, META, PRESETS, THUMBNAIL};
+use sue_core::file::{ARENA, META, PIXELS, PRESETS, THUMBNAIL};
 use sue_core::{
     ASTNode, Arena, CHILD, Chunk, Color, ColorSpace, ComponentData, ComponentKind,
     ComponentRegistry, ComponentType, Entity, EntityId, MeshBuffer3D, OpaqueComponent, OrderKey,
@@ -439,8 +439,9 @@ fn describe(file: &SueFile, registry: &ComponentRegistry) -> String {
     if let Some(thumbnail) = file.chunk(THUMBNAIL) {
         let _ = writeln!(out, "thumbnail {}", hex(&thumbnail.payload));
     }
+    // The pixel store is the arena's own, read above with it.
     for chunk in file.chunks() {
-        if ![ARENA, META, PRESETS, THUMBNAIL].contains(&chunk.tag) {
+        if ![ARENA, META, PRESETS, THUMBNAIL, PIXELS].contains(&chunk.tag) {
             let _ = writeln!(
                 out,
                 "unknown chunk {} version {}: {}",

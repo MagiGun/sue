@@ -11,8 +11,13 @@ license-file.workspace = true
 [lints]
 workspace = true
 
-# Only the tile codec benchmark (tests/codec_bench.rs) uses these; the
-# kernel itself depends on nothing.
+# The pixel store (src/pixels.rs): tile keys and the deflate of the
+# planes codec. Both are pure Rust and build for every target.
+[dependencies]
+miniz_oxide.workspace = true
+sha2.workspace = true
+
+# Only the tile codec benchmark (tests/codec_bench.rs) uses these.
 [dev-dependencies]
 jxl-oxide.workspace = true
 miniz_oxide.workspace = true

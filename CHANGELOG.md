@@ -34,6 +34,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- A Sue project (`.sue`) with pictures is far smaller and the same on
+  disk however it is saved: pixels are stored as 256 pixel tiles, an
+  empty or single color tile costs a byte, a tile found twice (a duplicated
+  layer, a held animation cel) is stored once, and the rest is
+  compressed without loss. An empty A4 layer at 350 dpi took 47 MB and
+  now takes a few bytes. Sue 0.0.75 and older cannot open such a file
+  and say that it was saved by a newer Sue; projects without pictures
+  are written as before.
 - A picture you open with Open File (`Ctrl+O`), drop on the window or
   hand to Sue from the system now opens in Sue Paint as a new canvas,
   not in the Image Viewer. That includes GIF, TGA, QOI, ICO and the
