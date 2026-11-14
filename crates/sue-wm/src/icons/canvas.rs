@@ -16,8 +16,15 @@ pub(super) const FRAME: &str = "M3.75 6.75 V5.75 A2 2 0 0 1 5.75 3.75 H6.75 M9.7
                                 H14.25 M6.75 20.25 H5.75 A2 2 0 0 1 3.75 18.25 V17.25 M3.75 9.75 \
                                 V14.25";
 
-/// The line that strikes the selection out.
+/// The line that strikes the selection out, from corner to corner where
+/// the dashed box leaves out its two corners.
 const SLASH: &str = "M3.75 20.25 L20.25 3.75";
+
+/// The dashed box of a selection without its top right and bottom left
+/// corners, which the slash takes the place of.
+const STRUCK: &str = "M3.75 6.75 V5.75 A2 2 0 0 1 5.75 3.75 H6.75 M9.75 3.75 H14.25 M20.25 \
+                      9.75 V14.25 M20.25 17.25 V18.25 A2 2 0 0 1 18.25 20.25 H17.25 M9.75 \
+                      20.25 H14.25 M3.75 9.75 V14.25";
 
 /// The solid half of the inverted selection.
 const HALF: &str = "M20.25 9.75 V18.25 A2 2 0 0 1 18.25 20.25 H9.75 Z";
@@ -48,7 +55,7 @@ pub(super) const SELECT_ALL: Art = Art {
 
 pub(super) const DESELECT: Art = Art {
     keyline: Keyline::Square,
-    line: &[Part::Stroke(FRAME), Part::Clear(SLASH), Part::Stroke(SLASH)],
+    line: &[Part::Stroke(STRUCK), Part::Stroke(SLASH)],
     solid: &[],
 };
 

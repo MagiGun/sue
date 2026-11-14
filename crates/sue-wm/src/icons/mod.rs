@@ -440,9 +440,9 @@ icons! {
     /// A box drawn with a dashed line: the marching line round a
     /// selected area. The selection tool.
     ToolSelect = "tool-select" => tools::TOOL_SELECT,
-    /// A lasso: a flat loop of rope, a solid knot on its lower left and
-    /// the loose end of the rope hanging from the knot. The tool that
-    /// selects an area drawn freehand.
+    /// A lasso: a flat loop of rope, and the loose end of the rope
+    /// hanging from its lower left and curling away to the right. The
+    /// tool that selects an area drawn freehand.
     ToolSelectLasso = "tool-select-lasso" => tools::TOOL_SELECT_LASSO,
     /// A magic wand: a slim rod rising to the right, a band round it
     /// near its tip, and a solid sparkle of four points just past the
@@ -483,9 +483,10 @@ icons! {
     /// level of the paint in it, and a solid drop falling from its lip.
     /// The fill tool.
     ToolFill = "tool-fill" => tools::TOOL_FILL,
-    /// A frame with a solid band down its left side and three upright
-    /// bars after it, each thinner than the last, then nothing: a tone
-    /// that fades from full to empty. The gradient tool.
+    /// A frame with a solid band down its left side and three columns
+    /// of solid dots after it, each column of smaller dots than the
+    /// last: a tone that fades from full to empty, as print shows it.
+    /// The gradient tool.
     ToolGradient = "tool-gradient" => tools::TOOL_GRADIENT,
     /// A circle in front of a square, the square showing behind it at
     /// the top left. The tool that draws lines and shapes.
