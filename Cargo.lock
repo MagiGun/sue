@@ -3802,6 +3802,7 @@ version = "0.0.75"
 dependencies = [
  "egui",
  "sue-ai",
+ "sue-brush",
  "sue-core",
  "sue-io",
  "sue-lang",
