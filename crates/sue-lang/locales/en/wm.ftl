@@ -272,5 +272,6 @@ hub-forgot = { $count ->
    *[other] { $count } files that are gone were taken off the list
 }
 hub-search = Search or run a command
+hub-search-files = Search files
 hub-search-hint = Find a command, a setting or a studio (Tab)
 files-transfers = Transfers

@@ -70,6 +70,12 @@ pub struct Browse {
     pub drawn: Vec<(Spot, Rect)>,
     /// The kept work whose Discard was clicked once and asks again.
     pub discard_armed: Option<String>,
+    /// What the search field says while empty (`None`: "Search
+    /// projects", as Sue Paint's launcher has it).
+    pub hint: Option<String>,
+    /// Every card the last frame drew, in reading order, for the host's
+    /// keyboard walk.
+    pub focus: Vec<egui::Response>,
 }
 
 /// A place on a card that [`Browse::drawn`] reports.
@@ -121,6 +127,7 @@ pub fn browse(
 ) -> Vec<Event> {
     let mut events = Vec::new();
     options.drawn.clear();
+    options.focus.clear();
     let compact = options.compact;
     let all = items(cx.work, studios);
     // A label just added is renamed once it shows.
@@ -313,7 +320,10 @@ pub fn browse(
     page::search_box(
         &mut area,
         &mut state.search,
-        &tr!("start-search-projects"),
+        &options
+            .hint
+            .clone()
+            .unwrap_or_else(|| tr!("start-search-projects")),
         right.width(),
         theme,
     );
@@ -355,21 +365,17 @@ pub fn browse(
         // As far from the chips as a lone name is: its gap and a spacing.
         width + 6.0 + area.spacing().item_spacing.x
     });
+    // A row's name is as tall as its chips and centred on them (the row
+    // learns its height only from the chips that follow it).
     let name = |ui: &mut Ui, text: String| {
-        if let Some(width) = names {
-            let galley =
-                ui.painter()
-                    .layout_no_wrap(text, theme.font(theme.small_size + 1.0), theme.muted);
-            let (rect, _) = ui.allocate_exact_size(vec2(width, galley.size().y), Sense::hover());
-            ui.painter().galley(rect.min, galley, theme.muted);
-        } else {
-            ui.label(
-                egui::RichText::new(text)
-                    .color(theme.muted)
-                    .size(theme.small_size + 1.0),
-            );
-            ui.add_space(6.0);
-        }
+        let galley =
+            ui.painter()
+                .layout_no_wrap(text, theme.font(theme.small_size + 1.0), theme.muted);
+        let width = names.unwrap_or(galley.size().x + 6.0);
+        let height = page::chip_height(ui, theme).max(galley.size().y);
+        let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+        let at = pos2(rect.left(), rect.center().y - galley.size().y / 2.0);
+        ui.painter().galley(at, galley, theme.muted);
     };
     if studios.len() > 1 {
         area.horizontal(|ui| {
@@ -561,6 +567,7 @@ pub fn browse(
                 options
                     .drawn
                     .push((Spot::Card(item.key.clone()), response.rect));
+                options.focus.push(response.clone());
                 if let ProjectKey::Kept(id) = &item.key {
                     let [recover, discard] = kept_buttons(ui, &response, state.view, theme);
                     options.drawn.push((Spot::Recover(id.clone()), recover));

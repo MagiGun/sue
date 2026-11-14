@@ -127,6 +127,7 @@ impl Shell {
         let more = crate::ui::icon_button("sue-hub-upkeep", Icon::More, &tr!("hub-upkeep"))
             .show(&mut tools, theme);
         self.hub.buttons.push((HubButton::Upkeep, more.rect));
+        self.hub.walk.push(more.clone());
         let items = upkeep_items();
         let picked = self.hub.upkeep.dropdown(
             ui,
@@ -169,6 +170,7 @@ impl Shell {
         body_ui.set_clip_rect(body.intersect(ui.clip_rect()));
         let studios = studios(io);
         self.hub.browse.compact = narrow;
+        self.hub.browse.hint = Some(tr!("hub-search-files"));
         self.hub.browse.discard_armed = self.discard_armed.take();
         let events = {
             let (_, mut cx) = split(io, theme, view.clone());
@@ -183,6 +185,8 @@ impl Shell {
             )
         };
         self.discard_armed = self.hub.browse.discard_armed.take();
+        // The arrow keys walk on from the menu to the cards.
+        self.hub.walk.append(&mut self.hub.browse.focus);
         for (spot, rect) in &self.hub.browse.drawn {
             let row = match spot {
                 Spot::Card(ProjectKey::File(path)) => HubRow::Open(path.clone()),

@@ -477,6 +477,17 @@ pub fn progress(ui: &mut Ui, width: f32, fraction: f32, theme: &Theme) {
     );
 }
 
+/// How tall a [`chip`] is: finger sized on touch.
+#[must_use]
+pub fn chip_height(ui: &Ui, theme: &Theme) -> f32 {
+    let density = Density::of(ui);
+    if density == Density::Touch {
+        density.min_hit()
+    } else {
+        density.min_hit() - theme.space(Space::S2)
+    }
+}
+
 /// A chip: a small button that stays lit while `on`.
 pub fn chip(ui: &mut Ui, label: &str, on: bool, theme: &Theme) -> Response {
     let galley = ui.painter().layout_no_wrap(
@@ -484,12 +495,7 @@ pub fn chip(ui: &mut Ui, label: &str, on: bool, theme: &Theme) -> Response {
         theme.font(theme.small_size + 1.0),
         theme.text,
     );
-    let density = Density::of(ui);
-    let height = if density == Density::Touch {
-        density.min_hit()
-    } else {
-        density.min_hit() - theme.space(Space::S2)
-    };
+    let height = chip_height(ui, theme);
     let size = vec2(galley.size().x + height, height);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let painter = ui.painter();
