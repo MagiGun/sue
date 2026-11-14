@@ -404,7 +404,9 @@ impl<'a> TabStrip<'a> {
                 (true, true) => Sense::click_and_drag(),
                 (true, false) => Sense::click(),
             };
-            let tab_response = ui.interact(rect, id, sense);
+            // A tab that runs past the end of the strip takes the pointer
+            // only where it shows.
+            let tab_response = ui.interact(rect.intersect(strip), id, sense);
             let selected = Some(index) == self.chosen;
             tab_response
                 .widget_info(|| WidgetInfo::selected(Role::Tab, enabled, selected, tab.label));
@@ -486,21 +488,40 @@ impl<'a> TabStrip<'a> {
                 tab_response.on_hover_text(tab.label);
             }
         }
-        // The line under the chosen tab, gliding to it.
+        // The tab being dragged, lifted over the strip: it carries the
+        // line with it when it is the chosen one.
+        let carried = lifted.and_then(|(index, id, rect, named)| {
+            let shown = self.drag_ui(
+                ui,
+                theme,
+                (index, id, rect, named),
+                (strip, &places),
+                pointer,
+                &mut output,
+            );
+            shown.filter(|_| Some(index) == self.chosen)
+        });
+        // The line under the chosen tab, gliding to it. It glides along
+        // the strip, not across the window: a strip that moves (a panel
+        // being resized, a page scrolled) takes its line with it.
         if let Some(rect) = chosen_rect {
             let inset = theme.radius(Radius::Sm);
             let from = glide(
                 ui.ctx(),
                 self.id.with("sue-line-left"),
-                rect.left() + inset,
+                rect.left() + inset - strip.left(),
                 Pace::Base,
             );
             let to = glide(
                 ui.ctx(),
                 self.id.with("sue-line-right"),
-                rect.right() - inset,
+                rect.right() - inset - strip.left(),
                 Pace::Base,
             );
+            let (from, to) = match carried {
+                Some(shown) => (shown.left() + inset, shown.right() - inset),
+                None => (strip.left() + from, strip.left() + to),
+            };
             let thick = Theme::STRONG_STROKE;
             let line =
                 Rect::from_min_max(pos2(from, strip.bottom() - thick), pos2(to, strip.bottom()));
@@ -508,16 +529,6 @@ impl<'a> TabStrip<'a> {
                 line,
                 theme.corner(Radius::Full),
                 theme.selected_stroke().color,
-            );
-        }
-        if let Some((index, id, rect, named)) = lifted {
-            self.drag_ui(
-                ui,
-                theme,
-                (index, id, rect, named),
-                (strip, &places),
-                pointer,
-                &mut output,
             );
         }
         // Arrow keys: the tab they reach is shown.
@@ -571,7 +582,8 @@ impl<'a> TabStrip<'a> {
 
     /// The tab being dragged: it follows the pointer along the strip,
     /// trades places with the neighbour whose middle it passes and tears
-    /// off when it leaves the strip.
+    /// off when it leaves the strip. Returns where it is drawn, unless it
+    /// was torn off.
     fn drag_ui(
         &self,
         ui: &Ui,
@@ -580,8 +592,8 @@ impl<'a> TabStrip<'a> {
         (strip, places): (Rect, &[Rect]),
         pointer: Option<Pos2>,
         output: &mut TabsOutput,
-    ) {
-        let Some(at) = pointer else { return };
+    ) -> Option<Rect> {
+        let at = pointer?;
         let key = id.with("sue-grab");
         let mut grab: Grab = ui.data(|data| data.get_temp(key)).unwrap_or(Grab {
             offset: rect.width() / 2.0,
@@ -595,7 +607,7 @@ impl<'a> TabStrip<'a> {
         }
         if grab.torn {
             // It is the caller's now; the strip keeps its place empty.
-            return;
+            return None;
         }
         let left = if self.reorder {
             (at.x - grab.offset).clamp(
@@ -636,6 +648,7 @@ impl<'a> TabStrip<'a> {
             Self::padding(theme, density),
             false,
         );
+        Some(shown)
     }
 }
 
@@ -882,18 +895,21 @@ impl<'a> SidebarTabs<'a> {
         // The bar at the chosen tab's start, gliding to it.
         if let Some(rect) = chosen_rect {
             let reach = rect.height() * 0.25;
-            let top = glide(
-                ui.ctx(),
-                self.id.with("sue-bar-top"),
-                rect.top() + reach,
-                Pace::Base,
-            );
-            let bottom = glide(
-                ui.ctx(),
-                self.id.with("sue-bar-bottom"),
-                rect.bottom() - reach,
-                Pace::Base,
-            );
+            // Along the column, so a column that moves takes its bar.
+            let top = column.top()
+                + glide(
+                    ui.ctx(),
+                    self.id.with("sue-bar-top"),
+                    rect.top() + reach - column.top(),
+                    Pace::Base,
+                );
+            let bottom = column.top()
+                + glide(
+                    ui.ctx(),
+                    self.id.with("sue-bar-bottom"),
+                    rect.bottom() - reach - column.top(),
+                    Pace::Base,
+                );
             let thick = Theme::STRONG_STROKE;
             let left = rect.left() + theme.space(Space::S1);
             let bar = Rect::from_min_max(pos2(left, top), pos2(left + thick, bottom));
@@ -1233,6 +1249,43 @@ mod tests {
         let (_, rects, _) = run.frame(Vec::new(), draw).0;
         let seen = run.click(at(rects[2], 0.2, 0.5), |ui, theme| draw(ui, theme).0);
         assert!(chosen(&seen).is_empty() && closed(&seen).is_empty());
+    }
+
+    #[test]
+    fn a_strip_that_moves_takes_its_line_along_at_once() {
+        let mut run = Run::new();
+        let order = [0, 1, 2, 3];
+        let draw = |ui: &mut Ui, theme: &Theme, x: f32| {
+            let room = Rect::from_min_size(pos2(x, 10.0), vec2(500.0, 60.0));
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(room));
+            strip(&mut child, theme, &order, 2, false).0
+        };
+        let _ = run.settle(|ui, theme| draw(ui, theme, 0.0));
+        // A panel being resized moves the strip a little every frame:
+        // nothing glides, so nothing asks for frames.
+        for x in [30.0, 60.0, 90.0] {
+            let (_, again) = run.frame(Vec::new(), |ui, theme| draw(ui, theme, x));
+            assert!(!again, "the line moved with the strip at {x}");
+        }
+    }
+
+    #[test]
+    fn a_tab_past_the_end_of_the_strip_takes_no_click() {
+        let mut run = Run::new();
+        let order = [0, 1, 2, 3];
+        let draw = |ui: &mut Ui, theme: &Theme| {
+            ui.set_max_width(120.0);
+            strip(ui, theme, &order, 0, false)
+        };
+        let (output, _, _) = run.frame(Vec::new(), draw).0;
+        let edge = output.response.rect.right();
+        let past = pos2(edge + 40.0, output.response.rect.center().y);
+        let seen = run.click(past, |ui, theme| draw(ui, theme).0);
+        assert!(chosen(&seen).is_empty() && closed(&seen).is_empty());
+        // Inside the strip the cut tabs still answer.
+        let inside = pos2(edge - 10.0, past.y);
+        let seen = run.click(inside, |ui, theme| draw(ui, theme).0);
+        assert_eq!(chosen(&seen).len(), 1);
     }
 
     #[test]
