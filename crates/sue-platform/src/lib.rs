@@ -169,9 +169,5 @@ pub fn process_id() -> u32 {
     }
 }
 
-/// `false` where Sue cannot start threads of its own (the browser, as a
-/// static page without wasm threads): work meant for a worker runs where
-/// it is asked for.
-pub const THREADS: bool = !cfg!(target_arch = "wasm32");
 /// The `wgpu` version Sue renders with, re-exported so renderers match it.
 pub use wgpu;
