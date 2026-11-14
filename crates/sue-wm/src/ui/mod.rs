@@ -14,11 +14,26 @@
 //!
 //! The components built on these (buttons, fields, menus, dialogs) get one
 //! file each beside these three.
+//!
+//! - [`mod@button`]: buttons in four kinds, toggle, icon and split buttons,
+//!   links.
+//! - [`choice`]: checkboxes, radio buttons, switches, segmented strips
+//!   and chips.
 
+pub mod button;
+pub mod choice;
 pub mod focus;
 pub mod motion;
 pub mod tokens;
 
+pub use button::{
+    Button, ButtonKind, IconButton, Link, Sheet, SplitButton, SplitResponse, button, icon_button,
+    link, split_button, toggle_button,
+};
+pub use choice::{
+    Check, Chip, ChipResponse, Marked, Segmented, SegmentedResponse, checkbox, chip, radio, rove,
+    segmented, switch,
+};
 pub use focus::{FocusScope, Roving, focus_ring, focus_visible, paint_focus_ring, watch_focus};
 pub use motion::{Motion, Pace};
 pub use tokens::{
