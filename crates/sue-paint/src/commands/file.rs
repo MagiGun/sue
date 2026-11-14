@@ -301,6 +301,23 @@ fn import_3d(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     ));
 }
 
+/// File, Import, Pose Scanner: a photo poses the 3D drawing figure that
+/// is picked, as the figure's own Pose Scanner button does. With no
+/// figure picked, a new one is made first (one step that undoes), then
+/// the photo is asked for.
+fn import_pose_scanner(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    let picked = paint.layer().is_some_and(|layer| {
+        crate::figure::of_layer(&cx.world.arena, layer)
+            .and_then(|model| cx.world.arena.get_by_id(model).ok())
+            .is_some_and(|model| crate::figure::Body::of(model).kind == crate::figure::Kind::Body)
+    });
+    if !picked {
+        let name = tr!("drawing-figure");
+        paint.add_3d_layer(cx, &name, crate::figure::new_model(&name));
+    }
+    paint.pick_scan(cx, false);
+}
+
 /// Export an animation as a movie, an animated picture or a picture
 /// sequence.
 fn export_animation(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
@@ -447,6 +464,12 @@ fn modifiers(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 fn command_bar(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
     paint.panels.command_bar = true;
     paint.dialog = Some(Dialog::CommandBar(String::new()));
+}
+
+/// Manage Fonts: Sue's shared font list, the one every font menu of Sue
+/// shows.
+fn manage_fonts(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.dialog = Some(Dialog::Fonts(sue_wm::fonts::FontManager::default()));
 }
 
 fn pressure(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
@@ -779,6 +802,23 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     Command::family("file.recent.open.", "open-recent", "file", open_recent)
         .icon("recent")
         .state(doc_open),
+    // Added for the tutorials (gap CC-12, CT-35). P3-2 puts them in the
+    // File menu (Manage Fonts after Modifier Key Settings, Pose Scanner
+    // under Import); until then the command palette offers them.
+    on(
+        "file.fonts",
+        "manage-fonts-ellipsis",
+        "tool-text",
+        manage_fonts,
+    )
+    .with(Flags::PALETTE),
+    c(
+        "file.import.pose_scanner",
+        "pose-scanner-from-image-ellipsis",
+        "material-pose",
+        import_pose_scanner,
+    )
+    .with(Flags::PALETTE),
 ];
 
 #[cfg(test)]

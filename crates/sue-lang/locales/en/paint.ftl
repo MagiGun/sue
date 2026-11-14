@@ -2343,3 +2343,8 @@ zoom-100-percent = 100%
 zoom-200-percent = 200%
 paste-material = Paste Material
 cancel-transform = Cancel Transform
+
+## File menu commands added in 0.0.8 (P3-1, file)
+manage-fonts-ellipsis = Manage Fonts...
+manage-fonts = Manage Fonts
+pose-scanner-from-image-ellipsis = Pose Scanner (Scan Pose from Image)...
