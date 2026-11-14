@@ -111,6 +111,8 @@ impl SuePaint {
     /// Records what an unfinished gesture or slider already changed in
     /// place, so nothing escapes the history when the studio closes.
     pub(super) fn settle(&mut self, cx: &mut AppletContext<'_>) {
+        // A stroke of the new brush engine ends where the pen last was.
+        self.engine_settle(cx);
         match self.gesture.take() {
             Some(Gesture::Stroke { stroke, label, .. }) => {
                 if let Some(raster) = doc::raster(&cx.world.arena, stroke.layer()) {

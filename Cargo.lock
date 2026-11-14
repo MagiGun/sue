@@ -3800,6 +3800,7 @@ version = "0.0.75"
 dependencies = [
  "egui",
  "sue-ai",
+ "sue-brush",
  "sue-core",
  "sue-io",
  "sue-lang",
@@ -3816,6 +3817,7 @@ dependencies = [
 name = "sue-picture"
 version = "0.0.75"
 dependencies = [
+ "sue-brush",
  "sue-core",
  "sue-io",
  "sue-lang",

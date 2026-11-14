@@ -1178,3 +1178,113 @@ fn stroke_ends_sheet() {
     std::fs::write(&path, png).unwrap();
     println!("stroke ends: {}", path.display());
 }
+
+/// Sue Paint with the new brush engine on (`sue_paint.brush_engine`), and
+/// a bigger G-pen, so a line's width can be read.
+fn new_engine(tag: &str) -> Paint {
+    let mut paint = Paint::new(tag);
+    // The key is hidden (not in the shipped rice): as the owner turns it
+    // on, by writing it into the rice file.
+    let _ = paint
+        .runtime
+        .engine
+        .world
+        .rice
+        .register(&sue_rice::RiceDeclaration::new(
+            "sue_paint.brush_engine",
+            sue_rice::RiceParameter::Text {
+                value: "new".to_owned(),
+            },
+            "",
+        ));
+    for _ in 0..8 {
+        paint.step(vec![key(egui::Key::CloseBracket, egui::Modifiers::NONE)]);
+    }
+    paint
+}
+
+/// A sample of the pen's stream at `pos` and `time`, pressing `pressure`.
+fn packet(kind: stylus::PenKind, pos: Pos2, time: f64, pressure: Option<f32>) -> stylus::PenSample {
+    let mut sample = stylus::PenSample::at(PenSource::WinTab, [pos.x, pos.y], time);
+    sample.kind = kind;
+    sample.pressure = pressure;
+    sample
+}
+
+/// The new engine takes every packet of the pen with its own pressure:
+/// forty packets that press harder and harder, all in one frame, draw a
+/// line that widens along its length, not one of the frame's last
+/// pressure. The lift is a frame later and adds nothing; the stroke is
+/// one undo step.
+#[test]
+fn sue_paint_the_new_engine_draws_every_packets_pressure() {
+    let mut paint = new_engine("paint-engine-packets");
+    let start = paint.middle() - vec2(150.0, 0.0);
+    let mut events = vec![
+        egui::Event::PointerMoved(start),
+        button(start, true, egui::Modifiers::NONE),
+    ];
+    let count = 40;
+    for i in 0..=count {
+        let at = start + vec2(300.0 * i as f32 / count as f32, 0.0);
+        let pressure = 0.1 + 0.9 * i as f32 / count as f32;
+        let kind = if i == 0 {
+            stylus::PenKind::Down
+        } else {
+            stylus::PenKind::Move
+        };
+        stylus::push_for_test(packet(kind, at, 5.0 + f64::from(i) / 200.0, Some(pressure)));
+        if i > 0 && i % 4 == 0 {
+            events.push(egui::Event::PointerMoved(at));
+        }
+    }
+    paint.step(events);
+    let end = start + vec2(300.0, 0.0);
+    stylus::push_for_test(packet(stylus::PenKind::Up, end, 5.25, None));
+    paint.step(vec![button(end, false, egui::Modifiers::NONE)]);
+    paint.settle(3);
+    let profile = paint.profile();
+    assert!(profile.len() > 40, "the line was drawn: {profile:?}");
+    let quarter = profile.len() / 4;
+    let early = profile[quarter].1;
+    let late = profile[profile.len() - quarter].1;
+    assert!(
+        early * 3 <= late * 2,
+        "the line widens with the pen's pressure within one frame: {early} px early, {late} px late"
+    );
+    paint.command("edit.undo");
+    assert!(paint.profile().is_empty(), "the stroke was one undo step");
+    paint.command("edit.redo");
+    assert_eq!(paint.profile(), profile, "redo lays it again");
+}
+
+/// With no sample of the pen's stream (a script of pointer events), the
+/// pointer's events are the new engine's samples; its end is no blob.
+#[test]
+fn sue_paint_the_new_engine_draws_from_pointer_events_too() {
+    let mut paint = new_engine("paint-engine-pointer");
+    let start = paint.middle() - vec2(120.0, 0.0);
+    paint.step(vec![
+        egui::Event::PointerMoved(start),
+        button(start, true, egui::Modifiers::NONE),
+    ]);
+    let mut at = start;
+    for _ in 0..30 {
+        at += vec2(8.0, 0.0);
+        paint.step(vec![egui::Event::PointerMoved(at)]);
+    }
+    let end = at + vec2(3.0, 0.0);
+    paint.step(vec![
+        egui::Event::PointerMoved(end),
+        button(end, false, egui::Modifiers::NONE),
+    ]);
+    paint.settle(2);
+    let profile = paint.profile();
+    let (middle, end) = middle_and_end(&profile);
+    assert!(
+        end <= middle + 1,
+        "the end ({end} px) is no blob over the middle ({middle} px)"
+    );
+    paint.command("edit.undo");
+    assert!(paint.profile().is_empty(), "the stroke was one undo step");
+}

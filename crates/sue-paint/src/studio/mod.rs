@@ -165,6 +165,8 @@ pub(crate) struct Shaping {
 /// What a press on the canvas started.
 #[derive(Debug)]
 pub(crate) enum Gesture {
+    /// A stroke of the new brush engine (`sue_paint.brush_engine`).
+    Engine(Box<crate::canvas::engine::EngineStroke>),
     /// A brush stroke (`shifted` is the selection moved into the layer's
     /// pixels when the layer is offset; `trail` the recent raw samples with
     /// their times, for the pen's speed as it lifts).
@@ -705,6 +707,9 @@ pub struct SuePaint {
     pub(crate) cover: f32,
     /// `true` while the studio is the one the shell shows (not leaving).
     pub(crate) present: bool,
+    /// The pen's samples since its latest touch down, for a stroke of the
+    /// new brush engine (see `canvas/engine.rs`).
+    pub(crate) pen_stream: Vec<sue_platform::stylus::PenSample>,
 }
 
 impl Default for SuePaint {
@@ -871,6 +876,7 @@ impl Default for SuePaint {
             ready: true,
             cover: 1.0,
             present: false,
+            pen_stream: Vec::new(),
         }
     }
 }

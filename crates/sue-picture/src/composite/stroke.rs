@@ -6,7 +6,54 @@ use sue_core::{Arena, EntityId};
 
 use super::gather::{Layer, Source, gather_view, prepare};
 use super::rows::{Stack, composite_span, fold, fold_plain, pixel, rows, shown, to_byte, unit};
-use super::{Compositor, RenderOptions, next_version, workers};
+use super::{Compositor, LiveStroke, RenderOptions, next_version, share_pool, workers};
+
+/// A stroke of the brush worker (`sue_brush::worker`) shown over its
+/// layer: the compositor reads the coverage the worker has laid so far
+/// and lays the stroke's ink with it, the way the merge on lift will.
+#[derive(Debug, Clone)]
+pub struct BrushLive {
+    layer: EntityId,
+    view: std::sync::Arc<sue_brush::worker::LiveView>,
+}
+
+impl BrushLive {
+    /// The stroke `view` shows, painted on `layer`.
+    #[must_use]
+    pub fn new(layer: EntityId, view: std::sync::Arc<sue_brush::worker::LiveView>) -> Self {
+        Self { layer, view }
+    }
+}
+
+impl LiveStroke for BrushLive {
+    fn layer(&self) -> EntityId {
+        self.layer
+    }
+
+    fn bounds(&self) -> Option<[i64; 4]> {
+        self.view.bounds().map(|rect| {
+            [
+                i64::from(rect.x0),
+                i64::from(rect.y0),
+                i64::from(rect.x1),
+                i64::from(rect.y1),
+            ]
+        })
+    }
+
+    fn over(&self, x: i64, y: i64, under: [f32; 4]) -> [f32; 4] {
+        self.view.over(x, y, under)
+    }
+}
+
+/// Has the compositor split its work over the brush worker's pool
+/// (`sue_brush::worker::shared_pool`), so painting and showing share one
+/// set of cores, and answers that pool.
+pub fn share_brush_pool() -> std::sync::Arc<sue_core::JobPool> {
+    let pool = sue_brush::worker::shared_pool();
+    share_pool(&pool);
+    pool
+}
 
 /// Side of a [`Focus`] tile.
 const FOCUS_TILE: u32 = 64;
@@ -609,5 +656,111 @@ impl Compositor {
             self.forgotten = version;
         }
         self.seen = signature;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use sue_brush::input::{Device, Kind, Sample, Settings};
+    use sue_brush::worker::{Brush, StrokeWorker};
+    use sue_core::txn::SetProperty;
+    use sue_core::{Color, JobPool, ReversibleTransaction};
+    use sue_model::BrushPreset;
+    use sue_model::brush::param;
+
+    use super::*;
+    use crate::doc::{self, NewPicture};
+
+    #[test]
+    fn the_brush_workers_stroke_shows_live_and_then_from_the_layer() {
+        let mut arena = Arena::new();
+        let (mut edit, picture) = doc::create(&NewPicture {
+            name: "Test".to_owned(),
+            width: 160,
+            height: 90,
+            dpi: 72.0,
+            paper: Some(Color::srgb8(255, 255, 255)),
+            timelapse: false,
+        })
+        .unwrap();
+        edit.apply(&mut arena).unwrap();
+        let layer = doc::layers(&arena, picture).last().unwrap().id;
+        // The layer sits 7 pixels right: the stroke is in its pixels.
+        SetProperty::new(layer, sue_model::picture::X, 7_i64)
+            .apply(&mut arena)
+            .unwrap();
+        let mut compositor = Compositor::new(picture);
+        compositor.sync(&arena);
+        let mut preset = BrushPreset::new("Pen");
+        preset.set(param::SIZE, 9.0);
+        let brush = Brush::new(preset, [1.0, 0.0, 0.0]);
+        let pool = Arc::new(JobPool::new(2));
+        let mut worker = StrokeWorker::start(pool, &brush, Settings::new(Device::Pen));
+        let live: Arc<dyn LiveStroke> = Arc::new(BrushLive::new(layer, worker.live()));
+        compositor.set_live(&arena, Some(live));
+        let mut samples: Vec<Sample> = (0..=40)
+            .map(|i| {
+                let kind = if i == 0 { Kind::Down } else { Kind::Move };
+                Sample::new(kind, [10.0 + 3.0 * i as f32, 40.0], f64::from(i) / 200.0).pressing(1.0)
+            })
+            .collect();
+        samples.push(Sample::new(Kind::Up, [130.0, 40.0], 0.25));
+        let (body, up) = samples.split_at(samples.len() - 1);
+        for frame in body.chunks(5) {
+            worker.push_all(frame);
+            let mut dirty = worker.poll();
+            while worker.is_busy() {
+                std::thread::yield_now();
+                dirty.extend(worker.poll());
+            }
+            let rects: Vec<[u32; 4]> = dirty
+                .iter()
+                .map(|key| {
+                    let [x, y] = key.origin();
+                    let at = |v: i32| (v + 64).max(0) as u32;
+                    [(x + 7).max(0) as u32, y.max(0) as u32, at(x + 7), at(y)]
+                })
+                .collect();
+            compositor.refresh_rects(&arena, &rects, Some(layer));
+        }
+        // Layer pixel (70, 40) is picture pixel (77, 40): red, before the
+        // layer holds a single red pixel.
+        assert_eq!(compositor.pixel(77, 40), Some([255, 0, 0, 255]));
+        assert_eq!(
+            doc::raster(&arena, layer).unwrap().bytes().unwrap()[0..4],
+            [0; 4]
+        );
+        worker.push_all(up);
+        let stroke = worker.finish().unwrap();
+        let edit = stroke
+            .commit(
+                doc::raster_mut(&mut arena, layer).unwrap(),
+                [0, 0],
+                layer,
+                "Pen",
+            )
+            .unwrap();
+        assert!(!edit.is_empty());
+        // Merged: the view ends and shows nothing, so letting it go
+        // recomposites nothing; the merged tiles are shown from the layer.
+        stroke.live().end();
+        compositor.set_live(&arena, None);
+        let rects: Vec<[u32; 4]> = edit
+            .patches()
+            .iter()
+            .map(|p| [p.x + 7, p.y, p.x + 7 + p.width, p.y + p.height])
+            .collect();
+        compositor.refresh_rects(&arena, &rects, Some(layer));
+        assert_eq!(compositor.pixel(77, 40), Some([255, 0, 0, 255]));
+        assert_eq!(compositor.pixel(77, 10), Some([255, 255, 255, 255]));
+        assert!(compositor.live().is_none());
+    }
+
+    #[test]
+    fn sharing_the_brush_pool_sizes_the_compositors_splits() {
+        let pool = share_brush_pool();
+        assert_eq!(workers(), pool.threads().max(1));
     }
 }
