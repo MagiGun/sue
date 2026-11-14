@@ -175,3 +175,10 @@ menu-check-for-updates = 检查更新
 menu-about = 关于 { $studio }
 menu-note-coming-later = 即将推出
 menu-note-needs-selection = 需要先选择
+## ui/dialog.rs, ui/toast.rs
+
+ok = 确定
+cancel = 取消
+dialog-close = 关闭
+toast-dismiss = 忽略
+notices = 通知

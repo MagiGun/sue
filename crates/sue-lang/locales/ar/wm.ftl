@@ -203,3 +203,10 @@ menu-check-for-updates = التحقق من وجود تحديثات
 menu-about = حول { $studio }
 menu-note-coming-later = يأتي لاحقًا
 menu-note-needs-selection = يتطلب تحديدًا
+## ui/dialog.rs, ui/toast.rs
+
+ok = موافق
+cancel = إلغاء
+dialog-close = إغلاق
+toast-dismiss = تجاهل
+notices = الإشعارات

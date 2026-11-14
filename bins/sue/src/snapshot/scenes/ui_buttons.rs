@@ -2,7 +2,8 @@
 //! sheets. They are not part of Sue's interface; they are the pictures
 //! the components are judged on, in the theme and at the scale of the run.
 
-use sue_wm::ui::{Sheet, button, choice};
+use sue_wm::ui::button::Sheet;
+use sue_wm::ui::{button, choice};
 
 use super::super::Tour;
 

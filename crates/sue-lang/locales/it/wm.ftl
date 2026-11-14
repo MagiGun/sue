@@ -187,3 +187,10 @@ menu-check-for-updates = Controlla aggiornamenti
 menu-about = Informazioni su { $studio }
 menu-note-coming-later = Arriverà più avanti
 menu-note-needs-selection = Serve una selezione
+## ui/dialog.rs, ui/toast.rs
+
+ok = OK
+cancel = Annulla
+dialog-close = Chiudi
+toast-dismiss = Ignora
+notices = Notifiche

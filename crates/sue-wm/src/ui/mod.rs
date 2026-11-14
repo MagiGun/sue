@@ -32,6 +32,7 @@
 pub mod button;
 pub mod card;
 pub mod choice;
+pub mod dialog;
 pub mod focus;
 pub mod input;
 pub mod list;
@@ -42,12 +43,13 @@ pub mod scroll;
 pub mod slider;
 pub mod splitter;
 pub mod tabs;
+pub mod toast;
 pub mod tokens;
 pub mod tooltip;
 
 pub use button::{
-    Button, ButtonKind, IconButton, Link, Sheet, SplitButton, SplitResponse, button, icon_button,
-    link, split_button, toggle_button,
+    Button, ButtonKind, IconButton, Link, SplitButton, SplitResponse, button, icon_button, link,
+    split_button, toggle_button,
 };
 pub use card::{
     Card, Thumbnail, ThumbnailCard, ThumbnailOutput, Tile, card, group, section, thumbnail_card,
@@ -56,6 +58,10 @@ pub use card::{
 pub use choice::{
     Check, Chip, ChipResponse, Marked, Segmented, SegmentedResponse, checkbox, chip, radio, rove,
     segmented, switch,
+};
+pub use dialog::{
+    Answer, Dialog, DialogHost, DialogResponse, FormGrid, Sheet, SheetResponse, confirm, form_grid,
+    form_row,
 };
 pub use focus::{FocusScope, Roving, focus_ring, focus_visible, paint_focus_ring, watch_focus};
 pub use input::{
@@ -77,6 +83,7 @@ pub use slider::{
 };
 pub use splitter::{SplitAxis, Splitter, splitter};
 pub use tabs::{SideOutput, SidebarTabs, Tab, TabStrip, TabsOutput, sidebar_tabs, tab_strip};
+pub use toast::{Toast, ToastEvent, ToastId, ToastRects, Toasts, Tone};
 pub use tokens::{
     Density, EDGE_CONTRAST, Elevation, Layer, MIN_TEXT_SIZE, Radius, Space, TEXT_CONTRAST,
     TextRole, contrast, nested_radius,

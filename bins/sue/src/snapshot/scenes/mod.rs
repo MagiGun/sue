@@ -21,6 +21,7 @@ mod paint_touch;
 mod settings;
 mod shell;
 mod ui_buttons;
+mod ui_dialogs;
 mod ui_inputs;
 mod writer_compile;
 mod writer_corkboard;
@@ -108,6 +109,8 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     // 29a to 29e. Menus walked with the keyboard, a menu taller than the
     // window, the note of a row and tooltips.
     menus::scenes(tour)?;
+    // 28a to 28f. The dialog host, the sheet and the toast stack.
+    ui_dialogs::gallery(tour)?;
     Ok(())
 }
 

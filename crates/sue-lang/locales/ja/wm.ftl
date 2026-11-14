@@ -193,3 +193,10 @@ menu-check-for-updates = アップデートを確認
 menu-about = { $studio } について
 menu-note-coming-later = 今後対応予定
 menu-note-needs-selection = 選択範囲が必要です
+## ui/dialog.rs, ui/toast.rs
+
+ok = OK
+cancel = キャンセル
+dialog-close = 閉じる
+toast-dismiss = 閉じる
+notices = 通知
