@@ -94,19 +94,7 @@ pub fn thumbnail(arena: &Arena, layer: EntityId, max: [u32; 2]) -> Option<(Vec<u
         ),
         LayerKind::Other => return None,
     };
-    let layer = Layer {
-        id: None,
-        source,
-        style: LayerStyle::default(),
-        tint: None,
-        mask: None,
-        warp: None,
-        effects: crate::effects::Effects::default(),
-        edge: None,
-        rim: None,
-        lines: None,
-        occupancy: None,
-    };
+    let layer = Layer::new(source, LayerStyle::default());
     let scale = (max[0] as f32 / size[0].max(1) as f32).min(max[1] as f32 / size[1].max(1) as f32);
     let out = [
         ((size[0] as f32 * scale).round() as u32).max(1),

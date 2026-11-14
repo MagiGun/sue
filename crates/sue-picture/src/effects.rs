@@ -30,10 +30,28 @@ pub const TONE: &str = "effect.tone";
 pub const TONE_LINES: &str = "effect.tone.lines";
 /// The dots' angle in degrees (`Float`).
 pub const TONE_ANGLE: &str = "effect.tone.angle";
+/// What sets how large the dots are (`Int`): 0 the brightness of the
+/// layer, 1 its opacity (see [`TONE_SOURCES`]).
+pub const TONE_SOURCE: &str = "effect.tone.source";
+/// How many steps of density there are (`Int`): 0 or 1 as many as the
+/// pixels have, 2 or more that many (Posterization).
+pub const TONE_LEVELS: &str = "effect.tone.levels";
+/// The shape of the dots (`Int`, see [`TONE_SHAPES`]).
+pub const TONE_SHAPE: &str = "effect.tone.shape";
+
+/// What can set the size of a tone's dots, in order.
+pub const TONE_SOURCES: [&str; 2] = ["Brightness", "Opacity"];
+
+/// The shapes a tone's dots take, in order: the last scatters single
+/// pixels (noise) instead of drawing dots.
+pub const TONE_SHAPES: [&str; 6] = ["Circle", "Square", "Diamond", "Line", "Cross", "Noise"];
 /// The layer shown in one color (`Bool`).
 pub const COLOR: &str = "effect.color";
 /// That color (`Color`).
 pub const COLOR_VALUE: &str = "effect.color.value";
+/// The sub color (`Color`): when set, the layer's light parts take it and
+/// its dark parts the layer color, in between a blend of the two.
+pub const COLOR_SUB: &str = "effect.color.sub";
 /// Expression color: 0 color, 1 gray, 2 monochrome (`Int`).
 pub const EXPRESSION: &str = "effect.expression";
 /// Where monochrome turns black, 0 to 1 (`Float`).
@@ -53,8 +71,16 @@ pub struct Effects {
     pub extract: Option<(f32, f32)>,
     /// The tone's cell size in pixels and angle in radians.
     pub tone: Option<(f32, f32)>,
+    /// What sets the dots' size: 0 brightness, 1 opacity.
+    pub tone_source: u8,
+    /// Steps of density (0 or 1: no posterization).
+    pub tone_levels: u8,
+    /// The dots' shape (an index of [`TONE_SHAPES`]).
+    pub tone_shape: u8,
     /// The layer color.
     pub color: Option<[f32; 3]>,
+    /// The sub color the layer's light parts take.
+    pub sub_color: Option<[f32; 3]>,
     /// 0 color, 1 gray, 2 monochrome.
     pub expression: u8,
     /// Where monochrome turns black.
@@ -68,7 +94,11 @@ impl Default for Effects {
             watercolor: None,
             extract: None,
             tone: None,
+            tone_source: 0,
+            tone_levels: 0,
+            tone_shape: 0,
             color: None,
+            sub_color: None,
             expression: 0,
             threshold: 0.5,
         }
@@ -91,6 +121,57 @@ fn on(entity: &Entity, key: &str) -> bool {
 
 fn number(entity: &Entity, key: &str, or: f64) -> f64 {
     entity.property(key).and_then(Value::as_f64).unwrap_or(or)
+}
+
+/// An index below `count` stored at `key` (0 when missing or out of
+/// range).
+fn small(entity: &Entity, key: &str, count: usize) -> u8 {
+    entity
+        .property(key)
+        .and_then(Value::as_i64)
+        .filter(|value| (0..count as i64).contains(value))
+        .map_or(0, |value| value as u8)
+}
+
+/// How much of a tone cell's pixel a dot of `density` (0 to 1) covers:
+/// `(du, dv)` is the pixel's place in its cell from the cell's middle, in
+/// cells, `cell` the cell's side in pixels.
+fn dot(shape: u8, density: f32, du: f32, dv: f32, cell: f32) -> f32 {
+    if density <= 0.0 {
+        return 0.0;
+    }
+    let (du, dv) = (du.abs(), dv.abs());
+    let (reach, away) = match shape {
+        // Square: as large as the density, its side square-rooted.
+        1 => (cell * density.sqrt() / 2.0, du.max(dv) * cell),
+        // Diamond: a square turned on its point.
+        2 => (cell * (density / 2.0).sqrt(), (du + dv) * cell),
+        // Line: stripes along the angle.
+        3 => (cell * density / 2.0, dv * cell),
+        // Cross: two stripes that cover the density together.
+        4 => (
+            cell * (1.0 - (1.0 - density).max(0.0).sqrt()) / 2.0,
+            du.min(dv) * cell,
+        ),
+        // Circle.
+        _ => (
+            cell * (density / std::f32::consts::PI).sqrt(),
+            du.hypot(dv) * cell,
+        ),
+    };
+    (reach - away + 0.5).clamp(0.0, 1.0)
+}
+
+/// A number from 0 to 1 for pixel `(x, y)` that looks random and is the
+/// same every time (the noise tone).
+fn scatter(x: u32, y: u32) -> f32 {
+    let mut h = x.wrapping_mul(0x9E37_79B1) ^ y.wrapping_mul(0x85EB_CA77);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2C1B_3C6D);
+    h ^= h >> 12;
+    h = h.wrapping_mul(0x297A_2D39);
+    h ^= h >> 15;
+    (h >> 8) as f32 / (1 << 24) as f32
 }
 
 /// The default border color, layer color and their `Color` values.
@@ -133,6 +214,12 @@ impl Effects {
                     (number(entity, TONE_ANGLE, 45.0) as f32).to_radians(),
                 )
             }),
+            tone_source: small(entity, TONE_SOURCE, TONE_SOURCES.len()),
+            tone_levels: entity
+                .property(TONE_LEVELS)
+                .and_then(Value::as_i64)
+                .map_or(0, |value| value.clamp(0, 255) as u8),
+            tone_shape: small(entity, TONE_SHAPE, TONE_SHAPES.len()),
             color: on(entity, COLOR).then(|| {
                 rgb(
                     entity,
@@ -140,6 +227,14 @@ impl Effects {
                     [40.0 / 255.0, 120.0 / 255.0, 220.0 / 255.0],
                 )
             }),
+            sub_color: on(entity, COLOR)
+                .then(|| match entity.property(COLOR_SUB) {
+                    Some(Value::Color(color)) => {
+                        Some(color.to_space(sue_core::ColorSpace::Srgb).rgb)
+                    }
+                    _ => None,
+                })
+                .flatten(),
             expression: entity
                 .property(EXPRESSION)
                 .and_then(Value::as_i64)
@@ -181,18 +276,60 @@ impl Effects {
             _ => [r, g, b, a],
         };
         if let Some((cell, angle)) = self.tone {
-            // Dots on a turned grid, as large as the gray is dark.
-            let density = 1.0 - (0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2]);
-            let (sin, cos) = angle.sin_cos();
-            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-            let (u, v) = ((px * cos + py * sin) / cell, (-px * sin + py * cos) / cell);
-            let away = (u - u.round()).hypot(v - v.round()) * cell;
-            let radius = cell * (density.clamp(0.0, 1.0) / std::f32::consts::PI).sqrt();
-            let cover = (radius - away + 0.5).clamp(0.0, 1.0);
-            out = [0.0, 0.0, 0.0, a * cover];
+            // Dots on a turned grid, as large as the gray is dark (or the
+            // layer opaque), in steps when posterized.
+            let mut density = if self.tone_source == 1 {
+                a
+            } else {
+                1.0 - (0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2])
+            }
+            .clamp(0.0, 1.0);
+            if self.tone_levels >= 2 {
+                let steps = f32::from(self.tone_levels - 1);
+                density = (density * steps).round() / steps;
+            }
+            let cover = if usize::from(self.tone_shape) == TONE_SHAPES.len() - 1 {
+                if scatter(x, y) < density { 1.0 } else { 0.0 }
+            } else {
+                let (sin, cos) = angle.sin_cos();
+                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                let (u, v) = ((px * cos + py * sin) / cell, (-px * sin + py * cos) / cell);
+                let (hu, hv) = (u + 0.5, v + 0.5);
+                match self.tone_shape {
+                    _ if density >= 1.0 => 1.0,
+                    // Dark dots past half turn into light holes between
+                    // them, so the coverage keeps up to solid.
+                    0..=2 if density > 0.5 => {
+                        1.0 - dot(
+                            self.tone_shape,
+                            1.0 - density,
+                            hu - hu.round(),
+                            hv - hv.round(),
+                            cell,
+                        )
+                    }
+                    shape => dot(shape, density, u - u.round(), v - v.round(), cell),
+                }
+            };
+            let alpha = if self.tone_source == 1 { 1.0 } else { a };
+            out = [0.0, 0.0, 0.0, alpha * cover];
         }
         if let Some(color) = self.color {
-            out = [color[0], color[1], color[2], out[3]];
+            out = match self.sub_color {
+                // The dark parts take the layer color, the light ones the
+                // sub color.
+                Some(sub) => {
+                    let light =
+                        (0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2]).clamp(0.0, 1.0);
+                    [
+                        color[0] + (sub[0] - color[0]) * light,
+                        color[1] + (sub[1] - color[1]) * light,
+                        color[2] + (sub[2] - color[2]) * light,
+                        out[3],
+                    ]
+                }
+                None => [color[0], color[1], color[2], out[3]],
+            };
         }
         out
     }
@@ -533,6 +670,59 @@ mod tests {
         }
         let share = sum / 4096.0;
         assert!((share - 0.5).abs() < 0.06, "{share}");
+    }
+
+    #[test]
+    fn tones_take_shapes_steps_and_the_opacity_as_density() {
+        let share = |effects: &Effects, rgba: [f32; 4]| {
+            let mut sum = 0.0;
+            for y in 0..96 {
+                for x in 0..96 {
+                    sum += effects.apply(rgba, x, y)[3];
+                }
+            }
+            sum / (96.0 * 96.0)
+        };
+        let gray = [0.5, 0.5, 0.5, 1.0];
+        // Every shape covers about as much as the gray is dark.
+        for shape in 0..TONE_SHAPES.len() as u8 {
+            let effects = Effects {
+                tone: Some((8.0, 0.4)),
+                tone_shape: shape,
+                ..Effects::default()
+            };
+            let covered = share(&effects, gray);
+            assert!((covered - 0.5).abs() < 0.08, "{shape}: {covered}");
+            // White takes no dot at all.
+            assert_eq!(share(&effects, [1.0, 1.0, 1.0, 1.0]), 0.0, "{shape}");
+        }
+        // Two steps: light grays vanish and dark ones go solid.
+        let steps = Effects {
+            tone: Some((8.0, 0.4)),
+            tone_levels: 2,
+            ..Effects::default()
+        };
+        assert_eq!(share(&steps, [0.7, 0.7, 0.7, 1.0]), 0.0);
+        assert!(share(&steps, [0.3, 0.3, 0.3, 1.0]) > 0.97);
+        // By opacity: a half clear white layer is half covered.
+        let by_alpha = Effects {
+            tone: Some((8.0, 0.4)),
+            tone_source: 1,
+            ..Effects::default()
+        };
+        let covered = share(&by_alpha, [1.0, 1.0, 1.0, 0.5]);
+        assert!((covered - 0.5).abs() < 0.08, "{covered}");
+        // The settings read from a layer, out of range ones as defaults.
+        let entity = Entity::empty("Tone", "sue.layer")
+            .with_property(TONE, true)
+            .with_property(TONE_SHAPE, 3_i64)
+            .with_property(TONE_SOURCE, 7_i64)
+            .with_property(TONE_LEVELS, 4_i64);
+        let read = Effects::of(&entity, 72.0);
+        assert_eq!(
+            (read.tone_shape, read.tone_source, read.tone_levels),
+            (3, 0, 4)
+        );
     }
 
     #[test]
