@@ -92,3 +92,11 @@ close-esc = 关闭 (Esc)
 none = 无
 there-no-studio-tool-called = 未找到名为 { $id } 的工作室或工具
 is-not-available = { $command } 不可用
+
+## ui/dialog.rs, ui/toast.rs
+
+ok = 确定
+cancel = 取消
+dialog-close = 关闭
+toast-dismiss = 忽略
+notices = 通知

@@ -117,3 +117,11 @@ in-folder = { $lead } dans { $folder }
 saved = { $name } enregistré{ $note }{ $folder }{ $click }
 saved-in-folder = {" "}dans { $folder }
 
+
+## ui/dialog.rs, ui/toast.rs
+
+ok = OK
+cancel = Annuler
+dialog-close = Fermer
+toast-dismiss = Ignorer
+notices = Notifications

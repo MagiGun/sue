@@ -122,3 +122,11 @@ label-work = Trabajo
 transfer-copy = Copiar
 transfer-export = Exportar
 transfer-import = Importar
+
+## ui/dialog.rs, ui/toast.rs
+
+ok = Aceptar
+cancel = Cancelar
+dialog-close = Cerrar
+toast-dismiss = Descartar
+notices = Avisos

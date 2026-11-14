@@ -110,3 +110,11 @@ label-work = 作業
 transfer-copy = コピー
 transfer-export = エクスポート
 transfer-import = インポート
+
+## ui/dialog.rs, ui/toast.rs
+
+ok = OK
+cancel = キャンセル
+dialog-close = 閉じる
+toast-dismiss = 閉じる
+notices = 通知

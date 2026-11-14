@@ -104,3 +104,11 @@ close-esc = Fechar (Esc)
 none = Nenhum
 there-no-studio-tool-called = Nenhum estúdio ou ferramenta chamado { $id }
 is-not-available = { $command } não está disponível
+
+## ui/dialog.rs, ui/toast.rs
+
+ok = OK
+cancel = Cancelar
+dialog-close = Fechar
+toast-dismiss = Dispensar
+notices = Avisos

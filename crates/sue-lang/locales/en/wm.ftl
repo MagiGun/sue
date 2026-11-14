@@ -139,3 +139,10 @@ do-not-save = Do Not Save
 save = Save
 cancel = Cancel
 shortcuts-custom = Keys of commands that have no default key
+
+## ui/dialog.rs, ui/toast.rs
+
+ok = OK
+dialog-close = Close
+toast-dismiss = Dismiss
+notices = Notices

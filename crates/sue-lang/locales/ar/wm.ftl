@@ -120,3 +120,11 @@ close-esc = إغلاق (Esc)
 none = لا يوجد
 there-no-studio-tool-called = لا يوجد استوديو أو أداة باسم { $id }
 is-not-available = { $command } غير متاح
+
+## ui/dialog.rs, ui/toast.rs
+
+ok = موافق
+cancel = إلغاء
+dialog-close = إغلاق
+toast-dismiss = تجاهل
+notices = الإشعارات
