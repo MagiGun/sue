@@ -13,16 +13,6 @@ use crate::filters::Filter;
 use crate::select::{Op, Selection};
 use crate::studio::SuePaint;
 
-/// Runs a Layer command by its name: Window, Layer Property runs Layer
-/// Property through it, since that item is the Layer menu's.
-pub(super) fn run(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
-    if call.name == "window.layer_property" {
-        properties(paint, cx, call);
-    } else if let Some(command) = COMMANDS.iter().find(|command| command.name == call.name) {
-        (command.run)(paint, cx, call);
-    }
-}
-
 // How the items look.
 
 /// The current layer is a raster layer.
