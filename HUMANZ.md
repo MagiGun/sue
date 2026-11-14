@@ -1641,7 +1641,7 @@ opacity sliders of a tool's settings. Every slider follows the pointer
 from where it went down, takes the arrows, Page Up and Down, Home and
 End while it holds focus, and can map its values by their logarithm.
 `input::sheet` and `slider::sheet` draw all of them in every state for
-review (snapshot scenes 28 to 28d).
+review (snapshot scenes 28c to 28g).
 
 **Docking** (`sue_wm::dock`). A studio's palettes, as Clip Studio
 Paint's: the studio lists them as a `DockPanel` (a stable key, an optional

@@ -23,7 +23,7 @@ const FRAMES: usize = 60;
 /// The height of the backdrop's status bar, in points.
 const STATUS_BAR: f32 = 24.0;
 
-/// Scenes 28a to 28f: a form dialog, a question that destroys, the toast
+/// Scenes 28h to 28m: a form dialog, a question that destroys, the toast
 /// stack, a sheet and a dialog on a phone, and a dialog too narrow for
 /// a row of buttons.
 pub(super) fn gallery(tour: &mut Tour<'_>) -> Result<(), String> {
@@ -32,14 +32,14 @@ pub(super) fn gallery(tour: &mut Tour<'_>) -> Result<(), String> {
     let touch = sue_wm::widgets::is_touch(&tour.camera.ctx);
 
     tour.camera.size = DESKTOP;
-    shoot_ui(tour, "28a-ui-dialog-form", false, |ui, theme| {
+    shoot_ui(tour, "28h-ui-dialog-form", false, |ui, theme| {
         backdrop(ui, theme);
         Dialog::new("gallery-form", "New Layer", theme)
             .extra("Reset")
             .ok_cancel()
             .show(ui.ctx(), |ui| new_layer_form(ui, theme));
     })?;
-    shoot_ui(tour, "28b-ui-dialog-confirm", false, |ui, theme| {
+    shoot_ui(tour, "28i-ui-dialog-confirm", false, |ui, theme| {
         backdrop(ui, theme);
         confirm(
             ui.ctx(),
@@ -59,7 +59,7 @@ pub(super) fn gallery(tour: &mut Tour<'_>) -> Result<(), String> {
          so it is drawn in parts",
     ));
     toasts.push(Toast::error("Brush.sut could not be read").sticky());
-    shoot_ui(tour, "28c-ui-toasts", false, |ui, theme| {
+    shoot_ui(tour, "28j-ui-toasts", false, |ui, theme| {
         backdrop(ui, theme);
         let mut room = ui.ctx().content_rect();
         room.max.y -= STATUS_BAR;
@@ -67,7 +67,7 @@ pub(super) fn gallery(tour: &mut Tour<'_>) -> Result<(), String> {
     })?;
 
     tour.camera.size = PHONE;
-    shoot_ui(tour, "28d-ui-sheet-phone", true, |ui, theme| {
+    shoot_ui(tour, "28k-ui-sheet-phone", true, |ui, theme| {
         backdrop(ui, theme);
         Sheet::new("gallery-sheet", "Brush", theme).show(ui.ctx(), |ui| {
             form_grid(ui, "gallery-sheet-form", theme, |form| {
@@ -80,7 +80,7 @@ pub(super) fn gallery(tour: &mut Tour<'_>) -> Result<(), String> {
             });
         });
     })?;
-    shoot_ui(tour, "28e-ui-dialog-phone", true, |ui, theme| {
+    shoot_ui(tour, "28l-ui-dialog-phone", true, |ui, theme| {
         backdrop(ui, theme);
         Dialog::new("gallery-phone", "Save Changes?", theme)
             .accept("Save")
@@ -91,7 +91,7 @@ pub(super) fn gallery(tour: &mut Tour<'_>) -> Result<(), String> {
             });
     })?;
     tour.camera.size = DESKTOP;
-    shoot_ui(tour, "28f-ui-dialog-narrow", false, |ui, theme| {
+    shoot_ui(tour, "28m-ui-dialog-narrow", false, |ui, theme| {
         backdrop(ui, theme);
         Dialog::new("gallery-narrow", "Close Picture", theme)
             .width(300.0)

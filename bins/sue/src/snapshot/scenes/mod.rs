@@ -105,14 +105,14 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
 
     // 28a and 28b. The buttons and the choices of the design system.
     ui_buttons::sheets(tour)?;
-    // 28 to 28d. The inputs and sliders of the component library.
+    // 28c to 28g. The inputs and sliders of the component library.
     ui_inputs::sheets(tour)?;
     // 29a to 29e. Menus walked with the keyboard, a menu taller than the
     // window, the note of a row and tooltips.
     menus::scenes(tour)?;
-    // 28a to 28f. The dialog host, the sheet and the toast stack.
+    // 28h to 28m. The dialog host, the sheet and the toast stack.
     ui_dialogs::gallery(tour)?;
-    // 29. The gallery of the design system: per preset, at 1.5 and 2.0
+    // 30. The gallery of the design system: per preset, at 1.5 and 2.0
     // pixels per point and per density, with the focus ring showing.
     gallery::scenes(tour)?;
     Ok(())

@@ -13,14 +13,14 @@ const SIZE: [u32; 2] = [1440, 900];
 /// height of three lists of 44 point rows.
 const TALL: [u32; 2] = [1440, 1320];
 
-/// Scenes 28 to 28d: the inputs in every state, their open lists, the
+/// Scenes 28c to 28g: the inputs in every state, their open lists, the
 /// inputs live in the three densities, then the same for the sliders.
 pub(super) fn sheets(tour: &mut Tour<'_>) -> Result<(), String> {
     let before = tour.camera.size;
     for (name, page, size) in [
-        ("28-ui-inputs-states", input::Sheet::States, SIZE),
-        ("28a-ui-inputs-open", input::Sheet::Open, TALL),
-        ("28b-ui-inputs-densities", input::Sheet::Densities, SIZE),
+        ("28c-ui-inputs-states", input::Sheet::States, SIZE),
+        ("28d-ui-inputs-open", input::Sheet::Open, TALL),
+        ("28e-ui-inputs-densities", input::Sheet::Densities, SIZE),
     ] {
         tour.camera.size = size;
         tour.shoot_drawing(name, |painter, rect, theme| {
@@ -29,8 +29,8 @@ pub(super) fn sheets(tour: &mut Tour<'_>) -> Result<(), String> {
     }
     tour.camera.size = SIZE;
     for (name, page) in [
-        ("28c-ui-sliders-states", slider::Sheet::States),
-        ("28d-ui-sliders-densities", slider::Sheet::Densities),
+        ("28f-ui-sliders-states", slider::Sheet::States),
+        ("28g-ui-sliders-densities", slider::Sheet::Densities),
     ] {
         tour.shoot_drawing(name, |painter, rect, theme| {
             slider::sheet(painter, rect, theme, page);

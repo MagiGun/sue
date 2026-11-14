@@ -23,10 +23,10 @@ const SIZE: [u32; 2] = [1440, 900];
 /// Frames drawn after the Tab, so that the focus ring has faded in.
 const SETTLE: usize = 60;
 
-/// Scenes 29: the gallery in each built-in preset at the scale of the run
-/// (`29-gallery-preset-<id>`), at 1.5 and 2.0 pixels per point
-/// (`29-gallery-scale-150`, `-200`) and in each density
-/// (`29-gallery-density-<density>`), the last five in the theme of the
+/// Scenes 30: the gallery in each built-in preset at the scale of the run
+/// (`30-gallery-preset-<id>`), at 1.5 and 2.0 pixels per point
+/// (`30-gallery-scale-150`, `-200`) and in each density
+/// (`30-gallery-density-<density>`), the last five in the theme of the
 /// run.
 pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.settle();
@@ -41,16 +41,16 @@ pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
     let mut applied = run.clone();
     let mut pictures: Vec<(String, Theme, Density, Option<f32>)> = Vec::new();
     for preset in sue_rice::builtin_presets() {
-        let name = format!("29-gallery-preset-{}", preset.id);
+        let name = format!("30-gallery-preset-{}", preset.id);
         pictures.push((name, run.with_preset(&preset), Density::Regular, None));
     }
     for (scale, label) in [(1.5, "150"), (2.0, "200")] {
-        let name = format!("29-gallery-scale-{label}");
+        let name = format!("30-gallery-scale-{label}");
         pictures.push((name, run.clone(), Density::Regular, Some(scale)));
     }
     for density in Density::ALL {
         let name = format!(
-            "29-gallery-density-{}",
+            "30-gallery-density-{}",
             format!("{density:?}").to_lowercase()
         );
         pictures.push((name, run.clone(), density, None));
