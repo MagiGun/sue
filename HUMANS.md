@@ -689,6 +689,8 @@ Once a canvas is open:
   spray, ribbon and turn come along; colored tips keep their colors, and
   a brush of several pictures uses them in turn. They are kept for next
   time.
+  A Clip Studio Paint sub tool without a picture tip (a round pen, an
+  airbrush) comes in too, painting with its own settings.
 - **Decorations:** the Decoration tool lays shapes instead of a line.
   Stars, Hearts, Sparkles, Snow, Flowers and Bubbles scatter about the
   stroke at random sizes and turns; Leaves, Chain, Lace, Stitches, Dotted
