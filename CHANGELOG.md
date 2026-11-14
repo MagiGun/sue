@@ -22,6 +22,10 @@ follow [Semantic Versioning](https://semver.org/).
   scene by scene, the pixels that differ between two snapshot folders, so a
   change to how Sue looks can be checked against the scenes it was meant to
   touch.
+- Sue Paint saves pictures as ICO (Windows icons, at most 256 by 256
+  pixels) and PPM too: both are in the "save as type" list of every
+  picture export. A PPM holds no transparency, so the picture is laid
+  over white, as for a JPEG.
 
 ### Changed
 

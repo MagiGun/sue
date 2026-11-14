@@ -3749,6 +3749,7 @@ dependencies = [
  "jxl-oxide",
  "miniz_oxide 0.8.9",
  "sue-core",
+ "sue-lang",
  "sue-model",
  "symphonia",
  "ttf-parser",

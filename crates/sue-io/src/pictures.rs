@@ -166,11 +166,31 @@ pub const PICTURE_SAVE_TYPES: &[(&str, &[&str])] = &[
     ("TGA picture", &["tga"]),
     ("GIF picture", &["gif"]),
     ("QOI picture", &["qoi"]),
+    ("ICO picture", &["ico"]),
+    ("PPM picture", &["ppm"]),
 ];
+
+/// `tile` laid over white, for the formats that hold no transparency.
+fn over_white(tile: &RasterTile2D) -> RasterTile2D {
+    let mut flat = tile.clone();
+    if flat.format() == PixelFormat::Rgba8
+        && let Some(pixels) = flat.bytes_mut()
+    {
+        for pixel in pixels.as_chunks_mut::<4>().0 {
+            let alpha = u32::from(pixel[3]);
+            for channel in &mut pixel[..3] {
+                *channel = ((u32::from(*channel) * alpha + 255 * (255 - alpha)) / 255) as u8;
+            }
+            pixel[3] = 255;
+        }
+    }
+    flat
+}
 
 /// Encodes `tile` as the picture format of `extension` (any of
 /// [`PICTURE_SAVE_TYPES`]): JPEG at `jpeg_quality` over white, JPEG XL
-/// losslessly at `jxl_effort`.
+/// losslessly at `jxl_effort`. A PPM holds no transparency either and is
+/// laid over white like a JPEG.
 ///
 /// # Errors
 /// If the extension is not a picture format Sue writes, or encoding fails.
@@ -183,23 +203,7 @@ pub fn encode_as(
     let extension = extension.trim_start_matches('.').to_ascii_lowercase();
     match extension.as_str() {
         "png" => crate::encode_png(tile),
-        "jpg" | "jpeg" => {
-            // JPEG has no transparency: lay the picture over white.
-            let mut flat = tile.clone();
-            if flat.format() == PixelFormat::Rgba8
-                && let Some(pixels) = flat.bytes_mut()
-            {
-                for pixel in pixels.as_chunks_mut::<4>().0 {
-                    let alpha = u32::from(pixel[3]);
-                    for channel in &mut pixel[..3] {
-                        *channel =
-                            ((u32::from(*channel) * alpha + 255 * (255 - alpha)) / 255) as u8;
-                    }
-                    pixel[3] = 255;
-                }
-            }
-            crate::encode_jpeg(&flat, jpeg_quality)
-        }
+        "jpg" | "jpeg" => crate::encode_jpeg(&over_white(tile), jpeg_quality),
         "jxl" => {
             use crate::JxlPipeline;
             crate::NativeJxlPipeline
@@ -207,6 +211,7 @@ pub fn encode_as(
                 .map_err(|error| error.to_string())
         }
         other => match PictureFormat::from_extension(other) {
+            Some(format) if !format.keeps_alpha() => encode_picture(&over_white(tile), format),
             Some(format) => encode_picture(tile, format),
             None => Err(format!("Sue cannot write .{other} pictures")),
         },
@@ -513,6 +518,35 @@ mod tests {
         let png = encode_as(&tile, "PNG", 90, 3).unwrap();
         assert_eq!(crate::decode_png(&png).unwrap().tile.width(), 8);
         assert!(encode_as(&tile, "doc", 90, 3).is_err());
+    }
+
+    #[test]
+    fn icons_and_pixmaps_are_save_types_and_a_pixmap_lies_over_white() {
+        for extension in ["ico", "ppm"] {
+            assert!(
+                PICTURE_SAVE_TYPES
+                    .iter()
+                    .any(|(_, extensions)| extensions.contains(&extension)),
+                "{extension}"
+            );
+        }
+        // Half see-through red and a clear pixel.
+        let tile =
+            RasterTile2D::from_bytes(2, 1, PixelFormat::Rgba8, vec![255, 0, 0, 128, 0, 0, 0, 0])
+                .unwrap();
+        let ppm = encode_as(&tile, "ppm", 90, 3).unwrap();
+        let back = decode_picture(&ppm, Some(PictureFormat::Pnm)).unwrap();
+        assert_eq!(
+            back.bytes().unwrap(),
+            [255, 127, 127, 255, 255, 255, 255, 255]
+        );
+        // An icon keeps its transparency.
+        let ico = encode_as(&tile, "ico", 90, 3).unwrap();
+        let back = decode_picture(&ico, Some(PictureFormat::Ico)).unwrap();
+        assert_eq!(back.bytes().unwrap(), tile.bytes().unwrap());
+        // One too large says so in words.
+        let large = RasterTile2D::new(300, 2, PixelFormat::Rgba8).unwrap();
+        assert!(encode_as(&large, "ico", 90, 3).unwrap_err().contains("256"));
     }
 
     /// Eight by six pixels of four opaque colors and a see-through corner.

@@ -7,3 +7,14 @@ codec-16-bit-pcm-encode = encodage PCM 16 bits
 codec-hex-and-byte-map = hexadécimal et carte des octets
 codec-anything-else = Tout le reste
 codec-built-in = intégré
+
+## Export operations (picture_ops.rs, audio.rs)
+
+filter-lanczos = Lanczos (plus net)
+filter-bicubic = Bicubique
+filter-bilinear = Bilinéaire (doux)
+filter-nearest = Au plus proche (pixel art)
+the-picture-has-no-pixels = l'image ne contient aucun pixel
+float-pictures-are-not-converted-yet = les images en virgule flottante ne sont pas encore converties
+jpeg-xl-writing-not-build = l'écriture JPEG XL n'est pas incluse dans cette compilation
+trimming-left-no-sound = le découpage ne laisse aucun son

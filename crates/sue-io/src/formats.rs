@@ -12,9 +12,11 @@ use sue_core::{
 };
 use sue_model::{AttributeData, Domain, Encoded, Geometry, PrimKind, Table, class};
 
+use crate::picture_ops::{PictureOptions, transform_picture, write_picture};
 use crate::{
-    IngestRoute, JxlPipeline, NativeFormat, NativeJxlPipeline, ProgressiveTarget, decode_audio,
-    decode_jpeg, decode_png, encode_jpeg, encode_png, encode_wav, meta, sniff_stream,
+    IngestRoute, JxlPipeline, NativeFormat, NativeJxlPipeline, PictureFormat, ProgressiveTarget,
+    SampleDepth, decode_audio, decode_jpeg, decode_picture, decode_png, encode_jpeg, encode_png,
+    encode_wav, meta, sniff_stream, write_sound,
 };
 
 fn native(head: &[u8]) -> Option<NativeFormat> {
@@ -225,6 +227,96 @@ impl FormatHandler for JxlFormat {
     }
 }
 
+/// Pictures the shared picture codec reads into pixels and writes from
+/// them: Windows icons and Netpbm pixmaps.
+#[derive(Clone, Copy, Debug)]
+pub struct PictureFileFormat {
+    info: FormatInfo,
+    format: PictureFormat,
+}
+
+impl PictureFileFormat {
+    /// Windows icons. A picture larger than 256 pixels is fitted into
+    /// that size when it is written.
+    #[must_use]
+    pub fn ico() -> Self {
+        Self {
+            info: FormatInfo {
+                id: "ico",
+                name: "ICO image",
+                extensions: &["ico"],
+                mime: "image/vnd.microsoft.icon",
+                category: "Image",
+            },
+            format: PictureFormat::Ico,
+        }
+    }
+
+    /// Netpbm pixmaps. They hold no transparency, so a picture is laid
+    /// over white when it is written.
+    #[must_use]
+    pub fn ppm() -> Self {
+        Self {
+            info: FormatInfo {
+                id: "ppm",
+                name: "PPM image",
+                extensions: &["ppm", "pgm", "pbm", "pnm", "pam"],
+                mime: "image/x-portable-pixmap",
+                category: "Image",
+            },
+            format: PictureFormat::Pnm,
+        }
+    }
+}
+
+impl FormatHandler for PictureFileFormat {
+    fn info(&self) -> FormatInfo {
+        self.info
+    }
+
+    /// Icons are known by their first bytes. A pixmap starts with two
+    /// characters of plain text, so only its file extension tells.
+    fn sniff(&self, head: &[u8]) -> bool {
+        self.format == PictureFormat::Ico && native(head) == Some(NativeFormat::Ico)
+    }
+
+    fn can_import(&self) -> bool {
+        true
+    }
+
+    fn import(
+        &self,
+        bytes: &[u8],
+        name: &str,
+        _options: &Properties,
+    ) -> Result<Bundle, FormatError> {
+        let tile = decode_picture(bytes, Some(self.format)).map_err(FormatError::new)?;
+        Ok(Bundle::single(image_entity(
+            name,
+            tile,
+            self.format.name(),
+            bytes.len(),
+        )))
+    }
+
+    fn can_export(&self, entity: &Entity) -> bool {
+        has_8bit_raster(entity)
+    }
+
+    fn export(
+        &self,
+        arena: &Arena,
+        ids: &[EntityId],
+        _options: &Properties,
+    ) -> Result<Vec<u8>, FormatError> {
+        let options = PictureOptions::default();
+        let extension = self.format.extension();
+        let fitted = transform_picture(raster_of(arena, ids)?, &options, extension)
+            .map_err(FormatError::new)?;
+        write_picture(&fitted, extension, &options).map_err(FormatError::new)
+    }
+}
+
 fn audio_entity(name: &str, decoded: crate::DecodedAudio, format: &str, bytes: usize) -> Entity {
     let info = decoded.info;
     let mut entity = Entity::new(name, decoded.pcm)
@@ -255,6 +347,36 @@ fn decode_track(bytes: &[u8], name: &str, format: &str, hint: &str) -> Result<Bu
         format,
         bytes.len(),
     )))
+}
+
+/// Writes the sound of the first of `ids` as a file of `extension`, with
+/// the sample size of the `bits` option (16 or 24).
+fn encode_track(
+    arena: &Arena,
+    ids: &[EntityId],
+    options: &Properties,
+    extension: &str,
+) -> Result<Vec<u8>, FormatError> {
+    let id = ids
+        .first()
+        .ok_or_else(|| FormatError::new("nothing to export"))?;
+    let pcm = arena
+        .get_by_id(*id)?
+        .component(ComponentKind::PCMFloat1D)
+        .and_then(|component| component.as_pcm())
+        .ok_or_else(|| FormatError::new("only audio exports to this format"))?;
+    let bits = options.f64("bits").unwrap_or(16.0);
+    let depth = if bits >= 24.0 {
+        SampleDepth::Int24
+    } else {
+        SampleDepth::Int16
+    };
+    write_sound(pcm, extension, depth).map_err(FormatError::new)
+}
+
+/// The `bits` option of the sound formats that write 16 or 24 bits.
+fn bits_option() -> Vec<PropertyDef> {
+    vec![PropertyDef::new("bits", "Bits", 16).range(16.0, 24.0)]
 }
 
 /// WAV audio.
@@ -385,6 +507,84 @@ impl FormatHandler for CompressedAudioFormat {
         _options: &Properties,
     ) -> Result<Bundle, FormatError> {
         decode_track(bytes, name, self.native.name(), self.info.extensions[0])
+    }
+
+    /// Of the compressed formats Sue writes FLAC, which loses nothing.
+    fn can_export(&self, entity: &Entity) -> bool {
+        self.native == NativeFormat::Flac && entity.component(ComponentKind::PCMFloat1D).is_some()
+    }
+
+    fn export(
+        &self,
+        arena: &Arena,
+        ids: &[EntityId],
+        options: &Properties,
+    ) -> Result<Vec<u8>, FormatError> {
+        if self.native != NativeFormat::Flac {
+            return Err(FormatError::new(format!(
+                "{} files cannot be written yet",
+                self.info.name
+            )));
+        }
+        encode_track(arena, ids, options, "flac")
+    }
+
+    fn options(&self) -> Vec<PropertyDef> {
+        if self.native == NativeFormat::Flac {
+            bits_option()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+/// AIFF audio.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AiffFormat;
+
+impl FormatHandler for AiffFormat {
+    fn info(&self) -> FormatInfo {
+        FormatInfo {
+            id: "aiff",
+            name: "AIFF audio",
+            extensions: &["aiff", "aif"],
+            mime: "audio/aiff",
+            category: "Audio",
+        }
+    }
+
+    fn sniff(&self, head: &[u8]) -> bool {
+        head.len() >= 12 && head.starts_with(b"FORM") && matches!(&head[8..12], b"AIFF" | b"AIFC")
+    }
+
+    fn can_import(&self) -> bool {
+        true
+    }
+
+    fn import(
+        &self,
+        bytes: &[u8],
+        name: &str,
+        _options: &Properties,
+    ) -> Result<Bundle, FormatError> {
+        decode_track(bytes, name, "AIFF", "aiff")
+    }
+
+    fn can_export(&self, entity: &Entity) -> bool {
+        entity.component(ComponentKind::PCMFloat1D).is_some()
+    }
+
+    fn export(
+        &self,
+        arena: &Arena,
+        ids: &[EntityId],
+        options: &Properties,
+    ) -> Result<Vec<u8>, FormatError> {
+        encode_track(arena, ids, options, "aiff")
+    }
+
+    fn options(&self) -> Vec<PropertyDef> {
+        bits_option()
     }
 }
 
@@ -1215,10 +1415,13 @@ pub fn formats(registry: ComponentRegistry) -> FormatRegistry {
     formats.register(JxlFormat);
     formats.register(PngFormat);
     formats.register(JpegFormat);
+    formats.register(PictureFileFormat::ico());
+    formats.register(PictureFileFormat::ppm());
     formats.register(WavFormat);
     for format in CompressedAudioFormat::all() {
         formats.register(format);
     }
+    formats.register(AiffFormat);
     formats.register(TextFormat::plain());
     formats.register(TextFormat::markdown());
     formats.register(DelimitedFormat::csv());
@@ -1424,5 +1627,244 @@ mod tests {
         let (back, back_id) = import_one(&formats, &project, "copy.sue");
         assert_eq!(back_id, id, "a project keeps its ids");
         assert_eq!(back.get_by_id(id).unwrap(), entity);
+    }
+
+    #[test]
+    fn icons_and_pixmaps_round_trip_and_fit_their_format() {
+        let formats = registry();
+        let mut tile = RasterTile2D::new(3, 2, PixelFormat::Rgba8).unwrap();
+        for (index, byte) in tile.bytes_mut().unwrap().iter_mut().enumerate() {
+            *byte = if index % 4 == 3 {
+                255
+            } else {
+                (index * 20) as u8
+            };
+        }
+        let mut arena = Arena::new();
+        let handle = arena.insert(Entity::new("pic", tile.clone()));
+        let id = arena.get(handle).unwrap().id();
+        for (format, name) in [("ico", "ICO"), ("ppm", "PPM")] {
+            let handler = formats.get(format).unwrap();
+            assert!(handler.can_export(arena.get(handle).unwrap()));
+            let bytes = handler.export(&arena, &[id], &Properties::new()).unwrap();
+            let (back, back_id) = import_one(&formats, &bytes, &format!("pic.{format}"));
+            let entity = back.get_by_id(back_id).unwrap();
+            assert_eq!(entity.class(), class::IMAGE);
+            assert_eq!(entity.meta(meta::FORMAT), Some(name));
+            let decoded = entity
+                .component(ComponentKind::RasterTile2D)
+                .unwrap()
+                .as_raster()
+                .unwrap();
+            assert_eq!(decoded.bytes(), tile.bytes(), "{format} is lossless");
+        }
+        // An icon is known by its bytes, whatever the file is called.
+        let ico = formats
+            .get("ico")
+            .unwrap()
+            .export(&arena, &[id], &Properties::new())
+            .unwrap();
+        assert_eq!(
+            formats.importer_for(&ico, "unnamed").unwrap().info().id,
+            "ico"
+        );
+        // A pixmap only by its name: its first bytes are plain text.
+        assert_eq!(formats.for_name("scan.pgm").unwrap().info().id, "ppm");
+        assert!(
+            formats
+                .importer_for(b"P3 is a room", "notes.txt")
+                .unwrap()
+                .info()
+                .id
+                != "ppm"
+        );
+
+        // A picture too large for an icon is fitted into 256 pixels, and
+        // a pixmap, which has no transparency, is laid over white.
+        let mut large = RasterTile2D::new(512, 128, PixelFormat::Rgba8).unwrap();
+        large.bytes_mut().unwrap().fill(0);
+        let handle = arena.insert(Entity::new("large", large));
+        let id = arena.get(handle).unwrap().id();
+        let ico = formats
+            .get("ico")
+            .unwrap()
+            .export(&arena, &[id], &Properties::new())
+            .unwrap();
+        let (back, back_id) = import_one(&formats, &ico, "large.ico");
+        let icon = back
+            .get_by_id(back_id)
+            .unwrap()
+            .component(ComponentKind::RasterTile2D)
+            .unwrap()
+            .as_raster()
+            .unwrap();
+        assert_eq!((icon.width(), icon.height()), (256, 64));
+        assert!(icon.bytes().unwrap().iter().all(|&byte| byte == 0));
+        let ppm = formats
+            .get("ppm")
+            .unwrap()
+            .export(&arena, &[id], &Properties::new())
+            .unwrap();
+        let (back, back_id) = import_one(&formats, &ppm, "large.ppm");
+        let pixmap = back
+            .get_by_id(back_id)
+            .unwrap()
+            .component(ComponentKind::RasterTile2D)
+            .unwrap()
+            .as_raster()
+            .unwrap();
+        assert_eq!((pixmap.width(), pixmap.height()), (512, 128));
+        assert!(pixmap.bytes().unwrap().iter().all(|&byte| byte == 255));
+
+        // Float pixels and things that are no picture are not offered.
+        let float = arena.insert(Entity::new(
+            "float",
+            RasterTile2D::new(1, 1, PixelFormat::RgbaF32).unwrap(),
+        ));
+        let sound = arena.insert(Entity::new(
+            "tone",
+            PCMFloat1D::new(8000, 1, vec![0.0]).unwrap(),
+        ));
+        for format in ["ico", "ppm"] {
+            let handler = formats.get(format).unwrap();
+            assert!(!handler.can_export(arena.get(float).unwrap()));
+            assert!(!handler.can_export(arena.get(sound).unwrap()));
+        }
+        assert!(
+            formats
+                .get("ico")
+                .unwrap()
+                .import(b"not an icon", "bad.ico", &Properties::new())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn flac_and_aiff_round_trip_at_16_and_24_bits() {
+        let formats = registry();
+        let samples: Vec<f32> = (0..800)
+            .flat_map(|frame| {
+                let left = (frame as f32 * 0.05).sin() * 0.5;
+                [left, -left]
+            })
+            .collect();
+        let pcm = PCMFloat1D::new(8000, 2, samples).unwrap();
+        let mut arena = Arena::new();
+        let handle = arena.insert(Entity::new("tone", pcm.clone()));
+        let id = arena.get(handle).unwrap().id();
+        let picture = arena.insert(Entity::new(
+            "pic",
+            RasterTile2D::new(1, 1, PixelFormat::Rgba8).unwrap(),
+        ));
+        for (format, name) in [("flac", "FLAC"), ("aiff", "AIFF")] {
+            let handler = formats.get(format).unwrap();
+            assert!(handler.can_export(arena.get(handle).unwrap()), "{format}");
+            assert!(!handler.can_export(arena.get(picture).unwrap()), "{format}");
+            assert_eq!(handler.options()[0].key, "bits", "{format}");
+            let mut sizes = Vec::new();
+            for (bits, tolerance) in [(16, 1e-4_f32), (24, 1e-5)] {
+                let bytes = handler
+                    .export(&arena, &[id], &Properties::new().with("bits", bits))
+                    .unwrap();
+                sizes.push(bytes.len());
+                // The bytes tell the format, not the name.
+                let (back, back_id) = import_one(&formats, &bytes, "unnamed");
+                let entity = back.get_by_id(back_id).unwrap();
+                assert_eq!(entity.class(), class::AUDIO);
+                assert_eq!(entity.meta(meta::FORMAT), Some(name));
+                let decoded = entity
+                    .component(ComponentKind::PCMFloat1D)
+                    .unwrap()
+                    .as_pcm()
+                    .unwrap();
+                assert_eq!(
+                    (decoded.sample_rate(), decoded.channels(), decoded.frames()),
+                    (8000, 2, 800),
+                    "{format} {bits}"
+                );
+                let worst = decoded
+                    .samples()
+                    .iter()
+                    .zip(pcm.samples())
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0_f32, f32::max);
+                assert!(worst <= tolerance, "{format} {bits} drifted by {worst}");
+            }
+            assert!(sizes[1] > sizes[0], "{format}: 24 bits take more room");
+            // Without the option the file has 16 bits.
+            let plain = handler.export(&arena, &[id], &Properties::new()).unwrap();
+            assert_eq!(plain.len(), sizes[0], "{format}");
+        }
+        // The other compressed formats are still read only.
+        for format in ["mp3", "ogg", "m4a"] {
+            let handler = formats.get(format).unwrap();
+            assert!(!handler.can_export(arena.get(handle).unwrap()), "{format}");
+            assert!(handler.options().is_empty(), "{format}");
+            assert!(
+                handler.export(&arena, &[id], &Properties::new()).is_err(),
+                "{format}"
+            );
+        }
+    }
+
+    /// The Converter had its own table writer. What it quoted, this
+    /// format quotes too, and where it gave up (a tab or a line end in a
+    /// tab-separated cell became a space) this one keeps the cell whole.
+    #[test]
+    fn delimited_tables_quote_every_cell_that_needs_it() {
+        let formats = registry();
+        let cells = [
+            "plain",
+            "Lee, Ada",
+            "say \"hi\"",
+            "two\nlines",
+            "two\r\nlines",
+            "a\tb",
+            " spaced ",
+            "\"",
+        ];
+        let mut table = Table::new();
+        for (column, cell) in cells.iter().enumerate() {
+            table.set(0, column as u32, Some(sue_model::Cell::value(*cell)));
+            table.set(1, column as u32, Some(sue_model::Cell::value(*cell)));
+        }
+        let mut arena = Arena::new();
+        let handle = arena.insert(Entity::empty("cells", class::SHEET).with_ext(table));
+        let id = arena.get(handle).unwrap().id();
+        for format in ["csv", "tsv"] {
+            let bytes = formats
+                .get(format)
+                .unwrap()
+                .export(&arena, &[id], &Properties::new())
+                .unwrap();
+            let (back, back_id) = import_one(&formats, &bytes, &format!("cells.{format}"));
+            let read = back.get_by_id(back_id).unwrap().ext::<Table>().unwrap();
+            assert_eq!(read.size(), (2, cells.len() as u32), "{format}");
+            for row in 0..2 {
+                for (column, cell) in cells.iter().enumerate() {
+                    assert_eq!(
+                        read.value(row, column as u32).and_then(Value::as_str),
+                        Some(*cell),
+                        "{format} row {row} column {column}"
+                    );
+                }
+            }
+        }
+        let csv = formats
+            .get("csv")
+            .unwrap()
+            .export(&arena, &[id], &Properties::new())
+            .unwrap();
+        let text = String::from_utf8(csv).unwrap();
+        assert!(text.starts_with("plain,\"Lee, Ada\",\"say \"\"hi\"\"\",\"two\nlines\","));
+        // In a tab-separated file a comma needs no quotes, a tab does.
+        let tsv = formats
+            .get("tsv")
+            .unwrap()
+            .export(&arena, &[id], &Properties::new())
+            .unwrap();
+        let text = String::from_utf8(tsv).unwrap();
+        assert!(text.starts_with("plain\tLee, Ada\t\"say \"\"hi\"\"\"\t"));
+        assert!(text.contains("\t\"a\tb\"\t"));
     }
 }

@@ -26,6 +26,7 @@ use std::time::Duration;
 
 use egui::{Align, Align2, Layout, Rect, RichText, ScrollArea, Sense, Ui, pos2, vec2};
 use sue_core::{AssetHandle, ComponentKind};
+use sue_io::picture_ops::{Filter, Resize};
 use sue_io::{SampleDepth, meta};
 use sue_platform::write_atomic;
 use sue_wm::{
@@ -33,7 +34,7 @@ use sue_wm::{
     MenuItem, ShellRequest, SueApplet, Theme, Tick, widgets,
 };
 
-use self::ops::{Endings, Filter, Kind, Options, Resize, Target};
+use self::ops::{Endings, Kind, Options, Target};
 use crate::util::{file_name, free_path, human_bytes};
 
 /// The applet id.
@@ -897,7 +898,7 @@ impl Convert {
                     row(ui, &tr!("resampling"), theme, |ui| {
                         let options: Vec<(Filter, String)> = Filter::ALL
                             .iter()
-                            .map(|filter| (*filter, filter.label()))
+                            .map(|filter| (*filter, sue_lang::translate("io", filter.name())))
                             .collect();
                         combo(
                             ui,
