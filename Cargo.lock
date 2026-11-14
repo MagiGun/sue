@@ -3728,6 +3728,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sue-brush"
+version = "0.0.75"
+dependencies = [
+ "sue-core",
+ "sue-model",
+]
+
+[[package]]
 name = "sue-core"
 version = "0.0.75"
 

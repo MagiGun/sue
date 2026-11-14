@@ -18,12 +18,14 @@
 //! | [`Geometry`] / [`Transform`] | 3D, CAD, BIM, vector art, rigging, game levels |
 //! | [`PageLayout`] | desktop publishing, books, slides, PDF pages, drawing sheets |
 //! | [`picture`] / [`BlendMode`] | painting, photo editing, compositing, textures, thumbnails |
+//! | [`brush`] / [`BrushPreset`] | every studio that paints: brushes, brush sets, stored strokes |
 //! | [`Encoded`] | any file Sue cannot decode yet, kept byte for byte |
 //!
 //! Features that need something new add their own component type the same
 //! way (see `HUMANZ.md` §8), and register it with [`register`].
 
 mod blend;
+pub mod brush;
 pub mod changes;
 pub mod comments;
 pub mod contents;
@@ -39,6 +41,7 @@ mod table;
 mod text;
 
 pub use blend::BlendMode;
+pub use brush::BrushPreset;
 pub use curve::{Animation, Curve, Interpolation, Key, Response};
 pub use encoded::Encoded;
 pub use geometry::{AttributeData, Domain, Geometry, Prim, PrimKind, Transform};
@@ -101,6 +104,8 @@ pub mod class {
     pub const MANUSCRIPT: &str = "sue.manuscript";
     /// A link to a file Sue does not hold in memory.
     pub const LINKED_FILE: &str = "sue.linked-file";
+    /// A brush ([`crate::BrushPreset`]); a brush set is a folder of them.
+    pub const BRUSH: &str = "sue.brush";
 }
 
 /// Registers every model component type.
@@ -116,6 +121,7 @@ pub fn register(registry: &mut ComponentRegistry) {
         .register::<Transform>()
         .register::<PageLayout>()
         .register::<Encoded>();
+    registry.register::<BrushPreset>();
 }
 
 /// A registry with every model component type.
