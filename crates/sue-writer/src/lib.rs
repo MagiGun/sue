@@ -35,7 +35,9 @@ mod studio;
 pub mod templates;
 mod ui;
 
-pub use compile::{FORMATS, Look, Options, Separator, Titles, compile, import, sections};
+pub use compile::{
+    FORMATS, Look, Options, Separator, Titles, compile, import, sections, system_text,
+};
 pub use project::{create, create_built_in};
 pub use studio::{ID, SueWriter};
 

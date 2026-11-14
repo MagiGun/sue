@@ -907,3 +907,456 @@ fn sue_writer_tables_take_typing_grow_with_tab_undo_and_export() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Sue Writer at 1440 by 900 with a blank document open, driven a frame
+/// at a time; what each frame drew is kept, so clicks find their place by
+/// the text drawn there.
+struct WriterDriver {
+    runtime: Runtime,
+    ctx: egui::Context,
+    now: Instant,
+    root: PathBuf,
+    texts: Vec<(String, egui::Rect)>,
+}
+
+impl WriterDriver {
+    fn new(tag: &str) -> Self {
+        let (mut runtime, root) = runtime(tag);
+        let ctx = egui::Context::default();
+        let now = Instant::now();
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        runtime.request(
+            ShellRequest::Create {
+                applet: Self::id(),
+                key: "blank".to_owned(),
+            },
+            &mut NoTextures,
+            now,
+        );
+        let mut driver = Self {
+            runtime,
+            ctx,
+            now,
+            root,
+            texts: Vec::new(),
+        };
+        driver.settle(30);
+        driver
+    }
+
+    fn id() -> AppletId {
+        AppletId::new(sue_writer::ID).unwrap()
+    }
+
+    /// The home folder of the test's Sue, made.
+    fn home(&self) -> PathBuf {
+        let home = self.runtime.engine.catalog.folders["home"].clone();
+        std::fs::create_dir_all(&home).unwrap();
+        home
+    }
+
+    fn step(&mut self, events: Vec<egui::Event>) {
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+            events,
+            time: Some(self.ctx.input(|input| input.time) + 0.016),
+            ..egui::RawInput::default()
+        };
+        self.now += Duration::from_millis(16);
+        let runtime = &mut self.runtime;
+        let now = self.now;
+        let output = self
+            .ctx
+            .run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
+        self.texts = text_rects(&output);
+        output.drop_without_applying_deltas();
+    }
+
+    fn settle(&mut self, count: usize) {
+        for _ in 0..count {
+            self.step(Vec::new());
+        }
+    }
+
+    /// Where the last frame drew `text`, the lowest first (a dialog sits
+    /// over the page, the menu bar above it).
+    fn rect_of(&self, text: &str) -> Option<egui::Rect> {
+        self.texts
+            .iter()
+            .filter(|(found, _)| found == text)
+            .map(|(_, rect)| *rect)
+            .max_by(|a, b| a.top().total_cmp(&b.top()))
+    }
+
+    /// A click in the middle of `text`, found where the last frame drew it.
+    fn click_text(&mut self, text: &str) {
+        let at = self
+            .rect_of(text)
+            .unwrap_or_else(|| {
+                let shown: Vec<&String> = self.texts.iter().map(|(text, _)| text).collect();
+                panic!("{text:?} is on screen: {shown:?}")
+            })
+            .center();
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        self.step(vec![egui::Event::PointerMoved(at)]);
+        self.step(vec![press(true)]);
+        self.step(vec![press(false)]);
+        self.settle(4);
+    }
+
+    /// Runs one of Sue Writer's commands, as its menus do.
+    fn command(&mut self, command: &str) {
+        self.runtime.request(
+            ShellRequest::AppletCommand {
+                applet: Self::id(),
+                command: command.to_owned(),
+            },
+            &mut NoTextures,
+            self.now,
+        );
+        self.settle(4);
+    }
+
+    /// The system's file dialog answering `purpose` with `path`.
+    fn picked(&mut self, purpose: &str, path: &Path, save: bool) {
+        let pick = if save {
+            FilePick::save(Some(Self::id()), purpose, "Save", "file")
+        } else {
+            FilePick::open(Some(Self::id()), purpose, "Open")
+        };
+        self.runtime.request(
+            ShellRequest::Picked {
+                pick,
+                path: path.to_path_buf(),
+            },
+            &mut NoTextures,
+            self.now,
+        );
+        self.settle(4);
+    }
+
+    fn undo(&mut self, redo: bool) {
+        let modifiers = if redo {
+            egui::Modifiers::COMMAND | egui::Modifiers::SHIFT
+        } else {
+            egui::Modifiers::COMMAND
+        };
+        self.step(vec![key(egui::Key::Z, modifiers)]);
+        self.settle(4);
+    }
+
+    /// Every table of the arena: its id, its cells' text and heading rows.
+    fn tables(&self) -> Vec<(sue_core::EntityId, Vec<Vec<String>>, Option<i64>)> {
+        self.runtime
+            .engine
+            .world
+            .arena
+            .iter()
+            .filter(|(_, entity)| entity.class() == sue_model::TEXT_TABLE)
+            .map(|(_, entity)| {
+                let table = entity.ext::<sue_model::Table>().unwrap();
+                let (rows, columns) = table.size();
+                let cells = (0..rows)
+                    .map(|row| (0..columns).map(|column| table.text(row, column)).collect())
+                    .collect();
+                let heading = entity
+                    .property(sue_model::HEADER_ROWS)
+                    .and_then(sue_core::Value::as_i64);
+                (entity.id(), cells, heading)
+            })
+            .collect()
+    }
+
+    /// Every document: id, text and marks, sorted by id.
+    fn documents(&self) -> Vec<(sue_core::EntityId, String, sue_model::TextMarks)> {
+        let mut docs: Vec<_> = self
+            .runtime
+            .engine
+            .world
+            .arena
+            .iter()
+            .filter(|(_, entity)| sue_model::manuscript::is_document(entity))
+            .map(|(_, entity)| {
+                (
+                    entity.id(),
+                    entity.string_buffer().unwrap().as_str().to_owned(),
+                    entity
+                        .ext::<sue_model::TextMarks>()
+                        .cloned()
+                        .unwrap_or_default(),
+                )
+            })
+            .collect();
+        docs.sort_by_key(|(id, ..)| *id);
+        docs
+    }
+}
+
+impl Drop for WriterDriver {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+/// A CSV opened anywhere in Sue becomes a Sue Writer document holding the
+/// table (the first row a heading row, as the dialog asked), and Table,
+/// Convert, Export Table As writes it back byte for byte; as TSV too.
+/// This is the Writer leg that replaces the Converter's tables.
+#[test]
+fn sue_writer_opens_a_csv_as_a_table_and_exports_it_back_equal() {
+    let mut writer = WriterDriver::new("writer-csv");
+    let csv = "Part,Code,Note\r\nBolt,007,\"M8, zinc\"\r\nNut,12,\"say \"\"hi\"\"\"\r\n";
+    let path = writer.home().join("parts.csv");
+    std::fs::write(&path, csv).unwrap();
+    let docs_before = writer.documents().len();
+    writer.runtime.open_path(&path, &mut NoTextures, writer.now);
+    writer.settle(6);
+    assert_eq!(writer.runtime.shell.page(), Some(&WriterDriver::id()));
+    // The dialog asks about the heading row before anything is made.
+    assert!(writer.tables().is_empty(), "nothing yet");
+    assert!(
+        writer.rect_of("The first row is a heading row").is_some(),
+        "the question is asked"
+    );
+    writer.click_text("Open");
+    let tables = writer.tables();
+    assert_eq!(tables.len(), 1, "one table");
+    let (table, cells, heading) = &tables[0];
+    assert_eq!(cells[0], ["Part", "Code", "Note"]);
+    assert_eq!(
+        cells[1],
+        ["Bolt", "007", "M8, zinc"],
+        "text kept as written"
+    );
+    assert_eq!(cells[2][2], "say \"hi\"");
+    assert_eq!(*heading, Some(1), "the first row is a heading row");
+    // A document named after the file holds it (a blank project's empty
+    // first document takes it, as any opened file).
+    assert!(writer.documents().len() >= docs_before);
+    assert!(
+        writer.runtime.engine.world.arena.iter().any(|(_, entity)| {
+            entity.name() == "parts"
+                && entity.ext::<sue_model::TextMarks>().is_some_and(|marks| {
+                    marks.marks().iter().any(|mark| {
+                        mark.kind == sue_model::mark_kind::EMBED
+                            && mark.value == sue_core::Value::Entity(*table)
+                    })
+                })
+        }),
+        "the document shows the table"
+    );
+    // The caret is in the table: Export Table As asks where, and writes.
+    writer.command("table.export");
+    let out = writer.home().join("parts-out.csv");
+    writer.picked("table-export", &out, true);
+    assert_eq!(
+        std::fs::read(&out).unwrap(),
+        csv.as_bytes(),
+        "the CSV exports back equal: {:?}",
+        writer.runtime.shell.message()
+    );
+    writer.command("table.export");
+    let tsv = writer.home().join("parts-out.tsv");
+    writer.picked("table-export", &tsv, true);
+    assert_eq!(
+        std::fs::read_to_string(&tsv).unwrap(),
+        "Part\tCode\tNote\r\nBolt\t007\tM8, zinc\r\nNut\t12\t\"say \"\"hi\"\"\"\r\n",
+        "in TSV a comma needs no quotes, a quote does"
+    );
+}
+
+/// Table, Convert, Table from File puts a CSV's table at the caret as one
+/// step: Undo takes it away, ids and all, and Redo brings it back. With
+/// the box unticked the table has no heading row.
+#[test]
+fn sue_writer_puts_a_table_from_a_file_at_the_caret_with_one_undo_step() {
+    let mut writer = WriterDriver::new("writer-table-file");
+    writer.step(vec![egui::Event::Text("Before the table.".to_owned())]);
+    writer.settle(4);
+    writer
+        .runtime
+        .typing
+        .flush(&mut writer.runtime.engine.history);
+    let path = writer.home().join("sizes.tsv");
+    std::fs::write(&path, "S\tM\n1\t2\n").unwrap();
+    let before = writer.documents();
+    let ids_before: Vec<sue_core::EntityId> = writer
+        .runtime
+        .engine
+        .world
+        .arena
+        .iter()
+        .map(|(_, entity)| entity.id())
+        .collect();
+    writer.command("table.from_file");
+    writer.picked("table-file", &path, false);
+    assert!(
+        writer.rect_of("Table from File").is_some(),
+        "the dialog is titled for the insert"
+    );
+    writer.click_text("The first row is a heading row");
+    writer.click_text("Insert");
+    let tables = writer.tables();
+    assert_eq!(tables.len(), 1);
+    assert_eq!(tables[0].1, [["S", "M"], ["1", "2"]]);
+    assert_eq!(tables[0].2, None, "the box was unticked: no heading row");
+    let after = writer.documents();
+    let (_, text, marks) = after
+        .iter()
+        .find(|(_, text, _)| text.contains("Before the table."))
+        .unwrap();
+    assert!(
+        text.starts_with(&format!("Before the table.\n{}\n", sue_model::OBJECT)),
+        "{text:?}"
+    );
+    assert!(
+        marks
+            .marks()
+            .iter()
+            .any(|mark| mark.kind == sue_model::mark_kind::EMBED
+                && mark.value == sue_core::Value::Entity(tables[0].0))
+    );
+    // One Undo: the arena is as it was, the ids too.
+    writer.undo(false);
+    assert_eq!(writer.documents(), before, "the text and marks are back");
+    assert!(writer.tables().is_empty(), "the table is gone");
+    let ids_now: Vec<sue_core::EntityId> = writer
+        .runtime
+        .engine
+        .world
+        .arena
+        .iter()
+        .map(|(_, entity)| entity.id())
+        .collect();
+    assert_eq!(ids_now, ids_before);
+    // Redo: as after.
+    writer.undo(true);
+    assert_eq!(writer.documents(), after);
+    assert_eq!(writer.tables(), tables);
+}
+
+/// File, Export to Plain text with CRLF line ends, spaces at line ends
+/// dropped and tabs as four spaces, all set in the Export dialog by
+/// clicks; Markdown keeps its tabs.
+#[test]
+fn sue_writer_exports_plain_text_with_crlf_and_tabs_as_four_spaces() {
+    let mut writer = WriterDriver::new("writer-plain-text");
+    writer.step(vec![egui::Event::Text("one\ttwo  ".to_owned())]);
+    writer.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    writer.step(vec![egui::Event::Text("three".to_owned())]);
+    writer.settle(4);
+    writer
+        .runtime
+        .typing
+        .flush(&mut writer.runtime.engine.history);
+    writer.command("compile.open");
+    assert!(
+        writer.rect_of("Export").is_some(),
+        "the dialog reads Export"
+    );
+    // Markdown offers the line endings only.
+    writer.click_text("Markdown");
+    assert!(
+        writer.rect_of("LINE ENDINGS").is_some(),
+        "{:?}",
+        writer
+            .texts
+            .iter()
+            .map(|(text, rect)| format!("{text} {rect:?}"))
+            .collect::<Vec<_>>()
+    );
+    assert!(writer.rect_of("Drop spaces at line ends").is_none());
+    writer.click_text("Plain text");
+    writer.click_text("CRLF (Windows)");
+    writer.click_text("Drop spaces at line ends");
+    // Tabs as 4 spaces: the field takes the arrow keys while typed in.
+    let field = writer
+        .rect_of("Tabs as")
+        .expect("the tabs row")
+        .right_center()
+        + vec2(30.0, 0.0);
+    let press = |pressed| egui::Event::PointerButton {
+        pos: field,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    writer.step(vec![egui::Event::PointerMoved(field)]);
+    writer.step(vec![press(true)]);
+    writer.step(vec![press(false)]);
+    writer.settle(2);
+    for _ in 0..4 {
+        writer.step(vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)]);
+    }
+    writer.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    writer.settle(4);
+    writer.click_text("Export...");
+    let path = writer.home().join("notes.txt");
+    writer.picked("compile.txt", &path, true);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|_| panic!("written: {:?}", writer.runtime.shell.message()));
+    assert!(text.contains("one    two\r\nthree\r\n"), "{text:?}");
+    assert!(!text.contains('\t'), "{text:?}");
+    assert!(
+        !text.replace("\r\n", "").contains('\n'),
+        "CRLF only: {text:?}"
+    );
+    // The same choices on Markdown: CRLF, but the tab stays.
+    let markdown = writer.home().join("notes.md");
+    writer.picked("compile.md", &markdown, true);
+    let text = std::fs::read_to_string(&markdown).unwrap();
+    assert!(text.contains("one\ttwo"), "{text:?}");
+    assert!(
+        !text.replace("\r\n", "").contains('\n'),
+        "CRLF only: {text:?}"
+    );
+}
+
+/// Edit, Select All and Edit, Cut from the menu do what their keys do in
+/// the text, and Undo brings the words back.
+#[test]
+fn sue_writers_edit_menu_selects_all_and_cuts() {
+    let mut writer = WriterDriver::new("writer-edit-menu");
+    writer.step(vec![egui::Event::Text("Cut me.".to_owned())]);
+    writer.settle(4);
+    writer
+        .runtime
+        .typing
+        .flush(&mut writer.runtime.engine.history);
+    let text = |writer: &WriterDriver| {
+        writer
+            .documents()
+            .into_iter()
+            .map(|(_, text, _)| text)
+            .find(|text| !text.trim().is_empty() || text.is_empty())
+            .unwrap_or_default()
+    };
+    assert!(text(&writer).contains("Cut me."));
+    writer.command("edit.select_all");
+    writer.command("edit.cut");
+    writer
+        .runtime
+        .typing
+        .flush(&mut writer.runtime.engine.history);
+    assert!(!text(&writer).contains("Cut me."), "{:?}", text(&writer));
+    writer.undo(false);
+    assert!(text(&writer).contains("Cut me."), "{:?}", text(&writer));
+}
+
+/// Help, About Sue Writer says what it is; the name 0.0.75 gave Back to
+/// the Hub still goes there.
+#[test]
+fn sue_writer_shows_about_and_goes_back_to_the_hub() {
+    let mut writer = WriterDriver::new("writer-about");
+    writer.command("help.about");
+    assert!(writer.rect_of("About Sue Writer").is_some());
+    writer.click_text("Close");
+    assert!(writer.rect_of("About Sue Writer").is_none());
+    writer.command("studio.leave");
+    assert_ne!(writer.runtime.shell.page(), Some(&WriterDriver::id()));
+}

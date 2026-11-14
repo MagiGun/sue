@@ -272,4 +272,5 @@ view_outliner = "Ctrl+3"       # @keybind Outliner
 project_snapshot = "Ctrl+5"    # @keybind Take Snapshot
 list_bullet = "Ctrl+Shift+L"   # @keybind Bulleted List
 table_insert = "Ctrl+F12"      # @keybind Insert Table
+file_save_as = "Ctrl+Shift+S"  # @keybind Save As
 custom = ""                    # @text Keys of commands that have no default key

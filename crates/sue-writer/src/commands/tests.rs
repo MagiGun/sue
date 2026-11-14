@@ -139,6 +139,7 @@ fn the_shortcuts_keep_the_keys_they_had() {
         ("project.snapshot", "Ctrl+5"),
         ("list.bullet", "Ctrl+Shift+L"),
         ("table.insert", "Ctrl+F12"),
+        ("file.save_as", "Ctrl+Shift+S"),
     ];
     let keyed: Vec<(&str, String)> = shortcut_table()
         .iter()
@@ -204,8 +205,9 @@ fn the_palette_offers_what_it_did() {
     let expected = [
         ("New Project...", "file.new", ""),
         ("Import a Document...", "file.import", ""),
-        ("Compile...", "compile.open", "Ctrl+Shift+E"),
+        ("Export...", "compile.open", "Ctrl+Shift+E"),
         ("Export as PDF...", "compile.pdf", "Ctrl+P"),
+        ("Settings...", "file.settings", ""),
         ("Composition Mode", "view.composition", "F11"),
         ("Writing Statistics...", "project.statistics", ""),
         ("Keyboard Shortcuts", "help.shortcuts", ""),
@@ -338,14 +340,19 @@ fn every_command_that_stays_runs_on_a_project_without_leaving_it() {
         for name in names {
             let flags = registry().flags(&name);
             if flags.has(Flags::LEAVES_CANVAS) {
-                // It does leave (the templates folder is not made here).
-                if name != "file.templates_folder" {
+                // It does leave (the templates folder is not made here, and
+                // Export Table As needs the caret in a table: the runtime
+                // test of tables runs it).
+                if name != "file.templates_folder" && name != "table.export" {
                     cx.requests.clear();
                     assert!(writer.run(&name, cx), "{name} did not run");
                     assert!(
                         cx.requests.iter().any(|request| matches!(
                             request,
-                            ShellRequest::PickFile(_) | ShellRequest::Hub
+                            ShellRequest::PickFile(_)
+                                | ShellRequest::Hub
+                                | ShellRequest::Command(_)
+                                | ShellRequest::OpenSettings(_)
                         )),
                         "{name} is marked as leaving but stays"
                     );

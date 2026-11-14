@@ -1,13 +1,21 @@
 //! The Table menu: tables inserted, grown, shrunk and converted.
 
 use sue_type::editor::TableEdit;
-use sue_wm::{AppletContext, Call, Command, Flags};
+use sue_wm::{AppletContext, Call, Command, Facts, FilePick, Flags, ItemState, ShellRequest};
 
-use crate::studio::{Dialog, SueWriter};
+use crate::studio::{Dialog, SueWriter, me};
 
 const fn c(name: &'static str, label: &'static str) -> Command<SueWriter> {
     Command::new(name, label, "table", run)
 }
+
+/// A command that works only now and then (see [`state`]).
+const fn s(name: &'static str, label: &'static str) -> Command<SueWriter> {
+    c(name, label).state(state)
+}
+
+/// The extensions of the table files Sue Writer reads and writes.
+pub(crate) const TABLE_FILES: [&str; 3] = ["csv", "tsv", "tab"];
 
 pub(super) const COMMANDS: &[Command<SueWriter>] = &[
     c("table.insert", "insert-table-ellipsis").keys("Ctrl+F12"),
@@ -26,7 +34,25 @@ pub(super) const COMMANDS: &[Command<SueWriter>] = &[
     c("table.header", "heading-row"),
     c("table.from_text", "text-to-table"),
     c("table.to_text", "table-to-text"),
+    // A CSV or TSV file as a table at the caret, and a table out as one.
+    s("table.from_file", "table-from-file-ellipsis").with(Flags::LEAVES_CANVAS),
+    s("table.export", "export-table-as-ellipsis").with(Flags::LEAVES_CANVAS),
 ];
+
+/// Whether a Table menu command works now: a table file goes into text
+/// that is open, and a table goes out when the caret is in one.
+fn state(writer: &SueWriter, _: &Facts<'_>, call: Call<'_>) -> ItemState {
+    let on = match call.name {
+        "table.from_file" => writer.editor.current().is_some(),
+        "table.export" => writer.editor.cell().is_some(),
+        _ => true,
+    };
+    if on {
+        ItemState::on()
+    } else {
+        ItemState::off()
+    }
+}
 
 /// Does what a Table menu command does.
 fn run(writer: &mut SueWriter, cx: &mut AppletContext<'_>, call: Call<'_>) {
@@ -83,6 +109,29 @@ fn run(writer: &mut SueWriter, cx: &mut AppletContext<'_>, call: Call<'_>) {
         }
         "table.from_text" => {
             writer.editor.text_to_table(cx);
+        }
+        "table.from_file" => {
+            if writer.editor.current().is_none() {
+                cx.notify(tr!("open-a-document-first"));
+                return;
+            }
+            let pick = FilePick::open(Some(me()), "table-file", &tr!("table-from-file"))
+                .extensions(&TABLE_FILES)
+                .starting_in(SueWriter::export_dir(cx));
+            cx.request(ShellRequest::PickFile(pick));
+        }
+        "table.export" => {
+            let Some((table, ..)) = writer.editor.cell() else {
+                cx.notify(tr!("click-in-a-table-first"));
+                return;
+            };
+            writer.editor.commit(cx);
+            writer.table_out = Some(table);
+            let name = format!("{}.csv", crate::studio::sanitize(&writer.title(cx)));
+            let pick = FilePick::save(Some(me()), "table-export", &tr!("export-table-as"), &name)
+                .extensions(&["csv", "tsv"])
+                .starting_in(SueWriter::export_dir(cx));
+            cx.request(ShellRequest::PickFile(pick));
         }
         _ => {}
     }

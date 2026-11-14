@@ -19,7 +19,7 @@ pub(super) const COMMANDS: &[Command<SueWriter>] = &[
     c("project.trash", "move-to-trash"),
     c("project.empty_trash", "empty-trash"),
     c("project.snapshot", "take-snapshot").keys("Ctrl+5"),
-    c("project.include", "include-in-compile"),
+    c("project.include", "include-in-export"),
     // `status.draft`: one of `project::STATUSES`, or `none`.
     c("status.", "status").with(Flags::FAMILY),
     // `label.idea`: one of `project::LABELS`, or `none`.

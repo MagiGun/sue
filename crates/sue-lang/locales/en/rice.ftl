@@ -555,3 +555,5 @@ sue_writer_keys-format_shrink = Format shrink
     .description = Shrink Font
 sue_writer_keys-insert_mark_nbsp = Insert mark nbsp
     .description = Non-breaking Space
+sue_writer_keys-file_save_as = File save as
+    .description = Save As

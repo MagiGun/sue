@@ -2,8 +2,10 @@
 
 use egui::{Align2, Id, Rect, RichText, Sense, Ui, pos2, vec2};
 use sue_core::Value;
+use sue_io::text_ops::Endings;
 use sue_model::manuscript;
 use sue_model::mark_kind as kind;
+use sue_wm::ui::{self, Space};
 use sue_wm::{AppletContext, ShellRequest, Theme, widgets};
 
 use crate::compile::{FORMATS, Separator, Titles};
@@ -32,7 +34,7 @@ impl SueWriter {
             matches!(dialog, Dialog::Shortcuts).then(|| crate::commands::shortcut_rows(cx.rice()));
         let title = match &dialog {
             Dialog::NewProject { .. } => tr!("new-project"),
-            Dialog::Compile(_) => tr!("compile"),
+            Dialog::Compile(_) => tr!("export"),
             Dialog::Settings(_) => tr!("project-settings"),
             Dialog::Link(_) => tr!("link"),
             Dialog::Footnote(_) => tr!("footnote"),
@@ -43,6 +45,9 @@ impl SueWriter {
             Dialog::Comment(_) => tr!("new-comment"),
             Dialog::Statistics => tr!("writing-statistics"),
             Dialog::Shortcuts => tr!("keyboard-shortcuts"),
+            Dialog::TableFile { insert: true, .. } => tr!("table-from-file"),
+            Dialog::TableFile { .. } => tr!("open-table"),
+            Dialog::About => tr!("about-sue-writer"),
         };
         let escape = ctx.input(|input| input.key_pressed(egui::Key::Escape));
         let id = Id::unique("sue-writer-dialog");
@@ -162,6 +167,7 @@ impl SueWriter {
                         ui.add_space(6.0);
                         ui.checkbox(&mut choices.title_page, tr!("a-title-page-first"));
                         ui.checkbox(&mut choices.chapter_pages, tr!("each-chapter-new-page"));
+                        Self::tidy_ui(ui, choices, theme);
                         ui.add_space(10.0);
                         ui.horizontal(|ui| {
                             if ui.button(tr!("export-ellipsis")).clicked() {
@@ -307,6 +313,65 @@ impl SueWriter {
                             }
                         });
                     }
+                    Dialog::TableFile {
+                        path,
+                        heading,
+                        insert,
+                    } => {
+                        let name = path
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        ui.label(RichText::new(name).color(theme.muted));
+                        ui.add_space(theme.space(Space::S4));
+                        if ui::checkbox(
+                            "writer-table-heading-row",
+                            &tr!("the-first-row-is-a-heading-row"),
+                            *heading,
+                        )
+                        .show(ui, theme)
+                        .clicked()
+                        {
+                            *heading = !*heading;
+                        }
+                        ui.add_space(theme.space(Space::S5));
+                        ui.horizontal(|ui| {
+                            let go = if *insert { tr!("insert") } else { tr!("open") };
+                            if ui::button("writer-table-file-go", &go)
+                                .primary()
+                                .show(ui, theme)
+                                .clicked()
+                            {
+                                let (path, heading, insert) = (path.clone(), *heading, *insert);
+                                after = Some(Box::new(move |me: &mut Self, cx| {
+                                    me.open_table_file(cx, &path, heading, insert);
+                                }));
+                                keep = false;
+                            }
+                            if ui::button("writer-table-file-cancel", &tr!("cancel"))
+                                .show(ui, theme)
+                                .clicked()
+                            {
+                                keep = false;
+                            }
+                        });
+                    }
+                    Dialog::About => {
+                        ui.label(
+                            RichText::new(tr!("version-number", value = env!("CARGO_PKG_VERSION")))
+                                .color(theme.muted),
+                        );
+                        ui.add_space(theme.space(Space::S4));
+                        ui.label(tr!("sue-writer-about"));
+                        ui.add_space(theme.space(Space::S5));
+                        if ui::button("writer-about-close", &tr!("close"))
+                            .primary()
+                            .show(ui, theme)
+                            .clicked()
+                        {
+                            keep = false;
+                        }
+                    }
                     Dialog::Comment(text) => {
                         ui.label(tr!("by", value = self.author_name(cx)));
                         let response = ui.add(
@@ -429,6 +494,68 @@ impl SueWriter {
         if let Some(after) = after {
             after(self, cx);
         }
+    }
+
+    /// The Export dialog's tidying of plain text: line endings for Plain
+    /// text and Markdown; spaces at line ends and tabs for Plain text only
+    /// (in Markdown two spaces end a line and tabs carry its lists).
+    fn tidy_ui(ui: &mut Ui, choices: &mut crate::studio::CompileChoices, theme: &Theme) {
+        let (key, ..) = FORMATS[choices.format.min(FORMATS.len() - 1)];
+        if crate::compile::tidying(key, &choices.text).is_none() {
+            return;
+        }
+        ui.add_space(theme.space(Space::S3));
+        widgets::heading(ui, &tr!("line-endings"), theme);
+        // One row each, so the dialog stays short enough for a laptop.
+        ui.horizontal(|ui| {
+            let lf = ui::radio(
+                "writer-endings-lf",
+                &tr!("lf-linux-macos"),
+                choices.text.endings == Endings::Lf,
+            )
+            .show(ui, theme);
+            ui.add_space(theme.space(Space::S5));
+            let crlf = ui::radio(
+                "writer-endings-crlf",
+                &tr!("crlf-windows"),
+                choices.text.endings == Endings::CrLf,
+            )
+            .show(ui, theme);
+            if lf.clicked() {
+                choices.text.endings = Endings::Lf;
+            }
+            if crlf.clicked() {
+                choices.text.endings = Endings::CrLf;
+            }
+        });
+        if key != "txt" {
+            return;
+        }
+        ui.horizontal(|ui| {
+            if ui::checkbox(
+                "writer-drop-spaces",
+                &tr!("drop-spaces-at-line-ends"),
+                choices.text.trim_trailing,
+            )
+            .show(ui, theme)
+            .clicked()
+            {
+                choices.text.trim_trailing = !choices.text.trim_trailing;
+            }
+            ui.add_space(theme.space(Space::S5));
+            ui.label(tr!("tabs-as"));
+            let mut spaces = f64::from(choices.text.tab_spaces);
+            let label = tr!("tabs-as-spaces");
+            ui::number_field("writer-tab-spaces", &mut spaces)
+                .range(0.0..=8.0)
+                .step(1.0)
+                .decimals(0)
+                .label(&label)
+                .show(ui, theme)
+                .on_hover_text(tr!("n-0-keeps-the-tabs"));
+            choices.text.tab_spaces = spaces.round().clamp(0.0, 8.0) as u8;
+            ui.label(tr!("spaces"));
+        });
     }
 
     fn statistics_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>, theme: &Theme) {

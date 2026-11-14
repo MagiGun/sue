@@ -77,6 +77,8 @@ pub(crate) struct CompileChoices {
     pub title_page: bool,
     pub chapter_pages: bool,
     pub whole: bool,
+    /// Plain text and Markdown: line endings, spaces at line ends, tabs.
+    pub text: sue_io::text_ops::TextOptions,
 }
 
 /// The project settings dialog's fields.
@@ -135,6 +137,16 @@ pub(crate) enum Dialog {
     Statistics,
     /// The keyboard shortcuts.
     Shortcuts,
+    /// A CSV or TSV file about to become a table: a document of its own,
+    /// or (`insert`) a table at the caret. `heading`: the first row is a
+    /// heading row.
+    TableFile {
+        path: PathBuf,
+        heading: bool,
+        insert: bool,
+    },
+    /// What Sue Writer is.
+    About,
 }
 
 /// The find bar.
@@ -228,6 +240,14 @@ pub struct SueWriter {
     pub(crate) templates: Templates,
     /// A command a top bar tool chose this frame, run once it is drawn.
     pub(crate) pending_command: Option<String>,
+    /// The table Table, Convert, Export Table As writes, while the
+    /// system's save dialog asks where.
+    pub(crate) table_out: Option<EntityId>,
+    /// The last answer to "The first row is a heading row".
+    pub(crate) table_heading: bool,
+    /// What an Edit menu item hands the text next frame (cut, copy,
+    /// paste, select all), as its keys would.
+    pub(crate) for_text: Vec<egui::Event>,
 }
 
 impl Default for SueWriter {
@@ -278,6 +298,9 @@ impl Default for SueWriter {
             top_bar: None,
             templates: Templates::load(),
             pending_command: None,
+            table_out: None,
+            table_heading: true,
+            for_text: Vec::new(),
         }
     }
 }
@@ -702,28 +725,183 @@ impl SueWriter {
     /// Imports a document file into the project (or as a project of its
     /// own).
     pub(crate) fn import(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
-        let name = path.file_stem().map_or_else(
+        // A table file asks first whether its first row is a heading row.
+        if compile::is_table_file(&path.to_string_lossy()) {
+            self.dialog = Some(Dialog::TableFile {
+                path: path.to_path_buf(),
+                heading: self.table_heading,
+                insert: false,
+            });
+            return;
+        }
+        let Some(bytes) = Self::read_file(cx, path) else {
+            return;
+        };
+        match compile::import(&path.to_string_lossy(), &bytes) {
+            Ok(read) => self.take_document(cx, &Self::file_name(path), read),
+            Err(error) => cx.fail(error),
+        }
+    }
+
+    /// The name a document read from `path` gets: the file's, without its
+    /// extension.
+    fn file_name(path: &Path) -> String {
+        path.file_stem().map_or_else(
             || tr!("imported"),
             |stem| stem.to_string_lossy().into_owned(),
-        );
-        let bytes = match sue_platform::fs::read(path) {
-            Ok(bytes) => bytes,
+        )
+    }
+
+    /// The bytes of `path`, or a failure said and `None`.
+    fn read_file(cx: &mut AppletContext<'_>, path: &Path) -> Option<Vec<u8>> {
+        match sue_platform::fs::read(path) {
+            Ok(bytes) => Some(bytes),
             Err(error) => {
                 cx.fail(tr!("could-not-read", path = path.display(), error = error));
-                return;
+                None
             }
+        }
+    }
+
+    /// A table file, as the table file dialog answered: a document of its
+    /// own holding the table, or (`insert`) the table at the caret.
+    pub(crate) fn open_table_file(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        path: &Path,
+        heading: bool,
+        insert: bool,
+    ) {
+        self.table_heading = heading;
+        let Some(bytes) = Self::read_file(cx, path) else {
+            return;
         };
+        let name = path.to_string_lossy();
+        if insert {
+            match compile::read_table(&name, &bytes, heading) {
+                Ok(table) => self.insert_table_entity(cx, table),
+                Err(error) => cx.fail(error),
+            }
+        } else {
+            match compile::import_table(&name, &bytes, heading) {
+                Ok(read) => {
+                    let table = read.entities.first().map(Entity::id);
+                    self.take_document(cx, &Self::file_name(path), read);
+                    // The caret in the first cell, where the work is.
+                    if let Some(table) = table
+                        && cx.arena().get_by_id(table).is_ok()
+                    {
+                        self.view = View::Document;
+                        self.editor.enter_cell(table, 0, 0);
+                        self.editor.focus();
+                    }
+                }
+                Err(error) => cx.fail(error),
+            }
+        }
+    }
+
+    /// Puts table `table` (not yet in the arena) in a paragraph of its own
+    /// at the caret, as one undo step, with the caret in its first cell.
+    pub(crate) fn insert_table_entity(&mut self, cx: &mut AppletContext<'_>, table: Entity) {
+        self.editor.commit(cx);
+        if self.editor.cell().is_some() {
+            self.editor.leave_table(false);
+        }
+        let Some(doc) = self.editor.current() else {
+            cx.notify(tr!("open-a-document-first"));
+            return;
+        };
+        let Some(handle) = cx.arena().handle_of(doc) else {
+            return;
+        };
+        let Some((text, mut marks)) = cx.arena().get_by_id(doc).ok().and_then(|entity| {
+            Some((
+                entity.string_buffer()?.as_str().to_owned(),
+                entity
+                    .ext::<sue_model::TextMarks>()
+                    .cloned()
+                    .unwrap_or_default(),
+            ))
+        }) else {
+            return;
+        };
+        let mut at = self.editor.selection().start.min(text.len());
+        while !text.is_char_boundary(at) {
+            at -= 1;
+        }
+        let mut insert = String::new();
+        if at > 0 && text.as_bytes()[at - 1] != b'\n' {
+            insert.push('\n');
+        }
+        let object = at + insert.len()..at + insert.len() + sue_model::OBJECT.len_utf8();
+        insert.push(sue_model::OBJECT);
+        if text.as_bytes().get(at) != Some(&b'\n') {
+            insert.push('\n');
+        }
+        marks.insert_text(&text, at, &insert, None);
+        let id = table.id();
+        marks.set(object, sue_model::mark_kind::EMBED, Some(Value::Entity(id)));
+        let end = at + insert.len();
+        let batch = sue_core::txn::Batch::new(tr!("table-from-file"))
+            .then(sue_core::txn::SpawnEntity::new(table))
+            .then(sue_core::txn::InsertText::new(handle, at, insert))
+            .then(sue_core::txn::SetExtension::set(doc, marks));
+        if self.apply(cx, batch) {
+            self.view = View::Document;
+            self.editor.select(doc, end..end);
+            self.editor.enter_cell(id, 0, 0);
+            self.editor.focus();
+        }
+    }
+
+    /// Writes the table Export Table As chose to `path`: CSV, or TSV for a
+    /// `.tsv` or `.tab` name.
+    pub(crate) fn export_table(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let Some(table) = self.table_out.take() else {
+            return;
+        };
+        let name = path.to_string_lossy();
+        match compile::export_table(cx.arena(), table, &name) {
+            Ok(bytes) => match sue_platform::fs::write(path, &bytes) {
+                Ok(()) => {
+                    let format = if compile::is_tsv(&name) {
+                        tr!("tsv-table")
+                    } else {
+                        tr!("csv-table")
+                    };
+                    cx.saved(
+                        path.to_path_buf(),
+                        tr!("kib", value = bytes.len().div_ceil(1024), name = format),
+                    );
+                }
+                Err(error) => cx.fail(tr!("could-not-write", path = path.display(), error = error)),
+            },
+            Err(error) => cx.fail(error),
+        }
+    }
+
+    /// Hands `event` to the text next frame, as a key would.
+    pub(crate) fn hand_to_text(&mut self, event: egui::Event) {
+        self.view = View::Document;
+        self.editor.focus();
+        self.for_text.push(event);
+    }
+
+    /// A document read from a file into the project (a project of its own
+    /// when none is open), named `name`, with the entities its text shows.
+    pub(crate) fn take_document(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        name: &str,
+        read: sue_io::publish::Imported,
+    ) {
+        let name = name.to_owned();
         let sue_io::publish::Imported {
             text,
             marks,
             entities,
-        } = match compile::import(&path.to_string_lossy(), &bytes) {
-            Ok(read) => read,
-            Err(error) => {
-                cx.fail(error);
-                return;
-            }
-        };
+        } = read;
         if self.project.is_none() {
             self.new_project(cx, "blank", &name);
         }
@@ -799,7 +977,7 @@ impl SueWriter {
         choices: &CompileChoices,
     ) {
         let Some(from) = self.compile_from(cx, choices.whole) else {
-            cx.fail(tr!("nothing-to-compile"));
+            cx.fail(tr!("nothing-to-export"));
             return;
         };
         let options = compile::Options {
@@ -809,6 +987,7 @@ impl SueWriter {
             separator: choices.separator,
             title_page: choices.title_page,
             chapter_pages: choices.chapter_pages,
+            text: choices.text,
         };
         let look = self.look(cx);
         match compile::compile(cx.arena(), &options, &look) {
@@ -1324,6 +1503,11 @@ impl SueWriter {
         if self.dialog.is_some() || self.menubar.is_open() || self.renaming.is_some() {
             return;
         }
+        // What the Edit menu handed the text, as its keys would.
+        if !self.for_text.is_empty() {
+            let events = std::mem::take(&mut self.for_text);
+            ctx.input_mut(|input| input.events.extend(events));
+        }
         // Shortcuts work while typing; other text fields keep theirs. The
         // chords are the settings' (Settings, Keymaps), any number each.
         let other_field = ctx.text_edit_focused() && !self.editor.has_focus(ctx);
@@ -1568,7 +1752,41 @@ impl SueApplet for SueWriter {
                     title_page: true,
                     chapter_pages: true,
                     whole: true,
+                    text: crate::compile::system_text(),
                 }));
+                true
+            }
+            // The Export dialog on Plain text, every tidying shown.
+            "dialog/compile-txt" => {
+                self.dialog = Some(Dialog::Compile(CompileChoices {
+                    format: FORMATS
+                        .iter()
+                        .position(|(key, ..)| *key == "txt")
+                        .unwrap_or(0),
+                    titles: Titles::Folders,
+                    separator: Separator::SceneBreak,
+                    title_page: true,
+                    chapter_pages: true,
+                    whole: true,
+                    text: sue_io::text_ops::TextOptions {
+                        endings: sue_io::text_ops::Endings::CrLf,
+                        trim_trailing: true,
+                        tab_spaces: 4,
+                    },
+                }));
+                true
+            }
+            // The question a table file asks before it opens.
+            "dialog/table-file" => {
+                self.dialog = Some(Dialog::TableFile {
+                    path: PathBuf::from("parts.csv"),
+                    heading: true,
+                    insert: false,
+                });
+                true
+            }
+            "dialog/about" => {
+                self.dialog = Some(Dialog::About);
                 true
             }
             _ => false,
@@ -1645,6 +1863,9 @@ impl SueApplet for SueWriter {
                         | "html"
                         | "htm"
                         | "xhtml"
+                        | "csv"
+                        | "tsv"
+                        | "tab"
                 )
             })
     }
@@ -1657,6 +1878,14 @@ impl SueApplet for SueWriter {
                 }
                 self.import(cx, path);
             }
+            "table-file" => {
+                self.dialog = Some(Dialog::TableFile {
+                    path: path.to_path_buf(),
+                    heading: self.table_heading,
+                    insert: true,
+                });
+            }
+            "table-export" => self.export_table(cx, path),
             "picture" => {
                 // Read the picture into the arena, then into the text.
                 match sue_platform::fs::read(path) {
@@ -1696,6 +1925,7 @@ impl SueApplet for SueWriter {
                     title_page: false,
                     chapter_pages: true,
                     whole: true,
+                    text: crate::compile::system_text(),
                 });
                 choices.format = format;
                 self.compile_to(cx, path, &choices);
