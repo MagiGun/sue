@@ -293,6 +293,14 @@ fn the_golden_file_is_written_back_the_same_from_a_snapshot() {
 
 // The cost that remains: one copy of one layer on the first write after a
 // snapshot was taken.
+//
+// Recorded on the development machine (Windows 11, 16 cores) on
+// 2026-11-13, release build, 15 runs, for a 4,000 x 4,000 Rgba8 layer
+// (64 MB): the first dab with a snapshot alive took 5.4 / 6.1 / 7.9 ms
+// (least, middle, most) with the machine lightly used, and 11.3 / 13.3 /
+// 49.8 ms while some 40 compilers ran beside it; taking the snapshot, a
+// dab without one and every later dab took under 0.01 ms. One frame at
+// 60 Hz is 16.7 ms.
 
 fn dab(layer: &mut RasterTile2D, x: usize, y: usize, size: usize) {
     let stride = layer.width() as usize * 4;
