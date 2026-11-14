@@ -245,26 +245,28 @@ fn sue_paint_every_menu_command_and_tool_works() {
         }
     }
     // Every command in the menus, as Clip Studio Paint's are laid out.
-    // First the entries the studio adds while it runs (Open Recent's
-    // last item and Window, Workspace), then the menu bar itself.
-    let mut commands: Vec<String> = [
+    let menus = sue_paint::menus();
+    let commands: Vec<String> = menus
+        .iter()
+        .flat_map(|menu| &menu.items)
+        .flat_map(sue_wm::MenuItem::commands)
+        .map(str::to_owned)
+        .collect();
+    assert!(commands.len() > 300, "{}", commands.len());
+    // The walk reaches into sub menus and misses no menu: the entries
+    // of Open Recent, of Window, Workspace and of View are all there.
+    for wanted in [
         "file.recent.clear",
         "window.workspace.save",
         "window.workspace.manage",
         "window.workspace.default",
         "window.workspace.reset",
-    ]
-    .map(str::to_owned)
-    .to_vec();
-    let menus = sue_paint::menus();
-    commands.extend(
-        menus
-            .iter()
-            .flat_map(|menu| &menu.items)
-            .flat_map(sue_wm::MenuItem::commands)
-            .map(str::to_owned),
-    );
-    assert!(commands.len() > 300, "{}", commands.len());
+        "view.actual",
+        "view.double",
+        "help.about",
+    ] {
+        assert!(commands.iter().any(|command| command == wanted), "{wanted}");
+    }
     // Leaving, quitting, printing and help go outside the canvas.
     let outside = [
         "file.leave",
@@ -772,6 +774,7 @@ fn sue_paint_opens_a_menu_by_a_click_on_its_title() {
     paint.settle(1);
     assert!(paint.rect_of("File").is_some(), "{:?}", paint.texts);
     assert!(paint.rect_of("Save As...").is_none(), "no menu is open yet");
+    assert!(paint.rect_of("Draw").is_none(), "the canvas is showing");
     paint.click_text("File");
     let item = paint.rect_of("Save As...").expect("the File menu is open");
     let title = paint.rect_of("File").unwrap();
@@ -779,4 +782,5 @@ fn sue_paint_opens_a_menu_by_a_click_on_its_title() {
     // A click on one of its items runs it and closes the menu.
     paint.click_text("Start Page");
     assert!(paint.rect_of("Save As...").is_none(), "the menu closed");
+    assert!(paint.rect_of("Draw").is_some(), "{:?}", paint.texts);
 }
