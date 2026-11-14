@@ -27,6 +27,10 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint: Select, Selection from Layer, Select Overlapping Area keeps
   only the part of the selection where the current layer has something
   drawn.
+- Sue Paint's Select menu has Select Overlapping Vectors and Select
+  Vectors Within Area: on a vector layer they pick the lines the selected
+  area touches, or holds whole, for the Object tool, which then moves or
+  deletes them.
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.
