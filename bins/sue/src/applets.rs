@@ -18,5 +18,7 @@ pub fn launchpad() -> Result<Launchpad, WmError> {
     launchpad.register(|| Box::new(sue_writer::SueWriter::default()))?;
     // Windows.
     launchpad.register(|| Box::new(Settings::default()))?;
+    // Hidden: the design system's gallery, only in `sue --gallery`.
+    crate::gallery::install(&mut launchpad)?;
     Ok(launchpad)
 }
