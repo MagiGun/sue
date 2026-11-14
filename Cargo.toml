@@ -142,7 +142,8 @@ strip = "debuginfo"
 
 # But the pixel loops run for every pixel of every stroke, and the browser
 # runs them on one thread: they are built for speed even there. They live
-# in the picture engine; Sue Paint's interface is built like the shell's.
+# in the picture engine. Sue Paint keeps a little pixel work of its own
+# (materials, the canvas), so it stays at 2, not at "s".
 [profile.web.package.sue-picture]
 opt-level = 3
 
