@@ -3791,6 +3791,7 @@ dependencies = [
 name = "sue-model"
 version = "0.0.75"
 dependencies = [
+ "sha2",
  "sue-core",
 ]
 

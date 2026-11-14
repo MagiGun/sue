@@ -20,6 +20,7 @@
 //! | [`picture`] / [`BlendMode`] | painting, photo editing, compositing, textures, thumbnails |
 //! | [`brush`] / [`BrushPreset`] | every studio that paints: brushes, brush sets, stored strokes |
 //! | [`Encoded`] | any file Sue cannot decode yet, kept byte for byte |
+//! | [`Foreign`] | what a foreign format holds that Sue does not map, kept for the way back |
 //!
 //! Features that need something new add their own component type the same
 //! way (see `HUMANZ.md` §8), and register it with [`register`].
@@ -31,6 +32,7 @@ pub mod comments;
 pub mod contents;
 mod curve;
 mod encoded;
+pub mod foreign;
 mod geometry;
 mod graph;
 mod layout;
@@ -44,6 +46,7 @@ pub use blend::BlendMode;
 pub use brush::BrushPreset;
 pub use curve::{Animation, Curve, Interpolation, Key, Response};
 pub use encoded::Encoded;
+pub use foreign::Foreign;
 pub use geometry::{AttributeData, Domain, Geometry, Prim, PrimKind, Transform};
 pub use graph::{GraphEdit, GraphOp, Link, Node, NodeGraph, NodeKey, NodeRegistry, NodeType, Port};
 pub use layout::{
@@ -122,6 +125,7 @@ pub fn register(registry: &mut ComponentRegistry) {
         .register::<PageLayout>()
         .register::<Encoded>();
     registry.register::<BrushPreset>();
+    registry.register::<Foreign>();
 }
 
 /// A registry with every model component type.

@@ -10,6 +10,7 @@ license-file.workspace = true
 
 [dependencies]
 sue-core.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true
