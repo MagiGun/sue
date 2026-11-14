@@ -119,6 +119,9 @@ follow [Semantic Versioning](https://semver.org/).
   Clip Studio Paint: the other color becomes the one you draw with and
   both keep their values. It used to swap the two colors. The arrow
   button beside the colors still swaps them.
+- Sue Paint's Drawing Color to Transparent and Radial gradients start
+  at the color you draw with. They always used the main color, even
+  while the sub color was picked.
 - Instant transitions and Animation speed (Settings, Motion) now reach
   the switches in Settings and on the start pages and everything else
   the interface toolkit animates by itself: they used to keep their own

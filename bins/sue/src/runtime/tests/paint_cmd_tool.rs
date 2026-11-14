@@ -194,4 +194,13 @@ fn x_draws_with_the_other_color_and_back() {
         "the gradient starts at the main color"
     );
     assert_eq!(after, [255, 255, 255, 255], "and ends at the sub color");
+    // Drawing Color to Transparent starts at the color X made the
+    // drawing color: white now.
+    driver.command("edit.undo");
+    driver.command("tool.previous_sub");
+    driver.settle(4);
+    driver.drag(from, from + vec2(200.0, 0.0), egui::PointerButton::Primary);
+    let before = strongest(&driver, [690, 598], [700, 602]);
+    assert_eq!(before, [255, 255, 255, 255], "the gradient starts white");
+    assert_eq!(strongest(&driver, [1400, 598], [1410, 602])[3], 0);
 }
