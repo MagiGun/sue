@@ -222,6 +222,41 @@ impl Camera2 {
         std::fs::write(path, encode_png_rgba(size[0], size[1], &pixels)?)
             .map_err(|error| error.to_string())
     }
+
+    /// Paints one frame of `draw` alone, without the shell, into a PNG:
+    /// with the context, the painter, the size and the scale the scenes
+    /// are drawn with, on a ground of `clear`.
+    fn paint_drawing(
+        &mut self,
+        path: &Path,
+        clear: egui::Color32,
+        mut draw: impl FnMut(&egui::Painter, Rect),
+    ) -> Result<(), String> {
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(self.size[0] as f32, self.size[1] as f32));
+        let mut raw = egui::RawInput {
+            screen_rect: Some(rect),
+            time: Some(self.now.duration_since(self.start).as_secs_f64()),
+            max_texture_side: Some(self.painter.max_texture_side()),
+            ..egui::RawInput::default()
+        };
+        raw.viewports
+            .entry(raw.viewport_id)
+            .or_default()
+            .native_pixels_per_point = Some(self.scale);
+        let output = self.ctx.run_ui(raw, |ui| draw(ui.painter(), rect));
+        self.now += Duration::from_millis(8);
+        let size = self.pixels();
+        let pixels = self.painter.paint_offscreen(
+            &self.ctx,
+            size,
+            clear,
+            output.shapes,
+            output.textures_delta,
+            output.pixels_per_point,
+        )?;
+        std::fs::write(path, encode_png_rgba(size[0], size[1], &pixels)?)
+            .map_err(|error| error.to_string())
+    }
 }
 
 /// The tour through Sue that the scenes share: the running shell, the
@@ -250,6 +285,25 @@ impl Tour<'_> {
     fn shoot(&mut self, name: &str) -> Result<(), String> {
         let path = self.dir.join(format!("{name}.png"));
         self.camera.shoot(&mut self.runtime, &path)?;
+        self.written.push(path);
+        Ok(())
+    }
+
+    /// Lets the shell come to rest, then writes the picture `name` of
+    /// what `draw` draws alone, without the shell, in the theme of the
+    /// run: a sheet for review that is no part of Sue's interface.
+    fn shoot_drawing(
+        &mut self,
+        name: &str,
+        mut draw: impl FnMut(&egui::Painter, Rect, &sue_wm::Theme),
+    ) -> Result<(), String> {
+        self.settle();
+        let theme = self.runtime.theme().clone();
+        let path = self.dir.join(format!("{name}.png"));
+        self.camera
+            .paint_drawing(&path, theme.void, |painter, rect| {
+                draw(painter, rect, &theme);
+            })?;
         self.written.push(path);
         Ok(())
     }

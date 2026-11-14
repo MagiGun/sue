@@ -233,6 +233,59 @@ four checks, and make sure it did not touch the backbone without tests.
   `tr!("key")` (or `tr!("key", name = value)` for variables). A test checks
   every key the code reads exists in English with the same variables.
 
+## Drawing an icon
+
+Every picture on a button in Sue is one `Icon` of `sue_wm::icons`
+(`crates/sue-wm/src/icons/`), written as SVG path data and drawn by
+`icons::paint`. The module's own documentation is the full rule; this is
+the short form.
+
+The legal rule comes first. Every icon is drawn from scratch from a
+written description of what it means: the doc comment of its line in the
+icon table. No icon is traced from, copied from, drawn while looking at,
+or matched side by side against the artwork of Clip Studio Paint or of
+any other program, icon set or web site. Pictures everybody uses for an
+idea (a magnifier for search, a bin for delete, a folder) are fine,
+drawn our own way. Where an idea has no such picture, invent one and let
+the tooltip carry the name.
+
+The grid and the pen:
+
+- The canvas is 24 by 24 units. Nothing, the width of the pen included,
+  comes nearer than 2 units to its edge.
+- Fit the icon to one of four keyline shapes, centered: a circle 20
+  across, a square of 18, a wide box of 20 by 16, a tall box of 16 by 20.
+- One pen: 1.5 units wide, round caps, round joins. The pen belongs to
+  the engine, not to the drawing; never draw a second weight.
+- Outer corners have a radius of 2 units, corners of details 1. Keep
+  1.5 units of clear space between two strokes.
+- Put straight stems on x.75 left of or above the middle and on x.25
+  right of or below it (a test holds this), the tops of curves too
+  wherever the picture allows, and other points on the quarter unit grid
+  unless the geometry decides them.
+- An icon is a line, with at most one small solid accent (a dot, an
+  arrow head, a folded corner). No second tone. Only the "on" half of an
+  on and off pair (a pin, a heart, an eye, a lock, a star) gets a solid
+  twin.
+- Path data uses `M L H V C Q A Z` only.
+
+To add one: write its art in the file of its group, add one line to the
+table at the end of `icons/mod.rs` (description, name in Rust, name as a
+string, art), and name it after what the picture is or does (`Layer`,
+`LayerNew`, `layer-new`), never after where it is used. Then look at it:
+
+```bash
+SUE_ICON_PROOFS=<folder> cargo test -p sue-wm proofs -- --ignored
+```
+
+writes every icon at 16 to 48 pixels, with the small sizes enlarged so
+that each pixel shows, and as SVG files. `sue --snapshot <folder>` draws
+the contact sheets (`27-icons-reference`, `27a-icons-all`) with the real
+painter; add `--scale 1.5` or `--preset paper` to see other displays and
+themes. The tests of the module hold the rest: every icon parses, stays
+inside its keyline, gives a tile at 16, 24 and 48, and no two icons are
+the same picture at 24.
+
 ## Adding or updating a language
 
 Every string Sue shows lives in `crates/sue-lang/locales/`, one folder per

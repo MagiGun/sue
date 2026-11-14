@@ -7,6 +7,7 @@
 //! that changes something for its picture puts it back before it returns.
 
 mod hub;
+mod icons;
 mod paint_canvas;
 mod paint_color;
 mod paint_dialogs;
@@ -98,6 +99,9 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
 
     // 24 to 26. Settings shaped to each screen.
     settings::screens(tour)?;
+
+    // 27. The icons: the reference sheet, then every icon.
+    icons::contact_sheets(tour)?;
     Ok(())
 }
 
