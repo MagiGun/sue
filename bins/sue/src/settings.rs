@@ -885,7 +885,10 @@ impl SueApplet for Settings {
     }
 
     fn navigate(&mut self, target: &str) -> bool {
+        // A deep link shows its page, not the last search.
         self.pending = Some(target.to_owned());
+        self.filter.clear();
+        self.notice = None;
         true
     }
 
@@ -1233,7 +1236,7 @@ impl Settings {
             pages.iter().collect()
         };
         ScrollArea::vertical()
-            .id_salt("sue-settings-scroll")
+            .id_salt(("sue-settings-scroll", self.page, needle.is_empty()))
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for page in shown {

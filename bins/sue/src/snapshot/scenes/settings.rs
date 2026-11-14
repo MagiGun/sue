@@ -70,6 +70,23 @@ fn scroll(tour: &mut Tour<'_>, by: f32) {
     }
 }
 
+/// Scrolls Settings' page down until it draws `text` in the window's
+/// lower half (or it cannot scroll further).
+fn scroll_to(tour: &mut Tour<'_>, text: &str) -> Result<(), String> {
+    for _ in 0..20 {
+        let window = tour
+            .runtime
+            .shell
+            .window_rect()
+            .ok_or("Settings is not open")?;
+        if rect_of(tour, text).is_ok_and(|rect| rect.bottom() < window.bottom() - 60.0) {
+            return Ok(());
+        }
+        scroll(tour, 160.0);
+    }
+    rect_of(tour, text).map(|_| ())
+}
+
 /// Types `text` into the Settings filter, which is empty.
 fn filter(tour: &mut Tour<'_>, text: &str) -> Result<(), String> {
     click(
@@ -91,8 +108,9 @@ pub(super) fn desktop(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.request(ShellRequest::OpenSettings(Some("appearance".to_owned())));
     tour.shoot("04-settings-appearance")?;
     // The colors wait under Advanced: open them, then the first wheel.
-    scroll(tour, 900.0);
-    click(tour, &sue_lang::text("settings", "colors"))?;
+    let colors = sue_lang::text("settings", "colors");
+    scroll_to(tour, &colors)?;
+    click(tour, &colors)?;
     let row = rect_of(tour, &sue_lang::text("rice", "colors-void"))?;
     let window = tour.runtime.shell.window_rect().ok_or("Settings closed")?;
     // The swatch sits at the row's right end, level with its name.
@@ -104,8 +122,9 @@ pub(super) fn desktop(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.settle();
     // The icons: Sue's own, as a sheet.
     tour.request(ShellRequest::OpenSettings(Some("appearance".to_owned())));
-    scroll(tour, 380.0);
-    click(tour, &sue_lang::text("settings", "icons-show-sheet"))?;
+    let sheet = sue_lang::text("settings", "icons-show-sheet");
+    scroll_to(tour, &sheet)?;
+    click(tour, &sheet)?;
     tour.shoot("04c-settings-icons")?;
     // File, Preferences in Sue Paint opens this page.
     tour.request(ShellRequest::OpenSettings(Some(sue_paint::ID.to_owned())));
