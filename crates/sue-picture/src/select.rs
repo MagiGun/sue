@@ -5,6 +5,133 @@
 
 use sue_core::RasterTile2D;
 
+/// The Selection area tool's Shrink selection sub tool's mode: a lasso
+/// whose selection shrinks to what is drawn inside it.
+pub const SHRINK_SELECTION: u8 = 6;
+
+/// The shape a selection or figure drag keeps (Clip Studio Paint's
+/// Aspect).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Aspect {
+    /// Any shape.
+    #[default]
+    Free,
+    /// As wide as tall.
+    Square,
+    /// `width` to `height`.
+    Ratio {
+        /// Parts across.
+        width: f32,
+        /// Parts down.
+        height: f32,
+    },
+}
+
+impl Aspect {
+    /// Its stable name in saved settings (a ratio adds its numbers).
+    #[must_use]
+    pub fn id(self) -> String {
+        match self {
+            Self::Free => "free".to_owned(),
+            Self::Square => "square".to_owned(),
+            Self::Ratio { width, height } => format!("ratio {width} {height}"),
+        }
+    }
+
+    /// The aspect named `id` ([`Self::id`]).
+    #[must_use]
+    pub fn from_id(id: &str) -> Option<Self> {
+        let mut words = id.split_whitespace();
+        match words.next()? {
+            "free" => Some(Self::Free),
+            "square" => Some(Self::Square),
+            "ratio" => {
+                let width: f32 = words.next()?.parse().ok()?;
+                let height: f32 = words.next()?.parse().ok()?;
+                (width > 0.0 && height > 0.0).then_some(Self::Ratio { width, height })
+            }
+            _ => None,
+        }
+    }
+
+    /// Where a drag from `from` to `to` ends once it keeps this shape: the
+    /// longer side rules, and the corner stays on the side it was dragged
+    /// to.
+    #[must_use]
+    pub fn constrain(self, from: [f32; 2], to: [f32; 2]) -> [f32; 2] {
+        let (rw, rh) = match self {
+            Self::Free => return to,
+            Self::Square => (1.0, 1.0),
+            Self::Ratio { width, height } => (width.max(1e-3), height.max(1e-3)),
+        };
+        let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
+        // The size that holds the drag: whichever side asks more.
+        let scale = (dx.abs() / rw).max(dy.abs() / rh);
+        let sign = |value: f32| if value < 0.0 { -1.0 } else { 1.0 };
+        [
+            from[0] + sign(dx) * rw * scale,
+            from[1] + sign(dy) * rh * scale,
+        ]
+    }
+}
+
+/// Shrink selection: of the area `inside` (one byte a pixel, a lasso's
+/// inside) only what is drawn in it, by `reference` (straight RGBA8
+/// picture pixels of `size`): the clear pixels joined to the lasso's rim
+/// fall away, so the selection hugs the drawing's outline and keeps the
+/// clear holes the drawing closes in.
+#[must_use]
+pub fn shrink_to_drawn(inside: &[u8], reference: &[u8], size: [u32; 2]) -> Vec<u8> {
+    let [width, height] = size;
+    let count = width as usize * height as usize;
+    if inside.len() < count || reference.len() < count * 4 {
+        return vec![0; count];
+    }
+    let clear = |index: usize| reference[index * 4 + 3] < 8;
+    let mut outside = vec![false; count];
+    let mut stack: Vec<usize> = Vec::new();
+    // Clear pixels inside that touch the outside (or the picture's edge).
+    for index in 0..count {
+        if inside[index] == 0 || !clear(index) {
+            continue;
+        }
+        let (x, y) = (index % width as usize, index / width as usize);
+        let rim = x == 0
+            || y == 0
+            || x + 1 == width as usize
+            || y + 1 == height as usize
+            || inside[index - 1] == 0
+            || inside[index + 1] == 0
+            || inside[index - width as usize] == 0
+            || inside[index + width as usize] == 0;
+        if rim {
+            stack.push(index);
+        }
+    }
+    while let Some(index) = stack.pop() {
+        if outside[index] || inside[index] == 0 || !clear(index) {
+            continue;
+        }
+        outside[index] = true;
+        let (x, y) = (index % width as usize, index / width as usize);
+        if x > 0 {
+            stack.push(index - 1);
+        }
+        if x + 1 < width as usize {
+            stack.push(index + 1);
+        }
+        if y > 0 {
+            stack.push(index - width as usize);
+        }
+        if y + 1 < height as usize {
+            stack.push(index + width as usize);
+        }
+    }
+    (0..count)
+        .map(|index| if outside[index] { 0 } else { inside[index] })
+        .collect()
+}
+
 /// How a new shape combines with the selection.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Op {
@@ -518,5 +645,66 @@ mod tests {
         .unwrap();
         let from = Selection::from_alpha(&alpha);
         assert_eq!((from.at(0, 0), from.at(1, 0)), (1.0, 0.0));
+    }
+
+    #[test]
+    fn aspect_keeps_the_shape_of_a_drag() {
+        assert_eq!(
+            Aspect::Free.constrain([0.0, 0.0], [30.0, 10.0]),
+            [30.0, 10.0]
+        );
+        assert_eq!(
+            Aspect::Square.constrain([10.0, 10.0], [40.0, 20.0]),
+            [40.0, 40.0],
+            "the longer side rules"
+        );
+        assert_eq!(
+            Aspect::Square.constrain([10.0, 10.0], [0.0, -30.0]),
+            [-30.0, -30.0],
+            "up and left stay up and left"
+        );
+        let wide = Aspect::Ratio {
+            width: 16.0,
+            height: 9.0,
+        };
+        let [x, y] = wide.constrain([0.0, 0.0], [32.0, 2.0]);
+        assert_eq!((x, y), (32.0, 18.0));
+        for aspect in [Aspect::Free, Aspect::Square, wide] {
+            assert_eq!(Aspect::from_id(&aspect.id()), Some(aspect));
+        }
+        assert_eq!(Aspect::from_id("ratio 0 2"), None);
+        assert_eq!(Aspect::from_id("round"), None);
+    }
+
+    #[test]
+    fn shrink_selection_hugs_what_is_drawn_inside_the_lasso() {
+        // A 30 by 30 picture with a drawn ring from 10 to 19 (a clear hole
+        // in it) and a dot outside the lasso.
+        let size = [30_u32, 30_u32];
+        let mut reference = vec![0_u8; 30 * 30 * 4];
+        for y in 10..20_usize {
+            for x in 10..20_usize {
+                let hole = (13..17).contains(&x) && (13..17).contains(&y);
+                if !hole {
+                    reference[(y * 30 + x) * 4 + 3] = 255;
+                }
+            }
+        }
+        reference[(2 * 30 + 2) * 4 + 3] = 255;
+        let mut lasso = Selection::new(30, 30);
+        lasso.polygon(
+            &[[5.0, 5.0], [25.0, 5.0], [25.0, 25.0], [5.0, 25.0]],
+            Op::Replace,
+        );
+        let shrunk = shrink_to_drawn(lasso.mask(), &reference, size);
+        let at = |x: usize, y: usize| shrunk[y * 30 + x];
+        assert_eq!(at(10, 10), 255, "the drawing");
+        assert_eq!(at(14, 14), 255, "a hole it closes in stays");
+        assert_eq!(at(7, 7), 0, "clear around it falls away");
+        assert_eq!(at(2, 2), 0, "outside the lasso stays out");
+        assert_eq!(shrunk.iter().filter(|value| **value != 0).count(), 100);
+        // A lasso round nothing drawn selects nothing.
+        let empty = shrink_to_drawn(lasso.mask(), &vec![0; 30 * 30 * 4], size);
+        assert!(empty.iter().all(|value| *value == 0));
     }
 }

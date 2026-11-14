@@ -90,6 +90,282 @@ pub fn rotated(center: [f32; 2], width: f32, height: f32, scale: [f32; 2], angle
         .map(|[x, y]| [center[0] + x * cos - y * sin, center[1] + x * sin + y * cos])
 }
 
+/// What dragging a corner of the transform box does (Clip Studio Paint's
+/// transform modes, in Tool Property's order).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Mode {
+    /// A corner scales, keeping the shape; outside turns.
+    #[default]
+    ScaleRotate,
+    /// A corner scales; nothing turns.
+    Scale,
+    /// Every drag turns it.
+    Rotate,
+    /// Each corner goes where it is dragged.
+    Free,
+    /// A corner slides its edge along itself.
+    Skew,
+    /// Each corner goes where it is dragged (as Free, kept apart for the
+    /// menu).
+    Distort,
+    /// A corner and the one across its edge move apart or together.
+    Perspective,
+}
+
+impl Mode {
+    /// Every mode, in Tool Property's order.
+    pub const ALL: [Self; 7] = [
+        Self::ScaleRotate,
+        Self::Scale,
+        Self::Rotate,
+        Self::Free,
+        Self::Skew,
+        Self::Distort,
+        Self::Perspective,
+    ];
+
+    /// Its stable name in saved settings.
+    #[must_use]
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::ScaleRotate => "scale_rotate",
+            Self::Scale => "scale",
+            Self::Rotate => "rotate",
+            Self::Free => "free",
+            Self::Skew => "skew",
+            Self::Distort => "distort",
+            Self::Perspective => "perspective",
+        }
+    }
+
+    /// The mode named `id`.
+    #[must_use]
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|mode| mode.id() == id)
+    }
+
+    /// What people read.
+    #[must_use]
+    pub fn label(self) -> String {
+        match self {
+            Self::ScaleRotate => tr!("scale-rotate"),
+            Self::Scale => tr!("scale"),
+            Self::Rotate => tr!("rotate"),
+            Self::Free => tr!("free-transform"),
+            Self::Skew => tr!("skew"),
+            Self::Distort => tr!("distort"),
+            Self::Perspective => tr!("perspective"),
+        }
+    }
+
+    /// `true` if its corners move one by one (the box stops being a
+    /// rotated rectangle).
+    #[must_use]
+    pub const fn frees_corners(self) -> bool {
+        matches!(
+            self,
+            Self::Free | Self::Skew | Self::Distort | Self::Perspective
+        )
+    }
+}
+
+/// The middle of `quad`: where its rotation centre starts.
+#[must_use]
+pub fn middle(quad: &Quad) -> [f32; 2] {
+    let sum = quad.iter().fold([0.0, 0.0], |sum, corner| {
+        [sum[0] + corner[0], sum[1] + corner[1]]
+    });
+    [sum[0] / 4.0, sum[1] / 4.0]
+}
+
+/// `quad` turned `angle` radians (clockwise on the screen) around
+/// `pivot`, the rotation centre, which can be anywhere.
+#[must_use]
+pub fn turned(quad: &Quad, pivot: [f32; 2], angle: f32) -> Quad {
+    let (sin, cos) = angle.sin_cos();
+    quad.map(|[x, y]| {
+        let (dx, dy) = (x - pivot[0], y - pivot[1]);
+        [
+            pivot[0] + dx * cos - dy * sin,
+            pivot[1] + dx * sin + dy * cos,
+        ]
+    })
+}
+
+/// The angle from `pivot` to `from` turned to the angle from `pivot` to
+/// `to`, snapped to steps of `step` radians when `step` is above nothing
+/// (Snap angle, or Shift).
+#[must_use]
+pub fn drag_angle(pivot: [f32; 2], from: [f32; 2], to: [f32; 2], step: f32) -> f32 {
+    let a = (from[1] - pivot[1]).atan2(from[0] - pivot[0]);
+    let b = (to[1] - pivot[1]).atan2(to[0] - pivot[0]);
+    let angle = b - a;
+    if step > 0.0 {
+        (angle / step).round() * step
+    } else {
+        angle
+    }
+}
+
+/// `quad` with corner `corner` (0 top left, then clockwise) dragged to
+/// `to` in `mode`, scaling about `pivot` where the mode scales. `keep`
+/// keeps the shape where the mode would let it change (Shift in Scale).
+#[must_use]
+pub fn drag_corner(
+    quad: &Quad,
+    mode: Mode,
+    corner: usize,
+    to: [f32; 2],
+    pivot: [f32; 2],
+    keep: bool,
+) -> Quad {
+    let corner = corner % 4;
+    let mut out = *quad;
+    let from = quad[corner];
+    match mode {
+        Mode::Free | Mode::Distort => out[corner] = to,
+        Mode::Rotate => {
+            let angle = drag_angle(pivot, from, to, 0.0);
+            out = turned(quad, pivot, angle);
+        }
+        Mode::ScaleRotate | Mode::Scale => {
+            // Scale along the box's own sides, about the pivot.
+            let across = sub(quad[1], quad[0]);
+            let down = sub(quad[3], quad[0]);
+            let (ua, ud) = (unit(across), unit(down));
+            let (before, after) = (sub(from, pivot), sub(to, pivot));
+            let ratio = |axis: [f32; 2]| {
+                let was = dot(before, axis);
+                if was.abs() < 1e-4 {
+                    1.0
+                } else {
+                    dot(after, axis) / was
+                }
+            };
+            let (mut sx, mut sy) = (ratio(ua), ratio(ud));
+            if keep {
+                let both = if sx.abs() > sy.abs() { sx } else { sy };
+                (sx, sy) = (both, both);
+            }
+            out = quad.map(|point| {
+                let d = sub(point, pivot);
+                let (along, downward) = (dot(d, ua) * sx, dot(d, ud) * sy);
+                [
+                    pivot[0] + ua[0] * along + ud[0] * downward,
+                    pivot[1] + ua[1] * along + ud[1] * downward,
+                ]
+            });
+        }
+        Mode::Skew => {
+            // The corner and its neighbour along the top or bottom edge
+            // slide together along that edge.
+            let partner = [1, 0, 3, 2][corner];
+            let edge = unit(sub(quad[partner], quad[corner]));
+            let along = dot(sub(to, from), edge);
+            for at in [corner, partner] {
+                out[at] = [quad[at][0] + edge[0] * along, quad[at][1] + edge[1] * along];
+            }
+        }
+        Mode::Perspective => {
+            // The corner goes along its edge; the one across the edge goes
+            // the other way, as far.
+            let partner = [1, 0, 3, 2][corner];
+            let edge = unit(sub(quad[partner], quad[corner]));
+            let along = dot(sub(to, from), edge);
+            out[corner] = [from[0] + edge[0] * along, from[1] + edge[1] * along];
+            out[partner] = [
+                quad[partner][0] - edge[0] * along,
+                quad[partner][1] - edge[1] * along,
+            ];
+        }
+    }
+    out
+}
+
+fn sub(a: [f32; 2], b: [f32; 2]) -> [f32; 2] {
+    [a[0] - b[0], a[1] - b[1]]
+}
+
+fn dot(a: [f32; 2], b: [f32; 2]) -> f32 {
+    a[0] * b[0] + a[1] * b[1]
+}
+
+fn unit(a: [f32; 2]) -> [f32; 2] {
+    let length = a[0].hypot(a[1]);
+    if length < 1e-6 {
+        [1.0, 0.0]
+    } else {
+        [a[0] / length, a[1] / length]
+    }
+}
+
+/// Mesh Transformation's lattice: a grid of points over the piece, a
+/// chosen number across and down, each dragged on its own.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lattice {
+    /// Points across, at least 2.
+    pub columns: usize,
+    /// Points down, at least 2.
+    pub rows: usize,
+    /// Where each point started, row by row.
+    pub from: Vec<[f32; 2]>,
+    /// Where each point is now.
+    pub to: Vec<[f32; 2]>,
+}
+
+impl Lattice {
+    /// The most points either way.
+    pub const MOST: usize = 33;
+
+    /// A `columns` by `rows` lattice of points (clamped to 2 to
+    /// [`Self::MOST`]) spread evenly over `[x0, y0, x1, y1]`.
+    #[must_use]
+    pub fn over([x0, y0, x1, y1]: [f32; 4], columns: usize, rows: usize) -> Self {
+        let (columns, rows) = (columns.clamp(2, Self::MOST), rows.clamp(2, Self::MOST));
+        let from: Vec<[f32; 2]> = (0..rows)
+            .flat_map(|row| (0..columns).map(move |column| (column, row)))
+            .map(|(column, row)| {
+                [
+                    x0 + (x1 - x0) * column as f32 / (columns - 1) as f32,
+                    y0 + (y1 - y0) * row as f32 / (rows - 1) as f32,
+                ]
+            })
+            .collect();
+        Self {
+            columns,
+            rows,
+            to: from.clone(),
+            from,
+        }
+    }
+
+    /// Moves point `(column, row)` to `to`.
+    pub fn drag(&mut self, column: usize, row: usize, to: [f32; 2]) -> bool {
+        if column >= self.columns || row >= self.rows {
+            return false;
+        }
+        self.to[row * self.columns + column] = to;
+        true
+    }
+
+    /// `source` (RGBA8, `width` by `height`) bent by the lattice.
+    #[must_use]
+    pub fn apply(&self, source: &[u8], width: u32, height: u32) -> Vec<u8> {
+        if self.from == self.to {
+            return source.to_vec();
+        }
+        crate::warp::lattice(
+            source,
+            width,
+            height,
+            [self.columns, self.rows],
+            &self.from,
+            &self.to,
+            crate::warp::Interpolation::Smooth,
+        )
+    }
+}
+
 /// The piece to transform: the part of a layer (RGBA8) under `selection`
 /// (in the layer's pixels), or all of its pixels. Returns the piece's
 /// rectangle `[x0, y0, x1, y1]`, its pixels and the layer without it.
@@ -247,5 +523,105 @@ mod tests {
             "the rest stays"
         );
         assert!(lift(&[0; 64], 4, 4, None).is_none(), "nothing to lift");
+    }
+
+    fn near(a: [f32; 2], b: [f32; 2]) -> bool {
+        (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3
+    }
+
+    const BOX: Quad = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
+
+    #[test]
+    fn transform_modes_are_data_with_stable_names() {
+        assert_eq!(Mode::ALL.len(), 7);
+        for mode in Mode::ALL {
+            assert_eq!(Mode::from_id(mode.id()), Some(mode));
+            assert!(!mode.label().is_empty());
+        }
+        assert!(Mode::Free.frees_corners() && !Mode::ScaleRotate.frees_corners());
+    }
+
+    #[test]
+    fn each_mode_drags_a_corner_its_own_way() {
+        let pivot = middle(&BOX);
+        assert_eq!(pivot, [5.0, 5.0]);
+        // Free and Distort: that corner alone.
+        let free = drag_corner(&BOX, Mode::Free, 2, [14.0, 12.0], pivot, false);
+        assert_eq!(free[2], [14.0, 12.0]);
+        assert_eq!(&free[..2], &BOX[..2]);
+        // Scale about the far corner, freely or keeping the shape.
+        let scaled = drag_corner(&BOX, Mode::Scale, 2, [20.0, 15.0], BOX[0], false);
+        assert!(near(scaled[2], [20.0, 15.0]) && near(scaled[0], [0.0, 0.0]));
+        let kept = drag_corner(&BOX, Mode::Scale, 2, [20.0, 15.0], BOX[0], true);
+        assert!(near(kept[2], [20.0, 20.0]), "{kept:?}");
+        // Rotate: a quarter turn of a corner turns the box about the pivot.
+        let turned_box = drag_corner(&BOX, Mode::Rotate, 1, [10.0, 10.0], pivot, false);
+        assert!(near(turned_box[0], [10.0, 0.0]), "{turned_box:?}");
+        // Skew: the top edge slides along itself.
+        let skewed = drag_corner(&BOX, Mode::Skew, 0, [3.0, 4.0], pivot, false);
+        assert!(near(skewed[0], [3.0, 0.0]) && near(skewed[1], [13.0, 0.0]));
+        assert_eq!(&skewed[2..], &BOX[2..]);
+        // Perspective: the corner and the one across its edge mirror.
+        let perspective = drag_corner(&BOX, Mode::Perspective, 0, [2.0, 0.0], pivot, false);
+        assert!(near(perspective[0], [2.0, 0.0]) && near(perspective[1], [8.0, 0.0]));
+    }
+
+    #[test]
+    fn the_rotation_centre_can_be_moved() {
+        // Turned about its middle, the middle stays; about a corner, the
+        // corner stays and the middle goes round it.
+        let about_middle = turned(&BOX, [5.0, 5.0], std::f32::consts::FRAC_PI_2);
+        assert!(near(middle(&about_middle), [5.0, 5.0]));
+        let about_corner = turned(&BOX, [0.0, 0.0], std::f32::consts::FRAC_PI_2);
+        assert!(near(about_corner[0], [0.0, 0.0]));
+        assert!(near(middle(&about_corner), [-5.0, 5.0]));
+        // A drag snapped to 45 degree steps.
+        let step = std::f32::consts::FRAC_PI_4;
+        let angle = drag_angle([0.0, 0.0], [10.0, 0.0], [10.0, 6.0], step);
+        assert!((angle - step).abs() < 1e-5);
+        let free = drag_angle([0.0, 0.0], [10.0, 0.0], [10.0, 6.0], 0.0);
+        assert!((free - 0.540_42).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_lattice_of_any_grid_bends_the_piece() {
+        // An 8 by 8 square in a 32 by 32 picture.
+        let (width, height) = (32_u32, 32_u32);
+        let mut source = vec![0_u8; (width * height * 4) as usize];
+        for y in 8..16 {
+            for x in 8..16 {
+                source[((y * width + x) * 4) as usize..][..4].copy_from_slice(&[0, 0, 0, 255]);
+            }
+        }
+        let mut lattice = Lattice::over([0.0, 0.0, 32.0, 32.0], 5, 3);
+        assert_eq!((lattice.columns, lattice.rows), (5, 3));
+        assert_eq!(lattice.from.len(), 15);
+        assert_eq!(lattice.from[4], [32.0, 0.0]);
+        assert_eq!(lattice.apply(&source, width, height), source, "untouched");
+        assert_eq!(
+            Lattice::over([0.0, 0.0, 1.0, 1.0], 1, 99).columns,
+            2,
+            "clamped"
+        );
+        // Every point moved right by 8: the whole piece moves.
+        for row in 0..3 {
+            for column in 0..5 {
+                let [x, y] = lattice.from[row * 5 + column];
+                assert!(lattice.drag(column, row, [x + 8.0, y]));
+            }
+        }
+        assert!(!lattice.drag(5, 0, [0.0, 0.0]));
+        let moved = lattice.apply(&source, width, height);
+        let alpha = |pixels: &[u8], x: u32, y: u32| pixels[((y * width + x) * 4 + 3) as usize];
+        assert_eq!(alpha(&moved, 20, 12), 255);
+        assert_eq!(alpha(&moved, 10, 12), 0);
+        // One middle point dragged bends the piece near it only.
+        let mut bend = Lattice::over([0.0, 0.0, 32.0, 32.0], 5, 3);
+        bend.drag(1, 1, [8.0, 22.0]);
+        let bent = bend.apply(&source, width, height);
+        assert_ne!(bent, source);
+        assert_eq!(alpha(&source, 12, 17), 0);
+        assert_eq!(alpha(&bent, 12, 17), 255, "the bottom edge came down");
+        assert_eq!(alpha(&bent, 12, 10), 255, "the top stays");
     }
 }
