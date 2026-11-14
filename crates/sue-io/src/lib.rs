@@ -44,8 +44,9 @@ pub use audio::{
 };
 pub use bytemap::{byte_map_tile, shannon_entropy};
 pub use formats::{
-    CompressedAudioFormat, DelimitedFormat, JpegFormat, JxlFormat, KeptFormat, ObjFormat,
-    PngFormat, PublishFormat, SueFormat, TextFormat, WavFormat, formats,
+    AiffFormat, CompressedAudioFormat, DelimitedFormat, JpegFormat, JxlFormat, KeptFormat,
+    ObjFormat, PictureFileFormat, PngFormat, PublishFormat, SueFormat, TextFormat, WavFormat,
+    formats,
 };
 pub use ingest::{IngestOptions, IngestView, Ingested, ingest_bytes, meta, route_label};
 pub use jxl::{
