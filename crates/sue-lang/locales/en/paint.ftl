@@ -2348,5 +2348,4 @@ cancel-transform = Cancel Transform
 
 select-overlapping-vectors = Select Overlapping Vectors
 select-vectors-within-area = Select Vectors Within Area
-pick-a-vector-layer-first = Pick a vector layer first: these commands pick its vector lines
 no-vector-line-in-the-selected-area = No vector line of this layer is in the selected area

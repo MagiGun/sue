@@ -495,13 +495,14 @@ enum Reach {
 /// changes, so there is nothing to undo.
 fn pick_vectors(paint: &mut SuePaint, cx: &mut AppletContext<'_>, reach: Reach) {
     let arena = &cx.world.arena;
-    let Some(info) = paint.layer_info(arena) else {
+    // The item is grayed, and so never runs, unless the current layer is
+    // a vector layer and the canvas has a selection.
+    let Some(info) = paint
+        .layer_info(arena)
+        .filter(|info| crate::vector::is_vector(arena, info.id))
+    else {
         return;
     };
-    if !crate::vector::is_vector(arena, info.id) {
-        cx.notify(tr!("pick-a-vector-layer-first"));
-        return;
-    }
     let Some(selection) = paint.doc().and_then(|doc| doc.selection.clone()) else {
         return;
     };

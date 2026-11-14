@@ -313,12 +313,31 @@ fn sue_paint_runs_every_select_command() {
     canvas.undo_pair("select.quick_mask");
     assert!(canvas.selection() == Some(shrunk), "and gives it back");
 
-    // The Selection Launcher, hidden and shown; the vector commands do
-    // nothing on a raster layer but say what they need.
+    // The Selection Launcher, hidden and shown; the vector commands are
+    // grayed on a raster layer, so they run nothing and say nothing.
     canvas.leaves_document("select.launcher");
     canvas.leaves_document("select.launcher");
-    canvas.leaves_document("select.vectors_overlapping");
-    canvas.leaves_document("select.vectors_within");
+    for name in ["select.vectors_overlapping", "select.vectors_within"] {
+        let before = canvas
+            .runtime
+            .shell
+            .message()
+            .map(|(text, _)| text.to_owned());
+        canvas.leaves_document(name);
+        assert_eq!(
+            canvas
+                .runtime
+                .shell
+                .message()
+                .map(|(text, _)| text.to_owned()),
+            before,
+            "{name}"
+        );
+        assert!(
+            canvas.selection().is_some(),
+            "{name} leaves the selection alone"
+        );
+    }
 }
 
 #[test]
@@ -370,8 +389,8 @@ fn sue_paint_selects_vector_lines_by_the_selected_area() {
     canvas.command("edit.undo");
     assert_eq!(lines(&canvas), drawn);
 
-    // A box that misses both lines picks none, and Delete then clears
-    // the selected area as it always does.
+    // A box that misses both lines picks none and says so; the lines
+    // stay as they were.
     canvas.leaves_document("select.none");
     canvas.step(vec![key(egui::Key::M, egui::Modifiers::NONE)]);
     canvas.drag(middle + vec2(30.0, 30.0), middle + vec2(80.0, 80.0));
@@ -385,4 +404,5 @@ fn sue_paint_selects_vector_lines_by_the_selected_area() {
         "{:?}",
         canvas.runtime.shell.message()
     );
+    assert_eq!(lines(&canvas), drawn);
 }
