@@ -7,6 +7,8 @@
 //! new layer) and only the painted rectangle while a stroke is drawn.
 //! Large areas are split into bands of rows composited on every core.
 
+#[cfg(test)]
+mod folders_tests;
 mod gather;
 mod preview;
 mod rows;

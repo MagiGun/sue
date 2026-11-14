@@ -4,8 +4,9 @@
 
 use sue_core::{PixelFormat, RasterTile2D};
 
-use super::gather::{Correction, Layer, Source, mask_at};
+use super::gather::{Correction, Layer, Source};
 use super::workers;
+use crate::doc::cover;
 
 /// The composited color of one pixel.
 pub(super) fn pixel(layers: &[Layer<'_>], x: u32, y: u32) -> [f32; 4] {
@@ -33,7 +34,45 @@ impl Stack {
     };
 }
 
-/// Lays `layers` over `state` at pixel `(x, y)`.
+/// A correction layer over `color`: everything below, corrected and mixed
+/// in by the layer's blend mode, as strongly as its opacity and masks say.
+/// The alpha below stays as it is.
+fn correct(color: &mut [f32; 4], correction: &Correction, layer: &Layer<'_>, strength: f32) {
+    if !layer.style.visible || color[3] <= 0.0 || strength <= 0.0 {
+        return;
+    }
+    let rgb = [color[0], color[1], color[2]];
+    let fixed = layer.style.blend.mix(rgb, correction.apply(rgb));
+    for channel in 0..3 {
+        color[channel] += (fixed[channel] - color[channel]) * strength;
+    }
+}
+
+/// How much the masks of the folders a layer passes through show at
+/// `(x, y)`.
+fn outer_cover(layer: &Layer<'_>, x: u32, y: u32) -> f32 {
+    layer.outer.iter().fold(1.0, |shown, (mask, at)| {
+        shown * cover(mask, i64::from(x) - at[0], i64::from(y) - at[1])
+    })
+}
+
+/// How much a layer's own mask shows at `(x, y)` (seen through its
+/// camera).
+fn own_cover(layer: &Layer<'_>, x: u32, y: u32) -> f32 {
+    layer.mask.map_or(1.0, |mask| {
+        layer.seen(x, y).map_or(0.0, |(sx, sy)| {
+            cover(
+                mask,
+                i64::from(sx) - layer.mask_offset[0],
+                i64::from(sy) - layer.mask_offset[1],
+            )
+        })
+    })
+}
+
+/// Lays `layers` over `state` at pixel `(x, y)`. A folder that is not
+/// Through is composited on its own first, from nothing, and the result
+/// laid over `state` as one layer.
 pub(super) fn fold(layers: &[Layer<'_>], x: u32, y: u32, state: &mut Stack) {
     let Stack {
         mut color,
@@ -42,13 +81,8 @@ pub(super) fn fold(layers: &[Layer<'_>], x: u32, y: u32, state: &mut Stack) {
     } = *state;
     for layer in layers {
         if let Source::Correction(correction) = &layer.source {
-            // Everything below, corrected, by the layer's opacity.
-            if layer.style.visible && color[3] > 0.0 {
-                let fixed = correction.apply([color[0], color[1], color[2]]);
-                for channel in 0..3 {
-                    color[channel] += (fixed[channel] - color[channel]) * layer.style.opacity;
-                }
-            }
+            let strength = layer.style.opacity * own_cover(layer, x, y) * outer_cover(layer, x, y);
+            correct(&mut color, correction, layer, strength);
             continue;
         }
         if layer.empty_at(x, y) {
@@ -69,11 +103,17 @@ pub(super) fn fold(layers: &[Layer<'_>], x: u32, y: u32, state: &mut Stack) {
             }
             continue;
         }
-        let mut source = layer.sample(x, y);
-        if let Some(mask) = layer.mask {
-            source[3] *= layer
-                .seen(x, y)
-                .map_or(0.0, |(sx, sy)| mask_at(mask, layer.style.offset, sx, sy));
+        let mut source = match &layer.source {
+            Source::Group(members) => {
+                let mut inner = Stack::EMPTY;
+                fold(members, x, y, &mut inner);
+                inner.color
+            }
+            _ => layer.sample(x, y),
+        };
+        source[3] *= own_cover(layer, x, y);
+        if !layer.outer.is_empty() {
+            source[3] *= outer_cover(layer, x, y);
         }
         if let Some((color, amount)) = layer.tint {
             for channel in 0..3 {
@@ -130,6 +170,28 @@ pub(super) fn unit(byte: u8) -> f32 {
     TABLE.get_or_init(|| std::array::from_fn(|i| i as f32 / 255.0))[usize::from(byte)]
 }
 
+/// One row of a mask as the fast path reads it: its bytes, the picture x
+/// of its first pixel, and the bytes a pixel takes (4 for `Rgba8`, whose
+/// last byte is the cover; 1 for `Gray8`).
+#[derive(Clone, Copy)]
+pub(super) struct MaskRow<'a> {
+    bytes: &'a [u8],
+    left: i64,
+    step: usize,
+}
+
+impl MaskRow<'_> {
+    /// How much shows at picture x `x`.
+    fn at(&self, x: u32) -> f32 {
+        let mx = i64::from(x) - self.left;
+        if mx >= 0 && (mx as usize) * self.step < self.bytes.len() {
+            unit(self.bytes[mx as usize * self.step + self.step - 1])
+        } else {
+            0.0
+        }
+    }
+}
+
 /// A layer as the fast path reads it along one row: the row's pixels and
 /// mask, found once instead of per pixel.
 pub(super) enum RowSource<'a> {
@@ -140,21 +202,31 @@ pub(super) enum RowSource<'a> {
         bytes: &'a [u8],
         /// The picture x of the row's first pixel.
         left: i64,
-        mask: Option<(&'a [u8], i64)>,
+        mask: Option<MaskRow<'a>>,
     },
+    /// A folder composited on its own: its members' rows.
+    Group(Vec<RowSource<'a>>),
 }
 
 impl Layer<'_> {
-    /// `true` for what the fast path handles: plain 8-bit pixels, paper or
-    /// a correction, with no camera, tint, effect or border.
+    /// `true` for what the fast path handles: plain 8-bit pixels, paper, a
+    /// correction or a folder of such layers, with no camera, tint,
+    /// effect, border or folder mask, and a mask only on pixels.
     pub(super) fn plain(&self) -> bool {
         let source = match &self.source {
-            Source::Paper(_) | Source::Correction(_) => true,
+            Source::Paper(_) | Source::Correction(_) => self.mask.is_none(),
             Source::Raster { raster, .. } => {
-                raster.format() == PixelFormat::Rgba8 && raster.bytes().is_some()
+                raster.format() == PixelFormat::Rgba8
+                    && raster.bytes().is_some()
+                    && self.mask.is_none_or(|mask| {
+                        matches!(mask.format(), PixelFormat::Rgba8 | PixelFormat::Gray8)
+                            && mask.bytes().is_some()
+                    })
             }
+            Source::Group(members) => self.mask.is_none() && members.iter().all(Layer::plain),
         };
         source
+            && self.outer.is_empty()
             && self.live.is_none()
             && self.warp.is_none()
             && self.tint.is_none()
@@ -162,9 +234,6 @@ impl Layer<'_> {
             && self.edge.is_none()
             && self.rim.is_none()
             && self.lines.is_none()
-            && self
-                .mask
-                .is_none_or(|mask| mask.format() == PixelFormat::Rgba8 && mask.bytes().is_some())
     }
 
     /// The layer along picture row `y`.
@@ -174,8 +243,22 @@ impl Layer<'_> {
             Source::Correction(correction) => RowSource::Correction(correction),
             Source::Raster { raster, offset } => {
                 let (bytes, left) = raster_row(raster, *offset, y);
-                let mask = self.mask.map(|mask| raster_row(mask, self.style.offset, y));
+                let mask = self.mask.map(|mask| {
+                    let (bytes, left) = raster_row(mask, self.mask_offset, y);
+                    MaskRow {
+                        bytes,
+                        left,
+                        step: if mask.format() == PixelFormat::Gray8 {
+                            1
+                        } else {
+                            4
+                        },
+                    }
+                });
                 RowSource::Pixels { bytes, left, mask }
+            }
+            Source::Group(members) => {
+                RowSource::Group(members.iter().map(|member| member.row(y)).collect())
             }
         }
     }
@@ -189,7 +272,7 @@ fn raster_row(raster: &RasterTile2D, offset: [i64; 2], y: u32) -> (&[u8], i64) {
     if ly < 0 || ly >= i64::from(raster.height()) {
         return (&[], offset[0]);
     }
-    let stride = raster.width() as usize * 4;
+    let stride = raster.width() as usize * raster.format().bytes_per_pixel();
     let start = ly as usize * stride;
     (
         bytes.get(start..start + stride).unwrap_or_default(),
@@ -227,12 +310,7 @@ pub(super) fn fold_plain(
     } = *state;
     for (layer, row) in layers.iter().zip(rows) {
         if let RowSource::Correction(correction) = row {
-            if layer.style.visible && color[3] > 0.0 {
-                let fixed = correction.apply([color[0], color[1], color[2]]);
-                for channel in 0..3 {
-                    color[channel] += (fixed[channel] - color[channel]) * layer.style.opacity;
-                }
-            }
+            correct(&mut color, correction, layer, layer.style.opacity);
             continue;
         }
         if layer.empty_at(x, y) {
@@ -264,15 +342,18 @@ pub(super) fn fold_plain(
                 } else {
                     [0.0; 4]
                 };
-                if let Some((mask, mask_left)) = mask {
-                    let mx = i64::from(x) - mask_left;
-                    source[3] *= if mx >= 0 && (mx as usize) * 4 < mask.len() {
-                        unit(mask[mx as usize * 4 + 3])
-                    } else {
-                        0.0
-                    };
+                if let Some(mask) = mask {
+                    source[3] *= mask.at(x);
                 }
                 source
+            }
+            RowSource::Group(rows) => {
+                let Source::Group(members) = &layer.source else {
+                    continue;
+                };
+                let mut inner = Stack::EMPTY;
+                fold_plain(members, rows, x, y, &mut inner);
+                inner.color
             }
         };
         source[3] *= layer.style.opacity;

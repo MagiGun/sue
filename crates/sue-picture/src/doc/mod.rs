@@ -18,15 +18,18 @@ pub use convert::{
     fitted, rasterize, resample, resize_canvas, resize_rgba, rotate_canvas, vectorize,
 };
 pub use folders::{
-    MEMBER, OPEN, delete_folder, folder_of, folders_around, is_folder, is_open, members,
-    new_folder, set_folder,
+    MEMBER, OPEN, delete_folder, folder_blend, folder_of, folders_around, is_folder, is_open,
+    members, new_folder, set_folder,
 };
 pub use layers::{
     CORRECTION, CORRECTION_FILTER, REFERENCE, TEXT, add_layer_pixels, add_layers_pixels, add_paper,
     add_raster_layer, add_raster_layer_at, add_vector_layer, add_vector_lines, delete, duplicate,
     is_reference, merge_down, merge_layers, merge_visible, new_correction, transfer_down,
 };
-pub use masks::{MASK, MASK_CLASS, MASK_ON, apply_mask, delete_mask, mask_of, mask_on, new_mask};
+pub use masks::{
+    MASK, MASK_CLASS, MASK_LINKED, MASK_ON, apply_mask, cover, delete_mask, mask_linked, mask_of,
+    mask_offset, mask_on, new_mask, set_mask_linked, shown_at,
+};
 pub(crate) use order::key_above;
 pub use order::{key_below, keys_above, move_block, reorder};
 

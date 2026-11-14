@@ -54,6 +54,9 @@ pub(super) enum Source<'a> {
         raster: &'a RasterTile2D,
         offset: [i64; 2],
     },
+    /// A folder that is not Through: its members composited on their own,
+    /// bottom first, then laid on as one layer.
+    Group(Vec<Layer<'a>>),
 }
 
 pub(super) struct Layer<'a> {
@@ -64,8 +67,13 @@ pub(super) struct Layer<'a> {
     /// Drawn toward this color by this much (onion skin), keeping its
     /// alpha.
     pub(super) tint: Option<([f32; 3], f32)>,
-    /// The layer mask, the layer's size: its alpha is how much shows.
+    /// The layer mask: its cover is how much shows (see
+    /// [`crate::doc::cover`]).
     pub(super) mask: Option<&'a RasterTile2D>,
+    /// The picture pixel where the mask's top left sits.
+    pub(super) mask_offset: [i64; 2],
+    /// The masks of the Through folders it is in, and where each sits.
+    pub(super) outer: Vec<(&'a RasterTile2D, [i64; 2])>,
     /// Seen through a camera: where each picture pixel looks on the layer.
     pub(super) warp: Option<[f32; 6]>,
     /// Its Layer Property effects.
@@ -93,6 +101,8 @@ impl<'a> Layer<'a> {
             style,
             tint: None,
             mask: None,
+            mask_offset: style.offset,
+            outer: Vec::new(),
             warp: None,
             effects: crate::effects::Effects::default(),
             edge: None,
@@ -173,6 +183,10 @@ pub(super) fn prepare(layers: &mut [Layer<'_>], rect: [u32; 4]) {
         if !layer.style.visible {
             continue;
         }
+        if let Source::Group(members) = &mut layer.source {
+            prepare(members, rect);
+            continue;
+        }
         let alpha = |layer: &Layer<'_>, x: i64, y: i64| {
             if x < 0 || y < 0 {
                 0.0
@@ -227,6 +241,9 @@ impl Layer<'_> {
     /// without reading it: its tile there is empty, and nothing it does
     /// (a camera, an effect, a border) could show there anyway.
     pub(super) fn empty_at(&self, x: u32, y: u32) -> bool {
+        if let Source::Group(members) = &self.source {
+            return members.iter().all(|member| member.empty_at(x, y));
+        }
         matches!(self.source, Source::Raster { .. })
             && self.live.is_none()
             && self.warp.is_none()
@@ -306,8 +323,9 @@ impl Layer<'_> {
     fn own_texel(&self, x: i64, y: i64) -> [f32; 4] {
         match &self.source {
             Source::Paper(rgb) => [rgb[0], rgb[1], rgb[2], 1.0],
-            // A correction has no pixels of its own.
-            Source::Correction(_) => [0.0; 4],
+            // A correction has no pixels of its own, and a folder's are
+            // its members' (see `rows::fold`).
+            Source::Correction(_) | Source::Group(_) => [0.0; 4],
             Source::Raster { raster, offset } => {
                 let lx = x - offset[0];
                 let ly = y - offset[1];
@@ -347,115 +365,265 @@ pub(super) fn gather(arena: &Arena, picture: EntityId, options: RenderOptions) -
     gather_view(arena, picture, options, None)
 }
 
+/// What every layer of a gather needs to know.
+struct Gathering<'v> {
+    options: RenderOptions,
+    view: Option<&'v FrameView>,
+    dpi: f64,
+}
+
+/// How a folder lays its layers on: Through (the default, and what every
+/// folder of 0.0.75 did) or as one composite of their own with its mode.
+fn isolated(arena: &Arena, folder: EntityId) -> bool {
+    crate::doc::folder_blend(arena, folder) != sue_model::BlendMode::Through
+}
+
+/// `style` of layer `id` as the Through folders around it pass it on:
+/// hidden with any folder around it, and as see-through, and masked, as
+/// each Through folder up to the first folder that is composited on its
+/// own (that folder's composite takes the rest). The masks it passes
+/// through go to `outer`.
+fn passed_through<'a>(
+    arena: &'a Arena,
+    id: EntityId,
+    style: &mut LayerStyle,
+    outer: &mut Vec<(&'a RasterTile2D, [i64; 2])>,
+) {
+    let mut through = true;
+    for folder in crate::doc::folders_around(arena, id) {
+        let Ok(entity) = arena.get_by_id(folder) else {
+            continue;
+        };
+        let around = LayerStyle::of(entity);
+        style.visible &= around.visible;
+        if !through {
+            continue;
+        }
+        if isolated(arena, folder) {
+            through = false;
+            continue;
+        }
+        style.opacity *= around.opacity;
+        if let Some(mask) = mask_raster(arena, folder) {
+            outer.push(mask);
+        }
+    }
+}
+
+/// The raster of `layer`'s mask while it is on, and where it sits.
+fn mask_raster(arena: &Arena, layer: EntityId) -> Option<(&RasterTile2D, [i64; 2])> {
+    let mask = crate::doc::mask_of(arena, layer).filter(|_| crate::doc::mask_on(arena, layer))?;
+    let raster = arena
+        .get_by_id(mask)
+        .ok()?
+        .component(ComponentKind::RasterTile2D)?
+        .as_raster()?;
+    Some((raster, crate::doc::mask_offset(arena, layer)?))
+}
+
+/// The layer color the folders around `id` give it when it has none of
+/// its own: the nearest folder's with one on.
+fn inherited_color(arena: &Arena, id: EntityId, dpi: f64) -> crate::effects::Effects {
+    crate::doc::folders_around(arena, id)
+        .into_iter()
+        .filter_map(|folder| arena.get_by_id(folder).ok())
+        .map(|folder| crate::effects::Effects::of(folder, dpi))
+        .find(|effects| effects.color.is_some())
+        .unwrap_or_default()
+}
+
+/// One layer of the stack (not a folder), ready to composite.
+fn gather_layer<'a>(
+    arena: &'a Arena,
+    entity: &'a sue_core::Entity,
+    how: &Gathering<'_>,
+) -> Option<Layer<'a>> {
+    let mut style = LayerStyle::of(entity);
+    let mut outer = Vec::new();
+    passed_through(arena, entity.id(), &mut style, &mut outer);
+    let mut tint = None;
+    let mut placed = None;
+    if let Some(view) = how.view
+        && view.hidden.contains(&entity.id())
+    {
+        match view.onion.iter().find(|skin| skin.cel == entity.id()) {
+            Some(skin) => {
+                style.opacity *= skin.opacity;
+                tint = Some((skin.color, skin.tint));
+                placed = skin.place;
+                if skin.force {
+                    style.visible = true;
+                }
+            }
+            None => style.visible = false,
+        }
+    }
+    if style.draft && !how.options.drafts {
+        style.visible = false;
+    }
+    let source = match LayerKind::of(entity) {
+        LayerKind::Raster => Source::Raster {
+            raster: entity.component(ComponentKind::RasterTile2D)?.as_raster()?,
+            offset: style.offset,
+        },
+        LayerKind::Paper => {
+            if !how.options.paper {
+                style.visible = false;
+            }
+            let color = picture::paper_color(entity).to_space(sue_core::ColorSpace::Srgb);
+            Source::Paper(color.rgb)
+        }
+        LayerKind::Other if entity.class() == crate::doc::CORRECTION => {
+            let filter = entity
+                .property(crate::doc::CORRECTION_FILTER)
+                .and_then(sue_core::Value::as_str)
+                .and_then(crate::filters::Filter::from_text)?;
+            Source::Correction(Correction::of(filter))
+        }
+        LayerKind::Other => return None,
+    };
+    let (mask, mask_offset) = match mask_raster(arena, entity.id()) {
+        Some((mask, at)) => (Some(mask), at),
+        None => (None, style.offset),
+    };
+    // Seen through the innermost camera folder around it.
+    let warp = placed.or_else(|| {
+        let view = how.view?;
+        crate::doc::folders_around(arena, entity.id())
+            .into_iter()
+            .find_map(|folder| {
+                view.cameras
+                    .iter()
+                    .find(|(id, _)| *id == folder)
+                    .map(|(_, map)| *map)
+            })
+    });
+    let effects = if matches!(source, Source::Raster { .. }) {
+        let mut effects = crate::effects::Effects::of(entity, how.dpi);
+        if effects.color.is_none() {
+            let around = inherited_color(arena, entity.id(), how.dpi);
+            effects.color = around.color;
+            effects.sub_color = around.sub_color;
+        }
+        effects
+    } else {
+        crate::effects::Effects::default()
+    };
+    Some(Layer {
+        id: Some(entity.id()),
+        tint,
+        mask,
+        mask_offset,
+        outer,
+        warp,
+        effects,
+        ..Layer::new(source, style)
+    })
+}
+
+/// A folder composited on its own, holding `members`: laid on as one
+/// layer with the folder's visibility, opacity, mode, clipping and mask.
+fn gather_group<'a>(
+    arena: &'a Arena,
+    folder: EntityId,
+    members: Vec<Layer<'a>>,
+    how: &Gathering<'_>,
+) -> Option<Layer<'a>> {
+    let entity = arena.get_by_id(folder).ok()?;
+    let mut style = LayerStyle::of(entity);
+    style.blend = crate::doc::folder_blend(arena, folder);
+    style.offset = [0, 0];
+    let mut outer = Vec::new();
+    passed_through(arena, folder, &mut style, &mut outer);
+    if let Some(view) = how.view
+        && view.hidden.contains(&folder)
+    {
+        style.visible = false;
+    }
+    if style.draft && !how.options.drafts {
+        style.visible = false;
+    }
+    let (mask, mask_offset) = match mask_raster(arena, folder) {
+        Some((mask, at)) => (Some(mask), at),
+        None => (None, [0, 0]),
+    };
+    Some(Layer {
+        id: Some(folder),
+        mask,
+        mask_offset,
+        outer,
+        ..Layer::new(Source::Group(members), style)
+    })
+}
+
+/// The layers of `picture`, bottom first, ready to composite: each folder
+/// that is not Through becomes one layer holding its members (see
+/// [`Source::Group`]), and a Through folder's layers stay in the stack
+/// the folder is in, passed its visibility, opacity and mask.
 pub(super) fn gather_view<'a>(
     arena: &'a Arena,
     picture: EntityId,
     options: RenderOptions,
     view: Option<&FrameView>,
 ) -> Vec<Layer<'a>> {
-    let dpi = arena
-        .get_by_id(picture)
-        .ok()
-        .and_then(|entity| entity.property(picture::DPI))
-        .and_then(sue_core::Value::as_f64)
-        .unwrap_or(72.0);
-    picture::layers(arena, picture)
-        .into_iter()
-        .filter_map(|id| arena.get_by_id(id).ok())
-        .filter_map(|entity| {
-            let mut style = LayerStyle::of(entity);
-            // Folders pass their layers through: hidden with them, and
-            // as see-through as each folder around them.
-            for folder in crate::doc::folders_around(arena, entity.id()) {
-                if let Ok(folder) = arena.get_by_id(folder) {
-                    let outer = LayerStyle::of(folder);
-                    style.visible &= outer.visible;
-                    style.opacity *= outer.opacity;
-                }
-            }
-            let mut tint = None;
-            let mut placed = None;
-            if let Some(view) = view
-                && view.hidden.contains(&entity.id())
-            {
-                match view.onion.iter().find(|skin| skin.cel == entity.id()) {
-                    Some(skin) => {
-                        style.opacity *= skin.opacity;
-                        tint = Some((skin.color, skin.tint));
-                        placed = skin.place;
-                        if skin.force {
-                            style.visible = true;
-                        }
-                    }
-                    None => style.visible = false,
-                }
-            }
-            if style.draft && !options.drafts {
-                style.visible = false;
-            }
-            let source = match LayerKind::of(entity) {
-                LayerKind::Raster => Source::Raster {
-                    raster: entity.component(ComponentKind::RasterTile2D)?.as_raster()?,
-                    offset: style.offset,
-                },
-                LayerKind::Paper => {
-                    if !options.paper {
-                        style.visible = false;
-                    }
-                    let color = picture::paper_color(entity).to_space(sue_core::ColorSpace::Srgb);
-                    Source::Paper(color.rgb)
-                }
-                LayerKind::Other if entity.class() == crate::doc::CORRECTION => {
-                    let filter = entity
-                        .property(crate::doc::CORRECTION_FILTER)
-                        .and_then(sue_core::Value::as_str)
-                        .and_then(crate::filters::Filter::from_text)?;
-                    Source::Correction(Correction::of(filter))
-                }
-                LayerKind::Other => return None,
-            };
-            let mask = crate::doc::mask_of(arena, entity.id())
-                .filter(|_| crate::doc::mask_on(arena, entity.id()))
-                .and_then(|mask| arena.get_by_id(mask).ok())
-                .and_then(|mask| mask.component(ComponentKind::RasterTile2D)?.as_raster());
-            // Seen through the innermost camera folder around it.
-            let warp = placed.or_else(|| {
-                let view = view?;
-                crate::doc::folders_around(arena, entity.id())
-                    .into_iter()
-                    .find_map(|folder| {
-                        view.cameras
-                            .iter()
-                            .find(|(id, _)| *id == folder)
-                            .map(|(_, map)| *map)
-                    })
-            });
-            let effects = if matches!(source, Source::Raster { .. }) {
-                crate::effects::Effects::of(entity, dpi)
-            } else {
-                crate::effects::Effects::default()
-            };
-            Some(Layer {
-                id: Some(entity.id()),
-                tint,
-                mask,
-                warp,
-                effects,
-                ..Layer::new(source, style)
-            })
-        })
-        .collect()
-}
-
-/// How much of a masked layer shows at picture pixel `(x, y)`.
-pub(super) fn mask_at(mask: &RasterTile2D, offset: [i64; 2], x: u32, y: u32) -> f32 {
-    let (lx, ly) = (i64::from(x) - offset[0], i64::from(y) - offset[1]);
-    if lx < 0 || ly < 0 || lx >= i64::from(mask.width()) || ly >= i64::from(mask.height()) {
-        return 0.0;
+    let how = Gathering {
+        options,
+        view,
+        dpi: arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(|entity| entity.property(picture::DPI))
+            .and_then(sue_core::Value::as_f64)
+            .unwrap_or(72.0),
+    };
+    // The folders composited on their own that are open, outermost first,
+    // each with the members gathered so far; the picture's own stack is
+    // the first.
+    let mut open: Vec<(Option<EntityId>, Vec<Layer<'a>>)> = vec![(None, Vec::new())];
+    let close = |open: &mut Vec<(Option<EntityId>, Vec<Layer<'a>>)>| {
+        if let Some((Some(folder), members)) = open.pop()
+            && let Some(group) = gather_group(arena, folder, members, &how)
+            && let Some((_, stack)) = open.last_mut()
+        {
+            stack.push(group);
+        }
+    };
+    for id in picture::layers(arena, picture) {
+        let Ok(entity) = arena.get_by_id(id) else {
+            continue;
+        };
+        // The folders composited on their own around it, outermost first.
+        let mut chain: Vec<EntityId> = crate::doc::folders_around(arena, id)
+            .into_iter()
+            .filter(|folder| isolated(arena, *folder))
+            .collect();
+        chain.reverse();
+        let shared = open[1..]
+            .iter()
+            .zip(&chain)
+            .take_while(|((folder, _), around)| *folder == Some(**around))
+            .count();
+        // A folder's own row comes right above its layers: what is open
+        // and not around this one is finished.
+        while open.len() > shared + 1 {
+            close(&mut open);
+        }
+        if crate::doc::is_folder(arena, id) {
+            continue;
+        }
+        for folder in &chain[shared..] {
+            open.push((Some(*folder), Vec::new()));
+        }
+        if let Some(layer) = gather_layer(arena, entity, &how)
+            && let Some((_, stack)) = open.last_mut()
+        {
+            stack.push(layer);
+        }
     }
-    mask.bytes().map_or(1.0, |bytes| {
-        f32::from(bytes[((ly as u32 * mask.width() + lx as u32) * 4 + 3) as usize]) / 255.0
-    })
+    while open.len() > 1 {
+        close(&mut open);
+    }
+    open.pop().map(|(_, stack)| stack).unwrap_or_default()
 }
 
 impl Compositor {
@@ -464,8 +632,10 @@ impl Compositor {
     /// full composite does; a stroke's refresh does not, so the layer being
     /// painted is read everywhere.
     pub(super) fn attach(&mut self, arena: &Arena, layers: &mut [Layer<'_>], find: bool) {
+        let mut all = Vec::new();
+        every_layer(layers, &mut all);
         if let Some(live) = &self.live {
-            for layer in layers.iter_mut() {
+            for layer in &mut all {
                 if layer.id == Some(live.layer()) {
                     layer.live = Some(live.clone());
                 }
@@ -473,8 +643,8 @@ impl Compositor {
         }
         let size = self.size;
         let mut missing = Vec::new();
-        for (index, layer) in layers.iter_mut().enumerate() {
-            let (Some(id), Source::Raster { offset, .. }) = (layer.id, &layer.source) else {
+        for (index, layer) in all.iter_mut().enumerate() {
+            let (Some(id), Source::Raster { raster, offset }) = (layer.id, &layer.source) else {
                 continue;
             };
             let Ok(entity) = arena.get_by_id(id) else {
@@ -485,32 +655,38 @@ impl Compositor {
                 Some((seen, at, tiles)) if *seen == revision && at == offset => {
                     layer.occupancy = Some(tiles.clone());
                 }
-                _ if find => missing.push((index, id, revision, *offset)),
+                _ if find => missing.push((index, id, revision, *raster, *offset)),
                 _ => {}
             }
         }
-        if missing.is_empty() {
-            return;
-        }
         let rasters: Vec<(&RasterTile2D, [i64; 2])> = missing
             .iter()
-            .filter_map(|(index, _, _, offset)| match &layers[*index].source {
-                Source::Raster { raster, .. } => Some((*raster, *offset)),
-                _ => None,
-            })
+            .map(|(_, _, _, raster, offset)| (*raster, *offset))
             .collect();
         let found: Vec<Option<Occupancy>> = split(&rasters, |(raster, offset)| {
             Occupancy::of(raster, *offset, size)
         });
-        for ((index, id, revision, offset), tiles) in missing.into_iter().zip(found) {
+        for ((index, id, revision, _, offset), tiles) in missing.into_iter().zip(found) {
             if let Some(tiles) = tiles {
                 let tiles = std::sync::Arc::new(tiles);
-                layers[index].occupancy = Some(tiles.clone());
+                all[index].occupancy = Some(tiles.clone());
                 self.occupancy.insert(id, (revision, offset, tiles));
             }
         }
         // Layers that are gone keep nothing.
-        let present: HashSet<EntityId> = layers.iter().filter_map(|layer| layer.id).collect();
+        let present: HashSet<EntityId> = all.iter().filter_map(|layer| layer.id).collect();
         self.occupancy.retain(|id, _| present.contains(id));
+    }
+}
+
+/// Every layer of `layers` with pixels of its own, the members of
+/// folders included, into `out`.
+fn every_layer<'s, 'a>(layers: &'s mut [Layer<'a>], out: &mut Vec<&'s mut Layer<'a>>) {
+    for layer in layers {
+        if !matches!(layer.source, Source::Group(_)) {
+            out.push(layer);
+        } else if let Source::Group(members) = &mut layer.source {
+            every_layer(members, out);
+        }
     }
 }

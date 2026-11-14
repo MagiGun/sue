@@ -3,7 +3,8 @@
 
 use sue_core::txn::{DespawnEntity, Relate, SpawnEntity, Unrelate};
 use sue_core::{Arena, CHILD, Entity, EntityId, Relation, Value};
-use sue_model::class;
+use sue_model::picture;
+use sue_model::{BlendMode, class};
 
 use super::{Edit, key_above, layers};
 
@@ -50,6 +51,20 @@ pub fn members(arena: &Arena, picture: EntityId, folder: EntityId) -> Vec<Entity
         .map(|info| info.id)
         .filter(|id| folders_around(arena, *id).contains(&folder))
         .collect()
+}
+
+/// How `folder` lays its layers on: the mode stored on it, or
+/// [`BlendMode::Through`] when none is (what every folder of 0.0.75 did:
+/// its layers mixed with what is under the folder). A name from a newer
+/// Sue reads as Normal, as on a layer.
+#[must_use]
+pub fn folder_blend(arena: &Arena, folder: EntityId) -> BlendMode {
+    arena
+        .get_by_id(folder)
+        .ok()
+        .and_then(|entity| entity.property(picture::BLEND))
+        .and_then(Value::as_str)
+        .map_or(BlendMode::Through, BlendMode::from_name_or_normal)
 }
 
 /// `true` if the folder shows its layers in the palette.

@@ -2343,3 +2343,7 @@ zoom-100-percent = 100%
 zoom-200-percent = 200%
 paste-material = Paste Material
 cancel-transform = Cancel Transform
+
+## Picture model: folders, masks and layer kinds (0.0.8)
+link-mask-to-layer = Link Mask to Layer
+unlink-mask-from-layer = Unlink Mask from Layer
