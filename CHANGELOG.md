@@ -126,13 +126,15 @@ follow [Semantic Versioning](https://semver.org/).
   Hub, the Sue menu's Tools and their pages in Settings. A picture opens
   in Sue Paint as a canvas, where turning, flipping, cropping, resizing,
   color adjustments and saving as any picture type already are, and the
-  Sue menu's Send To puts it into Sue Writer. Converting many files at
-  once, export settings and audio export come back inside Sue Paint and
-  Sue Writer in a later release. Gone for good: Markdown to HTML and JSON
-  tables in the Converter (Sue Writer reads Markdown and makes web pages
-  itself), Base64, hex dumps, byte map pictures, plain copies, sound speed
-  and reverse, and stepping through a project's pictures with the arrow
-  keys.
+  Sue menu's Send To puts it into Sue Writer. Converting many pictures at
+  once, export settings and audio export move into Sue Paint, and tables
+  and text tidying into Sue Writer. Gone for good: the Converter's own
+  Markdown to HTML (Sue Writer reads Markdown and makes web pages itself),
+  JSON tables and JSON re-indenting, turning one sound file into another,
+  tidying source code files, Base64, hex dumps, byte map pictures, plain
+  copies, sound speed and reverse, Add from the Project, the Image
+  Viewer's info row and its shortcuts, and stepping through a project's
+  pictures with the arrow keys.
 
 ## [0.0.75] - 2026-11-09
 
