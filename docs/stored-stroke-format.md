@@ -74,18 +74,36 @@ as not a number. The kind of each sample follows from its place: the
 first is the landing and the last the lift.
 
 The layer keeps the brushes its lines name once, in the detail
-attribute `brushes`: each brush's bytes as hexadecimal text. A brush's
-tip pictures and papers that the brush names by hash are kept the same
-way in the detail attribute `pictures`, each as `hash width height`
-and the picture's 8-bit coverage in hexadecimal, so a line paints the
-same without the library it was drawn from.
+attribute `brushes`: one text, a line a brush, each the brush's bytes in
+hexadecimal. The tip pictures, dual brush pictures and papers that a
+brush names by hash are kept the same way in the detail attribute
+`pictures`, a line a picture: its hash, its width, its height and its
+8-bit coverage in hexadecimal, separated by spaces. A picture's hash is
+the SHA-256 of its width and height (little endian `u32`) and its
+coverage. So a line paints the same without the library it was drawn
+from.
+
+A tool that changes a line's samples without knowing the engine (Correct
+Line, today) leaves the line with a different number of samples than
+times: the line then takes its times again from its samples, spread by
+arc length over the stroke's own span, and its pressures and tilts from
+them. The vector eraser cuts a line where the pen was, each cut taking
+what the pen said at that place.
 
 Old files load unchanged: a file without these attributes holds legacy
 lines only, which keep their stored pixels and are painted again by the
 frozen legacy engine when they must be (the vector eraser, Correct Line,
-a move). The action "Update lines to the new brush engine" turns the
-legacy lines of a layer into lines of the new engine, painted again, as
-one step that undo takes back.
+a move). The action "Update lines to the new brush engine"
+(`vector::update_lines`) turns the legacy lines of a layer into lines of
+the new engine, painted again, as one step that undo takes back. A
+converted line reads its brush from its text
+(`BrushPreset::from_legacy_text`), keeps its tip pictures by hash, takes
+its times from the speeds it kept, dwells a few milliseconds where it
+landed (so its first pressure is painted whole) and gains a lift where
+it ended. It looks a little different, mostly at its ends: engine 1
+ramps every pen line to no pressure at its lift, and has no flick or
+post correction yet (the brush keeps both settings for the version that
+paints them).
 
 ## The promise
 

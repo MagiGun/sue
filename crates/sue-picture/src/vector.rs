@@ -9,11 +9,19 @@
 //! that paint it. Painting a line again from these gives the same pixels,
 //! since strokes take their chances from their own path.
 
+use std::sync::Arc;
+
+use sue_brush::input::{Device, Kind, Sample as PenSample, Settings};
+use sue_brush::paint::{Behaviours, Colors, PaperChoice, Resources, TextureChoice};
+use sue_brush::raster::TipImage;
+use sue_brush::replay::{self, StoredStroke};
+use sue_brush::texture::Paper;
 use sue_core::txn::{RasterEdit, SetExtension};
 use sue_core::{Arena, EntityId, PixelFormat, RasterTile2D};
-use sue_model::{AttributeData, Domain, Geometry, PrimKind};
+use sue_model::brush::{ContentHash, PictureRef, TipSource};
+use sue_model::{AttributeData, BrushPreset, Domain, Geometry, PrimKind, Response};
 
-use crate::brush::{Copy2D, Finish, SAME, Sample, Stroke, Tip};
+use crate::brush::{Copy2D, Finish, SAME, Sample, Stroke, Tip, TipShape};
 use crate::doc::Edit;
 
 /// The class of a vector layer.
@@ -77,6 +85,10 @@ pub struct Line {
     /// A flag a sample ([`CONTROL`], [`CORNER`]) for Correct Line, or none
     /// to find the control points from the path.
     pub marks: Vec<u8>,
+    /// What the brush engine keeps of a line it paints; `None` for a
+    /// line of the legacy engine (Sue 0.0.75 and before), which `tip`
+    /// paints from `samples`.
+    pub engine: Option<EngineLine>,
 }
 
 /// `lines` as the shapes of an SVG drawing (File, Special Export, Export
@@ -159,11 +171,20 @@ impl Line {
             finish,
             copies: stroke.copies().to_vec(),
             marks: Vec::new(),
+            engine: None,
         }
     }
 
-    /// Paints the line onto `raster`.
+    /// Paints the line onto `raster`: a line of the brush engine through
+    /// [`sue_brush::replay`], to the bytes it was drawn with; a legacy
+    /// line through the frozen legacy engine. A line of an engine this
+    /// build does not know, or whose brush the layer lacks, paints
+    /// nothing.
     pub fn paint(&self, raster: &mut RasterTile2D) {
+        if let Some(engine) = &self.engine {
+            engine.paint(self, raster);
+            return;
+        }
         let mut stroke = Stroke::new(EntityId::NIL, self.tip, self.colors[0], false);
         stroke.set_sub_color(self.colors[1]);
         stroke.set_copies(self.copies.clone());
@@ -179,7 +200,12 @@ impl Line {
 
     /// The same line along other samples.
     pub(crate) fn along(&self, samples: Vec<Sample>, keep_flick: bool) -> Self {
+        let engine = self
+            .engine
+            .as_ref()
+            .map(|engine| engine.along(&self.samples, &samples));
         Self {
+            engine,
             samples,
             marks: Vec::new(),
             finish: Finish {
@@ -266,6 +292,7 @@ pub fn from_svg(drawing: &sue_io::svg::SvgDrawing, size: [u32; 2]) -> Vec<Line> 
                 finish: Finish::default(),
                 copies: Vec::new(),
                 marks: Vec::new(),
+                engine: None,
             })
         })
         .collect()
@@ -485,6 +512,7 @@ pub fn trace(pixels: &[u8], width: u32, height: u32) -> Vec<Line> {
                 finish: Finish::default(),
                 copies: Vec::new(),
                 marks: Vec::new(),
+                engine: None,
             })
         })
         .collect()
@@ -551,6 +579,7 @@ pub fn lines(geometry: &Geometry) -> Vec<Line> {
             [values[at * 3], values[at * 3 + 1], values[at * 3 + 2]]
         })
     };
+    let engines = EngineAttributes::read(geometry);
     geometry
         .prims()
         .iter()
@@ -584,9 +613,14 @@ pub fn lines(geometry: &Geometry) -> Vec<Line> {
                         .collect()
                 })
                 .unwrap_or_default();
-            if single.is_some_and(|values| values[at] == 1) {
+            let one = single.is_some_and(|values| values[at] == 1);
+            if one {
                 samples.truncate(1);
                 flags.truncate(1);
+            }
+            let engine = engines.line(at, geometry.prim_points(prim), samples.len());
+            if let Some(engine) = &engine {
+                engine.show(&mut samples);
             }
             if flags.iter().all(|flag| *flag == 0) {
                 flags.clear();
@@ -619,6 +653,7 @@ pub fn lines(geometry: &Geometry) -> Vec<Line> {
                 },
                 copies,
                 marks: flags,
+                engine,
             }
         })
         .collect()
@@ -628,6 +663,7 @@ pub fn lines(geometry: &Geometry) -> Vec<Line> {
 #[must_use]
 pub fn to_geometry(lines: &[Line]) -> Geometry {
     let mut geometry = Geometry::new();
+    let mut engines = EngineAttributes::default();
     let (mut pressure, mut speed, mut tilt) = (Vec::new(), Vec::new(), Vec::new());
     let mut lean: Vec<f32> = Vec::new();
     let (mut width, mut alpha) = (Vec::new(), Vec::new());
@@ -639,14 +675,32 @@ pub fn to_geometry(lines: &[Line]) -> Geometry {
         marks.extend(
             (0..line.samples.len()).map(|at| i32::from(line.marks.get(at).copied().unwrap_or(0))),
         );
+        let raw = line
+            .engine
+            .as_ref()
+            .map(|engine| engine.pen_for(&line.samples));
         let mut indices: Vec<u32> = line
             .samples
             .iter()
-            .map(|sample| {
-                pressure.push(sample.pressure);
+            .enumerate()
+            .map(|(at, sample)| {
+                let part = raw.as_ref().map(|raw| raw[at]);
+                engines.point(part.as_ref());
+                match part {
+                    // A line of the brush engine keeps what the pen said.
+                    Some(part) => {
+                        pressure.push(part.pressure.unwrap_or(f32::NAN));
+                        let [x, y] = part.tilt.unwrap_or([f32::NAN; 2]);
+                        tilt.push((x * x + y * y).sqrt());
+                        lean.extend([x, y]);
+                    }
+                    None => {
+                        pressure.push(sample.pressure);
+                        tilt.push(sample.tilt);
+                        lean.extend(sample.lean);
+                    }
+                }
                 speed.push(sample.speed);
-                tilt.push(sample.tilt);
-                lean.extend(sample.lean);
                 width.push(sample.width);
                 alpha.push(sample.alpha);
                 geometry.add_point([f64::from(sample.at[0]), f64::from(sample.at[1]), 0.0])
@@ -657,6 +711,7 @@ pub fn to_geometry(lines: &[Line]) -> Geometry {
         if dot {
             marks.push(0);
             let sample = line.samples[0];
+            engines.point(raw.as_ref().map(|raw| &raw[0]));
             pressure.push(sample.pressure);
             speed.push(sample.speed);
             tilt.push(sample.tilt);
@@ -672,6 +727,7 @@ pub fn to_geometry(lines: &[Line]) -> Geometry {
         if geometry.add_prim(PrimKind::Polyline, &indices).is_err() {
             continue;
         }
+        engines.prim(line.engine.as_ref());
         colors.extend(line.colors[0]);
         subs.extend(line.colors[1]);
         let flick = line.finish.flick;
@@ -715,6 +771,7 @@ pub fn to_geometry(lines: &[Line]) -> Geometry {
         // Each holds one value an element, so this always fits.
         let _ = geometry.set_attribute(domain, name, data);
     }
+    engines.write(&mut geometry);
     geometry
 }
 
@@ -962,10 +1019,814 @@ pub fn erase(lines: &[Line], at: [f32; 2], radius: f32, mode: Erase) -> Option<V
     touched.then_some(out)
 }
 
+// ----- Lines of the brush engine ---------------------------------------------------
+
+/// One picture a brush names by hash (a tip, a paper): its 8-bit coverage,
+/// kept on the layer so a line paints the same without the library it
+/// was drawn from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BrushPicture {
+    /// Its width in texels.
+    pub width: u32,
+    /// Its height in texels.
+    pub height: u32,
+    /// `width * height` coverages, row by row, 0 (none) to 255 (full).
+    pub coverage: Vec<u8>,
+}
+
+impl BrushPicture {
+    /// The picture's hash: SHA-256 of its width and height (little
+    /// endian `u32`s) and its coverage.
+    #[must_use]
+    pub fn hash(&self) -> ContentHash {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(self.width.to_le_bytes());
+        hasher.update(self.height.to_le_bytes());
+        hasher.update(&self.coverage);
+        hasher.finalize().into()
+    }
+
+    /// The legacy engine's tip shape `shape` as a picture (its own
+    /// colors, which only the legacy engine paints, are left behind).
+    #[must_use]
+    pub fn of_shape(shape: &TipShape) -> Option<Self> {
+        let side = shape.side;
+        let count = (side as usize).checked_mul(side as usize)?;
+        if side == 0 || shape.cover.len() != count {
+            return None;
+        }
+        Some(Self {
+            width: side,
+            height: side,
+            coverage: shape
+                .cover
+                .iter()
+                .map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8)
+                .collect(),
+        })
+    }
+
+    fn tip(&self) -> Option<TipImage> {
+        TipImage::from_coverage(self.width as usize, self.height as usize, &self.coverage)
+    }
+
+    fn paper(&self) -> Option<Paper> {
+        Paper::from_gray8(self.width as usize, self.height as usize, &self.coverage)
+    }
+}
+
+/// The brush a line of the brush engine paints with, and the pictures it
+/// names by hash.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LineBrush {
+    /// The brush as it was when the line was drawn.
+    pub preset: BrushPreset,
+    /// The pictures it names, by hash.
+    pub pictures: Vec<(ContentHash, BrushPicture)>,
+}
+
+impl LineBrush {
+    /// The hash a line names its brush by: SHA-256 of
+    /// [`BrushPreset::to_bytes`].
+    #[must_use]
+    pub fn hash(&self) -> ContentHash {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(self.preset.to_bytes()).into()
+    }
+
+    fn picture(&self, hash: &ContentHash) -> Option<&BrushPicture> {
+        self.pictures
+            .iter()
+            .find(|(known, _)| known == hash)
+            .map(|(_, picture)| picture)
+    }
+
+    /// The pictures the brush's tip, dual brush and paper read, decoded.
+    fn decoded(&self) -> Decoded {
+        let behaviours = Behaviours::from_preset(&self.preset);
+        let tips = match &self.preset.tip {
+            TipSource::Images { pictures, .. } => pictures
+                .iter()
+                .filter_map(|picture| match picture {
+                    PictureRef::Hash(hash) => self.picture(hash)?.tip(),
+                    PictureRef::Named(_) => None,
+                })
+                .collect(),
+            TipSource::Round => Vec::new(),
+        };
+        let dual = behaviours
+            .dual
+            .as_ref()
+            .map(|dual| {
+                dual.pictures
+                    .iter()
+                    .filter_map(|hash| self.picture(hash)?.tip())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let paper = behaviours
+            .texture
+            .as_ref()
+            .and_then(|texture| match &texture.paper {
+                PaperChoice::Builtin(name) => Paper::builtin(name),
+                PaperChoice::Picture(hash) => self.picture(hash)?.paper(),
+            });
+        Decoded { tips, dual, paper }
+    }
+}
+
+/// A brush's pictures, decoded for the engine.
+struct Decoded {
+    tips: Vec<TipImage>,
+    dual: Vec<TipImage>,
+    paper: Option<Paper>,
+}
+
+/// What the pen said at one sample of a line of the brush engine.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PenPart {
+    /// Seconds since the landing.
+    pub time: f32,
+    /// The pressure, when the pen said one.
+    pub pressure: Option<f32>,
+    /// The tilt, `[x, y]`, when the pen said one.
+    pub tilt: Option<[f32; 2]>,
+    /// The twist in degrees, when the pen said one.
+    pub twist: Option<f32>,
+}
+
+impl PenPart {
+    /// The part `t` of the way from `self` to `other`; a part only one
+    /// of them said is taken from that one.
+    fn mix(&self, other: &Self, t: f32) -> Self {
+        let lerp = |a: f32, b: f32| a + (b - a) * t;
+        let either = |a: Option<f32>, b: Option<f32>| match (a, b) {
+            (Some(a), Some(b)) => Some(lerp(a, b)),
+            (a, b) => a.or(b),
+        };
+        Self {
+            time: lerp(self.time, other.time),
+            pressure: either(self.pressure, other.pressure),
+            tilt: match (self.tilt, other.tilt) {
+                (Some(a), Some(b)) => Some([lerp(a[0], b[0]), lerp(a[1], b[1])]),
+                (a, b) => a.or(b),
+            },
+            twist: either(self.twist, other.twist),
+        }
+    }
+}
+
+/// What a line of the brush engine keeps beyond its places: what replays
+/// it ([`sue_brush::replay`]). The places are the line's samples, so a
+/// line moved, transformed or corrected moves with them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EngineLine {
+    /// The engine version that paints it ([`sue_brush::replay::ENGINE`]).
+    pub engine: u32,
+    /// The seed of its chances.
+    pub seed: u64,
+    /// The hash of its brush ([`LineBrush::hash`]).
+    pub brush_hash: ContentHash,
+    /// Its brush, when the layer has it.
+    pub brush: Option<Arc<LineBrush>>,
+    /// The device that drew it.
+    pub device: Device,
+    /// Screen points per layer pixel when it was drawn.
+    pub scale: f32,
+    /// The person's pressure curve when it was drawn.
+    pub curve: Response,
+    /// What the pen said at each sample, beside the line's samples.
+    pub pen: Vec<PenPart>,
+}
+
+impl EngineLine {
+    /// What the pen said at each of `samples`: its own record when it
+    /// has one a sample, else (a tool that knows nothing of the engine
+    /// changed the samples) made again from them, time spread by arc
+    /// length over the stroke's own span.
+    #[must_use]
+    pub fn pen_for(&self, samples: &[Sample]) -> Vec<PenPart> {
+        if self.pen.len() == samples.len() {
+            return self.pen.clone();
+        }
+        let arcs = arcs(samples);
+        let total = arcs.last().copied().unwrap_or(0.0);
+        let (first, last) = (
+            self.pen.first().map_or(0.0, |p| p.time),
+            self.pen.last().map_or(0.0, |p| p.time),
+        );
+        let said_tilt = self.pen.iter().any(|p| p.tilt.is_some());
+        samples
+            .iter()
+            .zip(&arcs)
+            .enumerate()
+            .map(|(at, (sample, arc))| PenPart {
+                time: if total > 0.0 {
+                    first + (last - first) * (arc / total)
+                } else {
+                    first + (last - first) * at as f32 / (samples.len().max(2) - 1) as f32
+                },
+                pressure: Some(sample.pressure),
+                tilt: said_tilt.then_some(sample.lean),
+                twist: None,
+            })
+            .collect()
+    }
+
+    /// The same line along `new` samples cut from `old` (the vector
+    /// eraser): each takes what the pen said at its place along the old
+    /// line.
+    #[must_use]
+    pub fn along(&self, old: &[Sample], new: &[Sample]) -> Self {
+        let pen = self.pen_for(old);
+        let arcs = arcs(old);
+        let parts = new
+            .iter()
+            .map(|sample| {
+                if old.len() < 2 {
+                    return pen.first().copied().unwrap_or(PenPart {
+                        time: 0.0,
+                        pressure: None,
+                        tilt: None,
+                        twist: None,
+                    });
+                }
+                let along = touch(old, &arcs, sample.at, f32::INFINITY).unwrap_or(0.0);
+                let index = arcs
+                    .partition_point(|arc| *arc < along)
+                    .clamp(1, old.len() - 1);
+                let span = arcs[index] - arcs[index - 1];
+                let t = if span > 0.0 {
+                    ((along - arcs[index - 1]) / span).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                pen[index - 1].mix(&pen[index], t)
+            })
+            .collect();
+        Self {
+            pen: parts,
+            ..self.clone()
+        }
+    }
+
+    /// Fills what the legacy tools read of `samples` (pressure, tilt and
+    /// lean) from what the pen said, a part it did not say from the one
+    /// before (or after) it.
+    pub fn show(&self, samples: &mut [Sample]) {
+        let pen = self.pen_for(samples);
+        let first = pen.iter().find_map(|p| p.pressure).unwrap_or(1.0);
+        let mut pressure = first;
+        let mut lean = [0.0; 2];
+        for (sample, part) in samples.iter_mut().zip(&pen) {
+            pressure = part.pressure.filter(|p| p.is_finite()).unwrap_or(pressure);
+            lean = part.tilt.unwrap_or(lean);
+            sample.pressure = pressure;
+            sample.lean = lean;
+            sample.tilt = (lean[0] * lean[0] + lean[1] * lean[1]).sqrt().min(1.0);
+        }
+    }
+
+    /// The stroke `line` keeps, as the engine reads it: its first sample
+    /// the landing, its last the lift.
+    #[must_use]
+    pub fn stored(&self, line: &Line) -> StoredStroke {
+        let settings = Settings {
+            device: self.device,
+            curve: self.curve,
+            to_layer: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            scale: self.scale,
+            seed: self.seed,
+            step: None,
+        };
+        // A line drawn once keeps one copy that leaves it where it is.
+        let copies = if line.copies.iter().all(|copy| *copy == SAME) {
+            Vec::new()
+        } else {
+            line.copies.clone()
+        };
+        let mut stroke = StoredStroke::new(
+            self.engine,
+            self.brush_hash,
+            &settings,
+            Colors {
+                main: line.colors[0],
+                sub: line.colors[1],
+            },
+            copies,
+        );
+        let pen = self.pen_for(&line.samples);
+        let last = line.samples.len().saturating_sub(1);
+        stroke.samples = line
+            .samples
+            .iter()
+            .zip(&pen)
+            .enumerate()
+            .map(|(at, (sample, part))| PenSample {
+                pos: sample.at,
+                time: f64::from(part.time),
+                pressure: part.pressure,
+                tilt: part.tilt,
+                twist: part.twist,
+                kind: if at == 0 {
+                    Kind::Down
+                } else if at == last {
+                    Kind::Up
+                } else {
+                    Kind::Move
+                },
+            })
+            .collect();
+        stroke
+    }
+
+    /// Paints `line` onto `raster` again.
+    fn paint(&self, line: &Line, raster: &mut RasterTile2D) {
+        let Some(brush) = &self.brush else {
+            return;
+        };
+        let decoded = brush.decoded();
+        let resources = Resources {
+            pictures: &decoded.tips,
+            dual_pictures: &decoded.dual,
+            paper: decoded.paper.as_ref(),
+            overflow: None,
+        };
+        // A line of an engine this build does not know paints nothing:
+        // its version's code paints it.
+        let _ = replay::paint(
+            &self.stored(line),
+            &brush.preset,
+            resources,
+            raster,
+            [0, 0],
+            false,
+        );
+    }
+}
+
+/// The hash as 64 hexadecimal digits.
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
+}
+
+/// The bytes `text` spells in hexadecimal digits.
+fn unhex(text: &str) -> Option<Vec<u8>> {
+    let text = text.trim();
+    if !text.len().is_multiple_of(2) || !text.is_ascii() {
+        return None;
+    }
+    (0..text.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&text[at..at + 2], 16).ok())
+        .collect()
+}
+
+fn hash_of(text: &str) -> Option<ContentHash> {
+    unhex(text)?.try_into().ok()
+}
+
+/// A pressure curve as text: its points, `x,y x,y ...`.
+fn curve_text(curve: &Response) -> String {
+    curve
+        .points()
+        .iter()
+        .map(|[x, y]| format!("{x},{y}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn curve_of(text: &str) -> Response {
+    let points: Vec<[f32; 2]> = text
+        .split_whitespace()
+        .filter_map(|pair| {
+            let (x, y) = pair.split_once(',')?;
+            Some([x.parse().ok()?, y.parse().ok()?])
+        })
+        .collect();
+    if points.len() < 2 {
+        Response::LINEAR
+    } else {
+        Response::new(&points)
+    }
+}
+
+/// The attributes lines of the brush engine add to a vector layer's
+/// geometry (`docs/stored-stroke-format.md`): written only when a line
+/// of the engine is there, so a layer of legacy lines keeps the
+/// attributes Sue 0.0.75 wrote.
+#[derive(Default)]
+struct EngineAttributes {
+    any: bool,
+    engine: Vec<i32>,
+    seed: Vec<String>,
+    brush: Vec<String>,
+    device: Vec<f32>,
+    scale: Vec<f32>,
+    curve: Vec<String>,
+    time: Vec<f32>,
+    twist: Vec<f32>,
+    raw_pressure: Vec<f32>,
+    raw_lean: Vec<f32>,
+    brushes: Vec<(ContentHash, Arc<LineBrush>)>,
+}
+
+impl EngineAttributes {
+    /// One point; `part` for a point of a line of the brush engine.
+    fn point(&mut self, part: Option<&PenPart>) {
+        self.time.push(part.map_or(0.0, |p| p.time));
+        self.twist
+            .push(part.and_then(|p| p.twist).unwrap_or(f32::NAN));
+    }
+
+    /// One line; `engine` for a line of the brush engine.
+    fn prim(&mut self, engine: Option<&EngineLine>) {
+        match engine {
+            Some(e) => {
+                self.any = true;
+                self.engine
+                    .push(i32::try_from(e.engine).unwrap_or(i32::MAX));
+                self.seed.push(e.seed.to_string());
+                self.brush.push(hex(&e.brush_hash));
+                self.device.push(match e.device {
+                    Device::Pen => -1.0,
+                    Device::Constant(pressure) => pressure,
+                });
+                self.scale.push(e.scale);
+                self.curve.push(curve_text(&e.curve));
+                if let Some(brush) = &e.brush
+                    && !self.brushes.iter().any(|(hash, _)| *hash == e.brush_hash)
+                {
+                    self.brushes.push((e.brush_hash, Arc::clone(brush)));
+                }
+            }
+            None => {
+                self.engine.push(0);
+                self.seed.push(String::new());
+                self.brush.push(String::new());
+                self.device.push(-1.0);
+                self.scale.push(1.0);
+                self.curve.push(String::new());
+            }
+        }
+    }
+
+    /// Writes the attributes into `geometry`, when a line needs them.
+    fn write(self, geometry: &mut Geometry) {
+        if !self.any {
+            return;
+        }
+        let mut pictures: Vec<(ContentHash, &BrushPicture)> = Vec::new();
+        for (_, brush) in &self.brushes {
+            for (hash, picture) in &brush.pictures {
+                if !pictures.iter().any(|(known, _)| known == hash) {
+                    pictures.push((*hash, picture));
+                }
+            }
+        }
+        let brushes = self
+            .brushes
+            .iter()
+            .map(|(_, brush)| hex(&brush.preset.to_bytes()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let pictures = pictures
+            .iter()
+            .map(|(hash, p)| {
+                format!(
+                    "{} {} {} {}",
+                    hex(hash),
+                    p.width,
+                    p.height,
+                    hex(&p.coverage)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let float = |values: Vec<f32>| AttributeData::Float { width: 1, values };
+        for (domain, name, data) in [
+            (
+                Domain::Primitive,
+                "engine",
+                AttributeData::Int {
+                    width: 1,
+                    values: self.engine,
+                },
+            ),
+            (Domain::Primitive, "seed", AttributeData::Text(self.seed)),
+            (Domain::Primitive, "brush", AttributeData::Text(self.brush)),
+            (Domain::Primitive, "device", float(self.device)),
+            (Domain::Primitive, "scale", float(self.scale)),
+            (Domain::Primitive, "curve", AttributeData::Text(self.curve)),
+            (Domain::Point, "time", float(self.time)),
+            (Domain::Point, "twist", float(self.twist)),
+            (
+                Domain::Detail,
+                "brushes",
+                AttributeData::Text(vec![brushes]),
+            ),
+            (
+                Domain::Detail,
+                "pictures",
+                AttributeData::Text(vec![pictures]),
+            ),
+        ] {
+            // Each holds one value an element, so this always fits.
+            let _ = geometry.set_attribute(domain, name, data);
+        }
+    }
+
+    /// What a layer's `geometry` holds of lines of the brush engine.
+    fn read(geometry: &Geometry) -> Self {
+        let mut out = Self::default();
+        let prims = geometry.prims().len();
+        let count = geometry.points().len();
+        let Some(engine) = ints(geometry, Domain::Primitive, "engine").filter(|v| v.len() == prims)
+        else {
+            return out;
+        };
+        out.any = engine.iter().any(|e| *e > 0);
+        if !out.any {
+            return out;
+        }
+        out.engine = engine.to_vec();
+        let text = |name: &str| {
+            texts(geometry, Domain::Primitive, name)
+                .filter(|v| v.len() == prims)
+                .map(<[String]>::to_vec)
+                .unwrap_or_else(|| vec![String::new(); prims])
+        };
+        let float = |domain: Domain, name: &str, len: usize, or: f32| {
+            floats(geometry, domain, name, 1)
+                .filter(|v| v.len() == len)
+                .map_or_else(|| vec![or; len], <[f32]>::to_vec)
+        };
+        out.seed = text("seed");
+        out.brush = text("brush");
+        out.curve = text("curve");
+        out.device = float(Domain::Primitive, "device", prims, -1.0);
+        out.scale = float(Domain::Primitive, "scale", prims, 1.0);
+        out.time = float(Domain::Point, "time", count, 0.0);
+        out.twist = float(Domain::Point, "twist", count, f32::NAN);
+        out.raw_pressure = float(Domain::Point, "pressure", count, f32::NAN);
+        out.raw_lean = floats(geometry, Domain::Point, "lean", 2)
+            .filter(|v| v.len() == count * 2)
+            .map_or_else(|| vec![f32::NAN; count * 2], <[f32]>::to_vec);
+        let detail = |name: &str| {
+            texts(geometry, Domain::Detail, name)
+                .and_then(|v| v.first().cloned())
+                .unwrap_or_default()
+        };
+        let pictures: Vec<(ContentHash, BrushPicture)> = detail("pictures")
+            .lines()
+            .filter_map(|line| {
+                let mut words = line.split_whitespace();
+                let hash = hash_of(words.next()?)?;
+                let width: u32 = words.next()?.parse().ok()?;
+                let height: u32 = words.next()?.parse().ok()?;
+                let coverage = unhex(words.next().unwrap_or(""))?;
+                (coverage.len() == width as usize * height as usize).then_some((
+                    hash,
+                    BrushPicture {
+                        width,
+                        height,
+                        coverage,
+                    },
+                ))
+            })
+            .collect();
+        for line in detail("brushes").lines() {
+            let Some(preset) = unhex(line).and_then(|b| BrushPreset::from_bytes(&b).ok()) else {
+                continue;
+            };
+            let named = named_hashes(&preset);
+            let brush = LineBrush {
+                pictures: pictures
+                    .iter()
+                    .filter(|(hash, _)| named.contains(hash))
+                    .cloned()
+                    .collect(),
+                preset,
+            };
+            out.brushes.push((brush.hash(), Arc::new(brush)));
+        }
+        out
+    }
+
+    /// Line `at`, over `points`, cut to its first `len` samples, when it
+    /// is a line of the brush engine.
+    fn line(&self, at: usize, points: &[u32], len: usize) -> Option<EngineLine> {
+        let engine = u32::try_from(*self.engine.get(at)?)
+            .ok()
+            .filter(|e| *e > 0)?;
+        let brush_hash = hash_of(self.brush.get(at)?).unwrap_or([0; 32]);
+        let finite = |value: f32| value.is_finite().then_some(value);
+        let pen = points
+            .iter()
+            .take(len)
+            .map(|&point| {
+                let i = point as usize;
+                let tilt = [self.raw_lean[i * 2], self.raw_lean[i * 2 + 1]];
+                PenPart {
+                    time: self.time[i],
+                    pressure: finite(self.raw_pressure[i]),
+                    tilt: (tilt[0].is_finite() && tilt[1].is_finite()).then_some(tilt),
+                    twist: finite(self.twist[i]),
+                }
+            })
+            .collect();
+        Some(EngineLine {
+            engine,
+            seed: self.seed.get(at)?.parse().unwrap_or(0),
+            brush: self
+                .brushes
+                .iter()
+                .find(|(hash, _)| *hash == brush_hash)
+                .map(|(_, brush)| Arc::clone(brush)),
+            brush_hash,
+            device: match self.device[at] {
+                pressure if pressure >= 0.0 => Device::Constant(pressure),
+                _ => Device::Pen,
+            },
+            scale: self.scale[at],
+            curve: curve_of(&self.curve[at]),
+            pen,
+        })
+    }
+}
+
+/// The picture hashes `preset` names: its tip's, its dual brush's and its
+/// paper's.
+fn named_hashes(preset: &BrushPreset) -> Vec<ContentHash> {
+    let mut out = Vec::new();
+    if let TipSource::Images { pictures, .. } = &preset.tip {
+        out.extend(pictures.iter().filter_map(|p| match p {
+            PictureRef::Hash(hash) => Some(*hash),
+            PictureRef::Named(_) => None,
+        }));
+    }
+    let behaviours = Behaviours::from_preset(preset);
+    if let Some(dual) = &behaviours.dual {
+        out.extend(dual.pictures.iter().copied());
+    }
+    if let Some(TextureChoice {
+        paper: PaperChoice::Picture(hash),
+        ..
+    }) = &behaviours.texture
+    {
+        out.push(*hash);
+    }
+    out
+}
+
+// ----- Update lines to the new brush engine ----------------------------------------
+
+/// How many samples a legacy line dwells at its landing when it becomes
+/// a line of the brush engine, and how far apart in seconds: long enough
+/// for the engine's limit on how fast pressure rises (a full press in
+/// 10 ms) to let the first pressure through whole.
+const LANDING: usize = 3;
+const LANDING_STEP: f32 = 0.004;
+
+/// The time between two samples of a legacy line, which kept none: as
+/// long as its stored speed says the pen took over the distance, from a
+/// millisecond to a twentieth of a second.
+fn legacy_step(from: &Sample, to: &Sample) -> f32 {
+    let (dx, dy) = (to.at[0] - from.at[0], to.at[1] - from.at[1]);
+    let distance = (dx * dx + dy * dy).sqrt();
+    // The legacy speed is screen points a second over 2,000.
+    let speed = (0.5 * (from.speed + to.speed) * 2_000.0).max(40.0);
+    (distance / speed).clamp(0.001, 0.05)
+}
+
+/// The legacy `line` as a line of the brush engine: its brush read from
+/// its text (`BrushPreset::from_legacy_text`) with its tip pictures kept
+/// by hash, the pen's pressure and lean as it said them, time made from
+/// the speeds it kept, the pen dwelling a moment where it landed, a lift
+/// where it ended, and the seed the legacy
+/// engine took from its first place. `None` for a line already of the
+/// engine, or one with no samples.
+#[must_use]
+pub fn to_engine(line: &Line) -> Option<Line> {
+    if line.engine.is_some() || line.samples.is_empty() {
+        return None;
+    }
+    let mut preset = BrushPreset::from_legacy_text(&line.tip.to_text());
+    // The finish it was drawn with is the brush's in the engine.
+    preset.input.post_correction = line.finish.correction;
+    preset.input.flick = line.finish.flick.is_some();
+    let mut pictures = Vec::new();
+    if let TipSource::Images { pictures: refs, .. } = &mut preset.tip {
+        let count = line.tip.shape_count.max(1);
+        let mut kept = Vec::new();
+        for id in line.tip.shape..line.tip.shape.saturating_add(count) {
+            if let Some(picture) = crate::brush::shape(id)
+                .as_deref()
+                .and_then(BrushPicture::of_shape)
+            {
+                let hash = picture.hash();
+                kept.push(PictureRef::Hash(hash));
+                pictures.push((hash, picture));
+            }
+        }
+        if !kept.is_empty() {
+            *refs = kept;
+        }
+    }
+    let brush = LineBrush { preset, pictures };
+    // The legacy engine painted the first sample at its full pressure;
+    // the engine lets a landing's pressure rise over a few milliseconds
+    // (against spikes), so the pen dwells there that long first.
+    let mut samples = vec![line.samples[0]; LANDING];
+    samples.extend_from_slice(&line.samples);
+    let mut time = 0.0;
+    let mut pen = Vec::with_capacity(samples.len() + 1);
+    for (at, sample) in samples.iter().enumerate() {
+        if at > 0 {
+            time += if at <= LANDING {
+                LANDING_STEP
+            } else {
+                legacy_step(&samples[at - 1], sample)
+            };
+        }
+        let leaned = sample.lean != [0.0, 0.0];
+        pen.push(PenPart {
+            time,
+            pressure: Some(sample.pressure),
+            tilt: leaned.then_some(sample.lean),
+            twist: None,
+        });
+    }
+    // The lift, where the line ended.
+    let last = *samples.last()?;
+    samples.push(last);
+    pen.push(PenPart {
+        time: time + 0.004,
+        ..*pen.last()?
+    });
+    let first = samples[0].at;
+    let seed = u64::from((first[0].to_bits() ^ first[1].to_bits().rotate_left(16)) | 1);
+    let mut marks = line.marks.clone();
+    if !marks.is_empty() {
+        marks.splice(0..0, [0; LANDING]);
+        marks.push(0);
+    }
+    Some(Line {
+        samples,
+        marks,
+        engine: Some(EngineLine {
+            engine: replay::ENGINE,
+            seed,
+            brush_hash: brush.hash(),
+            brush: Some(Arc::new(brush)),
+            device: Device::Pen,
+            scale: 1.0,
+            curve: Response::LINEAR,
+            pen,
+        }),
+        ..line.clone()
+    })
+}
+
+/// "Update lines to the new brush engine": every legacy line of the
+/// vector `layer` becomes a line of the brush engine ([`to_engine`]) and
+/// the layer is painted again from its lines, as one step named `label`
+/// that undo takes back whole. `None` when the layer is not a vector
+/// layer or holds no legacy line.
+#[must_use]
+pub fn update_lines(arena: &mut Arena, layer: EntityId, label: &str) -> Option<Edit> {
+    if !is_vector(arena, layer) {
+        return None;
+    }
+    let old = geometry(arena, layer);
+    let before = lines(&old);
+    if before.iter().all(|line| line.engine.is_some()) {
+        return None;
+    }
+    let after: Vec<Line> = before
+        .iter()
+        .map(|line| to_engine(line).unwrap_or_else(|| line.clone()))
+        .collect();
+    let raster = crate::doc::raster_mut(arena, layer)?;
+    let (width, height) = (raster.width(), raster.height());
+    let was = raster.bytes()?.to_vec();
+    let painted = render(&after, width, height)?;
+    raster.bytes_mut()?.copy_from_slice(painted.bytes()?);
+    let pixels = crate::doc::diff_patch(&was, painted.bytes()?, width, height)
+        .map(|patch| RasterEdit::new(layer, label, vec![patch]));
+    Some(keep(arena, layer, old, &after, pixels, label))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::brush::{Dynamics, TaperMode};
+    use sue_core::ReversibleTransaction as _;
 
     fn line(from: [f32; 2], to: [f32; 2]) -> Line {
         let samples = (0..=20)
@@ -995,6 +1856,7 @@ mod tests {
             finish: Finish::default(),
             copies: vec![SAME],
             marks: Vec::new(),
+            engine: None,
         }
     }
 
@@ -1213,6 +2075,253 @@ mod tests {
         assert!(
             (45.0..=48.0).contains(&left) && (52.0..=55.0).contains(&right),
             "{left} {right}"
+        );
+    }
+
+    /// The vector layer of the picture Sue 0.0.75 wrote for the golden
+    /// tests (`crates/sue-paint/tests/golden/picture.sue`).
+    fn golden_layer() -> (sue_core::Arena, EntityId) {
+        let bytes = include_bytes!("../../sue-paint/tests/golden/picture.sue");
+        let file = sue_core::SueFile::from_bytes(bytes).expect("a 0.0.75 file reads");
+        let arena = file.arena(&sue_model::registry()).expect("its arena reads");
+        let layer = arena
+            .iter()
+            .map(|(_, entity)| entity)
+            .find(|entity| entity.class() == CLASS)
+            .expect("the vector layer")
+            .id();
+        (arena, layer)
+    }
+
+    #[test]
+    fn the_golden_vector_lines_of_0_0_75_paint_again_to_their_pixels() {
+        // The decoration shapes are known from the moment the tools are.
+        let _ = crate::tools::Tool::Decoration.sub_tools();
+        let (arena, layer) = golden_layer();
+        assert_eq!(layer.to_string(), "1de746c6-556a-45f2-9839-f99d81f7ba24");
+        let lines = lines(&geometry(&arena, layer));
+        let counts: Vec<usize> = lines.iter().map(|line| line.samples.len()).collect();
+        assert_eq!(counts, [33, 33, 1, 13, 11]);
+        assert!(
+            lines.iter().all(|line| line.engine.is_none()),
+            "no engine attribute: every line is the legacy engine's"
+        );
+        // Painted again by the frozen legacy engine, the same pixels.
+        let stored = crate::doc::raster(&arena, layer).expect("its pixels");
+        let again = render(&lines, stored.width(), stored.height()).expect("painted again");
+        assert_eq!(again.bytes(), stored.bytes(), "the pixels Sue 0.0.75 saved");
+        // And kept again, the geometry is the one that was read.
+        assert_eq!(to_geometry(&lines), geometry(&arena, layer));
+    }
+
+    /// The whole arena as the bytes of a `.sue` file.
+    fn saved(arena: &sue_core::Arena) -> Vec<u8> {
+        let mut file = sue_core::SueFile::new();
+        file.set_arena(arena);
+        file.to_bytes()
+    }
+
+    /// The arena of `bytes`.
+    fn opened(bytes: &[u8]) -> sue_core::Arena {
+        sue_core::SueFile::from_bytes(bytes)
+            .expect("the file reads")
+            .arena(&sue_model::registry())
+            .expect("its arena reads")
+    }
+
+    /// With `SUE_PICTURE_SHOTS` set to a folder, `raster` over paper as
+    /// `name` there, four times as large, to be looked at.
+    fn shot(name: &str, raster: &RasterTile2D) {
+        let Some(dir) = std::env::var_os("SUE_PICTURE_SHOTS") else {
+            return;
+        };
+        let (w, h) = (raster.width(), raster.height());
+        let bytes = raster.bytes().expect("bytes");
+        let mut out = Vec::with_capacity((w * h * 64) as usize);
+        for y in 0..h * 4 {
+            for x in 0..w * 4 {
+                let i = (((y / 4) * w + x / 4) * 4) as usize;
+                let a = f32::from(bytes[i + 3]) / 255.0;
+                for (c, paper) in bytes[i..i + 3].iter().zip([250.0_f32, 248.0, 242.0]) {
+                    out.push((f32::from(*c) * a + paper * (1.0 - a) + 0.5) as u8);
+                }
+                out.push(255);
+            }
+        }
+        let png = sue_io::encode_png_rgba(w * 4, h * 4, &out).expect("a PNG");
+        std::fs::write(std::path::Path::new(&dir).join(name), png).expect("written");
+    }
+
+    #[test]
+    fn updating_the_golden_lines_to_the_new_engine_is_one_step_undo_takes_back() {
+        let _ = crate::tools::Tool::Decoration.sub_tools();
+        let (mut arena, layer) = golden_layer();
+        shot(
+            "golden-legacy.png",
+            crate::doc::raster(&arena, layer).unwrap(),
+        );
+        let before = saved(&arena);
+        let mut edit = update_lines(&mut arena, layer, "Update lines").expect("legacy lines");
+        let after = saved(&arena);
+        assert_ne!(after, before);
+        let updated = lines(&geometry(&arena, layer));
+        assert_eq!(updated.len(), 5);
+        assert!(updated.iter().all(|line| {
+            line.engine
+                .as_ref()
+                .is_some_and(|e| e.engine == replay::ENGINE && e.brush.is_some())
+        }));
+        // Every line gained its landing's dwell and its lift.
+        let counts: Vec<usize> = updated.iter().map(|line| line.samples.len()).collect();
+        assert_eq!(counts, [37, 37, 5, 17, 15]);
+        // The decoration line keeps its stars by hash, on the layer.
+        let star = updated[1].engine.as_ref().unwrap().brush.as_ref().unwrap();
+        assert!(matches!(
+            &star.preset.tip,
+            TipSource::Images { pictures, .. } if matches!(pictures[..], [PictureRef::Hash(_)])
+        ));
+        assert_eq!(star.pictures.len(), 1);
+        let pixels = crate::doc::raster(&arena, layer).unwrap().clone();
+        shot("golden-new-engine.png", &pixels);
+        assert!(
+            pixels
+                .bytes()
+                .unwrap()
+                .chunks(4)
+                .filter(|p| p[3] > 0)
+                .count()
+                > 900,
+            "the lines are painted"
+        );
+        // Nothing left to update.
+        assert!(update_lines(&mut arena, layer, "Update lines").is_none());
+        // Undo: the arena as it was, ids, geometry and pixels; redo: as
+        // it became.
+        edit.revert(&mut arena).expect("undone");
+        assert_eq!(saved(&arena), before, "undo takes the whole step back");
+        edit.apply(&mut arena).expect("redone");
+        assert_eq!(saved(&arena), after, "redo makes it again");
+    }
+
+    #[test]
+    fn a_line_of_the_new_engine_saved_and_opened_paints_the_same_bytes() {
+        let _ = crate::tools::Tool::Decoration.sub_tools();
+        let (mut arena, layer) = golden_layer();
+        let _ = update_lines(&mut arena, layer, "Update lines").expect("legacy lines");
+        let painted = crate::doc::raster(&arena, layer).unwrap().clone();
+        let kept = lines(&geometry(&arena, layer));
+        // Saved as a file and opened again.
+        let opened = opened(&saved(&arena));
+        let read = lines(&geometry(&opened, layer));
+        assert_eq!(read, kept, "every line reads back as it was kept");
+        // (Compared as text: a part the pen did not say is kept as not a
+        // number, which is never equal to itself.)
+        assert_eq!(
+            format!("{:?}", to_geometry(&read)),
+            format!("{:?}", geometry(&opened, layer))
+        );
+        let again = render(&read, painted.width(), painted.height()).expect("painted");
+        assert_eq!(again.bytes(), painted.bytes(), "the same bytes");
+        // What the engine keeps of a line is the stroke it replays.
+        let stored = read[0].engine.as_ref().unwrap().stored(&read[0]);
+        assert!(stored.is_finished());
+        assert_eq!(
+            sue_brush::replay::StoredStroke::from_bytes(&stored.to_bytes()),
+            Ok(stored)
+        );
+    }
+
+    #[test]
+    fn a_layer_without_new_lines_keeps_the_attributes_0_0_75_wrote() {
+        let kept = to_geometry(&[line([0.0, 0.0], [10.0, 0.0])]);
+        for name in ["engine", "seed", "brush", "time", "twist", "brushes"] {
+            for domain in [Domain::Point, Domain::Primitive, Domain::Detail] {
+                assert!(kept.attribute(domain, name).is_none(), "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_vector_eraser_cuts_a_line_of_the_new_engine_where_the_pen_was() {
+        let legacy = line([0.0, 50.0], [100.0, 50.0]);
+        let new = to_engine(&legacy).expect("a legacy line");
+        assert!(to_engine(&new).is_none(), "already the engine's");
+        let pieces = erase(&[new.clone()], [50.0, 50.0], 3.0, Erase::Touched).expect("touched");
+        assert_eq!(pieces.len(), 2);
+        let pen = &new.engine.as_ref().unwrap().pen;
+        for piece in &pieces {
+            let engine = piece.engine.as_ref().expect("still the engine's");
+            assert_eq!(engine.pen.len(), piece.samples.len());
+            // Each cut takes the time and pressure the pen had there.
+            let times: Vec<f32> = engine.pen.iter().map(|p| p.time).collect();
+            assert!(times.windows(2).all(|t| t[0] <= t[1]), "{times:?}");
+            assert!(times[0] >= pen[0].time && *times.last().unwrap() <= pen.last().unwrap().time);
+        }
+        let first = &pieces[0].engine.as_ref().unwrap().pen;
+        let cut = pieces[0].samples.last().unwrap();
+        // The legacy line pressed 0.5 to 1 along x from 0 to 100.
+        let expected = 0.5 + cut.at[0] / 100.0 * 0.5;
+        assert!((first.last().unwrap().pressure.unwrap() - expected).abs() < 0.02);
+        let mut raster = RasterTile2D::new(100, 100, PixelFormat::Rgba8).unwrap();
+        for piece in &pieces {
+            piece.paint(&mut raster);
+        }
+        let inked = |x0: u32, x1: u32| {
+            (x0..x1)
+                .map(|x| raster.bytes().unwrap()[((50 * 100 + x) * 4 + 3) as usize])
+                .max()
+                .unwrap()
+        };
+        assert!(inked(10, 40) > 0 && inked(60, 90) > 0, "both pieces paint");
+        assert_eq!(inked(49, 52), 0, "the cut stays clear");
+    }
+
+    #[test]
+    fn a_line_whose_samples_a_tool_changed_still_paints() {
+        // Correct Line knows nothing of the engine: it changes samples,
+        // and what the pen said is made again from them.
+        let mut new = to_engine(&line([0.0, 20.0], [60.0, 20.0])).unwrap();
+        new.samples.insert(3, new.samples[3]);
+        let engine = new.engine.as_ref().unwrap();
+        let pen = engine.pen_for(&new.samples);
+        assert_eq!(pen.len(), new.samples.len());
+        assert!(pen.windows(2).all(|p| p[0].time <= p[1].time));
+        let mut raster = RasterTile2D::new(64, 40, PixelFormat::Rgba8).unwrap();
+        new.paint(&mut raster);
+        assert!(raster.bytes().unwrap().chunks(4).any(|p| p[3] > 0));
+    }
+
+    #[test]
+    fn a_dot_updated_to_the_new_engine_stays_about_as_large() {
+        let dot = Line {
+            samples: vec![Sample {
+                at: [20.0, 20.0],
+                pressure: 0.8,
+                speed: 0.0,
+                tilt: 0.0,
+                lean: [0.0, 0.0],
+                width: 1.0,
+                alpha: 1.0,
+            }],
+            ..line([0.0, 0.0], [1.0, 0.0])
+        };
+        let mut dot = dot;
+        dot.tip.size = 10.0;
+        let inked = |line: &Line| {
+            let mut raster = RasterTile2D::new(40, 40, PixelFormat::Rgba8).unwrap();
+            line.paint(&mut raster);
+            raster
+                .bytes()
+                .unwrap()
+                .chunks(4)
+                .filter(|p| p[3] > 127)
+                .count()
+        };
+        let (old, new) = (inked(&dot), inked(&to_engine(&dot).unwrap()));
+        assert!(old > 20, "{old}");
+        assert!(
+            new * 10 >= old * 8 && new * 10 <= old * 12,
+            "legacy {old} pixels, new {new}"
         );
     }
 }

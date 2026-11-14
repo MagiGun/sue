@@ -800,6 +800,7 @@ mod tests {
             finish: Finish::default(),
             copies: vec![SAME],
             marks: Vec::new(),
+            engine: None,
         }
     }
 
