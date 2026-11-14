@@ -1565,3 +1565,63 @@ fn brush_density_is_apart_from_opacity() {
         "{once} once, {many} after many passes"
     );
 }
+
+#[test]
+fn a_wet_stroke_keeps_locked_clear_pixels_clear_and_stays_inside_the_lines() {
+    // A finger tip from a red block out over clear pixels: locked, the
+    // clear pixels stay clear and no pixel's alpha changes; unlocked,
+    // the red is dragged out onto them.
+    let mut preset = pen_preset(30.0, 0.6);
+    preset.dynamics.clear();
+    preset.engine = sue_model::brush::EngineKind::Blend("finger-tip".into());
+    let samples = pen(|s| [180.0 + 200.0 * s as f32, 75.0], 0.5, |_| 0.9);
+    let block = || {
+        let mut layer = clear();
+        fill(&mut layer, 100, 250, 50, 100, [200, 30, 30, 255]);
+        layer
+    };
+    let mut locked = block();
+    let mut brush = Brush::new(preset.clone());
+    brush.keep_alpha = true;
+    draw(&mut locked, &brush, &samples, 1);
+    let mut free = block();
+    draw(&mut free, &Brush::new(preset.clone()), &samples, 1);
+    let original = block();
+    for x in 100..400 {
+        assert_eq!(alpha(&locked, x, 75), alpha(&original, x, 75), "x {x}");
+    }
+    assert!(alpha(&free, 300, 75) > 60, "{}", alpha(&free, 300, 75));
+
+    // Inside a ring of lines, a mixing brush lays nothing outside it.
+    let mut lines = clear();
+    ring(&mut lines);
+    let region = Region::enclosing(&lines, [0, 0], [1000, 75], 0.5).expect("a region");
+    let mut layer = clear();
+    stripes(&mut layer, 20, W - 20);
+    let before = layer.clone();
+    let mut wet = pen_preset(30.0, 0.6);
+    wet.dynamics.clear();
+    wet.mix = Some(Mixing {
+        amount: 0.6,
+        load: 0.8,
+        pull: 0.2,
+        blur: 0.0,
+    });
+    let brush = Brush::new(wet).color([1.0, 1.0, 1.0]).resources(Resources {
+        overflow: Some(&region),
+        ..Resources::default()
+    });
+    draw(
+        &mut layer,
+        &brush,
+        &pen(|s| [760.0 + 480.0 * s as f32, 75.0], 0.8, |_| 0.9),
+        1,
+    );
+    let px = |r: &RasterTile2D, x: u32| {
+        let i = ((75 * W + x) * 4) as usize;
+        r.bytes().expect("bytes")[i..i + 4].to_vec()
+    };
+    assert_ne!(px(&layer, 1000), px(&before, 1000), "paint inside");
+    assert_eq!(px(&layer, 780), px(&before, 780), "nothing outside");
+    assert_eq!(px(&layer, 1225), px(&before, 1225), "nothing outside");
+}

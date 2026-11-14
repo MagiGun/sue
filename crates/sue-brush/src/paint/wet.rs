@@ -29,6 +29,7 @@ use sue_core::{PixelFormat, RasterTile2D};
 use sue_model::brush::Mixing;
 
 use super::math::unit;
+use super::overflow::Region;
 use super::plan::Planned;
 use super::stamp::{Stamp, Tips};
 use crate::buffer::{AREA, MergeError, TILE, TileKey};
@@ -281,6 +282,29 @@ impl WetCanvas {
         ]
     }
 
+    /// The straight color layer pixel `(x, y)` will have once the stroke
+    /// is laid: the canvas, held to the anti-overflow `region` and, with
+    /// `keep_alpha` (lock transparent pixels), at the layer's own alpha.
+    /// The live view and the merge both read it, so what shows while
+    /// drawing is what is laid.
+    #[must_use]
+    pub fn laid(
+        &self,
+        backdrop: &dyn Backdrop,
+        x: i32,
+        y: i32,
+        region: Option<&Region>,
+        keep_alpha: bool,
+    ) -> [f32; 4] {
+        let before = backdrop.pixel(x, y);
+        settle(
+            before,
+            self.pixel(backdrop, x, y),
+            region.map(|r| r.at(x, y)),
+            keep_alpha,
+        )
+    }
+
     /// Lays `dabs` one by one, each reading what the ones before left.
     pub fn stamp(
         &mut self,
@@ -402,8 +426,8 @@ impl WetCanvas {
     }
 
     /// Replaces the pixels the stroke changed in `raster` (whose pixel
-    /// `(0, 0)` is layer pixel `origin`) and returns the rectangle of
-    /// each tile it changed, in order.
+    /// `(0, 0)` is layer pixel `origin`) as [`Self::laid`] says, and
+    /// returns the rectangle of each tile it changed, in order.
     ///
     /// # Errors
     /// [`MergeError::Format`] for a raster with no color.
@@ -411,9 +435,14 @@ impl WetCanvas {
         &self,
         raster: &mut RasterTile2D,
         origin: [i32; 2],
+        region: Option<&Region>,
+        keep_alpha: bool,
     ) -> Result<Vec<PixelRect>, MergeError> {
         let (w, h) = (raster.width() as i32, raster.height() as i32);
         let format = raster.format();
+        if !matches!(format, PixelFormat::Rgba8 | PixelFormat::RgbaF32) {
+            return Err(MergeError::Format(format));
+        }
         let mut changed = Vec::new();
         for (key, tile) in &self.tiles {
             let [ox, oy] = key.origin();
@@ -430,12 +459,18 @@ impl WetCanvas {
                     }
                     let p = &tile.pixels[i * 4..i * 4 + 4];
                     let a = p[3].clamp(0.0, 1.0);
-                    let straight = if a > 0.0 {
+                    let wet = if a > 0.0 {
                         [p[0] / a, p[1] / a, p[2] / a, a]
                     } else {
                         [0.0; 4]
                     };
                     let j = ((ry * w + rx) * 4) as usize;
+                    let (lx, ly) = (ox + x, oy + y);
+                    let before = RasterBackdrop { raster, origin }.pixel(lx, ly);
+                    let straight = settle(before, wet, region.map(|r| r.at(lx, ly)), keep_alpha);
+                    if straight == before {
+                        continue;
+                    }
                     match format {
                         PixelFormat::Rgba8 => {
                             let bytes = raster
@@ -453,7 +488,6 @@ impl WetCanvas {
                         }
                         other => return Err(MergeError::Format(other)),
                     }
-                    let (lx, ly) = (ox + x, oy + y);
                     rect = Some(match rect {
                         None => PixelRect {
                             x0: lx,
@@ -474,6 +508,38 @@ impl WetCanvas {
         }
         Ok(changed)
     }
+}
+
+/// A layer pixel `before` (straight) with the wet canvas's `wet`
+/// (straight) laid on it: by `region`'s share of the pixel where
+/// anti-overflow holds the stroke, and at `before`'s alpha with
+/// `keep_alpha`, so a locked clear pixel stays clear and keeps its
+/// color samples.
+fn settle(before: [f32; 4], wet: [f32; 4], region: Option<f32>, keep_alpha: bool) -> [f32; 4] {
+    let share = region.map_or(1.0, unit);
+    let mut out = if share >= 1.0 {
+        wet
+    } else if share <= 0.0 {
+        before
+    } else {
+        // Mixed in premultiplied color, so a clear pixel's color does
+        // not bleed in.
+        let pre = |p: [f32; 4]| [p[0] * p[3], p[1] * p[3], p[2] * p[3], p[3]];
+        let (b, w) = (pre(before), pre(wet));
+        let m: [f32; 4] = std::array::from_fn(|k| b[k] + (w[k] - b[k]) * share);
+        if m[3] > 0.0 {
+            [m[0] / m[3], m[1] / m[3], m[2] / m[3], m[3]]
+        } else {
+            before
+        }
+    };
+    if keep_alpha {
+        if before[3] <= 0.0 || out[3] <= 0.0 {
+            return before;
+        }
+        out[3] = before[3];
+    }
+    out
 }
 
 /// Box blurs premultiplied pixels (`width` wide) by `radius` each way,
@@ -644,7 +710,9 @@ mod tests {
         };
         let mut canvas = WetCanvas::new(blender("blend").expect("a blender"), [0.0; 3]);
         canvas.stamp(&backdrop, &dabs(28.0, 36.0, 4.0), &Tips::round(1.0), None);
-        let changed = canvas.merge(&mut picture, [0, 0]).expect("merged");
+        let changed = canvas
+            .merge(&mut picture, [0, 0], None, false)
+            .expect("merged");
         assert_eq!(changed.len(), 1);
         let r = changed[0];
         assert!(r.x0 >= 23 && r.x1 <= 42, "{r:?}");

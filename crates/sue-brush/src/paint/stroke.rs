@@ -213,8 +213,9 @@ impl<'a> PaintStroke<'a> {
         self.lay
     }
 
-    /// The wet canvas, for a mixing stroke: what the live view shows in
-    /// place of the layer's tiles it touched.
+    /// The wet canvas, for a mixing stroke, as the dabs left it (before
+    /// anti-overflow and lock transparent pixels; the live view reads
+    /// [`Self::wet_pixel`]).
     #[must_use]
     pub fn wet(&self) -> Option<&WetCanvas> {
         match &self.target {
@@ -419,6 +420,24 @@ impl<'a> PaintStroke<'a> {
         }
     }
 
+    /// For a mixing stroke, layer pixel `(x, y)` as the live view shows
+    /// it: what the merge will lay there, anti-overflow and lock
+    /// transparent pixels (`keep_alpha`) included. `None` for a stroke
+    /// that is not wet, which shows [`Self::field`] instead.
+    #[must_use]
+    pub fn wet_pixel(
+        &self,
+        backdrop: &dyn Backdrop,
+        x: i32,
+        y: i32,
+        keep_alpha: bool,
+    ) -> Option<[f32; 4]> {
+        match &self.target {
+            Target::Wet(canvas) => Some(canvas.laid(backdrop, x, y, self.overflow, keep_alpha)),
+            _ => None,
+        }
+    }
+
     /// The pixels the stroke spans so far, or `None` when it is empty.
     #[must_use]
     pub fn bounds(&self) -> Option<PixelRect> {
@@ -462,7 +481,7 @@ impl<'a> PaintStroke<'a> {
         keep_alpha: bool,
     ) -> Result<Vec<PixelRect>, MergeError> {
         if let Target::Wet(canvas) = &self.target {
-            return canvas.merge(raster, origin);
+            return canvas.merge(raster, origin, self.overflow, keep_alpha);
         }
         let Some(rect) = self.bounds() else {
             return Ok(Vec::new());
