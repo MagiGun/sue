@@ -2368,3 +2368,16 @@ tone-shape-line = Line
 tone-shape-cross = Cross
 tone-shape-noise = Noise
 layer-sub-color = Sub Color
+## anim/ (the animation model)
+enable-keyframes-on-this-layer = Enable Keyframes on This Layer
+delete-all-keyframes = Delete All Keyframes
+switch-keyframe-interpolation = Switch Keyframe Interpolation
+renamed-in-timeline-order = Rename in Timeline Order
+renamed-in-layer-order = Rename in Layer Order
+timeline-1 = Timeline 1
+change-settings = Change Settings
+switch-timeline = Switch Timeline
+create-timeline-label = Create Timeline Label
+delete-timeline-label = Delete Timeline Label
+change-playback-settings = Playback Settings
+set-output-frame = Output Frame

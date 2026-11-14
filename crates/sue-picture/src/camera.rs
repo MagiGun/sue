@@ -7,10 +7,18 @@
 //!
 //! At a frame the compositor shows the folder's layers as the camera sees
 //! them: what is in the camera's view fills the canvas.
+//!
+//! As in Clip Studio Paint, the camera is a track on the timeline (kind
+//! [`crate::anim::setup::CAMERA`]); a new camera folder is empty, each
+//! value is keyed on its own with its own ease, the camera turns about a
+//! centre of rotation ([`PIVOT_X`], [`PIVOT_Y`]; its own middle when
+//! none) and keys the folder's opacity ([`OPACITY`]).
 
-use sue_core::txn::{Rename, SetExtension, SetProperty};
-use sue_core::{Arena, EntityId, Time, Value};
-use sue_model::{Animation, Interpolation, Key};
+use sue_core::txn::{SetExtension, SpawnEntity};
+use sue_core::{Arena, CHILD, Entity, EntityId, Relation, Time, Value};
+use sue_model::{Animation, Interpolation, Key, Sequence};
+
+use crate::anim::motion::{Ease, smoothed};
 
 use crate::doc::{self, Edit};
 
@@ -24,6 +32,15 @@ pub const Y: &str = "camera.y";
 pub const SCALE: &str = "camera.scale";
 /// How far the camera turns, in radians.
 pub const ANGLE: &str = "camera.angle";
+/// The centre the camera turns about, across (picture pixels).
+pub const PIVOT_X: &str = "camera.pivot.x";
+/// The centre the camera turns about, down (picture pixels).
+pub const PIVOT_Y: &str = "camera.pivot.y";
+/// The opacity of the camera folder's layers, 0 to 1.
+pub const OPACITY: &str = "camera.opacity";
+/// Every value a camera key can hold, in the order Clip Studio Paint's
+/// Tool Property lists them.
+pub const VALUES: [&str; 7] = [X, Y, SCALE, ANGLE, PIVOT_X, PIVOT_Y, OPACITY];
 
 /// Where a camera stands.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -34,6 +51,13 @@ pub struct Camera {
     pub scale: f32,
     /// How far it turns (radians).
     pub angle: f32,
+}
+
+/// The value `key` of `entity`'s camera at `time`: its keyframes there,
+/// else its own property.
+fn sampled(entity: &Entity, time: Option<Time>, key: &str) -> Option<f64> {
+    time.and_then(|time| entity.ext::<Animation>()?.channel(key)?.sample(time))
+        .or_else(|| entity.property(key).and_then(Value::as_f64))
 }
 
 /// `true` if `folder` is a camera folder.
@@ -71,11 +95,33 @@ impl Camera {
                 .map_or(or, |value| value as f32)
         };
         let still = Self::still(size);
-        Self {
+        let mut camera = Self {
             center: [value(X, still.center[0]), value(Y, still.center[1])],
             scale: value(SCALE, 1.0).max(0.01),
             angle: value(ANGLE, 0.0),
+        };
+        // Turned about a centre of its own: the middle of the view swings
+        // round it.
+        let pivot = [PIVOT_X, PIVOT_Y].map(|key| sampled(entity, time, key));
+        if let [Some(px), Some(py)] = pivot {
+            let (px, py) = (px as f32, py as f32);
+            let (sin, cos) = camera.angle.sin_cos();
+            let (dx, dy) = (camera.center[0] - px, camera.center[1] - py);
+            camera.center = [px + cos * dx - sin * dy, py + sin * dx + cos * dy];
         }
+        camera
+    }
+
+    /// The opacity the camera of `folder` gives its layers at `time`, when
+    /// a key sets one.
+    #[must_use]
+    pub fn opacity(arena: &Arena, folder: EntityId, time: Time) -> Option<f32> {
+        let entity = arena.get_by_id(folder).ok()?;
+        entity
+            .ext::<Animation>()?
+            .channel(OPACITY)?
+            .sample(time)
+            .map(|value| value.clamp(0.0, 1.0) as f32)
     }
 
     /// The camera showing the canvas as it is.
@@ -147,20 +193,103 @@ pub fn views(
         .collect()
 }
 
-/// The edit that makes a camera folder right above `layer` (with `layer`
-/// in it), named `Camera` and a number, and its id.
+/// The opacities the camera folders of `picture` key at `time`.
+#[must_use]
+pub fn opacities(arena: &Arena, picture: EntityId, time: Time) -> Vec<(EntityId, f32)> {
+    doc::layers(arena, picture)
+        .into_iter()
+        .filter(|info| is_camera(arena, info.id))
+        .filter_map(|info| Some((info.id, Camera::opacity(arena, info.id, time)?)))
+        .collect()
+}
+
+/// The edit that makes an empty camera folder named `Camera` and a number
+/// where a new layer goes with `layer` picked (as Clip Studio Paint's 2D
+/// camera folder), and its id. A cel picked stays in its animation
+/// folder: the camera folder goes beside that folder. On a timeline the
+/// camera gets its track.
 #[must_use]
 pub fn new_camera(arena: &Arena, picture: EntityId, layer: Option<EntityId>) -> (Edit, EntityId) {
     let count = doc::layers(arena, picture)
         .iter()
         .filter(|info| is_camera(arena, info.id))
         .count();
-    let (edit, id) = doc::new_folder(arena, picture, layer, layer.is_some());
-    let mut edit = Edit::new(tr!("new-camera-folder")).then(edit);
-    edit = edit
-        .then(SetProperty::new(id, CAMERA, true))
-        .then(Rename::new(id, tr!("camera", value = count + 1)));
+    let name = tr!("camera", value = count + 1);
+    let folder = Entity::empty(name.clone(), sue_model::class::FOLDER)
+        .with_property(doc::OPEN, true)
+        .with_property(CAMERA, true);
+    let id = folder.id();
+    // Right above the picked layer in its folder; a cel's animation
+    // folder stands in for the cel, and a folder picked is not entered.
+    let beside = crate::anim::outside_animation(arena, layer);
+    let order = doc::key_above(arena, picture, beside);
+    let mut spawn =
+        SpawnEntity::new(folder).with_relation(Relation::new(picture, CHILD, id).ordered(order));
+    if let Some(outer) = beside.and_then(|beside| doc::folder_of(arena, beside)) {
+        spawn = spawn.with_relation(Relation::new(outer, doc::MEMBER, id));
+    }
+    let mut edit = Edit::new(tr!("new-camera-folder")).then(spawn);
+    if let Some(sequence) = crate::anim::timeline(arena, picture) {
+        let mut out: Sequence = sequence.clone();
+        let length = crate::anim::length(arena, picture);
+        out.tracks.push(crate::anim::setup::camera_track(
+            &name, id, out.rate, length,
+        ));
+        edit = edit.then(SetExtension::set(picture, out));
+    }
     (edit, id)
+}
+
+/// The edit that keys one value (`channel`, one of [`VALUES`]) of
+/// `folder`'s camera at `time` with `ease` (a key button per value).
+#[must_use]
+pub fn key_value(
+    arena: &Arena,
+    folder: EntityId,
+    channel: &str,
+    time: Time,
+    value: f64,
+    ease: Ease,
+) -> Edit {
+    let mut animation = arena
+        .get_by_id(folder)
+        .ok()
+        .and_then(|entity| entity.ext::<Animation>())
+        .cloned()
+        .unwrap_or_default();
+    animation.channel_mut(channel).insert(Key {
+        time,
+        value,
+        interpolation: ease.interpolation(),
+    });
+    let curve = animation.channel(channel).map(smoothed).unwrap_or_default();
+    *animation.channel_mut(channel) = curve;
+    Edit::new(tr!("camera-keyframe")).then(SetExtension::set(folder, animation))
+}
+
+/// The edit that switches `folder`'s camera keys at `time` to `ease`;
+/// `None` when none change.
+#[must_use]
+pub fn set_ease(arena: &Arena, folder: EntityId, time: Time, ease: Ease) -> Option<Edit> {
+    let mut animation = arena.get_by_id(folder).ok()?.ext::<Animation>()?.clone();
+    let mut any = false;
+    for channel in VALUES {
+        let Some(curve) = animation.channel(channel) else {
+            continue;
+        };
+        let mut curve = curve.clone();
+        if let Some(mut key) = curve.keys().iter().find(|key| key.time == time).copied()
+            && Ease::of(key.interpolation) != ease
+        {
+            key.interpolation = ease.interpolation();
+            curve.insert(key);
+            *animation.channel_mut(channel) = smoothed(&curve);
+            any = true;
+        }
+    }
+    any.then(|| {
+        Edit::new(tr!("switch-keyframe-interpolation")).then(SetExtension::set(folder, animation))
+    })
 }
 
 /// The times `folder`'s camera has keyframes at.
@@ -212,8 +341,10 @@ pub fn key(arena: &Arena, folder: EntityId, time: Time, camera: Camera) -> Edit 
 pub fn delete_key(arena: &Arena, folder: EntityId, time: Time) -> Option<Edit> {
     let mut animation = arena.get_by_id(folder).ok()?.ext::<Animation>()?.clone();
     let mut any = false;
-    for channel in [X, Y, SCALE, ANGLE] {
-        any |= animation.channel_mut(channel).remove(time).is_some();
+    for channel in VALUES {
+        if animation.channel(channel).is_some() {
+            any |= animation.channel_mut(channel).remove(time).is_some();
+        }
     }
     any.then(|| Edit::new(tr!("delete-camera-keyframe")).then(SetExtension::set(folder, animation)))
 }
@@ -273,9 +404,12 @@ mod tests {
         assert!(is_camera(&arena, folder));
         assert_eq!(
             doc::folder_of(&arena, layer.unwrap()),
-            Some(folder),
-            "the layer goes in"
+            None,
+            "it is made empty"
         );
+        assert!(doc::members(&arena, picture, folder).is_empty());
+        let mut into = doc::set_folder(&arena, layer.unwrap(), Some(folder)).unwrap();
+        sue_core::ReversibleTransaction::apply(&mut into, &mut arena).unwrap();
         let rate = sue_core::Rate::new(10, 1);
         let mut first = key(&arena, folder, time_of(0, rate), Camera::still(size));
         sue_core::ReversibleTransaction::apply(&mut first, &mut arena).unwrap();
@@ -326,6 +460,8 @@ mod tests {
         }
         let (mut edit, folder) = new_camera(&arena, picture, Some(layer));
         sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        let mut into = doc::set_folder(&arena, layer, Some(folder)).unwrap();
+        sue_core::ReversibleTransaction::apply(&mut into, &mut arena).unwrap();
         let shown = |camera: Camera| {
             let view = crate::composite::FrameView {
                 cameras: vec![(folder, camera.map(size))],
@@ -353,5 +489,113 @@ mod tests {
             "the dot, four times bigger"
         );
         assert!(gray(&close, 50, 50) > 200, "where it was is paper now");
+    }
+
+    #[test]
+    fn a_new_camera_is_an_empty_track_and_a_cel_stays_in_its_folder() {
+        let mut arena = Arena::new();
+        let (mut edit, picture) = create(&NewPicture::default()).unwrap();
+        sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        let mut timeline = crate::anim::new_timeline(&arena, picture, 12, 12);
+        sue_core::ReversibleTransaction::apply(&mut timeline, &mut arena).unwrap();
+        let sequence = crate::anim::timeline(&arena, picture).unwrap();
+        let animation = crate::anim::track_folder(&sequence.tracks[0]).unwrap();
+        let (mut made, cel) = crate::anim::new_cel(&arena, picture, animation, 0).unwrap();
+        sue_core::ReversibleTransaction::apply(&mut made, &mut arena).unwrap();
+        let before = format!("{:?}", crate::anim::timeline(&arena, picture));
+        // The cel is current: the camera goes beside its folder (H-6).
+        let (mut edit, camera) = new_camera(&arena, picture, Some(cel));
+        sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        assert_eq!(crate::anim::cel_folder(&arena, cel), Some(animation));
+        assert_eq!(doc::folder_of(&arena, camera), None);
+        assert!(
+            doc::members(&arena, picture, camera).is_empty(),
+            "empty when made"
+        );
+        assert_eq!(arena.get_by_id(camera).unwrap().name(), "Camera 1");
+        let sequence = crate::anim::timeline(&arena, picture).unwrap();
+        let track = crate::anim::setup::track_of_layer(sequence, camera).expect("a camera track");
+        assert_eq!(sequence.tracks[track].kind, crate::anim::setup::CAMERA);
+        let stack: Vec<EntityId> = doc::layers(&arena, picture)
+            .into_iter()
+            .map(|info| info.id)
+            .collect();
+        let at = |id: EntityId| stack.iter().position(|known| *known == id).unwrap();
+        assert_eq!(
+            at(camera),
+            at(animation) + 1,
+            "right above the animation folder"
+        );
+        // Deleting the folder takes its track.
+        let mut gone = crate::anim::delete_folder(&arena, picture, camera);
+        sue_core::ReversibleTransaction::apply(&mut gone, &mut arena).unwrap();
+        let sequence = crate::anim::timeline(&arena, picture).unwrap();
+        assert!(crate::anim::setup::track_of_layer(sequence, camera).is_none());
+        sue_core::ReversibleTransaction::revert(&mut gone, &mut arena).unwrap();
+        sue_core::ReversibleTransaction::revert(&mut edit, &mut arena).unwrap();
+        assert!(arena.get_by_id(camera).is_err());
+        assert_eq!(
+            format!("{:?}", crate::anim::timeline(&arena, picture)),
+            before
+        );
+    }
+
+    #[test]
+    fn camera_values_key_one_by_one_turn_about_a_centre_and_fade() {
+        let size = [100, 100];
+        let mut arena = Arena::new();
+        let (mut edit, picture) = create(&NewPicture {
+            width: 100,
+            height: 100,
+            ..NewPicture::default()
+        })
+        .unwrap();
+        sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        let (mut edit, folder) = new_camera(&arena, picture, None);
+        sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        let rate = sue_core::Rate::new(10, 1);
+        let at = |frame: u32| time_of(frame, rate);
+        // Only the angle and the opacity are keyed.
+        let quarter = f64::from(std::f32::consts::FRAC_PI_2);
+        for (channel, frame, value, ease) in [
+            (ANGLE, 0, 0.0, Ease::Linear),
+            (ANGLE, 10, quarter, Ease::Linear),
+            (OPACITY, 0, 1.0, Ease::Hold),
+            (OPACITY, 10, 0.0, Ease::Hold),
+        ] {
+            let mut edit = key_value(&arena, folder, channel, at(frame), value, ease);
+            sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        }
+        let animation = arena.get_by_id(folder).unwrap().ext::<Animation>().unwrap();
+        assert!(animation.channel(X).is_none(), "the position was not keyed");
+        assert_eq!(Camera::opacity(&arena, folder, at(5)), Some(1.0), "held");
+        assert_eq!(Camera::opacity(&arena, folder, at(10)), Some(0.0));
+        assert_eq!(opacities(&arena, picture, at(10)), vec![(folder, 0.0)]);
+        // Turned about the canvas corner a quarter: the view's middle
+        // swings from (50, 50) to (50, -50)... about (0, 0) it goes to
+        // (-50, 50).
+        let mut pivot = Edit::new("Pivot")
+            .then(sue_core::txn::SetProperty::new(folder, PIVOT_X, 0.0))
+            .then(sue_core::txn::SetProperty::new(folder, PIVOT_Y, 0.0));
+        sue_core::ReversibleTransaction::apply(&mut pivot, &mut arena).unwrap();
+        let turned = Camera::of(&arena, folder, Some(at(10)), size);
+        assert!(near(turned.center, [-50.0, 50.0]), "{turned:?}");
+        sue_core::ReversibleTransaction::revert(&mut pivot, &mut arena).unwrap();
+        let middle = Camera::of(&arena, folder, Some(at(10)), size);
+        assert!(
+            near(middle.center, [50.0, 50.0]),
+            "its own middle: {middle:?}"
+        );
+        // Switching the angle keys to Smooth, and back by undo.
+        let mut smooth = set_ease(&arena, folder, at(0), Ease::Smooth).unwrap();
+        sue_core::ReversibleTransaction::apply(&mut smooth, &mut arena).unwrap();
+        let early = Camera::of(&arena, folder, Some(at(2)), size).angle;
+        assert!(
+            early < 0.2 * std::f32::consts::FRAC_PI_2,
+            "eases out: {early}"
+        );
+        sue_core::ReversibleTransaction::revert(&mut smooth, &mut arena).unwrap();
+        let linear = Camera::of(&arena, folder, Some(at(2)), size).angle;
+        assert!((linear - 0.2 * std::f32::consts::FRAC_PI_2).abs() < 1e-4);
     }
 }
