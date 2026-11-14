@@ -1414,8 +1414,9 @@ impl BrushPreset {
     ///   is a [`Spacing::Ratio`].
     /// - `size_by.*` and `opacity_by.*` become bindings of size and
     ///   opacity to pressure, speed (`velocity`), tilt and random, each
-    ///   multiplied in from its minimum to 1. One that is off is kept,
-    ///   off, when it holds a minimum or a curve.
+    ///   multiplied in from its minimum (held within 0 to 1, as the old
+    ///   engine held it) to 1. One that is off is kept, off, when it
+    ///   holds a minimum or a curve.
     /// - `size_jitter` is a binding of size to random from 1 down to
     ///   1 less the jitter; `turn_jitter` one of angle to random, added,
     ///   half a turn each way at 1; `follow` and `follow_tilt` bindings
@@ -1548,10 +1549,13 @@ impl BrushPreset {
                 // said otherwise; everything else was off.
                 let default = name == "size_by" && legacy == "pressure";
                 let on = flag(&format!("{name}.{legacy}"), default);
+                // The old engine held a minimum within 0 to 1 as it
+                // used it.
                 let min = number(
                     &format!("{name}.{legacy}_min"),
                     if default { 0.15 } else { 0.0 },
-                );
+                )
+                .clamp(0.0, 1.0);
                 // Chance had no curve.
                 let curve = if legacy == "random" {
                     Response::LINEAR
@@ -2078,6 +2082,18 @@ mod tests {
                     _ => binding.apply(value, chance),
                 });
         assert!((old - new).abs() < 1e-6, "{old} {new}");
+
+        // A minimum outside 0 to 1 counts as the old engine counted it.
+        let preset = BrushPreset::from_legacy_text(
+            "size_by.pressure_min=3;opacity_by.velocity=1;opacity_by.velocity_min=-2",
+        );
+        assert_eq!(
+            preset.dynamics,
+            vec![
+                Binding::new(param::SIZE, input::PRESSURE).range(1.0, 1.0),
+                Binding::new(param::OPACITY, input::SPEED),
+            ]
+        );
     }
 
     #[test]
