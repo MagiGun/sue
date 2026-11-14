@@ -1472,6 +1472,12 @@ impl Toolbox {
         self.current
     }
 
+    /// The current entry: the tool palette button that is lit.
+    #[must_use]
+    pub fn current_entry(&self) -> &ToolSlot {
+        &self.slots[self.current]
+    }
+
     /// Makes entry `slot` current.
     pub fn pick_slot(&mut self, slot: usize) {
         if slot < self.slots.len() {
@@ -1487,12 +1493,15 @@ impl Toolbox {
             .position(|slot| slot.subs.iter().any(&pick))
     }
 
-    /// The entry that is `tool` (or, if none is, the first holding one of
-    /// its sub tools).
+    /// The entry that is `tool`: the first of that tool with a key (a sub
+    /// tool made into a tool has none, so the tool's own button comes
+    /// before it), else the first of that tool, else the first holding one
+    /// of its sub tools.
     fn home(&self, tool: Tool) -> Option<usize> {
         self.slots
             .iter()
-            .position(|slot| slot.kind == tool)
+            .position(|slot| slot.kind == tool && slot.key.is_some())
+            .or_else(|| self.slots.iter().position(|slot| slot.kind == tool))
             .or_else(|| self.slots.iter().position(|slot| slot.holds(tool)))
     }
 
@@ -1565,11 +1574,13 @@ impl Toolbox {
         slot.picked = slot.put(group, at, copy);
     }
 
-    /// Adds `sub` at the end of the last group of its tool's entry, picks
-    /// it and makes that entry current (the Item Bank's Add).
+    /// Adds `sub` at the end of the last group of its tool's entry (the
+    /// current entry when it is one of that tool), picks it and makes that
+    /// entry current (the Item Bank's Add).
     pub fn add_sub(&mut self, sub: SubTool) {
         let tool = sub.tool;
-        let Some(slot) = self.home(tool) else {
+        let current = (self.slots[self.current].kind == tool).then_some(self.current);
+        let Some(slot) = current.or_else(|| self.home(tool)) else {
             self.slots.push(ToolSlot::new(
                 tool.english(),
                 tool,
@@ -2542,5 +2553,30 @@ mod tests {
         assert_eq!(toolbox.tool(), Tool::Eraser);
         assert!(end.follow(false, false, &mut toolbox));
         assert_eq!(toolbox.current_slot(), liquify, "not the Blend tool");
+    }
+
+    #[test]
+    fn an_added_sub_tool_joins_the_current_entry_of_its_tool() {
+        let mut toolbox = Toolbox::default();
+        let pen = slot_named(&toolbox, "Pen");
+        let own = toolbox.promote_sub(pen, 0, 0).unwrap();
+        toolbox.pick_slot(own);
+        let tip = toolbox.current().tip;
+        toolbox.add_sub(SubTool::new(Tool::Pen, "Mine", 0, tip));
+        assert_eq!(toolbox.current_slot(), own, "the tool out, a pen too");
+        assert_eq!(toolbox.current().name, "Mine");
+        assert_eq!(toolbox.current_entry().subs().len(), 2);
+        // Out of another tool's entry it goes to its tool's home entry.
+        toolbox.pick(Tool::Fill);
+        toolbox.add_sub(SubTool::new(Tool::Pen, "Also mine", 0, tip));
+        let home = slot_named(&toolbox, "Pen");
+        assert_eq!(toolbox.current_slot(), home);
+        assert_eq!(toolbox.current().name, "Also mine");
+        assert_ne!(home, own);
+        // Picking the Pen picks the Pen tool's own button, not the pen
+        // made into a tool before it.
+        toolbox.pick(Tool::Fill);
+        toolbox.pick(Tool::Pen);
+        assert_eq!(toolbox.current_slot(), home);
     }
 }
