@@ -44,7 +44,7 @@ fn paint_pattern(driver: &mut PaintDriver, layer: EntityId) {
         .expect("a raster layer");
     let width = raster.width() as usize;
     let bytes = raster.bytes_mut().expect("8-bit pixels");
-    for (index, pixel) in bytes.chunks_exact_mut(4).enumerate() {
+    for (index, pixel) in bytes.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         let (x, y) = (index % width, index / width);
         let hash = (x as u32)
             .wrapping_mul(0x9E37_79B9)
@@ -229,7 +229,9 @@ fn grayscale_turns_every_picked_layer_gray_in_one_step() {
         sue_paint::doc::raster(&driver.runtime.engine.world.arena, layer)
             .and_then(|raster| raster.bytes())
             .expect("pixels")
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|pixel| pixel[3])
             .collect()
     };
@@ -243,11 +245,18 @@ fn grayscale_turns_every_picked_layer_gray_in_one_step() {
         let bytes = raster.bytes().unwrap();
         assert!(
             bytes
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .all(|pixel| pixel[0] == pixel[1] && pixel[1] == pixel[2]),
             "every pixel is gray"
         );
-        let kept: Vec<u8> = bytes.chunks_exact(4).map(|pixel| pixel[3]).collect();
+        let kept: Vec<u8> = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| pixel[3])
+            .collect();
         assert_eq!(&kept, alphas, "alpha is kept");
     }
     // Pure blue goes dark, not white: the gray has the color's
