@@ -66,7 +66,11 @@ pub use sniff::{
     sniff_stream,
 };
 pub use tile_cache::{TileCache, TileCacheStats, TileKey};
-pub use video::{MAX_FRAMES, MjpegAvi, decode_frames};
+pub use video::{
+    MAX_FRAMES, MjpegAvi, MovieError, MovieFormat, MovieQuality, MovieSettings, MovieSink,
+    MovieSound, Nv12, PADDED_NOTE, TICKS_PER_SECOND, decode_frames, rgba_to_nv12,
+    rgba_to_nv12_into,
+};
 
 /// One codec compiled into this build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
