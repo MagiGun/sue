@@ -852,6 +852,25 @@ Two hosts implement the trait:
   monitor's refresh rate. The application builds every frame into egui's root
   `Ui` through `DesktopApp::ui`.
 
+**More than one window.** Besides the main window an application lists
+the windows it wants (`DesktopApp::windows`, each a `WindowSpec`: a key,
+a title, a size and where on the desktop it opens). On a desktop each
+becomes a system window of its own with Sue's frame, which can go to
+another screen (`sue-platform/src/windows.rs`). All windows share one egui
+context, so fonts, the theme and textures are shared; each window is an
+egui viewport whose frame runs as a pass of its own (`DesktopApp::window_ui`)
+with its own input, scale factor and surface. A window draws for its own
+input, for its own motion, and when what it shows changed elsewhere
+(`DesktopApp::revision`), never because another window drew; a dialog
+belongs to the window that showed it. Closing one
+(`DesktopApp::window_close_requested`) leaves the others. Where the system
+has one window (`WindowSupport::One`: phones, tablets, the browser) the
+shell draws the same content in a frame floating over the page. Applets
+reach this through `ShellRequest::OpenView` and `SueApplet::view_ui`.
+`HeadlessWindows` drives several windows without a screen for tests, and
+`HeadlessHost` keeps each surface's events apart (`inject_into`,
+`poll_events_of`).
+
 **Pen tablets.** On Windows, X11 and in the browser a pen moves the
 pointer, so its motion, tip and barrel buttons reach Sue as mouse events;
 what else it measures comes per system into `stylus`. On Windows a WinTab
