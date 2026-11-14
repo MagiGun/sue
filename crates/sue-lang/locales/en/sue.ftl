@@ -82,5 +82,5 @@ update-try-again = Try Again
 update-android-cancelled = The update was not installed. Tap Install to try again; if Android asks, let Sue install apps.
 update-android-conflict = This copy of Sue was signed with an older key, so Android will not update it in place. Uninstall Sue once and install the new version; every update after that installs over it.
 # Saving and keeping work on a background job (the transfers list).
-keeping-unsaved-work = Keeping the unsaved work: { $title }
+unsaved-work-transfer = Unsaved work: { $title }
 the-save-stopped = the save stopped before it was done

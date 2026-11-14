@@ -772,7 +772,7 @@ impl Runtime {
         let running = Running::spawn(
             &mut self.transfers,
             TransferKind::Export,
-            &tr!("keeping-unsaved-work", title = autosave.title()),
+            &tr!("unsaved-work-transfer", title = autosave.title()),
             None,
             revision,
             move |job| {
