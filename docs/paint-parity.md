@@ -29,7 +29,7 @@ rows are at the end.
 
 | Area | done | partial | missing | percent |
 | --- | --- | --- | --- | --- |
-| File: new, open and save | 11 | 1 | 5 | 68 |
+| File: new, open and save | 11 | 1 | 3 | 77 |
 | File: export | 15 | 1 | 2 | 86 |
 | File: import, batch and scanning | 6 | 4 | 5 | 53 |
 | Edit: undo, clipboard and fills | 8 | 5 | 0 | 81 |
@@ -54,7 +54,7 @@ rows are at the end.
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 10 | 2 | 2 | 79 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 266 | 60 | 28 | 84 |
+| **All of Sue Paint** | 266 | 60 | 26 | 84 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -121,8 +121,6 @@ The order of work is the plan at the end.
 | Revert | File > Revert | done | Reloads the last saved file, and says so when nothing was saved yet |
 | Manage fonts | File > Manage fonts | missing | Text reads the installed fonts from `sue_wm::fonts`; no manager yet |
 | Connect to smartphone | File > Connect to smartphone | missing | Companion Mode, a phone as a second screen |
-| Files in the CLIP STUDIO cloud | File > Manage files in Clip Studio | missing | Sue's projects and package manager serve the same end |
-| Tab-Mate and TABMATE hardware | File > Tab-Mate Controller | missing | Peripheral devices |
 | Quit | File > Quit | done | Back to the Hub first |
 
 ## File: export
@@ -594,8 +592,9 @@ should build them from this list:
 - Downloading a brush or a picture from a link. Brushes and pictures
   that are already on the device are imported instead (Tool Group
   palette, Manage Materials).
-- Anything that needs a Clip Studio account, and settings pages for
-  Clip Studio's own hardware.
+- Anything that needs a Clip Studio account, its cloud files among
+  them, and anything for Clip Studio's own hardware: no menu item, no
+  settings page.
 
 ## The plan
 
