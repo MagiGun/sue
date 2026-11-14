@@ -10,11 +10,6 @@ codec-built-in = integriert
 
 ## Export operations (picture_ops.rs, audio.rs)
 
-filter-lanczos = Lanczos (am schärfsten)
-filter-bicubic = Bikubisch
-filter-bilinear = Bilinear (weich)
-filter-nearest = Nächster Nachbar (Pixelgrafik)
 the-picture-has-no-pixels = das Bild enthält keine Pixel
 float-pictures-are-not-converted-yet = Gleitkommabilder werden noch nicht konvertiert
 jpeg-xl-writing-not-build = JPEG-XL-Schreiben ist in diesem Build nicht enthalten
-trimming-left-no-sound = nach dem Zuschneiden ist kein Audio übrig

@@ -785,7 +785,7 @@ impl SuePaint {
     }
 }
 
-/// The JPEG quality Settings has for conversions.
+/// The JPEG quality Settings has for exports.
 pub(super) fn jpeg_quality(cx: &AppletContext<'_>) -> u8 {
     cx.rice()
         .get_i64("io.jpeg_quality")
@@ -793,7 +793,7 @@ pub(super) fn jpeg_quality(cx: &AppletContext<'_>) -> u8 {
         .unwrap_or(90)
 }
 
-/// The JPEG XL effort Settings has for conversions.
+/// The JPEG XL effort Settings has for exports.
 pub(super) fn jxl_effort(cx: &AppletContext<'_>) -> u8 {
     cx.rice()
         .get_i64("io.jxl_effort")

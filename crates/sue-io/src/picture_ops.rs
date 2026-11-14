@@ -56,18 +56,6 @@ impl Filter {
     /// Every filter.
     pub const ALL: [Self; 4] = [Self::Lanczos, Self::Bicubic, Self::Bilinear, Self::Nearest];
 
-    /// Its name in English; `sue_lang::translate("io", ...)` gives it in
-    /// the language in use.
-    #[must_use]
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Lanczos => "Lanczos (sharpest)",
-            Self::Bicubic => "Bicubic",
-            Self::Bilinear => "Bilinear (soft)",
-            Self::Nearest => "Nearest (pixel art)",
-        }
-    }
-
     fn support(self) -> f32 {
         match self {
             Self::Nearest => 0.5,
@@ -629,9 +617,6 @@ mod tests {
 
     #[test]
     fn every_text_here_is_in_the_language_database() {
-        for filter in Filter::ALL {
-            assert!(sue_lang::has_english("io", filter.name()), "{filter:?}");
-        }
         for text in [NO_PIXELS, NO_FLOAT, NO_JXL] {
             assert!(sue_lang::has_english("io", text), "{text}");
         }
