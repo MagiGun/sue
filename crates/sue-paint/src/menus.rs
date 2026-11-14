@@ -149,7 +149,7 @@ pub fn menus() -> Vec<Menu> {
                 item("file.start_page"),
                 item("file.new"),
                 item("file.new_clipboard"),
-                item("file.open").key("Ctrl+O"),
+                named(&tr!("open-ellipsis"), "file.open").key("Ctrl+O"),
                 sub(&tr!("open-recent"), vec![item("file.recent.clear")]),
                 item("file.close"),
                 SEP,

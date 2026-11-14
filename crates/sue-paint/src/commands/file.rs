@@ -371,7 +371,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         .keys("Ctrl+N")
         .with(Flags::PALETTE),
     c("file.new_clipboard", "create-new-from-clipboard"),
-    c("file.open", "open-ellipsis").with(Flags::PALETTE),
+    c("file.open", "open-picture-ellipsis").with(Flags::PALETTE),
     c("file.recent.clear", "clear-recent-files"),
     c("file.close", "close")
         .keys("Ctrl+W")

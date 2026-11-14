@@ -279,6 +279,12 @@ fn the_palette_offers_what_it_offered() {
         (new.label.as_str(), new.hint.as_str()),
         ("New...", "Ctrl+N")
     );
+    // Beside the shell's Open File, the studio's Open says what it opens;
+    // the File menu keeps the short "Open...".
+    assert_eq!(palette[2].label, "Open Picture...");
+    assert_eq!(palette[3].label, "Export as PNG...");
+    let menus = crate::menus::menus();
+    assert_eq!(crate::menus::label_of(&menus, "file.open"), Some("Open..."));
 }
 
 #[test]
