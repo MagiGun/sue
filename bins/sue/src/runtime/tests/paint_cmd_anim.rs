@@ -245,3 +245,94 @@ fn cels_are_renamed_in_timeline_and_layer_order_and_select_next_cel_takes_a_key(
     assert_eq!(frames, [0, 2, 4], "the key on frame 2 went");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn light_table_and_camera_commands_undo_and_redo() {
+    let (mut runtime, root) = runtime("paint-cmd-anim-light");
+    let ctx = egui::Context::default();
+    let start = Instant::now();
+    let mut now = start;
+    let paint = AppletId::new(sue_paint::ID).unwrap();
+    runtime.request(ShellRequest::Open(paint.clone()), &mut NoTextures, now);
+    frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+    let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+        frame_with(runtime, &ctx, now, events);
+        now += Duration::from_millis(16);
+    };
+    let plain = egui::Modifiers::NONE;
+    step(
+        &mut runtime,
+        vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+    );
+    step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
+    step(&mut runtime, Vec::new());
+    let picture = runtime
+        .applets
+        .get(&paint)
+        .and_then(|applet| applet.focus())
+        .expect("a canvas");
+    let command = |runtime: &mut Runtime, name: &str| {
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: paint.clone(),
+                command: name.to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+    };
+    // Runs `name`, which must make exactly one undo step; undo gives
+    // back the arena as it was, redo as the command left it.
+    let one_step = |runtime: &mut Runtime, name: &str| {
+        let before = arena_bytes(runtime);
+        let depth = runtime.engine.history.depth();
+        command(runtime, name);
+        assert_eq!(runtime.engine.history.depth(), depth + 1, "{name}");
+        let after = arena_bytes(runtime);
+        assert!(after != before, "{name} changed nothing");
+        runtime
+            .engine
+            .history
+            .undo(&mut runtime.engine.world)
+            .expect("undo");
+        assert!(arena_bytes(runtime) == before, "{name}: undo");
+        runtime
+            .engine
+            .history
+            .redo(&mut runtime.engine.world)
+            .expect("redo");
+        assert!(arena_bytes(runtime) == after, "{name}: redo");
+    };
+
+    // A cel on frame 1, and two layers to trace from.
+    command(&mut runtime, "anim.timeline.new");
+    command(&mut runtime, "anim.cel.new");
+    command(&mut runtime, "layer.new");
+    one_step(&mut runtime, "anim.light_table.register");
+    command(&mut runtime, "layer.new");
+    one_step(&mut runtime, "anim.light_table.register");
+    let cel = {
+        let arena = &runtime.engine.world.arena;
+        let sequence = sue_paint::anim::timeline(arena, picture).expect("a timeline");
+        sue_paint::anim::cel_at(&sequence.tracks[0], sequence.rate, 0).expect("a cel")
+    };
+    let table = |runtime: &Runtime| sue_paint::anim::light_table(&runtime.engine.world.arena, cel);
+    let registered = table(&runtime);
+    assert_eq!(registered.len(), 2);
+    one_step(&mut runtime, "anim.light_table.reverse");
+    let mut reversed = registered.clone();
+    reversed.reverse();
+    assert_eq!(table(&runtime), reversed, "the table turned round");
+    one_step(&mut runtime, "anim.light_table.reverse");
+    assert_eq!(table(&runtime), registered, "and back");
+    one_step(&mut runtime, "anim.light_table.deregister");
+    command(&mut runtime, "anim.light_table.register");
+    one_step(&mut runtime, "anim.light_table.clear");
+    one_step(&mut runtime, "anim.light_table.register_general");
+
+    // The 2D camera: a key on frame 1, then taken away.
+    command(&mut runtime, "anim.layer.camera");
+    one_step(&mut runtime, "anim.camera.key");
+    one_step(&mut runtime, "anim.camera.unkey");
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -167,6 +167,8 @@ follow [Semantic Versioning](https://semver.org/).
 - Undoing Assign Animation Cel, Add Keyframe or Delete Keyframe in Sue
   Paint names the step after the menu item, in your language, instead
   of "Specify Cel" or "Delete Key".
+- Reverse Layers Vertically on Sue Paint's light table turns the
+  table's layers round; it used to leave them as they were.
 
 ### Removed
 
