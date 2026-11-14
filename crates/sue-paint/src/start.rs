@@ -1540,6 +1540,7 @@ fn link_group(ui: &mut Ui, rows: &[(Row, &str)], cx: &mut AppletContext<'_>, the
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sue_core::ReversibleTransaction;
 
     fn temp(tag: &str) -> PathBuf {
         let dir =
@@ -1547,6 +1548,92 @@ mod tests {
         let _ = sue_platform::fs::remove_dir_all(&dir);
         sue_platform::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn the_start_page_lists_only_sue_paints_work() {
+        let root = temp("items");
+        let paint = me();
+        let writer = AppletId::new("sue-writer").unwrap();
+        let cat = root.join("cat.png");
+        let comic = root.join("Comic.sue");
+        let story = root.join("story.sue");
+        let notes = root.join("notes.txt");
+        for file in [&cat, &comic, &story, &notes] {
+            sue_platform::fs::write(file, b"x").unwrap();
+        }
+        let mut work = sue_wm::WorkList::open(root.join("work"));
+        // A picture is Sue Paint's wherever it was opened last.
+        work.remember(&cat, false, None, 100).unwrap();
+        work.remember(&comic, true, Some(paint.clone()), 300)
+            .unwrap();
+        work.remember(&story, true, Some(writer.clone()), 400)
+            .unwrap();
+        work.remember(&notes, false, Some(writer.clone()), 500)
+            .unwrap();
+        work.keep(b"SUE", None, "Sketch", Some(paint.clone()), 200)
+            .unwrap();
+        work.start_over();
+        work.keep(b"SUE", None, "Draft", Some(writer), 250).unwrap();
+        work.start_over();
+
+        let all = items(&work);
+        assert_eq!(work.unsaved().count(), 2);
+        let mut titles: Vec<(String, Type)> = all
+            .iter()
+            .map(|item| (item.title.clone(), item.kind))
+            .collect();
+        titles.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            titles,
+            [
+                ("Comic".to_owned(), Type::Project),
+                ("Sketch".to_owned(), Type::Unsaved),
+                ("cat".to_owned(), Type::Picture),
+            ]
+        );
+        assert!(all.iter().all(|item| item.studio.as_ref() == Some(&paint)));
+        let _ = sue_platform::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_start_page_draws_a_project_without_a_preview_of_its_own() {
+        // A Sue Paint project holds no THMB preview yet, so its card's
+        // picture comes from Sue Paint's thumbnailer.
+        let root = temp("thumb");
+        let mut arena = sue_core::Arena::new();
+        let (mut edit, picture) = crate::doc::create(&crate::doc::NewPicture {
+            name: "Card".to_owned(),
+            width: 40,
+            height: 20,
+            ..crate::doc::NewPicture::default()
+        })
+        .unwrap();
+        edit.apply(&mut arena).unwrap();
+        assert!(arena.get_by_id(picture).is_ok());
+        let mut file = sue_core::SueFile::new();
+        file.set_arena(&arena);
+        let project = root.join("Card.sue");
+        sue_platform::fs::write(&project, file.to_bytes()).unwrap();
+
+        let mut start = StartPage::default();
+        assert!(start.thumbs.get(&project).is_none());
+        let begun = std::time::Instant::now();
+        while start.thumbs.poll() {
+            assert!(begun.elapsed().as_secs() < 20);
+            std::thread::yield_now();
+        }
+        let (_, thumb) = start.thumbs.get(&project).expect("Sue Paint's picture");
+        assert_eq!(thumb.size, [40, 20]);
+        assert_eq!(&thumb.pixels[..4], &[255, 255, 255, 255], "white paper");
+        // Without Sue Paint's thumbnailer the shared browser has none.
+        let mut plain = Thumbs::default();
+        assert!(plain.get(&project).is_none());
+        while plain.poll() {
+            std::thread::yield_now();
+        }
+        assert!(plain.get(&project).is_none());
+        let _ = sue_platform::fs::remove_dir_all(&root);
     }
 
     #[test]
