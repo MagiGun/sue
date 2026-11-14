@@ -2,7 +2,11 @@
 //! bitmap, laid out as chunks around a fresh database.
 
 use super::offscreen::{attribute, encode_bitmap};
-use super::schema::{LAYER_COLUMNS, composite_of, table};
+use super::schema::{
+    ANIMATION_CUT_BANK_COLUMNS, CANVAS_COLUMNS, CANVAS_ITEM_BANK_COLUMNS, LAYER_COLUMNS,
+    LAYER_COMP_MANAGER_COLUMNS, LAYER_THUMBNAIL_COLUMNS, MIPMAP_COLUMNS, MIPMAP_INFO_COLUMNS,
+    OFFSCREEN_COLUMNS, PROJECT_COLUMNS, composite_of, table,
+};
 use crate::psd::{Psd, PsdKind, PsdLayer};
 use crate::sqlite::{self, NewTable, Value};
 
@@ -311,7 +315,7 @@ pub fn encode_clip(psd: &Psd, dpi: f64, sue: Option<&[u8]>) -> Result<Vec<u8>, S
     let mut tables = vec![
         table(
             "Project",
-            "ProjectInternalVersion TEXT DEFAULT NULL, ProjectName TEXT DEFAULT NULL, ProjectCanvas INTEGER DEFAULT NULL, ProjectItemBank INTEGER DEFAULT NULL, ProjectCutBank INTEGER DEFAULT NULL, ProjectLayerCompManager INTEGER DEFAULT NULL, ProjectRootCanvasNode INTEGER DEFAULT NULL",
+            PROJECT_COLUMNS,
             vec![(
                 1,
                 vec![
@@ -328,22 +332,22 @@ pub fn encode_clip(psd: &Psd, dpi: f64, sue: Option<&[u8]>) -> Result<Vec<u8>, S
         ),
         table(
             "CanvasItemBank",
-            "MainId INTEGER DEFAULT NULL, ModelBankMainIndex INTEGER DEFAULT NULL, BankRootItemMainIndex INTEGER DEFAULT NULL",
+            CANVAS_ITEM_BANK_COLUMNS,
             vec![(1, vec![Value::Null, int(1), int(0), int(0)])],
         ),
         table(
             "AnimationCutBank",
-            "MainId INTEGER DEFAULT NULL, FirstTimeLine INTEGER DEFAULT NULL, FirstScenario INTEGER DEFAULT NULL, CurrentIndex INTEGER DEFAULT NULL, Enable INTEGER DEFAULT NULL",
+            ANIMATION_CUT_BANK_COLUMNS,
             vec![(1, vec![Value::Null, int(2), int(0), int(0), int(0), int(0)])],
         ),
         table(
             "LayerCompManager",
-            "MainId INTEGER DEFAULT NULL, FirstLayerCompIndex INTEGER DEFAULT NULL, LastStateLayerCompIndex INTEGER DEFAULT NULL, AppliedLayerCompIndex INTEGER DEFAULT NULL",
+            LAYER_COMP_MANAGER_COLUMNS,
             vec![(1, vec![Value::Null, int(3), int(0), int(0), int(-1)])],
         ),
         table(
             "Canvas",
-            "MainId INTEGER DEFAULT NULL, CanvasUnit INTEGER DEFAULT NULL, CanvasWidth REAL DEFAULT NULL, CanvasHeight REAL DEFAULT NULL, CanvasResolution REAL DEFAULT NULL, CanvasChannelBytes INTEGER DEFAULT NULL, CanvasDefaultChannelOrder INTEGER DEFAULT NULL, CanvasRootFolder INTEGER DEFAULT NULL, CanvasCurrentLayer INTEGER DEFAULT NULL, CanvasDoSimulateColor INTEGER DEFAULT NULL, CanvasUseColorAdjustment INTEGER DEFAULT NULL, CanvasDefaultColorTypeIndex INTEGER DEFAULT NULL, CanvasDefaultColorBlackChecked INTEGER DEFAULT NULL, CanvasDefaultColorWhiteChecked INTEGER DEFAULT NULL, CanvasDefaultToneLine REAL DEFAULT NULL, CanvasDoublePage INTEGER DEFAULT NULL, CanvasRenderMipmapForceSaved INTEGER DEFAULT NULL, CanvasWorkTime INTEGER DEFAULT NULL",
+            CANVAS_COLUMNS,
             vec![(
                 1,
                 vec![
@@ -372,22 +376,22 @@ pub fn encode_clip(psd: &Psd, dpi: f64, sue: Option<&[u8]>) -> Result<Vec<u8>, S
         table("Layer", LAYER_COLUMNS, std::mem::take(&mut writer.layers)),
         table(
             "Mipmap",
-            "MainId INTEGER DEFAULT NULL, CanvasId INTEGER DEFAULT NULL, LayerId INTEGER DEFAULT NULL, MipmapCount INTEGER DEFAULT NULL, BaseMipmapInfo INTEGER DEFAULT NULL",
+            MIPMAP_COLUMNS,
             std::mem::take(&mut writer.mipmaps),
         ),
         table(
             "MipmapInfo",
-            "MainId INTEGER DEFAULT NULL, CanvasId INTEGER DEFAULT NULL, LayerId INTEGER DEFAULT NULL, ThisScale REAL DEFAULT NULL, Offscreen INTEGER DEFAULT NULL, NextIndex INTEGER DEFAULT NULL",
+            MIPMAP_INFO_COLUMNS,
             std::mem::take(&mut writer.levels),
         ),
         table(
             "Offscreen",
-            "MainId INTEGER DEFAULT NULL, CanvasId INTEGER DEFAULT NULL, LayerId INTEGER DEFAULT NULL, Attribute BLOB DEFAULT NULL, BlockData BLOB DEFAULT NULL",
+            OFFSCREEN_COLUMNS,
             std::mem::take(&mut writer.offscreens),
         ),
         table(
             "LayerThumbnail",
-            "MainId INTEGER DEFAULT NULL, CanvasId INTEGER DEFAULT NULL, LayerId INTEGER DEFAULT NULL, ThumbnailCanvasWidth INTEGER DEFAULT NULL, ThumbnailCanvasHeight INTEGER DEFAULT NULL, ThumbnailOffscreen INTEGER DEFAULT NULL, ThumbnailDrewMode INTEGER DEFAULT NULL, ThumbnailFixMode INTEGER DEFAULT NULL",
+            LAYER_THUMBNAIL_COLUMNS,
             std::mem::take(&mut writer.thumbnails),
         ),
         NewTable {
