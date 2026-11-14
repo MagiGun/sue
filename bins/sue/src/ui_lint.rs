@@ -161,7 +161,7 @@ const AREAS: [Area; 6] = [
     },
     Area {
         folder: "crates/sue-wm/src/shell",
-        baseline: Counts::new([0, 4, 19, 8, 26, 4, 3]),
+        baseline: Counts::new([0, 2, 13, 2, 21, 2, 3]),
     },
 ];
 

@@ -60,8 +60,13 @@ impl SuePaint {
 
 impl SueApplet for SuePaint {
     fn manifest(&self) -> AppletManifest {
-        let mut manifest = AppletManifest::new(ID, "Sue Paint", AppletRole::Studio, "\u{1F3A8}")
-            .localized("paint");
+        let mut manifest = AppletManifest::new(
+            ID,
+            "Sue Paint",
+            AppletRole::Studio,
+            sue_wm::icons::Icon::AppPaint,
+        )
+        .localized("paint");
         manifest.summary = tr!("applet-summary").to_owned();
         manifest.order = 25;
         manifest

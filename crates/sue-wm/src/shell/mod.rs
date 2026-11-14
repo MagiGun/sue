@@ -43,7 +43,7 @@ mod status;
 mod sue_menu;
 mod window;
 
-pub use hub::HubRow;
+pub use hub::{HUB_FILES, HUB_HOME, HubButton, HubRow, WorkShelf};
 
 /// The rice key of the Hub's pin: the studio or tool Sue opens into at
 /// launch, empty for the Hub.
@@ -229,6 +229,8 @@ pub struct Shell {
     /// The languages in use when the fonts last covered them, and the
     /// characters they (and every language's name) need.
     scripts: (Vec<String>, String),
+    /// The Hub's places, browser, menus and buttons.
+    hub: hub::HubState,
 }
 
 impl std::fmt::Debug for Shell {
@@ -299,6 +301,7 @@ impl Shell {
             booted: false,
             hub_place: None,
             scripts: (Vec::new(), String::new()),
+            hub: hub::HubState::default(),
             config,
             theme,
             applied_theme: None,
@@ -413,6 +416,15 @@ impl Shell {
     #[must_use]
     pub fn hub_rows(&self) -> &[(HubRow, Rect)] {
         &self.hub_rows
+    }
+
+    /// Where the last frame drew the Hub's other buttons: its places, New,
+    /// Open, the buttons of Your work, the cards of Jump back in, and the
+    /// top bar's search, Transfers and Settings (empty when a page covered
+    /// the Hub).
+    #[must_use]
+    pub fn hub_buttons(&self) -> &[(HubButton, Rect)] {
+        &self.hub.buttons
     }
 
     /// The Hub's place [`ShellRequest::HubPlace`] asked for last, by its
@@ -1045,10 +1057,11 @@ impl Shell {
         self.sue_button = layout.sue_button;
         self.hub_boxes.clear();
         self.hub_rows.clear();
+        self.hub.buttons.clear();
         let settled = self.shown.is_some() && self.reveal.position() >= 0.999;
         // The Hub, unless a page covers it whole.
         if !settled {
-            self.hub_ui(root, layout.page, io, &theme);
+            self.hub_ui(root, layout.page, io, &theme, now, dt);
         }
         // The page, wearing its own theme if it has one, with its menus in
         // the bar after the Sue button.

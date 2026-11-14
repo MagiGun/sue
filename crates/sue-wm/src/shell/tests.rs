@@ -15,7 +15,12 @@ struct Probe(Arc<Mutex<Vec<egui::Color32>>>);
 
 impl SueApplet for Probe {
     fn manifest(&self) -> AppletManifest {
-        AppletManifest::new("probe", "Probe", AppletRole::Studio, "*")
+        AppletManifest::new(
+            "probe",
+            "Probe",
+            AppletRole::Studio,
+            crate::icons::Icon::AppGeneric,
+        )
     }
 
     fn rice_declarations(&self) -> Vec<RiceDeclaration> {
@@ -120,7 +125,12 @@ struct Layouts(Arc<Mutex<Vec<(FormFactor, f32)>>>);
 
 impl SueApplet for Layouts {
     fn manifest(&self) -> AppletManifest {
-        AppletManifest::new("layouts", "Layouts", AppletRole::Studio, "*")
+        AppletManifest::new(
+            "layouts",
+            "Layouts",
+            AppletRole::Studio,
+            crate::icons::Icon::AppGeneric,
+        )
     }
 
     fn page_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {

@@ -477,7 +477,12 @@ pub struct Gallery {
 
 impl SueApplet for Gallery {
     fn manifest(&self) -> AppletManifest {
-        let mut manifest = AppletManifest::new(ID, "Gallery", AppletRole::Tool, "G");
+        let mut manifest = AppletManifest::new(
+            ID,
+            "Gallery",
+            AppletRole::Tool,
+            sue_wm::icons::Icon::AppGeneric,
+        );
         manifest.summary = "Sue's design system on one page.".to_owned();
         manifest.order = i32::MAX;
         manifest
@@ -560,9 +565,10 @@ mod tests {
         launchpad.register(|| Box::new(Gallery::default())).unwrap();
         let manifest = launchpad.manifests().next().unwrap();
         assert_eq!(manifest.role, AppletRole::Tool);
-        assert!(
-            manifest.icon.chars().all(|c| c.is_ascii_alphanumeric()),
-            "the gallery uses no font character as an icon"
+        assert_eq!(
+            manifest.icon,
+            sue_wm::icons::Icon::AppGeneric,
+            "the gallery draws an icon of Sue's set, not a font character"
         );
     }
 

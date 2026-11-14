@@ -756,8 +756,13 @@ fn slider_edit(
 
 impl SueApplet for Settings {
     fn manifest(&self) -> AppletManifest {
-        let mut manifest = AppletManifest::new(ID, "Settings", AppletRole::Window, "\u{2699}")
-            .localized("settings");
+        let mut manifest = AppletManifest::new(
+            ID,
+            "Settings",
+            AppletRole::Window,
+            sue_wm::icons::Icon::Settings,
+        )
+        .localized("settings");
         manifest.summary = "Every setting and every rice parameter.".to_owned();
         manifest
     }

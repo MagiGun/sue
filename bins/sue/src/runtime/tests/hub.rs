@@ -1,4 +1,5 @@
-//! The Hub: its boxes, its lists, pages over it, what a run remembers.
+//! The Hub: its places, its cards and buttons, the Files place, pages
+//! over it, what a run remembers.
 
 use super::*;
 
@@ -136,8 +137,17 @@ fn the_hub_lists_recent_files_saved_projects_and_unsaved_work() {
             .filter(|(_, entity)| sue_model::picture::is_picture(entity))
             .count()
     };
+    let files = |runtime: &mut Runtime| {
+        runtime.request(
+            ShellRequest::HubPlace(sue_wm::HUB_FILES.to_owned()),
+            &mut NoTextures,
+            start,
+        );
+        frames(runtime, &ctx, size, start, |_| Vec::new());
+    };
     let mut runtime = boot();
-    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    files(&mut runtime);
+    assert_eq!(runtime.shell.hub_place(), Some(sue_wm::HUB_FILES));
     assert!(runtime.shell.hub_rows().is_empty(), "nothing yet");
 
     // A picture opened from a file goes first among the recent files. It
@@ -196,9 +206,9 @@ fn the_hub_lists_recent_files_saved_projects_and_unsaved_work() {
     assert_eq!(pictures(&runtime), 3);
     runtime.shutdown();
 
-    // The next start lists all three on the Hub.
+    // The next start lists all three in the Hub's Files.
     let mut runtime = boot();
-    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    files(&mut runtime);
     let kept = runtime.work().unsaved().next().cloned().unwrap();
     assert_eq!(kept.project.as_deref(), Some(album.as_path()));
     assert_eq!(kept.title(), "album");
@@ -211,8 +221,8 @@ fn the_hub_lists_recent_files_saved_projects_and_unsaved_work() {
         assert!(hub_row(&runtime, &row).is_some(), "{row:?} is on the Hub");
     }
 
-    // A click on it brings it back in Sue Paint, every picture, and the
-    // project it belongs to.
+    // A click on its card brings it back in Sue Paint, every picture, and
+    // the project it belongs to.
     let at = hub_row(&runtime, &HubRow::Recover(kept.id.clone()))
         .unwrap()
         .left_center()
@@ -249,9 +259,9 @@ fn the_hub_lists_recent_files_saved_projects_and_unsaved_work() {
     );
     let replaced = runtime.work().unsaved().next().cloned().unwrap();
 
-    // Discard asks once more, then throws it away.
+    // Discard, on its card, asks once more, then throws it away.
     runtime.request(ShellRequest::Hub, &mut NoTextures, start);
-    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    files(&mut runtime);
     let discard = HubRow::Discard(replaced.id.clone());
     let button = hub_row(&runtime, &discard).unwrap().center();
     frames(&mut runtime, &ctx, size, start, click_at(button));
@@ -301,11 +311,11 @@ fn a_pinned_studio_opens_at_launch_and_the_pin_undoes() {
             .unwrap_or_default()
             .to_owned()
     };
-    // A click on Sue Writer's pin, at the bottom right of its box.
+    // A click on Sue Writer's pin, at the top right of its card.
     let (rect, pin) = hub_box(&runtime, sue_writer::ID).expect("Sue Writer's box");
     assert!(
-        (pin.right() - rect.right()).abs() < 12.0 && (pin.bottom() - rect.bottom()).abs() < 12.0,
-        "the pin sits at the box's bottom right"
+        (pin.right() - rect.right()).abs() < 20.0 && (pin.top() - rect.top()).abs() < 20.0,
+        "the pin sits at the card's top right"
     );
     frames(&mut runtime, &ctx, size, start, click_at(pin.center()));
     assert_eq!(pinned(&runtime), sue_writer::ID);
@@ -359,5 +369,393 @@ fn a_pinned_studio_opens_at_launch_and_the_pin_undoes() {
     let mut third = third;
     frame_with(&mut third, &ctx, start, Vec::new());
     assert!(third.shell.hub_open());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Where the Hub drew `button` in the last frame.
+fn hub_button(runtime: &Runtime, button: &sue_wm::HubButton) -> Option<egui::Rect> {
+    runtime
+        .shell
+        .hub_buttons()
+        .iter()
+        .find(|(drawn, _)| drawn == button)
+        .map(|(_, rect)| *rect)
+}
+
+#[test]
+fn the_hub_is_a_rail_of_places_and_your_work_opens_files_already_sorted() {
+    use sue_wm::{HubButton, WorkShelf};
+    let (mut runtime, root) = runtime("hub-places");
+    let ctx = egui::Context::default();
+    let size = vec2(1440.0, 900.0);
+    let start = Instant::now();
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    // Home and Files sit in a rail at the left, Home chosen.
+    let place = |runtime: &Runtime, id: &str| {
+        hub_button(runtime, &HubButton::Place(id.to_owned())).expect("a place in the rail")
+    };
+    let (home, files) = (
+        place(&runtime, sue_wm::HUB_HOME),
+        place(&runtime, sue_wm::HUB_FILES),
+    );
+    assert!(
+        home.left() < 1.0 && files.top() > home.top(),
+        "{home:?} {files:?}"
+    );
+    assert_eq!(runtime.shell.hub_place(), None, "Home");
+    // New, Open, the four shelves of Your work, and the top bar's search,
+    // Transfers and Settings.
+    for button in [
+        HubButton::New,
+        HubButton::Open,
+        HubButton::Work(WorkShelf::Recent),
+        HubButton::Work(WorkShelf::Projects),
+        HubButton::Work(WorkShelf::Unsaved),
+        HubButton::Work(WorkShelf::Favorites),
+        HubButton::Search,
+        HubButton::Transfers,
+        HubButton::Settings,
+    ] {
+        assert!(
+            hub_button(&runtime, &button).is_some(),
+            "{button:?} is on the Hub"
+        );
+    }
+    // Nothing to jump back into on a first run.
+    assert!(hub_button(&runtime, &HubButton::AllFiles).is_none());
+
+    // Your work's Unsaved Work opens Files.
+    let unsaved = hub_button(&runtime, &HubButton::Work(WorkShelf::Unsaved)).unwrap();
+    frames(&mut runtime, &ctx, size, start, click_at(unsaved.center()));
+    assert_eq!(runtime.shell.hub_place(), Some(sue_wm::HUB_FILES));
+    assert!(
+        hub_button(&runtime, &HubButton::Upkeep).is_some(),
+        "the Files menu"
+    );
+    // The rail takes it back Home.
+    let home = place(&runtime, sue_wm::HUB_HOME);
+    frames(&mut runtime, &ctx, size, start, click_at(home.center()));
+    assert_eq!(runtime.shell.hub_place(), None);
+
+    // The search field opens the command palette; Settings its window.
+    let search = hub_button(&runtime, &HubButton::Search).unwrap();
+    frames(&mut runtime, &ctx, size, start, click_at(search.center()));
+    assert!(runtime.shell.palette_open());
+    runtime.shell.dismiss_overlays();
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    let settings = hub_button(&runtime, &HubButton::Settings).unwrap();
+    frames(&mut runtime, &ctx, size, start, click_at(settings.center()));
+    assert_eq!(
+        runtime.shell.window().map(AppletId::as_str),
+        Some(crate::settings::ID)
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn your_work_opens_files_on_its_shelf() {
+    use sue_wm::{HubButton, HubRow, WorkShelf};
+    let (host, root) = temp_host("hub-shelves");
+    let ctx = egui::Context::default();
+    let size = vec2(1440.0, 900.0);
+    let start = Instant::now();
+    let boot = || {
+        Runtime::new(Engine::boot(&host).unwrap())
+            .unwrap()
+            .remembering(true)
+    };
+    // A picture opened, a project saved, and work kept at quit.
+    let mut runtime = boot();
+    std::fs::create_dir_all(&root).unwrap();
+    let photo = root.join("photo.png");
+    std::fs::write(
+        &photo,
+        sue_io::encode_png_rgba(2, 2, &[120_u8; 16]).unwrap(),
+    )
+    .unwrap();
+    runtime.request(
+        ShellRequest::OpenFile(photo.clone()),
+        &mut NoTextures,
+        start,
+    );
+    let paint = AppletId::new(sue_paint::ID).unwrap();
+    runtime.request(
+        ShellRequest::Create {
+            applet: paint.clone(),
+            key: "Square Post".to_owned(),
+        },
+        &mut NoTextures,
+        start,
+    );
+    let album = root.join("album.sue");
+    runtime.save_project_to(&album).unwrap();
+    runtime.request(
+        ShellRequest::Create {
+            applet: paint,
+            key: "Square Post".to_owned(),
+        },
+        &mut NoTextures,
+        start,
+    );
+    runtime.shutdown();
+    let mut runtime = boot();
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    let kept = runtime.work().unsaved().next().cloned().unwrap();
+    // Jump back in holds the two files, newest first; All Files opens
+    // Files on everything.
+    let jumps: Vec<_> = runtime
+        .shell
+        .hub_buttons()
+        .iter()
+        .filter_map(|(button, _)| match button {
+            HubButton::Jump(path) => Some(path.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(jumps, [album.clone(), photo.clone()]);
+    let shown = |runtime: &Runtime| {
+        let mut rows: Vec<String> = runtime
+            .shell
+            .hub_rows()
+            .iter()
+            .map(|(row, _)| match row {
+                HubRow::Open(path) => path.display().to_string(),
+                HubRow::Recover(id) | HubRow::Discard(id) => id.clone(),
+            })
+            .collect();
+        rows.dedup();
+        rows
+    };
+    let all = hub_button(&runtime, &HubButton::AllFiles).unwrap();
+    frames(&mut runtime, &ctx, size, start, click_at(all.center()));
+    assert_eq!(runtime.shell.hub_place(), Some(sue_wm::HUB_FILES));
+    assert_eq!(shown(&runtime).len(), 3, "{:?}", shown(&runtime));
+    // Each shelf of Your work shows its own.
+    for (shelf, expected) in [
+        (WorkShelf::Projects, vec![album.display().to_string()]),
+        (WorkShelf::Unsaved, vec![kept.id.clone()]),
+        (WorkShelf::Favorites, Vec::new()),
+    ] {
+        runtime.request(ShellRequest::Hub, &mut NoTextures, start);
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        let button = hub_button(&runtime, &HubButton::Work(shelf)).unwrap();
+        frames(&mut runtime, &ctx, size, start, click_at(button.center()));
+        assert_eq!(runtime.shell.hub_place(), Some(sue_wm::HUB_FILES));
+        assert_eq!(shown(&runtime), expected, "{shelf:?}");
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn on_a_narrow_screen_the_places_are_a_tab_bar_and_the_cards_rows() {
+    use sue_wm::HubButton;
+    let (mut runtime, root) = runtime("hub-narrow");
+    let ctx = egui::Context::default();
+    let size = vec2(420.0, 860.0);
+    let start = Instant::now();
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    let place = |id: &str| {
+        hub_button(&runtime, &HubButton::Place(id.to_owned())).expect("a place in the tab bar")
+    };
+    let (home, files) = (place(sue_wm::HUB_HOME), place(sue_wm::HUB_FILES));
+    assert!(home.bottom() > size.y - 2.0, "along the bottom: {home:?}");
+    assert!((home.top() - files.top()).abs() < 0.5 && files.left() > home.left());
+    // A studio's card spans the page, its pin at its end.
+    let (card, pin) = hub_box(&runtime, sue_paint::ID).unwrap();
+    assert!(card.width() > size.x - 60.0, "{card:?}");
+    assert!(
+        (pin.center().y - card.center().y).abs() < 1.0,
+        "the pin at its end"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// One frame with no input, `dt` seconds after the last; returns how long
+/// egui asks to wait before the next.
+fn idle_frame(
+    runtime: &mut Runtime,
+    ctx: &egui::Context,
+    size: egui::Vec2,
+    now: Instant,
+) -> Duration {
+    let time = ctx.input(|input| input.time) + 0.016;
+    let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, size)),
+        time: Some(time),
+        ..egui::RawInput::default()
+    };
+    let output = ctx.run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
+    output
+        .viewport_output
+        .get(&egui::ViewportId::ROOT)
+        .map_or(Duration::ZERO, |viewport| viewport.repaint_delay)
+}
+
+#[test]
+fn an_idle_hub_asks_for_no_frame() {
+    let (mut runtime, root) = runtime("hub-idle");
+    let ctx = egui::Context::default();
+    let size = vec2(1440.0, 900.0);
+    let start = Instant::now();
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    // The pointer crosses a studio's card and leaves: its hover fades in
+    // and out, asking for frames while it moves, then nothing moves.
+    let (card, _) = hub_box(&runtime, sue_paint::ID).unwrap();
+    frames(&mut runtime, &ctx, size, start, |frame| match frame {
+        0 => vec![egui::Event::PointerMoved(card.center())],
+        _ => Vec::new(),
+    });
+    let fading = idle_frame(&mut runtime, &ctx, size, start);
+    assert!(fading < Duration::from_secs(1), "the hover fades in");
+    let mut gone = vec![egui::Event::PointerGone];
+    let mut delay = Duration::ZERO;
+    for _ in 0..120 {
+        let time = ctx.input(|input| input.time) + 0.016;
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, size)),
+            time: Some(time),
+            events: std::mem::take(&mut gone),
+            ..egui::RawInput::default()
+        };
+        let output = ctx.run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, start));
+        delay = output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map_or(Duration::ZERO, |viewport| viewport.repaint_delay);
+        if delay == Duration::MAX {
+            break;
+        }
+    }
+    assert_eq!(delay, Duration::MAX, "the idle Hub asks for no frame");
+    assert_eq!(idle_frame(&mut runtime, &ctx, size, start), Duration::MAX);
+    assert!(!matches!(
+        runtime.pacing(start + Duration::from_secs(60)),
+        FramePacing::Animate { .. }
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn with_instant_transitions_the_hub_hover_snaps() {
+    let (mut runtime, root) = runtime("hub-instant");
+    let ctx = egui::Context::default();
+    let size = vec2(1440.0, 900.0);
+    let start = Instant::now();
+    runtime
+        .engine
+        .history
+        .apply(
+            &mut runtime.engine.world,
+            RiceEdit(sue_rice::SetRiceValue::new(
+                "motion.instant_transitions",
+                sue_rice::RiceValue::Bool(true),
+            )),
+        )
+        .unwrap();
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    let (card, _) = hub_box(&runtime, sue_paint::ID).unwrap();
+    frames(&mut runtime, &ctx, size, start, |frame| match frame {
+        0 => vec![egui::Event::PointerMoved(card.center())],
+        _ => Vec::new(),
+    });
+    assert_eq!(
+        idle_frame(&mut runtime, &ctx, size, start),
+        Duration::MAX,
+        "nothing fades: the hover is there at once"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn the_files_menu_rebuilds_thumbnails_forgets_what_is_gone_and_clears_transfers() {
+    let (host, root) = temp_host("hub-upkeep");
+    let ctx = egui::Context::default();
+    let size = vec2(1440.0, 900.0);
+    let start = Instant::now();
+    let mut runtime = Runtime::new(Engine::boot(&host).unwrap())
+        .unwrap()
+        .remembering(true);
+    std::fs::create_dir_all(&root).unwrap();
+    let kept = root.join("kept.png");
+    let gone = root.join("gone.png");
+    for path in [&kept, &gone] {
+        std::fs::write(path, sue_io::encode_png_rgba(2, 2, &[90_u8; 16]).unwrap()).unwrap();
+        runtime.request(ShellRequest::OpenFile(path.clone()), &mut NoTextures, start);
+    }
+    runtime.request(ShellRequest::Hub, &mut NoTextures, start);
+    runtime.request(
+        ShellRequest::HubPlace(sue_wm::HUB_FILES.to_owned()),
+        &mut NoTextures,
+        start,
+    );
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    assert!(hub_row(&runtime, &sue_wm::HubRow::Open(gone.clone())).is_some());
+    std::fs::remove_file(&gone).unwrap();
+    let pick = |runtime: &mut Runtime, label: &str| {
+        let picked = runtime.with_shell(&mut NoTextures, start, |shell, io, _| {
+            shell.hub_files_menu_pick(label, io)
+        });
+        assert!(picked, "the Files menu has {label}");
+    };
+    // Forget Files That Are Gone: the gone file leaves the list, the
+    // other stays.
+    pick(&mut runtime, "Forget Files That Are Gone");
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    let paths: Vec<_> = runtime
+        .work()
+        .recent()
+        .map(|file| file.path.clone())
+        .collect();
+    assert_eq!(paths, [kept.clone()]);
+    assert!(hub_row(&runtime, &sue_wm::HubRow::Open(gone)).is_none());
+    // Rebuild Thumbnails says so.
+    pick(&mut runtime, "Rebuild Thumbnails");
+    assert_eq!(
+        runtime.shell.message().map(|(text, _)| text.to_owned()),
+        Some("The thumbnails are drawn again".to_owned())
+    );
+    // Clear Completed Transfers empties the list of what is done.
+    runtime
+        .transfers
+        .done(sue_wm::TransferKind::Import, "kept.png", Some(kept));
+    assert!(!runtime.transfers.list().is_empty());
+    pick(&mut runtime, "Clear Completed Transfers");
+    assert!(
+        runtime
+            .transfers
+            .list()
+            .iter()
+            .all(|transfer| !transfer.finished()),
+        "only what still runs stays"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn the_keyboard_walks_the_hub_and_enter_uses_what_has_focus() {
+    let (mut runtime, root) = runtime("hub-keys");
+    let ctx = egui::Context::default();
+    let size = vec2(1440.0, 900.0);
+    let start = Instant::now();
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    // Tab is the command palette's; the arrow keys walk the Hub, from the
+    // place shown: Home, then Files. Enter uses what has focus.
+    let press = |runtime: &mut Runtime, key_pressed: egui::Key| {
+        frames(runtime, &ctx, size, start, |frame| {
+            if frame == 0 {
+                vec![key(key_pressed, egui::Modifiers::NONE)]
+            } else {
+                Vec::new()
+            }
+        });
+    };
+    press(&mut runtime, egui::Key::ArrowDown);
+    press(&mut runtime, egui::Key::Enter);
+    assert_eq!(runtime.shell.hub_place(), Some(sue_wm::HUB_FILES));
+    assert!(!runtime.shell.palette_open());
+    // And back up to Home.
+    press(&mut runtime, egui::Key::ArrowUp);
+    press(&mut runtime, egui::Key::Enter);
+    assert_eq!(runtime.shell.hub_place(), None);
     let _ = std::fs::remove_dir_all(&root);
 }

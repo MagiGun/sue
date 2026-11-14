@@ -210,7 +210,8 @@ mod tests {
 
     impl SueApplet for Probe {
         fn manifest(&self) -> AppletManifest {
-            let mut manifest = AppletManifest::new(self.0, self.0, self.1, "*");
+            let mut manifest =
+                AppletManifest::new(self.0, self.0, self.1, crate::icons::Icon::AppGeneric);
             manifest.order = self.2;
             manifest
         }
