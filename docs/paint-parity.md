@@ -460,7 +460,7 @@ The order of work is the plan at the end.
 | Color History | Palette | done | |
 | Intermediate Color | Palette | done | Four colors at its corners |
 | Approximate Color | Palette | done | The shades near your color |
-| Main and sub color, transparent color, swap | Palette, keys | done | X swaps, C takes the transparent color |
+| Main and sub color, transparent color, swap | Palette, keys | done | X switches between the main and the sub color, the arrow button swaps them, C takes the transparent color |
 | Pick from the picture (Alt, right click) | Canvas | done | |
 | Sub View reference pictures pick colors | Sub View palette | done | |
 | Lab color space (5.1) | Color Slider | missing | |
