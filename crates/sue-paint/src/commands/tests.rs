@@ -81,27 +81,32 @@ const IN_PALETTES: [&str; 18] = [
     "figure.hand_scanner",
 ];
 
-/// The palettes' code, which runs those commands by name.
-const PALETTES_SOURCE: [&str; 18] = [
-    include_str!("../panels/brush_size.rs"),
-    include_str!("../panels/cels.rs"),
-    include_str!("../panels/color.rs"),
-    include_str!("../panels/color_set.rs"),
-    include_str!("../panels/command_bar.rs"),
-    include_str!("../panels/history.rs"),
-    include_str!("../panels/layer.rs"),
-    include_str!("../panels/layer_property.rs"),
-    include_str!("../panels/material.rs"),
-    include_str!("../panels/mod.rs"),
-    include_str!("../panels/navigator.rs"),
-    include_str!("../panels/sub_tool.rs"),
-    include_str!("../panels/timeline.rs"),
-    include_str!("../panels/tool.rs"),
-    include_str!("../panels/tool_property/brush.rs"),
-    include_str!("../panels/tool_property/effect.rs"),
-    include_str!("../panels/tool_property/mod.rs"),
-    include_str!("../panels/tool_property/three.rs"),
-];
+/// The palettes' code, which runs those commands by name: every source
+/// file under `panels/`, read from the folder so a palette file added or
+/// split later is never left out.
+fn palettes_source() -> Vec<String> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<String>) {
+        let mut entries: Vec<_> = std::fs::read_dir(dir)
+            .expect("the panels folder")
+            .map(|entry| entry.expect("a panels entry").path())
+            .collect();
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(std::fs::read_to_string(&path).expect("a panels file"));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/panels"),
+        &mut out,
+    );
+    assert!(out.len() > 20, "the panels folder has its palettes");
+    out
+}
 
 #[test]
 fn every_command_can_be_reached() {
@@ -132,6 +137,7 @@ fn every_command_can_be_reached() {
     );
     // The list stays true: each of its names is registered, in no menu,
     // and a palette's button runs it.
+    let palettes = palettes_source();
     for name in IN_PALETTES {
         assert!(registry().has(name), "{name} is not registered");
         assert!(
@@ -139,7 +145,7 @@ fn every_command_can_be_reached() {
             "{name} is in a menu"
         );
         assert!(
-            PALETTES_SOURCE
+            palettes
                 .iter()
                 .any(|source| source.contains(&format!("\"{name}\""))),
             "no palette runs {name}"
