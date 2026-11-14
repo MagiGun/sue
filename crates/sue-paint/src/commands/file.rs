@@ -469,7 +469,7 @@ fn command_bar(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
 /// Manage Fonts: Sue's shared font list, the one every font menu of Sue
 /// shows.
 fn manage_fonts(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.dialog = Some(Dialog::Fonts(sue_wm::fonts::FontManager::default()));
+    paint.dialog = Some(Dialog::Fonts(sue_wm::fonts::FontManager::open()));
 }
 
 fn pressure(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {

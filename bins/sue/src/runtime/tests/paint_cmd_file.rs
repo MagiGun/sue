@@ -198,15 +198,22 @@ fn manage_fonts_opens_the_shared_font_list_and_closes() {
             .any(|(text, _)| text.contains("font famil") || text.starts_with("Finding the fonts")),
         "how many families: {texts:?}"
     );
-    // Picking one shows its sample line.
-    paint.click_text("Hack");
-    let texts = paint.settle(4);
-    assert!(
+    // It opens on the family Sue writes in, its sample line shown.
+    let sample = |texts: &[(String, egui::Rect)]| {
         texts
             .iter()
-            .any(|(text, _)| text.starts_with("The quick brown fox")),
-        "{texts:?}"
-    );
+            .any(|(text, _)| text.starts_with("The quick brown fox"))
+    };
+    let times = |texts: &[(String, egui::Rect)], text: &str| {
+        texts.iter().filter(|(found, _)| found == text).count()
+    };
+    assert!(sample(&texts), "{texts:?}");
+    assert_eq!(times(&texts, "Hack"), 1, "Hack only in the list");
+    // Picking another names it over the sample too.
+    paint.click_text("Hack");
+    let texts = paint.settle(4);
+    assert!(sample(&texts), "{texts:?}");
+    assert_eq!(times(&texts, "Hack"), 2, "Hack in the list and picked");
     // Close closes it, and nothing in the document changed.
     paint.click_text("Close");
     let texts = paint.settle(4);

@@ -24,6 +24,16 @@ pub struct FontManager {
 }
 
 impl FontManager {
+    /// The dialog as it opens: the family Sue's own words are set in is
+    /// picked, so its faces and sample show from the start.
+    #[must_use]
+    pub fn open() -> Self {
+        Self {
+            filter: String::new(),
+            selected: super::SANS.to_owned(),
+        }
+    }
+
     /// The families the list shows now: every installed family whose
     /// name holds the search text, in any case.
     #[must_use]
@@ -89,15 +99,17 @@ pub fn manage_ui(ui: &mut Ui, manager: &mut FontManager, theme: &Theme) -> bool 
         let faces = manager.faces().map_or_else(
             || tr!("font-bundled"),
             |info| {
-                info.faces
+                let faces = info
+                    .faces
                     .iter()
                     .map(|face| face.style.clone())
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(", ");
+                tr!("font-faces", faces = faces)
             },
         );
         ui.label(
-            RichText::new(tr!("font-faces", faces = faces))
+            RichText::new(faces)
                 .size(theme.text_size(TextRole::Caption))
                 .color(theme.text_muted()),
         );
@@ -109,9 +121,14 @@ pub fn manage_ui(ui: &mut Ui, manager: &mut FontManager, theme: &Theme) -> bool 
             .color(theme.text_muted()),
     );
     ui.add_space(gap);
-    ui::button("sue-manage-fonts-close", &tr!("dialog-close"))
-        .show(ui, theme)
-        .clicked()
+    // Close at the bottom right, where every dialog of Sue has its
+    // buttons.
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+        ui::button("sue-manage-fonts-close", &tr!("dialog-close"))
+            .show(ui, theme)
+            .clicked()
+    })
+    .inner
 }
 
 #[cfg(test)]
@@ -140,6 +157,13 @@ mod tests {
     #[test]
     fn nothing_picked_has_no_faces() {
         assert_eq!(FontManager::default().faces(), None);
+    }
+
+    #[test]
+    fn it_opens_on_the_family_sue_writes_in() {
+        let manager = FontManager::open();
+        assert_eq!(manager.selected, super::super::SANS);
+        assert!(manager.filter.is_empty());
     }
 
     #[test]
