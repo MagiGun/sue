@@ -13,6 +13,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint: every tool that shares its letter with others (Pen and
+  Pencil on P, Brush, Airbrush and Decoration on B, Fill and Gradient on
+  G, Figure, Frame Border and Ruler on U, Text and Balloon on T) has a
+  command of its own, such as Pencil Tool, that the command palette
+  finds and Settings can give a key of its own.
 - Sue Paint: Manage Fonts shows Sue's font list, the one every font menu
   of Sue offers, with a search, each family drawn in its own font, and its
   faces and a sample line; Pose Scanner (Scan Pose from Image) runs from

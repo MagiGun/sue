@@ -361,6 +361,18 @@ fn the_palette_offers_what_it_offered() {
             "help.faq",
             "help.contact",
             "help.feedback",
+            "tool.pick.pen",
+            "tool.pick.pencil",
+            "tool.pick.brush",
+            "tool.pick.airbrush",
+            "tool.pick.decoration",
+            "tool.pick.fill",
+            "tool.pick.gradient",
+            "tool.pick.figure",
+            "tool.pick.frame",
+            "tool.pick.ruler",
+            "tool.pick.text",
+            "tool.pick.balloon",
         ]
     );
     let new = &palette[1];
