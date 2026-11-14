@@ -2,7 +2,7 @@
 # "A jack of all trades is a master of none,
 #  but oftentimes better than a master of one."
 #
-# sue-rice format 6
+# sue-rice format 7
 #
 # Every key below is a live control in Settings. Metadata lives in the
 # trailing comment:   [min..max]  slider       {a|b|c}  choice

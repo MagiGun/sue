@@ -2716,6 +2716,14 @@ so a tinted color never survives a start. The old file is kept as
 `default.suerice.broken` and the defaults are used, so a typo never stops Sue
 from starting.
 
+**Format 7.** The shipped file is format 7 since 0.0.8, and the default of
+0.0.75 is frozen as `rice/history/v6.suerice` (the history now runs from `v1`
+to `v6`; a test holds that every earlier format has its frozen file). The bump
+is made once for the whole release: every default that changes in 0.0.8 rides
+on it. A file that is already format 7 is never migrated again, so a build
+made between two such changes is tried with a fresh `SUE_HOME`, or with a copy
+of a 0.0.75 settings folder.
+
 ---
 
 ## 5. Atomic self-updater & package manager (`sue-pkg`)
