@@ -467,8 +467,8 @@ icons! {
     /// A table.
     Table = "table" => text::TABLE,
     /// A sheet of paper standing upright, nothing folded, with three
-    /// lines of writing on its upper part. A page of text in a
-    /// manuscript.
+    /// lines of writing on it, the last one shorter. A page of text in
+    /// a manuscript.
     Page = "page" => text::PAGE,
     /// A sheet of paper standing upright, nothing on it but the short
     /// upright mark where typing would begin. A page not yet written.
