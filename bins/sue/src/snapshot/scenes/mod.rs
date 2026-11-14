@@ -23,6 +23,7 @@ mod settings;
 mod shell;
 mod ui_buttons;
 mod ui_dialogs;
+mod ui_export;
 mod ui_inputs;
 mod writer_compile;
 mod writer_corkboard;
@@ -115,6 +116,8 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     // 30. The gallery of the design system: per preset, at 1.5 and 2.0
     // pixels per point and per density, with the focus ring showing.
     gallery::scenes(tour)?;
+    // 31a to 31e. The export settings dialog and the batch list.
+    ui_export::scenes(tour)?;
     Ok(())
 }
 

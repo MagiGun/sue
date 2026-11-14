@@ -967,9 +967,7 @@ impl Filter {
             Self::BrightnessContrast {
                 brightness,
                 contrast,
-            } => {
-                sue_io::picture_ops::brightness_contrast(rgb, brightness, contrast)
-            }
+            } => sue_io::picture_ops::brightness_contrast(rgb, brightness, contrast),
             Self::HueSaturation {
                 hue,
                 saturation,

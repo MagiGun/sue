@@ -138,7 +138,7 @@ fn new_layer_form(ui: &mut Ui, theme: &Theme) {
 
 /// A plain window behind the components: a bar at the top, a sheet of
 /// paper in the middle and a status bar at the bottom.
-fn backdrop(ui: &Ui, theme: &Theme) {
+pub(super) fn backdrop(ui: &Ui, theme: &Theme) {
     let screen = ui.ctx().content_rect();
     let painter = ui.painter();
     painter.rect_filled(screen, 0.0, theme.void);
@@ -167,7 +167,7 @@ fn backdrop(ui: &Ui, theme: &Theme) {
 /// Runs [`FRAMES`] frames of `draw` alone in the shell's context, laid out
 /// for touch when `touch`, with a letter key in the last frames so that
 /// keyboard focus shows; then writes the picture `name`.
-fn shoot_ui(
+pub(super) fn shoot_ui(
     tour: &mut Tour<'_>,
     name: &str,
     touch: bool,
