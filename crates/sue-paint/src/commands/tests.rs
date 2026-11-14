@@ -205,13 +205,18 @@ fn every_command_but_the_shells_can_be_given_a_key() {
 fn the_shortcuts_keep_the_keys_and_names_they_had() {
     // The default chords of 0.0.75, as settings write them, each command
     // once with every chord it has, and labeled as Settings named it.
+    // Since 0.0.8 Ctrl+Alt+Shift+K opens Shortcut Settings and
+    // Ctrl+Alt+Shift+Y Modifier Key Settings (Clip Studio Paint's keys),
+    // and Shift+Delete deletes outside the selection instead of filling.
     let expected: &[(&str, &str, &str)] = &[
-        (
-            "help.shortcuts",
-            "Ctrl+Alt+Shift+K or F1 or Alt+I",
-            "Keyboard Shortcuts",
-        ),
+        ("help.shortcuts", "F1 or Alt+I", "Keyboard Shortcuts"),
         ("file.preferences", "Ctrl+K", "Preferences"),
+        ("file.shortcuts", "Ctrl+Alt+Shift+K", "Shortcut Settings"),
+        (
+            "file.modifiers",
+            "Ctrl+Alt+Shift+Y",
+            "Modifier Key Settings",
+        ),
         (
             "file.save_as",
             "Ctrl+Shift+S or Ctrl+Alt+S or Alt+Shift+S",
@@ -239,10 +244,11 @@ fn the_shortcuts_keep_the_keys_and_names_they_had() {
             "Ctrl+Delete or Ctrl+Backspace or Delete or Backspace",
             "Delete",
         ),
+        ("edit.fill", "Alt+Delete or Alt+Backspace", "Fill"),
         (
-            "edit.fill",
-            "Shift+Delete or Shift+Backspace or Alt+Delete or Alt+Backspace",
-            "Fill",
+            "edit.clear_outside",
+            "Shift+Delete or Shift+Backspace",
+            "Delete Outside Selection",
         ),
         ("layer.toggle.clip", "Ctrl+Alt+G", "Clip to Layer Below"),
         (
@@ -253,7 +259,7 @@ fn the_shortcuts_keep_the_keys_and_names_they_had() {
         (
             "layer.merge_visible_here",
             "Ctrl+Shift+E",
-            "Merge visible layers",
+            "Merge Visible Layers",
         ),
         ("layer.ungroup", "Ctrl+Shift+G", "Ungroup Layer Folder"),
         (

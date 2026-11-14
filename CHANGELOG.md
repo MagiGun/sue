@@ -161,6 +161,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint's keys match its menus and Clip Studio Paint: Shift+Delete
+  deletes outside the selection (it used to fill, while the menu showed
+  it on Delete Outside Selection), Ctrl+Shift+Alt+K opens Shortcut
+  Settings and Ctrl+Shift+Alt+Y Modifier Key Settings; the read-only key
+  list keeps F1 and Alt+I.
 - Sue Paint's History names the steps of Edit, Rotate/Flip Canvas as the
   menu does: Flip Horizontal, Flip Vertical and Rotate 180 Degrees, where
   it used to say "Flip Canvas" for both flips and "Rotate Canvas".

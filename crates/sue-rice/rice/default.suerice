@@ -161,8 +161,10 @@ redo = "Ctrl+Shift+Z"          # @keybind Redo
 redo_alt = "Ctrl+Y"            # @keybind Redo (alternative)
 
 [sue_paint_keys]
-help_shortcuts = "Ctrl+Alt+Shift+K or F1 or Alt+I" # @keybind Keyboard Shortcuts
+help_shortcuts = "F1 or Alt+I"  # @keybind Keyboard Shortcuts
 file_preferences = "Ctrl+K"    # @keybind Preferences
+file_shortcuts = "Ctrl+Alt+Shift+K" # @keybind Shortcut Settings
+file_modifiers = "Ctrl+Alt+Shift+Y" # @keybind Modifier Key Settings
 file_save_as = "Ctrl+Shift+S or Ctrl+Alt+S or Alt+Shift+S" # @keybind Save As
 file_print = "Ctrl+P"          # @keybind Print
 layer_new = "Ctrl+Shift+N"     # @keybind Raster Layer
@@ -178,10 +180,11 @@ edit_copy = "Ctrl+C or F3"     # @keybind Copy
 edit_paste = "Ctrl+V or F4"    # @keybind Paste
 edit_paste_here = "Ctrl+Shift+V" # @keybind Paste to Shown Position
 edit_clear = "Ctrl+Delete or Ctrl+Backspace or Delete or Backspace" # @keybind Delete
-edit_fill = "Shift+Delete or Shift+Backspace or Alt+Delete or Alt+Backspace" # @keybind Fill
+edit_fill = "Alt+Delete or Alt+Backspace" # @keybind Fill
+edit_clear_outside = "Shift+Delete or Shift+Backspace" # @keybind Delete Outside Selection
 layer_toggle_clip = "Ctrl+Alt+G" # @keybind Clip to Layer Below
 layer_folder_insert = "Ctrl+G" # @keybind Create Folder and Insert Layer
-layer_merge_visible_here = "Ctrl+Shift+E" # @keybind Merge visible layers
+layer_merge_visible_here = "Ctrl+Shift+E" # @keybind Merge Visible Layers
 layer_ungroup = "Ctrl+Shift+G" # @keybind Ungroup Layer Folder
 layer_merge_selected = "Alt+Shift+E" # @keybind Merge Selected Layers
 layer_merge_down = "Ctrl+E"    # @keybind Merge with Layer Below

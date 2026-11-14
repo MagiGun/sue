@@ -109,7 +109,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "keyboard",
         shortcuts,
     )
-    .keys("Ctrl+Alt+Shift+K or F1 or Alt+I")
+    .keys("F1 or Alt+I")
     .with(Flags::PALETTE),
     c("help.updates", "check-for-updates", "update", updates),
     c("help.about", "about-sue-paint", "info", about),

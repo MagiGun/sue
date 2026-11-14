@@ -778,13 +778,15 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "shortcut-settings-ellipsis",
         "keyboard",
         shortcuts,
-    ),
+    )
+    .keys("Ctrl+Alt+Shift+K"),
     c(
         "file.modifiers",
         "modifier-key-settings-ellipsis",
         "keyboard",
         modifiers,
-    ),
+    )
+    .keys("Ctrl+Alt+Shift+Y"),
     c(
         "file.command_bar",
         "command-bar-settings-ellipsis",
