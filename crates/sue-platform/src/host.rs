@@ -165,6 +165,8 @@ pub struct HeadlessHost {
     surfaces: BTreeMap<SurfaceId, SurfaceInfo>,
     next_surface: u32,
     events: VecDeque<InputEvent>,
+    /// Events sent to one surface, kept apart from the others'.
+    surface_events: BTreeMap<SurfaceId, VecDeque<InputEvent>>,
 }
 
 impl HeadlessHost {
@@ -185,6 +187,7 @@ impl HeadlessHost {
             surfaces: BTreeMap::new(),
             next_surface: 1,
             events: VecDeque::new(),
+            surface_events: BTreeMap::new(),
         }
     }
 
@@ -219,6 +222,27 @@ impl HeadlessHost {
     /// Queues a synthetic input event.
     pub fn inject(&mut self, event: InputEvent) {
         self.events.push_back(event);
+    }
+
+    /// Queues a synthetic input event for one surface only: it comes out
+    /// of [`Self::poll_events_of`] for that surface, never another's.
+    ///
+    /// # Errors
+    /// [`PlatformError::UnknownSurface`] for a surface that is not live.
+    pub fn inject_into(&mut self, id: SurfaceId, event: InputEvent) -> Result<(), PlatformError> {
+        if !self.surfaces.contains_key(&id) {
+            return Err(PlatformError::UnknownSurface(id));
+        }
+        self.surface_events.entry(id).or_default().push_back(event);
+        Ok(())
+    }
+
+    /// Drains the events sent to surface `id`, oldest first.
+    pub fn poll_events_of(&mut self, id: SurfaceId) -> Vec<InputEvent> {
+        self.surface_events
+            .get_mut(&id)
+            .map(|events| events.drain(..).collect())
+            .unwrap_or_default()
     }
 
     fn validate(width: f32, height: f32, scale_factor: f32) -> Result<(), PlatformError> {
@@ -290,6 +314,8 @@ impl PlatformHost for HeadlessHost {
     }
 
     fn destroy_surface(&mut self, id: SurfaceId) -> Result<(), PlatformError> {
+        // Its events go with it.
+        self.surface_events.remove(&id);
         self.surfaces
             .remove(&id)
             .map(drop)
@@ -371,6 +397,37 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0], InputEvent::Keyboard(KeyEvent::typed('a')));
         assert!(host.poll_events().is_empty());
+    }
+
+    #[test]
+    fn two_surfaces_get_their_own_events_and_close_apart() {
+        let mut host = host();
+        let first = host.create_surface(&descriptor(800.0, 600.0)).unwrap();
+        let second = host.create_surface(&descriptor(400.0, 300.0)).unwrap();
+        host.inject_into(first.id, InputEvent::Keyboard(KeyEvent::typed('a')))
+            .unwrap();
+        host.inject_into(second.id, InputEvent::Keyboard(KeyEvent::typed('b')))
+            .unwrap();
+        assert_eq!(
+            host.poll_events_of(second.id),
+            vec![InputEvent::Keyboard(KeyEvent::typed('b'))]
+        );
+        assert!(host.poll_events_of(second.id).is_empty());
+        assert!(host.poll_events().is_empty(), "nothing went to everyone");
+        // Closing the second leaves the first, its size and its events.
+        host.inject_into(second.id, InputEvent::Keyboard(KeyEvent::typed('c')))
+            .unwrap();
+        host.destroy_surface(second.id).unwrap();
+        assert!(host.poll_events_of(second.id).is_empty());
+        assert_eq!(
+            host.inject_into(second.id, InputEvent::Keyboard(KeyEvent::typed('d'))),
+            Err(PlatformError::UnknownSurface(second.id))
+        );
+        assert_eq!(host.surface(first.id), Some(&first));
+        assert_eq!(
+            host.poll_events_of(first.id),
+            vec![InputEvent::Keyboard(KeyEvent::typed('a'))]
+        );
     }
 
     #[test]

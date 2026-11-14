@@ -82,6 +82,7 @@ mod viewports;
 mod wayland_pen;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
+pub mod windows;
 #[cfg(target_os = "windows")]
 mod wintab_pen;
 #[cfg(any(
@@ -121,6 +122,7 @@ pub use os::{
 };
 pub use paint::{EguiPainter, NoTextures, TextureUpload};
 pub use paths::{PlatformPaths, font_dirs, system_font_dirs};
+pub use windows::{HeadlessWindows, Screen, WindowSet, WindowSpec, WindowSupport};
 /// Random bits for seeding entity ids (`sue_core::seed_entity_ids`): the
 /// page's own randomness in the browser, where std has none; elsewhere
 /// std's hasher keys, which the system fills.
