@@ -1,8 +1,6 @@
 //! What the database of a `.clip` is called: its tables, their columns,
 //! and the numbers Clip Studio gives the blend modes.
 
-use crate::sqlite::{NewTable, Value};
-
 /// Clip Studio's layer blend modes by number, as Photoshop keys.
 pub(super) const BLENDS: [(i64, &[u8; 4]); 31] = [
     (0, b"norm"),
@@ -56,14 +54,6 @@ pub(super) fn composite_of(key: [u8; 4]) -> i64 {
 /// The columns Sue writes of `Layer`.
 pub(super) const LAYER_COLUMNS: &str = "MainId INTEGER DEFAULT NULL, CanvasId INTEGER DEFAULT NULL, LayerName TEXT DEFAULT NULL, LayerType INTEGER DEFAULT NULL, LayerLock INTEGER DEFAULT NULL, LayerClip INTEGER DEFAULT NULL, LayerMasking INTEGER DEFAULT NULL, LayerOffsetX INTEGER DEFAULT NULL, LayerOffsetY INTEGER DEFAULT NULL, LayerRenderOffscrOffsetX INTEGER DEFAULT NULL, LayerRenderOffscrOffsetY INTEGER DEFAULT NULL, LayerMaskOffsetX INTEGER DEFAULT NULL, LayerMaskOffsetY INTEGER DEFAULT NULL, LayerMaskOffscrOffsetX INTEGER DEFAULT NULL, LayerMaskOffscrOffsetY INTEGER DEFAULT NULL, LayerOpacity INTEGER DEFAULT NULL, LayerComposite INTEGER DEFAULT NULL, LayerUsePaletteColor INTEGER DEFAULT NULL, LayerNoticeablePaletteColor INTEGER DEFAULT NULL, LayerPaletteRed INTEGER DEFAULT NULL, LayerPaletteGreen INTEGER DEFAULT NULL, LayerPaletteBlue INTEGER DEFAULT NULL, LayerFolder INTEGER DEFAULT NULL, LayerVisibility INTEGER DEFAULT NULL, LayerSelect INTEGER DEFAULT NULL, LayerNextIndex INTEGER DEFAULT NULL, LayerFirstChildIndex INTEGER DEFAULT NULL, LayerUuid TEXT DEFAULT NULL, LayerRenderMipmap INTEGER DEFAULT NULL, LayerLayerMaskMipmap INTEGER DEFAULT NULL, LayerRenderThumbnail INTEGER DEFAULT NULL, LayerLayerMaskThumbnail INTEGER DEFAULT NULL";
 
-pub(super) fn table(name: &str, columns: &str, rows: Vec<(i64, Vec<Value>)>) -> NewTable {
-    NewTable {
-        name: name.to_owned(),
-        sql: format!("CREATE TABLE {name}(_PW_ID INTEGER PRIMARY KEY AUTOINCREMENT, {columns})"),
-        rows,
-    }
-}
-
 /// The columns Sue writes of `Project`.
 pub(super) const PROJECT_COLUMNS: &str = "ProjectInternalVersion TEXT DEFAULT NULL, ProjectName TEXT DEFAULT NULL, ProjectCanvas INTEGER DEFAULT NULL, ProjectItemBank INTEGER DEFAULT NULL, ProjectCutBank INTEGER DEFAULT NULL, ProjectLayerCompManager INTEGER DEFAULT NULL, ProjectRootCanvasNode INTEGER DEFAULT NULL";
 
@@ -90,3 +80,131 @@ pub(super) const OFFSCREEN_COLUMNS: &str = "MainId INTEGER DEFAULT NULL, CanvasI
 
 /// The columns Sue writes of `LayerThumbnail`.
 pub(super) const LAYER_THUMBNAIL_COLUMNS: &str = "MainId INTEGER DEFAULT NULL, CanvasId INTEGER DEFAULT NULL, LayerId INTEGER DEFAULT NULL, ThumbnailCanvasWidth INTEGER DEFAULT NULL, ThumbnailCanvasHeight INTEGER DEFAULT NULL, ThumbnailOffscreen INTEGER DEFAULT NULL, ThumbnailDrewMode INTEGER DEFAULT NULL, ThumbnailFixMode INTEGER DEFAULT NULL";
+
+/// Sue's own table of the layer marks Clip Studio's own columns for are
+/// not yet observed (survey 8.19): draft and reference. Clip Studio
+/// ignores tables it does not know, as it does `SueProject`.
+pub(super) const SUE_LAYER_SQL: &str =
+    "CREATE TABLE SueLayer(LayerId INTEGER, Draft INTEGER, Reference INTEGER)";
+
+/// `SueProject`: the picture's `.sue` bytes in files Sue writes.
+pub(super) const SUE_PROJECT_SQL: &str = "CREATE TABLE SueProject(Version INTEGER, Data BLOB)";
+
+/// `ExternalChunk`: where each stored bitmap's chunk is.
+pub(super) const EXTERNAL_CHUNK_SQL: &str =
+    "CREATE TABLE ExternalChunk(ExternalID BLOB, Offset INTEGER)";
+
+/// `ExternalTableAndColumnName`: which column names stored bitmaps.
+pub(super) const EXTERNAL_NAMES_SQL: &str =
+    "CREATE TABLE ExternalTableAndColumnName(TableName TEXT, ColumnName TEXT)";
+
+/// The `CREATE TABLE` statement Sue writes for `name` with `columns`.
+pub(super) fn table_sql(name: &str, columns: &str) -> String {
+    format!("CREATE TABLE {name}(_PW_ID INTEGER PRIMARY KEY AUTOINCREMENT, {columns})")
+}
+
+/// The column definitions inside the brackets of a `CREATE TABLE`, split
+/// at the commas that are not inside brackets of their own.
+fn definitions(sql: &str) -> Vec<&str> {
+    let Some(open) = sql.find('(') else {
+        return Vec::new();
+    };
+    let close = sql.rfind(')').unwrap_or(sql.len()).max(open + 1);
+    let inner = &sql[open + 1..close];
+    let mut parts = Vec::new();
+    let (mut depth, mut start) = (0_i32, 0);
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(inner[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(inner[start..].trim());
+    parts
+}
+
+/// Where among a table's columns the rowid stands (an `INTEGER PRIMARY
+/// KEY` column, by the rule `sqlite::read` follows): its value is stored
+/// as NULL and read back as the rowid.
+pub(super) fn rowid_column(sql: &str) -> Option<usize> {
+    let mut index = 0;
+    for part in definitions(sql) {
+        let upper = part.to_ascii_uppercase();
+        if ["PRIMARY ", "UNIQUE", "CHECK", "FOREIGN ", "CONSTRAINT "]
+            .iter()
+            .any(|word| upper.starts_with(word))
+            || part.is_empty()
+        {
+            continue;
+        }
+        let words: Vec<&str> = upper.split_whitespace().collect();
+        if words.get(1) == Some(&"INTEGER") && upper.contains("PRIMARY KEY") {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
+}
+
+/// The definition of `column` in Sue's column list `columns` (such as
+/// `LayerName TEXT DEFAULT NULL`), if it is there.
+pub(super) fn definition<'a>(columns: &'a str, column: &str) -> Option<&'a str> {
+    columns.split(", ").find(|definition| {
+        definition
+            .split_whitespace()
+            .next()
+            .is_some_and(|name| name.eq_ignore_ascii_case(column))
+    })
+}
+
+/// The column names of Sue's column list `columns`.
+pub(super) fn names(columns: &str) -> Vec<String> {
+    columns
+        .split(", ")
+        .filter_map(|definition| definition.split_whitespace().next())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// `name` as SQL spells a column name: bare when it is a plain word,
+/// otherwise in double quotes.
+pub(super) fn quoted(name: &str) -> String {
+    let plain = name
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        && name.chars().next().is_some_and(|ch| !ch.is_ascii_digit());
+    if plain {
+        name.to_owned()
+    } else {
+        format!("\"{}\"", name.replace('"', "\"\""))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_rowid_column_is_found_as_sqlite_reads_it() {
+        assert_eq!(rowid_column(&table_sql("Layer", LAYER_COLUMNS)), Some(0));
+        assert_eq!(rowid_column(SUE_LAYER_SQL), None);
+        assert_eq!(
+            rowid_column("CREATE TABLE t(a TEXT, PRIMARY KEY(a), b integer primary key)"),
+            Some(1)
+        );
+        assert_eq!(rowid_column("no brackets"), None);
+        assert_eq!(
+            definition(LAYER_COLUMNS, "layername"),
+            Some("LayerName TEXT DEFAULT NULL")
+        );
+        assert_eq!(names(MIPMAP_COLUMNS)[4], "BaseMipmapInfo");
+        assert_eq!(quoted("Plain_1"), "Plain_1");
+        assert_eq!(quoted("1st"), "\"1st\"");
+        assert_eq!(quoted("say \"hi\""), "\"say \"\"hi\"\"\"");
+    }
+}
