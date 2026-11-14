@@ -457,7 +457,6 @@ alt-picks-color-while-drawing-space = 绘画时按住 Alt 拾取颜色，按住�
 layers = # 图层
 raster-layers-hold-pixels-vector-layers = 栅格图层存放像素，矢量图层存放可二次编辑的线条（修正线），3D 图层绘制可旋转的模型。图层组用于归类图层。图层属性面板可添加边框、网点和表现色；图层蒙版可在不擦除的情况下隐藏图层的一部分。
 colors = # 颜色
-color-wheel-color-slider-color-set = 色环、颜色滑块、颜色组、中间色和近似色面板以及颜色历史均可用于设置主颜色。按 X 键切换主颜色与副颜色，按 C 键使用透明色绘制。
 selections = # 选区
 selection-tools-make-selection-launcher-under = 选择工具用于创建选区；下方的选区起动器提供了后续快捷操作。快速蒙版可以手绘选区。“选择” -> “色彩范围”可按颜色进行选取。
 pages-and-books = # 页面与画册

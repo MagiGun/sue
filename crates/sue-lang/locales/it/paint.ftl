@@ -449,7 +449,6 @@ alt-picks-color-while-drawing-space = Alt preleva un colore durante il disegno, 
 layers = # Livelli
 raster-layers-hold-pixels-vector-layers = I livelli raster contengono pixel, i livelli vettoriali ospitano linee modificabili (Correggi linea), i livelli 3D visualizzano un modello ruotabile. Le cartelle raggruppano i livelli. La tavolozza Proprieta livello aggiunge un bordo, retini e un colore di espressione; le maschere nascondono parti di un livello senza cancellarle.
 colors = # Colori
-color-wheel-color-slider-color-set = La Ruota dei colori, il Cursore colore, il Set di colori, le tavolozze Colore intermedio e Colore approssimativo e la Cronologia colori impostano tutti il colore principale. X scambia il colore principale e secondario, C dipinge con il colore trasparente.
 selections = # Selezioni
 selection-tools-make-selection-launcher-under = Gli strumenti di selezione creano una selezione; il programma di avvio sottostante offre le operazioni successive. Maschera rapida disegna una selezione. Seleziona, Gamma colori seleziona in base al colore.
 pages-and-books = # Pagine e libri

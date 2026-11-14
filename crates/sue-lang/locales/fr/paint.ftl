@@ -424,7 +424,6 @@ alt-picks-color-while-drawing-space = Alt prélève une couleur, Espace fait dé
 layers = # Calques
 raster-layers-hold-pixels-vector-layers = Les calques raster contiennent des pixels, les calques vectoriels des lignes modifiables, les calques 3D un modèle orientable. Les dossiers regroupent les calques. La palette Propriété du calque ajoute bordure, trame et couleur d'expression ; les masques cachent des parties sans les effacer.
 colors = # Couleurs
-color-wheel-color-slider-color-set = Les palettes Roue chromatique, Curseur de couleur, Jeu de couleurs, Couleur intermédiaire, Couleur approchée et Historique définissent la couleur principale. X échange les couleurs principale et secondaire ; C peint avec la couleur transparente.
 selections = # Sélections
 selection-tools-make-selection-launcher-under = Les outils créent une sélection ; le lanceur en dessous propose les actions suivantes. Le masque rapide peint une sélection. Sélection, Gamme de couleurs sélectionne par couleur.
 pages-and-books = # Pages et livres

@@ -178,6 +178,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint's History names steps as the menus do: New Animation Folder
+  and Convert to Drawing Color, and a duplicated layer or page is called
+  "<name> Copy" with a capital, as in Clip Studio Paint. The help on the
+  color palettes says that X switches between the main and sub color.
 - Sue Paint's keys match its menus and Clip Studio Paint: Shift+Delete
   deletes outside the selection (it used to fill, while the menu showed
   it on Delete Outside Selection), Ctrl+Shift+Alt+K opens Shortcut

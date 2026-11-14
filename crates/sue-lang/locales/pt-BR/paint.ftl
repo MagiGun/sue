@@ -459,7 +459,6 @@ alt-picks-color-while-drawing-space = Alt captura uma cor enquanto você desenha
 layers = # Camadas
 raster-layers-hold-pixels-vector-layers = Camadas de rasterização contêm pixels, camadas vetoriais contêm linhas que você pode continuar editando (Corrigir Linha), camadas 3D exibem modelos que você pode girar. Pastas agrupam camadas. A paleta Propriedade da Camada adiciona bordas, tons e cores de expressão; máscaras ocultam partes de uma camada sem apagá-las.
 colors = # Cores
-color-wheel-color-slider-color-set = O Círculo Cromático, os Controles Deslizantes de Cor, o Conjunto de Cores, as paletas de Cor Intermediária e Cor Aproximada e o Histórico de Cores definem a cor principal. A tecla X alterna entre as cores principal e secundária, e C pinta com a cor transparente.
 selections = # Seleções
 selection-tools-make-selection-launcher-under = As ferramentas de seleção delimitam uma área; a barra inicializadora abaixo oferece as ações seguintes. A Máscara Rápida pinta uma seleção diretamente. Selecionar, Gama de Cores seleciona por tonalidade.
 pages-and-books = # Páginas e livros

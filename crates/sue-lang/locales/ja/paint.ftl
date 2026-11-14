@@ -459,7 +459,6 @@ alt-picks-color-while-drawing-space = 描画中に Alt を押すと色を取得 
 layers = # レイヤー
 raster-layers-hold-pixels-vector-layers = ラスターレイヤーはピクセルを保持し、ベクターレイヤーは描画後に編集可能な線を保持します (線修正)。3Dレイヤーでは回転可能なモデルを表示します。フォルダーでレイヤーをグループ化できます。レイヤープロパティパレットでフチ、トーン、表現色を設定でき、マスクを使えば消去せずに一部を非表示にできます。
 colors = # カラー
-color-wheel-color-slider-color-set = カラーサークル、カラースライダー、カラーセット、中間色パレット、近似色パレット、カラー履歴でメインカラーを設定します。X キーでメインカラーとサブカラーを切り替え、C キーで透明色を描画します。
 selections = # 選択範囲
 selection-tools-make-selection-launcher-under = 選択ツールで選択範囲を作成すると、下部に選択範囲ランチャーが表示されます。クイックマスクで選択範囲を描画できます。「選択範囲」の「色域選択」で色に応じた選択も可能です。
 pages-and-books = # ページと作品

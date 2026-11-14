@@ -423,7 +423,6 @@ alt-picks-color-while-drawing-space = Alt nimmt beim Zeichnen eine Farbe auf, Le
 layers = # Ebenen
 raster-layers-hold-pixels-vector-layers = Rasterebenen enthalten Pixel, Vektorebenen bearbeitbare Linien und 3D-Ebenen drehbare Modelle. Ordner gruppieren Ebenen. Die Ebeneneigenschaften fügen Rand, Rasterton und Ausdrucksfarbe hinzu; Masken verbergen Bereiche ohne sie zu löschen.
 colors = # Farben
-color-wheel-color-slider-color-set = Farbkreis, Farbregler, Farbsatz, Zwischenfarbe, Näherungsfarbe und Farbverlauf legen die Hauptfarbe fest. X tauscht Haupt- und Nebenfarbe, C malt mit transparenter Farbe.
 selections = # Auswahlen
 selection-tools-make-selection-launcher-under = Auswahlwerkzeuge erstellen eine Auswahl; der Launcher darunter zeigt nächste Aktionen. Schnellmaske malt eine Auswahl. Auswahl, Farbumfang wählt nach Farbe.
 pages-and-books = # Seiten und Bücher

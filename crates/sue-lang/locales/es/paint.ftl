@@ -459,7 +459,6 @@ alt-picks-color-while-drawing-space = Alt selecciona un color al dibujar, Espaci
 layers = # Capas
 raster-layers-hold-pixels-vector-layers = Las capas de rasterizado contienen píxeles, las capas de vectores contienen líneas que se pueden editar (Corregir línea), las capas 3D muestran un modelo orientable. Las carpetas agrupan capas. La paleta Propiedad de la capa añade borde, tramas y color de expresión; las máscaras ocultan partes de la capa sin borrarlas.
 colors = # Colores
-color-wheel-color-slider-color-set = Las paletas Círculo de colores, Deslizador de color, Conjunto de colores, Color intermedio, Color aproximado e Historial de color definen el color principal. X alterna entre el color principal y el secundario, C pinta con el color transparente.
 selections = # Selecciones
 selection-tools-make-selection-launcher-under = Las herramientas de selección crean una selección; la barra flotante inferior ofrece opciones para continuar. Máscara rápida permite pintar una selección. Selección, Gama de colores selecciona por color.
 pages-and-books = # Páginas y libros
