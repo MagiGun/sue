@@ -28,7 +28,12 @@ impl Shell {
             Toast::info(text)
         };
         let id = self.toasts.push(toast.seconds(stay.as_secs_f32()));
-        self.revealed = reveal.map(|path| (id, path));
+        // Each saved file's notice keeps its own file, whatever is said
+        // after it; the same words again are the same notice.
+        if let Some(path) = reveal {
+            self.revealed.retain(|(shown, _)| *shown != id);
+            self.revealed.push((id, path));
+        }
     }
 
     /// The notices, at the bottom of `room` (the page, so they never
@@ -44,9 +49,10 @@ impl Shell {
         for event in self.toasts.show(ctx, room, theme) {
             let (ToastEvent::Action(id) | ToastEvent::Dismissed(id) | ToastEvent::Expired(id)) =
                 event;
-            let Some((_, path)) = self.revealed.take_if(|(shown, _)| *shown == id) else {
+            let Some(at) = self.revealed.iter().position(|(shown, _)| *shown == id) else {
                 continue;
             };
+            let (_, path) = self.revealed.remove(at);
             if matches!(event, ToastEvent::Action(_)) {
                 io.requests.push(ShellRequest::Command(format!(
                     "reveal-file:{}",
@@ -54,6 +60,9 @@ impl Shell {
                 )));
             }
         }
+        // Notices taken away without a word (all at once) leave no file.
+        let toasts = &self.toasts;
+        self.revealed.retain(|(id, _)| toasts.get(*id).is_some());
     }
 
     /// How many notices the stack holds, those leaving included.
@@ -67,7 +76,7 @@ impl Shell {
     #[must_use]
     pub fn saved_notice_rects(&self) -> Option<crate::ui::ToastRects> {
         self.revealed
-            .as_ref()
+            .last()
             .and_then(|(id, _)| self.toasts.rects(*id))
     }
 

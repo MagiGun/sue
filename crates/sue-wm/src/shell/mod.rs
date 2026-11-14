@@ -231,8 +231,9 @@ pub struct Shell {
     scripts: (Vec<String>, String),
     /// The notices on screen (each [`notify`](Self::notify) puts one up).
     toasts: crate::ui::Toasts,
-    /// The notice of the last saved file, and the file its button shows.
-    revealed: Option<(crate::ui::ToastId, PathBuf)>,
+    /// The notices of saved files still showing, each with the file its
+    /// button shows, the newest last.
+    revealed: Vec<(crate::ui::ToastId, PathBuf)>,
 }
 
 impl std::fmt::Debug for Shell {
@@ -304,7 +305,7 @@ impl Shell {
             hub_place: None,
             scripts: (Vec::new(), String::new()),
             toasts: crate::ui::Toasts::new("sue-notices"),
-            revealed: None,
+            revealed: Vec::new(),
             config,
             theme,
             applied_theme: None,

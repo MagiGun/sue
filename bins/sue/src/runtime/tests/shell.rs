@@ -31,9 +31,13 @@ fn saved_files_say_where_they_went_in_a_notice_that_shows_the_file() {
     assert_eq!(runtime.shell.message_path(), Some(path.as_path()));
 
     // It shows on the toast stack, over the page and so above the status
-    // bar, with a button that shows the file.
+    // bar, with a button that shows the file; news said after it leaves
+    // that button alone.
     frames(&mut runtime, &ctx, size, start, |_| Vec::new());
     assert_eq!(runtime.shell.notices(), 1);
+    runtime.shell.notify("Nothing to undo", false);
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    assert_eq!(runtime.shell.notices(), 2);
     let rects = runtime
         .shell
         .saved_notice_rects()
@@ -43,7 +47,11 @@ fn saved_files_say_where_they_went_in_a_notice_that_shows_the_file() {
     let button = rects.action.expect("Show in Folder");
     // Headless, showing the file names it instead of opening Explorer.
     frames(&mut runtime, &ctx, size, start, click_at(button.center()));
-    assert!(runtime.shell.message().unwrap().0.starts_with("File: "));
+    let shown = runtime.shell.message().unwrap().0;
+    assert!(
+        shown.starts_with("File: ") && shown.contains("out.jxl"),
+        "{shown}"
+    );
     assert_eq!(runtime.shell.message_path(), None);
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -300,8 +308,7 @@ fn studios_keep_the_keys_they_reserve() {
     assert!(!runtime.shell.palette_open(), "Tab stayed with Sue Paint");
     // There the menu shows no key Sue Paint keeps for itself (Tab, and /
     // for the Zoom tool).
-    let key = palette_key(&mut runtime);
-    assert!(key != "Tab" && key != "/", "{key}");
+    assert_eq!(palette_key(&mut runtime), "");
     let _ = std::fs::remove_dir_all(&root);
 }
 
