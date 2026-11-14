@@ -45,7 +45,9 @@ pub use formats::{
     CompressedAudioFormat, DelimitedFormat, JpegFormat, JxlFormat, KeptFormat, ObjFormat,
     PngFormat, PublishFormat, SueFormat, TextFormat, WavFormat, formats,
 };
-pub use ingest::{IngestOptions, IngestView, Ingested, ingest_bytes, meta, route_label};
+pub use ingest::{
+    IngestOptions, IngestView, Ingested, ingest_bytes, is_flat_picture, meta, route_label,
+};
 pub use jxl::{
     DC_PREVIEW_SCALE, DecodedJxl, FourCc, JXL_CODESTREAM_SIGNATURE, JXL_CONTAINER_SIGNATURE,
     JxlError, JxlImageInfo, JxlPipeline, JxlProbe, NativeJxlPipeline, ProgressiveTarget, probe_jxl,

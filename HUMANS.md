@@ -236,10 +236,11 @@ to before it converts; they land there, named as the status bar says.
 Whenever Sue needs a file, or a place to save one, it shows your system's own
 Open, Save or folder window, the one every other app uses. Open File (in the
 Sue menu, or `Ctrl+O`) and dropping a file anywhere on the window both put
-the file where it belongs: a picture opens in the Image Viewer, a Word,
-Markdown or text file in Sue Writer, and a `.sue` project replaces what is
-open. A file nothing in Sue opens yet is left alone, and the status bar says
-so.
+the file where it belongs: a picture opens in Sue Paint as a new canvas, a
+brush file (`.sut`, `.abr`, `.gbr`, `.gih`) becomes sub tools there, a
+sound file goes on the timeline of the canvas in front, a Word, Markdown or
+text file opens in Sue Writer, and a `.sue` project replaces what is open.
+A file nothing in Sue opens yet is left alone, and the status bar says so.
 
 Whenever Sue saves or exports a file (a project, a picture from Sue Paint, a
 re-encoded JPEG XL, an exported rice), the status bar says the file's name and

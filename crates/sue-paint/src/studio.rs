@@ -56,14 +56,29 @@ pub const ID: &str = "sue-paint";
 
 /// The picture files Sue Paint opens as canvases.
 const OPENS: &[&str] = &[
-    "clip", "png", "jpg", "jpeg", "jxl", "psd", "psb", "webp", "tif", "tiff", "bmp",
+    "clip", "png", "jpg", "jpeg", "jxl", "psd", "psb", "webp", "tif", "tiff", "bmp", "gif", "tga",
+    "qoi", "ico", "ppm", "pgm", "pbm", "pnm", "pam",
 ];
+
+/// The brush files Sue Paint makes sub tools of when one is handed to
+/// Sue. A picture can be a brush tip too, but handed to Sue it is a
+/// picture; the Tool Group palette imports it as a brush.
+const BRUSHES: &[&str] = &["sut", "abr", "gbr", "gih"];
+
+/// The sound files that go on the timeline.
+const SOUNDS: &[&str] = &["wav", "flac", "mp3", "ogg", "aif", "aiff", "m4a"];
+
+/// `true` when the extension of `path` is one of `extensions`, in any
+/// case.
+fn has_extension(path: &Path, extensions: &[&str]) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extensions.contains(&extension.to_ascii_lowercase().as_str()))
+}
 
 /// `true` for a picture file Sue Paint opens as a canvas.
 pub(crate) fn opens(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| OPENS.contains(&extension.to_ascii_lowercase().as_str()))
+    has_extension(path, OPENS)
 }
 
 /// One open canvas tab.
@@ -3445,6 +3460,27 @@ impl SuePaint {
         cx.notify(tr!("batch-imported", count = count));
     }
 
+    /// A file handed to Sue that Sue Paint takes (see `opens_file`): a
+    /// brush file becomes sub tools, a sound file goes on the timeline,
+    /// and a picture opens as a new canvas.
+    fn take_file(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        if has_extension(path, BRUSHES) {
+            self.import_brushes(cx, path);
+        } else if has_extension(path, SOUNDS) {
+            let timeline = self
+                .picture()
+                .and_then(|picture| crate::anim::timeline(&cx.world.arena, picture))
+                .is_some();
+            if timeline {
+                self.import_audio(cx, path);
+            } else {
+                cx.fail(tr!("make-timeline-first-animation-timeline-new"));
+            }
+        } else {
+            self.open_picked(cx, path, false);
+        }
+    }
+
     pub(crate) fn open_picked(&mut self, cx: &mut AppletContext<'_>, path: &Path, as_layer: bool) {
         if let Some(dir) = path.parent() {
             self.last_dir = Some(dir.to_path_buf());
@@ -3488,23 +3524,36 @@ impl SuePaint {
             return self.open_clip(cx, path, &name, &file, bytes, as_layer);
         }
         let formats = sue_io::formats(sue_model::registry());
-        let bundle = formats
-            .import(bytes, &file, &Properties::new())
-            .map_err(|error| tr!("cannot-open", file = file, error = error))?;
-        // Some pictures (WebP, GIF, TIFF, ...) come in kept as their file;
-        // Sue Paint decodes those itself.
-        let rgba = match bundle
-            .entities
-            .iter()
-            .find_map(|entity| entity.component(ComponentKind::RasterTile2D)?.as_raster())
-        {
-            Some(raster) => to_rgba(raster),
+        let imported = formats.import(bytes, &file, &Properties::new());
+        // Some pictures (WebP, GIF, TIFF, ...) come in kept as their file,
+        // and some (TGA, QOI, ...) no format handler reads; Sue Paint
+        // decodes those itself.
+        let read = imported.as_ref().ok().and_then(|bundle| {
+            bundle
+                .entities
+                .iter()
+                .find_map(|entity| entity.component(ComponentKind::RasterTile2D)?.as_raster())
+                .map(to_rgba)
+        });
+        let rgba = match read {
+            Some(rgba) => rgba,
             None => sue_io::decode_png(bytes)
                 .map(|decoded| decoded.tile)
                 .or_else(|_| sue_io::decode_jpeg(bytes).map(|decoded| decoded.tile))
-                .or_else(|_| sue_io::decode_picture(bytes, None))
+                // The extension names the format where the bytes cannot
+                // (TGA has no signature).
+                .or_else(|_| {
+                    let hint = path
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .and_then(sue_io::PictureFormat::from_extension);
+                    sue_io::decode_picture(bytes, hint)
+                })
                 .map(|raster| to_rgba(&raster))
-                .map_err(|_| tr!("has-no-pixels-sue-paint-can", file = file))?,
+                .map_err(|_| match &imported {
+                    Ok(_) => tr!("has-no-pixels-sue-paint-can", file = file),
+                    Err(error) => tr!("cannot-open", file = file, error = error),
+                })?,
         };
         let target = self.picture().filter(|_| as_layer);
         match target {
@@ -3522,10 +3571,15 @@ impl SuePaint {
             }
             None => {
                 let (width, height) = (rgba.width(), rgba.height());
+                // The canvas says which file it came from and how large
+                // that was, as a picture read by ingest does. Nothing else
+                // of the file is kept: the canvas holds its pixels.
                 let image = Entity::empty(name.clone(), class::IMAGE)
                     .with_property(picture::WIDTH, i64::from(width))
                     .with_property(picture::HEIGHT, i64::from(height))
-                    .with_property(picture::DPI, 72.0);
+                    .with_property(picture::DPI, 72.0)
+                    .with_meta(sue_io::meta::SOURCE, path.display().to_string())
+                    .with_meta(sue_io::meta::BYTES, bytes.len().to_string());
                 let picture_id = image.id();
                 let layer = Entity::new(name.clone(), rgba).with_class(class::LAYER);
                 let layer_id = layer.id();
@@ -7268,8 +7322,10 @@ impl SueApplet for SuePaint {
         }
     }
 
+    /// A layered picture is a canvas as it is; a flat picture becomes one
+    /// when it is handed over (see `take_entity`).
     fn accepts(&self, entity: &Entity) -> bool {
-        picture::is_picture(entity)
+        picture::is_picture(entity) || sue_io::is_flat_picture(entity)
     }
 
     fn focus(&self) -> Option<EntityId> {
@@ -7283,12 +7339,15 @@ impl SueApplet for SuePaint {
         Some(crate::story::story_of(arena, picture).unwrap_or(picture))
     }
 
-    /// Clip Studio Paint files come to Sue Paint as they are, wherever
-    /// they are opened (the Sue menu, the start page, a drop, the Hub),
-    /// since only Sue Paint reads their layers.
+    /// Picture files come to Sue Paint as they are, wherever they are
+    /// opened (the Sue menu, the start page, a drop, the Hub): it reads
+    /// their layers where they have any, and opens each as a canvas. So
+    /// do brush files, which become sub tools. A sound file is Sue Paint's
+    /// only while a canvas is in front, where it goes on the timeline.
     fn opens_file(&self, path: &Path) -> bool {
-        path.extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("clip"))
+        opens(path)
+            || has_extension(path, BRUSHES)
+            || (has_extension(path, SOUNDS) && self.present && self.picture().is_some())
     }
 
     fn reserved_keys(&self) -> Vec<sue_rice::Keybind> {
@@ -7418,6 +7477,50 @@ impl SueApplet for SuePaint {
                 )
             },
         );
+        // Gray and float pixels cannot be painted on as they are. The
+        // canvas gets an 8-bit copy, and the picture itself stays as it
+        // was: nothing of it is lost, and Save asks where to write.
+        let copy = cx.arena().get_by_id(entity).ok().and_then(|found| {
+            let raster = found.component(ComponentKind::RasterTile2D)?.as_raster()?;
+            (raster.format() != PixelFormat::Rgba8).then(|| {
+                let source = found.meta(sue_io::meta::SOURCE).map(str::to_owned);
+                (to_rgba(raster), source)
+            })
+        });
+        if let Some((rgba, source)) = copy {
+            let (width, height) = (rgba.width(), rgba.height());
+            if width > doc::MAX_SIDE || height > doc::MAX_SIDE {
+                cx.fail(tr!(
+                    "picture-must-most-pixels-side",
+                    MAX_SIDE = doc::MAX_SIDE
+                ));
+                return;
+            }
+            let mut image = Entity::empty(name.clone(), class::IMAGE)
+                .with_property(picture::WIDTH, i64::from(width))
+                .with_property(picture::HEIGHT, i64::from(height))
+                .with_property(picture::DPI, 72.0);
+            if let Some(source) = source {
+                image = image.with_meta(sue_io::meta::SOURCE, source);
+            }
+            let picture_id = image.id();
+            let layer = Entity::new(name.clone(), rgba).with_class(class::LAYER);
+            let layer_id = layer.id();
+            let edit = Batch::new(tr!("open-in-sue-paint", name = name.as_str()))
+                .then(SpawnEntity::new(image))
+                .then(
+                    SpawnEntity::new(layer).with_relation(
+                        Relation::new(picture_id, CHILD, layer_id)
+                            .ordered(sue_core::OrderKey::default()),
+                    ),
+                );
+            if Self::apply(cx, edit) {
+                self.activate(&cx.world.arena, picture_id);
+                self.saved_at.insert(picture_id, cx.history.cursor());
+                cx.request(ShellRequest::Open(me_id()));
+            }
+            return;
+        }
         match doc::adopt(cx.arena(), entity, &name) {
             Ok((edit, picture)) => {
                 if Self::apply(cx, edit) {
@@ -7439,9 +7542,10 @@ impl SueApplet for SuePaint {
             return;
         }
         match pick.purpose.as_str() {
-            // "import" is a file opened anywhere in Sue that Sue Paint
-            // takes itself (see `opens_file`).
-            "open" | "import" => self.open_picked(cx, path, false),
+            "open" => self.open_picked(cx, path, false),
+            // A file opened anywhere in Sue that Sue Paint takes itself
+            // (see `opens_file`).
+            "import" => self.take_file(cx, path),
             "layer" => self.open_picked(cx, path, true),
             "import-layers" => self.open_picked(cx, path, true),
             "batch-import" => self.batch_import(cx, path),

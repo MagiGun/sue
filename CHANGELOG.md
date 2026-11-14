@@ -25,6 +25,15 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- A picture you open with Open File (`Ctrl+O`), drop on the window or
+  hand to Sue from the system now opens in Sue Paint as a new canvas,
+  not in the Image Viewer. That includes GIF, TGA, QOI, ICO and the
+  PPM family (PGM, PBM, PNM, PAM), which Sue Paint did not open before.
+  Opening changes nothing in the file, and a canvas you have not
+  touched is not asked about when you quit.
+- A brush file (`.sut`, `.abr`, `.gbr`, `.gih`) dropped on Sue becomes
+  sub tools in Sue Paint, and a sound file dropped while a canvas is in
+  front goes on its timeline.
 - Sue Paint's 3D controls (camera, light, shadow, shapes and body
   shape) are translated into German, French, Spanish, Italian,
   Brazilian Portuguese, Japanese, Simplified Chinese and Arabic.
