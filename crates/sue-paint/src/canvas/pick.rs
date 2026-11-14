@@ -1,5 +1,6 @@
-//! Picking under the pointer: the layer, the vector line or figure
-//! part, and the current layer as the tools see it.
+//! Picking under the pointer: the color, the layer and the drawing
+//! figure's body part, and the current layer's pixels placed on the
+//! picture for the fills that look at it.
 
 use egui::{Pos2, Rect};
 use sue_wm::AppletContext;

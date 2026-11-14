@@ -1604,7 +1604,7 @@ canvas: `mod.rs` lays out the column (tabs, the view, Window, Canvas,
 Tile and the empty canvas); `input.rs` reads the pointer, pen and touch
 events in order and turns them into gestures; `press.rs`, `drag.rs` and
 `release.rs` hold what every tool does as the pen goes down, moves and
-lifts; `pick.rs` finds the layer, line or figure part under the pen;
+lifts; `pick.rs` finds the color, layer or figure part under the pen;
 `fill.rs` has the bucket, lasso fill, auto select and gradients;
 `shape.rs` figures and straight lines; `view.rs` draws the picture with
 its tone overlay, page frames, edge rulers and scrollbars; `overlays.rs`
