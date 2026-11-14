@@ -763,3 +763,20 @@ fn sue_paint_opens_on_its_start_page_where_draw_opens_the_last_picture_or_a_new_
     assert!(runtime.shell.message().is_none_or(|(_, error)| !error));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The menu bar answers a click on a title, and a menu a click on an
+/// item, each found by its text: the click helper of [`PaintDriver`].
+#[test]
+fn sue_paint_opens_a_menu_by_a_click_on_its_title() {
+    let mut paint = PaintDriver::new("paint-menu-click");
+    paint.settle(1);
+    assert!(paint.rect_of("File").is_some(), "{:?}", paint.texts);
+    assert!(paint.rect_of("Save As...").is_none(), "no menu is open yet");
+    paint.click_text("File");
+    let item = paint.rect_of("Save As...").expect("the File menu is open");
+    let title = paint.rect_of("File").unwrap();
+    assert!(item.top() > title.bottom(), "{item:?} under {title:?}");
+    // A click on one of its items runs it and closes the menu.
+    paint.click_text("Start Page");
+    assert!(paint.rect_of("Save As...").is_none(), "the menu closed");
+}

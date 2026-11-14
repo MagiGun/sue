@@ -27,30 +27,9 @@ fn a_click_on_a_hub_box_glides_its_studio_in_and_then_sleeps() {
             crate::convert::ID
         ]
     );
-    let (_, rect, _) = runtime.shell.hub_boxes()[0].clone();
+    let (rect, _) = hub_box(&runtime, sue_paint::ID).expect("Sue Paint's box");
     let at = rect.left_top() + vec2(30.0, 30.0);
-    let count = frames(
-        &mut runtime,
-        &ctx,
-        vec2(1440.0, 900.0),
-        start,
-        |frame| match frame {
-            0 => vec![egui::Event::PointerMoved(at)],
-            1 => vec![egui::Event::PointerButton {
-                pos: at,
-                button: egui::PointerButton::Primary,
-                pressed: true,
-                modifiers: egui::Modifiers::NONE,
-            }],
-            2 => vec![egui::Event::PointerButton {
-                pos: at,
-                button: egui::PointerButton::Primary,
-                pressed: false,
-                modifiers: egui::Modifiers::NONE,
-            }],
-            _ => Vec::new(),
-        },
-    );
+    let count = frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, click_at(at));
     assert!(count > 10, "the page must glide in ({count} frames)");
     assert_eq!(
         runtime.shell.page().map(AppletId::as_str),
@@ -329,36 +308,12 @@ fn a_pinned_studio_opens_at_launch_and_the_pin_undoes() {
             .to_owned()
     };
     // A click on Sue Writer's pin, at the bottom right of its box.
-    let (_, rect, pin) = runtime
-        .shell
-        .hub_boxes()
-        .iter()
-        .find(|(id, _, _)| id.as_str() == sue_writer::ID)
-        .cloned()
-        .unwrap();
+    let (rect, pin) = hub_box(&runtime, sue_writer::ID).expect("Sue Writer's box");
     assert!(
         (pin.right() - rect.right()).abs() < 12.0 && (pin.bottom() - rect.bottom()).abs() < 12.0,
         "the pin sits at the box's bottom right"
     );
-    let click = |at: egui::Pos2| {
-        move |frame: usize| match frame {
-            0 => vec![egui::Event::PointerMoved(at)],
-            1 => vec![egui::Event::PointerButton {
-                pos: at,
-                button: egui::PointerButton::Primary,
-                pressed: true,
-                modifiers: egui::Modifiers::NONE,
-            }],
-            2 => vec![egui::Event::PointerButton {
-                pos: at,
-                button: egui::PointerButton::Primary,
-                pressed: false,
-                modifiers: egui::Modifiers::NONE,
-            }],
-            _ => Vec::new(),
-        }
-    };
-    frames(&mut runtime, &ctx, size, start, click(pin.center()));
+    frames(&mut runtime, &ctx, size, start, click_at(pin.center()));
     assert_eq!(pinned(&runtime), sue_writer::ID);
     assert!(runtime.shell.hub_open(), "pinning does not open it");
     // One undo step, like any other change.
@@ -379,16 +334,13 @@ fn a_pinned_studio_opens_at_launch_and_the_pin_undoes() {
     });
     assert_eq!(pinned(&runtime), sue_writer::ID);
     // One pin at a time: Sue Paint's pin takes it over.
-    let paint_pin = runtime
-        .shell
-        .hub_boxes()
-        .iter()
-        .find(|(id, _, _)| id.as_str() == sue_paint::ID)
-        .map(|(_, _, pin)| pin.center())
-        .unwrap();
-    frames(&mut runtime, &ctx, size, start, click(paint_pin));
+    let paint_pin = hub_box(&runtime, sue_paint::ID)
+        .expect("Sue Paint's box")
+        .1
+        .center();
+    frames(&mut runtime, &ctx, size, start, click_at(paint_pin));
     assert_eq!(pinned(&runtime), sue_paint::ID);
-    frames(&mut runtime, &ctx, size, start, click(pin.center()));
+    frames(&mut runtime, &ctx, size, start, click_at(pin.center()));
     assert_eq!(pinned(&runtime), sue_writer::ID);
     // The rice file keeps it.
     let rice = std::fs::read_to_string(runtime.engine.rice_path()).unwrap();

@@ -178,25 +178,7 @@ fn the_sue_menu_follows_the_context_and_sends_work_between_studios() {
     // opens the Sue menu.
     let button = runtime.shell.sue_button();
     assert_eq!(button.min, egui::Pos2::ZERO);
-    frames(&mut runtime, &ctx, size, start, |frame| {
-        let at = button.center();
-        match frame {
-            0 => vec![egui::Event::PointerMoved(at)],
-            1 => vec![egui::Event::PointerButton {
-                pos: at,
-                button: egui::PointerButton::Primary,
-                pressed: true,
-                modifiers: egui::Modifiers::NONE,
-            }],
-            2 => vec![egui::Event::PointerButton {
-                pos: at,
-                button: egui::PointerButton::Primary,
-                pressed: false,
-                modifiers: egui::Modifiers::NONE,
-            }],
-            _ => Vec::new(),
-        }
-    });
+    frames(&mut runtime, &ctx, size, start, click_at(button.center()));
     assert!(runtime.shell.sue_menu_open());
     let first = runtime.shell.sue_menu_labels(&[]);
     for wanted in [

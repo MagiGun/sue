@@ -120,6 +120,16 @@ pub(crate) fn hub_row(runtime: &Runtime, row: &sue_wm::HubRow) -> Option<egui::R
         .max_by(|a, b| a.width().total_cmp(&b.width()))
 }
 
+/// Where the Hub drew the box of the studio or tool `id`, and its pin.
+pub(crate) fn hub_box(runtime: &Runtime, id: &str) -> Option<(egui::Rect, egui::Rect)> {
+    runtime
+        .shell
+        .hub_boxes()
+        .iter()
+        .find(|(applet, _, _)| applet.as_str() == id)
+        .map(|(_, rect, pin)| (*rect, *pin))
+}
+
 /// The first document's text and marks.
 pub(crate) fn doc_any(runtime: &Runtime) -> (String, sue_model::TextMarks) {
     runtime
@@ -144,11 +154,22 @@ pub(crate) fn doc_any(runtime: &Runtime) -> (String, sue_model::TextMarks) {
 
 /// Every piece of text one frame draws, with where it starts.
 pub(crate) fn texts_of(output: &egui::FullOutput) -> Vec<(String, Pos2)> {
+    text_rects(output)
+        .into_iter()
+        .map(|(text, rect)| (text, rect.min))
+        .collect()
+}
+
+/// Every piece of text one frame draws, with its rect.
+pub(crate) fn text_rects(output: &egui::FullOutput) -> Vec<(String, egui::Rect)> {
     let mut found = Vec::new();
     for clipped in &output.shapes {
         let mut look = |shape: &egui::Shape| {
             if let egui::Shape::Text(text) = shape {
-                found.push((text.galley.text().to_owned(), text.pos));
+                found.push((
+                    text.galley.text().to_owned(),
+                    egui::Rect::from_min_size(text.pos, text.galley.size()),
+                ));
             }
         };
         match &clipped.shape {
@@ -166,6 +187,8 @@ pub(crate) struct PaintDriver {
     pub(crate) ctx: egui::Context,
     pub(crate) now: Instant,
     pub(crate) root: PathBuf,
+    /// What the last frame drew: every piece of text and its rect.
+    pub(crate) texts: Vec<(String, egui::Rect)>,
 }
 
 impl PaintDriver {
@@ -184,6 +207,7 @@ impl PaintDriver {
             ctx,
             now,
             root,
+            texts: Vec::new(),
         };
         driver.step(vec![key(egui::Key::N, egui::Modifiers::COMMAND)]);
         driver.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
@@ -206,23 +230,43 @@ impl PaintDriver {
         let output = self
             .ctx
             .run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
-        let mut found = Vec::new();
-        for clipped in &output.shapes {
-            let mut look = |shape: &egui::Shape| {
-                if let egui::Shape::Text(text) = shape {
-                    found.push((
-                        text.galley.text().to_owned(),
-                        egui::Rect::from_min_size(text.pos, text.galley.size()),
-                    ));
-                }
-            };
-            match &clipped.shape {
-                egui::Shape::Vec(shapes) => shapes.iter().for_each(&mut look),
-                shape => look(shape),
-            }
-        }
+        let found = text_rects(&output);
         output.drop_without_applying_deltas();
+        self.texts.clone_from(&found);
         found
+    }
+
+    /// Where the last frame drew `text`: the topmost, then the leftmost
+    /// when it is drawn more than once.
+    pub(crate) fn rect_of(&self, text: &str) -> Option<egui::Rect> {
+        self.texts
+            .iter()
+            .filter(|(found, _)| found == text)
+            .map(|(_, rect)| *rect)
+            .min_by(|a, b| {
+                a.top()
+                    .total_cmp(&b.top())
+                    .then(a.left().total_cmp(&b.left()))
+            })
+    }
+
+    /// A click in the middle of `text`, found where the last frame drew
+    /// it and never by a fixed position; what the frames after draw.
+    pub(crate) fn click_text(&mut self, text: &str) -> Vec<(String, egui::Rect)> {
+        let at = self
+            .rect_of(text)
+            .unwrap_or_else(|| panic!("{text:?} is on screen: {:?}", self.texts))
+            .center();
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        self.step(vec![egui::Event::PointerMoved(at)]);
+        self.step(vec![press(true)]);
+        self.step(vec![press(false)]);
+        self.settle(4)
     }
 
     /// `count` frames with nothing new; what the last one draws.
