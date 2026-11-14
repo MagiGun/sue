@@ -34,7 +34,7 @@ fn every_command_of_the_tool_group_runs_on_a_canvas() {
         .filter(|command| command.group == "tool")
         .map(|command| command.name)
         .collect();
-    assert_eq!(group.len(), 22, "{group:?}");
+    assert_eq!(group.len(), 34, "{group:?}");
     for name in &group {
         driver.command(name);
         driver.settle(4);

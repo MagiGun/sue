@@ -107,7 +107,7 @@ fn sue_paint_strip_icons_open_their_palettes() {
         texts = step(&mut runtime, Vec::new());
     }
     assert!(
-        open(&texts, "Info"),
+        open(&texts, "Information"),
         "dragging the Info icon did not float its palette over the canvas"
     );
     let _ = std::fs::remove_dir_all(&root);
@@ -187,7 +187,7 @@ fn sue_paint_palettes_drag_by_their_title_bars() {
     // Every other palette drags by its title too, to the other side.
     let mut stuck = Vec::new();
     for name in [
-        "Tool settings",
+        "Tool Property",
         "Color Wheel",
         "Color Set",
         "Navigator",
