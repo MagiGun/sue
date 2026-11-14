@@ -493,6 +493,64 @@ cargo test --release -p sue-core --test codec_bench -- --ignored --nocapture
 Its crates are development dependencies of `sue-core` only: the kernel
 itself still depends on nothing.
 
+#### The pixel store (`PIXL`, `ARNA` version 2)
+
+This section replaces two older sentences above: big buffers are no longer
+stored raw when they are rasters, and the kernel now depends on two pure
+Rust crates of the workspace, `sha2` and `miniz_oxide`.
+
+| Tag | Version | Holds | Owner |
+| --- | --- | --- | --- |
+| `ARNA` | 2 | As version 1, except that a raster may be written by reference to the pixel store | `sue-core` |
+| `PIXL` | 1 | The pixel store: every distinct tile of the rasters, once | `sue-core` (`pixels.rs`) |
+
+`SueFile::set_arena` cuts every raster into tiles of 256 pixels (the
+brush's 64 pixel working tiles divide them exactly; edge tiles are what is
+left). A tile is `empty` (every byte zero), `solid` (one pixel value,
+written in the raster) or a `blob`, named by a key: SHA-256 of a salt, the
+format, the size and the pixels, cut to 128 bits. A store that meets a key
+it already holds compares the pixels before it shares the blob, and a
+different tile with the same key is hashed again with the next salt, so a
+collision costs a second blob and never a wrong picture. Tile size, hash
+kind and key width are written at the head of `PIXL`; a reader takes them
+from there and never recomputes a key. A raster by reference has the bit
+`0x80` set in its format byte (`pixels::TILED`).
+
+Each blob says its codec, format and size. Codec 1 (`CODEC_PLANES`) splits
+the tile into one plane per byte of a pixel, alpha first, runs the median
+predictor of LOCO-I over each plane and deflates the residues; a tile it
+would not make smaller is stored as codec 0, raw. The choice comes from
+the tile codec benchmark: 3.4 % of the raw size at deflate level 1 and
+3.0 % at level 3 over its pictures without noise, against about 3.1 %
+for lossless JPEG XL at less than half the speed. Save writes level 3
+(`PixelOptions::SAVE`), and `PixelOptions::AUTOSAVE` is level 1; one
+reader reads every level. Tiles are encoded, and decoded, on as many
+threads as the machine has, and the bytes do not depend on how many.
+
+A document without rasters is written as `ARNA` version 1, byte for byte
+as 0.0.75 wrote it. Sue 0.0.75 refuses an `ARNA` of version 2 as "saved by
+a newer Sue", a clear failure and not a corruption.
+`SueFile::copy_for_older_sue` writes the copy an older Sue opens: `ARNA`
+version 1, every raster inline, no `PIXL`, the other chunks as they are,
+and it names what it had to leave out (today: components a later Sue wrote
+that this build keeps without reading). For the golden files of 0.0.75 the
+copy is their arena byte for byte.
+
+Rule 3 for blobs: when the file being saved was read with a store, and it
+holds a chunk this build does not know or an entity holding an unread
+component, a tail, an opaque extension component or an opaque value,
+every old blob is written back as it was, under its old key, whether a
+raster this build understands points at it or not; tile size and key
+width stay the old file's then. Otherwise only the blobs the rasters use
+are written. A blob in a codec, or a tile of a kind, this build does not
+know leaves its raster unread and kept, like an unknown pixel format. A
+damaged or missing tile fails the load with the name of its entity.
+
+Pixel format codes 3 (`Gray16`, `PixelFormat::GRAY16_CODE`) and 4
+(`Rgba16`, `RGBA16_CODE`) are kept for 16-bit integer pixels, one
+little-endian `u16` per sample. No build reads them yet: such a raster is
+kept and not drawn.
+
 ### 1.10 Formats and bundles
 
 Every importer and exporter is a `FormatHandler` in one `FormatRegistry`:
