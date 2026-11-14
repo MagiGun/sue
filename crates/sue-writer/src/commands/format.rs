@@ -1,12 +1,14 @@
 //! The Format menu: character formats, colors, alignment, line spacing,
 //! lists and indents, and paragraph styles.
 
-use sue_wm::{Command, Flags};
+use sue_core::Value;
+use sue_model::mark_kind as kind;
+use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
-use crate::studio::SueWriter;
+use crate::studio::{SueWriter, font_step};
 
 const fn c(name: &'static str, label: &'static str) -> Command<SueWriter> {
-    super::old(name, label, "format")
+    Command::new(name, label, "format", run).state(state)
 }
 
 pub(super) const COMMANDS: &[Command<SueWriter>] = &[
@@ -60,3 +62,148 @@ pub(super) const COMMANDS: &[Command<SueWriter>] = &[
     c("style.dialogue", "style-dialogue"),
     c("style.transition", "style-transition"),
 ];
+
+/// Does what a Format menu command does.
+fn run(writer: &mut SueWriter, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let command = call.name;
+    let sheet = writer.sheet(cx);
+    match command {
+        "format.bold" => writer.editor.toggle(cx, kind::BOLD, &tr!("bold")),
+        "format.italic" => writer.editor.toggle(cx, kind::ITALIC, &tr!("italic")),
+        "format.underline" => writer.editor.toggle(cx, kind::UNDERLINE, &tr!("underline")),
+        "format.strike" => writer
+            .editor
+            .toggle(cx, kind::STRIKE, &tr!("strikethrough")),
+        "format.code" => writer.editor.toggle(cx, kind::CODE, &tr!("code")),
+        case if case.starts_with("format.case.") => {
+            let Some(case) = sue_type::case::Case::parse(&case["format.case.".len()..]) else {
+                return;
+            };
+            writer.editor.change_case(cx, case);
+        }
+        "format.caps" => writer.editor.toggle(cx, kind::CAPS, &tr!("all-capitals")),
+        "format.grow" | "format.shrink" => {
+            let (para, chars) = writer.editor.look_here(&sheet);
+            let now = chars.size.unwrap_or(para.size);
+            let next = font_step(now, command == "format.grow");
+            writer.editor.set_char(
+                cx,
+                kind::SIZE,
+                Some(Value::Float(f64::from(next))),
+                &tr!("font-size"),
+            );
+        }
+        "format.small_caps" => writer
+            .editor
+            .toggle(cx, kind::SMALL_CAPS, &tr!("small-capitals")),
+        "format.superscript" | "format.subscript" => {
+            let script = if command.ends_with("superscript") {
+                "super"
+            } else {
+                "sub"
+            };
+            let (_, look) = writer.editor.look_here(&sheet);
+            let on = look.script == if script == "super" { 1 } else { -1 };
+            writer.editor.set_char(
+                cx,
+                kind::SCRIPT,
+                (!on).then(|| Value::Text(script.to_owned())),
+                &tr!("raise-or-lower"),
+            );
+        }
+        "format.clear" => writer.editor.clear_formatting(cx),
+        command if command.starts_with("format.highlight.") => {
+            let color = match &command["format.highlight.".len()..] {
+                "yellow" => Some("#fff176"),
+                "green" => Some("#a5e3a1"),
+                "blue" => Some("#9fd2ff"),
+                "pink" => Some("#ffb3d1"),
+                _ => None,
+            };
+            writer.editor.set_char(
+                cx,
+                kind::HIGHLIGHT,
+                color.map(|hex| Value::Text(hex.to_owned())),
+                &tr!("highlight"),
+            );
+        }
+        command if command.starts_with("format.color.") => {
+            let hex = &command["format.color.".len()..];
+            let value = (hex != "none").then(|| Value::Text(format!("#{hex}")));
+            writer
+                .editor
+                .set_char(cx, kind::COLOR, value, &tr!("text-color"));
+        }
+        command if command.starts_with("style.") => {
+            let key = &command["style.".len()..];
+            writer.editor.set_style(cx, key, &tr!("paragraph-style"));
+        }
+        command if command.starts_with("align.") => {
+            let align = &command["align.".len()..];
+            let value = (align != "left").then(|| Value::Text(align.to_owned()));
+            writer
+                .editor
+                .set_paragraph(cx, kind::ALIGN, value, &tr!("alignment"));
+        }
+        command if command.starts_with("spacing.") => {
+            let spacing: f64 = command["spacing.".len()..].parse().unwrap_or(1.0);
+            writer.editor.set_paragraph(
+                cx,
+                kind::LINE_SPACING,
+                Some(Value::Float(spacing)),
+                &tr!("line-spacing"),
+            );
+        }
+        "list.bullet" | "list.number" => {
+            let list = &command["list.".len()..];
+            let (para, _) = writer.editor.look_here(&sheet);
+            let on = para.list.map(sue_type::ListKind::name) == Some(list);
+            writer.editor.set_paragraph(
+                cx,
+                kind::LIST,
+                (!on).then(|| Value::Text(list.to_owned())),
+                &tr!("list"),
+            );
+        }
+        "indent.more" | "indent.less" => {
+            let (para, _) = writer.editor.look_here(&sheet);
+            if para.list.is_some() {
+                let level = if command.ends_with("more") {
+                    (para.level + 1).min(8)
+                } else {
+                    para.level.saturating_sub(1)
+                };
+                writer.editor.set_paragraph(
+                    cx,
+                    kind::LEVEL,
+                    Some(Value::Int(level as i64)),
+                    &tr!("list-level"),
+                );
+            } else {
+                let style = sheet.get(&para.style).indent;
+                let own = para.indent - style;
+                let next = if command.ends_with("more") {
+                    own + 36.0
+                } else {
+                    (own - 36.0).max(0.0)
+                };
+                writer.editor.set_paragraph(
+                    cx,
+                    kind::INDENT,
+                    (next > 0.0).then(|| Value::Float(f64::from(style + next))),
+                    &tr!("indent"),
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Whether a Format menu command works now: with a text open.
+fn state(writer: &SueWriter, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    if writer.editor.current().is_some() {
+        ItemState::on()
+    } else {
+        ItemState::off()
+    }
+}

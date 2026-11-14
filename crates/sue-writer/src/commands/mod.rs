@@ -1,13 +1,14 @@
 //! Sue Writer's commands: one registry that the menus, the shortcuts, the
 //! command palette and the tests read.
 //!
-//! Each menu's commands are a `const` table in a file of their own. A
-//! command's name is saved data (shortcut settings are keyed by it), so it
-//! is never renamed without a migration.
+//! Each menu's commands are a `const` table in a file of their own,
+//! beside what they do (`run`) and when they work (`state`). A command's
+//! name is saved data (shortcut settings are keyed by it), so it is never
+//! renamed without a migration.
 
 use std::sync::OnceLock;
 
-use sue_wm::{AppletContext, Call, Command, CommandRegistry, Facts, ItemState};
+use sue_wm::CommandRegistry;
 
 use crate::studio::{KEYS_SECTION, SueWriter};
 
@@ -70,20 +71,6 @@ pub(crate) fn shortcut_table() -> &'static [sue_wm::shortcuts::Shortcut] {
             })
             .collect()
     })
-}
-
-/// A command whose `run` and `state` are the studio's `dispatch` and
-/// `command_state`.
-const fn old(name: &'static str, label: &'static str, group: &'static str) -> Command<SueWriter> {
-    Command::new(name, label, group, run_old).state(state_old)
-}
-
-fn run_old(writer: &mut SueWriter, cx: &mut AppletContext<'_>, call: Call<'_>) {
-    writer.dispatch(call.name, cx);
-}
-
-fn state_old(writer: &SueWriter, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
-    writer.command_state(call.name, facts)
 }
 
 #[cfg(test)]
