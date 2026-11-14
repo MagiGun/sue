@@ -825,10 +825,11 @@ mod tests {
 
     /// Sue Paint with `count` canvases open, the first one current.
     fn paint_with(count: usize) -> SuePaint {
-        let mut paint = SuePaint::default();
-        paint.docs = (0..count).map(|_| Doc::new(EntityId::new())).collect();
-        paint.active = 0;
-        paint
+        SuePaint {
+            docs: (0..count).map(|_| Doc::new(EntityId::new())).collect(),
+            active: 0,
+            ..SuePaint::default()
+        }
     }
 
     /// The name a test runs for an entry: a family as its first member.
@@ -1062,11 +1063,7 @@ mod tests {
             assert!(!checked(&paint, cx, "window.layer"), "Cels is the tab");
             // The palettes of their own come into the dock and stay,
             // whether the dock had them already or not.
-            for name in [
-                "window.info",
-                "window.auto_actions",
-                "window.item_bank",
-            ] {
+            for name in ["window.info", "window.auto_actions", "window.item_bank"] {
                 for _ in 0..2 {
                     registry().run(&mut paint, cx, name);
                     assert!(checked(&paint, cx, name), "{name}");
