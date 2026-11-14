@@ -122,6 +122,17 @@ follow [Semantic Versioning](https://semver.org/).
   holds pixels in a format this version does not know: that layer is not
   drawn, the rest is, and saving the file again keeps the layer and
   everything else the later version wrote that this one cannot read.
+- The **Image Viewer** and the **Converter**, with their boxes on the
+  Hub, the Sue menu's Tools and their pages in Settings. A picture opens
+  in Sue Paint as a canvas, where turning, flipping, cropping, resizing,
+  color adjustments and saving as any picture type already are, and the
+  Sue menu's Send To puts it into Sue Writer. Converting many files at
+  once, export settings and audio export come back inside Sue Paint and
+  Sue Writer in a later release. Gone for good: Markdown to HTML and JSON
+  tables in the Converter (Sue Writer reads Markdown and makes web pages
+  itself), Base64, hex dumps, byte map pictures, plain copies, sound speed
+  and reverse, and stepping through a project's pictures with the arrow
+  keys.
 
 ## [0.0.75] - 2026-11-09
 

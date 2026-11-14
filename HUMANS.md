@@ -7,14 +7,13 @@ musicians, filmmakers, makers and coders. It has no technical jargon. When a ter
 needs explaining, it is explained the first time it appears.
 
 > **Where things stand:** This guide describes the experience Sue is built for.
-> Sue already opens its own window on the Hub, where you pick a studio or a
-> tool. You can paint in Sue Paint, write and publish in Sue Writer, look at
-> and touch up pictures in the Image Viewer and turn files into other kinds
-> in the Converter. Everything you change can be undone, and `Ctrl+S` saves
-> everything you made as one project file. The big studios (music, video, 3D)
-> are added in the releases that follow. Sue reads your `.suerice` file when
-> it starts (or when you press Reload in Settings), so close Sue or reload
-> after you edit the file by hand.
+> Sue already opens its own window on the Hub, where you pick a studio.
+> You can paint in Sue Paint, where any picture file opens as a canvas, and
+> write and publish in Sue Writer. Everything you change can be undone, and
+> `Ctrl+S` saves everything you made as one project file. The big studios
+> (music, video, 3D) are added in the releases that follow. Sue reads your
+> `.suerice` file when it starts (or when you press Reload in Settings), so
+> close Sue or reload after you edit the file by hand.
 
 ---
 
@@ -22,12 +21,7 @@ needs explaining, it is explained the first time it appears.
 
 Sue is **one small app that can become many apps**.
 
-Some days you'll use it for everyday jobs, with its **tools**:
-
-- an **image viewer** to look at pictures large and fix them up quickly,
-- a **file converter**: drop a file in, get it out in another format.
-
-When you need more, one click turns Sue into a full **studio**:
+One click turns Sue into a full **studio**:
 
 | Studio | What you do there |
 | --- | --- |
@@ -64,11 +58,6 @@ see (you can color it yourself in Settings).
 │  │ Sue Paint    │ │ Sue Writer   │                                │
 │  │          [⚲] │ │          [⚲] │                                │
 │  └──────────────┘ └──────────────┘                                │
-│  Tools                                                            │
-│  ┌──────────────┐ ┌──────────────┐                                │
-│  │ Image Viewer │ │ Converter    │                                │
-│  │          [⚲] │ │          [⚲] │                                │
-│  └──────────────┘ └──────────────┘                                │
 │  Recent            Saved Projects     Unsaved Work                │
 │  ┌──────────────┐  ┌──────────────┐   ┌──────────────────────┐    │
 │  │ album  Proj. │  │ album        │   │ Novel   [Recover]    │    │
@@ -80,11 +69,10 @@ see (you can color it yourself in Settings).
 
 ### The Hub
 
-Sue opens on the **Hub**, a page of boxes: first the **Studios** (Sue Paint,
-Sue Writer), then the **Tools** (the Image Viewer, the Converter). Each box
-says what it is for. Click one to go there: it comes in over the Hub, and a
-studio slides its panels in from the edges. New studios and tools appear in
-the Hub by themselves as they are added.
+Sue opens on the **Hub**, a page of boxes: the **Studios** (Sue Paint, Sue
+Writer). Each box says what it is for. Click one to go there: it comes in
+over the Hub, and a studio slides its panels in from the edges. New studios
+and tools appear in the Hub by themselves as they are added.
 
 At the bottom right of every box is a **pin**. Pin the studio or tool you
 use most and Sue opens straight into it from then on, with no stop at the
@@ -132,8 +120,7 @@ The Sue button opens the **Sue menu**, for Sue as a whole:
 - **Project**: open, save and save as;
 - **Send To**: the thing you are working on, into another studio or tool,
   with no exporting and importing. A picture in Sue Paint goes into the
-  Converter or into the text in Sue Writer; a picture in the Image Viewer
-  opens in Sue Paint. Studios that come later appear here by themselves;
+  text in Sue Writer. Studios that come later appear here by themselves;
 - **Language**: the language Sue speaks;
 - **Layout**: Automatic (what your device is), Desktop, Tablet or Phone,
   for the whole of Sue at once. On a computer, Tablet and Phone show the
@@ -188,49 +175,6 @@ Clip Studio Paint: the picture's name (with `*` while it has changes not
 saved), its size, resolution and zoom, and the print profile while View,
 Color Profile, Preview is on. macOS keeps its own frame.
 
-### The Image Viewer
-
-The **Image Viewer** fills its page with one picture: zoom with the wheel,
-fit it or see it at 100%, drag to pan, and step to the project's other
-pictures with the arrow keys. Its menus (File, Image, View, Send) and the
-toolbar under them do the quick fixes (turn, mirror, crop, resize,
-brightness and contrast, saturation and hue, grayscale, invert), each one
-`Ctrl+Z` step, with **Undo** and **Redo** first on the toolbar; save the picture as any picture type; re-encode it as a
-lossless JPEG XL; show it in its folder; and send it to the Converter, Sue
-Paint or Sue Writer. File, Open Picture opens one with your system's own
-Open window.
-
-### The Converter
-
-The **Converter** turns any file into another kind. Add files with **Add
-Files** or **Add a Folder** (your system's own Open window), with the Sue
-menu's Send To from any studio or tool, or with **Add from the Project** (the
-pictures and sounds you have open). For each kind of file in the list a
-drop-down says what it becomes:
-
-- pictures: PNG, JPEG, JPEG XL, WebP, TIFF, BMP, GIF, TGA, QOI, ICO or PPM,
-  with a new size (scale, width, height, fit inside, exact) and how to
-  resample, turning, mirroring, brightness, contrast, saturation, grays
-  only, filling transparency with a color you pick on the wheel, and the
-  JPEG quality or JPEG XL effort;
-- sounds: FLAC, WAV or AIFF, at a new sample rate, mono or stereo, 16 or
-  24-bit (or 32-bit float WAV), louder or quieter (or normalized), with the
-  start or end cut, faded in or out, sped up or slowed down, or backwards;
-- text: tidied (line endings, trailing spaces, tabs), Markdown as an HTML
-  page, and tables between CSV, TSV and JSON (JSON can also be re-indented);
-- anything at all: Base64 text, a hex dump, a byte map picture, or a plain
-  copy.
-
-Choose where the results go (next to each file, or a folder you pick), how
-they are named (`{name}-small`, say), and whether to keep both or replace a
-file of the same name; the file being converted is never written over. Click
-Convert (or `Ctrl+Enter`): big files convert in the background, the list says
-where each one went (click it to see it in Explorer, or Finder on a Mac), and
-the status bar names the folder. On a phone or tablet, Sue works on a copy of
-a file you pick one by one, and nothing can be put next to that copy where
-you would see it, so "Next to each file" asks which folder the results go
-to before it converts; they land there, named as the status bar says.
-
 ### Opening and saving files
 
 Whenever Sue needs a file, or a place to save one, it shows your system's own
@@ -242,8 +186,8 @@ sound file goes on the timeline of the canvas in front, a Word, Markdown or
 text file opens in Sue Writer, and a `.sue` project replaces what is open.
 A file nothing in Sue opens yet is left alone, and the status bar says so.
 
-Whenever Sue saves or exports a file (a project, a picture from Sue Paint, a
-re-encoded JPEG XL, an exported rice), the status bar says the file's name and
+Whenever Sue saves or exports a file (a project, a picture from Sue Paint,
+an exported rice), the status bar says the file's name and
 the folder it went to. Click that message to see the file, selected, in your
 system's file manager.
 
@@ -258,23 +202,21 @@ and on iPhone and iPad the Files browser. Sue works on a copy of a file you
 open. On Android, saving that file writes your changes back to the
 original, and saving somewhere new asks where first, then every save
 (`Ctrl+S` too) goes there. A folder you choose on Android works both
-ways: Sue reads the files in it (the Converter's Add a Folder) and each
-file Sue makes in it lands there (the Converter's results; Android lets
-you choose any folder but the top of Download). iPhone and iPad save
+ways: Sue reads the files in it (Sue Paint's Batch import) and each
+file Sue makes in it lands there (Android lets you choose any folder but
+the top of Download). iPhone and iPad save
 first and then ask where in Files the file goes, each time you save; a
 folder you choose there is written to directly. Wherever Sue names such a
-file (the status bar's "Saved", the Image Viewer's info row and its Save
-over the original question, the Converter's output folder, the Hub's
-recent work), it names what
+file (the status bar's "Saved", the Hub's recent work), it names what
 you chose, such as "Picture.png in Download", with its folder where the
 system says it. A phone has no file manager for Sue to show files in, so
-those messages are not clickable there, and Show in Folder and the
-Converter's "show the result" choice are left out.
+those messages are not clickable there, and Show in Folder is left
+out.
 
 ### The command palette
 
 Press **Tab** (or `/`) for the **command palette**: start typing and it finds
-any action by a few letters, such as "open viewer" for the Image Viewer or
+any action by a few letters, such as "open writer" for Sue Writer or
 "new square" for a new square picture. (In Sue Paint, Tab hides the palettes
 instead, as in other painting apps; the palette is in the Sue menu.)
 
@@ -1146,8 +1088,8 @@ system's own picker, which needs no permission.
 
 **Trying Sue in your browser.** Open https://magigun.github.io/sue/try/ in a
 recent Chrome, Edge, Firefox or Safari: Sue downloads once (about 5 MB) and
-opens with nothing to install. It is the same Sue, with the Hub, Sue Paint,
-Sue Writer, the Image Viewer and the Converter.
+opens with nothing to install. It is the same Sue, with the Hub, Sue Paint
+and Sue Writer.
 
 - **The layout** follows your device: a computer gets the desktop layout,
   a tablet the tablet one and a phone the phone one. On a phone, turn on
@@ -1171,8 +1113,8 @@ because it runs as plain files with no server behind it:
   Light and Hack.
 - **Typing on phones and tablets.** The on-screen keyboard does not come up,
   so use a computer to write.
-- **Work in the background.** The Converter and other long jobs make the page
-  wait until they finish.
+- **Work in the background.** Long jobs make the page wait until they
+  finish.
 - **Show in Folder and opening other programs.**
 - **Files outside the browser.** Sue sees only the files you choose or drop;
   your other files and folders stay private, and anything you do not save
@@ -1226,7 +1168,7 @@ controls for it in **Settings**:
 - shortcuts become **key caps**, one for each set of keys: click one and
   press the new keys, `×` takes one away and `+` adds another, as many as
   you like. Sue's own shortcuts and every studio's (Sue Paint's, tools and
-  brush keys included, Sue Writer's and the Image Viewer's) are all under
+  brush keys included, and Sue Writer's) are all under
   Keymaps, and the menus show what you chose.
 
 **Appearance & Rice** also offers ready-made themes (Void, Graphite, Paper and
