@@ -23,6 +23,7 @@
 //! - [`progress`]: the progress bar, the spinner and the skeleton.
 //! - [`scroll`]: the scroll view, with thin bars over its content and
 //!   edges that fade where there is more.
+//! - [`mod@splitter`]: the line between two panes.
 
 pub mod card;
 pub mod focus;
@@ -30,6 +31,7 @@ pub mod list;
 pub mod motion;
 pub mod progress;
 pub mod scroll;
+pub mod splitter;
 pub mod tabs;
 pub mod tokens;
 
@@ -47,6 +49,7 @@ pub use progress::{
     ProgressBar, Skeleton, Spinner, paint_skeleton, progress_bar, skeleton, spinner,
 };
 pub use scroll::ScrollView;
+pub use splitter::{SplitAxis, Splitter, splitter};
 pub use tabs::{SideOutput, SidebarTabs, Tab, TabStrip, TabsOutput, sidebar_tabs, tab_strip};
 pub use tokens::{
     Density, EDGE_CONTRAST, Elevation, Layer, MIN_TEXT_SIZE, Radius, Space, TEXT_CONTRAST,
