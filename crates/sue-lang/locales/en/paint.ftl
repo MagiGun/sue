@@ -2344,3 +2344,4 @@ zoom-200-percent = 200%
 paste-material = Paste Material
 cancel-transform = Cancel Transform
 switch-main-and-sub-color = Switch Between Main and Sub Color
+swap-main-and-sub-color-values = Swap main and sub color

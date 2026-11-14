@@ -297,7 +297,7 @@ impl SuePaint {
             Icon::Swap,
             true,
             false,
-            &tr!("swap-main-sub-color-x"),
+            &tr!("swap-main-and-sub-color-values"),
             theme,
         ) {
             std::mem::swap(&mut self.main, &mut self.sub);
