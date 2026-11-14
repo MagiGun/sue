@@ -3741,6 +3741,7 @@ version = "0.0.75"
 dependencies = [
  "jxl-oxide",
  "miniz_oxide 0.8.9",
+ "sha2",
  "zune-core",
  "zune-jpegxl",
 ]

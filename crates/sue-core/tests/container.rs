@@ -736,7 +736,12 @@ fn the_golden_file_still_loads_and_holds_nothing_unread() {
             assert!(entity.unread_component(kind).is_none());
         }
     }
+    // A save puts the rasters into the pixel store (arena version 2); the
+    // copy for older Sue encodes the arena as 0.0.75 did, byte for byte.
     let mut again = SueFile::from_bytes(GOLDEN).unwrap();
     again.set_arena(&arena);
-    assert_eq!(again.to_bytes(), GOLDEN, "the arena encodes as 0.0.75 did");
+    assert_ne!(again.to_bytes(), GOLDEN);
+    let (older, left_out) = again.copy_for_older_sue(&arena);
+    assert!(left_out.is_empty());
+    assert_eq!(older.to_bytes(), GOLDEN, "the arena encodes as 0.0.75 did");
 }

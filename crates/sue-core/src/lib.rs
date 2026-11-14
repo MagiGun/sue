@@ -30,6 +30,7 @@ mod handle;
 mod id;
 mod jobs;
 mod operator;
+pub mod pixels;
 mod projection;
 mod registry;
 mod relation;

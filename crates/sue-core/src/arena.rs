@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::codec::{CodecError, Reader, Writer};
+use crate::pixels::{PixelReader, PixelWriter};
 use crate::registry::components_equal;
 use crate::{
     AssetHandle, Component, ComponentData, ComponentKind, ComponentRegistry, ComponentType,
@@ -351,6 +352,20 @@ impl Entity {
         self.unread.components.get(&kind).map(Vec::as_slice)
     }
 
+    /// Drops every built-in component this build could not read, for a
+    /// copy that an older Sue must open (it refuses such a component).
+    /// Returns whether there was one.
+    pub(crate) fn forget_unread_components(&mut self) -> bool {
+        let had = self
+            .unread
+            .components
+            .keys()
+            .any(|kind| !self.components.contains_key(kind));
+        self.unread.components.clear();
+        self.unread.base = None;
+        had
+    }
+
     /// The bytes a newer Sue wrote after the fields this build knows.
     /// Saving writes them back.
     #[must_use]
@@ -373,6 +388,12 @@ impl Entity {
 
     /// Writes the entity (everything but its revision).
     pub fn encode(&self, out: &mut Writer) {
+        self.encode_with(out, None);
+    }
+
+    /// As [`Self::encode`], its rasters by reference into `pixels`, the
+    /// pixel store of the file being written.
+    pub(crate) fn encode_with(&self, out: &mut Writer, mut pixels: Option<&mut PixelWriter<'_>>) {
         // A component attached since the load replaces an unread one of
         // its kind.
         let unread: Vec<(ComponentKind, &[u8])> = self
@@ -400,7 +421,7 @@ impl Entity {
                 out.bytes(bytes);
             }
             out.str(component.kind().name());
-            out.nested(|out| component.encode(out));
+            out.nested(|out| component.encode_with(out, pixels.as_deref_mut()));
         }
         for (kind, bytes) in unread {
             out.str(kind.name());
@@ -434,6 +455,17 @@ impl Entity {
         input: &mut Reader<'_>,
         registry: &ComponentRegistry,
     ) -> Result<Self, CodecError> {
+        Self::decode_with(input, registry, None)
+    }
+
+    /// As [`Self::decode`], reading rasters written by reference from
+    /// `pixels`, the pixel store of the file being read. A raster whose
+    /// pixels are damaged names the entity in the error.
+    pub(crate) fn decode_with(
+        input: &mut Reader<'_>,
+        registry: &ComponentRegistry,
+        pixels: Option<&PixelReader<'_>>,
+    ) -> Result<Self, CodecError> {
         let mut id = [0; 16];
         id.copy_from_slice(input.raw(16)?);
         let mut entity = Self::empty(input.str()?, input.str()?).with_id(EntityId::from_bytes(id));
@@ -443,7 +475,21 @@ impl Entity {
             let kind = ComponentKind::from_name(&name)
                 .ok_or_else(|| input.error(format!("unknown built-in component {name}")))?;
             let mut body = input.nested()?;
-            match ComponentData::decode_if_known(kind, &mut body)? {
+            let component =
+                ComponentData::decode_if_known_with(kind, &mut body, pixels).map_err(|error| {
+                    if kind == ComponentKind::RasterTile2D {
+                        CodecError::new(
+                            format!(
+                                "the pixels of \"{}\" cannot be read: {}",
+                                entity.name, error.message
+                            ),
+                            error.offset,
+                        )
+                    } else {
+                        error
+                    }
+                })?;
+            match component {
                 Some(component) => {
                     entity.projections.insert(Projection::of_kind(kind));
                     entity.components.insert(kind, component);
@@ -910,6 +956,17 @@ impl Arena {
     /// Writes the entities `keep` accepts and the relations between them
     /// (an app's own scratch entities stay out of documents).
     pub fn encode_where(&self, out: &mut Writer, keep: &dyn Fn(&Entity) -> bool) {
+        self.encode_where_with(out, keep, None);
+    }
+
+    /// As [`Self::encode_where`], the rasters by reference into `pixels`,
+    /// the pixel store of the file being written.
+    pub(crate) fn encode_where_with(
+        &self,
+        out: &mut Writer,
+        keep: &dyn Fn(&Entity) -> bool,
+        mut pixels: Option<&mut PixelWriter<'_>>,
+    ) {
         let kept: Vec<&Entity> = self
             .iter()
             .map(|(_, entity)| entity)
@@ -917,7 +974,7 @@ impl Arena {
             .collect();
         out.len(kept.len());
         for entity in &kept {
-            out.nested(|out| entity.encode(out));
+            out.nested(|out| entity.encode_with(out, pixels.as_deref_mut()));
         }
         if kept.len() == self.live {
             self.relations.encode(out);
@@ -947,11 +1004,21 @@ impl Arena {
         input: &mut Reader<'_>,
         registry: &ComponentRegistry,
     ) -> Result<Self, CodecError> {
+        Self::decode_with(input, registry, None)
+    }
+
+    /// As [`Self::decode`], reading rasters written by reference from
+    /// `pixels`, the pixel store of the file being read.
+    pub(crate) fn decode_with(
+        input: &mut Reader<'_>,
+        registry: &ComponentRegistry,
+        pixels: Option<&PixelReader<'_>>,
+    ) -> Result<Self, CodecError> {
         let count = input.len(1)?;
         let mut arena = Self::with_capacity(count);
         for _ in 0..count {
             let mut body = input.nested()?;
-            let entity = Entity::decode(&mut body, registry)?;
+            let entity = Entity::decode_with(&mut body, registry, pixels)?;
             arena
                 .insert_keep_id(entity)
                 .map_err(|error| input.error(error.to_string()))?;
