@@ -101,6 +101,7 @@
 //! on.
 
 mod cache;
+mod canvas;
 mod chrome;
 mod edit;
 mod file;
@@ -112,6 +113,7 @@ mod reference;
 pub mod sheet;
 pub mod stroke;
 mod svg;
+mod tools;
 
 use egui::{Color32, Painter, Rect, pos2, vec2};
 
@@ -724,6 +726,137 @@ icons! {
     /// two short feet. Files: everything made in Sue, kept to look
     /// through.
     Files = "files" => hub::FILES,
+    /// A magnifying glass held in the hand: a round lens with a glint of
+    /// light along its upper left, and a solid stout handle down to the
+    /// right. The zoom tool.
+    ToolZoom = "tool-zoom" => tools::TOOL_ZOOM,
+    /// An open hand seen from its back: four fingers up, the thumb out to
+    /// the left, a round palm. The hand tool, which moves the view.
+    ToolHand = "tool-hand" => tools::TOOL_HAND,
+    /// A sheet tilted to one side, inside one curved arrow that turns
+    /// nearly all the way round it, its solid head at the lower left.
+    /// The tool that rotates the view of the canvas.
+    ToolRotateView = "tool-rotate-view" => tools::TOOL_ROTATE_VIEW,
+    /// A box with an arrow pointer, solid, resting on its lower right
+    /// corner. The tool that picks an object and works on it.
+    ToolOperation = "tool-operation" => tools::TOOL_OPERATION,
+    /// A cross of four arrows, pointing up, down, left and right. The
+    /// tool that moves a layer.
+    ToolMoveLayer = "tool-move-layer" => tools::TOOL_MOVE_LAYER,
+    /// A box drawn with a dashed line: the marching line round a
+    /// selected area. The selection tool.
+    ToolSelect = "tool-select" => tools::TOOL_SELECT,
+    /// A lasso: a flat loop of rope, and the loose end of the rope
+    /// hanging from its lower left and curling away to the right. The
+    /// tool that selects an area drawn freehand.
+    ToolSelectLasso = "tool-select-lasso" => tools::TOOL_SELECT_LASSO,
+    /// A magic wand: a slim rod rising to the right, a band round it
+    /// near its tip, and a solid sparkle of four points just past the
+    /// tip. The tool that selects an area of one color with a click.
+    ToolAutoSelect = "tool-auto-select" => tools::TOOL_AUTO_SELECT,
+    /// A dropper lying from the top right down to the bottom left: a
+    /// solid rubber bulb, a collar, and a glass tube that narrows to a
+    /// point. The tool that picks a color from the canvas.
+    ToolEyedropper = "tool-eyedropper" => tools::TOOL_EYEDROPPER,
+    /// The steel nib of a dip pen in its holder, pointing down to the
+    /// bottom left: a broad pointed nib with a slit and a solid round
+    /// hole. The pen tool.
+    ToolPen = "tool-pen" => tools::TOOL_PEN,
+    /// A pencil pointing down to the bottom left: a straight shaft, a
+    /// sharpened cone, and a band near its end where the rubber sits.
+    /// The pencil tool.
+    ToolPencil = "tool-pencil" => tools::TOOL_PENCIL,
+    /// A spray can: a tall body, a narrow square cap on it and a nozzle
+    /// sticking out of the cap to the left, with a fan of solid drops
+    /// flying from the nozzle and spreading as they go. The airbrush
+    /// tool.
+    ToolAirbrush = "tool-airbrush" => tools::TOOL_AIRBRUSH,
+    /// Three sparkles of four points: a large one drawn as a line, and
+    /// two small solid ones beside it. The tool that stamps a trail of
+    /// ornaments.
+    ToolDecoration = "tool-decoration" => tools::TOOL_DECORATION,
+    /// A block of rubber lying on its lower left corner, with a line
+    /// across it where its sleeve ends, and the ground it rubs on. The
+    /// eraser tool.
+    ToolEraser = "tool-eraser" => tools::TOOL_ERASER,
+    /// Two rings side by side that overlap, solid where they overlap:
+    /// two colors running into each other. The blend tool.
+    ToolBlend = "tool-blend" => tools::TOOL_BLEND,
+    /// A spiral that winds inward: the picture stirred round like
+    /// liquid. The liquify tool.
+    ToolLiquify = "tool-liquify" => tools::TOOL_LIQUIFY,
+    /// A bucket of paint tipped on its corner, with its handle, the
+    /// paint in it solid up to a level line, and a solid drop falling
+    /// from its lip.
+    /// The fill tool.
+    ToolFill = "tool-fill" => tools::TOOL_FILL,
+    /// A solid upright band, and after it three columns of solid dots,
+    /// each column of smaller dots than the last, the middle one set
+    /// between the rows of the other two: a tone that fades from full to empty, as
+    /// print shows it.
+    /// The gradient tool.
+    ToolGradient = "tool-gradient" => tools::TOOL_GRADIENT,
+    /// A circle in front of a square, the square showing behind it at
+    /// the top left. The tool that draws lines and shapes.
+    ToolFigure = "tool-figure" => tools::TOOL_FIGURE,
+    /// A page of a comic cut into three panels: a slanted gutter across
+    /// it and an upright one below. The tool that draws panel frames.
+    ToolFrame = "tool-frame" => tools::TOOL_FRAME,
+    /// A speech balloon: an oval with a pointed tail down to the lower
+    /// left. The tool that draws the balloons of a comic.
+    ToolBalloon = "tool-balloon" => tools::TOOL_BALLOON,
+    /// A flat ruler lying from the top left down to the bottom right,
+    /// with three marks along one edge. The ruler tool.
+    ToolRuler = "tool-ruler" => tools::TOOL_RULER,
+    /// A capital letter T with serifs: a bar whose ends turn down, a
+    /// stem and a foot. The text tool.
+    ToolText = "tool-text" => tools::TOOL_TEXT,
+    /// A curved line between two small square points, with a solid
+    /// round point on its middle: a drawn line and the points it is
+    /// reshaped by. The tool that corrects lines.
+    ToolCorrectLine = "tool-correct-line" => tools::TOOL_CORRECT_LINE,
+    /// A dashed box hugging a box drawn whole that nearly fills it: the
+    /// selection round everything there is. Select all.
+    SelectAll = "select-all" => canvas::SELECT_ALL,
+    /// A dashed box struck through by a line from the bottom left to
+    /// the top right. Deselect: the selection is let go.
+    Deselect = "deselect" => canvas::DESELECT,
+    /// A box cut from corner to corner: the upper left half a dashed
+    /// line, the lower right half solid. Invert the selection: what was
+    /// outside is now inside.
+    SelectInvert = "select-invert" => canvas::SELECT_INVERT,
+    /// A dashed box, and inside it one slanted line with an arrow head
+    /// at each end, pushing two corners apart. Expand the selection.
+    SelectExpand = "select-expand" => canvas::SELECT_EXPAND,
+    /// A dashed box, and inside it two arrows that come from two
+    /// corners and point at each other. Shrink the selection.
+    SelectShrink = "select-shrink" => canvas::SELECT_SHRINK,
+    /// A dashed box with a cross inside it. Clear: what is inside the
+    /// selection is taken away.
+    ClearInside = "clear-inside" => canvas::CLEAR_INSIDE,
+    /// A small dashed box at the bottom left and a cross outside it, at
+    /// the top right. Clear outside: what is not in the selection is
+    /// taken away.
+    ClearOutside = "clear-outside" => canvas::CLEAR_OUTSIDE,
+    /// A dashed box with a solid drop of paint inside it. Fill: the
+    /// selection is filled with the drawing color.
+    FillSelection = "fill-selection" => canvas::FILL_SELECTION,
+    /// Two right angles that cross at two corners and leave a square
+    /// between them: the marks a picture is cut along. Crop.
+    Crop = "crop" => canvas::CROP,
+    /// A box with a solid square handle on each of its four corners:
+    /// the frame a picture is scaled and turned by. Transform.
+    Transform = "transform" => canvas::TRANSFORM,
+    /// An upright horseshoe magnet with solid poles, over the edge of a
+    /// ruler with three marks, the middle one longer. Snap to the ruler.
+    SnapRuler = "snap-ruler" => canvas::SNAP_RULER,
+    /// An upright horseshoe magnet with solid poles, over a row of the
+    /// square cells of a grid. Snap to the grid.
+    SnapGrid = "snap-grid" => canvas::SNAP_GRID,
+    /// Two color chips, a solid one at the top left and an empty one at
+    /// the bottom right, and two bent arrows that lead from each to the
+    /// other. Swap the drawing color and the second color.
+    ColorSwap = "color-swap" => canvas::COLOR_SWAP,
 }
 
 /// Frames drawn without a window or a GPU, for the tests of this module.
