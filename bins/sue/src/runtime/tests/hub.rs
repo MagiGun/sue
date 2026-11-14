@@ -708,8 +708,26 @@ fn the_files_menu_rebuilds_thumbnails_forgets_what_is_gone_and_clears_transfers(
         .collect();
     assert_eq!(paths, std::slice::from_ref(&kept));
     assert!(hub_row(&runtime, &sue_wm::HubRow::Open(gone)).is_none());
-    // Rebuild Thumbnails says so.
+    // Rebuild Thumbnails forgets the pictures made, makes them again,
+    // and says so.
+    for _ in 0..400 {
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        if runtime.shell.hub_has_thumbnail(&kept) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(runtime.shell.hub_has_thumbnail(&kept), "made once");
     pick(&mut runtime, "Rebuild Thumbnails");
+    assert!(!runtime.shell.hub_has_thumbnail(&kept), "forgotten");
+    for _ in 0..400 {
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        if runtime.shell.hub_has_thumbnail(&kept) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(runtime.shell.hub_has_thumbnail(&kept), "made again");
     assert_eq!(
         runtime.shell.message().map(|(text, _)| text.to_owned()),
         Some("The thumbnails are drawn again".to_owned())
@@ -753,7 +771,19 @@ fn the_keyboard_walks_the_hub_and_enter_uses_what_has_focus() {
     press(&mut runtime, egui::Key::Enter);
     assert_eq!(runtime.shell.hub_place(), Some(sue_wm::HUB_FILES));
     assert!(!runtime.shell.palette_open());
+    // In Files the walk goes on past the rail to the place's menu.
+    press(&mut runtime, egui::Key::ArrowDown);
+    let focused = ctx
+        .memory(|memory| memory.focused())
+        .and_then(|id| ctx.read_response(id))
+        .map(|response| response.rect);
+    assert_eq!(
+        focused,
+        hub_button(&runtime, &sue_wm::HubButton::Upkeep),
+        "the Files menu has focus"
+    );
     // And back up to Home.
+    press(&mut runtime, egui::Key::ArrowUp);
     press(&mut runtime, egui::Key::ArrowUp);
     press(&mut runtime, egui::Key::Enter);
     assert_eq!(runtime.shell.hub_place(), None);

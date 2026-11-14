@@ -406,6 +406,12 @@ impl Shell {
         self.hub.thumbs.poll()
     }
 
+    /// `true` when the Files place holds a finished thumbnail of `path`
+    /// (asking starts one in the background if there is none).
+    pub fn hub_has_thumbnail(&mut self, path: &std::path::Path) -> bool {
+        self.hub.thumbs.get(path).is_some()
+    }
+
     /// Opens the Transfers popup over the Hub.
     pub(super) fn hub_transfers(&mut self) {
         self.hub.transfers = true;
