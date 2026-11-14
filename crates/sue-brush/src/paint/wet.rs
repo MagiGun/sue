@@ -89,6 +89,11 @@ pub struct Wet {
     pub blur: f32,
     /// Clip Studio's density of paint: how fully what it lays covers.
     pub density: f32,
+    /// How much it drags the picture under its last place along with it
+    /// (a finger in wet paint: edges and detail move), against laying
+    /// the mean color it carries. 0 to 1; how long what it drags lasts
+    /// is the color stretch, kept per brush width travelled.
+    pub smear: f32,
 }
 
 impl Wet {
@@ -101,6 +106,7 @@ impl Wet {
             stretch: unit(mixing.pull),
             blur: unit(mixing.blur),
             density: unit(density),
+            smear: 0.0,
         }
     }
 }
@@ -119,6 +125,7 @@ pub const BLENDERS: &[(&str, Wet)] = &[
             stretch: 0.35,
             blur: 0.45,
             density: 0.9,
+            smear: 0.0,
         },
     ),
     // Blurs and moves nothing.
@@ -130,17 +137,20 @@ pub const BLENDERS: &[(&str, Wet)] = &[
             stretch: 0.0,
             blur: 1.0,
             density: 1.0,
+            smear: 0.0,
         },
     ),
-    // Drags the color it lands on along the stroke, as a finger does.
+    // Drags the picture it lands on along the stroke, as a finger does:
+    // edges and detail move with it and fade over a few brush widths.
     (
         "finger-tip",
         Wet {
             pickup: 0.35,
             amount: 0.0,
-            stretch: 0.9,
+            stretch: 0.75,
             blur: 0.0,
             density: 1.0,
+            smear: 1.0,
         },
     ),
     // Wet paint that bleeds: picks up a lot, softens, lays thinly.
@@ -152,6 +162,7 @@ pub const BLENDERS: &[(&str, Wet)] = &[
             stretch: 0.55,
             blur: 0.7,
             density: 0.55,
+            smear: 0.0,
         },
     ),
     // A gentle wash over watercolor: softens and lays very thinly.
@@ -163,6 +174,7 @@ pub const BLENDERS: &[(&str, Wet)] = &[
             stretch: 0.2,
             blur: 0.85,
             density: 0.3,
+            smear: 0.0,
         },
     ),
     // Moves paint in strokes that keep their marks.
@@ -174,6 +186,7 @@ pub const BLENDERS: &[(&str, Wet)] = &[
             stretch: 0.75,
             blur: 0.0,
             density: 1.0,
+            smear: 0.0,
         },
     ),
     // Like blend, broken up by the paper (give it a texture laid by dab).
@@ -185,6 +198,7 @@ pub const BLENDERS: &[(&str, Wet)] = &[
             stretch: 0.5,
             blur: 0.25,
             density: 0.9,
+            smear: 0.0,
         },
     ),
 ];
@@ -212,6 +226,8 @@ pub struct WetCanvas {
     /// The reservoir: premultiplied RGBA the brush carries; `None`
     /// before the first dab.
     reservoir: Option<[f32; 4]>,
+    /// Where the last dab fell, which a smearing brush drags from.
+    last_at: Option<[f32; 2]>,
 }
 
 impl WetCanvas {
@@ -223,6 +239,7 @@ impl WetCanvas {
             color: color.map(unit),
             tiles: BTreeMap::new(),
             reservoir: None,
+            last_at: None,
         }
     }
 
@@ -258,6 +275,24 @@ impl WetCanvas {
             tile.pixels[i + 2],
             tile.pixels[i + 3],
         ]
+    }
+
+    /// The premultiplied picture at `(x, y)` in pixel numbers (pixel
+    /// `(1, 2)` is at `(1.0, 2.0)`), read between the four nearest
+    /// pixels.
+    fn read_between(&mut self, backdrop: &dyn Backdrop, x: f32, y: f32) -> [f32; 4] {
+        let (fx, fy) = (x.floor(), y.floor());
+        let (tx, ty) = (x - fx, y - fy);
+        let (ix, iy) = (fx as i32, fy as i32);
+        let a = self.read(backdrop, ix, iy);
+        let b = self.read(backdrop, ix + 1, iy);
+        let c = self.read(backdrop, ix, iy + 1);
+        let d = self.read(backdrop, ix + 1, iy + 1);
+        std::array::from_fn(|k| {
+            let top = a[k] + (b[k] - a[k]) * tx;
+            let bottom = c[k] + (d[k] - c[k]) * tx;
+            top + (bottom - top) * ty
+        })
     }
 
     /// The straight color of layer pixel `(x, y)` as the stroke has left
@@ -315,7 +350,13 @@ impl WetCanvas {
     ) {
         for planned in dabs {
             let stamp = Stamp::new(planned, tips, texture);
-            self.dab(backdrop, &stamp, planned.disc.radius, planned.wet);
+            self.dab(
+                backdrop,
+                &stamp,
+                planned.disc.at,
+                planned.disc.radius,
+                planned.wet,
+            );
         }
     }
 
@@ -327,6 +368,7 @@ impl WetCanvas {
         &mut self,
         backdrop: &dyn Backdrop,
         shape: &impl Shape,
+        at: [f32; 2],
         radius: f32,
         driven: [f32; 3],
     ) {
@@ -400,6 +442,31 @@ impl WetCanvas {
             }
             out
         });
+        // A smearing brush moves the picture along with it, as a finger
+        // pushes wet paint: each pixel takes what lay behind it by the
+        // dab's step, scaled by how hard the dab presses there and by the
+        // color stretch. Paint ahead of the middle moves slower than the
+        // brush and is overtaken; paint under the middle rides along and,
+        // moving a little slower than the brush (a stretch below 1), slips
+        // out behind it, so a longer stretch drags it further. Read between
+        // pixels, all before any is written, so nothing is lost or doubled.
+        let last_at = self.last_at.replace(at);
+        let smear = match last_at {
+            Some(from) if wet.smear > 0.0 => {
+                let step = [at[0] - from[0], at[1] - from[1]];
+                let mut carried = Vec::with_capacity(w * h);
+                for y in 0..h {
+                    for x in 0..w {
+                        let pull = cover[y * w + x] * wet.density * wet.stretch;
+                        let px = (rect.x0 + x as i32) as f32 - step[0] * pull;
+                        let py = (rect.y0 + y as i32) as f32 - step[1] * pull;
+                        carried.push(self.read_between(backdrop, px, py));
+                    }
+                }
+                Some(carried)
+            }
+            _ => None,
+        };
         for y in 0..h {
             for x in 0..w {
                 let c = cover[y * w + x];
@@ -413,7 +480,11 @@ impl WetCanvas {
                     None => paint,
                 };
                 let t = c * wet.density;
-                let out: [f32; 4] = std::array::from_fn(|k| u[k] + (target[k] - u[k]) * t);
+                let mut out: [f32; 4] = std::array::from_fn(|k| u[k] + (target[k] - u[k]) * t);
+                if let Some(carried) = &smear {
+                    let d = carried[y * w + x];
+                    out = std::array::from_fn(|k| out[k] + (d[k] - out[k]) * wet.smear);
+                }
                 let (px, py) = (rect.x0 + x as i32, rect.y0 + y as i32);
                 let key = TileKey::of_pixel(px, py);
                 let [ox, oy] = key.origin();
@@ -652,6 +723,43 @@ mod tests {
     }
 
     #[test]
+    fn a_finger_tip_drags_a_thin_line_along_and_lets_it_fade() {
+        // A dark line one pixel wide, upright at x = 20, on white.
+        let mut picture = RasterTile2D::new(96, 32, PixelFormat::Rgba8).expect("a raster");
+        for (i, px) in picture
+            .bytes_mut()
+            .expect("bytes")
+            .chunks_mut(4)
+            .enumerate()
+        {
+            px.copy_from_slice(if i % 96 == 20 {
+                &[0, 0, 0, 255]
+            } else {
+                &[255, 255, 255, 255]
+            });
+        }
+        let backdrop = RasterBackdrop {
+            raster: &picture,
+            origin: [0, 0],
+        };
+        let mut finger = WetCanvas::new(blender("finger-tip").expect("a blender"), [1.0; 3]);
+        finger.stamp(&backdrop, &dabs(14.0, 80.0, 5.0), &Tips::round(1.0), None);
+        let gray = |x: i32| finger.pixel(&backdrop, x, 16)[0];
+        // The line is pushed right and spread out behind the finger: the
+        // place it was is lighter, and the dark it lost lies further on,
+        // the darkness kept (within what the softening between pixels
+        // loses), fading out well before the stroke ends.
+        assert!(gray(20) > 0.9, "{}", gray(20));
+        let lost: f32 = (10..90).map(|x| 1.0 - gray(x)).sum();
+        assert!(lost > 0.8 && lost < 1.2, "{lost}");
+        let ahead: f32 = (24..90).map(|x| 1.0 - gray(x)).sum();
+        assert!(ahead > 0.6, "{ahead}");
+        assert!(gray(88) > 0.999, "{}", gray(88));
+        // Off the stroke's path the line is untouched.
+        assert_eq!(finger.pixel(&backdrop, 20, 2), [0.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
     fn amount_of_paint_lays_the_brush_color_and_density_how_fully() {
         let picture = halves();
         let backdrop = RasterBackdrop {
@@ -666,6 +774,7 @@ mod tests {
                 stretch: 0.0,
                 blur: 0.0,
                 density,
+                smear: 0.0,
             };
             let mut canvas = WetCanvas::new(wet, [0.0, 1.0, 0.0]);
             canvas.stamp(&backdrop, &dabs(8.0, to, 6.0), &tips, None);
