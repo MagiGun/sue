@@ -26,10 +26,10 @@ fn small_text(theme: &Theme) -> impl Fn(&str) -> RichText + '_ {
     }
 }
 
-/// Blend's liquify sub tools (Push, Expand, Pinch and Twirl), which the
+/// A Blend sub tool mode that liquifies (`blend::LiquifyMode`), which the
 /// Liquify button shows.
-pub(super) const fn is_liquify_mode(mode: u8) -> bool {
-    matches!(mode, 2..=5)
+pub(super) fn is_liquify_mode(mode: u8) -> bool {
+    crate::blend::is_liquify(mode)
 }
 
 impl SuePaint {

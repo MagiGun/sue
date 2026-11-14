@@ -197,15 +197,18 @@ impl SuePaint {
                 continue;
             }
             match tools {
-                [Tool::Blend] => {
-                    self.toolbox.pick(Tool::Blend);
-                    let picked = is_liquify_mode(self.toolbox.of(Tool::Blend).mode);
-                    if is_liquify && !picked {
-                        self.toolbox.pick_sub(Tool::Blend, 2);
-                    } else if !is_liquify && picked {
-                        self.toolbox.pick_sub(Tool::Blend, 0);
+                // Liquify is a tool of its own in the toolbox: the entry
+                // holding the Liquify sub tool.
+                [Tool::Blend] if is_liquify => {
+                    let liquify = self.toolbox.slot_holding(|sub| {
+                        sub.tool == Tool::Blend && crate::blend::is_liquify(sub.mode)
+                    });
+                    match liquify {
+                        Some(slot) => self.toolbox.pick_slot(slot),
+                        None => self.toolbox.pick(Tool::Blend),
                     }
                 }
+                [Tool::Blend] => self.toolbox.pick(Tool::Blend),
                 // A group: the next of its tools when one is already out.
                 group => {
                     let next = group

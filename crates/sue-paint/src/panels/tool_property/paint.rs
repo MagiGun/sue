@@ -295,12 +295,28 @@ pub(super) fn blend_properties(ui: &mut Ui, sub: &mut SubTool, theme: &Theme) {
     ) {
         sub.tip.opacity = strength / 100.0;
     }
+    // Liquify's mode, one of its seven (`blend::LiquifyMode`), as choices
+    // that wrap to the palette's width.
+    if let Some(mode) = crate::blend::LiquifyMode::of_mode(sub.mode) {
+        ui.horizontal_wrapped(|ui| {
+            for found in crate::blend::LiquifyMode::ALL {
+                let salt = ("sue-paint-liquify-mode", found.id());
+                if sue_wm::ui::choice::radio(salt, &found.label(), found == mode)
+                    .show(ui, theme)
+                    .clicked()
+                {
+                    sub.mode = found.mode();
+                }
+            }
+        });
+    }
     ui.label(small(&match sub.mode {
         0 => tr!("softens-what-under-brush"),
         1 => tr!("drags-color-along-the-stroke"),
         2 => tr!("moves-picture-along-stroke"),
         3 => tr!("swells-picture-brushs-middle"),
         4 => tr!("draws-picture-into-brushs-middle"),
+        8 | 9 => tr!("moves-picture-across-stroke"),
         _ => tr!("turns-picture-around-brushs-middle"),
     }));
 }

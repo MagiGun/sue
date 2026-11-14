@@ -382,9 +382,10 @@ fn sue_paint_makes_manga_frames_balloons_and_focus_lines() {
     assert_eq!(shapes(&runtime), 11, "three bubbles");
     assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
 
-    // The Figure tool's Saturated line: a layer of lines of its own.
+    // The Figure tool's Saturated line, the first of its own group after
+    // the seven of Direct draw: a layer of lines of its own.
     step(&mut runtime, vec![key(egui::Key::U, plain)]);
-    for _ in 0..5 {
+    for _ in 0..7 {
         step(&mut runtime, vec![key(egui::Key::Period, plain)]);
     }
     let count = sue_paint::doc::layers(&runtime.engine.world.arena, picture).len();

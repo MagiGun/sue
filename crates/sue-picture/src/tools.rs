@@ -2,12 +2,21 @@
 //!
 //! The tool palette lists [`Tool`]s; each tool has [`SubTool`]s, ready-made
 //! settings such as a G-pen or a soft airbrush, picked in the Sub Tool
-//! palette and tuned in the Tool Property palette. Tools that are not built
-//! yet stay in the palette, grayed out.
+//! palette and tuned in the Tool Property palette.
+//!
+//! How the tool palette is arranged is data: a [`Toolbox`] holds
+//! [`ToolSlot`]s (the buttons of the tool palette) in order, each with
+//! [`SubToolGroup`]s (the tabs of the Sub Tool palette) of sub tools. A sub
+//! tool can become a tool of its own and go back, groups and tools move,
+//! and the whole arrangement reads from and writes to a text file
+//! ([`layout`]). Sue Paint's own arrangement is such a file too.
+
+pub mod layout;
 
 use crate::brush::{AntiAlias, Tip};
+use crate::fill::{Exclude, Refer};
+use crate::select::Aspect;
 
-/// A tool of the tool palette.
 /// The Fill tool's Close and fill sub tool's mode.
 pub const CLOSE_AND_FILL: u8 = 3;
 /// The Fill tool's Paint unpainted area sub tool's mode.
@@ -36,6 +45,8 @@ pub const POLYLINE_FRAME: u8 = 2;
 pub const SATURATED_LINES: u8 = 5;
 pub const SPEED_LINES: u8 = 6;
 
+/// A kind of tool: what its sub tools do. The tool palette shows
+/// [`ToolSlot`]s, which are these, or sub tools made into tools.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Tool {
     /// Zooms the view in or out.
@@ -110,6 +121,72 @@ impl Tool {
         Self::Balloon,
         Self::CorrectLine,
     ];
+
+    /// Its stable name in saved data (tool layouts): never translated,
+    /// never changed.
+    #[must_use]
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Zoom => "zoom",
+            Self::Hand => "hand",
+            Self::MoveLayer => "move_layer",
+            Self::Select => "selection",
+            Self::AutoSelect => "auto_select",
+            Self::Eyedropper => "eyedropper",
+            Self::Pen => "pen",
+            Self::Pencil => "pencil",
+            Self::Brush => "brush",
+            Self::Airbrush => "airbrush",
+            Self::Decoration => "decoration",
+            Self::Eraser => "eraser",
+            Self::Blend => "blend",
+            Self::Fill => "fill",
+            Self::Gradient => "gradient",
+            Self::Figure => "figure",
+            Self::Text => "text",
+            Self::Balloon => "balloon",
+            Self::Frame => "frame_border",
+            Self::Ruler => "ruler",
+            Self::CorrectLine => "correct_line",
+            Self::Operation => "operation",
+        }
+    }
+
+    /// The tool named `id` ([`Self::id`]).
+    #[must_use]
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|tool| tool.id() == id)
+    }
+
+    /// Its name in English, as kept in data and shown through the language
+    /// database ([`Self::label`] in the language in use).
+    #[must_use]
+    pub const fn english(self) -> &'static str {
+        match self {
+            Self::Zoom => "Zoom",
+            Self::Hand => "Hand",
+            Self::MoveLayer => "Move Layer",
+            Self::Select => "Selection",
+            Self::AutoSelect => "Auto Select",
+            Self::Eyedropper => "Eyedropper",
+            Self::Pen => "Pen",
+            Self::Pencil => "Sketch",
+            Self::Brush => "Brush",
+            Self::Airbrush => "Airbrush",
+            Self::Decoration => "Decoration",
+            Self::Eraser => "Eraser",
+            Self::Blend => "Blend",
+            Self::Fill => "Fill",
+            Self::Gradient => "Gradient",
+            Self::Figure => "Figure",
+            Self::Text => "Text",
+            Self::Balloon => "Balloon",
+            Self::Frame => "Frame Border",
+            Self::Ruler => "Ruler",
+            Self::CorrectLine => "Correct Line",
+            Self::Operation => "Operation",
+        }
+    }
 
     /// What people read.
     #[must_use]
@@ -231,9 +308,16 @@ impl Tool {
                     tip(20.0, |t| t.size_by.pressure = false),
                 ),
             ],
+            // Clip Studio Paint's three: the editing layer, every layer,
+            // and the reference layers.
             Self::AutoSelect => vec![
                 plain("Refer Only Editing Layer", 0).tolerance(0.1),
-                plain("Refer Other Layers", 1).tolerance(0.1),
+                plain("Refer Other Layers", 0)
+                    .tolerance(0.1)
+                    .referring(Refer::All),
+                plain("Refer Reference Layers", 0)
+                    .tolerance(0.1)
+                    .referring(Refer::Reference),
             ],
             Self::Eyedropper => vec![
                 plain("Obtain Display Color", 0),
@@ -249,7 +333,7 @@ impl Tool {
                     .flick(),
                 SubTool::new(
                     self,
-                    "Real G-Pen",
+                    "Grainy G-pen",
                     0,
                     csp(10.0, |t| {
                         t.size_by.pressure_min = 0.05;
@@ -318,7 +402,7 @@ impl Tool {
                 .stabilization(10),
                 SubTool::new(
                     self,
-                    "Milli pen",
+                    "Fineliner",
                     0,
                     csp(10.0, |t| {
                         tapered(t);
@@ -685,11 +769,15 @@ impl Tool {
                 )
                 .stabilization(2),
             ],
+            // Clip Studio Paint Ver. 4's order (A25V-22); its Lasso fill
+            // is the Figure tool's, placed here by the layout.
             Self::Fill => vec![
+                plain("Refer Other Layers", 0)
+                    .tolerance(0.1)
+                    .referring(Refer::All),
                 plain("Refer Only Editing Layer", 0).tolerance(0.1),
                 // Encircle lines: the areas they close off fill.
                 plain("Close and fill", CLOSE_AND_FILL).tolerance(0.1),
-                plain("Refer Other Layers", 1).tolerance(0.1),
                 // Draw round colored areas: the gaps left in them fill.
                 plain("Paint unpainted area", PAINT_UNPAINTED),
             ],
@@ -776,10 +864,14 @@ impl Tool {
                 vec![
                     SubTool::new(self, "Blur", 0, soft),
                     SubTool::new(self, "Finger Tip", 1, soft),
-                    SubTool::new(self, "Liquify: Push", 2, soft),
-                    SubTool::new(self, "Liquify: Expand", 3, soft),
-                    SubTool::new(self, "Liquify: Pinch", 4, soft),
-                    SubTool::new(self, "Liquify: Twirl", 5, soft),
+                    // One sub tool, its mode picked in Tool Property
+                    // (`blend::LiquifyMode`).
+                    SubTool::new(
+                        self,
+                        "Liquify",
+                        crate::blend::LiquifyMode::Push.mode(),
+                        soft,
+                    ),
                     // Alt and click picks where it copies from.
                     SubTool::new(
                         self,
@@ -997,8 +1089,35 @@ pub struct SubTool {
     pub mirror: bool,
     /// A fill's Close gap level, 0 (none) to 4 (strongest).
     pub gap: u32,
-    /// A fill's Area scaling, in pixels under the lines.
-    pub spread: u32,
+    /// A fill's Area scaling, in pixels: above nothing under the lines,
+    /// below nothing back from them.
+    pub spread: i32,
+    /// Fill and Auto Select look at more than the editing layer (Refer
+    /// multiple); which layers is [`Self::refer`].
+    pub refer_multiple: bool,
+    /// Which layers Fill and Auto Select look at while
+    /// [`Self::refer_multiple`] is on ([`Self::referred`] says what they
+    /// look at).
+    pub refer: Refer,
+    /// Layers Fill and Auto Select leave out while they look at more than
+    /// one.
+    pub exclude: Exclude,
+    /// Fill and Auto Select take only pixels joined to the one clicked
+    /// (Apply to connected pixels only); off, every like pixel.
+    pub connected_only: bool,
+    /// How Fill and Auto Select soften the edge of their area.
+    pub area_aa: AntiAlias,
+    /// The shape a selection or figure drag keeps (Aspect).
+    pub aspect: Aspect,
+    /// The Rotate sub tool turns in steps of this many degrees (Snap
+    /// angle), and Shift snaps by it; 0 turns freely.
+    pub angle_step: f32,
+    /// Liquify acts only inside the selection (Only refer to editing
+    /// area).
+    pub editing_area_only: bool,
+    /// Its settings are locked: Tool Property shows them and changes
+    /// nothing ([`Toolbox::settings_mut`]), and Reset leaves it.
+    pub locked: bool,
     /// What a ruler sub tool lays or does: the Special Ruler's kind
     /// (`rulers::Special::NAMES`) or the Perspective Ruler's process (0
     /// add a vanishing point, 1 delete one); for an eraser, how it erases
@@ -1046,6 +1165,15 @@ impl SubTool {
             mirror: true,
             gap: 0,
             spread: 0,
+            refer_multiple: false,
+            refer: Refer::All,
+            exclude: Exclude::default(),
+            connected_only: true,
+            area_aa: AntiAlias::None,
+            aspect: Aspect::Free,
+            angle_step: 0.0,
+            editing_area_only: false,
+            locked: false,
             kind: 0,
             fix_eye_level: true,
             level: 2,
@@ -1086,187 +1214,838 @@ impl SubTool {
         self.tolerance = tolerance;
         self
     }
+
+    /// The same, looking at the layers `refer` names (Refer multiple on,
+    /// unless it is [`Refer::Editing`]).
+    #[must_use]
+    pub fn referring(mut self, refer: Refer) -> Self {
+        self.set_referred(refer);
+        self
+    }
+
+    /// Looks at the layers `refer` names from now on: Refer multiple goes
+    /// off for [`Refer::Editing`], and on with that choice for the others.
+    pub fn set_referred(&mut self, refer: Refer) {
+        self.refer_multiple = refer != Refer::Editing;
+        if self.refer_multiple {
+            self.refer = refer;
+        }
+    }
+
+    /// The layers Fill and Auto Select look at.
+    #[must_use]
+    pub fn referred(&self) -> Refer {
+        if self.refer_multiple {
+            self.refer
+        } else {
+            Refer::Editing
+        }
+    }
+
+    /// How Fill and Auto Select take their area.
+    #[must_use]
+    pub fn area(&self) -> crate::fill::AreaSettings {
+        crate::fill::AreaSettings {
+            tolerance: self.tolerance,
+            gap: self.gap,
+            spread: self.spread,
+            connected_only: self.connected_only,
+            antialias: self.area_aa,
+        }
+    }
+
+    /// Sub tool names Sue Paint has changed, the old name first: sub tools
+    /// kept under an old name are found by it, in layouts and by Reset.
+    pub const RENAMED: [(&'static str, &'static str); 6] = [
+        // Names too close to another program's product names (risk R16).
+        ("Real G-Pen", "Grainy G-pen"),
+        ("Milli pen", "Fineliner"),
+        // Liquify became one sub tool with modes.
+        ("Liquify: Push", "Liquify"),
+        ("Liquify: Expand", "Liquify"),
+        ("Liquify: Pinch", "Liquify"),
+        ("Liquify: Twirl", "Liquify"),
+    ];
+
+    /// What sub tool name `name` is called now.
+    #[must_use]
+    pub fn renamed(name: &str) -> &str {
+        Self::RENAMED
+            .iter()
+            .find(|(old, _)| *old == name)
+            .map_or(name, |(_, new)| new)
+    }
+
+    /// The built-in sub tool of `tool` that `name` is, or is a numbered
+    /// copy of ("G-pen 2"), under its name now: the longest match wins.
+    #[must_use]
+    pub fn builtin(tool: Tool, name: &str) -> Option<Self> {
+        let matches = |original: &str, name: &str| {
+            name == original || name.starts_with(&format!("{original} "))
+        };
+        tool.sub_tools()
+            .into_iter()
+            .filter(|original| {
+                matches(&original.name, name)
+                    || Self::RENAMED
+                        .iter()
+                        .any(|(old, new)| *new == original.name && matches(old, name))
+            })
+            .max_by_key(|original| original.name.len())
+    }
 }
 
-/// Every tool's sub tools and which one is picked.
+/// A tab of the Sub Tool palette: sub tools kept together under a name,
+/// as Clip Studio Paint's sub tool groups are.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubToolGroup {
+    /// What people read: for a built-in group its English name, shown
+    /// through the language database; else the name someone gave it.
+    pub name: String,
+    /// How many of its tool's sub tools, in order from where the group
+    /// before it ends, it holds (at least one).
+    pub len: usize,
+}
+
+/// A button of the tool palette: groups of sub tools under one name, as
+/// the tools of Clip Studio Paint's tool palette are. A built-in tool is
+/// one of these; a sub tool dragged onto the tool palette becomes another,
+/// and a tool dragged into a group goes back.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolSlot {
+    /// What people read: for a built-in tool its English name, shown
+    /// through the language database; else the name someone gave it.
+    pub name: String,
+    /// The tool whose icon it shows: for a built-in tool the tool itself,
+    /// for one made from a sub tool that sub tool's tool.
+    pub kind: Tool,
+    /// The key that picks it, or none.
+    pub key: Option<char>,
+    subs: Vec<SubTool>,
+    groups: Vec<SubToolGroup>,
+    picked: usize,
+}
+
+impl ToolSlot {
+    /// A tool of one group holding `subs` (at least one).
+    fn new(name: &str, kind: Tool, key: Option<char>, group: &str, subs: Vec<SubTool>) -> Self {
+        let len = subs.len();
+        Self {
+            name: name.to_owned(),
+            kind,
+            key,
+            subs,
+            groups: vec![SubToolGroup {
+                name: group.to_owned(),
+                len,
+            }],
+            picked: 0,
+        }
+    }
+
+    /// Its sub tools, every group's, in order.
+    #[must_use]
+    pub fn subs(&self) -> &[SubTool] {
+        &self.subs
+    }
+
+    /// Its groups, in order.
+    #[must_use]
+    pub fn groups(&self) -> &[SubToolGroup] {
+        &self.groups
+    }
+
+    /// The index of the picked sub tool.
+    #[must_use]
+    pub fn picked(&self) -> usize {
+        self.picked
+    }
+
+    /// The sub tools of group `group`, as indices into [`Self::subs`].
+    #[must_use]
+    pub fn group_range(&self, group: usize) -> std::ops::Range<usize> {
+        let start: usize = self.groups.iter().take(group).map(|g| g.len).sum();
+        let len = self.groups.get(group).map_or(0, |g| g.len);
+        start..start + len
+    }
+
+    /// The group sub tool `index` is in.
+    #[must_use]
+    pub fn group_of(&self, index: usize) -> usize {
+        let mut end = 0;
+        for (group, found) in self.groups.iter().enumerate() {
+            end += found.len;
+            if index < end {
+                return group;
+            }
+        }
+        self.groups.len().saturating_sub(1)
+    }
+
+    /// `true` if it holds a sub tool of `tool`.
+    #[must_use]
+    pub fn holds(&self, tool: Tool) -> bool {
+        self.subs.iter().any(|sub| sub.tool == tool)
+    }
+
+    /// Takes sub tool `index` out, dropping its group if it empties.
+    fn take(&mut self, index: usize) -> SubTool {
+        let group = self.group_of(index);
+        self.groups[group].len -= 1;
+        if self.groups[group].len == 0 {
+            self.groups.remove(group);
+        }
+        let sub = self.subs.remove(index);
+        if self.picked > index || self.picked >= self.subs.len() {
+            self.picked = self.picked.saturating_sub(1);
+        }
+        sub
+    }
+
+    /// Puts `sub` in group `group` at place `at` within it (clamped).
+    fn put(&mut self, group: usize, at: usize, sub: SubTool) -> usize {
+        let range = self.group_range(group);
+        let index = range.start + at.min(range.len());
+        self.subs.insert(index, sub);
+        self.groups[group].len += 1;
+        if self.picked >= index && self.subs.len() > 1 {
+            self.picked += 1;
+        }
+        index
+    }
+
+    /// Keeps the picked index inside the list.
+    fn settle(&mut self) {
+        self.picked = self.picked.min(self.subs.len().saturating_sub(1));
+    }
+}
+
+/// The tool palette as data: every tool with its groups of sub tools, in
+/// order, which tool is current and which sub tool each has picked.
+///
+/// The functions that take a [`Tool`] act on that tool's tool palette
+/// entry: the current one when it is that tool or its picked sub tool is
+/// of that tool, else the first entry that is that tool.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Toolbox {
-    sets: Vec<(Tool, Vec<SubTool>, usize)>,
-    tool: Tool,
+    slots: Vec<ToolSlot>,
+    current: usize,
 }
 
 impl Default for Toolbox {
     fn default() -> Self {
-        Self {
-            sets: Tool::ALL
-                .iter()
-                .map(|tool| (*tool, tool.sub_tools(), 0))
-                .collect(),
-            tool: Tool::Pen,
-        }
+        let mut toolbox = Self::catalogue();
+        let problems = toolbox.arrange(&layout::ToolLayout::builtin());
+        debug_assert!(problems.is_empty(), "{problems:?}");
+        toolbox
     }
 }
 
 impl Toolbox {
-    /// The current tool.
+    /// Every built-in sub tool, one tool each, in [`Tool::ALL`]'s order
+    /// and with no groups: what [`Self::arrange`] starts from.
+    #[must_use]
+    pub fn catalogue() -> Self {
+        let slots: Vec<ToolSlot> = Tool::ALL
+            .iter()
+            .map(|tool| {
+                let name = tool.english();
+                ToolSlot::new(name, *tool, tool.key(), name, tool.sub_tools())
+            })
+            .collect();
+        let current = slots
+            .iter()
+            .position(|slot| slot.kind == Tool::Pen)
+            .unwrap_or(0);
+        Self { slots, current }
+    }
+
+    /// The tool palette's entries, in order.
+    #[must_use]
+    pub fn slots(&self) -> &[ToolSlot] {
+        &self.slots
+    }
+
+    /// The index of the current entry.
+    #[must_use]
+    pub fn current_slot(&self) -> usize {
+        self.current
+    }
+
+    /// Makes entry `slot` current.
+    pub fn pick_slot(&mut self, slot: usize) {
+        if slot < self.slots.len() {
+            self.current = slot;
+        }
+    }
+
+    /// The first entry with a sub tool that `pick` says yes to.
+    #[must_use]
+    pub fn slot_holding(&self, pick: impl Fn(&SubTool) -> bool) -> Option<usize> {
+        self.slots
+            .iter()
+            .position(|slot| slot.subs.iter().any(&pick))
+    }
+
+    /// The entry that is `tool` (or, if none is, the first holding one of
+    /// its sub tools).
+    fn home(&self, tool: Tool) -> Option<usize> {
+        self.slots
+            .iter()
+            .position(|slot| slot.kind == tool)
+            .or_else(|| self.slots.iter().position(|slot| slot.holds(tool)))
+    }
+
+    /// The entry the functions that take a [`Tool`] act on.
+    fn slot_of(&self, tool: Tool) -> usize {
+        let current = &self.slots[self.current];
+        if current.kind == tool || current.subs[current.picked].tool == tool {
+            return self.current;
+        }
+        self.home(tool).unwrap_or(self.current)
+    }
+
+    /// The current tool: the tool of the current entry's picked sub tool.
     #[must_use]
     pub fn tool(&self) -> Tool {
-        self.tool
+        self.current().tool
     }
 
-    /// Picks a tool (if it is available).
+    /// Picks a tool (if it is available): its first entry.
     pub fn pick(&mut self, tool: Tool) {
-        if tool.available() {
-            self.tool = tool;
+        if tool.available()
+            && let Some(slot) = self.home(tool)
+        {
+            self.current = slot;
         }
     }
 
-    fn set(&self, tool: Tool) -> &(Tool, Vec<SubTool>, usize) {
-        self.sets
-            .iter()
-            .find(|(t, _, _)| *t == tool)
-            .unwrap_or(&self.sets[0])
-    }
-
-    fn set_mut(&mut self, tool: Tool) -> &mut (Tool, Vec<SubTool>, usize) {
-        let index = self
-            .sets
-            .iter()
-            .position(|(t, _, _)| *t == tool)
-            .unwrap_or(0);
-        &mut self.sets[index]
-    }
-
-    /// The sub tools of `tool`.
+    /// The sub tools of `tool`'s entry, every group's, in order.
     #[must_use]
     pub fn subs(&self, tool: Tool) -> &[SubTool] {
-        &self.set(tool).1
+        &self.slots[self.slot_of(tool)].subs
     }
 
-    /// The index of the picked sub tool of `tool`.
+    /// The index of the picked sub tool of `tool`'s entry.
     #[must_use]
     pub fn picked(&self, tool: Tool) -> usize {
-        self.set(tool).2
+        self.slots[self.slot_of(tool)].picked
     }
 
-    /// Picks sub tool `index` of `tool`.
+    /// Picks sub tool `index` of `tool`'s entry.
     pub fn pick_sub(&mut self, tool: Tool, index: usize) {
-        let set = self.set_mut(tool);
-        if index < set.1.len() {
-            set.2 = index;
+        let slot = self.slot_of(tool);
+        let slot = &mut self.slots[slot];
+        if index < slot.subs.len() {
+            slot.picked = index;
         }
     }
 
-    /// Copies sub tool `index` of `tool` right after it, its name with a
-    /// number, and picks the copy (Duplicate Sub Tool).
+    /// Copies sub tool `index` of `tool`'s entry right after it, in its
+    /// group, its name with a number, and picks the copy (Duplicate Sub
+    /// Tool).
     pub fn duplicate_sub(&mut self, tool: Tool, index: usize) {
-        let set = self.set_mut(tool);
-        let Some(sub) = set.1.get(index).cloned() else {
+        let slot = self.slot_of(tool);
+        let slot = &mut self.slots[slot];
+        let Some(sub) = slot.subs.get(index).cloned() else {
             return;
         };
-        let taken: Vec<String> = set.1.iter().map(|sub| sub.name.clone()).collect();
+        let taken: Vec<&str> = slot.subs.iter().map(|sub| sub.name.as_str()).collect();
         let name = (2..)
             .map(|n| format!("{} {n}", sub.name))
-            .find(|name| !taken.contains(name))
+            .find(|name| !taken.contains(&name.as_str()))
             .unwrap_or_else(|| sub.name.clone());
-        set.1.insert(index + 1, SubTool { name, ..sub });
-        set.2 = index + 1;
+        let group = slot.group_of(index);
+        let at = index + 1 - slot.group_range(group).start;
+        let copy = SubTool {
+            name,
+            locked: false,
+            ..sub
+        };
+        slot.picked = slot.put(group, at, copy);
     }
 
-    /// Adds `sub` at the end of its tool's sub tools and picks it (the
-    /// Item Bank's Add).
+    /// Adds `sub` at the end of the last group of its tool's entry, picks
+    /// it and makes that entry current (the Item Bank's Add).
     pub fn add_sub(&mut self, sub: SubTool) {
         let tool = sub.tool;
-        let set = self.set_mut(tool);
-        set.1.push(sub);
-        set.2 = set.1.len() - 1;
-        self.pick(tool);
+        let Some(slot) = self.home(tool) else {
+            self.slots.push(ToolSlot::new(
+                tool.english(),
+                tool,
+                tool.key(),
+                tool.english(),
+                vec![sub],
+            ));
+            self.current = self.slots.len() - 1;
+            return;
+        };
+        let entry = &mut self.slots[slot];
+        let last = entry.groups.len() - 1;
+        entry.picked = entry.put(last, usize::MAX, sub);
+        self.current = slot;
     }
 
-    /// Deletes sub tool `index` of `tool`; a tool keeps at least one.
+    /// Deletes sub tool `index` of `tool`'s entry; an entry keeps at least
+    /// one, and a group that empties goes.
     pub fn delete_sub(&mut self, tool: Tool, index: usize) -> bool {
-        let set = self.set_mut(tool);
-        if set.1.len() <= 1 || index >= set.1.len() {
+        let slot = self.slot_of(tool);
+        let slot = &mut self.slots[slot];
+        if slot.subs.len() <= 1 || index >= slot.subs.len() {
             return false;
         }
-        set.1.remove(index);
-        set.2 = set.2.min(set.1.len() - 1);
+        slot.take(index);
+        slot.settle();
         true
     }
 
-    /// Puts sub tool `index` of `tool` back the way Sue Paint brings it
-    /// (Reset to Initial Settings); a copy goes back to what it copied.
+    /// Puts sub tool `index` of `tool`'s entry back the way Sue Paint
+    /// brings it (Reset to Initial Settings); a copy goes back to what it
+    /// copied, and a sub tool with a name Sue Paint has since changed to
+    /// what it is now called brings. A locked sub tool stays as it is.
     pub fn reset_sub(&mut self, tool: Tool, index: usize) -> bool {
-        let set = self.set_mut(tool);
-        let Some(sub) = set.1.get(index) else {
+        let slot = self.slot_of(tool);
+        let slot = &mut self.slots[slot];
+        let Some(sub) = slot.subs.get(index) else {
             return false;
         };
-        let name = sub.name.clone();
-        let Some(original) = tool
-            .sub_tools()
-            .into_iter()
-            .filter(|original| {
-                name == original.name || name.starts_with(&format!("{} ", original.name))
-            })
-            .max_by_key(|original| original.name.len())
-        else {
+        if sub.locked {
+            return false;
+        }
+        let (kind, name) = (sub.tool, sub.name.clone());
+        let Some(original) = SubTool::builtin(kind, &name) else {
             return false;
         };
-        set.1[index] = SubTool { name, ..original };
+        slot.subs[index] = SubTool { name, ..original };
         true
     }
 
     /// The picked sub tool of the current tool.
     #[must_use]
     pub fn current(&self) -> &SubTool {
-        let (_, subs, index) = self.set(self.tool);
-        &subs[(*index).min(subs.len() - 1)]
+        let slot = &self.slots[self.current];
+        &slot.subs[slot.picked.min(slot.subs.len() - 1)]
     }
 
     /// The picked sub tool of the current tool, to change its settings.
+    /// It does not look at [`SubTool::locked`]; Tool Property asks
+    /// [`Self::settings_mut`].
     pub fn current_mut(&mut self) -> &mut SubTool {
-        let tool = self.tool;
-        let (_, subs, index) = self.set_mut(tool);
-        let index = (*index).min(subs.len() - 1);
-        &mut subs[index]
+        let slot = &mut self.slots[self.current];
+        let index = slot.picked.min(slot.subs.len() - 1);
+        &mut slot.subs[index]
     }
 
-    /// The picked sub tool of `tool`.
+    /// The picked sub tool of the current tool to change its settings, or
+    /// `None` while they are locked.
+    pub fn settings_mut(&mut self) -> Option<&mut SubTool> {
+        let sub = self.current_mut();
+        (!sub.locked).then_some(sub)
+    }
+
+    /// Locks or unlocks the settings of the current tool's picked sub tool.
+    pub fn lock_settings(&mut self, locked: bool) {
+        self.current_mut().locked = locked;
+    }
+
+    /// The picked sub tool of `tool`'s entry: one of `tool`'s own when
+    /// the picked one is of another tool.
     #[must_use]
     pub fn of(&self, tool: Tool) -> &SubTool {
-        let (_, subs, index) = self.set(tool);
-        &subs[(*index).min(subs.len() - 1)]
+        let slot = &self.slots[self.slot_of(tool)];
+        let picked = &slot.subs[slot.picked.min(slot.subs.len() - 1)];
+        if picked.tool == tool {
+            return picked;
+        }
+        slot.subs
+            .iter()
+            .find(|sub| sub.tool == tool)
+            .unwrap_or(picked)
     }
 
     /// Picks the sub tool before (or, `forward`, after) the current one,
     /// going round (CSP's comma and period).
     pub fn step_sub(&mut self, forward: bool) {
-        let tool = self.tool;
-        let set = self.set_mut(tool);
-        let count = set.1.len().max(1);
-        set.2 = if forward {
-            (set.2 + 1) % count
+        let slot = &mut self.slots[self.current];
+        let count = slot.subs.len().max(1);
+        slot.picked = if forward {
+            (slot.picked + 1) % count
         } else {
-            (set.2 + count - 1) % count
+            (slot.picked + count - 1) % count
         };
     }
 
-    /// Picks the next tool sharing `key`, starting after the current one
+    /// Picks the next entry with key `key`, starting after the current one
     /// (P switches between the pen and the pencil).
     pub fn cycle(&mut self, key: char) {
-        let matching: Vec<Tool> = Tool::ALL
-            .iter()
-            .copied()
-            .filter(|tool| tool.key() == Some(key) && tool.available())
+        let matching: Vec<usize> = (0..self.slots.len())
+            .filter(|at| {
+                let slot = &self.slots[*at];
+                slot.key == Some(key) && slot.kind.available()
+            })
             .collect();
-        let next = match matching.iter().position(|tool| *tool == self.tool) {
+        let next = match matching.iter().position(|at| *at == self.current) {
             Some(at) => matching[(at + 1) % matching.len()],
             None => match matching.first() {
-                Some(tool) => *tool,
+                Some(at) => *at,
                 None => return,
             },
         };
-        self.tool = next;
+        self.current = next;
+    }
+
+    // ----- Arranging the tool palette -------------------------------------------------
+
+    /// Moves entry `from` to place `to` (clamped); the current entry stays
+    /// current.
+    pub fn move_slot(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.slots.len() {
+            return false;
+        }
+        let current = self.current;
+        let slot = self.slots.remove(from);
+        let to = to.min(self.slots.len());
+        self.slots.insert(to, slot);
+        self.current = moved_index(current, from, to);
+        true
+    }
+
+    /// Renames entry `slot`.
+    pub fn rename_slot(&mut self, slot: usize, name: &str) -> bool {
+        match self.slots.get_mut(slot) {
+            Some(found) if !name.trim().is_empty() => {
+                name.trim().clone_into(&mut found.name);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Renames group `group` of entry `slot`.
+    pub fn rename_group(&mut self, slot: usize, group: usize, name: &str) -> bool {
+        match self
+            .slots
+            .get_mut(slot)
+            .and_then(|found| found.groups.get_mut(group))
+        {
+            Some(found) if !name.trim().is_empty() => {
+                name.trim().clone_into(&mut found.name);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Moves group `from` of entry `slot` to place `to` among its groups,
+    /// its sub tools with it; the picked sub tool stays picked.
+    pub fn move_group(&mut self, slot: usize, from: usize, to: usize) -> bool {
+        let Some(entry) = self.slots.get_mut(slot) else {
+            return false;
+        };
+        if from >= entry.groups.len() {
+            return false;
+        }
+        let picked = entry.subs[entry.picked].clone();
+        let mut runs: Vec<(SubToolGroup, Vec<SubTool>)> = Vec::new();
+        let mut subs = std::mem::take(&mut entry.subs).into_iter();
+        for group in std::mem::take(&mut entry.groups) {
+            let members = subs.by_ref().take(group.len).collect();
+            runs.push((group, members));
+        }
+        let run = runs.remove(from);
+        runs.insert(to.min(runs.len()), run);
+        for (group, members) in runs {
+            entry.groups.push(group);
+            entry.subs.extend(members);
+        }
+        entry.picked = entry
+            .subs
+            .iter()
+            .position(|sub| *sub == picked)
+            .unwrap_or(0);
+        true
+    }
+
+    /// Starts a new group named `name` at sub tool `index` of entry
+    /// `slot`: it and the rest of its group form the new group, right
+    /// after the old one.
+    pub fn split_group(&mut self, slot: usize, index: usize, name: &str) -> bool {
+        let Some(entry) = self.slots.get_mut(slot) else {
+            return false;
+        };
+        if index >= entry.subs.len() || name.trim().is_empty() {
+            return false;
+        }
+        let group = entry.group_of(index);
+        let range = entry.group_range(group);
+        if index == range.start {
+            return false;
+        }
+        entry.groups[group].len = index - range.start;
+        entry.groups.insert(
+            group + 1,
+            SubToolGroup {
+                name: name.trim().to_owned(),
+                len: range.end - index,
+            },
+        );
+        true
+    }
+
+    /// Moves sub tool `index` of entry `from` into group `group` of entry
+    /// `to`, at place `at` within the group (clamped). An entry it leaves
+    /// empty goes from the tool palette. It stays picked if it was.
+    pub fn move_sub(
+        &mut self,
+        from: usize,
+        index: usize,
+        to: usize,
+        group: usize,
+        at: usize,
+    ) -> bool {
+        let fits = self
+            .slots
+            .get(from)
+            .is_some_and(|slot| index < slot.subs.len())
+            && self
+                .slots
+                .get(to)
+                .is_some_and(|slot| group < slot.groups.len());
+        if !fits {
+            return false;
+        }
+        let was_picked = self.slots[from].picked == index;
+        if from == to {
+            let entry = &mut self.slots[from];
+            let source = entry.group_of(index);
+            let empties = entry.groups[source].len == 1;
+            if empties && source == group {
+                // Alone in its group: it is there already.
+                return true;
+            }
+            let sub = entry.take(index);
+            // Taking it out dropped its group when it was alone in it.
+            let group = if empties && source < group {
+                group - 1
+            } else {
+                group
+            };
+            let placed = entry.put(group, at, sub);
+            if was_picked {
+                entry.picked = placed;
+            }
+            entry.settle();
+            return true;
+        }
+        let sub = self.slots[from].take(index);
+        let placed = self.slots[to].put(group, at, sub);
+        if was_picked {
+            self.slots[to].picked = placed;
+            if self.current == from {
+                self.current = to;
+            }
+        }
+        self.drop_if_empty(from);
+        true
+    }
+
+    /// Makes sub tool `index` of entry `from` a tool of its own, at place
+    /// `at` of the tool palette (Clip Studio Paint's drag onto the tool
+    /// palette): one group, named as the sub tool. An entry it leaves
+    /// empty goes. Returns the new entry's index.
+    pub fn promote_sub(&mut self, from: usize, index: usize, at: usize) -> Option<usize> {
+        if self
+            .slots
+            .get(from)
+            .is_none_or(|slot| index >= slot.subs.len())
+        {
+            return None;
+        }
+        let was_current = self.current == from && self.slots[from].picked == index;
+        let sub = self.slots[from].take(index);
+        self.slots[from].settle();
+        let name = sub.name.clone();
+        let slot = ToolSlot::new(&name, sub.tool, None, &name, vec![sub]);
+        let at = at.min(self.slots.len());
+        self.slots.insert(at, slot);
+        if self.current >= at {
+            self.current += 1;
+        }
+        let from = if from >= at { from + 1 } else { from };
+        if was_current {
+            self.current = at;
+        }
+        let gone = self.drop_if_empty(from);
+        Some(if gone && from < at { at - 1 } else { at })
+    }
+
+    /// Puts every group of entry `from` after the groups of entry `into`,
+    /// and takes `from` off the tool palette (a tool made from a sub tool
+    /// going back).
+    pub fn demote_slot(&mut self, from: usize, into: usize) -> bool {
+        if from == into || from >= self.slots.len() || into >= self.slots.len() {
+            return false;
+        }
+        let entry = self.slots.remove(from);
+        let into = if into > from { into - 1 } else { into };
+        let target = &mut self.slots[into];
+        let offset = target.subs.len();
+        target.groups.extend(entry.groups);
+        target.subs.extend(entry.subs);
+        if self.current == from {
+            target.picked = offset + entry.picked;
+            self.current = into;
+        } else if self.current > from {
+            self.current -= 1;
+        }
+        true
+    }
+
+    /// Takes entry `slot` off the tool palette when it holds nothing.
+    fn drop_if_empty(&mut self, slot: usize) -> bool {
+        if !self.slots[slot].subs.is_empty() {
+            return false;
+        }
+        self.slots.remove(slot);
+        if self.current > slot || self.current >= self.slots.len() {
+            self.current = self.current.saturating_sub(1);
+        }
+        true
+    }
+
+    // ----- Tool layouts ---------------------------------------------------------------
+
+    /// How the tool palette is arranged, as a [`layout::ToolLayout`] a
+    /// person can save, share and load.
+    #[must_use]
+    pub fn layout(&self) -> layout::ToolLayout {
+        layout::ToolLayout {
+            tools: self
+                .slots
+                .iter()
+                .map(|slot| layout::LayoutTool {
+                    name: slot.name.clone(),
+                    kind: slot.kind,
+                    key: slot.key,
+                    groups: slot
+                        .groups
+                        .iter()
+                        .enumerate()
+                        .map(|(group, found)| layout::LayoutGroup {
+                            name: found.name.clone(),
+                            subs: slot.subs[slot.group_range(group)]
+                                .iter()
+                                .map(|sub| (sub.tool, sub.name.clone()))
+                                .collect(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Arranges the tool palette as `layout` says, with the sub tools it
+    /// holds now: each sub tool the layout names (by tool and name) goes
+    /// where the layout puts it, and the first time only; one it does not
+    /// name goes to the end of its tool's entry, so nothing is lost. The
+    /// same tool stays current. Returns what in the layout it could not
+    /// follow, for people to read.
+    pub fn arrange(&mut self, layout: &layout::ToolLayout) -> Vec<String> {
+        let mut problems = Vec::new();
+        let current_sub = self.current().clone();
+        let mut left: Vec<Option<SubTool>> = self
+            .slots
+            .drain(..)
+            .flat_map(|slot| slot.subs)
+            .map(Some)
+            .collect();
+        let mut find = |tool: Tool, name: &str| {
+            let renamed = SubTool::renamed(name);
+            left.iter_mut()
+                .find(|sub| {
+                    sub.as_ref().is_some_and(|sub| {
+                        sub.tool == tool && (sub.name == name || sub.name == renamed)
+                    })
+                })
+                .and_then(Option::take)
+        };
+        let mut slots: Vec<ToolSlot> = Vec::new();
+        for tool in &layout.tools {
+            let mut slot = ToolSlot {
+                name: tool.name.clone(),
+                kind: tool.kind,
+                key: tool.key,
+                subs: Vec::new(),
+                groups: Vec::new(),
+                picked: 0,
+            };
+            for group in &tool.groups {
+                let before = slot.subs.len();
+                for (kind, name) in &group.subs {
+                    match find(*kind, name) {
+                        Some(sub) => slot.subs.push(sub),
+                        None => problems.push(format!("{}: {name}", kind.id())),
+                    }
+                }
+                if slot.subs.len() > before {
+                    slot.groups.push(SubToolGroup {
+                        name: group.name.clone(),
+                        len: slot.subs.len() - before,
+                    });
+                }
+            }
+            if slot.subs.is_empty() {
+                problems.push(format!("{}: {}", tool.kind.id(), tool.name));
+            } else {
+                slots.push(slot);
+            }
+        }
+        for sub in left.into_iter().flatten() {
+            let tool = sub.tool;
+            match slots.iter().position(|slot| slot.kind == tool) {
+                Some(at) => {
+                    let slot = &mut slots[at];
+                    let last = slot.groups.len() - 1;
+                    slot.put(last, usize::MAX, sub);
+                }
+                None => slots.push(ToolSlot::new(
+                    tool.english(),
+                    tool,
+                    tool.key(),
+                    tool.english(),
+                    vec![sub],
+                )),
+            }
+        }
+        for slot in &mut slots {
+            slot.picked = 0;
+        }
+        self.slots = slots;
+        self.current = self
+            .slot_holding(|sub| *sub == current_sub)
+            .unwrap_or_else(|| self.home(current_sub.tool).unwrap_or(0));
+        if let Some(index) = self.slots[self.current]
+            .subs
+            .iter()
+            .position(|sub| *sub == current_sub)
+        {
+            self.slots[self.current].picked = index;
+        }
+        problems
+    }
+}
+
+/// Where the item that was at `index` is once the item at `from` moved to
+/// `to`.
+fn moved_index(index: usize, from: usize, to: usize) -> usize {
+    if index == from {
+        to
+    } else if from < index && index <= to {
+        index - 1
+    } else if to <= index && index < from {
+        index + 1
+    } else {
+        index
     }
 }
 
@@ -1278,9 +2057,9 @@ impl Toolbox {
 pub struct EraserEnd {
     /// Whether the eraser end is in use, as last followed.
     on: bool,
-    /// The tool and sub tool to go back to, while the eraser end is in use
-    /// and it picked the Eraser.
-    before: Option<(Tool, usize)>,
+    /// The tool palette entry and sub tool to go back to, while the eraser
+    /// end is in use and it picked the Eraser.
+    before: Option<(usize, usize)>,
 }
 
 impl EraserEnd {
@@ -1294,21 +2073,24 @@ impl EraserEnd {
         }
         self.on = eraser;
         if eraser {
-            let tool = toolbox.tool();
-            if tool == Tool::Eraser {
+            if toolbox.tool() == Tool::Eraser {
                 // On the Eraser already: nothing to go back to.
                 self.before = None;
                 return false;
             }
-            self.before = Some((tool, toolbox.picked(tool)));
+            let slot = toolbox.current_slot();
+            self.before = Some((slot, toolbox.slots()[slot].picked()));
             toolbox.pick(Tool::Eraser);
             return toolbox.tool() == Tool::Eraser;
         }
         // Back to the tool before, unless another was picked by hand.
         match self.before.take() {
-            Some((tool, sub)) if toolbox.tool() == Tool::Eraser => {
-                toolbox.pick(tool);
-                toolbox.pick_sub(tool, sub);
+            Some((slot, sub)) if toolbox.tool() == Tool::Eraser => {
+                toolbox.pick_slot(slot);
+                let entry = &mut toolbox.slots[toolbox.current];
+                if sub < entry.subs.len() {
+                    entry.picked = sub;
+                }
                 true
             }
             _ => false,
@@ -1410,15 +2192,355 @@ mod tests {
     fn sub_tools_keep_their_own_settings() {
         let mut toolbox = Toolbox::default();
         toolbox.pick(Tool::Brush);
-        toolbox.pick_sub(Tool::Brush, 2);
+        // Gouache, the first of the Thick paint group.
+        toolbox.pick_sub(Tool::Brush, 3);
         assert_eq!(toolbox.current().name, "Gouache");
         toolbox.current_mut().tip.size = 99.0;
         toolbox.pick_sub(Tool::Brush, 0);
         assert_eq!(toolbox.current().tip.size, 80.0, "Round watercolor brush");
-        toolbox.pick_sub(Tool::Brush, 2);
+        toolbox.pick_sub(Tool::Brush, 3);
         assert_eq!(toolbox.current().tip.size, 99.0);
         toolbox.pick_sub(Tool::Brush, 99);
-        assert_eq!(toolbox.picked(Tool::Brush), 2);
+        assert_eq!(toolbox.picked(Tool::Brush), 3);
         assert_eq!(toolbox.of(Tool::Pen).name, "G-pen");
+    }
+
+    /// The names of `slot`'s groups and how many each holds.
+    fn groups(toolbox: &Toolbox, slot: usize) -> Vec<(String, usize)> {
+        toolbox.slots()[slot]
+            .groups()
+            .iter()
+            .map(|group| (group.name.clone(), group.len))
+            .collect()
+    }
+
+    fn slot_named(toolbox: &Toolbox, name: &str) -> usize {
+        toolbox
+            .slots()
+            .iter()
+            .position(|slot| slot.name == name)
+            .unwrap_or_else(|| panic!("no tool {name}"))
+    }
+
+    #[test]
+    fn the_default_palette_is_clip_studio_paints_order_and_groups() {
+        let toolbox = Toolbox::default();
+        let names: Vec<&str> = toolbox
+            .slots()
+            .iter()
+            .map(|slot| slot.name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "Zoom",
+                "Hand",
+                "Operation",
+                "Move Layer",
+                "Selection",
+                "Auto Select",
+                "Eyedropper",
+                "Pen",
+                "Sketch",
+                "Brush",
+                "Airbrush",
+                "Decoration",
+                "Eraser",
+                "Blend",
+                "Liquify",
+                "Fill",
+                "Gradient",
+                "Figure",
+                "Frame Border",
+                "Ruler",
+                "Text",
+                "Balloon",
+                "Correct Line",
+            ]
+        );
+        // Every tool but Liquify is the tool of the same name, in
+        // Tool::ALL's order.
+        let kinds: Vec<Tool> = toolbox
+            .slots()
+            .iter()
+            .filter(|slot| slot.name != "Liquify")
+            .map(|slot| slot.kind)
+            .collect();
+        assert_eq!(kinds, Tool::ALL);
+        let pen = slot_named(&toolbox, "Pen");
+        assert_eq!(
+            groups(&toolbox, pen),
+            [("Pen".to_owned(), 7), ("Marker".to_owned(), 4)]
+        );
+        let figure = slot_named(&toolbox, "Figure");
+        assert_eq!(
+            groups(&toolbox, figure),
+            [
+                ("Direct draw".to_owned(), 7),
+                ("Saturated Line".to_owned(), 1),
+                ("Speed Line".to_owned(), 1)
+            ]
+        );
+        // Fill in Ver. 4's order, Lasso fill among them (A25V-22).
+        let fill: Vec<&str> = toolbox
+            .subs(Tool::Fill)
+            .iter()
+            .map(|sub| sub.name.as_str())
+            .collect();
+        assert_eq!(
+            fill,
+            [
+                "Refer Other Layers",
+                "Refer Only Editing Layer",
+                "Close and fill",
+                "Lasso fill",
+                "Paint unpainted area"
+            ]
+        );
+        assert!(
+            !toolbox
+                .subs(Tool::Figure)
+                .iter()
+                .any(|sub| sub.name == "Lasso fill"),
+            "Lasso fill is not under Figure (A25V-14)"
+        );
+        // Auto Select's three (CC-2), each looking at its own layers.
+        let refers: Vec<Refer> = toolbox
+            .subs(Tool::AutoSelect)
+            .iter()
+            .map(SubTool::referred)
+            .collect();
+        assert_eq!(refers, [Refer::Editing, Refer::All, Refer::Reference]);
+        // Names of Sue's own for the two closest to product names.
+        let pens: Vec<&str> = toolbox
+            .subs(Tool::Pen)
+            .iter()
+            .map(|sub| sub.name.as_str())
+            .collect();
+        assert!(pens.contains(&"Grainy G-pen") && pens.contains(&"Fineliner"));
+        assert!(!pens.contains(&"Real G-Pen") && !pens.contains(&"Milli pen"));
+    }
+
+    #[test]
+    fn tool_names_in_data_are_english_and_stable() {
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        for tool in Tool::ALL {
+            assert_eq!(tool.english(), tool.label(), "{tool:?}");
+            assert_eq!(Tool::from_id(tool.id()), Some(tool));
+        }
+        let mut ids: Vec<&str> = Tool::ALL.iter().map(|tool| tool.id()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), Tool::ALL.len());
+        // Built-in names and group names are kept in English and shown
+        // through the language database.
+        let mut names = layout::ToolLayout::builtin().names();
+        for tool in Tool::ALL {
+            names.extend(tool.sub_tools().into_iter().map(|sub| sub.name));
+        }
+        for name in names {
+            assert!(
+                sue_lang::has_english("paint", &name),
+                "{name} has no English message"
+            );
+        }
+    }
+
+    #[test]
+    fn liquify_is_a_tool_of_its_own_with_one_sub_tool_and_modes() {
+        let mut toolbox = Toolbox::default();
+        let liquify = slot_named(&toolbox, "Liquify");
+        assert_eq!(toolbox.slots()[liquify].subs().len(), 1);
+        assert_eq!(toolbox.slots()[liquify].key, Some('J'), "J, after Blend");
+        toolbox.pick_slot(liquify);
+        assert_eq!(toolbox.tool(), Tool::Blend);
+        assert!(crate::blend::is_liquify(toolbox.current().mode));
+        assert_eq!(toolbox.subs(Tool::Blend).len(), 1, "the entry's own list");
+        // Every mode is a mode of the one sub tool.
+        for mode in crate::blend::LiquifyMode::ALL {
+            toolbox.current_mut().mode = mode.mode();
+            assert_eq!(
+                crate::blend::LiquifyMode::of_mode(toolbox.current().mode),
+                Some(mode)
+            );
+        }
+        // Picking Blend goes to the Blend tool, without Liquify.
+        toolbox.pick(Tool::Blend);
+        assert_eq!(toolbox.current_slot(), slot_named(&toolbox, "Blend"));
+        assert!(
+            toolbox
+                .subs(Tool::Blend)
+                .iter()
+                .all(|sub| !crate::blend::is_liquify(sub.mode))
+        );
+        // J goes round Blend and Liquify, as P does the Pen and Sketch.
+        toolbox.cycle('J');
+        assert_eq!(toolbox.current_slot(), liquify);
+        toolbox.cycle('J');
+        assert_eq!(toolbox.current_slot(), slot_named(&toolbox, "Blend"));
+    }
+
+    #[test]
+    fn a_sub_tool_becomes_a_tool_and_goes_back() {
+        let mut toolbox = Toolbox::default();
+        let pen = slot_named(&toolbox, "Pen");
+        let count = toolbox.slots().len();
+        let pens = toolbox.slots()[pen].subs().len();
+        toolbox.pick(Tool::Pen);
+        toolbox.pick_sub(Tool::Pen, 3);
+        let turnip = toolbox.current().clone();
+        assert_eq!(turnip.name, "Turnip pen");
+        // Dragged onto the tool palette, under the Pen.
+        let made = toolbox.promote_sub(pen, 3, pen + 1).expect("made");
+        assert_eq!(made, pen + 1);
+        assert_eq!(toolbox.slots().len(), count + 1);
+        let slot = &toolbox.slots()[made];
+        assert_eq!(slot.name, "Turnip pen");
+        assert_eq!(slot.kind, Tool::Pen);
+        assert_eq!(slot.subs(), std::slice::from_ref(&turnip));
+        assert_eq!(toolbox.slots()[pen].subs().len(), pens - 1);
+        assert_eq!(toolbox.current_slot(), made, "it stays the tool in use");
+        assert_eq!(*toolbox.current(), turnip, "with its own settings");
+        // The new tool has no key; the Pen still picks with P.
+        toolbox.pick(Tool::Pen);
+        assert_eq!(toolbox.current_slot(), pen);
+        // Back into the Pen, then into its Marker group, as its first.
+        toolbox.pick_slot(made);
+        assert!(toolbox.demote_slot(made, pen));
+        assert_eq!(toolbox.slots().len(), count);
+        assert_eq!(toolbox.current_slot(), pen);
+        assert_eq!(*toolbox.current(), turnip);
+        let groups_now = groups(&toolbox, pen);
+        assert_eq!(
+            groups_now.last().unwrap().0,
+            "Turnip pen",
+            "a group of its own"
+        );
+        let marker = 1;
+        let last = toolbox.slots()[pen].subs().len() - 1;
+        assert!(toolbox.move_sub(pen, last, pen, marker, 0));
+        assert_eq!(
+            groups(&toolbox, pen),
+            [("Pen".to_owned(), 6), ("Marker".to_owned(), 5)],
+            "its emptied group went"
+        );
+        assert_eq!(toolbox.slots()[pen].subs()[6], turnip);
+        assert_eq!(*toolbox.current(), turnip, "still picked");
+        // The last sub tool of a tool leaving it takes the tool away.
+        let eraser = slot_named(&toolbox, "Eraser");
+        let made = toolbox.promote_sub(pen, 0, eraser + 1).unwrap();
+        assert!(toolbox.move_sub(made, 0, pen, 0, 0));
+        assert_eq!(toolbox.slots().len(), count);
+        assert_eq!(toolbox.slots()[pen].subs()[0].name, "G-pen");
+    }
+
+    #[test]
+    fn tools_and_groups_move_split_and_rename() {
+        let mut toolbox = Toolbox::default();
+        toolbox.pick(Tool::Fill);
+        let fill = toolbox.current_slot();
+        let count = toolbox.slots().len();
+        assert!(toolbox.move_slot(fill, 0));
+        assert_eq!(toolbox.slots()[0].name, "Fill");
+        assert_eq!(toolbox.current_slot(), 0, "the tool in use moves with it");
+        assert_eq!(toolbox.tool(), Tool::Fill);
+        assert!(toolbox.move_slot(0, count));
+        assert_eq!(toolbox.slots()[count - 1].name, "Fill");
+        assert_eq!(toolbox.current_slot(), count - 1);
+        // Split the Pen group at Rough pen, move it first, rename it.
+        let pen = slot_named(&toolbox, "Pen");
+        toolbox.pick(Tool::Pen);
+        toolbox.pick_sub(Tool::Pen, 0);
+        assert!(toolbox.split_group(pen, 5, "Rough"));
+        assert!(
+            !toolbox.split_group(pen, 5, "Again"),
+            "already a group's first"
+        );
+        assert_eq!(
+            groups(&toolbox, pen),
+            [
+                ("Pen".to_owned(), 5),
+                ("Rough".to_owned(), 2),
+                ("Marker".to_owned(), 4)
+            ]
+        );
+        assert!(toolbox.move_group(pen, 1, 0));
+        assert_eq!(toolbox.slots()[pen].subs()[0].name, "Rough pen");
+        assert_eq!(toolbox.current().name, "G-pen", "the pick follows");
+        assert!(toolbox.rename_group(pen, 0, "Scratchy"));
+        assert!(!toolbox.rename_group(pen, 0, "  "));
+        assert!(toolbox.rename_slot(pen, "Inks"));
+        let layout = toolbox.layout();
+        let (read, problems) = layout::ToolLayout::parse(&layout.to_text());
+        assert!(problems.is_empty());
+        // A fresh toolbox arranged by the saved layout looks the same.
+        let mut fresh = Toolbox::default();
+        assert!(fresh.arrange(&read).is_empty());
+        assert_eq!(fresh.layout(), layout);
+    }
+
+    #[test]
+    fn sub_tool_edits_keep_groups_whole() {
+        let mut toolbox = Toolbox::default();
+        let pen = slot_named(&toolbox, "Pen");
+        toolbox.pick(Tool::Pen);
+        // A copy lands in its original's group.
+        toolbox.duplicate_sub(Tool::Pen, 8);
+        assert_eq!(
+            groups(&toolbox, pen),
+            [("Pen".to_owned(), 7), ("Marker".to_owned(), 5)]
+        );
+        assert_eq!(toolbox.current().name, "Felt pen 2");
+        // Deleting a group's every member drops the group.
+        let mut one = Toolbox::default();
+        let figure = slot_named(&one, "Figure");
+        one.pick(Tool::Figure);
+        let speed = one.slots()[figure].group_range(2).start;
+        assert!(one.delete_sub(Tool::Figure, speed));
+        assert_eq!(one.slots()[figure].groups().len(), 2);
+        // An Item Bank sub tool lands at the end of its tool.
+        let mut bank = Toolbox::default();
+        let mut sub = Tool::Pen.sub_tools()[0].clone();
+        sub.name = "From the bank".to_owned();
+        bank.add_sub(sub);
+        assert_eq!(bank.current().name, "From the bank");
+        assert_eq!(bank.tool(), Tool::Pen);
+        assert_eq!(groups(&bank, pen)[1], ("Marker".to_owned(), 5));
+    }
+
+    #[test]
+    fn locked_settings_hold_and_reset_finds_renamed_sub_tools() {
+        let mut toolbox = Toolbox::default();
+        toolbox.pick(Tool::Pen);
+        toolbox.lock_settings(true);
+        assert!(toolbox.settings_mut().is_none());
+        assert!(!toolbox.reset_sub(Tool::Pen, 0), "a locked one stays");
+        toolbox.lock_settings(false);
+        toolbox.settings_mut().expect("unlocked").tip.size = 77.0;
+        assert!(toolbox.reset_sub(Tool::Pen, 0));
+        assert_eq!(toolbox.current().tip.size, 10.0);
+        // A copy kept under an old name resets to the renamed original.
+        toolbox.pick_sub(Tool::Pen, 1);
+        toolbox.current_mut().name = "Real G-Pen 2".to_owned();
+        toolbox.current_mut().tip.size = 50.0;
+        assert!(toolbox.reset_sub(Tool::Pen, 1));
+        assert_eq!(toolbox.current().name, "Real G-Pen 2", "keeping its name");
+        assert_eq!(toolbox.current().tip.size, 10.0);
+        // A copy is not locked even when its original is.
+        toolbox.lock_settings(true);
+        toolbox.duplicate_sub(Tool::Pen, 1);
+        assert!(!toolbox.current().locked);
+    }
+
+    #[test]
+    fn the_eraser_end_goes_back_to_a_tool_made_from_a_sub_tool() {
+        let mut toolbox = Toolbox::default();
+        let mut end = EraserEnd::default();
+        let liquify = slot_named(&toolbox, "Liquify");
+        toolbox.pick_slot(liquify);
+        assert!(end.follow(true, false, &mut toolbox));
+        assert_eq!(toolbox.tool(), Tool::Eraser);
+        assert!(end.follow(false, false, &mut toolbox));
+        assert_eq!(toolbox.current_slot(), liquify, "not the Blend tool");
     }
 }

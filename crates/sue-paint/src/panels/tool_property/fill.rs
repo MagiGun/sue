@@ -5,6 +5,7 @@ use sue_wm::Theme;
 
 use super::select::select_ops;
 use super::small_text;
+use crate::fill::Refer;
 use crate::panels::slider_row;
 use crate::select::Op;
 use crate::tools::{SubTool, Tool};
@@ -33,9 +34,15 @@ pub(super) fn fill_properties(
     }
     ui.horizontal(|ui| {
         ui.label(small(&tr!("refer")));
-        ui.selectable_value(&mut sub.mode, 0, tr!("editing-layer"));
-        ui.selectable_value(&mut sub.mode, 1, tr!("all-layers"));
-        ui.selectable_value(&mut sub.mode, 2, tr!("reference-layer"));
+        // The layers looked at are the sub tool's refer setting; its mode
+        // says what it does (fill, close and fill, paint unpainted area).
+        let mut refer = sub.referred();
+        for choice in [Refer::Editing, Refer::All, Refer::Reference] {
+            ui.selectable_value(&mut refer, choice, choice.label());
+        }
+        if refer != sub.referred() {
+            sub.set_referred(refer);
+        }
     });
     if tool == Tool::Fill {
         ui.horizontal(|ui| {
@@ -65,7 +72,7 @@ pub(super) fn fill_properties(
             false,
             theme,
         ) {
-            sub.spread = spread.round() as u32;
+            sub.spread = spread.round() as i32;
         }
     }
     if tool == Tool::Fill {
