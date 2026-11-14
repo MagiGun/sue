@@ -417,116 +417,271 @@ fn material_paste(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>)
     }
 }
 
-/// A command of this group: works while a canvas is open unless its
-/// `state` says otherwise.
+/// A command of this group, with its icon of the shared set: works
+/// while a canvas is open unless its `state` says otherwise.
+///
+/// Every Edit command may be recorded in an Auto Action (as
+/// `extras::recordable` has it), and none leaves the canvas: the
+/// group's RECORDABLE list is all of it and its LEAVES_CANVAS list is
+/// empty.
 const fn c(
     name: &'static str,
     label: &'static str,
+    icon: &'static str,
     run: fn(&mut SuePaint, &mut AppletContext<'_>, Call<'_>),
 ) -> Command<SuePaint> {
-    Command::new(name, label, "edit", run).state(has_doc)
+    Command::new(name, label, "edit", run)
+        .icon(icon)
+        .state(has_doc)
+        .with(Flags::RECORDABLE)
 }
 
 pub(super) const COMMANDS: &[Command<SuePaint>] = &[
-    c("edit.undo", "undo", undo).state(can_undo),
-    c("edit.redo", "redo", redo).state(can_redo),
-    c("edit.cut", "cut", cut)
+    c("edit.undo", "undo", "undo", undo).state(can_undo),
+    c("edit.redo", "redo", "redo", redo).state(can_redo),
+    c("edit.cut", "cut", "cut", cut)
         .keys("Ctrl+X or F2")
         .state(on_raster),
-    c("edit.copy", "copy-2", copy)
+    c("edit.copy", "copy-2", "copy", copy)
         .keys("Ctrl+C or F3")
         .state(on_raster),
-    c("edit.paste", "paste", paste)
+    c("edit.paste", "paste", "paste", paste)
         .keys("Ctrl+V or F4")
         .state(with_clipboard),
-    c("edit.paste_here", "paste-to-shown-position", paste_here).state(with_clipboard),
-    c("edit.clear", "delete", clear)
+    c(
+        "edit.paste_here",
+        "paste-to-shown-position",
+        "paste",
+        paste_here,
+    )
+    .state(with_clipboard),
+    c("edit.clear", "delete", "clear-inside", clear)
         .keys("Ctrl+Delete or Ctrl+Backspace or Delete or Backspace")
         .state(on_raster),
     c(
         "edit.clear_outside",
         "delete-outside-selection",
+        "clear-outside",
         clear_outside,
     )
     .state(with_selection),
     c(
         "edit.smart_smoothing",
         "smart-smoothing-ellipsis",
+        "tool-correct-line",
         smart_smoothing,
     ),
-    c("edit.fill", "fill", fill)
+    c("edit.fill", "fill", "fill-selection", fill)
         .keys("Shift+Delete or Shift+Backspace or Alt+Delete or Alt+Backspace")
         .state(on_raster),
     c(
         "edit.advanced_fill",
         "advanced-fill-ellipsis",
+        "tool-fill",
         advanced_fill,
     ),
-    c("edit.recolor", "convert-to-drawing-color", recolor).state(on_raster),
+    c(
+        "edit.recolor",
+        "convert-to-drawing-color",
+        "replace",
+        recolor,
+    )
+    .state(on_raster),
     c(
         "edit.outline_selection",
         "outline-selection-ellipsis",
+        "border-effect",
         outline_selection,
     ),
     c(
         "edit.luma_to_alpha",
         "convert-brightness-to-opacity",
+        "extract-line",
         luma_to_alpha,
     )
     .state(on_raster),
-    c("edit.transform.scale", "scale-rotate-ellipsis", transform).keys("Ctrl+T"),
-    c("edit.transform.scale_only", "scale-ellipsis", transform),
-    c("edit.transform.rotate", "rotate-ellipsis", transform),
-    c("edit.transform.free", "free-transform", free_transform).keys("Ctrl+Shift+T"),
-    c("edit.transform.distort", "distort", free_transform),
-    c("edit.transform.skew", "skew", free_transform),
-    c("edit.transform.perspective", "perspective", free_transform),
-    c("edit.flip_h", "flip-horizontal", flip_h).state(on_raster),
-    c("edit.flip_v", "flip-vertical", flip_v).state(on_raster),
-    c("edit.rotate180", "rotate-180-degrees", rotate180).state(on_raster),
-    c("edit.transform.mesh", "mesh-transformation", mesh),
-    c("edit.transform.puppet", "puppet-warp-ellipsis", puppet),
-    c("edit.align.left", "align-left", align).state(on_raster),
-    c("edit.align.hcenter", "align-horizontal-center", align).state(on_raster),
-    c("edit.align.right", "align-right", align).state(on_raster),
-    c("edit.align.top", "align-top", align).state(on_raster),
-    c("edit.align.vcenter", "align-vertical-center", align).state(on_raster),
-    c("edit.align.bottom", "align-bottom", align).state(on_raster),
+    c(
+        "edit.transform.scale",
+        "scale-rotate-ellipsis",
+        "transform",
+        transform,
+    )
+    .keys("Ctrl+T"),
+    c(
+        "edit.transform.scale_only",
+        "scale-ellipsis",
+        "transform",
+        transform,
+    ),
+    c(
+        "edit.transform.rotate",
+        "rotate-ellipsis",
+        "rotate-right",
+        transform,
+    ),
+    c(
+        "edit.transform.free",
+        "free-transform",
+        "transform",
+        free_transform,
+    )
+    .keys("Ctrl+Shift+T"),
+    c(
+        "edit.transform.distort",
+        "distort",
+        "transform",
+        free_transform,
+    ),
+    c("edit.transform.skew", "skew", "transform", free_transform),
+    c(
+        "edit.transform.perspective",
+        "perspective",
+        "transform",
+        free_transform,
+    ),
+    c("edit.flip_h", "flip-horizontal", "flip-horizontal", flip_h).state(on_raster),
+    c("edit.flip_v", "flip-vertical", "flip-vertical", flip_v).state(on_raster),
+    c(
+        "edit.rotate180",
+        "rotate-180-degrees",
+        "rotate-right",
+        rotate180,
+    )
+    .state(on_raster),
+    c(
+        "edit.transform.mesh",
+        "mesh-transformation",
+        "view-grid",
+        mesh,
+    ),
+    c(
+        "edit.transform.puppet",
+        "puppet-warp-ellipsis",
+        "pin",
+        puppet,
+    ),
+    c("edit.align.left", "align-left", "align-left", align).state(on_raster),
+    c(
+        "edit.align.hcenter",
+        "align-horizontal-center",
+        "align-center",
+        align,
+    )
+    .state(on_raster),
+    c("edit.align.right", "align-right", "align-right", align).state(on_raster),
+    c("edit.align.top", "align-top", "arrow-up", align).state(on_raster),
+    c(
+        "edit.align.vcenter",
+        "align-vertical-center",
+        "align-center",
+        align,
+    )
+    .state(on_raster),
+    c("edit.align.bottom", "align-bottom", "arrow-down", align).state(on_raster),
     c(
         "edit.resolution",
         "change-image-resolution-ellipsis",
+        "picture",
         resolution,
     ),
     c(
         "edit.canvas_size",
         "change-canvas-size-ellipsis",
+        "fullscreen",
         canvas_size,
     ),
     c(
         "edit.canvas_height",
         "change-canvas-height-ellipsis",
+        "doc-webtoon",
         canvas_height,
     ),
-    c("edit.crop", "crop", crop),
+    c("edit.crop", "crop", "crop", crop),
     c(
         "edit.canvas_properties",
         "canvas-properties-ellipsis",
+        "info",
         canvas_properties,
     ),
-    c("edit.clear_history", "this-canvas", clear_history),
+    c(
+        "edit.clear_history",
+        "this-canvas",
+        "history",
+        clear_history,
+    ),
     c(
         "edit.brush_tip",
         "create-brush-tip-from-image-ellipsis",
+        "material-brush-tip",
         brush_tip,
     )
     .state(on_raster),
-    c("edit.material.image", "image-ellipsis", material_image),
-    c("edit.material.tip", "brush-tip-ellipsis", brush_tip).state(on_raster),
+    c(
+        "edit.material.image",
+        "image-ellipsis",
+        "material-image",
+        material_image,
+    ),
+    c(
+        "edit.material.tip",
+        "brush-tip-ellipsis",
+        "material-brush-tip",
+        brush_tip,
+    )
+    .state(on_raster),
     c(
         "edit.transform.cancel",
         "cancel-transform",
+        "cancel",
         cancel_transform,
     )
     .with(Flags::HIDDEN),
-    c("edit.material.paste", "paste-material", material_paste).with(Flags::HIDDEN),
+    c(
+        "edit.material.paste",
+        "paste-material",
+        "materials",
+        material_paste,
+    )
+    .with(Flags::HIDDEN),
 ];
+
+#[cfg(test)]
+mod tests {
+    use sue_wm::Flags;
+    use sue_wm::icons::Icon;
+
+    use super::COMMANDS;
+
+    #[test]
+    fn every_edit_command_has_an_icon_of_the_shared_set() {
+        for command in COMMANDS {
+            assert!(
+                Icon::from_name(command.icon).is_some(),
+                "{}: no icon is named {:?}",
+                command.name,
+                command.icon
+            );
+        }
+    }
+
+    #[test]
+    fn the_flags_say_what_auto_actions_and_the_tests_did() {
+        for command in COMMANDS {
+            assert_eq!(command.group, "edit");
+            assert!(command.name.starts_with("edit."), "{}", command.name);
+            // RECORDABLE stands where `extras::recordable` answers until
+            // that function goes.
+            assert_eq!(
+                command.flags.has(Flags::RECORDABLE),
+                crate::extras::recordable(command.name),
+                "{}",
+                command.name
+            );
+            assert!(
+                !command.flags.has(Flags::LEAVES_CANVAS),
+                "{} stays on the canvas",
+                command.name
+            );
+        }
+    }
+}
