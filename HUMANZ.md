@@ -1335,9 +1335,10 @@ project is, `transfers_popup` the Data Transfers; the host does what
 the returned `Event`s ask. `Thumbs` makes the cards' pictures on a
 background job, kept until the file changes: a `.sue` file's own
 preview (its `THMB` part, read without decoding the document) first,
-else the studio's `Thumbnailer`, else the picture formats `sue-io`
-reads. Sue Paint's start page draws its Projects page and popups from
-it until the Hub's Files place replaces that page.
+else the `Thumbnailer` of the studio whose work it is
+(`Thumbs::set_maker`), else the picture formats `sue-io` reads. Sue
+Paint's start page draws its Projects page and popups from it until
+the Hub's Files place replaces that page.
 
 **The Hub** is the page Sue opens on, a full page and not an overlay: a
 heading **Studios** with a box for every `Studio` manifest, then **Tools** with

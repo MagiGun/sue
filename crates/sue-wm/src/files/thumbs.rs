@@ -13,6 +13,8 @@ use std::sync::Arc;
 
 use sue_core::{JobContext, JobHandle, JobPool, RasterTile2D};
 
+use crate::AppletId;
+
 /// A picture made small for a card: RGBA8, laid over white.
 #[derive(Clone, Debug)]
 pub struct Thumb {
@@ -62,8 +64,11 @@ pub struct Thumbs {
     pool: Option<JobPool>,
     jobs: HashMap<PathBuf, (u64, JobHandle<Thumb>)>,
     done: HashMap<PathBuf, (u64, Option<Thumb>)>,
-    /// What turns a file without a preview of its own into a picture.
+    /// What turns a file without a preview of its own into a picture,
+    /// when no studio's own maker is known for it.
     maker: Option<Thumbnailer>,
+    /// Each studio's own maker, for its work.
+    makers: HashMap<AppletId, Thumbnailer>,
 }
 
 /// When `path` last changed, in seconds since 1970 (0: unknown).
@@ -87,15 +92,33 @@ impl Thumbs {
         }
     }
 
+    /// Hands `studio`'s work to `maker` (the studio's
+    /// [`crate::SueApplet::thumbnail`]) instead of the maker of
+    /// [`Self::new`].
+    pub fn set_maker(&mut self, studio: AppletId, maker: Thumbnailer) {
+        self.makers.insert(studio, maker);
+    }
+
     /// The thumbnail of `path` and when the file last changed, starting it
     /// in the background if it is new or changed.
     pub fn get(&mut self, path: &Path) -> Option<(u64, &Thumb)> {
+        self.get_for(path, None)
+    }
+
+    /// The thumbnail of `path`, the work of `studio` when that is known,
+    /// and when the file last changed, starting it in the background if
+    /// it is new or changed. The studio's own maker makes it, if it has
+    /// one ([`Self::set_maker`]).
+    pub fn get_for(&mut self, path: &Path, studio: Option<&AppletId>) -> Option<(u64, &Thumb)> {
         let now = stamp(path);
         let fresh = self.done.get(path).is_some_and(|(at, _)| *at == now);
         if !fresh && !self.jobs.contains_key(path) {
             let pool = self.pool.get_or_insert_with(|| JobPool::new(1));
             let file = path.to_path_buf();
-            let maker = self.maker.clone();
+            let maker = studio
+                .and_then(|studio| self.makers.get(studio))
+                .or(self.maker.as_ref())
+                .cloned();
             let job = pool.spawn(tr!("start-thumbnail"), move |job| {
                 thumbnail(&file, maker.as_ref(), SIDE, job).ok_or_else(String::new)
             });
@@ -319,6 +342,41 @@ mod tests {
         // A damaged preview is no preview.
         assert!(preview(b"SUE\0FILE", SIDE).is_none());
         assert!(preview(b"\x89PNG", SIDE).is_none());
+        let _ = sue_platform::fs::remove_dir_all(&root);
+    }
+
+    /// A thumbnailer that makes a one pixel picture of `shade`.
+    fn solid(shade: u8) -> Thumbnailer {
+        Thumbnailer::new(move |_, _, _, _| {
+            Some(Thumb {
+                size: [1, 1],
+                pixels: vec![shade; 4],
+            })
+        })
+    }
+
+    #[test]
+    fn each_studios_work_goes_to_its_own_thumbnailer() {
+        let root = temp("studios");
+        let paint = AppletId::new("sue-paint").unwrap();
+        let writer = AppletId::new("sue-writer").unwrap();
+        let [picture, story, stray] =
+            ["picture.thing", "story.thing", "stray.thing"].map(|name| root.join(name));
+        for path in [&picture, &story, &stray] {
+            sue_platform::fs::write(path, b"not a picture").unwrap();
+        }
+        let mut thumbs = Thumbs::new(Some(solid(1)));
+        thumbs.set_maker(paint.clone(), solid(2));
+        thumbs.set_maker(writer.clone(), solid(3));
+        assert!(thumbs.get_for(&picture, Some(&paint)).is_none());
+        assert!(thumbs.get_for(&story, Some(&writer)).is_none());
+        // Work of no known studio goes to the maker every file has.
+        assert!(thumbs.get(&stray).is_none());
+        settle(&mut thumbs);
+        let shade = |thumbs: &mut Thumbs, path: &Path| thumbs.get(path).unwrap().1.pixels[0];
+        assert_eq!(shade(&mut thumbs, &picture), 2);
+        assert_eq!(shade(&mut thumbs, &story), 3);
+        assert_eq!(shade(&mut thumbs, &stray), 1);
         let _ = sue_platform::fs::remove_dir_all(&root);
     }
 }

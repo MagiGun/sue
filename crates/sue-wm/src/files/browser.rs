@@ -404,7 +404,8 @@ pub fn projects_ui(
             let cards: Vec<Card> = shown
                 .iter()
                 .map(|item| {
-                    let picture = thumbs.get(&item.path).and_then(|(at, thumb)| {
+                    let studio = item.studio.as_ref();
+                    let picture = thumbs.get_for(&item.path, studio).and_then(|(at, thumb)| {
                         let key = texture_key(&item.path.display().to_string());
                         cx.textures
                             .texture(key, at.max(1), thumb.size, 4, &thumb.pixels, false)
@@ -492,7 +493,8 @@ pub fn project_popup(
     let now = unix_now();
     let mut close = false;
     let mut open = false;
-    let picture = thumbs.get(&item.path).and_then(|(at, thumb)| {
+    let studio = item.studio.as_ref();
+    let picture = thumbs.get_for(&item.path, studio).and_then(|(at, thumb)| {
         cx.textures
             .texture(
                 texture_key(&item.path.display().to_string()),
