@@ -58,7 +58,7 @@ pub fn sin_cos(x: f32) -> (f32, f32) {
     // the quarter turn split in two parts (Cody and Waite) so the rest
     // keeps its bits for angles of many turns.
     const QUARTER_HI: f32 = 1.570_312_5;
-    const QUARTER_LO: f32 = 4.838_267_9e-4;
+    const QUARTER_LO: f32 = 4.838_268e-4;
     let quarter = (x / FRAC_PI_2 + 0.5).floor();
     let rest = (x - quarter * QUARTER_HI) - quarter * QUARTER_LO;
     let (s, c) = sin_cos_small(rest);
