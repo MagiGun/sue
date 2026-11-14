@@ -92,3 +92,33 @@ close-esc = 关闭 (Esc)
 none = 无
 there-no-studio-tool-called = 未找到名为 { $id } 的工作室或工具
 is-not-available = { $command } 不可用
+
+## menubar.rs: the menus every studio shares, and notes on menu items
+
+menu-edit = 编辑
+menu-view = 视图
+menu-window = 窗口
+menu-help = 帮助
+menu-new = 新建...
+menu-open = 打开...
+menu-open-recent = 最近打开
+menu-close = 关闭
+menu-save = 保存
+menu-save-as = 另存为...
+menu-export = 导出...
+menu-print = 打印...
+menu-settings = 设置...
+menu-back-to-hub = 返回启动台
+menu-quit = 退出 Sue
+menu-undo = 撤销
+menu-redo = 重做
+menu-cut = 剪切
+menu-copy = 复制
+menu-paste = 粘贴
+menu-select-all = 全选
+menu-guide = { $studio } 指南
+menu-keyboard-shortcuts = 快捷键
+menu-check-for-updates = 检查更新
+menu-about = 关于 { $studio }
+menu-note-coming-later = 即将推出
+menu-note-needs-selection = 需要先选择

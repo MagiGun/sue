@@ -139,3 +139,33 @@ do-not-save = Do Not Save
 save = Save
 cancel = Cancel
 shortcuts-custom = Keys of commands that have no default key
+
+## menubar.rs: the menus every studio shares, and notes on menu items
+
+menu-edit = Edit
+menu-view = View
+menu-window = Window
+menu-help = Help
+menu-new = New...
+menu-open = Open...
+menu-open-recent = Open Recent
+menu-close = Close
+menu-save = Save
+menu-save-as = Save As...
+menu-export = Export...
+menu-print = Print...
+menu-settings = Settings...
+menu-back-to-hub = Back to the Hub
+menu-quit = Quit Sue
+menu-undo = Undo
+menu-redo = Redo
+menu-cut = Cut
+menu-copy = Copy
+menu-paste = Paste
+menu-select-all = Select All
+menu-guide = { $studio } Guide
+menu-keyboard-shortcuts = Keyboard Shortcuts
+menu-check-for-updates = Check for Updates
+menu-about = About { $studio }
+menu-note-coming-later = Coming later
+menu-note-needs-selection = Needs a selection

@@ -104,3 +104,33 @@ close-esc = Chiudi (Esc)
 none = Nessuno
 there-no-studio-tool-called = Nessuno studio o strumento denominato { $id }
 is-not-available = { $command } non è disponibile
+
+## menubar.rs: the menus every studio shares, and notes on menu items
+
+menu-edit = Modifica
+menu-view = Visualizza
+menu-window = Finestra
+menu-help = Aiuto
+menu-new = Nuovo...
+menu-open = Apri...
+menu-open-recent = Apri recenti
+menu-close = Chiudi
+menu-save = Salva
+menu-save-as = Salva con nome...
+menu-export = Esporta...
+menu-print = Stampa...
+menu-settings = Impostazioni...
+menu-back-to-hub = Torna all'Hub
+menu-quit = Esci da Sue
+menu-undo = Annulla
+menu-redo = Ripeti
+menu-cut = Taglia
+menu-copy = Copia
+menu-paste = Incolla
+menu-select-all = Seleziona tutto
+menu-guide = Guida di { $studio }
+menu-keyboard-shortcuts = Tasti di scelta rapida
+menu-check-for-updates = Controlla aggiornamenti
+menu-about = Informazioni su { $studio }
+menu-note-coming-later = Arriverà più avanti
+menu-note-needs-selection = Serve una selezione

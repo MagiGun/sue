@@ -122,3 +122,33 @@ label-work = Trabajo
 transfer-copy = Copiar
 transfer-export = Exportar
 transfer-import = Importar
+
+## menubar.rs: the menus every studio shares, and notes on menu items
+
+menu-edit = Editar
+menu-view = Ver
+menu-window = Ventana
+menu-help = Ayuda
+menu-new = Nuevo...
+menu-open = Abrir...
+menu-open-recent = Abrir reciente
+menu-close = Cerrar
+menu-save = Guardar
+menu-save-as = Guardar como...
+menu-export = Exportar...
+menu-print = Imprimir...
+menu-settings = Ajustes...
+menu-back-to-hub = Volver al Hub
+menu-quit = Salir de Sue
+menu-undo = Deshacer
+menu-redo = Rehacer
+menu-cut = Cortar
+menu-copy = Copiar
+menu-paste = Pegar
+menu-select-all = Seleccionar todo
+menu-guide = Guía de { $studio }
+menu-keyboard-shortcuts = Atajos de teclado
+menu-check-for-updates = Buscar actualizaciones
+menu-about = Acerca de { $studio }
+menu-note-coming-later = Llegará más adelante
+menu-note-needs-selection = Necesita una selección

@@ -17,6 +17,12 @@
 //! and close on a pick, on Escape or on a click elsewhere. Left and Right
 //! on a top level menu go to the menu beside it. Scripted runs open a menu
 //! with [`MenuBar::open`].
+//!
+//! [`Skeleton`] is the shape every studio's bar shares (File, Edit, View,
+//! the studio's own menus, Window, Help), with the standard items in one
+//! order and one wording.
+
+use std::collections::HashMap;
 
 use egui::{Id, Rect, Sense, Ui, pos2, vec2};
 
@@ -463,6 +469,372 @@ pub fn context_items(
     picked
 }
 
+// ----- The skeleton of D11 -----------------------------------------------------
+
+/// The standard items every studio's menus have, in [`Skeleton`]'s order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Slot {
+    /// File, New.
+    New,
+    /// File, Open.
+    Open,
+    /// File, Open Recent: a nested menu the studio fills.
+    Recent,
+    /// File, Close.
+    Close,
+    /// File, Save.
+    Save,
+    /// File, Save As.
+    SaveAs,
+    /// File, Export.
+    Export,
+    /// File, Print.
+    Print,
+    /// File, Settings.
+    Settings,
+    /// File, Back to the Hub.
+    Hub,
+    /// File, Quit Sue.
+    Quit,
+    /// Edit, Undo.
+    Undo,
+    /// Edit, Redo.
+    Redo,
+    /// Edit, Cut.
+    Cut,
+    /// Edit, Copy.
+    Copy,
+    /// Edit, Paste.
+    Paste,
+    /// Edit, Select All.
+    SelectAll,
+    /// Help, the studio's guide.
+    Guide,
+    /// Help, Keyboard Shortcuts.
+    Shortcuts,
+    /// Help, Check for Updates.
+    Updates,
+    /// Help, About the studio.
+    About,
+}
+
+impl Slot {
+    /// Every slot, in the order the menus show them.
+    pub const ALL: [Self; 21] = [
+        Self::New,
+        Self::Open,
+        Self::Recent,
+        Self::Close,
+        Self::Save,
+        Self::SaveAs,
+        Self::Export,
+        Self::Print,
+        Self::Settings,
+        Self::Hub,
+        Self::Quit,
+        Self::Undo,
+        Self::Redo,
+        Self::Cut,
+        Self::Copy,
+        Self::Paste,
+        Self::SelectAll,
+        Self::Guide,
+        Self::Shortcuts,
+        Self::Updates,
+        Self::About,
+    ];
+
+    /// The groups of the File menu, a line between each two.
+    const FILE: [&'static [Self]; 6] = [
+        &[Self::New, Self::Open, Self::Recent],
+        &[Self::Close, Self::Save, Self::SaveAs],
+        &[Self::Export],
+        &[Self::Print],
+        &[Self::Settings],
+        &[Self::Hub, Self::Quit],
+    ];
+
+    /// The groups of the Edit menu.
+    const EDIT: [&'static [Self]; 3] = [
+        &[Self::Undo, Self::Redo],
+        &[Self::Cut, Self::Copy, Self::Paste],
+        &[Self::SelectAll],
+    ];
+
+    /// The groups of the Help menu.
+    const HELP: [&'static [Self]; 3] = [
+        &[Self::Guide, Self::Shortcuts],
+        &[Self::Updates],
+        &[Self::About],
+    ];
+
+    /// The command the item runs: the same name in every studio, which a
+    /// studio's command registry answers. Open Recent runs none (it is a
+    /// nested menu).
+    #[must_use]
+    pub const fn command(self) -> Option<&'static str> {
+        Some(match self {
+            Self::New => "file.new",
+            Self::Open => "file.open",
+            Self::Recent => return None,
+            Self::Close => "file.close",
+            Self::Save => "file.save",
+            Self::SaveAs => "file.save_as",
+            Self::Export => "file.export",
+            Self::Print => "file.print",
+            Self::Settings => "file.settings",
+            Self::Hub => "file.leave",
+            Self::Quit => "app.quit",
+            Self::Undo => "edit.undo",
+            Self::Redo => "edit.redo",
+            Self::Cut => "edit.cut",
+            Self::Copy => "edit.copy",
+            Self::Paste => "edit.paste",
+            Self::SelectAll => "edit.select_all",
+            Self::Guide => "help.guide",
+            Self::Shortcuts => "help.shortcuts",
+            Self::Updates => "help.updates",
+            Self::About => "help.about",
+        })
+    }
+
+    /// What the item reads in the language in use; `studio` names the
+    /// studio in "Sue Paint Guide" and "About Sue Paint".
+    #[must_use]
+    pub fn label(self, studio: &str) -> String {
+        match self {
+            Self::New => tr!("menu-new"),
+            Self::Open => tr!("menu-open"),
+            Self::Recent => tr!("menu-open-recent"),
+            Self::Close => tr!("menu-close"),
+            Self::Save => tr!("menu-save"),
+            Self::SaveAs => tr!("menu-save-as"),
+            Self::Export => tr!("menu-export"),
+            Self::Print => tr!("menu-print"),
+            Self::Settings => tr!("menu-settings"),
+            Self::Hub => tr!("menu-back-to-hub"),
+            Self::Quit => tr!("menu-quit"),
+            Self::Undo => tr!("menu-undo"),
+            Self::Redo => tr!("menu-redo"),
+            Self::Cut => tr!("menu-cut"),
+            Self::Copy => tr!("menu-copy"),
+            Self::Paste => tr!("menu-paste"),
+            Self::SelectAll => tr!("menu-select-all"),
+            Self::Guide => tr!("menu-guide", studio = studio),
+            Self::Shortcuts => tr!("menu-keyboard-shortcuts"),
+            Self::Updates => tr!("menu-check-for-updates"),
+            Self::About => tr!("menu-about", studio = studio),
+        }
+    }
+
+    /// The standard item: an action running [`Self::command`], or for Open
+    /// Recent an empty nested menu.
+    fn item(self, studio: &str) -> MenuItem {
+        match self.command() {
+            Some(command) => MenuItem::action(self.label(studio), command),
+            None => MenuItem::sub(self.label(studio), Vec::new()),
+        }
+    }
+}
+
+/// The note of an item that a later version of Sue will make work.
+#[must_use]
+pub fn note_coming_later() -> String {
+    tr!("menu-note-coming-later")
+}
+
+/// The note of an item that works on a selection when there is none.
+#[must_use]
+pub fn note_needs_selection() -> String {
+    tr!("menu-note-needs-selection")
+}
+
+/// The menus every studio shares (D11 of the 0.0.8 plan): File (New, Open,
+/// Open Recent, Close, Save, Save As, Export, Print, Settings, Back to the
+/// Hub, Quit Sue), Edit (Undo, Redo, Cut, Copy, Paste, Select All), View,
+/// the studio's own menus, Window, Help (the guide, Keyboard Shortcuts,
+/// Check for Updates, About).
+///
+/// A studio puts its own items after a standard one with
+/// [`after`](Self::after), swaps one with [`set`](Self::set) (Export as a
+/// nested menu of formats, say), and fills View, Window and its own menus.
+/// Keys are not part of the skeleton: they come from the studio's command
+/// registry ([`crate::shortcuts::show_in_menus`]). A menu left with nothing
+/// in it is not shown, and lines never stand at the top or the bottom of a
+/// menu or two in a row.
+///
+/// ```
+/// use sue_wm::{Menu, MenuItem, Skeleton, Slot};
+/// let _english = sue_lang::scope(sue_lang::ENGLISH);
+/// let menus = Skeleton::new("Sue Paint")
+///     .after(Slot::New, vec![MenuItem::action("New from Clipboard", "file.new_clipboard")])
+///     .view(vec![MenuItem::action("Zoom In", "view.zoom_in")])
+///     .menu(Menu::new("Layer", vec![MenuItem::action("Delete", "layer.delete")]))
+///     .build();
+/// let titles: Vec<&str> = menus.iter().map(|menu| menu.title.as_str()).collect();
+/// assert_eq!(titles, ["File", "Edit", "View", "Layer", "Help"]);
+/// ```
+#[derive(Clone, Debug)]
+pub struct Skeleton {
+    studio: String,
+    replaced: HashMap<Slot, Option<MenuItem>>,
+    after: HashMap<Slot, Vec<MenuItem>>,
+    edit: Vec<MenuItem>,
+    view: Vec<MenuItem>,
+    own: Vec<Menu>,
+    window: Vec<MenuItem>,
+}
+
+impl Skeleton {
+    /// The skeleton of the studio called `studio` (its name as people read
+    /// it, for the guide and About).
+    pub fn new(studio: impl Into<String>) -> Self {
+        Self {
+            studio: studio.into(),
+            replaced: HashMap::new(),
+            after: HashMap::new(),
+            edit: Vec::new(),
+            view: Vec::new(),
+            own: Vec::new(),
+            window: Vec::new(),
+        }
+    }
+
+    /// Puts `items` right after the standard item `slot` (after what an
+    /// earlier call put there).
+    #[must_use]
+    pub fn after(mut self, slot: Slot, items: Vec<MenuItem>) -> Self {
+        self.after.entry(slot).or_default().extend(items);
+        self
+    }
+
+    /// Shows `item` where the standard item `slot` would be.
+    #[must_use]
+    pub fn set(mut self, slot: Slot, item: MenuItem) -> Self {
+        self.replaced.insert(slot, Some(item));
+        self
+    }
+
+    /// Fills Open Recent with `items`.
+    #[must_use]
+    pub fn recent(self, items: Vec<MenuItem>) -> Self {
+        let label = Slot::Recent.label(&self.studio);
+        self.set(Slot::Recent, MenuItem::sub(label, items))
+    }
+
+    /// Leaves the standard item `slot` out (what is put after it stays).
+    #[must_use]
+    pub fn without(mut self, slot: Slot) -> Self {
+        self.replaced.insert(slot, None);
+        self
+    }
+
+    /// Adds `items` at the end of the Edit menu, after a line.
+    #[must_use]
+    pub fn edit(mut self, items: Vec<MenuItem>) -> Self {
+        Self::append(&mut self.edit, items);
+        self
+    }
+
+    /// Adds `items` to the View menu.
+    #[must_use]
+    pub fn view(mut self, items: Vec<MenuItem>) -> Self {
+        self.view.extend(items);
+        self
+    }
+
+    /// Adds one of the studio's own menus, after View and the menus added
+    /// before it.
+    #[must_use]
+    pub fn menu(mut self, menu: Menu) -> Self {
+        self.own.push(menu);
+        self
+    }
+
+    /// Adds `items` to the Window menu.
+    #[must_use]
+    pub fn window(mut self, items: Vec<MenuItem>) -> Self {
+        self.window.extend(items);
+        self
+    }
+
+    /// `items` after a line at the end of `into`.
+    fn append(into: &mut Vec<MenuItem>, items: Vec<MenuItem>) {
+        if !items.is_empty() {
+            into.push(MenuItem::Separator);
+            into.extend(items);
+        }
+    }
+
+    /// The items of one standard menu: its groups with lines between them.
+    fn standard(&self, groups: &[&[Slot]]) -> Vec<MenuItem> {
+        let mut items = Vec::new();
+        for group in groups {
+            items.push(MenuItem::Separator);
+            for slot in *group {
+                match self.replaced.get(slot) {
+                    Some(Some(item)) => items.push(item.clone()),
+                    Some(None) => {}
+                    None => items.push(slot.item(&self.studio)),
+                }
+                if let Some(extra) = self.after.get(slot) {
+                    items.extend(extra.iter().cloned());
+                }
+            }
+        }
+        items
+    }
+
+    /// The menus, in the order the bar shows them.
+    #[must_use]
+    pub fn build(self) -> Vec<Menu> {
+        let file = self.standard(&Slot::FILE);
+        let mut edit = self.standard(&Slot::EDIT);
+        edit.extend(self.edit.iter().cloned());
+        let help = self.standard(&Slot::HELP);
+        let mut menus = vec![
+            Menu::new(tr!("menu-file"), file),
+            Menu::new(tr!("menu-edit"), edit),
+            Menu::new(tr!("menu-view"), self.view),
+        ];
+        menus.extend(self.own);
+        menus.push(Menu::new(tr!("menu-window"), self.window));
+        menus.push(Menu::new(tr!("menu-help"), help));
+        for menu in &mut menus {
+            tidy(&mut menu.items);
+        }
+        menus.retain(|menu| !menu.items.is_empty());
+        menus
+    }
+}
+
+/// Takes away lines at the top and the bottom of `items` and every line
+/// right after another, in nested menus too.
+fn tidy(items: &mut Vec<MenuItem>) {
+    let mut kept: Vec<MenuItem> = Vec::with_capacity(items.len());
+    for mut item in items.drain(..) {
+        if let MenuItem::Sub { items, .. } = &mut item {
+            tidy(items);
+        }
+        let line = matches!(item, MenuItem::Separator);
+        if line
+            && kept
+                .last()
+                .is_none_or(|last| matches!(last, MenuItem::Separator))
+        {
+            continue;
+        }
+        kept.push(item);
+    }
+    if kept
+        .last()
+        .is_some_and(|last| matches!(last, MenuItem::Separator))
+    {
+        kept.pop();
+    }
+    *items = kept;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -651,5 +1023,169 @@ mod tests {
         frame(&ctx, &mut bar, &menus, Vec::new());
         assert_eq!(frame(&ctx, &mut bar, &menus, vec![key(Key::Escape)]), None);
         assert!(!bar.is_open());
+    }
+
+    fn labels(items: &[MenuItem]) -> Vec<&str> {
+        items
+            .iter()
+            .map(|item| match item {
+                MenuItem::Separator => "-",
+                other => other.label(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_skeleton_has_the_standard_menus_in_one_order() {
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        let menus = Skeleton::new("Sue Writer").build();
+        let titles: Vec<&str> = menus.iter().map(|menu| menu.title.as_str()).collect();
+        // View and Window are empty, so they are not shown.
+        assert_eq!(titles, ["File", "Edit", "Help"]);
+        assert_eq!(
+            labels(&menus[0].items),
+            [
+                "New...",
+                "Open...",
+                "Open Recent",
+                "-",
+                "Close",
+                "Save",
+                "Save As...",
+                "-",
+                "Export...",
+                "-",
+                "Print...",
+                "-",
+                "Settings...",
+                "-",
+                "Back to the Hub",
+                "Quit Sue",
+            ]
+        );
+        assert_eq!(
+            labels(&menus[1].items),
+            [
+                "Undo",
+                "Redo",
+                "-",
+                "Cut",
+                "Copy",
+                "Paste",
+                "-",
+                "Select All"
+            ]
+        );
+        assert_eq!(
+            labels(&menus[2].items),
+            [
+                "Sue Writer Guide",
+                "Keyboard Shortcuts",
+                "-",
+                "Check for Updates",
+                "-",
+                "About Sue Writer",
+            ]
+        );
+        // Every standard item runs its slot's command.
+        let commands: Vec<&str> = menus
+            .iter()
+            .flat_map(|menu| menu.items.iter().flat_map(MenuItem::commands))
+            .collect();
+        let slots: Vec<&str> = Slot::ALL.iter().filter_map(|slot| slot.command()).collect();
+        assert_eq!(commands, slots);
+        // No key is made up: keys come from the studio's registry.
+        assert!(menus.iter().all(|menu| menu.items.iter().all(|item| {
+            !matches!(item, MenuItem::Action { shortcut, .. } if !shortcut.is_empty())
+        })));
+    }
+
+    #[test]
+    fn a_studio_fills_the_skeleton() {
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        let menus = Skeleton::new("Sue Paint")
+            .after(
+                Slot::New,
+                vec![MenuItem::action("New from Clipboard", "file.new_clipboard")],
+            )
+            .recent(vec![MenuItem::action("Cat.sue", "file.recent.open.0")])
+            .set(
+                Slot::Export,
+                MenuItem::sub("Export", vec![MenuItem::action(".png", "file.export.png")]),
+            )
+            .without(Slot::Print)
+            .after(
+                Slot::Print,
+                vec![MenuItem::action("Print Settings", "file.print_settings")],
+            )
+            .edit(vec![MenuItem::action("Clear", "edit.clear")])
+            .view(vec![MenuItem::action("Zoom In", "view.zoom_in")])
+            .menu(Menu::new(
+                "Layer",
+                vec![MenuItem::action("Delete", "layer.delete")],
+            ))
+            .menu(Menu::new("Empty", vec![MenuItem::Separator]))
+            .window(vec![MenuItem::action("Layer", "window.layer")])
+            .build();
+        let titles: Vec<&str> = menus.iter().map(|menu| menu.title.as_str()).collect();
+        assert_eq!(titles, ["File", "Edit", "View", "Layer", "Window", "Help"]);
+        assert_eq!(
+            labels(&menus[0].items)[..9],
+            [
+                "New...",
+                "New from Clipboard",
+                "Open...",
+                "Open Recent",
+                "-",
+                "Close",
+                "Save",
+                "Save As...",
+                "-",
+            ]
+        );
+        assert!(matches!(&menus[0].items[3], MenuItem::Sub { items, .. } if items.len() == 1));
+        assert!(matches!(&menus[0].items[9], MenuItem::Sub { label, .. } if label == "Export"));
+        // Print is gone; what was put after it stays.
+        assert_eq!(
+            labels(&menus[0].items)[10..13],
+            ["-", "Print Settings", "-"]
+        );
+        assert_eq!(labels(&menus[1].items).last(), Some(&"Clear"));
+        assert_eq!(labels(&menus[1].items)[menus[1].items.len() - 2], "-");
+    }
+
+    #[test]
+    fn lines_never_stand_at_an_end_or_two_in_a_row() {
+        let mut items = vec![
+            MenuItem::Separator,
+            MenuItem::action("A", "a"),
+            MenuItem::Separator,
+            MenuItem::Separator,
+            MenuItem::sub(
+                "B",
+                vec![
+                    MenuItem::Separator,
+                    MenuItem::action("C", "c"),
+                    MenuItem::Separator,
+                ],
+            ),
+            MenuItem::Separator,
+        ];
+        tidy(&mut items);
+        assert_eq!(
+            items,
+            vec![
+                MenuItem::action("A", "a"),
+                MenuItem::Separator,
+                MenuItem::sub("B", vec![MenuItem::action("C", "c")]),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_notes_read_from_the_language_database() {
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        assert_eq!(note_coming_later(), "Coming later");
+        assert_eq!(note_needs_selection(), "Needs a selection");
     }
 }
