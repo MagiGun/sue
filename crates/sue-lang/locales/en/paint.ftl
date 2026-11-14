@@ -2336,3 +2336,10 @@ pop-out-into-a-window = Pop Out into Separate Window
 use-current-workspace-as-default = Use Current Workspace as Default
 reset-workspace-to-default = Reset to Default
 default-workspace-saved = The palettes as they are now are the default workspace
+
+## commands/: names of commands that no menu shows
+
+zoom-100-percent = 100%
+zoom-200-percent = 200%
+paste-material = Paste Material
+cancel-transform = Cancel Transform

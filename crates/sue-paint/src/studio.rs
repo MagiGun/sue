@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use egui::{Key, Modifiers, Pos2, Rect, Ui, vec2};
+use egui::{Pos2, Rect, Ui, vec2};
 use sue_core::txn::{Batch, SetProperty, SpawnEntity};
 use sue_core::{
     Arena, CHILD, ComponentKind, Entity, EntityId, PixelFormat, Properties, RasterTile2D, Relation,
@@ -22,8 +22,8 @@ use sue_model::picture::{self, LayerKind};
 use sue_platform::write_atomic;
 use sue_rice::{RiceDeclaration, RiceParameter};
 use sue_wm::{
-    AppletContext, AppletId, AppletManifest, AppletRole, ArenaEdit, FilePick, FileType, ItemState,
-    Menu, MenuBar, PaletteEntry, ShellRequest, SueApplet, World,
+    AppletContext, AppletId, AppletManifest, AppletRole, ArenaEdit, Facts, FilePick, FileType,
+    ItemState, Menu, MenuBar, PaletteEntry, ShellRequest, SueApplet, World,
 };
 
 use crate::brush::{Stabilizer, Stroke};
@@ -887,389 +887,6 @@ pub(crate) const SELECTION_LAYER: &str = "layer.selection";
 pub(crate) fn texture_key(id: EntityId, salt: u64) -> u64 {
     let bits = id.to_u128();
     (bits as u64) ^ ((bits >> 64) as u64) ^ salt
-}
-
-/// The commands this build can run.
-fn implemented(command: &str) -> bool {
-    matches!(
-        command,
-        "file.new"
-            | "file.open"
-            | "file.start_page"
-            | "file.duplicate.clip"
-            | "file.export.webp"
-            | "edit.outline_selection"
-            | "edit.transform.scale_only"
-            | "edit.transform.rotate"
-            | "edit.transform.skew"
-            | "edit.clear_history"
-            | "layer.ungroup"
-            | "layer.delete_empty"
-            | "layer.delete_hidden"
-            | "layer.hide_drafts"
-            | "layer.rename"
-            | "layer.transfer_down"
-            | "layer.merge_visible_here"
-            | "view.reset_turn"
-            | "view.rotate_90"
-            | "view.rotate_180"
-            | "view.rotate_270"
-            | "view.reset_display"
-            | "view.paper"
-            | "file.close"
-            | "file.save"
-            | "file.save_as"
-            | "file.export.png"
-            | "file.export.jpg"
-            | "file.export.jxl"
-            | "file.import.image"
-            | "file.preferences"
-            | "file.leave"
-            | "app.quit"
-            | "edit.undo"
-            | "edit.redo"
-            | "edit.cut"
-            | "edit.copy"
-            | "edit.paste"
-            | "edit.clear"
-            | "edit.clear_outside"
-            | "edit.fill"
-            | "edit.recolor"
-            | "edit.luma_to_alpha"
-            | "edit.align.left"
-            | "edit.align.hcenter"
-            | "edit.align.right"
-            | "edit.align.top"
-            | "edit.align.vcenter"
-            | "edit.align.bottom"
-            | "view.scroll_bar"
-            | "layer.new.raster_top"
-            | "layer.new.figure"
-            | "layer.new.hand"
-            | "figure.register_pose"
-            | "figure.pose_scanner"
-            | "figure.hand_scanner"
-            | "layer.new.head"
-            | "layer.lines_tones_vector"
-            | "figure.flip"
-            | "figure.reset"
-            | "file.new_clipboard"
-            | "view.transform_launcher"
-            | "edit.transform.cancel"
-            | "view.text_launcher"
-            | "view.object_launcher"
-            | "edit.canvas_height"
-            | "window.brush_grid"
-            | "edit.flip_h"
-            | "edit.flip_v"
-            | "edit.rotate180"
-            | "canvas.flip_h"
-            | "canvas.flip_v"
-            | "canvas.rotate180"
-            | "filter.brightness"
-            | "filter.hue"
-            | "filter.invert"
-            | "filter.posterize"
-            | "filter.binarize"
-            | "filter.blur"
-            | "filter.blur_strong"
-            | "filter.gaussian"
-            | "filter.mosaic"
-            | "filter.noise"
-            | "filter.sharpen"
-            | "filter.sharpen_strong"
-            | "layer.new"
-            | "layer.new.fill"
-            | "layer.new.paper"
-            | "layer.from_selection"
-            | "layer.duplicate"
-            | "layer.delete"
-            | "layer.toggle.visible"
-            | "layer.toggle.clip"
-            | "layer.toggle.draft"
-            | "layer.toggle.lock"
-            | "layer.toggle.lock_alpha"
-            | "layer.properties"
-            | "layer.select_above"
-            | "layer.select_below"
-            | "layer.select_all"
-            | "layer.select_none"
-            | "layer.order.front"
-            | "layer.order.up"
-            | "layer.order.down"
-            | "layer.order.back"
-            | "layer.merge_down"
-            | "layer.merge_visible"
-            | "layer.flatten"
-            | "select.all"
-            | "select.none"
-            | "select.again"
-            | "select.invert"
-            | "select.from_layer"
-            | "view.rotate_left"
-            | "view.rotate_right"
-            | "view.rotate_reset"
-            | "view.flip_h"
-            | "view.flip_v"
-            | "view.zoom_in"
-            | "view.zoom_out"
-            | "view.actual"
-            | "view.double"
-            | "view.fit"
-            | "view.grid"
-            | "view.pixel_grid"
-            | "view.selection"
-            | "window.next_tab"
-            | "window.prev_tab"
-            | "window.hide_all"
-            | "window.command_bar"
-            | "window.tool"
-            | "window.sub_tool"
-            | "window.tool_property"
-            | "window.brush_size"
-            | "window.color_wheel"
-            | "window.color_slider"
-            | "window.color_set"
-            | "window.color_history"
-            | "window.navigator"
-            | "window.layer"
-            | "window.layer_property"
-            | "window.history"
-            | "window.timeline"
-            | "help.shortcuts"
-            | "window.hide_menus"
-            | "window.workspace.reset"
-            | "help.about"
-            | "file.shortcuts"
-            | "file.pressure"
-            | "edit.transform.puppet"
-            | "edit.transform.scale"
-            | "edit.transform.free"
-            | "edit.transform.distort"
-            | "edit.transform.perspective"
-            | "story.manager"
-            | "story.order"
-            | "story.open_page"
-            | "story.work_settings"
-            | "story.first"
-            | "story.previous"
-            | "story.next"
-            | "story.last"
-            | "story.add"
-            | "story.insert"
-            | "story.duplicate_page"
-            | "story.delete"
-            | "story.export_page"
-            | "story.export_pages"
-            | "filter.curve"
-            | "filter.levels"
-            | "filter.balance"
-            | "filter.gradient_map"
-            | "filter.focus_lines"
-            | "filter.speed_lines"
-            | "filter.tone"
-            | "layer.new.tone"
-            | "layer.new.frame"
-            | "layer.new.balloon"
-            | "layer.folder_insert"
-            | "edit.canvas_size"
-            | "edit.resolution"
-            | "edit.crop"
-            | "view.snap_special"
-            | "view.snap_ruler"
-            | "layer.new.vector"
-            | "file.timelapse.record"
-            | "file.timelapse.export"
-            | "file.export.movie"
-            | "layer.ruler.perspective"
-            | "layer.ruler.symmetry"
-            | "layer.ruler.circle"
-            | "layer.ruler.delete"
-            | "layer.ruler.show"
-            | "layer.new.text"
-            | "layer.correction.brightness"
-            | "layer.correction.levels"
-            | "layer.correction.curve"
-            | "layer.correction.hue"
-            | "layer.correction.balance"
-            | "layer.correction.invert"
-            | "layer.correction.posterize"
-            | "layer.correction.binarize"
-            | "layer.correction.gradient_map"
-            | "layer.mask.outside"
-            | "layer.mask.inside"
-            | "layer.mask.delete"
-            | "layer.mask.apply"
-            | "layer.mask.toggle"
-            | "layer.mask.edit"
-            | "layer.new.folder"
-            | "anim.timeline.new"
-            | "anim.layer.folder"
-            | "anim.cel.new"
-            | "anim.cel.assign"
-            | "anim.exposure_sheet"
-            | "file.export.exposure_sheet"
-            | "file.import.exposure_sheet"
-            | "anim.key.add"
-            | "anim.key.delete"
-            | "anim.frame.insert"
-            | "anim.frame.delete"
-            | "anim.onion"
-            | "window.intermediate"
-            | "window.approximate"
-            | "edit.material.image"
-            | "select.expand"
-            | "select.shrink"
-            | "select.feather"
-            | "select.gamut"
-            | "select.add_layer"
-            | "select.subtract_layer"
-            | "select.to_layer"
-            | "select.quick_mask"
-            | "select.launcher"
-            | "edit.material.paste"
-            | "file.export.webtoon"
-            | "file.export.vectors"
-            | "file.export.layer_comps"
-            | "layer.comps"
-            | "file.export.cels"
-            | "anim.first"
-            | "anim.last"
-            | "anim.timeline.edit"
-            | "anim.timeline.enable"
-            | "file.import.audio"
-            | "layer.new.3d"
-            | "file.import.3d"
-            | "filter.line_extraction"
-            | "filter.motion_blur"
-            | "filter.radial_blur"
-            | "filter.zoom_blur"
-            | "filter.smooth"
-            | "filter.dust"
-            | "filter.line_width"
-            | "filter.wave"
-            | "filter.pinch"
-            | "filter.twirl"
-            | "filter.zigzag"
-            | "filter.crystallize"
-            | "filter.lens_blur"
-            | "edit.smart_smoothing"
-            | "edit.advanced_fill"
-            | "filter.quick.layer"
-            | "filter.quick.all"
-            | "filter.effects.layer"
-            | "filter.effects.all"
-            | "filter.jpeg_noise"
-            | "filter.polar"
-            | "filter.ripple"
-            | "filter.fisheye"
-            | "filter.aberration"
-            | "filter.glow"
-            | "filter.inflate"
-            | "filter.drop_shadow"
-            | "filter.retro"
-            | "filter.perlin"
-            | "filter.clouds"
-            | "filter.unsharp"
-            | "filter.lines_tones"
-            | "file.export.pdf"
-            | "file.export.epub"
-            | "layer.toggle.reference"
-            | "layer.rasterize"
-            | "window.material"
-            | "anim.layer.camera"
-            | "anim.camera.key"
-            | "anim.camera.unkey"
-            | "anim.onion_settings"
-            | "anim.light_table"
-            | "anim.light_table.register"
-            | "anim.light_table.clear"
-            | "anim.light_table.reverse"
-            | "anim.light_table.color"
-            | "anim.light_table.cel"
-            | "anim.light_table.general"
-            | "anim.light_table.opacity_target"
-            | "anim.light_table.tool"
-            | "anim.light_table.reset"
-            | "anim.light_table.file"
-            | "anim.light_table.register_general"
-            | "anim.light_table.deregister"
-            | "anim.cel.lock"
-            | "anim.cel.prev"
-            | "anim.cel.next"
-            | "anim.loop"
-            | "anim.play"
-            | "anim.next"
-            | "anim.prev"
-            | "file.export.gif"
-            | "file.export.apng"
-            | "file.export.webp_animation"
-            | "file.export.sequence"
-            | "file.export.bmp"
-            | "file.export.tif"
-            | "file.export.tga"
-            | "file.export.psd"
-            | "file.export.psb"
-            | "file.import.layers"
-            | "file.import.batch"
-            | "file.import.vector"
-            | "file.import.movie"
-            | "file.import.pattern"
-            | "file.recent.clear"
-            | "file.revert"
-            | "view.fit_navigator"
-            | "view.print_size"
-            | "view.ruler_bar"
-            | "view.snap_grid"
-            | "view.crop_frame"
-            | "view.bleed"
-            | "view.page_image"
-            | "view.tone_area"
-            | "view.profile_preview"
-            | "view.profile_settings"
-            | "story.combine"
-            | "story.separate"
-            | "story.page_settings"
-            | "story.info"
-            | "story.editor"
-            | "story.import_text"
-            | "edit.transform.mesh"
-            | "window.interface.auto"
-            | "window.interface.desktop"
-            | "window.interface.tablet"
-            | "window.interface.phone"
-            | "canvas.rotate_left"
-            | "canvas.rotate_right"
-            | "edit.paste_here"
-            | "edit.canvas_properties"
-            | "edit.brush_tip"
-            | "edit.material.tip"
-            | "layer.new.gradient"
-            | "layer.merge_selected"
-            | "layer.convert"
-            | "select.from_selection_layer"
-            | "file.print_settings"
-            | "file.print"
-            | "file.export.batch"
-            | "file.modifiers"
-            | "file.command_bar"
-            | "help.guide"
-            | "help.updates"
-            | "window.new"
-            | "window.tile"
-            | "window.cascade"
-            | "window.workspace.save"
-            | "window.workspace.default"
-            | "window.workspace.manage"
-            | "window.sub_view"
-            | "window.cels"
-            | "window.auto_actions"
-            | "window.item_bank"
-            | "window.info"
-    ) || command.starts_with("file.recent.open.")
-        || command.starts_with("figure.preset.")
-        || command.starts_with("window.workspace.use.")
-        || TOOL_KEYS.iter().any(|(known, _, _)| *known == command)
 }
 
 /// Puppet warp on one layer: its pixels from before, the pins, and what
@@ -4296,16 +3913,19 @@ impl SuePaint {
 
     // ----- Commands ---------------------------------------------------------
 
-    /// How a menu item for `command` looks right now.
-    pub(crate) fn state(
+    /// How a menu item for `command` looks right now: grayed when it is
+    /// not a command of the studio.
+    pub(crate) fn state(&self, command: &str, facts: &Facts<'_>) -> ItemState {
+        crate::commands::registry().state(self, facts, command)
+    }
+
+    /// How an item for the registered command `command` looks right now.
+    pub(crate) fn state_arms(
         &self,
         command: &str,
         arena: &Arena,
         history: &UndoStack<World>,
     ) -> ItemState {
-        if !implemented(command) {
-            return ItemState::off();
-        }
         let has_doc = self.doc().is_some();
         let info = self.layer_info(arena);
         let raster = info
@@ -4537,7 +4157,6 @@ impl SuePaint {
     }
 
     /// Runs a command of the menus, the command bar or a shortcut.
-    #[allow(clippy::too_many_lines, reason = "one arm per command")]
     pub(crate) fn run(&mut self, command: &str, cx: &mut AppletContext<'_>) {
         // Words being typed are kept before anything else happens.
         self.finish_typing(cx);
@@ -4580,9 +4199,15 @@ impl SuePaint {
         {
             return;
         }
-        if !self.state(command, &cx.world.arena, cx.history).enabled {
+        if !self.state(command, &Facts::of(cx)).enabled {
             return;
         }
+        crate::commands::registry().run(self, cx, command);
+    }
+
+    /// Does what the registered command `command` does.
+    #[allow(clippy::too_many_lines, reason = "one arm per command")]
+    pub(crate) fn run_arms(&mut self, command: &str, cx: &mut AppletContext<'_>) {
         let rgb = color::unit(self.drawing_color());
         match command {
             "file.new" => self.dialog = Some(Dialog::New(Self::new_dialog(cx))),
@@ -6676,17 +6301,18 @@ impl SuePaint {
         }
         // The shortcuts as Settings has them (Clip Studio Paint's unless
         // changed), any number of chords each, tools and brush keys too.
-        let taken = ctx.input_mut(|input| {
-            sue_wm::shortcuts::take(input, cx.rice(), KEYS_SECTION, shortcut_table())
-        });
+        let bound = &self.bound;
+        let taken =
+            ctx.input_mut(|input| bound.take(input, cx.rice(), KEYS_SECTION, shortcut_table()));
+        let registry = crate::commands::registry();
         for name in taken {
             if self.tool_key(name) {
                 continue;
             }
-            if implemented(name) {
+            if registry.has(name) {
                 self.run(name, cx);
             } else {
-                let label = crate::menus::label_of(&self.menus, name).unwrap_or(name);
+                let label = registry.label(name).unwrap_or_else(|| name.to_owned());
                 cx.notify(tr!("not-sue-paint-yet", label = label));
             }
         }
@@ -6906,135 +6532,7 @@ impl SuePaint {
 /// The settings section Sue Paint's shortcuts live in.
 pub(crate) const KEYS_SECTION: &str = "sue_paint_keys";
 
-/// Sue Paint's shortcuts with their default chords (Clip Studio Paint's),
-/// each command once with every chord it has, labeled as its menu item.
-pub(crate) fn shortcut_table() -> &'static [sue_wm::shortcuts::Shortcut] {
-    static TABLE: std::sync::OnceLock<Vec<sue_wm::shortcuts::Shortcut>> =
-        std::sync::OnceLock::new();
-    TABLE.get_or_init(|| {
-        // The labels are the settings' English descriptions; Settings and
-        // the Keyboard Shortcuts list read them in other languages from
-        // the language database.
-        let _english = sue_lang::scope(sue_lang::ENGLISH);
-        let menus = crate::menus::menus();
-        let mut table = sue_wm::shortcuts::table(shortcuts(), |command| {
-            crate::menus::label_of(&menus, command)
-                .unwrap_or(command)
-                .trim_end_matches("...")
-                .to_owned()
-        });
-        table.extend(TOOL_KEYS.iter().map(|(command, label, chords)| {
-            sue_wm::shortcuts::Shortcut::new(command, *label, chords)
-        }));
-        table
-    })
-}
-
-/// Tool and brush keys, Clip Studio Paint's letters: command, what
-/// Settings calls it, default chords.
-const TOOL_KEYS: [(&str, &str, &str); 22] = [
-    ("tool.zoom", "Zoom Tool", "/"),
-    ("tool.hand", "Hand Tool", "H"),
-    ("tool.rotate", "Rotate Tool", "R"),
-    ("tool.operation", "Operation Tool", "O"),
-    ("tool.move_layer", "Move Layer Tool", "K"),
-    ("tool.selection", "Selection Tool", "M"),
-    ("tool.auto_select", "Auto Select Tool", "W"),
-    ("tool.eyedropper", "Eyedropper Tool", "I"),
-    ("tool.pen", "Pen and Pencil Tools", "P"),
-    ("tool.brush", "Brush, Airbrush and Decoration Tools", "B"),
-    ("tool.eraser", "Eraser Tool", "E"),
-    ("tool.blend", "Blend Tool", "J"),
-    ("tool.fill", "Fill and Gradient Tools", "G"),
-    ("tool.figure", "Figure, Frame Border and Ruler Tools", "U"),
-    ("tool.text", "Text and Balloon Tools", "T"),
-    ("tool.correct_line", "Correct Line Tool", "Y"),
-    ("tool.previous_sub", "Previous Sub Tool", ","),
-    ("tool.next_sub", "Next Sub Tool", "."),
-    ("color.swap", "Swap Main and Sub Color", "X"),
-    ("color.transparent", "Drawing or Transparent Color", "C"),
-    ("brush.smaller", "Smaller Brush", "["),
-    ("brush.bigger", "Bigger Brush", "]"),
-];
-
-/// The studio's default chords, Clip Studio Paint's.
-fn shortcuts() -> Vec<(Modifiers, Key, &'static str)> {
-    let command = Modifiers::COMMAND;
-    let shifted = Modifiers::COMMAND | Modifiers::SHIFT;
-    let alt = Modifiers::ALT;
-    let shift = Modifiers::SHIFT;
-    let none = Modifiers::NONE;
-    vec![
-        // File.
-        (shifted | alt, Key::K, "help.shortcuts"),
-        (command, Key::K, "file.preferences"),
-        (shifted, Key::S, "file.save_as"),
-        (command | alt, Key::S, "file.save_as"),
-        (shift | alt, Key::S, "file.save_as"),
-        (command, Key::P, "file.print"),
-        (shifted, Key::N, "layer.new"),
-        (command, Key::N, "file.new"),
-        (command, Key::W, "file.close"),
-        // Edit.
-        (shifted, Key::T, "edit.transform.free"),
-        (command, Key::T, "edit.transform.scale"),
-        (command, Key::U, "filter.hue"),
-        (shifted, Key::I, "select.invert"),
-        (command, Key::I, "filter.invert"),
-        (command, Key::X, "edit.cut"),
-        (command, Key::C, "edit.copy"),
-        (command, Key::V, "edit.paste"),
-        (none, Key::F2, "edit.cut"),
-        (none, Key::F3, "edit.copy"),
-        (none, Key::F4, "edit.paste"),
-        (command, Key::Delete, "edit.clear"),
-        (command, Key::Backspace, "edit.clear"),
-        (shift, Key::Delete, "edit.fill"),
-        (shift, Key::Backspace, "edit.fill"),
-        (alt, Key::Delete, "edit.fill"),
-        (alt, Key::Backspace, "edit.fill"),
-        (none, Key::Delete, "edit.clear"),
-        (none, Key::Backspace, "edit.clear"),
-        // Layer.
-        (command | alt, Key::G, "layer.toggle.clip"),
-        (command, Key::G, "layer.folder_insert"),
-        (shifted, Key::E, "layer.merge_visible_here"),
-        (shifted, Key::G, "layer.ungroup"),
-        (shift | alt, Key::E, "layer.merge_selected"),
-        (command, Key::E, "layer.merge_down"),
-        (alt, Key::CloseBracket, "layer.select_above"),
-        (alt, Key::OpenBracket, "layer.select_below"),
-        (command, Key::CloseBracket, "layer.order.up"),
-        (command, Key::OpenBracket, "layer.order.down"),
-        // Selection.
-        (shifted, Key::D, "select.again"),
-        (shift, Key::F7, "select.invert"),
-        (command, Key::A, "select.all"),
-        (command, Key::D, "select.none"),
-        // View.
-        (command | alt, Key::Num0, "view.actual"),
-        (command, Key::Num0, "view.fit"),
-        (shifted, Key::Num2, "view.rotate_reset"),
-        (command, Key::Plus, "view.zoom_in"),
-        (command, Key::Equals, "view.zoom_in"),
-        (command, Key::Semicolon, "view.zoom_in"),
-        (command, Key::Minus, "view.zoom_out"),
-        (command, Key::R, "view.ruler_bar"),
-        (command, Key::Num1, "view.snap_ruler"),
-        (command, Key::Num2, "view.snap_special"),
-        (command, Key::Num3, "view.snap_grid"),
-        (none, Key::Minus, "view.rotate_left"),
-        (none, Key::Equals, "view.rotate_right"),
-        // Window.
-        (shifted, Key::Tab, "window.prev_tab"),
-        (command, Key::Tab, "window.next_tab"),
-        (shift, Key::Tab, "window.hide_menus"),
-        (none, Key::Tab, "window.hide_all"),
-        // Help.
-        (none, Key::F1, "help.shortcuts"),
-        (alt, Key::I, "help.shortcuts"),
-    ]
-}
+pub(crate) use crate::commands::shortcut_table;
 
 /// Sue Paint's applet id.
 fn me_id() -> AppletId {
@@ -7311,9 +6809,8 @@ impl SueApplet for SuePaint {
         }
         let mut menubar = std::mem::take(&mut self.menubar);
         let picked = {
-            let arena = &cx.world.arena;
-            let history = &*cx.history;
-            let state = |command: &str| self.state(command, arena, history);
+            let facts = Facts::of(cx);
+            let state = |command: &str| self.state(command, &facts);
             menubar.ui(ui, rect, &self.menus, &state, &theme)
         };
         self.menubar = menubar;
@@ -7683,24 +7180,13 @@ impl SueApplet for SuePaint {
     }
 
     fn commands(&self) -> Vec<PaletteEntry> {
-        [
-            (tr!("new-illustration-ellipsis"), "file.new", "Ctrl+N"),
-            (tr!("open-picture-ellipsis"), "file.open", ""),
-            (tr!("start-page"), "file.start_page", ""),
-            (tr!("export-as-png-ellipsis"), "file.export.png", ""),
-            (tr!("keyboard-shortcuts"), "help.shortcuts", ""),
-        ]
-        .into_iter()
-        .map(|(label, command, hint)| PaletteEntry {
-            label: label.to_owned(),
-            command: command.to_owned(),
-            hint: hint.to_owned(),
-        })
-        .collect()
+        // The palette says whose command it is ("Sue Paint: ..."). It has
+        // no settings at hand here, so it shows the default keys.
+        crate::commands::registry().palette(&sue_rice::RiceSchema::new())
     }
 
     fn command(&mut self, name: &str, cx: &mut AppletContext<'_>) -> bool {
-        if !implemented(name) {
+        if !crate::commands::registry().has(name) {
             return false;
         }
         if cx.view.page.as_ref().map(AppletId::as_str) != Some(ID) {
@@ -7798,67 +7284,6 @@ impl SueApplet for SuePaint {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn every_default_chord_becomes_a_setting() {
-        let table = shortcut_table();
-        // Every chord of the old table made it in, grouped by command.
-        let chords: usize = table
-            .iter()
-            .map(|shortcut| shortcut.chords.chords().len())
-            .sum();
-        assert_eq!(chords, shortcuts().len() + TOOL_KEYS.len());
-        let save_as = table
-            .iter()
-            .find(|shortcut| shortcut.command == "file.save_as")
-            .unwrap();
-        assert_eq!(save_as.chords.chords().len(), 3);
-        let menus = crate::menus::menus();
-        for shortcut in table {
-            assert!(
-                implemented(shortcut.command)
-                    || crate::menus::label_of(&menus, shortcut.command).is_some(),
-                "{} is bound but neither built nor in a menu",
-                shortcut.command
-            );
-        }
-        let declarations = sue_wm::shortcuts::declarations(KEYS_SECTION, table);
-        let mut keys: Vec<&str> = declarations
-            .iter()
-            .map(|declaration| declaration.path.as_str())
-            .collect();
-        keys.sort_unstable();
-        keys.dedup();
-        assert_eq!(keys.len(), table.len(), "one setting per command");
-    }
-
-    #[test]
-    fn every_implemented_command_is_in_a_menu_or_a_shortcut() {
-        let mut named: Vec<String> = crate::menus::menus()
-            .iter()
-            .flat_map(|menu| menu.items.iter().flat_map(|item| item.commands()))
-            .map(str::to_owned)
-            .collect();
-        named.extend(
-            shortcut_table()
-                .iter()
-                .map(|shortcut| shortcut.command.to_owned()),
-        );
-        for command in named.iter().filter(|command| implemented(command)) {
-            assert!(command.contains('.'));
-        }
-        assert!(named.iter().filter(|command| implemented(command)).count() > 60);
-        assert!(implemented("story.add"), "pages are built");
-        // Every menu item does something.
-        let missing: Vec<String> = crate::menus::commands(&crate::menus::menus())
-            .into_iter()
-            .map(|(_, command)| command)
-            .filter(|command| {
-                !implemented(command) && !command.starts_with("window.workspace.preset")
-            })
-            .collect();
-        assert!(missing.is_empty(), "grayed menu items: {missing:?}");
-    }
 
     #[test]
     fn mirroring_flips_rows_and_columns() {

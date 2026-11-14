@@ -267,20 +267,29 @@ fn sue_paint_every_menu_command_and_tool_works() {
     ] {
         assert!(commands.iter().any(|command| command == wanted), "{wanted}");
     }
-    // Leaving, quitting, printing and help go outside the canvas.
-    let outside = [
-        "file.leave",
-        "file.quit",
-        "file.close",
-        "file.print",
-        "help.",
-        "window.new",
-        "window.interface.",
-    ];
-    for command in commands
+    // Every registered command, menus or not, runs too; a family runs
+    // as its first member. Leaving, quitting, printing and the help that
+    // opens a browser go outside the canvas and say so with a flag.
+    let registry = sue_paint::registry();
+    for command in &commands {
+        assert!(
+            registry.has(command),
+            "{command} is in a menu, not registered"
+        );
+    }
+    let everything: Vec<String> = registry
         .iter()
-        .filter(|command| !outside.iter().any(|skip| command.starts_with(skip)))
-    {
+        .filter(|command| !command.flags.has(sue_wm::Flags::LEAVES_CANVAS))
+        .map(|command| {
+            if command.is_family() {
+                format!("{}0", command.name)
+            } else {
+                command.name.to_owned()
+            }
+        })
+        .collect();
+    assert!(everything.len() > 380, "{}", everything.len());
+    for command in &everything {
         runtime.request(
             ShellRequest::AppletCommand {
                 applet: paint.clone(),

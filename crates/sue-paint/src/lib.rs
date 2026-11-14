@@ -41,6 +41,7 @@ mod canvas;
 pub mod clip_io;
 mod colorsets;
 mod comic;
+mod commands;
 mod dialogs;
 mod dock;
 mod extras;
@@ -73,6 +74,7 @@ pub use sue_picture::{
 // Private in Sue Paint before the move, so private here still.
 use sue_picture::{comps, smart};
 
+pub use commands::registry;
 pub use menus::menus;
 pub use studio::{ID, SuePaint, mirror};
 

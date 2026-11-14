@@ -200,20 +200,14 @@ impl SuePaint {
         theme: &Theme,
         run: &mut Option<String>,
     ) {
-        let arena = &cx.world.arena;
-        let history = &*cx.history;
+        let facts = sue_wm::Facts::of(cx);
         let menus = self.menus.clone();
         ui.spacing_mut().item_spacing.y = 4.0;
         for menu in &menus {
             egui::CollapsingHeader::new(egui::RichText::new(&menu.title).size(theme.ui_size + 1.0))
                 .id_salt(("sue-paint-touch-menu", menu.title.as_str()))
                 .show(ui, |ui| {
-                    menu_items(
-                        ui,
-                        &menu.items,
-                        &|command| self.state(command, arena, history),
-                        run,
-                    );
+                    menu_items(ui, &menu.items, &|command| self.state(command, &facts), run);
                 });
         }
     }

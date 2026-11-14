@@ -857,7 +857,7 @@ impl SuePaint {
                 if *command == "file.save" {
                     save_at = Some(rect);
                 }
-                let state = self.state(command, &cx.world.arena, cx.history);
+                let state = self.state(command, &sue_wm::Facts::of(cx));
                 if icon_button(
                     ui,
                     rect,
@@ -884,7 +884,7 @@ impl SuePaint {
                 break;
             };
             let rect = rect.translate(vec2(4.0, 1.0));
-            let state = self.state(command, &cx.world.arena, cx.history);
+            let state = self.state(command, &sue_wm::Facts::of(cx));
             let response = ui.interact(
                 rect,
                 Id::unique(("sue-paint-bar", command.as_str())),
@@ -4566,7 +4566,7 @@ impl SuePaint {
                 pos2(body.left() + 6.0 + index as f32 * 28.0, row_top),
                 vec2(26.0, 24.0),
             );
-            let state = self.state(command, &cx.world.arena, cx.history);
+            let state = self.state(command, &sue_wm::Facts::of(cx));
             let tip = &if state.enabled {
                 (*tip).to_owned()
             } else {
@@ -4624,7 +4624,7 @@ impl SuePaint {
                 pos2(body.left() + 6.0 + index as f32 * 28.0, action_top),
                 vec2(26.0, 24.0),
             );
-            let state = self.state(command, &cx.world.arena, cx.history);
+            let state = self.state(command, &sue_wm::Facts::of(cx));
             let tip = &if state.enabled {
                 (*tip).to_owned()
             } else {
@@ -4952,7 +4952,7 @@ impl SuePaint {
                     } else if response.clicked() || response.secondary_clicked() {
                         pick = Some(info.id);
                     }
-                    let state = |command: &str| self.state(command, &cx.world.arena, cx.history);
+                    let state = |command: &str| self.state(command, &sue_wm::Facts::of(cx));
                     response.context_menu(|ui| {
                         if let Some(command) = sue_wm::context_items(ui, &layer_menu, &state) {
                             from_menu = Some(command);

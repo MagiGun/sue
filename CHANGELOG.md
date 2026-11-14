@@ -31,6 +31,12 @@ follow [Semantic Versioning](https://semver.org/).
   `CREATE` text, row count and rows), and `sue-cli clip diff <before>
   <after>` prints what differs between two such files. For people
   working on the converter; neither changes a file.
+- Every Sue Paint command can be given a key, not only the ones that
+  come with one: each filter, layer, selection, view, window and
+  animation command, and the light table and cel commands of their
+  palettes. Keyboard Shortcuts (Help) lists them all, and a key for one
+  without a default goes in Settings, Keymaps, Sue Paint
+  (`sue_paint_keys.custom`).
 
 ### Changed
 
@@ -66,6 +72,8 @@ follow [Semantic Versioning](https://semver.org/).
   that holds keyboard focus shows it with a thicker outline. Two new
   settings, Card radius (Layout) and Title size (Typography), join the
   ones you can tune. A radius or color you set yourself stays as it is.
+- Sue Paint's entries in the command palette carry the names of its
+  menu items ("Sue Paint: New...") and show the key each one has.
 
 ### Fixed
 
@@ -101,6 +109,9 @@ follow [Semantic Versioning](https://semver.org/).
 - Undo, Redo, Open, Save and Quit show in a studio's menus the keys they
   really have: change one in Settings (Keymaps) and the menu follows, as
   it already did for the studio's own commands.
+- Sue Paint's Edit menu no longer shows Shift+Del beside Delete Outside
+  Selection: that key fills. The item shows the key you give it in
+  Settings.
 
 ### Removed
 
