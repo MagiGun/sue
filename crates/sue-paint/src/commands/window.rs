@@ -4,7 +4,9 @@
 //! Each command is one entry of [`COMMANDS`] with its own `run` and
 //! `state`, its label, its default keys, its icon and its flags. No
 //! Window command changes a document: they show and hide palettes, move
-//! between canvases and keep workspaces, so none has an undo step.
+//! between canvases and keep workspaces, so none has a document undo
+//! step. The interface choices change the setting `display.interface`,
+//! which Sue's own history takes back like any other setting.
 
 use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
@@ -782,7 +784,15 @@ mod tests {
     fn with_context<R>(
         work: impl FnOnce(&mut AppletContext<'_>) -> R,
     ) -> (R, World, UndoStack<World>) {
-        let rice = RiceSchema::new();
+        with_rice(RiceSchema::new(), work)
+    }
+
+    /// Runs `work` with an applet context over an empty arena and the
+    /// settings `rice`, and hands back the world and the history.
+    fn with_rice<R>(
+        rice: RiceSchema,
+        work: impl FnOnce(&mut AppletContext<'_>) -> R,
+    ) -> (R, World, UndoStack<World>) {
         let theme = Theme::from_rice(&rice);
         let mut world = World {
             arena: Arena::new(),
@@ -1125,7 +1135,28 @@ mod tests {
                 assert_eq!(checked(&paint, cx, name), on, "{name}");
             }
             // Without the setting registered, choosing says it cannot.
-            registry().run(&mut paint, cx, "window.interface.phone");
+            assert!(registry().run(&mut paint, cx, "window.interface.phone"));
+            assert!(
+                matches!(cx.requests.as_slice(), [sue_wm::ShellRequest::Fail(_)]),
+                "{:?}",
+                cx.requests
+            );
+            assert!(cx.world.rice.get_str("display.interface").is_none());
         });
+        // With it, the choice is the setting, said on the status line, and
+        // one undo step takes it back (rule 7: a setting has its undo).
+        let mut rice = RiceSchema::new();
+        sue_wm::register_rice(&mut rice).expect("the shell's settings register");
+        let ((), mut world, mut history) = with_rice(rice, |cx| {
+            assert!(registry().run(&mut paint, cx, "window.interface.phone"));
+            assert!(
+                matches!(cx.requests.as_slice(), [sue_wm::ShellRequest::Notify(_)]),
+                "{:?}",
+                cx.requests
+            );
+        });
+        assert_eq!(world.rice.get_str("display.interface"), Some("phone"));
+        assert!(history.undo(&mut world).expect("the step undoes"));
+        assert_eq!(world.rice.get_str("display.interface"), Some("auto"));
     }
 }
