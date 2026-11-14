@@ -19,18 +19,20 @@ use egui::{Align, Id, Layout, Order, Rect, RichText, Sense, Ui, vec2};
 use sue_core::EntityId;
 use sue_wm::{AppletContext, Theme, widgets};
 
-use crate::doc;
 use crate::filters::Filter;
 use crate::studio::SuePaint;
-use sue_rice::{RiceValue, SetRiceValue};
 
-use anim::onion_ui;
-use canvas::{canvas_ui, resolution_ui};
-use fill::advanced_fill_ui;
-use filter::{filter_params, filter_ui};
+use anim::{onion_ui, timelapse_ui, timeline_ui};
+use canvas::{
+    canvas_properties_ui, canvas_ui, convert_ui, material_ui, perspective_ui, print_ui, proof_ui,
+    resolution_ui, shape_3d_ui,
+};
+use fill::{gamut_ui, select_by_ui};
+use filter::{correction_ui, filter_ui};
 use frame::frame_ui;
-use new::new_ui;
 use pressure::pressure_ui;
+use settings::{modifiers_ui, preferences_ui, shortcuts_ui, workspace_ui};
+use story::{page_settings_ui, story_editor_ui, story_info_ui, webtoon_ui};
 use text::text_ui;
 
 pub(crate) use canvas::{CanvasDialog, CanvasProperties, ResolutionDialog};
@@ -41,7 +43,9 @@ pub(crate) use filter::FilterDialog;
 pub(crate) use new::SIZES;
 pub(crate) use new::{CanvasPreset, NEW_PRESET_TARGET, NewDialog, Project, new_presets};
 pub(crate) use pressure::{DEFAULT_PEN_PRESSURE, PEN_PRESSURE, PressureDialog};
-pub(crate) use settings::{GESTURES, MODIFIERS};
+#[cfg(test)]
+pub(crate) use settings::GESTURES;
+pub(crate) use settings::MODIFIERS;
 pub(crate) use story::{PageSettings, PagesDialog, StoryInfo};
 
 /// An open dialog.
@@ -126,28 +130,10 @@ pub(crate) enum Outcome {
     Ok,
 }
 
-impl SuePaint {
-    /// Draws the open dialog, if any, over the studio.
-    pub(crate) fn dialog_ui(
-        &mut self,
-        ctx: &egui::Context,
-        cx: &mut AppletContext<'_>,
-        theme: &Theme,
-    ) {
-        let Some(mut dialog) = self.dialog.take() else {
-            return;
-        };
-        let screen = ctx.content_rect();
-        egui::Area::new(Id::unique("sue-paint-scrim"))
-            .fade_in(false)
-            .order(Order::Middle)
-            .fixed_pos(screen.min)
-            .show(ctx, |ui| {
-                ui.allocate_rect(screen, Sense::click());
-                ui.painter()
-                    .rect_filled(screen, 0.0, theme.shadow.gamma_multiply(0.45));
-            });
-        let (title, size) = match &dialog {
+impl Dialog {
+    /// The dialog's title and its size before the screen clamps it.
+    fn title_and_size(&self) -> (String, egui::Vec2) {
+        match self {
             Dialog::New(_) => (tr!("new-2"), vec2(500.0, 690.0)),
             // The gallery keeps one title (and so one window) whatever look
             // is picked.
@@ -228,25 +214,36 @@ impl SuePaint {
                 tr!("adjust-pen-pressure"),
                 vec2(560.0, if pressure.show_graph { 520.0 } else { 330.0 }),
             ),
+        }
+    }
+}
+
+impl SuePaint {
+    /// Draws the open dialog, if any, over the studio.
+    pub(crate) fn dialog_ui(
+        &mut self,
+        ctx: &egui::Context,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        let Some(mut dialog) = self.dialog.take() else {
+            return;
         };
-        let title = title.to_owned();
+        let screen = ctx.content_rect();
+        egui::Area::new(Id::unique("sue-paint-scrim"))
+            .fade_in(false)
+            .order(Order::Middle)
+            .fixed_pos(screen.min)
+            .show(ctx, |ui| {
+                ui.allocate_rect(screen, Sense::click());
+                ui.painter()
+                    .rect_filled(screen, 0.0, theme.shadow.gamma_multiply(0.45));
+            });
+        let (title, size) = dialog.title_and_size();
         let size = size.min(screen.size() - vec2(16.0, 16.0));
         let at = screen.center() - size / 2.0;
         let mut outcome = Outcome::Open;
         let mut change_keys = false;
-        // Every command can be given a key, but the list shows the ones
-        // that have one, as set now.
-        let keys = matches!(dialog, Dialog::Shortcuts).then(|| {
-            let section = crate::studio::KEYS_SECTION;
-            let table = crate::studio::shortcut_table();
-            let bound: Vec<sue_wm::shortcuts::Shortcut> = table
-                .iter()
-                .zip(sue_wm::shortcuts::resolve(cx.rice(), section, table))
-                .filter(|(_, chords)| !chords.is_empty())
-                .map(|(shortcut, _)| shortcut.clone())
-                .collect();
-            sue_wm::shortcuts::rows(cx.rice(), section, &bound)
-        });
         // The dialog's body, in its own window or (in the browser and on
         // phones) over the studio.
         let own_window = !ctx.embed_viewports();
@@ -269,665 +266,7 @@ impl SuePaint {
                 .id_salt("sue-paint-dialog-body")
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    match &mut dialog {
-                        Dialog::New(new) => {
-                            new.own.clone_from(&self.canvas_presets);
-                            outcome = new_ui(ui, new, theme);
-                            if let Some(register) = new.preset_action.take() {
-                                self.canvas_preset(cx, new, register);
-                            }
-                        }
-                        Dialog::AdvancedFill => {
-                            let (main, sub) = (self.main, self.sub);
-                            outcome =
-                                advanced_fill_ui(ui, &mut self.advanced_fill, main, sub, theme);
-                        }
-                        Dialog::Filter(filter) => outcome = filter_ui(ui, filter, theme),
-                        Dialog::Pressure(pressure) => outcome = pressure_ui(ui, pressure, theme),
-                        Dialog::Pages(pages) => outcome = self.pages_ui(ui, pages, cx, theme),
-                        Dialog::Comps(comps) => outcome = self.comps_ui(ui, comps, cx, theme),
-                        Dialog::Exposure => outcome = self.exposure_ui(ui, cx, theme),
-                        Dialog::Frame(frame) => outcome = frame_ui(ui, frame, theme),
-                        Dialog::Text(_, lettering) => outcome = text_ui(ui, lettering, theme),
-                        Dialog::Onion(onion) => outcome = onion_ui(ui, onion, theme),
-                        Dialog::SelectBy(kind, amount) => {
-                            ui.horizontal(|ui| {
-                                label(
-                                    ui,
-                                    &if *kind == 2 {
-                                        tr!("blur-width")
-                                    } else {
-                                        tr!("width")
-                                    },
-                                    theme,
-                                );
-                                ui.add(egui::Slider::new(amount, 1.0..=100.0).suffix(tr!("px")));
-                            });
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::Workspace(name) => {
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("name"), theme);
-                                ui.text_edit_singleline(name);
-                            });
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::Workspaces => {
-                            let mut chosen = None;
-                            let mut gone = None;
-                            egui::ScrollArea::vertical()
-                                .max_height(220.0)
-                                .show(ui, |ui| {
-                                    for (index, space) in self.workspaces.iter_mut().enumerate() {
-                                        ui.horizontal(|ui| {
-                                            ui.text_edit_singleline(&mut space.name);
-                                            if ui.button(tr!("use")).clicked() {
-                                                chosen = Some(index);
-                                            }
-                                            if ui.button(tr!("delete")).clicked() {
-                                                gone = Some(index);
-                                            }
-                                        });
-                                    }
-                                    if self.workspaces.is_empty() {
-                                        ui.label(
-                                            RichText::new(tr!(
-                                                "no-workspaces-yet-window-workspace-register"
-                                            ))
-                                            .size(theme.small_size)
-                                            .color(theme.muted),
-                                        );
-                                    }
-                                });
-                            if let Some(index) = chosen {
-                                self.use_workspace(index);
-                            }
-                            if let Some(index) = gone {
-                                self.workspaces.remove(index);
-                            }
-                            ui.add_space(8.0);
-                            if ui.button(tr!("close")).clicked() {
-                                outcome = Outcome::Ok;
-                            }
-                        }
-                        Dialog::Print(settings, printing) => {
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("paper"), theme);
-                                egui::ComboBox::from_id_salt("sue-paint-paper")
-                                    .selected_text(crate::localize(
-                                        crate::print::PAPERS[settings.paper].0,
-                                    ))
-                                    .show_ui(ui, |ui| {
-                                        for (index, (name, ..)) in
-                                            crate::print::PAPERS.iter().enumerate()
-                                        {
-                                            ui.selectable_value(
-                                                &mut settings.paper,
-                                                index,
-                                                crate::localize(name),
-                                            );
-                                        }
-                                    });
-                            });
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("orientation"), theme);
-                                ui.radio_value(&mut settings.orientation, 0, tr!("auto"));
-                                ui.radio_value(&mut settings.orientation, 1, tr!("portrait"));
-                                ui.radio_value(&mut settings.orientation, 2, tr!("landscape"));
-                            });
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("size"), theme);
-                                ui.radio_value(&mut settings.size, 0, tr!("fit-to-page"));
-                                ui.radio_value(&mut settings.size, 1, tr!("print-size"));
-                                ui.radio_value(&mut settings.size, 2, tr!("scale"));
-                            });
-                            if settings.size == 2 {
-                                ui.add(
-                                    egui::Slider::new(&mut settings.percent, 1.0..=400.0)
-                                        .suffix(" %"),
-                                );
-                            }
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("margin"), theme);
-                                ui.add(
-                                    egui::Slider::new(&mut settings.margin, 0.0..=50.0)
-                                        .suffix(tr!("mm")),
-                                );
-                            });
-                            ui.checkbox(&mut settings.all_pages, tr!("every-page-of-the-story"));
-                            if *printing {
-                                ui.label(
-                                    RichText::new(tr!("pages-open-as-pdf-your-viewer"))
-                                        .size(theme.small_size)
-                                        .color(theme.muted),
-                                );
-                            }
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::Preferences(prefs) => match prefs.ui(ui, theme) {
-                            Some(true) => outcome = Outcome::Ok,
-                            Some(false) => outcome = Outcome::Cancel,
-                            None => {}
-                        },
-                        Dialog::Modifiers(chosen) => {
-                            for ((key, name, choices), pick) in
-                                MODIFIERS.iter().zip(chosen.iter_mut())
-                            {
-                                // Each choice reads as Settings names it.
-                                let choice_text = |choice: &str| {
-                                    sue_lang::text_or(
-                                        "rice",
-                                        &format!("{}.{choice}", key.replace('.', "-")),
-                                        &choice.replace('_', " "),
-                                    )
-                                };
-                                ui.horizontal(|ui| {
-                                    label(ui, &crate::localize(name), theme);
-                                    egui::ComboBox::from_id_salt(("sue-paint-modifier", *name))
-                                        .selected_text(choice_text(
-                                            choices[(*pick).min(choices.len() - 1)],
-                                        ))
-                                        .show_ui(ui, |ui| {
-                                            for (index, choice) in choices.iter().enumerate() {
-                                                ui.selectable_value(
-                                                    pick,
-                                                    index,
-                                                    choice_text(choice),
-                                                );
-                                            }
-                                        });
-                                });
-                            }
-                            ui.label(
-                                RichText::new(tr!("space-shift-turns-view-ctrl-alt"))
-                                    .size(theme.small_size)
-                                    .color(theme.muted),
-                            );
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::CommandBar(adding) => {
-                            egui::ScrollArea::vertical()
-                                .max_height(size.y - 150.0)
-                                .show(ui, |ui| {
-                                    for group in crate::panels::BAR_GROUPS {
-                                        for (_, command, tip) in group.iter() {
-                                            let mut shown = !self.bar_hidden.contains(*command);
-                                            if ui
-                                                .checkbox(&mut shown, crate::localize(tip))
-                                                .changed()
-                                            {
-                                                if shown {
-                                                    self.bar_hidden.remove(*command);
-                                                } else {
-                                                    self.bar_hidden.insert((*command).to_owned());
-                                                }
-                                            }
-                                        }
-                                        ui.separator();
-                                    }
-                                    let mut gone = None;
-                                    for (index, command) in self.bar_extra.iter().enumerate() {
-                                        ui.horizontal(|ui| {
-                                            ui.label(
-                                                crate::menus::label_of(&self.menus, command)
-                                                    .unwrap_or(command),
-                                            );
-                                            if ui.small_button(tr!("remove")).clicked() {
-                                                gone = Some(index);
-                                            }
-                                        });
-                                    }
-                                    if let Some(index) = gone {
-                                        self.bar_extra.remove(index);
-                                    }
-                                });
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("add"), theme);
-                                let picked = crate::menus::label_of(&self.menus, adding)
-                                    .unwrap_or(&tr!("a-menu-command"))
-                                    .to_owned();
-                                egui::ComboBox::from_id_salt("sue-paint-bar-add")
-                                    .selected_text(picked)
-                                    .height(320.0)
-                                    .show_ui(ui, |ui| {
-                                        for (label, command) in crate::menus::commands(&self.menus)
-                                        {
-                                            ui.selectable_value(adding, command, label);
-                                        }
-                                    });
-                                if ui.button(tr!("add-2")).clicked()
-                                    && !adding.is_empty()
-                                    && !self.bar_extra.contains(adding)
-                                {
-                                    self.bar_extra.push(adding.clone());
-                                }
-                            });
-                            ui.add_space(6.0);
-                            if ui.button(tr!("close")).clicked() {
-                                outcome = Outcome::Ok;
-                            }
-                        }
-                        Dialog::PageSettings(settings) => {
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("size"), theme);
-                                ui.add(
-                                    egui::DragValue::new(&mut settings.width)
-                                        .range(1..=10_000)
-                                        .suffix(tr!("px")),
-                                );
-                                ui.label("by");
-                                ui.add(
-                                    egui::DragValue::new(&mut settings.height)
-                                        .range(1..=10_000)
-                                        .suffix(tr!("px")),
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("resolution"), theme);
-                                ui.add(
-                                    egui::DragValue::new(&mut settings.dpi)
-                                        .range(1.0..=2400.0)
-                                        .suffix(tr!("dpi")),
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("bleed"), theme);
-                                ui.add(
-                                    egui::DragValue::new(&mut settings.bleed)
-                                        .range(0.0..=50.0)
-                                        .suffix(tr!("mm")),
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("inner-border"), theme);
-                                ui.add(
-                                    egui::DragValue::new(&mut settings.inner)
-                                        .range(0.0..=100.0)
-                                        .suffix(tr!("mm")),
-                                );
-                            });
-                            ui.label(
-                                RichText::new(tr!("every-page-story-changes-each-keeps"))
-                                    .size(theme.small_size)
-                                    .color(theme.muted),
-                            );
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::StoryInfo(info) => {
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("title"), theme);
-                                ui.text_edit_singleline(&mut info.title);
-                            });
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("author"), theme);
-                                ui.text_edit_singleline(&mut info.author);
-                            });
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("first-page-number"), theme);
-                                ui.add(egui::DragValue::new(&mut info.first).range(0..=9_999));
-                            });
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("binding"), theme);
-                                ui.radio_value(
-                                    &mut info.right_bound,
-                                    false,
-                                    tr!("left-left-to-right"),
-                                );
-                                ui.radio_value(&mut info.right_bound, true, tr!("right-manga"));
-                            });
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("first-page-place"), theme);
-                                ui.radio_value(&mut info.paired, false, tr!("start-page-alone"));
-                                ui.radio_value(&mut info.paired, true, tr!("start-page-paired"));
-                            });
-                            ui.separator();
-                            // Clip Studio Paint's folio: page numbers on the pages.
-                            ui.checkbox(&mut info.folio.show, tr!("show-folio"));
-                            ui.add_enabled_ui(info.folio.show, |ui| {
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("size-2"), theme);
-                                    ui.add(
-                                        egui::DragValue::new(&mut info.folio.size)
-                                            .range(4.0..=72.0)
-                                            .suffix(" pt"),
-                                    );
-                                });
-                                ui.horizontal(|ui| {
-                                    label(ui, &tr!("folio-position"), theme);
-                                    ui.radio_value(
-                                        &mut info.folio.center,
-                                        false,
-                                        tr!("folio-outside"),
-                                    );
-                                    ui.radio_value(
-                                        &mut info.folio.center,
-                                        true,
-                                        tr!("folio-center"),
-                                    );
-                                });
-                            });
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::StoryEditor(texts) => {
-                            egui::ScrollArea::vertical()
-                                .max_height(size.y - 120.0)
-                                .show(ui, |ui| {
-                                    let mut last_page = 0;
-                                    for (number, _, _, words) in texts.iter_mut() {
-                                        if *number != last_page {
-                                            last_page = *number;
-                                            ui.add_space(4.0);
-                                            ui.label(
-                                                RichText::new(tr!("page", number = number))
-                                                    .color(theme.text)
-                                                    .strong(),
-                                            );
-                                        }
-                                        ui.add(
-                                            egui::TextEdit::multiline(words)
-                                                .desired_rows(2)
-                                                .desired_width(f32::INFINITY),
-                                        );
-                                    }
-                                });
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::Proof(profile) => {
-                            ui.label(
-                                RichText::new(tr!("how-picture-would-print-shown-while"))
-                                    .size(theme.small_size)
-                                    .color(theme.muted),
-                            );
-                            for (index, (name, ..)) in crate::proof::PROFILES.iter().enumerate() {
-                                ui.radio_value(profile, index, crate::localize(name));
-                            }
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::CanvasProperties(props) => {
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("name"), theme);
-                                ui.text_edit_singleline(&mut props.name);
-                            });
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("resolution"), theme);
-                                ui.add(
-                                    egui::DragValue::new(&mut props.dpi)
-                                        .range(1.0..=2400.0)
-                                        .suffix(tr!("dpi")),
-                                );
-                            });
-                            if props.paper.is_some() {
-                                ui.horizontal(|ui| {
-                                    ui.checkbox(&mut props.paper_shown, tr!("paper-2"));
-                                    ui.color_edit_button_srgb(&mut props.paper_color);
-                                });
-                            }
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::Convert(_, kind, name) => {
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("name"), theme);
-                                ui.text_edit_singleline(name);
-                            });
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("type"), theme);
-                                ui.radio_value(kind, 0, tr!("raster-layer"));
-                                ui.radio_value(kind, 1, tr!("vector-layer"));
-                            });
-                            ui.label(
-                                RichText::new(tr!("vector-pixels-are-traced-lines-down"))
-                                    .size(theme.small_size)
-                                    .color(theme.muted),
-                            );
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::Message(_, paragraphs) => {
-                            egui::ScrollArea::vertical()
-                                .max_height(size.y - 110.0)
-                                .show(ui, |ui| {
-                                    for paragraph in paragraphs.iter() {
-                                        if paragraph.starts_with("https://") {
-                                            ui.hyperlink(paragraph.as_str());
-                                        } else if let Some(heading) = paragraph.strip_prefix("# ") {
-                                            ui.add_space(6.0);
-                                            ui.label(
-                                                RichText::new(heading)
-                                                    .size(theme.ui_size)
-                                                    .color(theme.text)
-                                                    .strong(),
-                                            );
-                                        } else {
-                                            ui.label(
-                                                RichText::new(paragraph.as_str())
-                                                    .size(theme.small_size + 0.5)
-                                                    .color(theme.text),
-                                            );
-                                        }
-                                    }
-                                });
-                            ui.add_space(8.0);
-                            if ui.button(tr!("close")).clicked() {
-                                outcome = Outcome::Ok;
-                            }
-                        }
-                        Dialog::Gamut(tolerance, all) => {
-                            ui.label(
-                                RichText::new(tr!("selects-colors-near-drawing-color"))
-                                    .size(theme.small_size)
-                                    .color(theme.muted),
-                            );
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("color-margin"), theme);
-                                let mut percent = *tolerance * 100.0;
-                                if ui
-                                    .add(egui::Slider::new(&mut percent, 0.0..=100.0).suffix(" %"))
-                                    .changed()
-                                {
-                                    *tolerance = percent / 100.0;
-                                }
-                            });
-                            ui.checkbox(all, tr!("refer-to-all-layers"));
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::Webtoon(height, width) => {
-                            egui::Grid::new("sue-paint-webtoon")
-                                .num_columns(2)
-                                .spacing(vec2(12.0, 8.0))
-                                .show(ui, |ui| {
-                                    label(ui, &tr!("split-every"), theme);
-                                    ui.add(
-                                        egui::DragValue::new(height)
-                                            .range(200..=20000)
-                                            .suffix(tr!("px")),
-                                    );
-                                    ui.end_row();
-                                    label(ui, &tr!("output-width"), theme);
-                                    ui.add(
-                                        egui::DragValue::new(width)
-                                            .range(100..=4000)
-                                            .suffix(tr!("px")),
-                                    );
-                                    ui.end_row();
-                                });
-                            ui.label(
-                                RichText::new(tr!("tall-canvas-cut-into-numbered-pictures"))
-                                    .size(theme.small_size)
-                                    .color(theme.muted),
-                            );
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::Timeline(fps, length) => {
-                            egui::Grid::new("sue-paint-timeline-edit")
-                                .num_columns(2)
-                                .spacing(vec2(12.0, 8.0))
-                                .show(ui, |ui| {
-                                    label(ui, &tr!("frame-rate-2"), theme);
-                                    ui.add(
-                                        egui::DragValue::new(fps).range(1..=120).suffix(tr!("fps")),
-                                    );
-                                    ui.end_row();
-                                    label(ui, &tr!("playback-time"), theme);
-                                    ui.add(
-                                        egui::DragValue::new(length)
-                                            .range(1..=100_000)
-                                            .suffix(tr!("frames")),
-                                    );
-                                    ui.end_row();
-                                });
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::Shape3D(kind) => {
-                            label(ui, &tr!("shape"), theme);
-                            for (index, name) in crate::three::SHAPES.iter().enumerate() {
-                                ui.radio_value(kind, index, crate::localize(name));
-                            }
-                            ui.label(
-                                RichText::new(tr!("file-import-3d-data-brings-models"))
-                                    .size(theme.small_size)
-                                    .color(theme.muted),
-                            );
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::Material(name) => {
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("material-name"), theme);
-                                ui.add(egui::TextEdit::singleline(name).desired_width(200.0));
-                            });
-                            ui.label(
-                                RichText::new(tr!("current-layer-goes-into-material-palette"))
-                                    .size(theme.small_size)
-                                    .color(theme.muted),
-                            );
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::Timelapse(export) => {
-                            egui::Grid::new("sue-paint-timelapse-export")
-                                .num_columns(2)
-                                .spacing(vec2(12.0, 8.0))
-                                .show(ui, |ui| {
-                                    label(ui, &tr!("long-side"), theme);
-                                    egui::ComboBox::from_id_salt("sue-paint-timelapse-side")
-                                        .selected_text(tr!("px-2", side = export.side))
-                                        .show_ui(ui, |ui| {
-                                            for side in [480, 720, 1080, 1280, 1920] {
-                                                ui.selectable_value(
-                                                    &mut export.side,
-                                                    side,
-                                                    tr!("px-2", side = side),
-                                                );
-                                            }
-                                        });
-                                    ui.end_row();
-                                    label(ui, &tr!("length"), theme);
-                                    let mut fit = export.seconds.is_some();
-                                    ui.vertical(|ui| {
-                                        if ui
-                                            .radio_value(
-                                                &mut fit,
-                                                true,
-                                                tr!("fit-to-specified-length"),
-                                            )
-                                            .changed()
-                                            || ui
-                                                .radio_value(
-                                                    &mut fit,
-                                                    false,
-                                                    tr!("export-all-frames"),
-                                                )
-                                                .changed()
-                                        {
-                                            export.seconds = fit.then_some(30.0);
-                                        }
-                                        if let Some(seconds) = export.seconds.as_mut() {
-                                            ui.add(
-                                                egui::DragValue::new(seconds)
-                                                    .range(1.0..=600.0)
-                                                    .suffix(" s"),
-                                            );
-                                        }
-                                    });
-                                    ui.end_row();
-                                });
-                            ui.label(
-                                RichText::new(tr!("motion-jpeg-avi-video-animated-gif"))
-                                    .size(theme.small_size)
-                                    .color(theme.muted),
-                            );
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::Perspective(count) => {
-                            ui.horizontal(|ui| {
-                                label(ui, &tr!("type"), theme);
-                                ui.vertical(|ui| {
-                                    for (points, name) in [
-                                        (1, tr!("n-1-point-perspective")),
-                                        (2, tr!("n-2-point-perspective")),
-                                        (3, tr!("n-3-point-perspective")),
-                                    ] {
-                                        ui.radio_value(count, points, name);
-                                    }
-                                });
-                            });
-                            ui.label(
-                                RichText::new(tr!("strokes-run-toward-vanishing-points-while"))
-                                    .size(theme.small_size)
-                                    .color(theme.muted),
-                            );
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::Correction(_, filter, ..) => {
-                            filter_params(ui, filter, theme);
-                            ui.label(
-                                RichText::new(tr!("changes-every-layer-under-one"))
-                                    .size(theme.small_size)
-                                    .color(theme.muted),
-                            );
-                            ok_cancel(ui, &mut outcome);
-                        }
-                        Dialog::Canvas(canvas) => outcome = canvas_ui(ui, canvas, theme),
-                        Dialog::Resolution(resolution) => {
-                            outcome = resolution_ui(ui, resolution, theme)
-                        }
-                        Dialog::Shortcuts => {
-                            egui::ScrollArea::vertical()
-                                .max_height(size.y - 90.0)
-                                .show(ui, |ui| {
-                                    let keys = keys.as_deref().unwrap_or_default();
-                                    sue_wm::shortcuts::grid_ui(ui, "sue-paint-keys", keys, theme);
-                                    ui.add_space(12.0);
-                                    ui.label(
-                                        RichText::new(tr!("with-the-pen-and-mouse"))
-                                            .color(theme.text)
-                                            .strong(),
-                                    );
-                                    let gestures: Vec<(String, String)> = GESTURES
-                                        .iter()
-                                        .map(|(what, how)| {
-                                            (crate::localize(what), crate::localize(how))
-                                        })
-                                        .collect();
-                                    sue_wm::shortcuts::grid_ui(
-                                        ui,
-                                        "sue-paint-gestures",
-                                        &gestures,
-                                        theme,
-                                    );
-                                });
-                            ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
-                                if ui.button(tr!("close")).clicked() {
-                                    outcome = Outcome::Cancel;
-                                }
-                                if ui
-                                    .button(tr!("change-shortcuts-ellipsis"))
-                                    .on_hover_text(tr!("settings-keymaps-any-number-keys-each"))
-                                    .clicked()
-                                {
-                                    change_keys = true;
-                                    outcome = Outcome::Cancel;
-                                }
-                            });
-                        }
-                    }
+                    outcome = self.dialog_body(ui, &mut dialog, cx, theme, size, &mut change_keys);
                 });
         };
         let mut closed = false;
@@ -1019,446 +358,162 @@ impl SuePaint {
         {
             outcome = Outcome::Ok;
         }
-        match (dialog, outcome) {
-            (dialog, Outcome::Open) => {
-                if let Dialog::Correction(layer, filter, ..) = &dialog
-                    && let Some(text) = filter.to_text()
-                    && let Ok(entity) = cx.world.arena.get_by_id(*layer)
-                    && entity
-                        .property(doc::CORRECTION_FILTER)
-                        .and_then(sue_core::Value::as_str)
-                        != Some(text.as_str())
-                    && let Ok(entity) = cx.world.arena.get_by_id_mut(*layer)
-                {
-                    // The setting shows live while the dialog is open.
-                    entity.properties_mut().set(doc::CORRECTION_FILTER, text);
-                }
-                if let Dialog::Filter(filter) = &dialog {
-                    let pointer_down = ctx.input(|input| input.pointer.any_down());
-                    let wanted = if filter.preview {
-                        Some(filter.filter)
-                    } else {
-                        None
-                    };
-                    let cheap = !matches!(
-                        filter.filter,
-                        Filter::GaussianBlur { .. }
-                            | Filter::Sharpen { .. }
-                            | Filter::Mosaic { .. }
-                            | Filter::LineExtraction { .. }
-                            | Filter::MotionBlur { .. }
-                            | Filter::RadialBlur { .. }
-                            | Filter::ZoomBlur { .. }
-                            | Filter::LineWidth { .. }
-                            | Filter::Wave { .. }
-                            | Filter::Pinch { .. }
-                            | Filter::Polar { .. }
-                            | Filter::Ripple { .. }
-                            | Filter::Twirl { .. }
-                            | Filter::ZigZag { .. }
-                            | Filter::Crystallize { .. }
-                            | Filter::JpegNoise { .. }
-                            | Filter::Quick { .. }
-                            | Filter::SmartSmooth { .. }
-                            | Filter::Fisheye { .. }
-                            | Filter::Aberration { .. }
-                            | Filter::Glow { .. }
-                            | Filter::DropShadow { .. }
-                            | Filter::Inflate { .. }
-                            | Filter::Retro { .. }
-                            | Filter::PerlinNoise { .. }
-                            | Filter::Unsharp { .. }
-                            | Filter::Dust { .. }
-                    );
-                    if wanted != filter.shown && (cheap || !pointer_down) {
-                        let pixels = match wanted {
-                            Some(filter_now) => filter.result(filter_now),
-                            None => filter.before.clone(),
-                        };
-                        filter.show(cx, &pixels);
-                        let mut updated = filter.clone();
-                        updated.shown = wanted;
-                        self.dialog = Some(Dialog::Filter(updated));
-                        ctx.request_repaint();
-                        return;
-                    }
-                }
-                self.dialog = Some(dialog);
+        match outcome {
+            Outcome::Open => self.keep_open(ctx, cx, dialog),
+            Outcome::Ok => self.dialog_ok(cx, dialog),
+            Outcome::Cancel => self.dialog_cancel(cx, dialog),
+        }
+    }
+
+    /// The open dialog's body: one function per kind of dialog, each
+    /// answering whether the dialog stays open, is kept or is cancelled.
+    fn dialog_body(
+        &mut self,
+        ui: &mut Ui,
+        dialog: &mut Dialog,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+        size: egui::Vec2,
+        change_keys: &mut bool,
+    ) -> Outcome {
+        match dialog {
+            Dialog::New(new) => self.new_dialog_ui(ui, new, cx, theme),
+            Dialog::AdvancedFill => self.advanced_fill_dialog_ui(ui, theme),
+            Dialog::Filter(filter) => filter_ui(ui, filter, theme),
+            Dialog::Pressure(pressure) => pressure_ui(ui, pressure, theme),
+            Dialog::Pages(pages) => self.pages_ui(ui, pages, cx, theme),
+            Dialog::Comps(comps) => self.comps_ui(ui, comps, cx, theme),
+            Dialog::Exposure => self.exposure_ui(ui, cx, theme),
+            Dialog::Frame(frame) => frame_ui(ui, frame, theme),
+            Dialog::Text(_, lettering) => text_ui(ui, lettering, theme),
+            Dialog::Onion(onion) => onion_ui(ui, onion, theme),
+            Dialog::SelectBy(kind, amount) => select_by_ui(ui, kind, amount, theme),
+            Dialog::Workspace(name) => workspace_ui(ui, name, theme),
+            Dialog::Workspaces => self.workspaces_ui(ui, theme),
+            Dialog::Print(settings, printing) => print_ui(ui, settings, *printing, theme),
+            Dialog::Preferences(prefs) => preferences_ui(ui, prefs, theme),
+            Dialog::Modifiers(chosen) => modifiers_ui(ui, chosen, theme),
+            Dialog::CommandBar(adding) => self.command_bar_ui(ui, adding, size, theme),
+            Dialog::PageSettings(settings) => page_settings_ui(ui, settings, theme),
+            Dialog::StoryInfo(info) => story_info_ui(ui, info, theme),
+            Dialog::StoryEditor(texts) => story_editor_ui(ui, texts, size, theme),
+            Dialog::Proof(profile) => proof_ui(ui, profile, theme),
+            Dialog::CanvasProperties(props) => canvas_properties_ui(ui, props, theme),
+            Dialog::Convert(_, kind, name) => convert_ui(ui, kind, name, theme),
+            Dialog::Message(_, paragraphs) => message_ui(ui, paragraphs, size, theme),
+            Dialog::Gamut(tolerance, all) => gamut_ui(ui, tolerance, all, theme),
+            Dialog::Webtoon(height, width) => webtoon_ui(ui, height, width, theme),
+            Dialog::Timeline(fps, length) => timeline_ui(ui, fps, length, theme),
+            Dialog::Shape3D(kind) => shape_3d_ui(ui, kind, theme),
+            Dialog::Material(name) => material_ui(ui, name, theme),
+            Dialog::Timelapse(export) => timelapse_ui(ui, export, theme),
+            Dialog::Perspective(count) => perspective_ui(ui, count, theme),
+            Dialog::Correction(_, filter, ..) => correction_ui(ui, filter, theme),
+            Dialog::Canvas(canvas) => canvas_ui(ui, canvas, theme),
+            Dialog::Resolution(resolution) => resolution_ui(ui, resolution, theme),
+            Dialog::Shortcuts => shortcuts_ui(ui, cx, size, change_keys, theme),
+        }
+    }
+
+    /// Puts back a dialog that stays open; a correction's or a filter's
+    /// setting shows live on the canvas meanwhile.
+    fn keep_open(&mut self, ctx: &egui::Context, cx: &mut AppletContext<'_>, dialog: Dialog) {
+        if let Dialog::Correction(layer, filter, ..) = &dialog {
+            Self::show_correction(cx, *layer, filter);
+        }
+        if let Dialog::Filter(filter) = &dialog
+            && let Some(updated) = filter.show_preview(ctx, cx)
+        {
+            self.dialog = Some(Dialog::Filter(updated));
+            ctx.request_repaint();
+            return;
+        }
+        self.dialog = Some(dialog);
+    }
+
+    /// What OK (or Enter) does, for each kind of dialog.
+    fn dialog_ok(&mut self, cx: &mut AppletContext<'_>, dialog: Dialog) {
+        match dialog {
+            Dialog::New(new) => self.new_ok(cx, &new),
+            Dialog::AdvancedFill => self.advanced_fill_now(cx),
+            Dialog::Filter(filter) => self.keep_filter(cx, &filter),
+            Dialog::Pressure(pressure) => Self::pressure_ok(cx, &pressure),
+            Dialog::Frame(frame) => self.add_frame_layer(cx, frame),
+            Dialog::Text(layer, lettering) => self.put_text(cx, layer, &lettering),
+            Dialog::Perspective(count) => self.make_perspective(cx, count),
+            Dialog::Timelapse(export) => self.ask_export_timelapse(cx, export),
+            Dialog::Material(name) => self.register_material(cx, &name),
+            Dialog::SelectBy(3, width) => self.outline_selection(cx, width),
+            Dialog::SelectBy(kind, amount) => self.select_by_ok(kind, amount),
+            Dialog::Gamut(tolerance, all) => self.select_gamut(cx, tolerance, all),
+            Dialog::Workspace(name) => self.workspace_ok(cx, &name),
+            Dialog::Workspaces | Dialog::CommandBar(_) => self.save_extras(cx),
+            Dialog::Print(settings, printing) => self.print_ok(cx, settings, printing),
+            Dialog::Modifiers(chosen) => Self::modifiers_ok(cx, chosen),
+            Dialog::Preferences(prefs) => Self::preferences_ok(cx, &prefs),
+            Dialog::PageSettings(settings) => self.page_settings_ok(cx, &settings),
+            Dialog::StoryInfo(info) => Self::story_info_ok(cx, &info),
+            Dialog::StoryEditor(texts) => Self::story_editor_ok(cx, texts),
+            Dialog::Proof(profile) => self.proof_ok(profile),
+            Dialog::CanvasProperties(props) => Self::canvas_properties_ok(cx, &props),
+            Dialog::Convert(layer, kind, name) => self.convert_ok(cx, layer, kind, &name),
+            Dialog::Webtoon(height, width) => self.ask_export_webtoon(cx, height, width),
+            Dialog::Shape3D(kind) => self.shape_3d_ok(cx, kind),
+            Dialog::Timeline(fps, length) => self.timeline_ok(cx, fps, length),
+            Dialog::Onion(onion) => self.onion_ok(cx, &onion),
+            Dialog::Correction(layer, filter, before, _) => {
+                Self::correction_ok(cx, layer, &filter, &before);
             }
-            (Dialog::Filter(filter), Outcome::Cancel) => {
-                if filter.shown.is_some() {
-                    filter.show(cx, &filter.before);
-                }
-                if filter.merged {
-                    // Take back the merged layer made for it.
-                    self.run("edit.undo", cx);
-                }
+            Dialog::Canvas(canvas) => self.canvas_ok(cx, &canvas),
+            Dialog::Resolution(resolution) => self.resolution_ok(cx, &resolution),
+            Dialog::Message(..)
+            | Dialog::Shortcuts
+            | Dialog::Pages(_)
+            | Dialog::Comps(_)
+            | Dialog::Exposure => {}
+        }
+    }
+
+    /// What Cancel (or Escape, or closing its window) does, for each kind
+    /// of dialog.
+    fn dialog_cancel(&mut self, cx: &mut AppletContext<'_>, dialog: Dialog) {
+        match dialog {
+            Dialog::Filter(filter) => self.filter_cancel(cx, &filter),
+            Dialog::Correction(layer, _, before, made) => {
+                Self::correction_cancel(cx, layer, &before, made);
             }
-            (Dialog::Filter(filter), Outcome::Ok) => self.keep_filter(cx, &filter),
-            (Dialog::Frame(frame), Outcome::Ok) => self.add_frame_layer(cx, frame),
-            (Dialog::Text(layer, lettering), Outcome::Ok) => self.put_text(cx, layer, &lettering),
-            (Dialog::Perspective(count), Outcome::Ok) => self.make_perspective(cx, count),
-            (Dialog::Timelapse(export), Outcome::Ok) => self.ask_export_timelapse(cx, export),
-            (Dialog::Material(name), Outcome::Ok) => self.register_material(cx, &name),
-            (Dialog::SelectBy(3, width), Outcome::Ok) => self.outline_selection(cx, width),
-            (Dialog::SelectBy(kind, amount), Outcome::Ok) => {
-                if let Some(doc) = self.doc_mut()
-                    && let Some(selection) = doc.selection.clone()
-                {
-                    let changed = match kind {
-                        0 => selection.expanded(amount),
-                        1 => selection.shrunk(amount),
-                        _ => selection.blurred(amount),
-                    };
-                    doc.set_selection(Some(changed));
-                }
-            }
-            (Dialog::Gamut(tolerance, all), Outcome::Ok) => self.select_gamut(cx, tolerance, all),
-            (Dialog::Workspace(name), Outcome::Ok) => {
-                let name = if name.trim().is_empty() {
-                    tr!("workspace")
-                } else {
-                    name.trim().to_owned()
-                };
-                let space = self.workspace_now(&name);
-                match self.workspaces.iter().position(|known| known.name == name) {
-                    Some(index) => self.workspaces[index] = space,
-                    None => self.workspaces.push(space),
-                }
-                self.save_extras(cx);
-            }
-            (Dialog::Workspaces, _) => self.save_extras(cx),
-            (Dialog::Message(..) | Dialog::Print(..) | Dialog::Modifiers(_), Outcome::Cancel) => {}
-            (Dialog::Message(..), _) => {}
-            (Dialog::Print(settings, printing), _) => {
-                self.print = settings;
-                if printing {
-                    self.print_now(cx);
-                }
-            }
-            (Dialog::Modifiers(chosen), _) => {
-                for ((key, _, choices), pick) in MODIFIERS.iter().zip(chosen) {
-                    let value = choices[pick.min(choices.len() - 1)].to_owned();
-                    if let Err(error) =
-                        cx.edit_rice(SetRiceValue::new(*key, RiceValue::Text(value)))
-                    {
-                        cx.fail(tr!("cannot-keep-the-modifier-keys", error = error));
-                    }
-                }
-            }
-            (Dialog::CommandBar(_), _) => self.save_extras(cx),
-            (Dialog::Preferences(_), Outcome::Cancel) => {}
-            (Dialog::Preferences(prefs), _) => {
-                for (key, value) in prefs.changes() {
-                    if cx.rice().get(key).as_ref() == Some(&value) {
-                        continue;
-                    }
-                    if let Err(error) = cx.edit_rice(SetRiceValue::new(key, value)) {
-                        cx.fail(tr!("cannot-keep-the-preferences", error = error));
-                    }
-                }
-            }
-            (
-                Dialog::CanvasProperties(_)
-                | Dialog::Convert(..)
-                | Dialog::Proof(_)
-                | Dialog::PageSettings(_)
-                | Dialog::StoryInfo(_)
-                | Dialog::StoryEditor(_),
-                Outcome::Cancel,
-            ) => {}
-            (Dialog::PageSettings(settings), _) => {
-                match crate::story::page_settings(
-                    &cx.world.arena,
-                    settings.story,
-                    [settings.width.max(1), settings.height.max(1)],
-                    settings.dpi,
-                    settings.bleed,
-                    settings.inner,
-                ) {
-                    Ok(edit) => {
-                        Self::apply(cx, edit);
-                        for doc in &mut self.docs {
-                            doc.view.fitted = false;
-                        }
-                    }
-                    Err(error) => cx.fail(error),
-                }
-            }
-            (Dialog::StoryInfo(info), _) => {
-                let mut edit = crate::doc::Edit::new(tr!("change-story-information"))
-                    .then(sue_core::txn::SetProperty::new(
-                        info.story,
-                        crate::story::AUTHOR,
-                        info.author.clone(),
-                    ))
-                    .then(sue_core::txn::SetProperty::new(
-                        info.story,
-                        crate::story::FIRST_NUMBER,
-                        info.first,
-                    ))
-                    .then(sue_core::txn::SetProperty::new(
-                        info.story,
-                        crate::story::BINDING,
-                        if info.right_bound { "right" } else { "left" },
-                    ))
-                    .then(sue_core::txn::SetProperty::new(
-                        info.story,
-                        crate::story::START,
-                        if info.paired { "paired" } else { "alone" },
-                    ))
-                    .then(sue_core::txn::SetProperty::new(
-                        info.story,
-                        crate::story::FOLIO,
-                        info.folio.show,
-                    ))
-                    .then(sue_core::txn::SetProperty::new(
-                        info.story,
-                        crate::story::FOLIO_SIZE,
-                        f64::from(info.folio.size),
-                    ))
-                    .then(sue_core::txn::SetProperty::new(
-                        info.story,
-                        crate::story::FOLIO_PLACE,
-                        if info.folio.center {
-                            "center"
-                        } else {
-                            "outside"
-                        },
-                    ));
-                if !info.title.trim().is_empty() {
-                    edit = edit.then(sue_core::txn::Rename::new(info.story, info.title.trim()));
-                }
-                Self::apply(cx, edit);
-            }
-            (Dialog::StoryEditor(texts), _) => {
-                let mut edit = crate::doc::Edit::new(tr!("story-editor"));
-                let mut changed = false;
-                for (_, page, layer, words) in texts {
-                    let arena = &cx.world.arena;
-                    let same = arena
-                        .get_by_id(layer)
-                        .ok()
-                        .and_then(crate::lettering::Lettering::of)
-                        .is_some_and(|lettering| lettering.content == words);
-                    if same {
-                        continue;
-                    }
-                    let Some([width, height]) = arena
-                        .get_by_id(page)
-                        .ok()
-                        .and_then(sue_model::picture::size)
-                    else {
-                        continue;
-                    };
-                    if let Some(step) =
-                        crate::lettering::retext(arena, layer, &words, width, height)
-                    {
-                        edit = edit.then(step);
-                        changed = true;
-                    }
-                }
-                if changed {
-                    Self::apply(cx, edit);
-                }
-            }
-            (Dialog::Proof(profile), _) => {
-                self.proof_profile = profile;
-                self.proof_on = true;
-            }
-            (Dialog::CanvasProperties(props), _) => {
-                let mut edit = crate::doc::Edit::new(tr!("canvas-properties")).then(
-                    sue_core::txn::SetProperty::new(
-                        props.picture,
-                        sue_model::picture::DPI,
-                        props.dpi,
-                    ),
-                );
-                let name = props.name.trim();
-                if !name.is_empty() {
-                    edit = edit.then(sue_core::txn::Rename::new(props.picture, name));
-                }
-                if let Some(paper) = props.paper {
-                    let [r, g, b] = props.paper_color;
-                    edit = edit
-                        .then(sue_core::txn::SetProperty::new(
-                            paper,
-                            sue_model::picture::COLOR,
-                            sue_core::Color::srgb8(r, g, b),
-                        ))
-                        .then(sue_core::txn::SetProperty::new(
-                            paper,
-                            sue_model::picture::VISIBLE,
-                            props.paper_shown,
-                        ));
-                }
-                Self::apply(cx, edit);
-            }
-            (Dialog::Convert(layer, kind, name), _) => {
-                let Some(picture) = self.picture() else {
-                    return;
-                };
-                let arena = &cx.world.arena;
-                let vector = crate::vector::is_vector(arena, layer);
-                let made = match (kind, vector) {
-                    (1, false) => crate::doc::vectorize(arena, picture, layer).map(Some),
-                    (0, true) => crate::doc::rasterize(arena, picture, layer).map(Some),
-                    _ => Ok(None),
-                };
-                match made {
-                    Ok(Some((mut edit, id))) => {
-                        if !name.trim().is_empty() {
-                            edit = edit.then(sue_core::txn::Rename::new(id, name.trim()));
-                        }
-                        if Self::apply(cx, edit)
-                            && let Some(doc) = self.doc_mut()
-                        {
-                            doc.layer = Some(id);
-                        }
-                    }
-                    Ok(None) => {
-                        if !name.trim().is_empty() {
-                            Self::apply(
-                                cx,
-                                crate::doc::Edit::new(tr!("rename-layer"))
-                                    .then(sue_core::txn::Rename::new(layer, name.trim())),
-                            );
-                        }
-                    }
-                    Err(error) => cx.fail(error),
-                }
-            }
-            (Dialog::Webtoon(height, width), Outcome::Ok) => {
-                self.ask_export_webtoon(cx, height, width)
-            }
-            (Dialog::Shape3D(kind), Outcome::Ok) => {
-                let name = crate::three::SHAPES[kind.min(crate::three::SHAPES.len() - 1)];
-                let model = sue_core::Entity::empty(crate::localize(name), sue_model::class::MODEL)
-                    .with_ext(crate::three::shape(kind));
-                self.add_3d_layer(cx, name, model);
-            }
-            (Dialog::Timeline(fps, length), Outcome::Ok) => {
-                if let Some(picture) = self.picture()
-                    && let Some(edit) =
-                        crate::anim::edit_timeline(&cx.world.arena, picture, fps, length)
-                {
-                    Self::apply(cx, edit);
-                }
-            }
-            (Dialog::Onion(onion), Outcome::Ok) => {
-                if let Some(picture) = self.picture() {
-                    let edit = doc::Edit::new(tr!("onion-skin-settings")).then(
-                        sue_core::txn::SetProperty::new(
-                            picture,
-                            crate::anim::ONION,
-                            onion.to_text(),
-                        ),
-                    );
-                    if Self::apply(cx, edit) {
-                        // The settings are for seeing it.
-                        self.onion = true;
-                    }
-                }
-            }
-            (Dialog::Correction(layer, filter, before, made), outcome) => {
-                let text = filter.to_text().unwrap_or_default();
-                // The setting shows live while the dialog is open.
-                let set_now = |cx: &mut AppletContext<'_>, text: &str| {
-                    if let Ok(entity) = cx.world.arena.get_by_id_mut(layer) {
-                        entity
-                            .properties_mut()
-                            .set(doc::CORRECTION_FILTER, text.to_owned());
-                    }
-                };
-                match outcome {
-                    Outcome::Open => {}
-                    Outcome::Ok => {
-                        // Back as it was, then the change as one undo step.
-                        set_now(cx, &before);
-                        if text != before {
-                            Self::apply(cx, doc::set(layer, doc::CORRECTION_FILTER, text));
-                        }
-                    }
-                    Outcome::Cancel => {
-                        set_now(cx, &before);
-                        if made {
-                            let _ = cx.undo(false);
-                        }
-                    }
-                }
-            }
-            (Dialog::Canvas(canvas), Outcome::Ok) => {
-                if let Some(picture) = self.picture() {
-                    match doc::resize_canvas(&cx.world.arena, picture, canvas.size, canvas.shift())
-                    {
-                        Ok(edit) => {
-                            Self::apply(cx, edit);
-                            if let Some(doc) = self.doc_mut() {
-                                doc.set_selection(None);
-                            }
-                        }
-                        Err(error) => cx.fail(error),
-                    }
-                }
-            }
-            (Dialog::Resolution(resolution), Outcome::Ok) => {
-                if let Some(picture) = self.picture() {
-                    match doc::resample(&cx.world.arena, picture, resolution.size, resolution.dpi) {
-                        Ok(edit) => {
-                            Self::apply(cx, edit);
-                            if let Some(doc) = self.doc_mut() {
-                                doc.set_selection(None);
-                            }
-                        }
-                        Err(error) => cx.fail(error),
-                    }
-                }
-            }
-            (Dialog::AdvancedFill, Outcome::Ok) => self.advanced_fill_now(cx),
-            (Dialog::AdvancedFill, Outcome::Cancel) => {}
-            (Dialog::New(new), Outcome::Ok) => {
-                let spec = new.spec();
-                match new.project {
-                    Project::Illustration | Project::Webtoon => self.make_picture(cx, &spec),
-                    Project::Comic | Project::Fanzine | Project::ComicAll => {
-                        self.make_story(cx, &spec, new.pages as usize, new.right_bound);
-                    }
-                    Project::Animation => self.make_animation(cx, &spec, new.frames, new.fps),
-                }
-            }
-            (Dialog::Pressure(pressure), Outcome::Ok) => {
-                let text = pressure.curve.to_string();
-                match cx.edit_rice(SetRiceValue::new(PEN_PRESSURE, RiceValue::Text(text))) {
-                    Ok(_) => cx.notify(tr!("pen-pressure-adjusted-every-tool")),
-                    Err(error) => cx.fail(tr!("cannot-keep-the-pen-pressure", error = error)),
-                }
-            }
-            (
-                Dialog::New(_)
-                | Dialog::Shortcuts
-                | Dialog::Pressure(_)
-                | Dialog::Pages(_)
-                | Dialog::Comps(_)
-                | Dialog::Exposure
-                | Dialog::Frame(_)
-                | Dialog::Canvas(_)
-                | Dialog::Resolution(_)
-                | Dialog::Text(..),
-                Outcome::Cancel | Outcome::Ok,
-            )
-            | (
-                Dialog::Perspective(_)
-                | Dialog::Onion(_)
-                | Dialog::Timelapse(_)
-                | Dialog::Material(_)
-                | Dialog::SelectBy(..)
-                | Dialog::Gamut(..)
-                | Dialog::Webtoon(..)
-                | Dialog::Timeline(..)
-                | Dialog::Shape3D(_)
-                | Dialog::Workspace(_),
-                Outcome::Cancel,
-            ) => {}
+            Dialog::Workspaces | Dialog::CommandBar(_) => self.save_extras(cx),
+            Dialog::New(_)
+            | Dialog::AdvancedFill
+            | Dialog::Pressure(_)
+            | Dialog::Pages(_)
+            | Dialog::Comps(_)
+            | Dialog::Exposure
+            | Dialog::Frame(_)
+            | Dialog::Canvas(_)
+            | Dialog::Resolution(_)
+            | Dialog::Text(..)
+            | Dialog::Perspective(_)
+            | Dialog::Onion(_)
+            | Dialog::Timelapse(_)
+            | Dialog::Material(_)
+            | Dialog::SelectBy(..)
+            | Dialog::Gamut(..)
+            | Dialog::Webtoon(..)
+            | Dialog::Timeline(..)
+            | Dialog::Shape3D(_)
+            | Dialog::Workspace(_)
+            | Dialog::Message(..)
+            | Dialog::Print(..)
+            | Dialog::Modifiers(_)
+            | Dialog::Preferences(_)
+            | Dialog::CanvasProperties(_)
+            | Dialog::Proof(_)
+            | Dialog::PageSettings(_)
+            | Dialog::StoryInfo(_)
+            | Dialog::StoryEditor(_)
+            | Dialog::Convert(..)
+            | Dialog::Shortcuts => {}
         }
     }
 }
@@ -1500,4 +555,42 @@ fn section(ui: &mut Ui, text: &str, theme: &Theme) {
         ui.painter()
             .hline(rect.x_range(), rect.center().y, theme.hairline());
     });
+}
+
+/// A page to read: its paragraphs, headings and links.
+pub(super) fn message_ui(
+    ui: &mut Ui,
+    paragraphs: &[String],
+    size: egui::Vec2,
+    theme: &Theme,
+) -> Outcome {
+    let mut outcome = Outcome::Open;
+    egui::ScrollArea::vertical()
+        .max_height(size.y - 110.0)
+        .show(ui, |ui| {
+            for paragraph in paragraphs.iter() {
+                if paragraph.starts_with("https://") {
+                    ui.hyperlink(paragraph.as_str());
+                } else if let Some(heading) = paragraph.strip_prefix("# ") {
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(heading)
+                            .size(theme.ui_size)
+                            .color(theme.text)
+                            .strong(),
+                    );
+                } else {
+                    ui.label(
+                        RichText::new(paragraph.as_str())
+                            .size(theme.small_size + 0.5)
+                            .color(theme.text),
+                    );
+                }
+            }
+        });
+    ui.add_space(8.0);
+    if ui.button(tr!("close")).clicked() {
+        outcome = Outcome::Ok;
+    }
+    outcome
 }

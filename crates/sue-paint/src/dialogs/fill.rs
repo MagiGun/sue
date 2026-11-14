@@ -1,9 +1,12 @@
-//! Edit, Advanced Fill: its settings and its dialog.
+//! Edit, Advanced Fill (its settings and its dialog), and the selection
+//! dialogs: Expand, Shrink, Blur Border, Outline Selection and Select
+//! Color Gamut.
 
 use egui::{Rect, RichText, Sense, Ui, vec2};
 use sue_wm::Theme;
 
-use super::{Outcome, right_label};
+use super::{Outcome, label, ok_cancel, right_label};
+use crate::studio::SuePaint;
 
 /// Edit, Advanced Fill's settings, kept from one use to the next as Clip
 /// Studio Paint keeps them.
@@ -263,4 +266,69 @@ pub(super) fn advanced_fill_ui(
         });
     });
     outcome
+}
+
+/// Expand, Shrink or Blur the border of the selection, or Outline
+/// Selection: by how many pixels.
+pub(super) fn select_by_ui(ui: &mut Ui, kind: &mut u8, amount: &mut f32, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    ui.horizontal(|ui| {
+        label(
+            ui,
+            &if *kind == 2 {
+                tr!("blur-width")
+            } else {
+                tr!("width")
+            },
+            theme,
+        );
+        ui.add(egui::Slider::new(amount, 1.0..=100.0).suffix(tr!("px")));
+    });
+    ok_cancel(ui, &mut outcome);
+    outcome
+}
+
+/// Select Color Gamut: the tolerance and whether it looks at every layer.
+pub(super) fn gamut_ui(ui: &mut Ui, tolerance: &mut f32, all: &mut bool, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    ui.label(
+        RichText::new(tr!("selects-colors-near-drawing-color"))
+            .size(theme.small_size)
+            .color(theme.muted),
+    );
+    ui.horizontal(|ui| {
+        label(ui, &tr!("color-margin"), theme);
+        let mut percent = *tolerance * 100.0;
+        if ui
+            .add(egui::Slider::new(&mut percent, 0.0..=100.0).suffix(" %"))
+            .changed()
+        {
+            *tolerance = percent / 100.0;
+        }
+    });
+    ui.checkbox(all, tr!("refer-to-all-layers"));
+    ok_cancel(ui, &mut outcome);
+    outcome
+}
+
+impl SuePaint {
+    /// Expands, shrinks or blurs the border of the selection by `amount`.
+    pub(super) fn select_by_ok(&mut self, kind: u8, amount: f32) {
+        if let Some(doc) = self.doc_mut()
+            && let Some(selection) = doc.selection.clone()
+        {
+            let changed = match kind {
+                0 => selection.expanded(amount),
+                1 => selection.shrunk(amount),
+                _ => selection.blurred(amount),
+            };
+            doc.set_selection(Some(changed));
+        }
+    }
+
+    /// Edit, Advanced Fill with the studio's colors and its kept settings.
+    pub(super) fn advanced_fill_dialog_ui(&mut self, ui: &mut Ui, theme: &Theme) -> Outcome {
+        let (main, sub) = (self.main, self.sub);
+        advanced_fill_ui(ui, &mut self.advanced_fill, main, sub, theme)
+    }
 }

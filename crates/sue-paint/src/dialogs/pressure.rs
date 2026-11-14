@@ -2,9 +2,11 @@
 
 use egui::{RichText, Sense, Ui, vec2};
 use sue_model::Response;
-use sue_wm::{Theme, widgets};
+use sue_rice::{RiceValue, SetRiceValue};
+use sue_wm::{AppletContext, Theme, widgets};
 
 use super::Outcome;
+use crate::studio::SuePaint;
 
 /// The setting that holds the pen pressure curve every tool uses.
 pub(crate) const PEN_PRESSURE: &str = "sue_paint.pen_pressure";
@@ -218,6 +220,17 @@ pub(super) fn pressure_ui(ui: &mut Ui, pressure: &mut PressureDialog, theme: &Th
         );
     }
     outcome
+}
+
+impl SuePaint {
+    /// Keeps the fitted curve for every tool.
+    pub(super) fn pressure_ok(cx: &mut AppletContext<'_>, pressure: &PressureDialog) {
+        let text = pressure.curve.to_string();
+        match cx.edit_rice(SetRiceValue::new(PEN_PRESSURE, RiceValue::Text(text))) {
+            Ok(_) => cx.notify(tr!("pen-pressure-adjusted-every-tool")),
+            Err(error) => cx.fail(tr!("cannot-keep-the-pen-pressure", error = error)),
+        }
+    }
 }
 
 #[cfg(test)]

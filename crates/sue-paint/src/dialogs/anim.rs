@@ -1,9 +1,12 @@
-//! Onion Skin Settings.
+//! The animation dialogs: Onion Skin Settings, Edit Timeline and Export
+//! Timelapse.
 
 use egui::{RichText, Ui, vec2};
-use sue_wm::Theme;
+use sue_wm::{AppletContext, Theme};
 
 use super::{Outcome, label, ok_cancel};
+use crate::doc;
+use crate::studio::SuePaint;
 
 /// Onion Skin Settings, as Clip Studio Paint lays them out: how many cels
 /// show before and after, their colors, and how faint they are.
@@ -99,4 +102,101 @@ pub(super) fn onion_ui(ui: &mut Ui, onion: &mut crate::anim::Onion, theme: &Them
     }
     ok_cancel(ui, &mut outcome);
     outcome
+}
+
+/// Edit Timeline: frames a second and length in frames.
+pub(super) fn timeline_ui(ui: &mut Ui, fps: &mut u32, length: &mut u32, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    egui::Grid::new("sue-paint-timeline-edit")
+        .num_columns(2)
+        .spacing(vec2(12.0, 8.0))
+        .show(ui, |ui| {
+            label(ui, &tr!("frame-rate-2"), theme);
+            ui.add(egui::DragValue::new(fps).range(1..=120).suffix(tr!("fps")));
+            ui.end_row();
+            label(ui, &tr!("playback-time"), theme);
+            ui.add(
+                egui::DragValue::new(length)
+                    .range(1..=100_000)
+                    .suffix(tr!("frames")),
+            );
+            ui.end_row();
+        });
+    ok_cancel(ui, &mut outcome);
+    outcome
+}
+
+/// Export Timelapse: the video's size and length.
+pub(super) fn timelapse_ui(
+    ui: &mut Ui,
+    export: &mut crate::timelapse::Export,
+    theme: &Theme,
+) -> Outcome {
+    let mut outcome = Outcome::Open;
+    egui::Grid::new("sue-paint-timelapse-export")
+        .num_columns(2)
+        .spacing(vec2(12.0, 8.0))
+        .show(ui, |ui| {
+            label(ui, &tr!("long-side"), theme);
+            egui::ComboBox::from_id_salt("sue-paint-timelapse-side")
+                .selected_text(tr!("px-2", side = export.side))
+                .show_ui(ui, |ui| {
+                    for side in [480, 720, 1080, 1280, 1920] {
+                        ui.selectable_value(&mut export.side, side, tr!("px-2", side = side));
+                    }
+                });
+            ui.end_row();
+            label(ui, &tr!("length"), theme);
+            let mut fit = export.seconds.is_some();
+            ui.vertical(|ui| {
+                if ui
+                    .radio_value(&mut fit, true, tr!("fit-to-specified-length"))
+                    .changed()
+                    || ui
+                        .radio_value(&mut fit, false, tr!("export-all-frames"))
+                        .changed()
+                {
+                    export.seconds = fit.then_some(30.0);
+                }
+                if let Some(seconds) = export.seconds.as_mut() {
+                    ui.add(
+                        egui::DragValue::new(seconds)
+                            .range(1.0..=600.0)
+                            .suffix(" s"),
+                    );
+                }
+            });
+            ui.end_row();
+        });
+    ui.label(
+        RichText::new(tr!("motion-jpeg-avi-video-animated-gif"))
+            .size(theme.small_size)
+            .color(theme.muted),
+    );
+    ok_cancel(ui, &mut outcome);
+    outcome
+}
+
+impl SuePaint {
+    /// Changes the timeline's frame rate and length.
+    pub(super) fn timeline_ok(&mut self, cx: &mut AppletContext<'_>, fps: u32, length: u32) {
+        if let Some(picture) = self.picture()
+            && let Some(edit) = crate::anim::edit_timeline(&cx.world.arena, picture, fps, length)
+        {
+            Self::apply(cx, edit);
+        }
+    }
+
+    /// Keeps the onion skin settings on the picture and shows it.
+    pub(super) fn onion_ok(&mut self, cx: &mut AppletContext<'_>, onion: &crate::anim::Onion) {
+        if let Some(picture) = self.picture() {
+            let edit = doc::Edit::new(tr!("onion-skin-settings")).then(
+                sue_core::txn::SetProperty::new(picture, crate::anim::ONION, onion.to_text()),
+            );
+            if Self::apply(cx, edit) {
+                // The settings are for seeing it.
+                self.onion = true;
+            }
+        }
+    }
 }

@@ -5,7 +5,7 @@ use egui::{Align, Layout, Rect, RichText, Sense, Ui, pos2, vec2};
 use sue_core::{EntityId, RasterTile2D};
 use sue_wm::{AppletContext, ArenaEdit, Theme, widgets};
 
-use super::Outcome;
+use super::{Outcome, ok_cancel};
 use crate::doc;
 use crate::filters::Filter;
 use crate::select::Selection;
@@ -63,7 +63,7 @@ impl FilterDialog {
     }
 
     /// The layer's pixels with `filter` applied to the originals.
-    pub(super) fn result(&self, filter: Filter) -> Vec<u8> {
+    fn result(&self, filter: Filter) -> Vec<u8> {
         let mut pixels = self.before.clone();
         filter.apply(
             &mut pixels,
@@ -76,13 +76,70 @@ impl FilterDialog {
     }
 
     /// Writes `pixels` into the layer in place (a preview, not history).
-    pub(super) fn show(&self, cx: &mut AppletContext<'_>, pixels: &[u8]) {
+    fn show(&self, cx: &mut AppletContext<'_>, pixels: &[u8]) {
         if let Some(bytes) = doc::raster_mut(&mut cx.world.arena, self.layer)
             .and_then(RasterTile2D::bytes_mut)
             .filter(|bytes| bytes.len() == pixels.len())
         {
             bytes.copy_from_slice(pixels);
         }
+    }
+
+    /// Shows the setting live on the layer when it changed, unless the
+    /// pointer is down on a slow filter; answers the dialog that now
+    /// shows it, if it changed.
+    pub(super) fn show_preview(
+        &self,
+        ctx: &egui::Context,
+        cx: &mut AppletContext<'_>,
+    ) -> Option<Self> {
+        let pointer_down = ctx.input(|input| input.pointer.any_down());
+        let wanted = if self.preview {
+            Some(self.filter)
+        } else {
+            None
+        };
+        let cheap = !matches!(
+            self.filter,
+            Filter::GaussianBlur { .. }
+                | Filter::Sharpen { .. }
+                | Filter::Mosaic { .. }
+                | Filter::LineExtraction { .. }
+                | Filter::MotionBlur { .. }
+                | Filter::RadialBlur { .. }
+                | Filter::ZoomBlur { .. }
+                | Filter::LineWidth { .. }
+                | Filter::Wave { .. }
+                | Filter::Pinch { .. }
+                | Filter::Polar { .. }
+                | Filter::Ripple { .. }
+                | Filter::Twirl { .. }
+                | Filter::ZigZag { .. }
+                | Filter::Crystallize { .. }
+                | Filter::JpegNoise { .. }
+                | Filter::Quick { .. }
+                | Filter::SmartSmooth { .. }
+                | Filter::Fisheye { .. }
+                | Filter::Aberration { .. }
+                | Filter::Glow { .. }
+                | Filter::DropShadow { .. }
+                | Filter::Inflate { .. }
+                | Filter::Retro { .. }
+                | Filter::PerlinNoise { .. }
+                | Filter::Unsharp { .. }
+                | Filter::Dust { .. }
+        );
+        if wanted != self.shown && (cheap || !pointer_down) {
+            let pixels = match wanted {
+                Some(filter_now) => self.result(filter_now),
+                None => self.before.clone(),
+            };
+            self.show(cx, &pixels);
+            let mut updated = self.clone();
+            updated.shown = wanted;
+            return Some(updated);
+        }
+        None
     }
 }
 
@@ -603,4 +660,85 @@ fn quick_gallery(ui: &mut Ui, dialog: &mut FilterDialog, theme: &Theme) {
                 }
             }
         });
+}
+
+/// A correction layer's settings.
+pub(super) fn correction_ui(ui: &mut Ui, filter: &mut Filter, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    filter_params(ui, filter, theme);
+    ui.label(
+        RichText::new(tr!("changes-every-layer-under-one"))
+            .size(theme.small_size)
+            .color(theme.muted),
+    );
+    ok_cancel(ui, &mut outcome);
+    outcome
+}
+
+impl SuePaint {
+    /// Cancel on a filter: the layer as it was, and a layer merged for it
+    /// taken away.
+    pub(super) fn filter_cancel(&mut self, cx: &mut AppletContext<'_>, filter: &FilterDialog) {
+        if filter.shown.is_some() {
+            filter.show(cx, &filter.before);
+        }
+        if filter.merged {
+            // Take back the merged layer made for it.
+            self.run("edit.undo", cx);
+        }
+    }
+
+    /// Shows a correction layer's setting live while its dialog is open.
+    pub(super) fn show_correction(cx: &mut AppletContext<'_>, layer: EntityId, filter: &Filter) {
+        if let Some(text) = filter.to_text()
+            && let Ok(entity) = cx.world.arena.get_by_id(layer)
+            && entity
+                .property(doc::CORRECTION_FILTER)
+                .and_then(sue_core::Value::as_str)
+                != Some(text.as_str())
+            && let Ok(entity) = cx.world.arena.get_by_id_mut(layer)
+        {
+            // The setting shows live while the dialog is open.
+            entity.properties_mut().set(doc::CORRECTION_FILTER, text);
+        }
+    }
+
+    /// OK on a correction layer's settings.
+    pub(super) fn correction_ok(
+        cx: &mut AppletContext<'_>,
+        layer: EntityId,
+        filter: &Filter,
+        before: &str,
+    ) {
+        let text = filter.to_text().unwrap_or_default();
+        // Back as it was, then the change as one undo step.
+        Self::set_correction(cx, layer, before);
+        if text != before {
+            Self::apply(cx, doc::set(layer, doc::CORRECTION_FILTER, text));
+        }
+    }
+
+    /// Cancel on a correction layer's settings: the setting as it was,
+    /// and the layer taken away again when the dialog made it.
+    pub(super) fn correction_cancel(
+        cx: &mut AppletContext<'_>,
+        layer: EntityId,
+        before: &str,
+        made: bool,
+    ) {
+        Self::set_correction(cx, layer, before);
+        if made {
+            let _ = cx.undo(false);
+        }
+    }
+
+    /// The setting shows live while the dialog is open: writes `text`
+    /// on the layer in place (a preview, not history).
+    fn set_correction(cx: &mut AppletContext<'_>, layer: EntityId, text: &str) {
+        if let Ok(entity) = cx.world.arena.get_by_id_mut(layer) {
+            entity
+                .properties_mut()
+                .set(doc::CORRECTION_FILTER, text.to_owned());
+        }
+    }
 }

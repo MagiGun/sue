@@ -1,5 +1,13 @@
-//! What the modifier keys, the pen and the mouse do, for Modifier Key
-//! Settings and the Keyboard Shortcuts dialog.
+//! The settings dialogs: Modifier Key Settings, Keyboard Shortcuts (with
+//! what the pen and the mouse do), Preferences, Command Bar Settings and
+//! the workspaces.
+
+use egui::{Align, Layout, RichText, Ui};
+use sue_rice::{RiceValue, SetRiceValue};
+use sue_wm::{AppletContext, Theme};
+
+use super::{Outcome, label, ok_cancel};
+use crate::studio::SuePaint;
 
 /// What each modifier can do: its rice key, label and choices.
 pub(crate) const MODIFIERS: [(&str, &str, &[&str]); 3] = [
@@ -37,3 +45,257 @@ pub(crate) const GESTURES: [(&str, &str); 11] = [
     ("Zoom tool: the other way", "Alt+click"),
     ("Command palette", "Command in the status bar"),
 ];
+
+/// Register Workspace: its name.
+pub(super) fn workspace_ui(ui: &mut Ui, name: &mut String, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    ui.horizontal(|ui| {
+        label(ui, &tr!("name"), theme);
+        ui.text_edit_singleline(name);
+    });
+    ok_cancel(ui, &mut outcome);
+    outcome
+}
+
+/// Modifier Key Settings: what Alt, Space and Ctrl+Shift do on the canvas.
+pub(super) fn modifiers_ui(ui: &mut Ui, chosen: &mut [usize; 3], theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    for ((key, name, choices), pick) in MODIFIERS.iter().zip(chosen.iter_mut()) {
+        // Each choice reads as Settings names it.
+        let choice_text = |choice: &str| {
+            sue_lang::text_or(
+                "rice",
+                &format!("{}.{choice}", key.replace('.', "-")),
+                &choice.replace('_', " "),
+            )
+        };
+        ui.horizontal(|ui| {
+            label(ui, &crate::localize(name), theme);
+            egui::ComboBox::from_id_salt(("sue-paint-modifier", *name))
+                .selected_text(choice_text(choices[(*pick).min(choices.len() - 1)]))
+                .show_ui(ui, |ui| {
+                    for (index, choice) in choices.iter().enumerate() {
+                        ui.selectable_value(pick, index, choice_text(choice));
+                    }
+                });
+        });
+    }
+    ui.label(
+        RichText::new(tr!("space-shift-turns-view-ctrl-alt"))
+            .size(theme.small_size)
+            .color(theme.muted),
+    );
+    ok_cancel(ui, &mut outcome);
+    outcome
+}
+
+/// Keyboard Shortcuts: the keys set now and the pen and mouse gestures.
+pub(super) fn shortcuts_ui(
+    ui: &mut Ui,
+    cx: &AppletContext<'_>,
+    size: egui::Vec2,
+    change_keys: &mut bool,
+    theme: &Theme,
+) -> Outcome {
+    let mut outcome = Outcome::Open;
+    // Every command can be given a key, but the list shows the ones
+    // that have one, as set now.
+    let keys = {
+        let section = crate::studio::KEYS_SECTION;
+        let table = crate::studio::shortcut_table();
+        let bound: Vec<sue_wm::shortcuts::Shortcut> = table
+            .iter()
+            .zip(sue_wm::shortcuts::resolve(cx.rice(), section, table))
+            .filter(|(_, chords)| !chords.is_empty())
+            .map(|(shortcut, _)| shortcut.clone())
+            .collect();
+        sue_wm::shortcuts::rows(cx.rice(), section, &bound)
+    };
+    egui::ScrollArea::vertical()
+        .max_height(size.y - 90.0)
+        .show(ui, |ui| {
+            sue_wm::shortcuts::grid_ui(ui, "sue-paint-keys", &keys, theme);
+            ui.add_space(12.0);
+            ui.label(
+                RichText::new(tr!("with-the-pen-and-mouse"))
+                    .color(theme.text)
+                    .strong(),
+            );
+            let gestures: Vec<(String, String)> = GESTURES
+                .iter()
+                .map(|(what, how)| (crate::localize(what), crate::localize(how)))
+                .collect();
+            sue_wm::shortcuts::grid_ui(ui, "sue-paint-gestures", &gestures, theme);
+        });
+    ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
+        if ui.button(tr!("close")).clicked() {
+            outcome = Outcome::Cancel;
+        }
+        if ui
+            .button(tr!("change-shortcuts-ellipsis"))
+            .on_hover_text(tr!("settings-keymaps-any-number-keys-each"))
+            .clicked()
+        {
+            *change_keys = true;
+            outcome = Outcome::Cancel;
+        }
+    });
+    outcome
+}
+
+/// File, Preferences: Sue Paint's own, page by page.
+pub(super) fn preferences_ui(
+    ui: &mut Ui,
+    prefs: &mut crate::prefs::Preferences,
+    theme: &Theme,
+) -> Outcome {
+    match prefs.ui(ui, theme) {
+        Some(true) => Outcome::Ok,
+        Some(false) => Outcome::Cancel,
+        None => Outcome::Open,
+    }
+}
+
+impl SuePaint {
+    /// Manage Workspaces: rename, use or delete each.
+    pub(super) fn workspaces_ui(&mut self, ui: &mut Ui, theme: &Theme) -> Outcome {
+        let mut outcome = Outcome::Open;
+        let mut chosen = None;
+        let mut gone = None;
+        egui::ScrollArea::vertical()
+            .max_height(220.0)
+            .show(ui, |ui| {
+                for (index, space) in self.workspaces.iter_mut().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.text_edit_singleline(&mut space.name);
+                        if ui.button(tr!("use")).clicked() {
+                            chosen = Some(index);
+                        }
+                        if ui.button(tr!("delete")).clicked() {
+                            gone = Some(index);
+                        }
+                    });
+                }
+                if self.workspaces.is_empty() {
+                    ui.label(
+                        RichText::new(tr!("no-workspaces-yet-window-workspace-register"))
+                            .size(theme.small_size)
+                            .color(theme.muted),
+                    );
+                }
+            });
+        if let Some(index) = chosen {
+            self.use_workspace(index);
+        }
+        if let Some(index) = gone {
+            self.workspaces.remove(index);
+        }
+        ui.add_space(8.0);
+        if ui.button(tr!("close")).clicked() {
+            outcome = Outcome::Ok;
+        }
+        outcome
+    }
+
+    /// Command Bar Settings: which buttons show, and menu commands added to it.
+    pub(super) fn command_bar_ui(
+        &mut self,
+        ui: &mut Ui,
+        adding: &mut String,
+        size: egui::Vec2,
+        theme: &Theme,
+    ) -> Outcome {
+        let mut outcome = Outcome::Open;
+        egui::ScrollArea::vertical()
+            .max_height(size.y - 150.0)
+            .show(ui, |ui| {
+                for group in crate::panels::BAR_GROUPS {
+                    for (_, command, tip) in group.iter() {
+                        let mut shown = !self.bar_hidden.contains(*command);
+                        if ui.checkbox(&mut shown, crate::localize(tip)).changed() {
+                            if shown {
+                                self.bar_hidden.remove(*command);
+                            } else {
+                                self.bar_hidden.insert((*command).to_owned());
+                            }
+                        }
+                    }
+                    ui.separator();
+                }
+                let mut gone = None;
+                for (index, command) in self.bar_extra.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(crate::menus::label_of(&self.menus, command).unwrap_or(command));
+                        if ui.small_button(tr!("remove")).clicked() {
+                            gone = Some(index);
+                        }
+                    });
+                }
+                if let Some(index) = gone {
+                    self.bar_extra.remove(index);
+                }
+            });
+        ui.horizontal(|ui| {
+            label(ui, &tr!("add"), theme);
+            let picked = crate::menus::label_of(&self.menus, adding)
+                .unwrap_or(&tr!("a-menu-command"))
+                .to_owned();
+            egui::ComboBox::from_id_salt("sue-paint-bar-add")
+                .selected_text(picked)
+                .height(320.0)
+                .show_ui(ui, |ui| {
+                    for (label, command) in crate::menus::commands(&self.menus) {
+                        ui.selectable_value(adding, command, label);
+                    }
+                });
+            if ui.button(tr!("add-2")).clicked()
+                && !adding.is_empty()
+                && !self.bar_extra.contains(adding)
+            {
+                self.bar_extra.push(adding.clone());
+            }
+        });
+        ui.add_space(6.0);
+        if ui.button(tr!("close")).clicked() {
+            outcome = Outcome::Ok;
+        }
+        outcome
+    }
+
+    /// Keeps the workspace as it is now under `name`.
+    pub(super) fn workspace_ok(&mut self, cx: &mut AppletContext<'_>, name: &str) {
+        let name = if name.trim().is_empty() {
+            tr!("workspace")
+        } else {
+            name.trim().to_owned()
+        };
+        let space = self.workspace_now(&name);
+        match self.workspaces.iter().position(|known| known.name == name) {
+            Some(index) => self.workspaces[index] = space,
+            None => self.workspaces.push(space),
+        }
+        self.save_extras(cx);
+    }
+
+    /// Keeps what each modifier does.
+    pub(super) fn modifiers_ok(cx: &mut AppletContext<'_>, chosen: [usize; 3]) {
+        for ((key, _, choices), pick) in MODIFIERS.iter().zip(chosen) {
+            let value = choices[pick.min(choices.len() - 1)].to_owned();
+            if let Err(error) = cx.edit_rice(SetRiceValue::new(*key, RiceValue::Text(value))) {
+                cx.fail(tr!("cannot-keep-the-modifier-keys", error = error));
+            }
+        }
+    }
+
+    /// Keeps the preferences that changed.
+    pub(super) fn preferences_ok(cx: &mut AppletContext<'_>, prefs: &crate::prefs::Preferences) {
+        for (key, value) in prefs.changes() {
+            if cx.rice().get(key).as_ref() == Some(&value) {
+                continue;
+            }
+            if let Err(error) = cx.edit_rice(SetRiceValue::new(key, value)) {
+                cx.fail(tr!("cannot-keep-the-preferences", error = error));
+            }
+        }
+    }
+}

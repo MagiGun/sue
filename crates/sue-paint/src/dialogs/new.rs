@@ -770,6 +770,36 @@ pub(super) fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome
     outcome
 }
 
+impl SuePaint {
+    /// Makes the new work.
+    pub(super) fn new_ok(&mut self, cx: &mut AppletContext<'_>, new: &NewDialog) {
+        let spec = new.spec();
+        match new.project {
+            Project::Illustration | Project::Webtoon => self.make_picture(cx, &spec),
+            Project::Comic | Project::Fanzine | Project::ComicAll => {
+                self.make_story(cx, &spec, new.pages as usize, new.right_bound);
+            }
+            Project::Animation => self.make_animation(cx, &spec, new.frames, new.fps),
+        }
+    }
+
+    /// The New dialog, and Register preset or Delete preset when it asks.
+    pub(super) fn new_dialog_ui(
+        &mut self,
+        ui: &mut Ui,
+        new: &mut NewDialog,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) -> Outcome {
+        new.own.clone_from(&self.canvas_presets);
+        let outcome = new_ui(ui, new, theme);
+        if let Some(register) = new.preset_action.take() {
+            self.canvas_preset(cx, new, register);
+        }
+        outcome
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
