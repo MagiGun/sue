@@ -1665,7 +1665,7 @@ that asks for a folder when results would stay in the picker's cache
 and saturation have one implementation, `sue_io::picture_ops`
 (`brightness_contrast`, `hue_saturation`), which Sue Paint's
 corrections call too. The list asks its host for the system's dialogs
-(`JobListRequest`). Snapshot scenes 31a to 31e show both.
+(`JobListRequest`). Snapshot scenes 28n to 28r show both.
 
 **Docking** (`sue_wm::dock`). A studio's palettes, as Clip Studio
 Paint's: the studio lists them as a `DockPanel` (a stable key, an optional

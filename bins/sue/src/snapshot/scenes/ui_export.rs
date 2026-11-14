@@ -44,7 +44,7 @@ fn scans() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// Scenes 31a to 31e: the picture page for a JPEG of a known size, the
+/// Scenes 28n to 28r: the picture page for a JPEG of a known size, the
 /// note of a format with a largest side, the sound page, and the batch
 /// dialog empty and after a run.
 pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
@@ -58,7 +58,7 @@ pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
     jpeg.width = 1920.0;
     jpeg.height = 1080.0;
     let mut dialog = ExportDialog::for_picture("Export Single Layer", jpeg, Some((3000, 2000)));
-    shoot_ui(tour, "31a-ui-export-picture", false, |ui, theme| {
+    shoot_ui(tour, "28n-ui-export-picture", false, |ui, theme| {
         backdrop(ui, theme);
         dialog.show(ui.ctx(), theme);
     })?;
@@ -67,7 +67,7 @@ pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
     icon.choose_format("ico");
     icon.options.grayscale = true;
     let mut dialog = ExportDialog::for_picture("Save Duplicate", icon, Some((1024, 1024)));
-    shoot_ui(tour, "31b-ui-export-icon", false, |ui, theme| {
+    shoot_ui(tour, "28o-ui-export-icon", false, |ui, theme| {
         backdrop(ui, theme);
         dialog.show(ui.ctx(), theme);
     })?;
@@ -86,13 +86,13 @@ pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
         normalize: true,
     };
     let mut dialog = ExportDialog::for_sound("Export Animation Audio", sound);
-    shoot_ui(tour, "31c-ui-export-sound", false, |ui, theme| {
+    shoot_ui(tour, "28p-ui-export-sound", false, |ui, theme| {
         backdrop(ui, theme);
         dialog.show(ui.ctx(), theme);
     })?;
 
     let mut empty = JobList::default();
-    shoot_ui(tour, "31d-ui-batch-empty", false, |ui, theme| {
+    shoot_ui(tour, "28q-ui-batch-empty", false, |ui, theme| {
         backdrop(ui, theme);
         empty.show_dialog(ui.ctx(), theme, "Batch Convert Pictures");
     })?;
@@ -110,7 +110,7 @@ pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
     list.poll().ok_or("the batch run did not finish")?;
     // Tall enough to show every part of the dialog.
     tour.camera.size = [1100, 1400];
-    shoot_ui(tour, "31e-ui-batch-run", false, |ui, theme| {
+    shoot_ui(tour, "28r-ui-batch-run", false, |ui, theme| {
         backdrop(ui, theme);
         list.show_dialog(ui.ctx(), theme, "Batch Convert Pictures");
     })?;
