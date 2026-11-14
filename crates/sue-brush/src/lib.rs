@@ -20,9 +20,11 @@
 //!   dual brush, the watercolor edge, tone scraping, blend modes, the
 //!   erasers) and the stroke that brings them together.
 //! - [`texture`]: paper textures, Sue's own and a person's pictures.
+//! - [`presets`]: Sue's built-in brushes, written by hand.
 
 pub mod buffer;
 pub mod input;
 pub mod paint;
+pub mod presets;
 pub mod raster;
 pub mod texture;
