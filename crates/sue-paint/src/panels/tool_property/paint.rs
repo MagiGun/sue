@@ -8,7 +8,7 @@ use sue_wm::Theme;
 use super::brush::{color_jitter_ui, dynamic_row, starting_and_ending_ui};
 use super::small_text;
 use crate::brush::{AntiAlias, Tip};
-use crate::panels::slider_row;
+use crate::panels::{row_label, slider_row};
 use crate::tools::{SubTool, Tool};
 
 /// A painting tool's settings: its size, opacity, hardness and
@@ -295,18 +295,24 @@ pub(super) fn blend_properties(ui: &mut Ui, sub: &mut SubTool, theme: &Theme) {
     ) {
         sub.tip.opacity = strength / 100.0;
     }
-    // Liquify's mode, one of its seven (`blend::LiquifyMode`), as choices
-    // that wrap to the palette's width.
+    // Liquify's mode, one of its seven (`blend::LiquifyMode`): a row like
+    // the sliders above, its choice in a drop-down that the arrow keys
+    // and the wheel step through.
     if let Some(mode) = crate::blend::LiquifyMode::of_mode(sub.mode) {
-        ui.horizontal_wrapped(|ui| {
-            for found in crate::blend::LiquifyMode::ALL {
-                let salt = ("sue-paint-liquify-mode", found.id());
-                if sue_wm::ui::choice::radio(salt, &found.label(), found == mode)
-                    .show(ui, theme)
-                    .clicked()
-                {
-                    sub.mode = found.mode();
-                }
+        let modes = crate::blend::LiquifyMode::ALL;
+        let names: Vec<String> = modes.iter().map(|found| found.label()).collect();
+        let mut chosen = modes.iter().position(|found| *found == mode).unwrap_or(0);
+        ui.horizontal(|ui| {
+            let label = tr!("mode");
+            row_label(ui, &label, theme);
+            let width = ui.available_width();
+            if sue_wm::ui::input::dropdown("sue-paint-liquify-mode", &mut chosen, &names)
+                .label(&label)
+                .width(width)
+                .show(ui, theme)
+                .changed()
+            {
+                sub.mode = modes[chosen].mode();
             }
         });
     }
