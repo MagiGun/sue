@@ -85,6 +85,10 @@ follow [Semantic Versioning](https://semver.org/).
   small button at the wheel's bottom right switches between a square of
   saturation and value (HSV) and a triangle between the hue, white and
   black (HLS), and the numbers under the wheel follow it.
+- Sue Paint: Edit, Tonal Correction, Grayscale turns the current layer,
+  and every other layer picked with it, into grays of the same
+  brightness in one step, transparency kept; with a selection only the
+  selected area.
 
 ### Changed
 
