@@ -785,7 +785,6 @@ impl SuePaint {
     }
 }
 
-/// Where exports go without a dialog: `io.convert_dir`, or the home folder.
 /// The JPEG quality Settings has for conversions.
 pub(super) fn jpeg_quality(cx: &AppletContext<'_>) -> u8 {
     cx.rice()
@@ -802,6 +801,7 @@ pub(super) fn jxl_effort(cx: &AppletContext<'_>) -> u8 {
         .unwrap_or(7)
 }
 
+/// Where exports go without a dialog: `io.convert_dir`, or the home folder.
 pub(crate) fn export_dir(cx: &AppletContext<'_>) -> PathBuf {
     let riced = cx.rice().get_str("io.convert_dir").unwrap_or("").trim();
     if riced.is_empty() {
