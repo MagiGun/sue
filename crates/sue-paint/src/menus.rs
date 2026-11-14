@@ -582,6 +582,8 @@ pub fn menus() -> Vec<Menu> {
                 ),
                 item("select.to_layer"),
                 item("select.from_selection_layer"),
+                item("select.vectors_overlapping"),
+                item("select.vectors_within"),
                 item("select.quick_mask"),
             ],
         ),

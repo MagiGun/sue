@@ -277,12 +277,13 @@ The order of work is the plan at the end.
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
 | Select All, Deselect, Reselect, Invert Selected Area | Select | done | |
-| Expand, Shrink Selected Area | Select | done | |
+| Expand, Shrink Selected Area | Select | partial | No expansion type (round or square corners) yet |
 | Blur Border (feather) | Select > Blur border | done | |
 | Select Color Gamut | Select > Select color gamut | done | |
 | Selection from Layer: create, add, remove | Select > Selection from Layer | done | |
 | Convert to Selection Layer, and back | Select | done | |
 | Quick Mask | Select > Quick Mask | done | Paint the selection in red, then turn it back |
+| Select Overlapping Vectors, Select Vectors Within Area | Select | done | Pick the lines of a vector layer for the Object tool |
 | Selection Launcher bar | View > Selection Launcher | done | |
 | Select the layer under the pointer | Canvas | done | Ctrl+Shift+click |
 
