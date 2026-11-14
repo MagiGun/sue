@@ -139,3 +139,10 @@ do-not-save = Do Not Save
 save = Save
 cancel = Cancel
 shortcuts-custom = Keys of commands that have no default key
+
+## ui/input.rs, ui/slider.rs
+
+field-clear = Clear
+field-choices = Choices
+range-start = Start of { $name }
+range-end = End of { $name }

@@ -104,3 +104,10 @@ close-esc = Chiudi (Esc)
 none = Nessuno
 there-no-studio-tool-called = Nessuno studio o strumento denominato { $id }
 is-not-available = { $command } non è disponibile
+
+## ui/input.rs, ui/slider.rs
+
+field-clear = Cancella
+field-choices = Scelte
+range-start = Inizio di { $name }
+range-end = Fine di { $name }

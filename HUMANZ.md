@@ -1513,6 +1513,32 @@ behaviour (`FocusScope`: a first focus when the group appears, Tab held
 inside for dialogs, arrow keys with Home and End for menus, lists and
 tab strips).
 
+**Inputs and sliders** (`sue_wm::ui::input`, `sue_wm::ui::slider`).
+Every field and slider a studio needs, built on the tokens, each named
+by a salt its caller gives it (never by where it is drawn), sized by the
+`Density` of its `Ui`, and telling assistive technology its role, name
+and value. `text_field` and `search_field` (a magnifier before the text
+and a clear button while it holds any) take one line; `number_field`
+drags sideways (Shift a tenth as fast), types on a click with all of the
+number chosen, steps with the arrow keys while typed in, reads numbers
+the way the language writes them (a unit typed after the number too),
+keeps to its range and drops a typo with an alert mark; `dropdown`
+opens a list that walks with the arrows, Home, End and type-ahead, and
+steps without opening with the keys while it holds focus and with the
+wheel once the pointer has rested on it for 0.2 seconds (a dropdown the
+page scrolls under the pointer leaves the wheel to the page), each step
+taking effect at once so whatever it drives previews it; `combo` is a
+text field that also offers a list. `slider` is a track with a thin
+upright handle, an optional label and a number field that types the same
+value; `tall_slider` stands upright with the most at the top, its
+opacity form fading over a checkerboard; `range` holds two handles that
+keep a least gap; `wedge` grows to the right as the compact size and
+opacity sliders of a tool's settings. Every slider follows the pointer
+from where it went down, takes the arrows, Page Up and Down, Home and
+End while it holds focus, and can map its values by their logarithm.
+`input::sheet` and `slider::sheet` draw all of them in every state for
+review (snapshot scenes 28 to 28d).
+
 **Docking** (`sue_wm::dock`). A studio's palettes, as Clip Studio
 Paint's: the studio lists them as a `DockPanel` (a stable key, an optional
 fixed width, a least height, a floating size, whether it stays when its

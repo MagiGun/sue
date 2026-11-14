@@ -117,3 +117,9 @@ in-folder = { $lead } dans { $folder }
 saved = { $name } enregistré{ $note }{ $folder }{ $click }
 saved-in-folder = {" "}dans { $folder }
 
+## ui/input.rs, ui/slider.rs
+
+field-clear = Effacer
+field-choices = Choix
+range-start = Début de { $name }
+range-end = Fin de { $name }

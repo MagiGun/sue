@@ -92,3 +92,10 @@ close-esc = 关闭 (Esc)
 none = 无
 there-no-studio-tool-called = 未找到名为 { $id } 的工作室或工具
 is-not-available = { $command } 不可用
+
+## ui/input.rs, ui/slider.rs
+
+field-clear = 清除
+field-choices = 选项
+range-start = { $name }起点
+range-end = { $name }终点

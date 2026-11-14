@@ -110,3 +110,10 @@ label-work = 作業
 transfer-copy = コピー
 transfer-export = エクスポート
 transfer-import = インポート
+
+## ui/input.rs, ui/slider.rs
+
+field-clear = クリア
+field-choices = 候補
+range-start = { $name }の開始
+range-end = { $name }の終了

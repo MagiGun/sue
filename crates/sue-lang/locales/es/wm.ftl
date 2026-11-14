@@ -122,3 +122,10 @@ label-work = Trabajo
 transfer-copy = Copiar
 transfer-export = Exportar
 transfer-import = Importar
+
+## ui/input.rs, ui/slider.rs
+
+field-clear = Borrar
+field-choices = Opciones
+range-start = Inicio de { $name }
+range-end = Fin de { $name }

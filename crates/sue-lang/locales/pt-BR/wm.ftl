@@ -104,3 +104,10 @@ close-esc = Fechar (Esc)
 none = Nenhum
 there-no-studio-tool-called = Nenhum estúdio ou ferramenta chamado { $id }
 is-not-available = { $command } não está disponível
+
+## ui/input.rs, ui/slider.rs
+
+field-clear = Limpar
+field-choices = Opções
+range-start = Início de { $name }
+range-end = Fim de { $name }
