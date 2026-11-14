@@ -6,7 +6,7 @@
 //! alignments, the two kinds of transform) share a function and tell
 //! themselves apart by their name.
 
-use sue_core::{Arena, Value};
+use sue_core::{Arena, EntityId, Value};
 use sue_model::picture::{self, LayerKind};
 use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
@@ -113,24 +113,36 @@ fn copy_svg(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 /// The lines Copy vectors as SVG copies, as SVG code the size of the
 /// canvas, and how many shapes it holds; `None` when there is none.
 fn vectors_svg(paint: &SuePaint, arena: &Arena) -> Option<(String, usize)> {
-    let picture = paint.picture()?;
     let info = paint.layer_info(arena)?;
-    if !vector::is_vector(arena, info.id) {
+    layer_svg(
+        arena,
+        paint.picture()?,
+        info.id,
+        info.style.offset,
+        paint.picked_lines.as_ref(),
+    )
+}
+
+/// The lines of the vector `layer` of `picture`, moved by the layer's
+/// `offset`, as SVG code the size of the picture: only those `picked`
+/// names when it names this layer and some of its lines. `None` when
+/// `layer` is not a vector layer or nothing on it is drawn.
+fn layer_svg(
+    arena: &Arena,
+    picture: EntityId,
+    layer: EntityId,
+    offset: [i64; 2],
+    picked: Option<&(EntityId, Vec<usize>)>,
+) -> Option<(String, usize)> {
+    if !vector::is_vector(arena, layer) {
         return None;
     }
     let size = arena.get_by_id(picture).ok().and_then(picture::size)?;
-    let lines = vector::lines(&vector::geometry(arena, info.id));
-    let picked = paint
-        .picked_lines
-        .as_ref()
-        .filter(|(layer, picked)| *layer == info.id && !picked.is_empty())
+    let lines = vector::lines(&vector::geometry(arena, layer));
+    let picked = picked
+        .filter(|(on, picked)| *on == layer && !picked.is_empty())
         .map(|(_, picked)| picked.as_slice());
-    svg_of(
-        &lines,
-        picked,
-        info.style.offset.map(|value| value as f32),
-        size,
-    )
+    svg_of(&lines, picked, offset.map(|value| value as f32), size)
 }
 
 /// `lines` (only those at the indices `picked` when given), moved by
@@ -829,5 +841,62 @@ mod tests {
         // Nothing to copy: no line, or only an erasing one.
         assert!(svg_of(&[], None, [0.0, 0.0], [200, 100]).is_none());
         assert!(svg_of(&lines, Some(&[2]), [0.0, 0.0], [200, 100]).is_none());
+    }
+
+    #[test]
+    fn copy_vectors_as_svg_reads_the_layer_from_the_arena() {
+        use sue_core::{Arena, ReversibleTransaction};
+
+        use crate::doc;
+
+        let mut arena = Arena::new();
+        let (mut edit, picture) = doc::create(&doc::NewPicture {
+            width: 200,
+            height: 100,
+            ..doc::NewPicture::default()
+        })
+        .expect("a picture");
+        edit.apply(&mut arena).expect("made");
+        let raster = doc::layers(&arena, picture)
+            .last()
+            .map(|info| info.id)
+            .expect("a raster layer");
+        let lines = [
+            line([10.0, 10.0], [90.0, 10.0]),
+            line([10.0, 50.0], [90.0, 80.0]),
+        ];
+        let (mut spawn, ink) =
+            doc::add_vector_lines(&arena, picture, Some(raster), "Ink".to_owned(), &lines)
+                .expect("a vector layer");
+        spawn.apply(&mut arena).expect("added");
+
+        // A raster layer has no lines to copy.
+        assert!(super::layer_svg(&arena, picture, raster, [0, 0], None).is_none());
+        // Every line, as big as the picture, moved with the layer.
+        let (text, count) =
+            super::layer_svg(&arena, picture, ink, [30, 0], None).expect("the lines");
+        assert_eq!(count, 2);
+        let drawing = sue_io::svg::parse_svg(&text).expect("it reads back");
+        assert_eq!((drawing.width, drawing.height), (200.0, 100.0));
+        let left = drawing
+            .shapes
+            .iter()
+            .flat_map(|shape| shape.points.iter())
+            .map(|point| point[0])
+            .fold(f32::MAX, f32::min);
+        assert!((37.0..40.0).contains(&left), "moved by 30: {left}");
+        // Lines picked on this layer narrow it; picked on another do not.
+        let picked = (ink, vec![0]);
+        let (_, count) =
+            super::layer_svg(&arena, picture, ink, [0, 0], Some(&picked)).expect("one");
+        assert_eq!(count, 1);
+        let elsewhere = (raster, vec![0]);
+        let (_, count) =
+            super::layer_svg(&arena, picture, ink, [0, 0], Some(&elsewhere)).expect("all");
+        assert_eq!(count, 2);
+        let none_picked = (ink, Vec::new());
+        let (_, count) =
+            super::layer_svg(&arena, picture, ink, [0, 0], Some(&none_picked)).expect("all");
+        assert_eq!(count, 2);
     }
 }
