@@ -13,6 +13,19 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Writer opens CSV and TSV files: each becomes a document holding
+  the table, after one question, whether the first row is a heading row.
+  Table, Convert, Table from File puts such a table at the caret, and
+  Export Table As writes the table the caret is in as CSV or TSV. Cells
+  keep their text as the file wrote it (007 stays 007).
+- Sue Writer's Export dialog tidies plain text: line endings (LF or CRLF,
+  the system's by default), spaces at line ends dropped, and tabs as a
+  number of spaces. Markdown takes the line endings only, since two
+  spaces end a line there and tabs carry its lists.
+- Sue Writer's menus follow the skeleton every studio shares: File has
+  Open, Save, Save As (Ctrl+Shift+S), Settings and Quit Sue; Edit has
+  Cut, Copy, Paste and Select All; Help has Check for Updates and About
+  Sue Writer.
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.
@@ -62,6 +75,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Writer's Compile is called Export (File, Export...), and "Include
+  in Compile" reads "Include in Export". Project Settings moved to the
+  Project menu, and Save as Template and the templates folder to File,
+  Templates.
 - A Sue project (`.sue`) with pictures is far smaller and the same on
   disk however it is saved: pixels are stored as 256 pixel tiles, an
   empty or single color tile costs a byte, a tile found twice (a duplicated
