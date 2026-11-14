@@ -408,3 +408,187 @@ fn every_kind_of_layer_takes_a_mask() {
     assert_eq!(doc::mask_of(&arena, paper), None);
     assert_eq!(shown(&arena, picture, 2), [[10, 20, 30, 255]; 2]);
 }
+
+/// Writes a picture of what folders, masks, modes, live layers and tones
+/// do, for a person to look at: `SUE_SHOTS=<folder> cargo test -p
+/// sue-picture folder_sheet -- --ignored`.
+#[test]
+#[ignore = "writes a picture for a person to look at"]
+fn folder_sheet() {
+    const SIDE: u32 = 120;
+    let add = |arena: &mut Arena,
+               history: &mut UndoStack<Arena>,
+               picture: EntityId,
+               paint: &dyn Fn(u32, u32) -> [u8; 4]| {
+        let mut pixels = Vec::new();
+        for y in 0..SIDE {
+            for x in 0..SIDE {
+                pixels.extend_from_slice(&paint(x, y));
+            }
+        }
+        let raster = RasterTile2D::from_bytes(SIDE, SIDE, PixelFormat::Rgba8, pixels).unwrap();
+        let (spawn, id) =
+            doc::add_layer_pixels(arena, picture, None, "Layer".to_owned(), raster).unwrap();
+        history
+            .apply(arena, doc::Edit::new("Add").then(spawn))
+            .unwrap();
+        id
+    };
+    // Stripes of red, green and blue to see modes against.
+    let stripes = |x: u32, _: u32| match (x / 20) % 3 {
+        0 => [220, 60, 60, 255],
+        1 => [60, 200, 90, 255],
+        _ => [70, 90, 220, 255],
+    };
+    let disc = |rgba: [u8; 4]| {
+        move |x: u32, y: u32| {
+            let (dx, dy) = (x as f32 - 60.0, y as f32 - 60.0);
+            if dx.hypot(dy) < 40.0 { rgba } else { [0; 4] }
+        }
+    };
+    let fresh = || {
+        let mut arena = Arena::new();
+        let mut history = UndoStack::new();
+        let (edit, picture) = doc::create(&NewPicture {
+            width: SIDE,
+            height: SIDE,
+            paper: Some(Color::srgb8(255, 255, 255)),
+            ..NewPicture::default()
+        })
+        .unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        (arena, history, picture)
+    };
+    let all = [0, 0, SIDE, SIDE];
+    let mut panels: Vec<Vec<u8>> = Vec::new();
+    // 1, 2: a gray disc set to Multiply in a folder at 70%: Through (it
+    // multiplies the stripes), then Normal (it is plain gray at 70%).
+    for mode in ["through", "normal"] {
+        let (mut arena, mut history, picture) = fresh();
+        add(&mut arena, &mut history, picture, &stripes);
+        let gray = add(
+            &mut arena,
+            &mut history,
+            picture,
+            &disc([128, 128, 128, 255]),
+        );
+        set(&mut arena, &mut history, gray, picture::BLEND, "multiply");
+        let folder = folder_around(&mut arena, &mut history, picture, gray);
+        set(&mut arena, &mut history, folder, picture::OPACITY, 0.7);
+        set(&mut arena, &mut history, folder, picture::BLEND, mode);
+        panels.push(render(&arena, picture, all, RenderOptions::default()));
+    }
+    // 3: a yellow disc in a Screen folder whose mask shows the left half,
+    // inside a Through folder whose mask fades from top to bottom.
+    {
+        let (mut arena, mut history, picture) = fresh();
+        add(&mut arena, &mut history, picture, &stripes);
+        let yellow = add(
+            &mut arena,
+            &mut history,
+            picture,
+            &disc([230, 210, 40, 255]),
+        );
+        let inner = folder_around(&mut arena, &mut history, picture, yellow);
+        set(&mut arena, &mut history, inner, picture::BLEND, "screen");
+        let (edit, _) =
+            doc::new_mask(&arena, inner, |x, _| if x < 60 { 1.0 } else { 0.0 }).unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        let outer = folder_around(&mut arena, &mut history, picture, inner);
+        let (edit, _) = doc::new_mask(&arena, outer, |_, y| 1.0 - y as f32 / SIDE as f32).unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        panels.push(render(&arena, picture, all, RenderOptions::default()));
+    }
+    // 4: an Invert correction in a Normal folder with a disc: only the
+    // disc is inverted, not the stripes.
+    {
+        let (mut arena, mut history, picture) = fresh();
+        add(&mut arena, &mut history, picture, &stripes);
+        let dark = add(&mut arena, &mut history, picture, &disc([40, 40, 120, 255]));
+        let (edit, invert) = doc::new_correction(&arena, picture, Some(dark), "Invert", "invert");
+        history.apply(&mut arena, edit).unwrap();
+        let folder = folder_around(&mut arena, &mut history, picture, invert);
+        let into = doc::set_folder(&arena, dark, Some(folder)).unwrap();
+        history.apply(&mut arena, into).unwrap();
+        set(&mut arena, &mut history, folder, picture::BLEND, "normal");
+        panels.push(render(&arena, picture, all, RenderOptions::default()));
+    }
+    // 5: a tiled, turned image material and a round gradient in Glow
+    // Dodge over the stripes.
+    {
+        let (mut arena, mut history, picture) = fresh();
+        add(&mut arena, &mut history, picture, &stripes);
+        let image = RasterTile2D::from_bytes(
+            2,
+            2,
+            PixelFormat::Rgba8,
+            [[0, 0, 0, 200], [0; 4], [0; 4], [0, 0, 0, 200]].concat(),
+        )
+        .unwrap();
+        let place = doc::Placement {
+            at: [60.0, 60.0],
+            scale: 8.0,
+            angle: 30.0,
+            tile: true,
+        };
+        let (edit, _) = doc::new_material_layer(&arena, picture, None, "Checks", image, place);
+        history.apply(&mut arena, edit).unwrap();
+        let gradient = doc::Gradient {
+            line: [[60.0, 60.0], [60.0, 110.0]],
+            colors: [[1.0, 0.8, 0.4, 0.9], [1.0, 0.8, 0.4, 0.0]],
+            radial: true,
+        };
+        let (edit, glow) = doc::new_gradient_layer(&arena, picture, None, "Glow", gradient);
+        history.apply(&mut arena, edit).unwrap();
+        set(&mut arena, &mut history, glow, picture::BLEND, "glow-dodge");
+        panels.push(render(&arena, picture, all, RenderOptions::default()));
+    }
+    // 6: a gray ramp as tone in the six dot shapes, a band each.
+    {
+        let (mut arena, mut history, picture) = fresh();
+        for shape in 0..6_u32 {
+            let ramp = move |x: u32, y: u32| {
+                if y / 20 == shape {
+                    let gray = (x * 255 / SIDE) as u8;
+                    [gray, gray, gray, 255]
+                } else {
+                    [0; 4]
+                }
+            };
+            let id = add(&mut arena, &mut history, picture, &ramp);
+            set(&mut arena, &mut history, id, crate::effects::TONE, true);
+            set(
+                &mut arena,
+                &mut history,
+                id,
+                crate::effects::TONE_LINES,
+                12.0,
+            );
+            set(
+                &mut arena,
+                &mut history,
+                id,
+                crate::effects::TONE_SHAPE,
+                i64::from(shape),
+            );
+        }
+        panels.push(render(&arena, picture, all, RenderOptions::default()));
+    }
+    let gap = 8;
+    let width = panels.len() as u32 * (SIDE + gap) + gap;
+    let height = SIDE + 2 * gap;
+    let mut sheet = vec![236_u8; (width * height * 4) as usize];
+    for (index, panel) in panels.iter().enumerate() {
+        let left = gap + index as u32 * (SIDE + gap);
+        for y in 0..SIDE {
+            let from = (y * SIDE * 4) as usize;
+            let to = (((y + gap) * width + left) * 4) as usize;
+            sheet[to..to + (SIDE * 4) as usize]
+                .copy_from_slice(&panel[from..from + (SIDE * 4) as usize]);
+        }
+    }
+    let png = sue_io::encode_png_rgba(width, height, &sheet).unwrap();
+    let folder = std::env::var("SUE_SHOTS").expect("SUE_SHOTS names the folder to write in");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(std::path::Path::new(&folder).join("folders.png"), png).unwrap();
+}
