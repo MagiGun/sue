@@ -36,20 +36,24 @@ impl Level {
         top * (1.0 - wy) + bottom * wy
     }
 
-    /// The next level: half the size (rounded up), each texel the mean
-    /// of the four beneath it. A missing texel at an odd edge counts as
-    /// empty, as everything outside the picture is.
+    /// The next level: half the size (rounded up), spanning exactly the
+    /// same picture. Each texel is the mean of the area of this level it
+    /// covers, so an odd side is shared out over the texels rather than
+    /// padded with empty ones. That keeps every level's extent, and so a
+    /// ribbon's period, the picture's own: a padded level would read the
+    /// empty padding at every repeat and band the ribbon.
     fn halved(&self) -> Self {
         let (width, height) = (self.width.div_ceil(2), self.height.div_ceil(2));
-        let mut texels = Vec::with_capacity(width * height);
-        for y in 0..height {
-            for x in 0..width {
-                let (x2, y2) = (2 * x as i64, 2 * y as i64);
-                let sum = self.at(x2, y2, false)
-                    + self.at(x2 + 1, y2, false)
-                    + self.at(x2, y2 + 1, false)
-                    + self.at(x2 + 1, y2 + 1, false);
-                texels.push(sum * 0.25);
+        // Across, row by row; then down, column by column.
+        let mut across = Vec::with_capacity(width * self.height);
+        for row in self.texels.chunks(self.width) {
+            across.extend(shrink(row.iter().copied(), self.width, width));
+        }
+        let mut texels = vec![0.0; width * height];
+        for x in 0..width {
+            let column = (0..self.height).map(|y| across[y * width + x]);
+            for (y, value) in shrink(column, self.height, height).into_iter().enumerate() {
+                texels[y * width + x] = value;
             }
         }
         Self {
@@ -58,6 +62,30 @@ impl Level {
             texels,
         }
     }
+}
+
+/// `values` (`from` of them) box-filtered down to `to` (at most `from`),
+/// each output the mean of the stretch of the input it spans: output `j`
+/// covers inputs `j * from / to .. (j + 1) * from / to`, parts of an
+/// input counted by how much of it lies inside.
+fn shrink(values: impl Iterator<Item = f32>, from: usize, to: usize) -> Vec<f32> {
+    let input: Vec<f32> = values.collect();
+    let ratio = from as f32 / to as f32;
+    (0..to)
+        .map(|j| {
+            let (start, end) = (j as f32 * ratio, (j + 1) as f32 * ratio);
+            let first = start.floor() as usize;
+            let last = (end.ceil() as usize).min(from);
+            let sum: f32 = (first..last)
+                .map(|i| {
+                    let lo = start.max(i as f32);
+                    let hi = end.min((i + 1) as f32);
+                    input[i] * (hi - lo).max(0.0)
+                })
+                .sum();
+            sum / ratio
+        })
+        .collect()
 }
 
 /// A tip picture as coverage, with its mip pyramid: each level half the
@@ -152,18 +180,28 @@ impl TipImage {
             level += 1;
             scale *= 2.0;
         }
-        let here = self.levels[level].sample(x / scale, y / scale, wrap);
+        let here = self.read(level, x, y, wrap);
         if level + 1 == self.levels.len() {
             return here;
         }
-        // Between this level (texels of `scale`) and the next (twice).
+        // Between this level (texels of about `scale`) and the next
+        // (about twice).
         let blend = ((footprint - scale) / scale).clamp(0.0, 1.0);
         if blend <= 0.0 {
             return here;
         }
-        let up = scale * 2.0;
-        let next = self.levels[level + 1].sample(x / up, y / up, wrap);
+        let next = self.read(level + 1, x, y, wrap);
         here + (next - here) * blend
+    }
+
+    /// Level `level` read at `(x, y)` in the picture's own texels: every
+    /// level spans the whole picture, so the point is scaled by how many
+    /// of the level's texels fit in the picture each way.
+    fn read(&self, level: usize, x: f32, y: f32, wrap: bool) -> f32 {
+        let (base, this) = (&self.levels[0], &self.levels[level]);
+        let sx = this.width as f32 / base.width as f32;
+        let sy = this.height as f32 / base.height as f32;
+        this.sample(x * sx, y * sy, wrap)
     }
 }
 
@@ -191,6 +229,41 @@ mod tests {
                 .all(|&t| (t - 0.5).abs() < 1.0e-6)
         );
         assert!((even.levels[2].texels[0] - 0.5).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn every_level_spans_the_picture_so_a_repeat_has_no_seam() {
+        // Full pictures of awkward widths, read wrapped along their
+        // middle row at every size: full everywhere, at every repeat.
+        for width in [3_usize, 5, 6, 7, 12, 20] {
+            let image = TipImage::from_coverage(width, 9, &vec![255; width * 9]).expect("full");
+            for footprint in [1.0_f32, 1.3, 2.0, 2.9, 4.0, 7.5, 16.0] {
+                for step in 0..200 {
+                    let x = step as f32 * 0.173;
+                    let v = image.sample(x, 4.5, footprint, true);
+                    assert!(
+                        (v - 1.0).abs() < 1.0e-5,
+                        "width {width}, footprint {footprint}, at {x}: {v}"
+                    );
+                }
+            }
+            // And an odd side is shared out, not padded: still full.
+            assert!(
+                image
+                    .levels
+                    .iter()
+                    .all(|l| l.texels.iter().all(|&t| (t - 1.0).abs() < 1.0e-5))
+            );
+        }
+        // A stripe pattern keeps its mean at every level.
+        let stripes: Vec<u8> = (0..7 * 3)
+            .map(|i| if i % 7 < 3 { 255 } else { 0 })
+            .collect();
+        let image = TipImage::from_coverage(7, 3, &stripes).expect("stripes");
+        for level in &image.levels {
+            let mean = level.texels.iter().sum::<f32>() / level.texels.len() as f32;
+            assert!((mean - 3.0 / 7.0).abs() < 1.0e-5, "{mean}");
+        }
     }
 
     #[test]
