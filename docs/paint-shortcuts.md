@@ -95,7 +95,7 @@ with the shell's `keys` where shared) and the menu defaults in
 | Snap to Ruler | Ctrl+1 | Ctrl+1 | yes |
 | Snap to Special Ruler | Ctrl+2 | Ctrl+2 | yes |
 | Snap to Grid | Ctrl+3 | Ctrl+3 | yes |
-| Toggle special ruler snapping | Ctrl+4 | no key | missing in Sue |
+| Toggle special ruler snapping | Ctrl+4 | Ctrl+4 | yes |
 
 ## Filter
 

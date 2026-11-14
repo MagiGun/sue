@@ -47,7 +47,7 @@ rows are at the end.
 | Vector | 6 | 2 | 0 | 88 |
 | 3D | 7 | 2 | 4 | 62 |
 | Colors | 9 | 0 | 1 | 90 |
-| View and navigation | 9 | 3 | 0 | 88 |
+| View and navigation | 10 | 3 | 0 | 88 |
 | Window, palettes and workspaces | 21 | 3 | 1 | 90 |
 | Materials and assets | 6 | 3 | 1 | 75 |
 | Print | 0 | 2 | 2 | 25 |
@@ -480,6 +480,7 @@ The order of work is the plan at the end.
 | Show Tone Area, Paper, Page Image | View | partial | Commands exist; verify |
 | Selection, Transform, Text and Object launchers | View | done | Small bars of buttons under what you work on |
 | Color profile preview | View > Color Profile | partial | Commands exist; verify |
+| Safety Margin, Show Vector Paths, Show Playback FPS, Toggle Special Ruler Snapping | View | done | The margin runs 5 mm inside a page's trim; the rate is what the canvas really shows; the snapping switch is kept with the picture and undoes |
 | Tabs show a dot when a picture changed | Canvas tabs | done | |
 | Next and previous canvas | Window > Canvas | done | Ctrl+Tab |
 | Touch: two fingers move, zoom and turn; two-finger tap undoes | Gestures | done | A pinch never paints and never undoes |

@@ -248,7 +248,10 @@ impl SuePaint {
                 } else {
                     crate::rulers::Rulers::default()
                 };
-                if let Some((center, angle)) = rulers.symmetry.filter(|_| doc.ruler_on)
+                // Snap to Special Ruler, and the picture's own switch.
+                let special =
+                    doc.ruler_on && crate::commands::special_snaps(&cx.world.arena, doc.picture);
+                if let Some((center, angle)) = rulers.symmetry.filter(|_| special)
                     && let Some(ruler) = self
                         .toolbox
                         .subs(Tool::Ruler)
@@ -274,7 +277,7 @@ impl SuePaint {
                     &rulers,
                     local,
                     doc.snap_ruler,
-                    doc.ruler_on,
+                    special,
                     24.0 / doc.view.zoom.max(0.01),
                 );
                 let snap = snap.or_else(|| {

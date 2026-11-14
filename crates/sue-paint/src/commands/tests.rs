@@ -282,6 +282,11 @@ fn the_shortcuts_keep_the_keys_and_names_they_had() {
         ("view.snap_ruler", "Ctrl+1", "Snap to Ruler"),
         ("view.snap_special", "Ctrl+2", "Snap to Special Ruler"),
         ("view.snap_grid", "Ctrl+3", "Snap to Grid"),
+        (
+            "view.special_ruler_snapping",
+            "Ctrl+4",
+            "Toggle Special Ruler Snapping",
+        ),
         ("view.rotate_left", "-", "Rotate Left"),
         ("view.rotate_right", "=", "Rotate Right"),
         ("window.prev_tab", "Ctrl+Shift+Tab", "Previous Canvas"),

@@ -19,6 +19,7 @@ mod paint_start;
 mod paint_timeline;
 mod paint_tools;
 mod paint_touch;
+mod paint_view;
 mod settings;
 mod shell;
 mod ui_buttons;
@@ -62,6 +63,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_dialogs::menu_and_dialogs(tour)?;
     paint_dialogs::pages(tour)?;
     paint_timeline::timeline(tour)?;
+    paint_view::marks(tour)?;
     paint_layers::property(tour)?;
     paint_color::scenes(tour);
     paint_dock::scenes(tour);
