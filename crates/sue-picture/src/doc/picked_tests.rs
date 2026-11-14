@@ -687,3 +687,17 @@ fn a_moved_layers_mask_keeps_to_it_through_merge_down_and_rasterize() {
     assert_eq!(shown(&arena), before);
     aligned(&arena, flat);
 }
+
+#[test]
+fn a_3d_layer_lands_in_the_picked_folder() {
+    let (mut arena, picture, mut history, first) = picture_of(4, 2);
+    let (edit, folder) = new_folder(&arena, picture, Some(first), true);
+    history.apply(&mut arena, edit).unwrap();
+    let model =
+        sue_core::Entity::empty("Cube", sue_model::class::MODEL).with_ext(crate::three::shape(0));
+    let (edit, layer) =
+        crate::three::new_layer(&arena, picture, Some(folder), "Cube", model).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    assert_eq!(folder_of(&arena, layer), Some(folder));
+    assert_eq!(&ids(&arena, picture)[1..], &[first, layer, folder]);
+}

@@ -37,7 +37,7 @@ pub use kinds::{
 pub use layers::{
     CORRECTION, CORRECTION_FILTER, REFERENCE, TEXT, add_layer_pixels, add_layers_pixels, add_paper,
     add_raster_layer, add_raster_layer_at, add_vector_layer, add_vector_lines, delete, duplicate,
-    is_reference, merge_down, merge_layers, merge_visible, new_correction, transfer_down,
+    is_reference, landed, merge_down, merge_layers, merge_visible, new_correction, transfer_down,
 };
 pub use lines_tones::{LinesAndTones, lines_and_tones};
 pub use masks::{

@@ -11,7 +11,7 @@
 
 use sue_core::txn::{ReplaceComponent, SetProperty, SpawnEntity};
 use sue_core::{
-    Arena, CHILD, Entity, EntityId, MeshBuffer3D, PixelFormat, REF, RasterTile2D, Relation, Value,
+    Arena, Entity, EntityId, MeshBuffer3D, PixelFormat, REF, RasterTile2D, Relation, Value,
 };
 use sue_model::{Geometry, PrimKind};
 
@@ -844,7 +844,9 @@ pub fn buffers_of(
 }
 
 /// The edit that makes a 3D layer named `name` showing `model` (an
-/// existing model entity, or a new one to spawn), right above `below`.
+/// existing model entity, or a new one to spawn) where a new layer goes
+/// with `below` picked: right above it in its folder, or in it when it is
+/// a folder.
 ///
 /// # Errors
 /// If the picture has no size.
@@ -891,21 +893,6 @@ pub fn new_layer(
     let model_id = model.id();
     let mut layer = Entity::new(name, raster).with_class(CLASS);
     let id = layer.id();
-    let stack = crate::doc::layers(arena, picture);
-    let order = below
-        .and_then(|below| stack.iter().position(|info| info.id == below))
-        .map_or_else(
-            || arena.relations().next_order(picture, CHILD),
-            |index| {
-                sue_core::OrderKey::between(
-                    Some(&stack[index].order),
-                    stack
-                        .get(index + 1)
-                        .map(|next| &next.order)
-                        .filter(|next| **next > stack[index].order),
-                )
-            },
-        );
     for (key, value) in [
         (YAW, Value::Float(f64::from(view.yaw))),
         (PITCH, Value::Float(f64::from(view.pitch))),
@@ -917,8 +904,9 @@ pub fn new_layer(
     let edit = Edit::new(tr!("new-3d-layer-2", name = name))
         .then(SpawnEntity::new(model))
         .then(
-            SpawnEntity::new(layer)
-                .with_relation(Relation::new(picture, CHILD, id).ordered(order))
+            // Where every new layer goes: in the picked folder, or right
+            // above the picked layer in its folder.
+            crate::doc::landed(arena, picture, below, layer)
                 .with_relation(Relation::new(id, REF, model_id)),
         );
     Ok((edit, id))

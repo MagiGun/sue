@@ -72,8 +72,10 @@ fn joined(spawn: SpawnEntity, folder: Option<EntityId>, id: EntityId) -> SpawnEn
 }
 
 /// The spawn of `layer` where a new layer goes with `current` picked (see
-/// [`landing`]): in its place in the stack and in its folder.
-pub(super) fn landed(
+/// [`landing`]): in its place in the stack and in its folder. Every maker
+/// of a new layer spawns it through this.
+#[must_use]
+pub fn landed(
     arena: &Arena,
     picture: EntityId,
     current: Option<EntityId>,
