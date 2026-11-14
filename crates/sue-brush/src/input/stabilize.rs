@@ -22,7 +22,7 @@
 //! Every field is averaged together, so the pressure the brush has at a
 //! place is the pressure the pen had there. Because the window holds the
 //! records themselves, the stabilizer can be drained on the lift along
-//! the path the pen took ([`Stabilizer::drain`]).
+//! the path the pen took, to where it lifted ([`Stabilizer::drain`]).
 
 use std::collections::VecDeque;
 
@@ -40,8 +40,9 @@ const SLOW: f32 = 150.0;
 const FAST: f32 = 1500.0;
 
 /// The narrowest the drain's centred average gets, in seconds each way
-/// (never more than the stabilizer's own): the drain ends this long
-/// before the pen's last packet, still averaging several packets.
+/// (never more than the stabilizer's own): the drain reaches the
+/// smoothed path this long before the pen's last packet, still
+/// averaging several packets, and runs straight on from there.
 const END_HALF: f64 = 0.01;
 
 /// How fast the window may grow back, in seconds of window a second.
@@ -182,8 +183,12 @@ impl Stabilizer {
     /// centred average that narrows toward the pen. The blend
     /// starts all on the first and ends all on the second, easing over
     /// (`3u^2 - 2u^3`), so the line leaves smoothly and lands on the pen
-    /// along the path the pen took. It ends a few milliseconds of travel
-    /// short of the pen's last packet, still smoothed, so that packet's
+    /// along the path the pen took. The pressure along the way is the
+    /// pen's own at each place, not an average, so a pen that eased off
+    /// before it lifted thins out as it did. The blend reaches the
+    /// smoothed path a few milliseconds before the pen's last packet;
+    /// from there the line runs straight on along that path as far as
+    /// the pen got, so it ends where the pen lifted and that packet's
     /// jitter does not bend the end into a hook. The window stays the
     /// one the brush trailed with at the lift (a longer one would pull
     /// it back).
@@ -204,7 +209,7 @@ impl Stabilizer {
         // Where the drain ends: the pen's path, smoothed, just before
         // its last packet.
         let target = centred(&path, to, half.min(newest.at - to));
-        let mut out = Vec::with_capacity(steps as usize + 1);
+        let mut out = Vec::with_capacity(steps as usize + 8);
         for step in 1..=steps.max(1) {
             let tick = Tick {
                 at: newest.at + step as f64 / RATE,
@@ -224,9 +229,47 @@ impl Stabilizer {
             // packet, so it never turns one-sided.
             // Along the path as far, in time, as the standing brush.
             let at = standing.time.clamp(from, to);
-            let following = centred(&path, at, half.min(newest.at - at));
+            let mut following = centred(&path, at, half.min(newest.at - at));
+            // The pen's own pressure there, not an average: a pen that
+            // eased off before it lifted ends as thin as it did.
+            following.pressure = centred(&path, at, 0.0).pressure;
             let ease = (u * u * (3.0 - 2.0 * u)) as f32;
             out.push(standing.lerp(&following, ease));
+        }
+        // The last stretch, to the pen's last packet: straight on along
+        // the smoothed path as far as the pen got, so the line reaches
+        // where the pen lifted without bending to that packet's jitter.
+        // Every other field narrows onto the pen's own last record.
+        let span = newest.at - to;
+        if span > 0.0 {
+            let behind = centred(&path, (to - span).max(path[0].at), half.min(newest.at - to));
+            let way = [target.pos[0] - behind.pos[0], target.pos[1] - behind.pos[1]];
+            let length = (way[0] * way[0] + way[1] * way[1]).sqrt();
+            let end = if length > 1e-6 {
+                let way = [way[0] / length, way[1] / length];
+                let reach = (newest.record.pos[0] - target.pos[0]) * way[0]
+                    + (newest.record.pos[1] - target.pos[1]) * way[1];
+                let reach = reach.max(0.0);
+                [
+                    target.pos[0] + way[0] * reach,
+                    target.pos[1] + way[1] * reach,
+                ]
+            } else {
+                target.pos
+            };
+            let count = (span * RATE).ceil().max(1.0) as u64;
+            for k in 1..=count {
+                let share = k as f64 / count as f64;
+                let at = to + span * share;
+                let mut record = centred(&path, at, half.min(newest.at - at));
+                record.pressure = centred(&path, at, 0.0).pressure;
+                let s = share as f32;
+                record.pos = [
+                    target.pos[0] + (end[0] - target.pos[0]) * s,
+                    target.pos[1] + (end[1] - target.pos[1]) * s,
+                ];
+                out.push(record);
+            }
         }
         self.last = out.last().copied();
         out

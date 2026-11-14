@@ -27,8 +27,10 @@
 //!    shortens as the pen speeds up when "adjust by speed" is on, and
 //!    as far as the brush must to trail the pen by no more than
 //!    `10 + 1.5 * level` screen points. On the lift it is drained along
-//!    the records it still holds, without a kink, onto the pen's path,
-//!    and then the line ramps to the lift's pressure (none, for a pen).
+//!    the records it still holds, without a kink, onto the pen's path
+//!    and along it to where the pen lifted, each place with the pen's
+//!    own pressure there; then the line ramps to the lift's pressure
+//!    (none, for a pen).
 //!    At level 0 there is neither resampling nor stabilizer: the curve
 //!    goes through the device's own samples.
 //! 5. **Curve** (`curve.rs`): a centripetal Catmull-Rom curve through

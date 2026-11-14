@@ -219,15 +219,14 @@ fn a_jittered_circle_and_line_come_out_smooth() {
     // stabilizer's lag, as with every stabilizer that averages (about
     // 10 pixels on a radius of 200 at 50); the lag stays within
     // `10 + 1.5 x level` screen points. After the lift the line ends
-    // within the jitter of the pen (at 0) or within 10 ms of travel of
-    // it, smoothed (a pen lifted at full speed, as here).
+    // where the pen lifted, within the jitter of its last packet.
     // "Adjust by speed" loosens the stabilizer on a quick stroke; at 50
     // and this speed the farthest lag binds first either way.
     let bounds = [
         (0, false, 1.6, 1.6, 60.0, 3.0, 1.5),
-        (10, false, 1.6, 1.0, 8.0, 30.0, 7.0),
-        (50, false, 12.0, 1.0, 4.0, 85.0, 7.0),
-        (50, true, 12.0, 1.0, 4.0, 85.0, 7.0),
+        (10, false, 1.6, 1.0, 8.0, 30.0, 1.5),
+        (50, false, 12.0, 1.0, 4.0, 85.0, 1.5),
+        (50, true, 12.0, 1.0, 4.0, 85.0, 1.5),
     ];
     for (level, by_speed, circle_bound, line_bound, turn_bound, lag_bound, reach_bound) in bounds {
         let round = measure(level, by_speed, circle, on_circle, 2.0, "circle");
@@ -397,6 +396,54 @@ fn stroke_ends_never_grow_for_any_device() {
                 if level == 20 {
                     draw(&format!("end-{ending:?}-{taper}"), &points);
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_stabilized_line_ends_where_and_as_thin_as_the_pen_did() {
+    // A pen eases off from 0.5 to nothing over its last 40 ms and lifts,
+    // slowly, at a medium pace and in a quick hatch (2,800 pixels a
+    // second). However steady the line, it reaches the place the pen
+    // lifted, and its end thins as the unsteadied line's does: the
+    // stabilizer must not average the pen's easing away into a blunt
+    // end, nor stop short of the pen.
+    let end_of = |seconds: f64, level: u32| {
+        let ramp_from = 1.0 - 0.04 / seconds;
+        let mut samples = stroke(line, seconds, 0.3, 3, |share| {
+            Some(if share > ramp_from {
+                (0.5 * (1.0 - (share - ramp_from) / (1.0 - ramp_from))) as f32
+            } else {
+                0.5
+            })
+        });
+        lift(&mut samples);
+        let pen_end = samples.last().unwrap().pos;
+        let (points, _) = run(&pen(16.0, level), Settings::new(Device::Pen), &samples, 1);
+        let length = points.last().unwrap().arc;
+        // The width two pixels before the end.
+        let near_end = points
+            .iter()
+            .rev()
+            .find(|p| p.arc <= length - 2.0)
+            .unwrap()
+            .size;
+        let reach = distance(points.last().unwrap().pos, pen_end);
+        (near_end, reach, points)
+    };
+    for seconds in [2.0, 0.8, 0.2] {
+        let (plain, _, _) = end_of(seconds, 0);
+        for level in [20, 60] {
+            let (steady, reach, points) = end_of(seconds, level);
+            let what = format!("{seconds} s at {level}");
+            assert!(reach <= 1.5, "{what}: ends {reach} short of the pen");
+            assert!(
+                (steady - plain).abs() <= 0.5,
+                "{what}: {steady} wide near the end, {plain} unsteadied"
+            );
+            if level == 20 && seconds < 0.5 {
+                draw("end-quick-hatch-20", &points);
             }
         }
     }
