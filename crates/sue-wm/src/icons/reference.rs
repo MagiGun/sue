@@ -10,6 +10,10 @@ use super::{Art, Keyline, Part};
 /// The ring every circle icon is drawn in: 20 units across with the pen.
 const RING: &str = "M2.75 12 A9.25 9.25 0 0 1 21.25 12 A9.25 9.25 0 0 1 2.75 12 Z";
 
+/// A small ring in the middle of the canvas: the hub of the gear and the
+/// iris of the eye.
+const HUB: &str = "M8.75 12 A3.25 3.25 0 0 1 15.25 12 A3.25 3.25 0 0 1 8.75 12 Z";
+
 pub(super) const SETTINGS: Art = Art {
     keyline: Keyline::Circle,
     line: &[
@@ -23,7 +27,7 @@ pub(super) const SETTINGS: Art = Art {
              L2.85 13.37 A9.25 9.25 0 0 1 2.85 10.63 L5.44 10.42 A6.75 6.75 0 0 1 6.24 8.47 L4.56 \
              6.5 A9.25 9.25 0 0 1 6.5 4.56 L8.47 6.24 A6.75 6.75 0 0 1 10.42 5.44 Z",
         ),
-        Part::Stroke("M9 12 A3 3 0 0 1 15 12 A3 3 0 0 1 9 12 Z"),
+        Part::Stroke(HUB),
     ],
     solid: &[],
 };
@@ -31,8 +35,8 @@ pub(super) const SETTINGS: Art = Art {
 pub(super) const SEARCH: Art = Art {
     keyline: Keyline::Square,
     line: &[
-        Part::Stroke("M3.75 10.75 A7 7 0 0 1 17.75 10.75 A7 7 0 0 1 3.75 10.75 Z"),
-        Part::Stroke("M15.7 15.7 L20.25 20.25"),
+        Part::Stroke("M3.75 10.5 A6.75 6.75 0 0 1 17.25 10.5 A6.75 6.75 0 0 1 3.75 10.5 Z"),
+        Part::Stroke("M15.27 15.27 L20.25 20.25"),
     ],
     solid: &[],
 };
@@ -40,8 +44,8 @@ pub(super) const SEARCH: Art = Art {
 pub(super) const FOLDER: Art = Art {
     keyline: Keyline::Wide,
     line: &[Part::Stroke(
-        "M2.75 6.75 A2 2 0 0 1 4.75 4.75 H9 L11.25 7.25 H19.25 A2 2 0 0 1 21.25 9.25 V17.25 A2 2 \
-         0 0 1 19.25 19.25 H4.75 A2 2 0 0 1 2.75 17.25 Z",
+        "M2.75 6.75 A2 2 0 0 1 4.75 4.75 H9 L12 7.75 H19.25 A2 2 0 0 1 21.25 9.75 V17.25 A2 2 0 \
+         0 1 19.25 19.25 H4.75 A2 2 0 0 1 2.75 17.25 Z",
     )],
     solid: &[],
 };
@@ -49,10 +53,12 @@ pub(super) const FOLDER: Art = Art {
 pub(super) const DELETE: Art = Art {
     keyline: Keyline::Tall,
     line: &[
-        Part::Stroke("M4.75 6.25 H19.25"),
-        Part::Stroke("M9 6.25 V4.25 A1.5 1.5 0 0 1 10.5 2.75 H13.5 A1.5 1.5 0 0 1 15 4.25 V6.25"),
-        Part::Stroke("M5.75 6.25 V19.25 A2 2 0 0 0 7.75 21.25 H16.25 A2 2 0 0 0 18.25 19.25 V6.25"),
-        Part::Stroke("M9.75 10.5 V17 M14.25 10.5 V17"),
+        Part::Stroke("M4.75 6.75 H19.25"),
+        Part::Stroke(
+            "M8.75 6.75 V4.25 A1.5 1.5 0 0 1 10.25 2.75 H13.75 A1.5 1.5 0 0 1 15.25 4.25 V6.75",
+        ),
+        Part::Stroke("M5.75 6.75 V19.25 A2 2 0 0 0 7.75 21.25 H16.25 A2 2 0 0 0 18.25 19.25 V6.75"),
+        Part::Stroke("M9.75 11 V17 M14.25 11 V17"),
     ],
     solid: &[],
 };
@@ -68,8 +74,8 @@ pub(super) const INFO: Art = Art {
 };
 
 /// The tuft of the brush.
-const TUFT: &str = "M3.85 20.15 C5.83 20.43 7.88 19.66 9.72 17.53 L6.47 14.28 C4.34 16.12 3.57 \
-                    18.17 3.85 20.15 Z";
+const TUFT: &str = "M3.81 20.19 C5.79 20.47 7.84 19.7 9.68 17.57 L6.43 14.32 C4.3 16.16 3.53 \
+                    18.21 3.81 20.19 Z";
 
 pub(super) const TOOL_BRUSH: Art = Art {
     keyline: Keyline::Square,
@@ -95,25 +101,27 @@ pub(super) const PICTURE: Art = Art {
 };
 
 /// The folded corner of the document.
-const FOLD: &str = "M13.5 2.75 V7 A1.5 1.5 0 0 0 15 8.5 H19.25 Z";
+const FOLD: &str = "M13.25 2.75 V7.25 A1.5 1.5 0 0 0 14.75 8.75 H19.25 Z";
 
 pub(super) const DOCUMENT: Art = Art {
     keyline: Keyline::Tall,
     line: &[
         Part::Stroke(
-            "M6.75 2.75 H13.5 L19.25 8.5 V19.25 A2 2 0 0 1 17.25 21.25 H6.75 A2 2 0 0 1 4.75 \
+            "M6.75 2.75 H13.25 L19.25 8.75 V19.25 A2 2 0 0 1 17.25 21.25 H6.75 A2 2 0 0 1 4.75 \
              19.25 V4.75 A2 2 0 0 1 6.75 2.75 Z",
         ),
         Part::Fill(FOLD),
         Part::Stroke(FOLD),
-        Part::Stroke("M8.5 13 H15.5 M8.5 16.75 H13"),
+        Part::Stroke("M8.5 13.25 H15.5 M8.5 17.25 H13"),
     ],
     solid: &[],
 };
 
-/// The outline of the star.
-const STAR_LINE: &str = "M12 3.22 L14.57 9.39 L21.23 9.92 L16.15 14.27 L17.7 20.77 L12 17.29 \
-                         L6.3 20.77 L7.85 14.27 L2.77 9.92 L9.43 9.39 Z";
+/// The outline of the star: five points 8.9 units from (12, 12.4), which
+/// is as large as the keyline circle lets it be, and five inner corners
+/// at 0.45 of that.
+const STAR_LINE: &str = "M12 3.5 L14.35 9.16 L20.46 9.65 L15.81 13.64 L17.23 19.6 L12 16.41 \
+                         L6.77 19.6 L8.19 13.64 L3.54 9.65 L9.65 9.16 Z";
 
 pub(super) const STAR: Art = Art {
     keyline: Keyline::Circle,
@@ -121,9 +129,10 @@ pub(super) const STAR: Art = Art {
     solid: &[Part::Fill(STAR_LINE), Part::Stroke(STAR_LINE)],
 };
 
-/// The outline of the heart.
-const HEART_LINE: &str = "M12 6.76 A4.5 4.5 0 1 0 4.98 12.35 L12 19.75 L19.02 12.35 A4.5 4.5 0 1 \
-                          0 12 6.76 Z";
+/// The outline of the heart: two lobes 4.5 in radius round (8.25, 9.25)
+/// and (15.75, 9.25), and from each a straight side down to the point.
+const HEART_LINE: &str = "M12 6.763 A4.5 4.5 0 1 0 4.984 12.345 L12 19.75 L19.016 12.345 A4.5 \
+                          4.5 0 1 0 12 6.763 Z";
 
 pub(super) const HEART: Art = Art {
     keyline: Keyline::Square,
@@ -137,10 +146,7 @@ const LIDS: &str = "M2.75 12 C5.5 8 8.5 5.75 12 5.75 C15.5 5.75 18.5 8 21.25 12 
 
 pub(super) const EYE: Art = Art {
     keyline: Keyline::Wide,
-    line: &[
-        Part::Stroke(LIDS),
-        Part::Stroke("M9 12 A3 3 0 0 1 15 12 A3 3 0 0 1 9 12 Z"),
-    ],
+    line: &[Part::Stroke(LIDS), Part::Stroke(HUB)],
     solid: &[
         Part::Fill(
             "M2.75 12 C5.5 8 8.5 5.75 12 5.75 C15.5 5.75 18.5 8 21.25 12 C18.5 16 15.5 18.25 12 \
@@ -152,7 +158,7 @@ pub(super) const EYE: Art = Art {
 };
 
 /// The shackle of the lock.
-const SHACKLE: &str = "M8 10.75 V6.75 A4 4 0 0 1 16 6.75 V10.75";
+const SHACKLE: &str = "M7.75 10.75 V7 A4.25 4.25 0 0 1 16.25 7 V10.75";
 
 /// The body of the lock.
 const BODY: &str = "M6.75 10.75 H17.25 A2 2 0 0 1 19.25 12.75 V19.25 A2 2 0 0 1 17.25 21.25 \

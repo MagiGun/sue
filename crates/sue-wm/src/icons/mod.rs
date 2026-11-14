@@ -28,13 +28,20 @@
 //!   look the same size side by side: a circle 20 across, a square of
 //!   18, a wide box of 20 by 16 and a tall box of 16 by 20. The outside
 //!   of the pen touches the keyline; it does not cross it.
-//! - Coordinates sit on the quarter unit grid. A straight stem that runs
-//!   along an axis lies on x.75 when it is left of or above the middle
-//!   of the canvas and on x.25 when it is right of or below it, so that
-//!   its outer side is on a whole unit. Drawn like that, an icon is on
-//!   whole pixels at 24 and 48 pixels as it is; at every other size the
-//!   pixel fitting ([`fit`]) moves stems and the tops of curves to
-//!   where they are sharp.
+//! - A straight stem that runs along an axis lies on x.75 when it is
+//!   left of or above the middle of the canvas and on x.25 when it is
+//!   right of or below it, so that its outer side is on a whole unit. A
+//!   stem on the middle itself stays there. The top of a curve (the
+//!   side of a ring, the lobe of a heart) follows the same rule wherever
+//!   the picture allows it. Drawn like that, an icon is on whole pixels
+//!   at 24 and 48 pixels as it is, and what is written is what is seen;
+//!   at every other size the pixel fitting ([`fit`]) moves stems and the
+//!   tops of curves to where they are sharp. A stem written elsewhere is
+//!   moved at 24 too, by up to half a unit, which is why a test refuses
+//!   it.
+//! - Other points sit on the quarter unit grid where the picture is
+//!   free, and where the geometry decides (a tangent, the points of a
+//!   star) they are written to two or three decimals.
 //!
 //! # The pen
 //!
@@ -537,6 +544,86 @@ mod tests {
         all
     }
 
+    /// How far from the middle of the canvas `parts` draw, the pen
+    /// included.
+    fn reach(parts: &[Part]) -> f32 {
+        let middle = fit::CANVAS / 2.0;
+        let mut far = 0.0_f32;
+        for part in parts {
+            let pen = match part {
+                Part::Stroke(_) => WEIGHT,
+                Part::Fill(_) => 0.0,
+                Part::Clear(_) => continue,
+            };
+            for path in path::parse(part.data()).unwrap() {
+                for point in path.flatten(0.005).points {
+                    let away = (point[0] - middle).hypot(point[1] - middle);
+                    far = far.max(away + pen / 2.0);
+                }
+            }
+        }
+        far
+    }
+
+    /// Where the straight pieces of `data` that run along an axis lie:
+    /// `(axis, place)`, axis 0 for an upright stem (its x) and 1 for a
+    /// level one (its y). Pieces shorter than the pen is wide are no
+    /// stems.
+    fn stems(data: &str) -> Vec<(usize, f32)> {
+        let mut found = Vec::new();
+        for path in path::parse(data).unwrap() {
+            let mut pen = path.start;
+            let mut ends: Vec<path::Point> = path.segments.iter().map(path::Segment::end).collect();
+            let lines: Vec<bool> = path
+                .segments
+                .iter()
+                .map(|segment| matches!(segment, path::Segment::Line(_)))
+                .collect();
+            if path.closed {
+                ends.push(path.start);
+            }
+            for (index, to) in ends.into_iter().enumerate() {
+                let straight = lines.get(index).copied().unwrap_or(true);
+                for axis in 0..2 {
+                    let along = (to[1 - axis] - pen[1 - axis]).abs();
+                    if straight && (to[axis] - pen[axis]).abs() < 1e-4 && along >= WEIGHT {
+                        found.push((axis, pen[axis]));
+                    }
+                }
+                pen = to;
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn every_stem_has_its_outer_side_on_a_whole_unit() {
+        let middle = fit::CANVAS / 2.0;
+        for icon in Icon::ALL {
+            let art = icon.art();
+            for part in art.line.iter().chain(art.solid) {
+                let Part::Stroke(data) = part else { continue };
+                for (axis, place) in stems(data) {
+                    if (place - middle).abs() < 1e-3 {
+                        continue;
+                    }
+                    let wanted = if place < middle { 0.75 } else { 0.25 };
+                    assert!(
+                        (place - place.floor() - wanted).abs() < 1e-3,
+                        "{}: the stem at {} {place} belongs on x{wanted}",
+                        icon.name(),
+                        if axis == 0 { "x" } else { "y" },
+                    );
+                }
+            }
+        }
+        // The helper sees stems, and only stems.
+        assert_eq!(stems("M4 6.25 H20"), vec![(1, 6.25)]);
+        assert_eq!(stems("M4 4 V8 H5 L9 9 Z"), vec![(0, 4.0)]);
+        assert_eq!(stems("M4 4 H9 V9 H4 Z").len(), 4);
+        assert!(stems("M4 4 L20 20 A3 3 0 0 1 20 4").is_empty());
+    }
+
     #[test]
     fn every_icon_stays_inside_the_canvas_the_live_area_and_its_keyline() {
         let slack = 0.01;
@@ -568,6 +655,14 @@ mod tests {
                         && ink[3] <= key[3] + slack,
                     "{name} leaves its keyline {key:?}: {ink:?}"
                 );
+                // A circle is round: its corners are no room to draw in.
+                if art.keyline == Keyline::Circle {
+                    let far = reach(art.parts(style));
+                    assert!(
+                        far <= Keyline::Circle.size()[0] / 2.0 + slack,
+                        "{name} leaves its keyline circle: it reaches {far} from the middle"
+                    );
+                }
             }
         }
     }

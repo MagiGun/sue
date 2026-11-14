@@ -259,8 +259,10 @@ The grid and the pen:
   the engine, not to the drawing; never draw a second weight.
 - Outer corners have a radius of 2 units, corners of details 1. Keep
   1.5 units of clear space between two strokes.
-- Put coordinates on the quarter unit grid, and straight stems on x.75
-  left of or above the middle and on x.25 right of or below it.
+- Put straight stems on x.75 left of or above the middle and on x.25
+  right of or below it (a test holds this), the tops of curves too
+  wherever the picture allows, and other points on the quarter unit grid
+  unless the geometry decides them.
 - An icon is a line, with at most one small solid accent (a dot, an
   arrow head, a folded corner). No second tone. Only the "on" half of an
   on and off pair (a pin, a heart, an eye, a lock, a star) gets a solid
