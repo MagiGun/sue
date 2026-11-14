@@ -842,11 +842,220 @@ fn mp4_shift_offsets(
     Ok(())
 }
 
+/// A box of `kind` around `body`, with a 64-bit size only when needed.
+fn mp4_wrap(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(body.len() + 16);
+    match u32::try_from(body.len() + 8) {
+        Ok(size) => {
+            out.extend_from_slice(&size.to_be_bytes());
+            out.extend_from_slice(kind);
+        }
+        Err(_) => {
+            out.extend_from_slice(&1_u32.to_be_bytes());
+            out.extend_from_slice(kind);
+            out.extend_from_slice(&((body.len() + 16) as u64).to_be_bytes());
+        }
+    }
+    out.extend_from_slice(body);
+    out
+}
+
+/// The header length of the box at the start of `bytes`: 8, or 16 with
+/// a 64-bit size.
+fn mp4_header(bytes: &[u8]) -> usize {
+    if bytes.get(..4) == Some(&[0, 0, 0, 1]) {
+        16
+    } else {
+        8
+    }
+}
+
+/// The body of the first child of `kind` among the boxes of `body`.
+fn mp4_child<'a>(body: &'a [u8], kind: &[u8; 4]) -> Option<&'a [u8]> {
+    let found = mp4_boxes(body)?
+        .into_iter()
+        .find(|found| &found.kind == kind)?;
+    let whole = &body[found.start..found.start + found.len];
+    whole.get(mp4_header(whole)..)
+}
+
+/// A big-endian u32 at `at` of `bytes`.
+fn mp4_u32(bytes: &[u8], at: usize) -> Option<u32> {
+    let four = bytes.get(at..at.checked_add(4)?)?;
+    Some(u32::from_be_bytes([four[0], four[1], four[2], four[3]]))
+}
+
+/// Walks a track's decode times (`stts`) sample by sample, a run at a
+/// time.
+struct DecodeTimes<'a> {
+    stts: &'a [u8],
+    runs: usize,
+    run: usize,
+    left: u64,
+    delta: i64,
+    time: i64,
+}
+
+impl DecodeTimes<'_> {
+    /// Makes sure the current run has a sample left; `None` past the end.
+    fn ready(&mut self) -> Option<()> {
+        while self.left == 0 {
+            if self.run >= self.runs {
+                return None;
+            }
+            self.left = u64::from(mp4_u32(self.stts, 8 + self.run * 8)?);
+            self.delta = i64::from(mp4_u32(self.stts, 12 + self.run * 8)?);
+            self.run += 1;
+        }
+        Some(())
+    }
+
+    /// Steps past `count` samples.
+    fn skip(&mut self, mut count: u64) -> Option<()> {
+        while count > 0 {
+            self.ready()?;
+            let take = count.min(self.left);
+            let step = self.delta.saturating_mul(i64::try_from(take).ok()?);
+            self.time = self.time.saturating_add(step);
+            self.left -= take;
+            count -= take;
+        }
+        Some(())
+    }
+}
+
+/// The earliest presentation time of a track's samples, in its media
+/// time scale, from its `stbl` body: the decode times of `stts` plus the
+/// offsets of `ctts`. `None` when the track has no `ctts` (each sample is
+/// shown when it is decoded) or the tables cannot be read.
+fn mp4_first_presentation(stbl: &[u8]) -> Option<i64> {
+    let ctts = mp4_child(stbl, b"ctts")?;
+    let stts = mp4_child(stbl, b"stts")?;
+    let signed = ctts.first() == Some(&1);
+    let mut times = DecodeTimes {
+        stts,
+        runs: mp4_u32(stts, 4)? as usize,
+        run: 0,
+        left: 0,
+        delta: 0,
+        time: 0,
+    };
+    let mut earliest: Option<i64> = None;
+    for entry in 0..mp4_u32(ctts, 4)? as usize {
+        let count = u64::from(mp4_u32(ctts, 8 + entry * 8)?);
+        let raw = mp4_u32(ctts, 12 + entry * 8)?;
+        let offset = if signed {
+            i64::from(raw.cast_signed())
+        } else {
+            i64::from(raw)
+        };
+        if count == 0 {
+            continue;
+        }
+        if times.ready().is_none() {
+            break;
+        }
+        // In a run of one offset the first sample decodes, and so shows,
+        // earliest.
+        let shown = times.time.saturating_add(offset);
+        earliest = Some(earliest.map_or(shown, |seen| seen.min(shown)));
+        if times.skip(count).is_none() {
+            break;
+        }
+    }
+    earliest
+}
+
+/// A `trak` box (whole, header included) with an edit list added when its
+/// first picture is shown later than zero, or `None` when it needs none.
+///
+/// Windows' H.264 encoder writes B frames, so the first picture is shown
+/// one frame after it is decoded (`ctts`), and Media Foundation's MPEG-4
+/// sink writes no edit list. Without one, players (Windows' own and
+/// ffmpeg alike) start the pictures one frame after the sound, and the
+/// movie runs one frame long. The edit list (`edts` holding `elst`) starts
+/// the track at its first shown picture, as other MP4 writers do.
+fn mp4_track_with_edit(trak: &[u8]) -> Option<Vec<u8>> {
+    let body = trak.get(mp4_header(trak)..)?;
+    let children = mp4_boxes(body)?;
+    if children.iter().any(|child| &child.kind == b"edts") {
+        return None;
+    }
+    let tkhd = mp4_child(body, b"tkhd")?;
+    let stbl = mp4_child(mp4_child(mp4_child(body, b"mdia")?, b"minf")?, b"stbl")?;
+    let start = mp4_first_presentation(stbl)?;
+    if start <= 0 {
+        return None;
+    }
+    // The track's length on the movie's time scale.
+    let duration = if tkhd.first() == Some(&1) {
+        u64::from_be_bytes(tkhd.get(28..36)?.try_into().ok()?)
+    } else {
+        u64::from(mp4_u32(tkhd, 20)?)
+    };
+    let mut elst = Vec::with_capacity(28);
+    if let (Ok(duration), Ok(start)) = (u32::try_from(duration), i32::try_from(start)) {
+        elst.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 1]);
+        elst.extend_from_slice(&duration.to_be_bytes());
+        elst.extend_from_slice(&start.to_be_bytes());
+    } else {
+        elst.extend_from_slice(&[1, 0, 0, 0, 0, 0, 0, 1]);
+        elst.extend_from_slice(&duration.to_be_bytes());
+        elst.extend_from_slice(&start.to_be_bytes());
+    }
+    // Played at normal speed: 1.0 in 16.16 fixed point.
+    elst.extend_from_slice(&[0, 1, 0, 0]);
+    let edts = mp4_wrap(b"edts", &mp4_wrap(b"elst", &elst));
+    let mut inner = Vec::with_capacity(body.len() + edts.len());
+    for child in &children {
+        inner.extend_from_slice(&body[child.start..child.start + child.len]);
+        if &child.kind == b"tkhd" {
+            inner.extend_from_slice(&edts);
+        }
+    }
+    Some(mp4_wrap(b"trak", &inner))
+}
+
+/// The `moov` box (whole) with an edit list in every track that needs one
+/// ([`mp4_track_with_edit`]); as it was when none does.
+fn mp4_index_with_edits(moov: &[u8]) -> Vec<u8> {
+    let Some(children) = moov
+        .get(mp4_header(moov)..)
+        .and_then(|body| mp4_boxes(body).map(|children| (body, children)))
+    else {
+        return moov.to_vec();
+    };
+    let (body, children) = children;
+    let mut changed = false;
+    let mut inner = Vec::with_capacity(body.len() + 72);
+    for child in &children {
+        let whole = &body[child.start..child.start + child.len];
+        let edited = if &child.kind == b"trak" {
+            mp4_track_with_edit(whole)
+        } else {
+            None
+        };
+        if let Some(trak) = edited {
+            inner.extend_from_slice(&trak);
+            changed = true;
+        } else {
+            inner.extend_from_slice(whole);
+        }
+    }
+    if changed {
+        mp4_wrap(b"moov", &inner)
+    } else {
+        moov.to_vec()
+    }
+}
+
 /// The MP4 `bytes` with its index (`moov`) moved in front of the picture
 /// and sound data (`mdat`), so the file starts playing while it loads and
 /// sites take it as it is ("fast start"). Every chunk offset is moved
-/// with the data it points at. A file whose index is already first comes
-/// back unchanged.
+/// with the data it points at. A track whose first picture is shown later
+/// than zero (B frames) gains an edit list, so pictures and sound start
+/// together ([`mp4_track_with_edit`]). A file whose index is already first
+/// and needs no edit list comes back unchanged.
 ///
 /// # Errors
 /// When the boxes cannot be read, an offset points outside every box, or
@@ -862,41 +1071,38 @@ pub fn mp4_index_first(bytes: &[u8]) -> Result<Vec<u8>, MovieError> {
     let Some(first_data) = boxes.iter().position(|found| &found.kind == b"mdat") else {
         return Ok(bytes.to_vec());
     };
-    if moov < first_data {
+    let index = &boxes[moov];
+    let old_index = &bytes[index.start..index.start + index.len];
+    let mut index_bytes = mp4_index_with_edits(old_index);
+    if moov < first_data && index_bytes.len() == old_index.len() {
         return Ok(bytes.to_vec());
     }
     // The new order: what came before the data, the index, then the rest.
-    let mut order: Vec<usize> = (0..first_data).collect();
+    let mut order: Vec<usize> = (0..first_data).filter(|at| *at != moov).collect();
     order.push(moov);
-    order.extend((first_data..boxes.len()).filter(|index| *index != moov));
-    // Where each box lands.
+    order.extend((first_data..boxes.len()).filter(|at| *at != moov));
+    // Where each box lands; the index may have grown by its edit lists.
     let mut landing = vec![0_u64; boxes.len()];
     let mut at = 0_u64;
-    for index in &order {
-        landing[*index] = at;
-        at += boxes[*index].len as u64;
+    for position in &order {
+        landing[*position] = at;
+        at += if *position == moov {
+            index_bytes.len() as u64
+        } else {
+            boxes[*position].len as u64
+        };
     }
+    // Chunks live in the data boxes, never in the index.
     let moved = |offset: u64| -> Option<u64> {
-        let (index, found) = boxes.iter().enumerate().find(|(_, found)| {
-            (found.start as u64..(found.start + found.len) as u64).contains(&offset)
+        let (position, found) = boxes.iter().enumerate().find(|(position, found)| {
+            *position != moov
+                && (found.start as u64..(found.start + found.len) as u64).contains(&offset)
         })?;
-        Some(landing[index] + (offset - found.start as u64))
+        Some(landing[position] + (offset - found.start as u64))
     };
-    let index = &boxes[moov];
-    let mut index_bytes = bytes[index.start..index.start + index.len].to_vec();
-    let header = if u32::from_be_bytes([
-        index_bytes[0],
-        index_bytes[1],
-        index_bytes[2],
-        index_bytes[3],
-    ]) == 1
-    {
-        16
-    } else {
-        8
-    };
+    let header = mp4_header(&index_bytes);
     mp4_shift_offsets(&mut index_bytes[header..], &moved)?;
-    let mut out = Vec::with_capacity(bytes.len());
+    let mut out = Vec::with_capacity(bytes.len() + index_bytes.len());
     for position in order {
         if position == moov {
             out.extend_from_slice(&index_bytes);
@@ -1377,6 +1583,90 @@ mod tests {
         assert!(mp4_index_first(&file[..file.len() - 3]).is_err());
         let no_index = [mp4_box(b"ftyp", b"isom"), mp4_box(b"mdat", b"x")].concat();
         assert!(mp4_index_first(&no_index).is_err());
+    }
+
+    /// A track as Media Foundation writes one: `tkhd` (version 0, length
+    /// `duration`), then `mdia`, `minf`, `stbl` with `stts` (three samples
+    /// 1000 apart), `ctts` (`offsets`) and `stco` (`chunk`).
+    fn track(duration: u32, offsets: [u32; 3], chunk: u32) -> Vec<u8> {
+        let mut tkhd = vec![0_u8; 20];
+        tkhd.extend_from_slice(&duration.to_be_bytes());
+        tkhd.extend_from_slice(&[0; 60]);
+        let stts = [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0x03, 0xE8];
+        let mut ctts = vec![0, 0, 0, 0, 0, 0, 0, 3];
+        for offset in offsets {
+            ctts.extend_from_slice(&1_u32.to_be_bytes());
+            ctts.extend_from_slice(&offset.to_be_bytes());
+        }
+        let mut stco = vec![0, 0, 0, 0, 0, 0, 0, 1];
+        stco.extend_from_slice(&chunk.to_be_bytes());
+        let stbl = mp4_box(
+            b"stbl",
+            &[
+                mp4_box(b"stts", &stts),
+                mp4_box(b"ctts", &ctts),
+                mp4_box(b"stco", &stco),
+            ]
+            .concat(),
+        );
+        let mdia = mp4_box(b"mdia", &mp4_box(b"minf", &stbl));
+        mp4_box(b"trak", &[mp4_box(b"tkhd", &tkhd), mdia].concat())
+    }
+
+    #[test]
+    fn b_frames_get_an_edit_list_so_pictures_start_with_the_sound() {
+        // Pictures shown at 1000, 4000 and 2000 (B frames): the first
+        // shown is at 1000, one frame late without an edit list. Sound
+        // shown as decoded (offsets of zero) needs none.
+        let chunks: [&[u8]; 2] = [b"PICTURES", b"SOUND"];
+        let ftyp = mp4_box(b"ftyp", b"isom\0\0\0\0isomavc1");
+        let mdat_start = (ftyp.len() + 8) as u32;
+        let video = track(3000, [1000, 3000, 0], mdat_start);
+        let sound = track(3000, [0, 0, 0], mdat_start + chunks[0].len() as u32);
+        let moov = mp4_box(
+            b"moov",
+            &[mp4_box(b"mvhd", &[0; 12]), video, sound].concat(),
+        );
+        let mdat = mp4_box(b"mdat", &chunks.concat());
+        let file = [ftyp, mdat, moov].concat();
+        let moved = mp4_index_first(&file).unwrap();
+        assert_eq!(moved.len(), file.len() + 36, "one edts of 36 bytes");
+        let tags: Vec<_> = mp4_boxes(&moved).unwrap().iter().map(|b| b.kind).collect();
+        assert_eq!(tags, [*b"ftyp", *b"moov", *b"mdat"]);
+        // One edit list: the whole length, starting at the first shown
+        // picture, at normal speed.
+        let elsts: Vec<_> = moved
+            .windows(4)
+            .enumerate()
+            .filter(|(_, tag)| *tag == b"elst")
+            .map(|(at, _)| at + 4)
+            .collect();
+        assert_eq!(elsts.len(), 1, "only the picture track needs one");
+        let elst = &moved[elsts[0]..elsts[0] + 20];
+        assert_eq!(elst[..8], [0, 0, 0, 0, 0, 0, 0, 1]);
+        assert_eq!(read_be(elst, 8), 3000, "the track's length");
+        assert_eq!(read_be(elst, 12), 1000, "starts at the first shown");
+        assert_eq!(read_be(elst, 16), 0x0001_0000, "normal speed");
+        // It sits right after tkhd, and each offset still finds its chunk.
+        let edts = moved.windows(4).position(|tag| tag == b"edts").unwrap();
+        let tkhd = moved.windows(4).position(|tag| tag == b"tkhd").unwrap();
+        assert_eq!(tkhd + 4 + 84, edts - 4);
+        let stcos: Vec<_> = moved
+            .windows(4)
+            .enumerate()
+            .filter(|(_, tag)| *tag == b"stco")
+            .map(|(at, _)| at + 4)
+            .collect();
+        for (stco, chunk) in stcos.iter().zip(chunks) {
+            let offset = read_be(&moved, stco + 8) as usize;
+            assert_eq!(&moved[offset..offset + chunk.len()], chunk);
+        }
+        // A second pass changes nothing.
+        assert_eq!(mp4_index_first(&moved).unwrap(), moved);
+    }
+
+    fn read_be(bytes: &[u8], at: usize) -> u32 {
+        u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap())
     }
 
     #[test]
