@@ -88,10 +88,12 @@ pub trait DockPanel: Copy + Eq + std::fmt::Debug + 'static {
     }
 
     /// Where the palettes are until people move them, and after Reset,
-    /// for callers without a style at hand: the first style's layout.
+    /// for callers without a style at hand: the first style's layout
+    /// (the first built one, so a grayed style is never the default).
     fn default_layout() -> DockLayout<Self> {
         Self::styles()
-            .first()
+            .iter()
+            .find(|style| style.available)
             .map_or_else(DockLayout::empty, |style| (style.layout)())
     }
 
@@ -885,6 +887,10 @@ impl<P: DockPanel> DockLayout<P> {
     /// until it is placed again.
     pub fn close(&mut self, panel: P) {
         self.remove(panel);
+        // Closed from its own menu: the menu goes with it.
+        if self.menu == Some(panel) {
+            self.menu = None;
+        }
         self.closed.push(panel);
     }
 
@@ -2724,8 +2730,10 @@ mod tests {
 
     #[test]
     fn a_closed_palette_stays_closed_until_it_is_placed_again() {
-        let mut dock = DockLayout::<Pane>::default();
+        let mut dock = Pane::default_layout();
+        dock.menu = Some(Pane::Layers);
         dock.close(Pane::Layers);
+        assert_eq!(dock.menu, None, "its menu closes with it");
         dock.close(Pane::History);
         dock.close(Pane::History);
         assert_eq!(dock.closed, [Pane::Layers, Pane::History]);
