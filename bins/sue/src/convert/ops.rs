@@ -2,6 +2,10 @@
 //! or plain bytes, changes it as the options say, and writes it in the
 //! chosen format. Pure functions of their inputs, so they run on a
 //! background thread and are tested on their own.
+//!
+//! What a studio will call lives in `sue-io` (`picture_ops`, `text_ops`,
+//! `transform_sound`, `write_sound`) and is called from here. The rest is
+//! the Converter's own and leaves with it.
 
 /// Text from the language database's `convert` namespace (the Converter).
 macro_rules! tr {
@@ -11,12 +15,9 @@ macro_rules! tr {
 use std::fmt::Write as _;
 use std::path::Path;
 
-use sue_core::{PCMFloat1D, PixelFormat, RasterTile2D};
-use sue_io::{
-    JxlError, JxlPipeline, NativeJxlPipeline, PictureFormat, ProgressiveTarget, SampleDepth,
-    decode_audio, decode_jpeg, decode_picture, decode_png, encode_aiff, encode_flac, encode_jpeg,
-    encode_picture, encode_png, encode_wav_as,
-};
+use sue_core::{PCMFloat1D, RasterTile2D};
+use sue_io::picture_ops::{self, PictureOptions, read_picture};
+use sue_io::{PictureFormat, SampleDepth, decode_audio, encode_png, text_ops};
 
 /// What a file is, for the Converter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -200,139 +201,6 @@ impl Target {
     }
 }
 
-/// How a picture is resized.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Resize {
-    /// Not at all.
-    Keep,
-    /// By a percentage.
-    Scale(f32),
-    /// To a width, keeping the shape.
-    Width(u32),
-    /// To a height, keeping the shape.
-    Height(u32),
-    /// To fit inside a box, keeping the shape.
-    Fit(u32, u32),
-    /// To exactly this size.
-    Exact(u32, u32),
-}
-
-/// How pixels are resampled.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Filter {
-    /// The nearest pixel: crisp pixel art.
-    Nearest,
-    /// A straight blend of neighbors.
-    Bilinear,
-    /// Catmull-Rom: sharper.
-    Bicubic,
-    /// Lanczos: sharpest, for photos.
-    Lanczos,
-}
-
-impl Filter {
-    /// Every filter.
-    pub const ALL: [Self; 4] = [Self::Lanczos, Self::Bicubic, Self::Bilinear, Self::Nearest];
-
-    /// Its name, in the language in use.
-    #[must_use]
-    pub fn label(self) -> String {
-        match self {
-            Self::Lanczos => tr!("filter-lanczos"),
-            Self::Bicubic => tr!("filter-bicubic"),
-            Self::Bilinear => tr!("filter-bilinear"),
-            Self::Nearest => tr!("filter-nearest"),
-        }
-    }
-
-    fn support(self) -> f32 {
-        match self {
-            Self::Nearest => 0.5,
-            Self::Bilinear => 1.0,
-            Self::Bicubic => 2.0,
-            Self::Lanczos => 3.0,
-        }
-    }
-
-    fn weight(self, x: f32) -> f32 {
-        let x = x.abs();
-        match self {
-            Self::Nearest => f32::from(x < 0.5),
-            Self::Bilinear => (1.0 - x).max(0.0),
-            Self::Bicubic => {
-                if x < 1.0 {
-                    1.5 * x * x * x - 2.5 * x * x + 1.0
-                } else if x < 2.0 {
-                    -0.5 * x * x * x + 2.5 * x * x - 4.0 * x + 2.0
-                } else {
-                    0.0
-                }
-            }
-            Self::Lanczos => {
-                if x < 1e-6 {
-                    1.0
-                } else if x < 3.0 {
-                    let pi = std::f32::consts::PI * x;
-                    3.0 * pi.sin() * (pi / 3.0).sin() / (pi * pi)
-                } else {
-                    0.0
-                }
-            }
-        }
-    }
-}
-
-/// Everything the Converter can change about a picture.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PictureOptions {
-    /// Resizing.
-    pub resize: Resize,
-    /// Resampling.
-    pub filter: Filter,
-    /// Clockwise quarter turns.
-    pub quarter_turns: u8,
-    /// Mirror left to right.
-    pub flip_h: bool,
-    /// Mirror top to bottom.
-    pub flip_v: bool,
-    /// Grays only.
-    pub grayscale: bool,
-    /// -1 to 1.
-    pub brightness: f32,
-    /// -1 to 1.
-    pub contrast: f32,
-    /// -1 to 1.
-    pub saturation: f32,
-    /// Fill transparency with the background.
-    pub flatten: bool,
-    /// The background for flattening.
-    pub background: [u8; 3],
-    /// JPEG quality, 1 to 100.
-    pub jpeg_quality: u8,
-    /// JPEG XL effort, 1 to 9.
-    pub jxl_effort: u8,
-}
-
-impl Default for PictureOptions {
-    fn default() -> Self {
-        Self {
-            resize: Resize::Keep,
-            filter: Filter::Lanczos,
-            quarter_turns: 0,
-            flip_h: false,
-            flip_v: false,
-            grayscale: false,
-            brightness: 0.0,
-            contrast: 0.0,
-            saturation: 0.0,
-            flatten: false,
-            background: [255, 255, 255],
-            jpeg_quality: 90,
-            jxl_effort: 7,
-        }
-    }
-}
-
 /// Everything the Converter can change about a sound.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SoundOptions {
@@ -440,265 +308,14 @@ pub struct Options {
 }
 
 // ----- Pictures ----------------------------------------------------------------
-
-/// Reads a picture file's bytes into RGBA8 pixels.
-///
-/// # Errors
-/// If no codec reads it.
-pub fn read_picture(path: &Path, bytes: &[u8]) -> Result<RasterTile2D, String> {
-    let extension = extension(path);
-    let tile = match extension.as_str() {
-        "png" => decode_png(bytes)?.tile,
-        "jpg" | "jpeg" => decode_jpeg(bytes)?.tile,
-        "jxl" => {
-            NativeJxlPipeline
-                .decode(bytes, ProgressiveTarget::Full)
-                .map_err(|error| error.to_string())?
-                .tile
-        }
-        _ => decode_picture(bytes, PictureFormat::from_extension(&extension))?,
-    };
-    rgba(&tile)
+/// A message of `sue-io` in the language in use.
+fn io_text(error: String) -> String {
+    sue_lang::translate("io", &error)
 }
 
-/// `tile` as RGBA8.
-///
-/// # Errors
-/// If it holds float pixels.
-pub fn rgba(tile: &RasterTile2D) -> Result<RasterTile2D, String> {
-    let bytes = tile.bytes().ok_or(tr!("the-picture-has-no-pixels"))?;
-    let pixels = match tile.format() {
-        PixelFormat::Rgba8 => return Ok(tile.clone()),
-        PixelFormat::Gray8 => bytes
-            .iter()
-            .flat_map(|&gray| [gray, gray, gray, 255])
-            .collect(),
-        PixelFormat::RgbaF32 => return Err(tr!("float-pictures-are-not-converted-yet")),
-    };
-    RasterTile2D::from_bytes(tile.width(), tile.height(), PixelFormat::Rgba8, pixels)
-        .map_err(|error| error.to_string())
-}
+// ----- Pictures ----------------------------------------------------------------
 
-/// The size `resize` makes of `width` by `height`.
-#[must_use]
-pub fn resized(width: u32, height: u32, resize: Resize) -> (u32, u32) {
-    let (w, h) = (width.max(1) as f32, height.max(1) as f32);
-    let (nw, nh) = match resize {
-        Resize::Keep => (w, h),
-        Resize::Scale(percent) => (w * percent / 100.0, h * percent / 100.0),
-        Resize::Width(target) => (target as f32, h * target as f32 / w),
-        Resize::Height(target) => (w * target as f32 / h, target as f32),
-        Resize::Fit(bw, bh) => {
-            let scale = (bw as f32 / w).min(bh as f32 / h);
-            (w * scale, h * scale)
-        }
-        Resize::Exact(bw, bh) => (bw as f32, bh as f32),
-    };
-    (
-        (nw.round() as u32).clamp(1, 32_768),
-        (nh.round() as u32).clamp(1, 32_768),
-    )
-}
-
-/// Resamples premultiplied RGBA rows along one axis.
-fn resample_axis(
-    source: &[f32],
-    (width, height): (usize, usize),
-    out_len: usize,
-    horizontal: bool,
-    filter: Filter,
-) -> Vec<f32> {
-    let in_len = if horizontal { width } else { height };
-    let lines = if horizontal { height } else { width };
-    let scale = out_len as f32 / in_len as f32;
-    let stretch = if scale < 1.0 { 1.0 / scale } else { 1.0 };
-    let support = filter.support() * stretch;
-    let (out_w, out_h) = if horizontal {
-        (out_len, height)
-    } else {
-        (width, out_len)
-    };
-    let mut out = vec![0.0_f32; out_w * out_h * 4];
-    // The taps of each output position, shared by every line.
-    let taps: Vec<(usize, Vec<f32>)> = (0..out_len)
-        .map(|at| {
-            let center = (at as f32 + 0.5) / scale;
-            let first = (center - support).floor().max(0.0) as usize;
-            let last = ((center + support).ceil() as usize).min(in_len);
-            let mut weights: Vec<f32> = (first..last)
-                .map(|index| filter.weight((index as f32 + 0.5 - center) / stretch))
-                .collect();
-            let total: f32 = weights.iter().sum();
-            if total.abs() > 1e-6 {
-                weights.iter_mut().for_each(|weight| *weight /= total);
-            } else if let Some(nearest) = weights.first_mut() {
-                *nearest = 1.0;
-            }
-            (first, weights)
-        })
-        .collect();
-    for line in 0..lines {
-        for (at, (first, weights)) in taps.iter().enumerate() {
-            let mut sum = [0.0_f32; 4];
-            for (offset, weight) in weights.iter().enumerate() {
-                let index = first + offset;
-                let pixel = if horizontal {
-                    line * width + index
-                } else {
-                    index * width + line
-                } * 4;
-                for channel in 0..4 {
-                    sum[channel] += source[pixel + channel] * weight;
-                }
-            }
-            let pixel = if horizontal {
-                line * out_w + at
-            } else {
-                at * out_w + line
-            } * 4;
-            out[pixel..pixel + 4].copy_from_slice(&sum);
-        }
-    }
-    out
-}
-
-/// Resizes RGBA8 pixels with `filter`, blending in premultiplied alpha so
-/// transparent edges never turn dark.
-#[must_use]
-pub fn resize(
-    pixels: &[u8],
-    (width, height): (u32, u32),
-    (nw, nh): (u32, u32),
-    filter: Filter,
-) -> Vec<u8> {
-    if (width, height) == (nw, nh) {
-        return pixels.to_vec();
-    }
-    let premultiplied: Vec<f32> = pixels
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .flat_map(|pixel| {
-            let alpha = f32::from(pixel[3]) / 255.0;
-            [
-                f32::from(pixel[0]) * alpha,
-                f32::from(pixel[1]) * alpha,
-                f32::from(pixel[2]) * alpha,
-                alpha * 255.0,
-            ]
-        })
-        .collect();
-    let (w, h) = (width as usize, height as usize);
-    let across = resample_axis(&premultiplied, (w, h), nw as usize, true, filter);
-    let done = resample_axis(&across, (nw as usize, h), nh as usize, false, filter);
-    done.as_chunks::<4>()
-        .0
-        .iter()
-        .flat_map(|pixel| {
-            let alpha = pixel[3].clamp(0.0, 255.0);
-            let unpremultiply = |value: f32| {
-                if alpha <= 0.0 {
-                    0
-                } else {
-                    (value * 255.0 / alpha).round().clamp(0.0, 255.0) as u8
-                }
-            };
-            [
-                unpremultiply(pixel[0]),
-                unpremultiply(pixel[1]),
-                unpremultiply(pixel[2]),
-                alpha.round() as u8,
-            ]
-        })
-        .collect()
-}
-
-/// Turns RGBA8 pixels a quarter turn clockwise, `turns` times.
-#[must_use]
-pub fn turn(pixels: &[u8], (width, height): (u32, u32), turns: u8) -> (Vec<u8>, (u32, u32)) {
-    let (w, h) = (width as usize, height as usize);
-    match turns % 4 {
-        0 => (pixels.to_vec(), (width, height)),
-        2 => {
-            let out: Vec<u8> = pixels
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .rev()
-                .flatten()
-                .copied()
-                .collect();
-            (out, (width, height))
-        }
-        quarter => {
-            let mut out = vec![0_u8; pixels.len()];
-            for y in 0..h {
-                for x in 0..w {
-                    let (nx, ny) = if quarter == 1 {
-                        (h - 1 - y, x)
-                    } else {
-                        (y, w - 1 - x)
-                    };
-                    let from = (y * w + x) * 4;
-                    let to = (ny * h + nx) * 4;
-                    out[to..to + 4].copy_from_slice(&pixels[from..from + 4]);
-                }
-            }
-            (out, (height, width))
-        }
-    }
-}
-
-/// Mirrors RGBA8 pixels.
-pub fn flip(pixels: &mut [u8], (width, height): (u32, u32), horizontal: bool) {
-    let (w, h) = (width as usize, height as usize);
-    if horizontal {
-        for row in pixels.chunks_exact_mut(w * 4) {
-            for x in 0..w / 2 {
-                for channel in 0..4 {
-                    row.swap(x * 4 + channel, (w - 1 - x) * 4 + channel);
-                }
-            }
-        }
-    } else {
-        for y in 0..h / 2 {
-            let (top, bottom) = pixels.split_at_mut((h - 1 - y) * w * 4);
-            top[y * w * 4..(y + 1) * w * 4].swap_with_slice(&mut bottom[..w * 4]);
-        }
-    }
-}
-
-/// Brightness, contrast, saturation, grays and flattening, pixel by pixel.
-pub fn adjust(pixels: &mut [u8], options: &PictureOptions, flatten: bool) {
-    let contrast = (1.0 + options.contrast).max(0.0).powf(2.0);
-    for pixel in pixels.as_chunks_mut::<4>().0.iter_mut() {
-        let mut rgb = [pixel[0], pixel[1], pixel[2]].map(|value| f32::from(value) / 255.0);
-        for value in &mut rgb {
-            *value = ((*value - 0.5) * contrast + 0.5 + options.brightness * 0.5).clamp(0.0, 1.0);
-        }
-        let luma = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
-        let saturation = if options.grayscale {
-            0.0
-        } else {
-            1.0 + options.saturation
-        };
-        for value in &mut rgb {
-            *value = (luma + (*value - luma) * saturation).clamp(0.0, 1.0);
-        }
-        if flatten {
-            let alpha = f32::from(pixel[3]) / 255.0;
-            for (value, background) in rgb.iter_mut().zip(options.background) {
-                *value = *value * alpha + f32::from(background) / 255.0 * (1.0 - alpha);
-            }
-            pixel[3] = 255;
-        }
-        for (channel, value) in pixel.iter_mut().zip(rgb) {
-            *channel = (value * 255.0).round() as u8;
-        }
-    }
-}
-
-/// Changes a picture as the options say.
+/// Changes a picture as the options say, on its way to `target`.
 ///
 /// # Errors
 /// If it holds float pixels.
@@ -707,44 +324,12 @@ pub fn transform_picture(
     options: &PictureOptions,
     target: Target,
 ) -> Result<RasterTile2D, String> {
-    let tile = rgba(tile)?;
-    let mut size = (tile.width(), tile.height());
-    let mut pixels = tile
-        .bytes()
-        .ok_or(tr!("the-picture-has-no-pixels"))?
-        .to_vec();
-    let mut new_size = resized(size.0, size.1, options.resize);
-    // Icons and the like have a largest size: fit into it.
-    if let Target::Picture(format) = target
-        && let Some(max) = format.max_side()
-        && new_size.0.max(new_size.1) > max
-    {
-        new_size = resized(new_size.0, new_size.1, Resize::Fit(max, max));
-    }
-    if new_size != size {
-        pixels = resize(&pixels, size, new_size, options.filter);
-        size = new_size;
-    }
-    if !options.quarter_turns.is_multiple_of(4) {
-        (pixels, size) = turn(&pixels, size, options.quarter_turns);
-    }
-    if options.flip_h {
-        flip(&mut pixels, size, true);
-    }
-    if options.flip_v {
-        flip(&mut pixels, size, false);
-    }
-    let touched = options.grayscale
-        || options.brightness != 0.0
-        || options.contrast != 0.0
-        || options.saturation != 0.0
-        || options.flatten
-        || target.flattens();
-    if touched {
-        adjust(&mut pixels, options, options.flatten || target.flattens());
-    }
-    RasterTile2D::from_bytes(size.0, size.1, PixelFormat::Rgba8, pixels)
-        .map_err(|error| error.to_string())
+    // Only a picture target has a largest side or lacks transparency.
+    let extension = match target {
+        Target::Jpeg | Target::Picture(_) => target.extension(),
+        _ => "",
+    };
+    picture_ops::transform_picture(tile, options, extension).map_err(io_text)
 }
 
 /// Writes a picture as `target`.
@@ -757,22 +342,12 @@ pub fn write_picture(
     options: &PictureOptions,
 ) -> Result<Vec<u8>, String> {
     match target {
-        Target::Png => encode_png(tile),
-        Target::Jpeg => encode_jpeg(tile, options.jpeg_quality.clamp(1, 100)),
-        Target::Jxl => NativeJxlPipeline
-            .encode_layers(&[tile], options.jxl_effort.clamp(1, 9))
-            .map_err(|error| match error {
-                JxlError::CodecUnavailable { .. } => {
-                    tr!("jpeg-xl-writing-not-build")
-                }
-                other => other.to_string(),
-            }),
-        Target::Picture(format) => encode_picture(tile, format),
+        Target::Png | Target::Jpeg | Target::Jxl | Target::Picture(_) => {
+            picture_ops::write_picture(tile, target.extension(), options).map_err(io_text)
+        }
         other => Err(tr!("a-picture-does-not-become", label = other.label())),
     }
 }
-
-// ----- Sounds ------------------------------------------------------------------
 
 /// Resamples interleaved `samples` of `channels` from `from` to `to` per
 /// second with a Lanczos window.
@@ -824,6 +399,22 @@ pub fn resample(samples: &[f32], channels: usize, ratio: f64) -> Vec<f32> {
 /// # Errors
 /// If the result would hold no sound.
 pub fn transform_sound(pcm: &PCMFloat1D, options: &SoundOptions) -> Result<PCMFloat1D, String> {
+    // Without a speed change and not backwards, this is the shared
+    // operation. Those two are the Converter's own and leave with it.
+    if options.speed.clamp(0.25, 4.0) == 1.0 && !options.reverse {
+        let shared = sue_io::SoundOptions {
+            sample_rate: options.sample_rate,
+            channels: options.channels,
+            depth: options.depth,
+            gain_db: options.gain_db,
+            normalize: options.normalize,
+            trim_start: options.trim_start,
+            trim_end: options.trim_end,
+            fade_in: options.fade_in,
+            fade_out: options.fade_out,
+        };
+        return sue_io::transform_sound(pcm, &shared).map_err(io_text);
+    }
     let rate = pcm.sample_rate().max(1);
     let channels = usize::from(pcm.channels().max(1));
     let frames = pcm.frames();
@@ -903,9 +494,9 @@ pub fn write_sound(
     depth: SampleDepth,
 ) -> Result<Vec<u8>, String> {
     match target {
-        Target::Wav => Ok(encode_wav_as(pcm, depth)),
-        Target::Flac => encode_flac(pcm, depth),
-        Target::Aiff => Ok(encode_aiff(pcm, depth)),
+        Target::Wav | Target::Flac | Target::Aiff => {
+            sue_io::write_sound(pcm, target.extension(), depth).map_err(io_text)
+        }
         other => Err(tr!("a-sound-does-not-become", label = other.label())),
     }
 }
@@ -915,34 +506,21 @@ pub fn write_sound(
 /// The text tidied: line endings, trailing spaces, tabs.
 #[must_use]
 pub fn tidy(text: &str, options: &TextOptions) -> String {
-    let crlf = match options.endings {
-        Endings::Keep => text.contains("\r\n"),
-        Endings::Lf => false,
-        Endings::CrLf => true,
+    let endings = match options.endings {
+        Endings::Keep if text.contains("\r\n") => text_ops::Endings::CrLf,
+        Endings::Keep | Endings::Lf => text_ops::Endings::Lf,
+        Endings::CrLf => text_ops::Endings::CrLf,
     };
-    let ends = text.ends_with('\n');
-    let lines: Vec<String> = text
-        .lines()
-        .map(|line| {
-            let mut line = if options.tab_spaces > 0 {
-                line.replace('\t', &" ".repeat(usize::from(options.tab_spaces)))
-            } else {
-                line.to_owned()
-            };
-            if options.trim_trailing {
-                line.truncate(line.trim_end().len());
-            }
-            line
-        })
-        .collect();
-    let mut out = lines.join(if crlf { "\r\n" } else { "\n" });
-    if ends {
-        out.push_str(if crlf { "\r\n" } else { "\n" });
-    }
-    out
+    text_ops::tidy(
+        text,
+        &text_ops::TextOptions {
+            endings,
+            trim_trailing: options.trim_trailing,
+            tab_spaces: options.tab_spaces,
+        },
+    )
 }
 
-/// Splits a table line by `separator`, honoring double quotes.
 fn split_row(line: &str, separator: char) -> Vec<String> {
     let mut cells = Vec::new();
     let mut cell = String::new();
@@ -1448,6 +1026,8 @@ pub fn convert(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sue_core::PixelFormat;
+    use sue_io::picture_ops::Resize;
 
     fn picture(width: u32, height: u32) -> RasterTile2D {
         let mut pixels = Vec::new();
@@ -1457,59 +1037,6 @@ mod tests {
             }
         }
         RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels).unwrap()
-    }
-
-    #[test]
-    fn sizes_follow_the_resize_choice() {
-        assert_eq!(resized(400, 200, Resize::Scale(50.0)), (200, 100));
-        assert_eq!(resized(400, 200, Resize::Width(100)), (100, 50));
-        assert_eq!(resized(400, 200, Resize::Height(100)), (200, 100));
-        assert_eq!(resized(400, 200, Resize::Fit(100, 100)), (100, 50));
-        assert_eq!(resized(400, 200, Resize::Exact(30, 70)), (30, 70));
-        assert_eq!(resized(400, 200, Resize::Keep), (400, 200));
-    }
-
-    #[test]
-    fn resizing_keeps_flat_colors_and_turning_moves_pixels() {
-        let flat = [10_u8, 200, 30, 255].repeat(16 * 16);
-        for filter in Filter::ALL {
-            let small = resize(&flat, (16, 16), (5, 7), filter);
-            assert_eq!(small.len(), 5 * 7 * 4);
-            assert!(
-                small
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .all(|pixel| *pixel == [10, 200, 30, 255]),
-                "{filter:?}"
-            );
-        }
-        // A see-through edge stays its own color, not darker.
-        let mut edge = [255_u8, 0, 0, 255].repeat(4);
-        edge.extend([0, 0, 0, 0].repeat(4));
-        let blended = resize(&edge, (8, 1), (4, 1), Filter::Bilinear);
-        assert!(
-            blended
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .filter(|pixel| pixel[3] > 0)
-                .all(|pixel| pixel[0] == 255)
-        );
-        let tile = picture(3, 2);
-        let pixels = tile.bytes().unwrap();
-        let (turned, size) = turn(pixels, (3, 2), 1);
-        assert_eq!(size, (2, 3));
-        // The top left pixel moves to the top right.
-        assert_eq!(&turned[4..8], &pixels[..4]);
-        let (back, _) = turn(&turned, size, 3);
-        assert_eq!(back, pixels);
-        let mut mirrored = pixels.to_vec();
-        flip(&mut mirrored, (3, 2), true);
-        assert_eq!(&mirrored[8..12], &pixels[..4]);
-        flip(&mut mirrored, (3, 2), true);
-        flip(&mut mirrored, (3, 2), false);
-        assert_eq!(&mirrored[..12], &pixels[12..]);
     }
 
     #[test]

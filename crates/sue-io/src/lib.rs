@@ -25,6 +25,7 @@ mod formats;
 mod ingest;
 mod jxl;
 pub mod pdf;
+pub mod picture_ops;
 mod pictures;
 pub mod psd;
 pub mod publish;
@@ -32,13 +33,14 @@ mod raster;
 mod sniff;
 pub mod sqlite;
 pub mod svg;
+pub mod text_ops;
 mod tile_cache;
 mod video;
 pub mod zip;
 
 pub use audio::{
-    AudioInfo, DecodedAudio, SampleDepth, decode_audio, encode_aiff, encode_flac, encode_wav,
-    encode_wav_as, probe_audio,
+    AudioInfo, DecodedAudio, SampleDepth, SoundOptions, decode_audio, encode_aiff, encode_flac,
+    encode_wav, encode_wav_as, probe_audio, transform_sound, write_sound,
 };
 pub use bytemap::{byte_map_tile, shannon_entropy};
 pub use formats::{

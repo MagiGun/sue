@@ -23,5 +23,10 @@ zune-jpeg.workspace = true
 zune-jpegxl.workspace = true
 zune-png.workspace = true
 
+[dev-dependencies]
+# Only tests use it: they hold every English text of this crate against
+# the language database.
+sue-lang.workspace = true
+
 [lints]
 workspace = true

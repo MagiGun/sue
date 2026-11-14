@@ -8,3 +8,14 @@ codec-16-bit-pcm-encode = 16 ビット PCM エンコード
 codec-hex-and-byte-map = 16 進とバイトマップ
 codec-anything-else = その他すべて
 codec-built-in = 内蔵
+
+## Export operations (picture_ops.rs, audio.rs)
+
+filter-lanczos = Lanczos (最もシャープ)
+filter-bicubic = バイキュービック
+filter-bilinear = バイリニア (柔らかい)
+filter-nearest = ニアレストネイバー (ドット絵)
+the-picture-has-no-pixels = 画像にピクセルがありません
+float-pictures-are-not-converted-yet = 浮動小数点の画像はまだ変換できません
+jpeg-xl-writing-not-build = このビルドは JPEG XL を書き込めません
+trimming-left-no-sound = 切り取ったら音が残りませんでした
