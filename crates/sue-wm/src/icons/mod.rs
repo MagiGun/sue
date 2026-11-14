@@ -102,6 +102,7 @@
 
 mod cache;
 pub mod fit;
+mod hub;
 pub mod path;
 pub mod raster;
 mod reference;
@@ -419,6 +420,58 @@ icons! {
     /// A padlock: a body with a keyhole and a shackle over it. Locked;
     /// solid for the state that is on.
     Lock = "lock" => reference::LOCK,
+    /// An artist's palette: a round board with a bite out of its lower
+    /// right where the hand holds it, and four solid dabs of paint in an
+    /// arc along its upper edge. Sue Paint, the studio.
+    AppPaint = "app-paint" => hub::APP_PAINT,
+    /// A quill: a long feather leaning from the lower left up to the top
+    /// right, its shaft running on down to a sharp point. Sue Writer, the
+    /// studio.
+    AppWriter = "app-writer" => hub::APP_WRITER,
+    /// Four small tiles in a square, three of them square and the one at
+    /// the top right turned on its corner: one app among others. A studio
+    /// or tool that has no picture of its own.
+    AppGeneric = "app-generic" => hub::APP_GENERIC,
+    /// A sheet laid out before anything is on it: a solid block for a
+    /// picture at the top and two lines for writing under it. A template,
+    /// a ready-made start for something new.
+    Template = "template" => hub::TEMPLATE,
+    /// A lifebuoy: a ring with a hole, bound across in four places. Work
+    /// Sue kept safe when it was not saved, and bringing it back.
+    Recover = "recover" => hub::RECOVER,
+    /// A closed folder with an arrow leaving it at its top right corner.
+    /// Showing a folder in the system's own file manager.
+    FolderReveal = "folder-reveal" => hub::FOLDER_REVEAL,
+    /// A wide window cut into a bar along its top, a column on each side
+    /// and a large space in the middle. How a studio's palettes are laid
+    /// out around the canvas: its layout style.
+    LayoutStyle = "layout-style" => hub::LAYOUT_STYLE,
+    /// A strip of film: a frame between two rails cut into cells, with a
+    /// solid play mark in the frame. A film or a video.
+    Film = "film" => hub::FILM,
+    /// A sound wave: five upright strokes side by side, tallest in the
+    /// middle. Sound, a kind of file.
+    Audio = "audio" => hub::AUDIO,
+    /// A cube seen from above a corner: three faces meeting in the
+    /// middle. A 3D model or scene.
+    Cube = "cube" => hub::CUBE,
+    /// A book lying open: two pages curving down to the spine. A guide to
+    /// read.
+    Book = "book" => hub::BOOK,
+    /// A closed envelope: a box with its flap folded down to a point in
+    /// the middle. Mail, writing to someone.
+    Mail = "mail" => hub::MAIL,
+    /// A round speech bubble with its tail at the lower left and three
+    /// solid dots in a row in it. Telling the makers of Sue what you
+    /// think.
+    Feedback = "feedback" => hub::FEEDBACK,
+    /// Three shapes together: a triangle on top, a circle and a square
+    /// under it. Materials, the parts kept ready to put into a work.
+    Materials = "materials" => hub::MATERIALS,
+    /// A sheet with its top right corner folded, in front of the edges of
+    /// another sheet behind it to the upper left. Files: everything made
+    /// in Sue, to look through.
+    Files = "files" => hub::FILES,
 }
 
 /// Frames drawn without a window or a GPU, for the tests of this module.
