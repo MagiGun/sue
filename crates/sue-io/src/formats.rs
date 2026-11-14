@@ -1806,4 +1806,65 @@ mod tests {
             );
         }
     }
+
+    /// The Converter had its own table writer. What it quoted, this
+    /// format quotes too, and where it gave up (a tab or a line end in a
+    /// tab-separated cell became a space) this one keeps the cell whole.
+    #[test]
+    fn delimited_tables_quote_every_cell_that_needs_it() {
+        let formats = registry();
+        let cells = [
+            "plain",
+            "Lee, Ada",
+            "say \"hi\"",
+            "two\nlines",
+            "two\r\nlines",
+            "a\tb",
+            " spaced ",
+            "\"",
+        ];
+        let mut table = Table::new();
+        for (column, cell) in cells.iter().enumerate() {
+            table.set(0, column as u32, Some(sue_model::Cell::value(*cell)));
+            table.set(1, column as u32, Some(sue_model::Cell::value(*cell)));
+        }
+        let mut arena = Arena::new();
+        let handle = arena.insert(Entity::empty("cells", class::SHEET).with_ext(table));
+        let id = arena.get(handle).unwrap().id();
+        for format in ["csv", "tsv"] {
+            let bytes = formats
+                .get(format)
+                .unwrap()
+                .export(&arena, &[id], &Properties::new())
+                .unwrap();
+            let (back, back_id) = import_one(&formats, &bytes, &format!("cells.{format}"));
+            let read = back.get_by_id(back_id).unwrap().ext::<Table>().unwrap();
+            assert_eq!(read.size(), (2, cells.len() as u32), "{format}");
+            for row in 0..2 {
+                for (column, cell) in cells.iter().enumerate() {
+                    assert_eq!(
+                        read.value(row, column as u32).and_then(Value::as_str),
+                        Some(*cell),
+                        "{format} row {row} column {column}"
+                    );
+                }
+            }
+        }
+        let csv = formats
+            .get("csv")
+            .unwrap()
+            .export(&arena, &[id], &Properties::new())
+            .unwrap();
+        let text = String::from_utf8(csv).unwrap();
+        assert!(text.starts_with("plain,\"Lee, Ada\",\"say \"\"hi\"\"\",\"two\nlines\","));
+        // In a tab-separated file a comma needs no quotes, a tab does.
+        let tsv = formats
+            .get("tsv")
+            .unwrap()
+            .export(&arena, &[id], &Properties::new())
+            .unwrap();
+        let text = String::from_utf8(tsv).unwrap();
+        assert!(text.starts_with("plain\tLee, Ada\t\"say \"\"hi\"\"\"\t"));
+        assert!(text.contains("\t\"a\tb\"\t"));
+    }
 }
