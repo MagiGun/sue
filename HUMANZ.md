@@ -2329,6 +2329,25 @@ chunks, bitmaps block by block, every table with its `CREATE` text, row
 count and rows, known blobs by their parts and unknown ones by their
 bytes. It only reads.
 
+`clip::read` and `clip::write` go through `ClipDocument` (`clip/model.rs`),
+a neutral tree: the canvas, the root folder and its layers with their
+columns as the file has them (type, folder bits, lock bits, clip,
+opacity 0 to 256, the blend number, so Glow Dodge and Add Glow keep
+theirs, visibility and mask bits, offsets, the paper color), each layer's
+pixels and mask as `ClipBitmap`s (the attribute by parts, the blocks
+still compressed, any size and place, off the canvas included; `decode`
+unpacks color or one channel, `color` and `gray` pack), draft and
+reference marks in Sue's own `SueLayer` table until the survey finds
+Clip Studio's columns for them, and `ClipForeign`: chunks, tables, rows
+and columns the model does not name, the shapes of the tables it does,
+and the bytes around the chunks. Writing what was read gives the same
+bytes again; ids that are missing or repeated are made from a
+fingerprint of the document, so two pictures never share them.
+`decode_clip` and `encode_clip` stay for Sue Paint as the `Psd` records
+it opens and saves today, through the same model (`write::document_of`).
+`clip::testkit` builds the documents the tests run over, with foreign
+data under names no code knows.
+
 ---
 
 ### 3.8 Sue Writer (`sue-writer`) and typography (`sue-type`)
