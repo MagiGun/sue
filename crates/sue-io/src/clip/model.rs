@@ -297,12 +297,14 @@ impl ClipLayer {
         }
     }
 
-    /// A paper layer of `color` over a canvas of `width` by `height`.
+    /// A paper layer of `color` over a canvas of `width` by `height`. Its
+    /// bitmap has its (empty) blocks, as every layer that is not a folder
+    /// gets: Clip Studio calls a pixel layer without them broken.
     #[must_use]
     pub fn paper(name: &str, color: [u8; 3], width: u32, height: u32) -> Self {
         Self {
             draw_color: ClipDrawColor::rgb(color),
-            pixels: Some(ClipBitmap::empty(width, height)),
+            pixels: Some(ClipBitmap::color(width, height, &[])),
             ..Self::blank(name, PAPER, 0)
         }
     }
