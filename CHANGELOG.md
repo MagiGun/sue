@@ -60,6 +60,9 @@ follow [Semantic Versioning](https://semver.org/).
   way Clip Studio Paint does. A line's far end follows the pen, a shape turns
   and grows around its middle, and what the drag leaves is what lifting the
   pen keeps, still one stroke to undo.
+- Undo, Redo, Open, Save and Quit show in a studio's menus the keys they
+  really have: change one in Settings (Keymaps) and the menu follows, as
+  it already did for the studio's own commands.
 
 ## [0.0.75] - 2026-11-09
 
