@@ -442,7 +442,8 @@ impl<'a> TabStrip<'a> {
             if tab_response.clicked() && !selected {
                 output.chosen = Some(index);
             }
-            if tab_response.drag_started()
+            if (self.reorder || self.tear)
+                && tab_response.drag_started()
                 && let Some(at) = pointer
             {
                 let grab = Grab {
@@ -451,7 +452,9 @@ impl<'a> TabStrip<'a> {
                 };
                 ui.data_mut(|data| data.insert_temp(id.with("sue-grab"), grab));
             }
-            if tab_response.dragged() {
+            // egui calls a press held long enough a drag even where only
+            // clicks are sensed: only a strip that drags lifts its tabs.
+            if (self.reorder || self.tear) && tab_response.dragged() {
                 lifted = Some((index, id, rect, fitted.named));
                 continue;
             }
