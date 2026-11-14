@@ -276,6 +276,7 @@ view_corkboard = "Ctrl+2"      # @keybind Corkboard
 view_outliner = "Ctrl+3"       # @keybind Outliner
 project_snapshot = "Ctrl+5"    # @keybind Take Snapshot
 list_bullet = "Ctrl+Shift+L"   # @keybind Bulleted List
+table_insert = "Ctrl+F12"      # @keybind Insert Table
 
 [image_viewer_keys]
 viewer_next = "Right or Space" # @keybind Next Picture

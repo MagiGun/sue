@@ -1908,6 +1908,7 @@ impl SueWriter {
             (command, Key::Num3, "view.outliner"),
             (command, Key::Num5, "project.snapshot"),
             (shift, Key::L, "list.bullet"),
+            (command, Key::F12, "table.insert"),
         ]
     }
 

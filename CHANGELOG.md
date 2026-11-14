@@ -103,6 +103,7 @@ follow [Semantic Versioning](https://semver.org/).
   it already did for the studio's own commands.
 - Sue Writer's entries in the command palette name the studio once
   ("Sue Writer: New Project..."), not twice.
+- Ctrl+F12 inserts a table in Sue Writer, as its Table menu always said.
 
 ### Removed
 
