@@ -97,11 +97,23 @@ impl Default for JobOutput {
     }
 }
 
+/// `true` when `a` and `b` name one file. Names that differ only in
+/// case count as one, as they do on Windows and on a Mac: a result
+/// called `Photo.png` would replace a source called `photo.PNG` there.
+fn same_file(a: &Path, b: &Path) -> bool {
+    a == b || a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+}
+
+/// `true` when `path` is one of `taken`, case aside ([`same_file`]).
+fn is_taken(path: &Path, taken: &HashSet<PathBuf>) -> bool {
+    taken.contains(path) || taken.iter().any(|other| same_file(other, path))
+}
+
 /// `path`, or the first free sibling such as `photo (2).png` when it
 /// exists on disk or is in `taken`.
 #[must_use]
 pub fn free_path(path: &Path, taken: &HashSet<PathBuf>) -> PathBuf {
-    let used = |candidate: &Path| sue_platform::fs::exists(candidate) || taken.contains(candidate);
+    let used = |candidate: &Path| sue_platform::fs::exists(candidate) || is_taken(candidate, taken);
     if !used(path) {
         return path.to_path_buf();
     }
@@ -120,8 +132,10 @@ pub fn free_path(path: &Path, taken: &HashSet<PathBuf>) -> PathBuf {
 
 impl JobOutput {
     /// Where `source` converted to a file of `extension` goes. `taken`
-    /// holds the paths other files of the same run go to, so two
-    /// pictures never land on one name.
+    /// holds the paths no result may replace: the files of the run
+    /// (each is read on a worker, perhaps after another result is
+    /// written) and the results already placed, so two pictures never
+    /// land on one name.
     #[must_use]
     pub fn path_for(&self, source: &Path, extension: &str, taken: &HashSet<PathBuf>) -> PathBuf {
         let folder = self
@@ -140,9 +154,9 @@ impl JobOutput {
         // A pattern holds a name, never a folder.
         let name = pattern.replace("{name}", &stem).replace(['/', '\\'], "_");
         let path = folder.join(format!("{name}.{extension}"));
-        // Never write over the file being converted, nor over another
-        // result of this run.
-        if self.replace && path != source && !taken.contains(&path) {
+        // Never write over the file being converted, another file of
+        // the run, or another result of it.
+        if self.replace && !same_file(&path, source) && !is_taken(&path, taken) {
             path
         } else {
             let mut taken = taken.clone();
@@ -199,14 +213,22 @@ impl RunSummary {
             [one] if self.failed == 0 => {
                 tr!("batch-converted-one", value = sue_platform::shown_path(one))
             }
-            many => {
-                let folder = many[0].parent().map(Path::to_path_buf).unwrap_or_default();
-                tr!(
-                    "batch-converted-many",
-                    count = many.len(),
-                    failed = self.failed,
-                    value = sue_platform::shown_path(&folder)
-                )
+            done => {
+                let folder = done[0].parent();
+                let one_folder = done.iter().all(|path| path.parent() == folder);
+                let text = match folder {
+                    Some(folder) if one_folder => tr!(
+                        "batch-converted-into",
+                        count = done.len(),
+                        value = sue_platform::shown_path(folder)
+                    ),
+                    _ => tr!("batch-converted-next-to", count = done.len()),
+                };
+                if self.failed == 0 {
+                    text
+                } else {
+                    tr!("batch-and-failed", text = text, failed = self.failed)
+                }
             }
         }
     }
@@ -428,7 +450,9 @@ impl JobList {
         }
         let extension = self.picture.extension();
         let pool = self.pool.get_or_insert_with(|| JobPool::new(2));
-        let mut taken = HashSet::new();
+        // No result replaces a file of the list: a worker may not have
+        // read it yet.
+        let mut taken: HashSet<PathBuf> = self.items.iter().map(|item| item.path.clone()).collect();
         let mut started = 0;
         for item in &mut self.items {
             if item.status.working() {
@@ -572,10 +596,16 @@ impl JobList {
             });
             ui.add_space(theme.space(Space::S3));
             if self.items.is_empty() {
-                empty_state("sue-batch-empty", &tr!("batch-empty"))
-                    .icon(Icon::Picture)
-                    .detail(&tr!("batch-empty-detail"))
-                    .show(ui, theme);
+                // A bounded room: the empty state centers itself in what
+                // is left, which in a scrolling dialog would push the
+                // output and the changes out of sight.
+                let room = egui::vec2(ui.available_width(), theme.space(Space::S9) * 4.0);
+                ui.allocate_ui(room, |ui| {
+                    empty_state("sue-batch-empty", &tr!("batch-empty"))
+                        .icon(Icon::Picture)
+                        .detail(&tr!("batch-empty-detail"))
+                        .show(ui, theme);
+                });
                 return;
             }
             if let Some(fraction) = self.progress() {
@@ -785,7 +815,9 @@ impl JobList {
     /// picture page of the export settings, then the list. Its accept
     /// button starts the run, Cancel closes it (a run going on goes on).
     /// Returns the answer and what the host is asked to do; a run that
-    /// needs a folder first asks for one.
+    /// needs a folder first asks for one. While a run goes the host
+    /// calls [`Self::poll`] each frame (the dialog keeps frames coming)
+    /// and tells the person its [`RunSummary`].
     pub fn show_dialog(
         &mut self,
         ctx: &Context,
@@ -795,7 +827,7 @@ impl JobList {
         let label = self.convert_label();
         let can_start = self.waiting() > 0 && !self.running;
         let response = Dialog::new("sue-batch-convert", title, theme)
-            .width(theme.space(Space::S9) * 10.0)
+            .width(theme.space(Space::S9) * 14.0)
             .accept(label)
             .accept_enabled(can_start)
             .cancel_as(tr!("batch-close"))
@@ -807,6 +839,10 @@ impl JobList {
                 ui.add_space(theme.space(Space::S5));
                 self.show(ui, theme)
             });
+        if self.running {
+            // The statuses and the progress move while nothing else does.
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
         let mut requests = response.inner;
         if response.answer == Some(Answer::Accept) && self.start() == Start::NeedsFolder {
             requests.push(JobListRequest::ChooseFolder);
@@ -897,6 +933,20 @@ mod tests {
         assert_eq!(
             output.path_for(&dir.join("photo.jpg"), "webp", &taken),
             dir.join("photo (2).webp")
+        );
+        // A name that differs from the source's only in case is the
+        // source on Windows: replacing never takes it.
+        let shout = dir.join("Shout.PNG");
+        std::fs::write(&shout, b"x").unwrap();
+        assert_eq!(
+            output.path_for(&shout, "png", &none),
+            dir.join("Shout (2).png")
+        );
+        // Nor another file of the run, which a worker may still read.
+        let sources = HashSet::from([dir.join("scan.jpg"), dir.join("scan.png")]);
+        assert_eq!(
+            output.path_for(&dir.join("scan.png"), "jpg", &sources),
+            dir.join("scan (2).jpg")
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1003,6 +1053,51 @@ mod tests {
         assert_eq!(list.items().len(), 3);
         list.clear();
         assert!(list.items().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_summary_counts_in_words_and_names_the_folder() {
+        let summary = |done: &[&str], failed| RunSummary {
+            done: done.iter().map(PathBuf::from).collect(),
+            failed,
+        };
+        let one_folder = summary(&["out/a.jpg", "out/b.jpg"], 0).message();
+        assert!(
+            one_folder.starts_with("2 pictures converted into "),
+            "{one_folder}"
+        );
+        assert!(!one_folder.contains("failed"), "{one_folder}");
+        let one_failed = summary(&["out/a.jpg"], 1).message();
+        assert!(
+            one_failed.starts_with("1 picture converted into "),
+            "{one_failed}"
+        );
+        assert!(one_failed.ends_with(", 1 failed"), "{one_failed}");
+        let spread = summary(&["one/a.jpg", "two/b.jpg"], 0).message();
+        assert_eq!(spread, "2 pictures converted next to their files");
+    }
+
+    #[test]
+    fn a_run_never_writes_over_a_file_it_converts() {
+        let dir = folder("sources");
+        std::fs::write(dir.join("scan.png"), png(6, 6)).unwrap();
+        let mut jpeg = PictureSettings::default();
+        assert!(jpeg.choose_format("jpg"));
+        let tile = read_picture(Path::new("scan.png"), &png(6, 6)).unwrap();
+        let original = jpeg.export(&tile).unwrap();
+        std::fs::write(dir.join("scan.jpg"), &original).unwrap();
+        let mut list = JobList::default().with_pool(JobPool::inline());
+        assert_eq!(list.add_path(&dir), 2);
+        list.picture = jpeg;
+        list.output.replace = true;
+        assert_eq!(list.start(), Start::Started(2));
+        let summary = list.poll().expect("an inline pool finishes at once");
+        assert_eq!((summary.done.len(), summary.failed), (2, 0));
+        assert_eq!(std::fs::read(dir.join("scan.jpg")).unwrap(), original);
+        for name in ["scan (2).jpg", "scan (3).jpg"] {
+            assert!(dir.join(name).exists(), "{name}");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

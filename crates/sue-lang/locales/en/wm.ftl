@@ -284,7 +284,7 @@ batch-empty = No pictures yet
 batch-empty-detail = Add picture files, or a folder of them, to convert them all at once.
 batch-remove = Take it off the list
 batch-show-in = Show it in { $manager }
-batch-becomes = Becomes a { $format }
+batch-becomes = Waiting: { $format }
 batch-converting = Converting...
 batch-done = Done: { $value } ({ $note })
 batch-failed = Failed: { $why }
@@ -326,4 +326,12 @@ batch-convert-count = { $count ->
 }
 batch-nothing-converted = Nothing converted: { $failed } failed
 batch-converted-one = Converted into { $value }
-batch-converted-many = { $count } pictures converted, { $failed } failed, into { $value }
+batch-converted-into = { $count ->
+    [one] 1 picture converted into { $value }
+   *[other] { $count } pictures converted into { $value }
+}
+batch-converted-next-to = { $count ->
+    [one] 1 picture converted next to its file
+   *[other] { $count } pictures converted next to their files
+}
+batch-and-failed = { $text }, { $failed } failed
