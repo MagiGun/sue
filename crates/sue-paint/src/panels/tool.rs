@@ -8,7 +8,22 @@ use crate::icons::Icon;
 use crate::panels::tool_property::is_liquify_mode;
 use crate::panels::{Flow, icon_button};
 use crate::studio::SuePaint;
-use crate::tools::Tool;
+use crate::tools::{Tool, ToolSlot};
+
+/// `true` if tool palette entry `slot` is Liquify: Blend sub tools that
+/// all liquify.
+pub(crate) fn slot_is_liquify(slot: &ToolSlot) -> bool {
+    slot.kind == Tool::Blend && slot.subs().iter().all(|sub| is_liquify_mode(sub.mode))
+}
+
+/// The icon of tool palette entry `slot`: its tool's, or Liquify's.
+pub(crate) fn slot_icon(slot: &ToolSlot) -> Icon {
+    if slot_is_liquify(slot) {
+        Icon::Replace
+    } else {
+        tool_icon(slot.kind)
+    }
+}
 
 /// The icon of a tool.
 pub(crate) fn tool_icon(tool: Tool) -> Icon {
@@ -84,9 +99,12 @@ impl SuePaint {
             )),
             Some((Icon::Eyedropper, tr!("eyedropper"), &[Tool::Eyedropper])),
         ];
-        let current = self.toolbox.tool();
-        // Liquify is Blend's liquify sub tools; Blend the others.
-        let liquify = current == Tool::Blend && is_liquify_mode(self.toolbox.of(Tool::Blend).mode);
+        // The lit button follows the tool palette entry that is current,
+        // not the tool of its picked sub tool: on the Fill tool's Lasso
+        // fill (a Figure sub tool) Fill stays lit.
+        let entry = self.toolbox.current_entry();
+        let current = entry.kind;
+        let liquify = slot_is_liquify(entry);
         // Where each tool's button goes: in a line along a row (the top or
         // the bottom), in one column, or in several once people widen the
         // palette's column, as Clip Studio Paint's tool palette does.
