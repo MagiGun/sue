@@ -1523,3 +1523,45 @@ fn anti_overflow_keeps_a_stroke_inside_the_lines() {
     assert_eq!(alpha(&layer, 780, 75), 0);
     assert_eq!(alpha(&layer, 1225, 75), 0);
 }
+
+#[test]
+fn brush_density_is_apart_from_opacity() {
+    // Build-up dabs pile up to the stroke's opacity and never past it;
+    // a low brush density builds up slowly, but on to full.
+    let samples = pen(
+        |s| {
+            let t = (s * 8.0).fract();
+            let back = (s * 8.0) as u32 % 2 == 1;
+            let t = if back { 1.0 - t } else { t };
+            [100.0 + 200.0 * t as f32, 75.0]
+        },
+        2.0,
+        |_| 1.0,
+    );
+    let mut capped = airbrush(30.0, 1.0);
+    capped.dynamics.clear();
+    capped.set(param::OPACITY, 0.5);
+    capped.set(param::DENSITY, 0.3);
+    let mut layer = clear();
+    draw(&mut layer, &Brush::new(capped), &samples, 1);
+    let a = alpha(&layer, 200, 75);
+    assert!((125..=129).contains(&a), "opacity caps the stroke: {a}");
+    let mut thin = airbrush(30.0, 1.0);
+    thin.dynamics.clear();
+    thin.set(param::DENSITY, 0.05);
+    let mut layer = clear();
+    draw(
+        &mut layer,
+        &Brush::new(thin.clone()),
+        &pen(|s| [100.0 + 200.0 * s as f32, 75.0], 0.3, |_| 1.0),
+        1,
+    );
+    let once = alpha(&layer, 200, 75);
+    let mut layer = clear();
+    draw(&mut layer, &Brush::new(thin), &samples, 1);
+    let many = alpha(&layer, 200, 75);
+    assert!(
+        once < 100 && many > 220,
+        "{once} once, {many} after many passes"
+    );
+}

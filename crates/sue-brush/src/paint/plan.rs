@@ -85,6 +85,11 @@ pub struct PlanSettings {
     pub continuous: Option<f32>,
     /// The density of paint, where no point carries its own.
     pub paint_density: f32,
+    /// The stroke's own opacity, laid once on the whole stroke when it
+    /// meets the layer. A point's opacity is a share of it, so dabs that
+    /// add up (build-up) never pass it: Clip Studio's brush density, a
+    /// dab's own strength, is apart from the opacity.
+    pub opacity: f32,
 }
 
 impl Default for PlanSettings {
@@ -99,6 +104,7 @@ impl Default for PlanSettings {
             spray: None,
             continuous: None,
             paint_density: 1.0,
+            opacity: 1.0,
         }
     }
 }
@@ -269,7 +275,13 @@ impl Planner {
                 .unwrap_or(default)
         };
         let spray = self.settings.spray.unwrap_or_default();
-        let mut strength = unit(p.opacity) * unit(p.density);
+        let base = self.settings.opacity;
+        let share = if base > 0.0 {
+            unit(p.opacity / base)
+        } else {
+            0.0
+        };
+        let mut strength = share * unit(p.density);
         if self.settings.build_up {
             strength *= unit(p.flow);
         }

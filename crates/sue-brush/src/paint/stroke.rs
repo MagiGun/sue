@@ -120,17 +120,27 @@ impl<'a> PaintStroke<'a> {
             }
             None => Target::Coverage(StrokeBuffer::new(combine)),
         };
+        // The stroke's own opacity, before the pen drives it.
+        let opacity = super::settings::registry()
+            .value(preset, sue_model::brush::param::OPACITY)
+            .map_or(1.0, |o| {
+                if o.is_finite() {
+                    o.clamp(0.0, 1.0)
+                } else {
+                    1.0
+                }
+            });
         let lay = if preset.erase {
-            Lay::Erase { opacity: 1.0 }
+            Lay::Erase { opacity }
         } else if behaviours.behind {
             Lay::Behind {
                 color: jitter.main(),
-                opacity: 1.0,
+                opacity,
             }
         } else {
             Lay::Paint {
                 color: jitter.main(),
-                opacity: 1.0,
+                opacity,
                 mode: preset.blend,
             }
         };
@@ -144,6 +154,9 @@ impl<'a> PaintStroke<'a> {
             spray: behaviours.spray,
             continuous: behaviours.continuous,
             paint_density: behaviours.paint_density,
+            // A wet stroke lays its dabs on the picture one by one, so
+            // each carries the opacity itself.
+            opacity: if wet.is_some() { 1.0 } else { opacity },
         };
         let planner = Planner::new(settings, seed, jitter, extra_keys);
         let dual = behaviours.dual.clone().map(|settings| Dual {
@@ -477,6 +490,11 @@ impl<'a> PaintStroke<'a> {
         let field = self
             .field(rect, false)
             .unwrap_or_else(|| Field::empty(rect));
-        super::lay::erase_layers(&field, targets, 1.0)
+        let opacity = match self.lay {
+            Lay::Erase { opacity } | Lay::Paint { opacity, .. } | Lay::Behind { opacity, .. } => {
+                opacity
+            }
+        };
+        super::lay::erase_layers(&field, targets, opacity)
     }
 }
