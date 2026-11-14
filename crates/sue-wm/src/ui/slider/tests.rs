@@ -383,6 +383,42 @@ fn the_handles_of_a_range_never_pass_each_other() {
 }
 
 #[test]
+fn two_handles_that_lie_together_part_the_way_the_pointer_goes() {
+    let mut harness = Harness::new();
+    let track = bare_track();
+    let draw = |ui: &mut Ui, theme: &Theme, low: &mut f64, high: &mut f64| {
+        range("together", low, high, 0.0..=100.0)
+            .fields(false)
+            .show_at(ui, place(), theme)
+    };
+    let (mut low, mut high) = (50.0, 50.0);
+    harness.drag(
+        along(track, 0.5),
+        along(track, 0.8),
+        Modifiers::NONE,
+        |ui, theme| draw(ui, theme, &mut low, &mut high),
+    );
+    assert_eq!((low, high), (50.0, 80.0), "to the right: the high handle");
+    let (mut low, mut high) = (50.0, 50.0);
+    harness.drag(
+        along(track, 0.5),
+        along(track, 0.2),
+        Modifiers::NONE,
+        |ui, theme| draw(ui, theme, &mut low, &mut high),
+    );
+    assert_eq!((low, high), (20.0, 50.0), "to the left: the low handle");
+    // Both at the low end: dragging right still moves one of them.
+    let (mut low, mut high) = (0.0, 0.0);
+    harness.drag(
+        along(track, 0.0),
+        along(track, 0.4),
+        Modifiers::NONE,
+        |ui, theme| draw(ui, theme, &mut low, &mut high),
+    );
+    assert_eq!((low, high), (0.0, 40.0));
+}
+
+#[test]
 fn setting_one_end_of_a_range_keeps_the_gap_and_the_bounds() {
     let (mut low, mut high) = (20.0, 80.0);
     let mut range = range("set", &mut low, &mut high, 0.0..=100.0).gap(5.0);

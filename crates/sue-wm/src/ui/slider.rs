@@ -978,32 +978,38 @@ impl<'a> RangeSlider<'a> {
         let low_handle = ui.interact(handle_rect(*self.low), low_id, focusable);
         let high_handle = ui.interact(handle_rect(*self.high), high_id, focusable);
         // Which handle the pointer holds: the one nearer where it went
-        // down.
+        // down. On two handles that lie together, the way the pointer
+        // then goes picks one, so they can always be parted.
         let grab_key = id.with("sue-grab");
-        if enabled && response.is_pointer_button_down_on() {
-            let grabbed = ui.data(|data| data.get_temp::<bool>(grab_key));
-            let high = grabbed.unwrap_or_else(|| {
-                let at = ui
-                    .input(|input| input.pointer.press_origin())
-                    .map_or(track.center().x, |at| at.x);
-                let (to_low, to_high) =
-                    ((at - x_of(*self.low)).abs(), (at - x_of(*self.high)).abs());
-                if (to_low - to_high).abs() < f32::EPSILON {
-                    at > x_of(*self.high)
-                } else {
-                    to_high < to_low
-                }
-            });
+        let grabbed = ui.data(|data| data.get_temp::<bool>(grab_key));
+        let picked = grabbed.or_else(|| {
+            let (at, now) =
+                ui.input(|input| (input.pointer.press_origin(), input.pointer.latest_pos()));
+            let at = at.map_or(track.center().x, |at| at.x);
+            let (to_low, to_high) = ((at - x_of(*self.low)).abs(), (at - x_of(*self.high)).abs());
+            if (to_low - to_high).abs() >= f32::EPSILON {
+                Some(to_high < to_low)
+            } else if to_high > density.min_hit() / 2.0 {
+                Some(at > x_of(*self.high))
+            } else {
+                let moved = now.map_or(0.0, |now| now.x - at);
+                (moved.abs() >= 1.0).then_some(moved > 0.0)
+            }
+        });
+        if enabled
+            && response.is_pointer_button_down_on()
+            && let Some(high) = picked
+        {
             if grabbed.is_none() {
                 ui.data_mut(|data| data.insert_temp(grab_key, high));
                 ui.memory_mut(|memory| memory.request_focus(if high { high_id } else { low_id }));
             }
             let now = scale.to_unit(if high { *self.high } else { *self.low });
             if let Some(t) = held_share(ui, &response, track, false, now) {
-                let value = rounded(scale.from_unit(t), self.decimals);
+                let value = value_at(scale, t, self.decimals);
                 self.set(high, value, scale);
             }
-        } else {
+        } else if !(enabled && response.is_pointer_button_down_on()) {
             ui.data_mut(|data| data.remove_temp::<bool>(grab_key));
         }
         for (high, held) in [(false, &low_handle), (true, &high_handle)] {
