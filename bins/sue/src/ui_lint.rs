@@ -18,10 +18,10 @@
 //!   moves to it, and none may come back.
 //!
 //! What counts is read from the code itself by a small lexer: comments,
-//! test modules and the bodies of [`PICTURE`] (functions that draw
-//! picture content, not interface) are left out. The counts are a floor,
-//! not an exact census: what they promise is that the same code always
-//! gives the same numbers.
+//! test modules and what [`PICTURE`] names (functions that draw picture
+//! content, or only the colors of overlays) are left out. The counts are
+//! a floor, not an exact census: what they promise is that the same code
+//! always gives the same numbers.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -143,12 +143,12 @@ struct Area {
 const AREAS: [Area; 6] = [
     Area {
         folder: "crates/sue-paint/src/panels",
-        baseline: Counts::new([6, 23, 33, 8, 88, 10, 10]),
+        baseline: Counts::new([10, 23, 34, 8, 92, 11, 10]),
         cut_by: "P2-3a",
     },
     Area {
         folder: "crates/sue-paint/src/canvas",
-        baseline: Counts::new([3, 2, 16, 4, 23, 7, 3]),
+        baseline: Counts::new([3, 2, 35, 4, 34, 46, 3]),
         cut_by: "P2-3b",
     },
     Area {
@@ -173,24 +173,49 @@ const AREAS: [Area; 6] = [
     },
 ];
 
+/// What a [`PICTURE`] entry leaves out of the count.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Exempt {
+    /// Every column: the function draws the picture itself.
+    All,
+    /// The color and gamma columns only: the function draws interface
+    /// over the picture (handles, guides, marks) whose colors must read
+    /// on any picture, while its sizes, radii and strokes are interface
+    /// like any other.
+    Colors,
+}
+
 /// Functions that draw picture content rather than interface: the
-/// document, its overlays on the canvas, thumbnails, color fields. Their
-/// literals are the picture's own and are not counted. Each entry is an
-/// area's folder (its file and every file under it, so a cut does not
-/// lose the entry) and a function name in it.
-const PICTURE: &[(&str, &str)] = &[
-    // The picture, its pages and what is drawn over it on the canvas.
-    ("crates/sue-paint/src/canvas", "draw_picture"),
-    ("crates/sue-paint/src/canvas", "page_frames"),
-    ("crates/sue-paint/src/canvas", "overlays"),
-    ("crates/sue-paint/src/canvas", "ruler_overlay"),
-    // Color fields, and small copies of the picture or of a stroke.
-    ("crates/sue-paint/src/panels", "color_wheel"),
-    ("crates/sue-paint/src/panels", "navigator"),
-    ("crates/sue-paint/src/panels", "layer_thumbnail"),
-    ("crates/sue-paint/src/panels", "stroke_preview"),
+/// document, thumbnails, color fields, and the colors of what is drawn
+/// over the picture on the canvas. Each entry is an area's folder (its
+/// file and every file under it, so a cut does not lose the entry), a
+/// function name in it, and what of it is left out.
+///
+/// A function that is mostly interface stays counted, even if it also
+/// draws a small picture (the Navigator panel with its view frame, the
+/// brush preview with its ground, both named as chrome by
+/// `code-ui-polish.md` 2.3).
+const PICTURE: &[(&str, &str, Exempt)] = &[
+    // The picture itself.
+    ("crates/sue-paint/src/canvas", "draw_picture", Exempt::All),
+    // What is drawn over it: page frames and marks, grids, selection,
+    // handles and rulers. Their colors must read on any picture.
+    ("crates/sue-paint/src/canvas", "page_frames", Exempt::Colors),
+    ("crates/sue-paint/src/canvas", "overlays", Exempt::Colors),
+    (
+        "crates/sue-paint/src/canvas",
+        "ruler_overlay",
+        Exempt::Colors,
+    ),
+    // Color fields, and small copies of the picture.
+    ("crates/sue-paint/src/panels", "color_wheel", Exempt::All),
+    (
+        "crates/sue-paint/src/panels",
+        "layer_thumbnail",
+        Exempt::All,
+    ),
     // The miniature page of a template on Sue Writer's start page.
-    ("crates/sue-writer/src/ui", "template_thumb"),
+    ("crates/sue-writer/src/ui", "template_thumb", Exempt::All),
 ];
 
 /// `true` when the file `name` (from the repository root) belongs to the
@@ -458,6 +483,24 @@ fn group_end(code: &[u8], open: usize) -> usize {
     code.len()
 }
 
+/// Where every function called `name` in lexed `code` starts, and the end
+/// of its body.
+fn function_spans(code: &[u8], name: &str) -> Vec<(usize, usize)> {
+    let text = String::from_utf8_lossy(code);
+    let pattern = format!("fn {name}");
+    let mut spans = Vec::new();
+    for (at, _) in text.match_indices(&pattern) {
+        let next = code.get(at + pattern.len()).copied().unwrap_or(b' ');
+        if next.is_ascii_alphanumeric() || next == b'_' {
+            continue;
+        }
+        if let Some(brace) = code[at..].iter().position(|b| *b == b'{') {
+            spans.push((at, group_end(code, at + brace)));
+        }
+    }
+    spans
+}
+
 /// Blanks every item marked `#[cfg(test)]` (a test module or function)
 /// and the body of every function of `picture`.
 fn drop_unseen(code: &mut [u8], picture: &[&str]) {
@@ -476,16 +519,7 @@ fn drop_unseen(code: &mut [u8], picture: &[&str]) {
         spans.push((at, end));
     }
     for name in picture {
-        let pattern = format!("fn {name}");
-        for (at, _) in text.match_indices(&pattern) {
-            let next = code.get(at + pattern.len()).copied().unwrap_or(b' ');
-            if next.is_ascii_alphanumeric() || next == b'_' {
-                continue;
-            }
-            if let Some(brace) = code[at..].iter().position(|b| *b == b'{') {
-                spans.push((at, group_end(code, at + brace)));
-            }
-        }
+        spans.extend(function_spans(code, name));
     }
     for (from, to) in spans {
         for byte in &mut code[from..to] {
@@ -758,20 +792,40 @@ fn read_lexed(root: &Path, path: &Path) -> Lexed {
         std::fs::read_to_string(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
     let mut lexed = lex(&source);
     let name = relative(root, path);
-    let picture: Vec<&str> = PICTURE
-        .iter()
-        .filter(|(folder, _)| in_area(&name, folder))
-        .map(|(_, function)| *function)
-        .collect();
-    drop_unseen(&mut lexed.code, &picture);
+    drop_unseen(&mut lexed.code, &picture(&name, Exempt::All));
     lexed
+}
+
+/// The functions of [`PICTURE`] in the file `name` that leave out `what`.
+fn picture(name: &str, what: Exempt) -> Vec<&'static str> {
+    PICTURE
+        .iter()
+        .filter(|(folder, _, exempt)| *exempt == what && in_area(name, folder))
+        .map(|(_, function, _)| *function)
+        .collect()
+}
+
+/// The literal styling in lexed `code`, less the colors of the functions
+/// `colors_only` names.
+fn count_file(code: &[u8], colors_only: &[&str]) -> Counts {
+    let mut counts = count(code);
+    for function in colors_only {
+        for (from, to) in function_spans(code, function) {
+            let inside = count(&code[from..to]);
+            counts.color = counts.color.saturating_sub(inside.color);
+            counts.gamma = counts.gamma.saturating_sub(inside.gamma);
+        }
+    }
+    counts
 }
 
 /// The literal styling an area holds now.
 fn area_counts(root: &Path, area: &Area) -> Counts {
     let mut total = Counts::default();
     for path in area_files(root, area) {
-        total.add(count(&read_lexed(root, &path).code));
+        let lexed = read_lexed(root, &path);
+        let colors_only = picture(&relative(root, &path), Exempt::Colors);
+        total.add(count_file(&lexed.code, &colors_only));
     }
     total
 }
@@ -871,7 +925,7 @@ fn every_area_of_the_plan_is_counted_and_none_was_lost() {
 #[test]
 fn every_picture_exception_names_a_function_that_exists() {
     let root = repository();
-    for (folder, function) in PICTURE {
+    for (folder, function, _) in PICTURE {
         let area = Area {
             folder,
             baseline: Counts::default(),
@@ -917,6 +971,51 @@ fn font_characters_are_not_coming_back_as_icons() {
         "Font characters are used as icons. Draw the icon with \
          sue_wm::icons (decision D7) instead.\n{}\n\nNow:\n{report}",
         grown.join("\n\n")
+    );
+}
+
+/// Interface text lives in the language files, so an icon written as a
+/// character could come in through them as well as through the code.
+/// None holds one, in any language.
+#[test]
+fn language_files_hold_no_font_characters_as_icons() {
+    fn ftl_files(dir: &Path, found: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                ftl_files(&path, found);
+            } else if path.extension().is_some_and(|e| e == "ftl") {
+                found.push(path);
+            }
+        }
+    }
+    let root = repository();
+    let mut files = Vec::new();
+    ftl_files(&root.join("crates/sue-lang/locales"), &mut files);
+    files.sort();
+    assert!(files.len() > 10, "the language files are where they were");
+    let mut found = Vec::new();
+    for path in files {
+        let text = std::fs::read_to_string(&path).expect("a language file reads");
+        for (index, line) in text.lines().enumerate() {
+            if line.trim_start().starts_with('#') {
+                continue;
+            }
+            for c in line.chars().filter(|c| is_icon_glyph(*c)) {
+                found.push(format!(
+                    "{}:{}: U+{:04X} {c}",
+                    relative(&root, &path),
+                    index + 1,
+                    u32::from(c)
+                ));
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "Font characters are used as icons in the language files. Draw \
+         the icon with sue_wm::icons (decision D7) instead.\n{}",
+        found.join("\n")
     );
 }
 
@@ -992,6 +1091,27 @@ mod lexer {
             fn kept<'a>(x: &'a str) { let c = 'x'; ui.add_space(2.0); }
         "#;
         assert_eq!(counted(source), Counts::new([0, 0, 0, 1, 0, 0, 0]));
+    }
+
+    #[test]
+    fn an_overlay_leaves_out_its_colors_only() {
+        let source = r"
+            fn overlays(painter: &Painter) {
+                let violet = Color32::from_rgb(170, 120, 255);
+                painter.circle_stroke(at, 4.0, Stroke::new(1.5, violet.gamma_multiply(0.4)));
+            }
+            fn panel(ui: &mut Ui) { let red = Color32::from_rgb(220, 40, 40); }
+        ";
+        let lexed = lex(source);
+        assert_eq!(
+            count_file(&lexed.code, &["overlays"]),
+            Counts::new([1, 0, 1, 0, 0, 1, 0]),
+            "the overlay's sizes and strokes count, its colors do not"
+        );
+        assert_eq!(
+            count_file(&lexed.code, &[]),
+            Counts::new([2, 0, 1, 0, 0, 1, 1])
+        );
     }
 
     #[test]
