@@ -58,8 +58,31 @@ fn every_menu_command_is_registered() {
 
 /// Commands that palettes run, not a menu: the timeline's camera keys, the
 /// Animation Cels and light table palettes, and the 3D drawing figure's
-/// tool property.
-const IN_PALETTES: [&str; 3] = ["anim.camera.", "anim.cel.", "anim.light_table."];
+/// tool property. Named one by one, so a command no one can reach cannot
+/// hide behind a prefix.
+const IN_PALETTES: [&str; 18] = [
+    "anim.camera.key",
+    "anim.camera.unkey",
+    "anim.light_table.reverse",
+    "anim.light_table.color",
+    "anim.light_table.cel",
+    "anim.light_table.general",
+    "anim.light_table.opacity_target",
+    "anim.light_table.tool",
+    "anim.light_table.reset",
+    "anim.light_table.file",
+    "anim.light_table.register_general",
+    "anim.light_table.deregister",
+    "anim.cel.lock",
+    "anim.cel.prev",
+    "anim.cel.next",
+    "figure.register_pose",
+    "figure.pose_scanner",
+    "figure.hand_scanner",
+];
+
+/// The palettes' code, which runs those commands by name.
+const PALETTES_SOURCE: &str = include_str!("../panels.rs");
 
 #[test]
 fn every_command_can_be_reached() {
@@ -80,8 +103,7 @@ fn every_command_can_be_reached() {
                 || command.flags.has(Flags::PALETTE)
                 || command.flags.has(Flags::HIDDEN)
                 || !command.chords.is_empty()
-                || name.starts_with("figure.")
-                || IN_PALETTES.iter().any(|prefix| name.starts_with(prefix)))
+                || IN_PALETTES.contains(&name))
         })
         .map(|command| command.name)
         .collect();
@@ -89,6 +111,19 @@ fn every_command_can_be_reached() {
         unreached.is_empty(),
         "in no menu, palette or key: {unreached:?}"
     );
+    // The list stays true: each of its names is registered, in no menu,
+    // and a palette's button runs it.
+    for name in IN_PALETTES {
+        assert!(registry().has(name), "{name} is not registered");
+        assert!(
+            !menus.iter().any(|item| item == name),
+            "{name} is in a menu"
+        );
+        assert!(
+            PALETTES_SOURCE.contains(&format!("\"{name}\"")),
+            "no palette runs {name}"
+        );
+    }
     // The names no menu, palette or key reaches are few, and each is
     // there on purpose (Auto Actions and scripts run them).
     let hidden: Vec<&str> = registry()
