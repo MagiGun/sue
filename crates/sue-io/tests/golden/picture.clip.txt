@@ -1,0 +1,27 @@
+# picture.clip, as Sue 0.0.75 wrote it
+canvas 64 by 64 at 300 pixels per inch
+layers 7, bottom first
+layer "Paper" pixels: at 0 0, 64 by 64, opacity 255, visible true, clipped false, blend "norm", 4096 not clear, fnv 4518e2b9d76e0325
+layer "Layer 1" pixels: at 0 0, 64 by 64, opacity 255, visible true, clipped false, blend "norm", 510 not clear, fnv e53f1cf2ab4023f5
+layer "</Layer group>" end of folder: at 0 0, 0 by 0, opacity 255, visible true, clipped false, blend "norm", 0 not clear, fnv cbf29ce484222325
+layer "Color" pixels: at 0 0, 64 by 64, opacity 128, visible true, clipped true, blend "mul ", 4096 not clear, fnv fd756c379bc2030d
+layer "Folder 1" folder, shown closed: at 0 0, 0 by 0, opacity 255, visible true, clipped false, blend "pass", 0 not clear, fnv cbf29ce484222325
+layer "Hidden" pixels: at 0 0, 64 by 64, opacity 255, visible false, clipped false, blend "norm", 482 not clear, fnv 433ebe3dc6cb6751
+layer "Vector lines" pixels: at 0 0, 64 by 64, opacity 255, visible true, clipped false, blend "norm", 470 not clear, fnv f94dcb9ec504b519
+project inside: 69698 bytes, sha256 91787413ea3d790dd16eb35245c8738d5c2c53bbc4cdc9a97a49512404a50850, chunks ARNA version 1
+entities 7
+entity 0e7136ea-0b56-46d8-992f-ca9674e6e6e8 class "sue.paint.vector" name "Vector lines", fnv f94dcb9ec504b519
+entity 2982a954-cc16-4c72-87e3-751333fd5e29 class "sue.image" name "Golden clip"
+entity 7598b1f2-9c45-4d4d-8afd-8a839f789d69 class "sue.folder" name "Folder 1"
+entity c8da3e4b-2712-40b9-bfb1-fc5b6e4fe6bb class "sue.layer.paper" name "Paper"
+entity e70de486-d72d-463d-891b-b79560591cd1 class "sue.layer" name "Layer 1", fnv 96b72dd67e85d26a
+entity f669bed8-7483-45c7-99bd-e684c497f6cc class "sue.layer" name "Color", fnv fd756c379bc2030d
+entity f7d94cb7-6458-4d4a-8523-c3386c182c03 class "sue.layer" name "Hidden", fnv 433ebe3dc6cb6751
+relations 7
+relation 2982a954-cc16-4c72-87e3-751333fd5e29 sue.child c8da3e4b-2712-40b9-bfb1-fc5b6e4fe6bb
+relation 2982a954-cc16-4c72-87e3-751333fd5e29 sue.child e70de486-d72d-463d-891b-b79560591cd1
+relation 2982a954-cc16-4c72-87e3-751333fd5e29 sue.child f669bed8-7483-45c7-99bd-e684c497f6cc
+relation 2982a954-cc16-4c72-87e3-751333fd5e29 sue.child 7598b1f2-9c45-4d4d-8afd-8a839f789d69
+relation 2982a954-cc16-4c72-87e3-751333fd5e29 sue.child f7d94cb7-6458-4d4a-8523-c3386c182c03
+relation 2982a954-cc16-4c72-87e3-751333fd5e29 sue.child 0e7136ea-0b56-46d8-992f-ca9674e6e6e8
+relation 7598b1f2-9c45-4d4d-8afd-8a839f789d69 sue.paint.member f669bed8-7483-45c7-99bd-e684c497f6cc
