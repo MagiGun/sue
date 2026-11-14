@@ -168,7 +168,7 @@ default key, and neither does its opposite number in Sue.
 | Toggle refer multiple | 0 | no key | missing in Sue |
 | Smaller brush preset | [ | [ | yes |
 | Larger brush preset | ] | ] | yes |
-| Switch using layer color | Ctrl+B | no key | missing in Sue |
+| Switch using layer color | Ctrl+B | Ctrl+B | yes |
 | Swap main and sub color | X | X | yes |
 | Switch drawing and transparent color | C | C | yes |
 
@@ -202,7 +202,8 @@ default key, and neither does its opposite number in Sue.
 2. Shift+Delete does two different things: Delete Outside Selection in
    Clip Studio (and in Sue's own menu), Fill in Sue's keymap. Sue's
    Alt+Delete matches Clip Studio's Fill. One chord should be settled.
-3. Switch using layer color, Ctrl+B, is missing.
+3. Switch using layer color, Ctrl+B, was missing; Sue Paint has it now
+   (0.0.8).
 4. Toggle refer multiple, 0, is missing.
 5. Operation's Select layer (D) and Light table or Edit timeline (L)
    keys are missing.

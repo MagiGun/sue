@@ -264,7 +264,7 @@ The order of work is the plan at the end.
 | Ruler/Frame: delete, show, perspective, symmetrical | Layer > Ruler/Frame | done | |
 | Concentric Circle Ruler | Layer > Ruler/Frame | partial | Command exists; verify |
 | Layer Settings: show, rename, clip to layer below, reference, draft, lock, lock transparent pixels | Layer > Layer Settings | done | |
-| Layer Property: border effect, tone, layer color, expression color | Layer > Layer Property | done | The drawing itself never changes, so effects come off again |
+| Layer Property: border effect, tone, layer color, expression color | Layer > Layer Property | done | The drawing itself never changes, so effects come off again. Ctrl+B (Switch using layer color) turns the layer color on and off |
 | Change Selected Layer, Layer Order | Layer | done | |
 | Transfer to Lower Layer | Layer | done | |
 | Merge with Layer Below, Merge Selected, Merge Visible, Merge Visible to New, Flatten | Layer | done | |
@@ -280,7 +280,7 @@ The order of work is the plan at the end.
 | Expand, Shrink Selected Area | Select | done | |
 | Blur Border (feather) | Select > Blur border | done | |
 | Select Color Gamut | Select > Select color gamut | done | |
-| Selection from Layer: create, add, remove | Select > Selection from Layer | done | |
+| Selection from Layer: create, add, remove, select overlapping area | Select > Selection from Layer | done | |
 | Convert to Selection Layer, and back | Select | done | |
 | Quick Mask | Select > Quick Mask | done | Paint the selection in red, then turn it back |
 | Selection Launcher bar | View > Selection Launcher | done | |
