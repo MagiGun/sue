@@ -425,14 +425,14 @@ icons! {
     /// arc along its upper edge. Sue Paint, the studio.
     AppPaint = "app-paint" => hub::APP_PAINT,
     /// A quill: a long feather leaning from the lower left up to the top
-    /// right, its shaft running on down to a sharp point. Sue Writer, the
+    /// right, its shaft running on down past it to the nib. Sue Writer, the
     /// studio.
     AppWriter = "app-writer" => hub::APP_WRITER,
-    /// Four small tiles in a square, three of them square and the one at
-    /// the top right turned on its corner: one app among others. A studio
-    /// or tool that has no picture of its own.
+    /// An easel with nothing on it: a blank canvas standing on three
+    /// legs, ready for any kind of work. A studio or tool that has no
+    /// picture of its own.
     AppGeneric = "app-generic" => hub::APP_GENERIC,
-    /// A sheet laid out before anything is on it: a solid block for a
+    /// A sheet laid out before anything is on it: a small box for a
     /// picture at the top and two lines for writing under it. A template,
     /// a ready-made start for something new.
     Template = "template" => hub::TEMPLATE,
@@ -468,9 +468,9 @@ icons! {
     /// Three shapes together: a triangle on top, a circle and a square
     /// under it. Materials, the parts kept ready to put into a work.
     Materials = "materials" => hub::MATERIALS,
-    /// A sheet with its top right corner folded, in front of the edges of
-    /// another sheet behind it to the upper left. Files: everything made
-    /// in Sue, to look through.
+    /// A filing cabinet: a tall box of two drawers, each with a pull, on
+    /// two short feet. Files: everything made in Sue, kept to look
+    /// through.
     Files = "files" => hub::FILES,
 }
 

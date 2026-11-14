@@ -34,25 +34,22 @@ pub(super) const APP_PAINT: Art = line(
 
 /// The vane of the quill: a long feather leaning from its foot at the
 /// lower left up to its tip at the top right.
-const VANE: &str = "M8.75 15.25 C8.25 9.5 13.5 4 20.25 3.75 C20 10.5 14.5 15.75 8.75 15.25 Z";
+const VANE: &str = "M8.75 15.25 C7.75 8.5 13 3.75 20.25 3.75 C20.25 11 15.5 16.25 8.75 15.25 Z";
 
 pub(super) const APP_WRITER: Art = line(
     Keyline::Square,
     &[Part::Stroke(VANE), Part::Stroke("M3.75 20.25 L14.25 9.75")],
 );
 
-/// The three square tiles of [`APP_GENERIC`].
-const TILES: &str = "M4.75 3.75 H8.75 A1 1 0 0 1 9.75 4.75 V8.75 A1 1 0 0 1 8.75 9.75 H4.75 A1 1 0 0 \
-                     1 3.75 8.75 V4.75 A1 1 0 0 1 4.75 3.75 Z M4.75 14.25 H8.75 A1 1 0 0 1 9.75 \
-                     15.25 V19.25 A1 1 0 0 1 8.75 20.25 H4.75 A1 1 0 0 1 3.75 19.25 V15.25 A1 1 0 0 \
-                     1 4.75 14.25 Z M15.25 14.25 H19.25 A1 1 0 0 1 20.25 15.25 V19.25 A1 1 0 0 1 \
-                     19.25 20.25 H15.25 A1 1 0 0 1 14.25 19.25 V15.25 A1 1 0 0 1 15.25 14.25 Z";
+/// The blank canvas on the easel of [`APP_GENERIC`].
+const CANVAS: &str = "M6.75 2.75 H17.25 A2 2 0 0 1 19.25 4.75 V12.25 A2 2 0 0 1 17.25 14.25 H6.75 \
+                      A2 2 0 0 1 4.75 12.25 V4.75 A2 2 0 0 1 6.75 2.75 Z";
 
 pub(super) const APP_GENERIC: Art = line(
-    Keyline::Square,
+    Keyline::Tall,
     &[
-        Part::Stroke(TILES),
-        Part::Stroke("M17 3.75 L20.25 7 L17 10.25 L13.75 7 Z"),
+        Part::Stroke(CANVAS),
+        Part::Stroke("M8.75 14.25 L6.25 21.25 M15.25 14.25 L17.75 21.25 M12 14.25 V18.25"),
     ],
 );
 
@@ -64,8 +61,9 @@ pub(super) const TEMPLATE: Art = line(
     Keyline::Tall,
     &[
         Part::Stroke(SHEET),
-        Part::Fill(
-            "M9 6 H15 A1 1 0 0 1 16 7 V10 A1 1 0 0 1 15 11 H9 A1 1 0 0 1 8 10 V7 A1 1 0 0 1 9 6 Z",
+        Part::Stroke(
+            "M9.75 5.75 H14.25 A1 1 0 0 1 15.25 6.75 V8.75 A1 1 0 0 1 14.25 9.75 H9.75 A1 1 0 0 1 \
+             8.75 8.75 V6.75 A1 1 0 0 1 9.75 5.75 Z",
         ),
         Part::Stroke("M8.75 14.25 H15.25 M8.75 17.25 H12.75"),
     ],
@@ -161,28 +159,24 @@ pub(super) const FEEDBACK: Art = line(
     &[
         Part::Stroke("M9.58 18.05 A7.5 7.5 0 1 0 5.7 13.82 L3.75 20.25 Z"),
         Part::Fill(
-            "M7.75 11.25 A1.1 1.1 0 0 1 9.95 11.25 A1.1 1.1 0 0 1 7.75 11.25 Z M11.65 11.25 A1.1 \
-             1.1 0 0 1 13.85 11.25 A1.1 1.1 0 0 1 11.65 11.25 Z M15.55 11.25 A1.1 1.1 0 0 1 17.75 \
-             11.25 A1.1 1.1 0 0 1 15.55 11.25 Z",
+            "M7.5 11.25 A1 1 0 0 1 9.5 11.25 A1 1 0 0 1 7.5 11.25 Z M11.75 11.25 A1 1 0 0 1 13.75 \
+             11.25 A1 1 0 0 1 11.75 11.25 Z M16 11.25 A1 1 0 0 1 18 11.25 A1 1 0 0 1 16 11.25 Z",
         ),
     ],
 );
 
-/// The sheet in front in [`FILES`]: a page with its top right corner
-/// folded, as the reference document has it, a size smaller.
-const FRONT: &str = "M10.75 6.75 H15.25 L19.25 10.75 V19.25 A2 2 0 0 1 17.25 21.25 H10.75 A2 2 0 0 \
-                     1 8.75 19.25 V8.75 A2 2 0 0 1 10.75 6.75 Z";
-
-/// The folded corner of [`FRONT`].
-const FRONT_FOLD: &str = "M15.25 6.75 V9.25 A1.5 1.5 0 0 0 16.75 10.75 H19.25 Z";
+/// The body of the filing cabinet that [`FILES`] is, standing on two
+/// short feet.
+const CABINET: &str = "M6.75 2.75 H17.25 A2 2 0 0 1 19.25 4.75 V17.25 A2 2 0 0 1 17.25 19.25 \
+                       H6.75 A2 2 0 0 1 4.75 17.25 V4.75 A2 2 0 0 1 6.75 2.75 Z";
 
 pub(super) const FILES: Art = line(
     Keyline::Tall,
     &[
-        Part::Stroke("M4.75 17.25 V4.75 A2 2 0 0 1 6.75 2.75 H15.25"),
-        Part::Stroke(FRONT),
-        Part::Fill(FRONT_FOLD),
-        Part::Stroke(FRONT_FOLD),
+        Part::Stroke(CABINET),
+        Part::Stroke("M4.75 10.75 H19.25"),
+        Part::Stroke("M9.75 5.75 V6.75 H14.25 V5.75 M9.75 14.25 V15.25 H14.25 V14.25"),
+        Part::Stroke("M7.75 19.25 V21.25 M16.25 19.25 V21.25"),
     ],
 );
 
