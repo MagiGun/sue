@@ -29,7 +29,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 
 use crate::codec::{CodecError, Reader, Writer, crc32};
 use crate::pixels::{
-    PixelOptions, PixelReader, PixelWriter, StoreHeader, VERSION as PIXELS_VERSION,
+    KEY_WIDTH, PixelOptions, PixelReader, PixelWriter, StoreHeader, VERSION as PIXELS_VERSION,
     may_refer_to_blobs,
 };
 use crate::{Arena, ComponentRegistry, PresetLibrary, Properties};
@@ -368,9 +368,12 @@ impl SueFile {
         let mut out = Writer::new();
         let (arena_version, store) = match &old {
             Some((version, payload)) if unknown => {
-                let reader = PixelReader::parse(payload)
-                    .ok()
-                    .filter(|_| *version == PIXELS_VERSION);
+                // New tiles share the old store's keys, so its keys must be
+                // wide enough to name every tile of this save (D12: at
+                // least 128 bits); a narrower store is kept as it is.
+                let reader = PixelReader::parse(payload).ok().filter(|reader| {
+                    *version == PIXELS_VERSION && reader.header().key_width >= KEY_WIDTH
+                });
                 if let Some(reader) = reader {
                     let mut pixels = PixelWriter::keeping(&reader, options);
                     arena.encode_where_with(&mut out, keep, Some(&mut pixels));

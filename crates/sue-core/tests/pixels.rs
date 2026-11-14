@@ -589,3 +589,37 @@ fn the_canvas_layout_of_older_builds_keeps_no_blob_alive() {
     assert_eq!(again.chunk(*b"SCNE").unwrap().payload, [7, 1]);
     same(&smaller, &again.arena(&registry()).unwrap());
 }
+
+#[test]
+fn a_store_with_narrow_keys_is_kept_as_it_is_and_the_save_ends() {
+    // 20 by 15 tiles of 16 px, every one different, against a store whose
+    // keys are one byte wide: 256 names for 300 tiles.
+    let picture = raster(320, 240, PixelFormat::Rgba8, |x, y| {
+        let tile = (y / 16) * 20 + x / 16;
+        vec![(tile % 256) as u8, (tile / 256) as u8, (x % 16) as u8, 255]
+    });
+    let mut arena = Arena::new();
+    layer(&mut arena, "Many tiles", picture);
+    let mut store = Writer::new();
+    store.varint(16);
+    store.u8(HASH_SHA256);
+    store.u8(1);
+    store.len(0);
+    let store = store.into_bytes();
+    let mut file = SueFile::new();
+    file.set(Chunk {
+        tag: PIXELS,
+        version: 1,
+        payload: store.clone(),
+    });
+    file.set(Chunk {
+        tag: *b"FUTR",
+        version: 1,
+        payload: vec![1],
+    });
+    file.set_arena(&arena);
+    let reread = SueFile::from_bytes(&file.to_bytes()).unwrap();
+    assert_eq!(reread.chunk(PIXELS).unwrap().payload, store);
+    assert_eq!(reread.chunk(ARENA).unwrap().version, 1);
+    same(&arena, &reread.arena(&registry()).unwrap());
+}
