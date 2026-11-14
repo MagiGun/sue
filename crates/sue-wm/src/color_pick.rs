@@ -500,14 +500,32 @@ pub fn color_wheel(ui: &mut Ui, id: Id, rgba: &mut [u8; 4], side: f32) -> ColorP
     ui.painter()
         .circle_stroke(mark, 5.5, Stroke::new(1.0, Color32::BLACK));
 
+    // The shape button lies over the wheel's corner, so a press on it is
+    // not a pick. egui hands a drag that starts on a click-only button to
+    // the wheel under it, so a hand that slips while pressing the button
+    // must not turn the hue either.
+    // egui forgets where the press began on the frame it ends, so it is
+    // remembered for the frame the drag stops.
+    let button = shape_button(ui, area, id, shape);
+    let held_id = id.with("press-on-shape-button");
+    let on_button = match ui.input(|input| input.pointer.press_origin()) {
+        Some(origin) => {
+            let on = button
+                .as_ref()
+                .is_some_and(|button| button.rect.contains(origin));
+            ui.data_mut(|data| data.insert_temp(held_id, on));
+            on
+        }
+        None => ui
+            .data_mut(|data| data.remove_temp::<bool>(held_id))
+            .unwrap_or(false),
+    };
     let mut pick = ColorPick {
-        dragging: response.dragged(),
-        released: response.drag_stopped(),
+        dragging: response.dragged() && !on_button,
+        released: response.drag_stopped() && !on_button,
         ..ColorPick::default()
     };
-    // The shape button lies over the wheel's corner, so a press on it is
-    // not a pick.
-    if let Some(button) = shape_button(ui, area, id, shape)
+    if let Some(button) = button
         && button.clicked()
     {
         set_wheel_shape(ui.ctx(), shape.other());
@@ -518,6 +536,7 @@ pub fn color_wheel(ui: &mut Ui, id: Id, rgba: &mut [u8; 4], side: f32) -> ColorP
     // Picking: a press on the ring turns the hue, one inside sets
     // saturation and value, and the drag keeps doing what the press began.
     if let Some(pointer) = response.interact_pointer_pos()
+        && !on_button
         && (response.dragged() || response.clicked() || response.drag_started())
     {
         let press = ui
@@ -968,6 +987,38 @@ mod tests {
         let picks = wheel_frames(&ctx, &mut rgba, click_at(corner));
         assert_eq!(wheel_shape(&ctx), WheelShape::Square);
         assert!(picks.iter().any(|pick| pick.reshaped));
+    }
+
+    /// A press on the shape button that slips into a drag picks nothing:
+    /// egui hands that drag to the wheel under the button, which would
+    /// turn the hue to the corner's angle.
+    #[test]
+    fn a_drag_from_the_shape_button_picks_no_color() {
+        let ctx = egui::Context::default();
+        let mut rgba = [200, 40, 40, 255];
+        let corner = pos2(196.0, 196.0);
+        let mut frames = vec![
+            Vec::new(),
+            Vec::new(),
+            vec![Event::PointerMoved(corner)],
+            vec![press(corner, true)],
+        ];
+        let mut at = corner;
+        for _ in 0..3 {
+            at -= vec2(8.0, 4.0);
+            frames.push(vec![Event::PointerMoved(at)]);
+        }
+        frames.push(vec![press(at, false)]);
+        frames.push(Vec::new());
+        let picks = wheel_frames(&ctx, &mut rgba, frames);
+        assert_eq!(rgba, [200, 40, 40, 255], "the drag turned the hue");
+        assert!(
+            !picks
+                .iter()
+                .any(|pick| pick.changed || pick.dragging || pick.released),
+            "{picks:?}"
+        );
+        assert_eq!(wheel_shape(&ctx), WheelShape::Square, "a drag is no click");
     }
 
     /// In the triangle, the middle of the side from white to black is a
