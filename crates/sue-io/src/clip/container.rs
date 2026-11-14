@@ -34,28 +34,36 @@ pub(super) fn chunks(bytes: &[u8]) -> Result<(Bitmaps<'_>, &[u8]), String> {
         .map_err(|_| "the file header is broken")?;
     let mut exta = HashMap::new();
     let mut database = None;
-    while at + 16 <= bytes.len() {
+    // Sizes come from the file: none is added without a check.
+    while let Some(start) = at.checked_add(16).filter(|start| *start <= bytes.len()) {
         if &bytes[at..at + 4] != b"CHNK" {
             return Err(format!("no chunk where one should start, at byte {at}"));
         }
         let kind = &bytes[at + 4..at + 8];
         let size = usize::try_from(be64(bytes, at + 8).ok_or("a chunk is cut short")?)
             .map_err(|_| "a chunk is too big")?;
+        let end = start
+            .checked_add(size)
+            .ok_or("a chunk runs past the end of the file")?;
         let data = bytes
-            .get(at + 16..at + 16 + size)
+            .get(start..end)
             .ok_or("a chunk runs past the end of the file")?;
         match kind {
             b"Exta" => {
                 let len = usize::try_from(be64(data, 0).ok_or("a bitmap chunk is short")?)
                     .map_err(|_| "a bitmap chunk is broken")?;
-                let id = data.get(8..8 + len).ok_or("a bitmap chunk is short")?;
-                let payload = data.get(8 + len + 8..).ok_or("a bitmap chunk is short")?;
+                let id_end = len.checked_add(8).ok_or("a bitmap chunk is short")?;
+                let id = data.get(8..id_end).ok_or("a bitmap chunk is short")?;
+                let payload = id_end
+                    .checked_add(8)
+                    .and_then(|from| data.get(from..))
+                    .ok_or("a bitmap chunk is short")?;
                 exta.insert(String::from_utf8_lossy(id).into_owned(), payload);
             }
             b"SQLi" => database = Some(data),
             _ => {}
         }
-        at += 16 + size;
+        at = end;
     }
     Ok((exta, database.ok_or("the file has no layer database")?))
 }
@@ -67,4 +75,42 @@ pub(super) fn put32(out: &mut Vec<u8>, value: u32) {
 pub(super) fn put_string(out: &mut Vec<u8>, text: &str) {
     put32(out, u32::try_from(text.encode_utf16().count()).unwrap_or(0));
     out.extend_from_slice(&utf16(text));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A file of `chunks` (kind, declared size, data).
+    fn file(first: u64, chunks: &[(&[u8; 4], u64, &[u8])]) -> Vec<u8> {
+        let mut out = b"CSFCHUNK".to_vec();
+        out.extend_from_slice(&0_u64.to_be_bytes());
+        out.extend_from_slice(&first.to_be_bytes());
+        for (kind, size, data) in chunks {
+            out.extend_from_slice(b"CHNK");
+            out.extend_from_slice(*kind);
+            out.extend_from_slice(&size.to_be_bytes());
+            out.extend_from_slice(data);
+        }
+        out
+    }
+
+    #[test]
+    fn sizes_too_big_to_add_are_refused_not_a_crash() {
+        // A first chunk offset, a chunk size and a bitmap id length at the
+        // top of what 64 bits hold.
+        for huge in [u64::MAX, u64::MAX - 15, u64::MAX - 40, 1 << 63] {
+            assert!(chunks(&file(huge, &[])).is_err(), "offset {huge}");
+            assert!(
+                chunks(&file(24, &[(b"SQLi", huge, b"abc")])).is_err(),
+                "size {huge}"
+            );
+            let mut exta = huge.to_be_bytes().to_vec();
+            exta.extend_from_slice(b"extrnlid0123");
+            assert!(
+                chunks(&file(24, &[(b"Exta", exta.len() as u64, &exta)])).is_err(),
+                "id length {huge}"
+            );
+        }
+    }
 }
